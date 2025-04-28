@@ -1,8 +1,0 @@
-Origin: miru
-Label: miru
-Suite: stable
-Version: v0.0.1
-Codename: stable
-Architectures: amd64 arm64
-Components: main
-Description: miru agent repository

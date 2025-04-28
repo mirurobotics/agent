@@ -1,0 +1,19 @@
+Package: miru-agent
+Priority: extra
+Section: default
+Installed-Size: 38894
+Maintainer: Benjamin Smidt <ben@miruml.com>
+Architecture: amd64
+Version: 0.1.0
+Depends: systemd, pkgconf, libc6
+Filename: pool/main/m/miru-agent/miru-agent_0.1.0_amd64.deb
+Size: 15284248
+MD5sum: 7b5b5fabf1307693ea9aeec0df1b7800
+SHA1: d5aa801a75ce768a4ecf48ee0839ce716e7ea44e
+SHA256: 56ca16fc3a3faac662ab15d563a08b40c3868a1e09b460a8466cbaf6734d442b
+SHA512: 7450278d48b7866ce88f6b938e29d3fa09f6d7bd42035075bd8f0bd77a825a41143b5342fb911eaac1ef81260b89c8a13e46d64b14a370dadd029620c12f6a8a
+Description: Miru Configuration Agent
+ .
+ Miru provides the infrastructure to version, manage, and deploy application configurations at scale. This debian package is the miru agent, which handles configuration deployment to your robots in production.
+Homepage: https://miruml.com
+
