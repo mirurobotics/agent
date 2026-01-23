@@ -25,8 +25,8 @@ nfpms:
     package_name: miru-agent
     file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
     vendor: "Miru"
-    homepage: "https://miruml.com"
-    maintainer: "Benjamin Smidt <ben@miruml.com>"
+    homepage: "https://mirurobotics.com"
+    maintainer: "Benjamin Smidt <ben@mirurobotics.com>"
     description: |
       Miru Agent.
       Miru provides the infrastructure to version, manage, and deploy application configurations at scale. This debian package is the miru agent, which handles configuration deployment to your robots in production.
@@ -112,15 +112,15 @@ changelog:
 release:
   prerelease: auto
   github:
-    owner: miruml
+    owner: mirurobotics
     name: agent
   footer: >-
     ## Miru Agent {{.Tag}}
 
-    **Full Changelog**: https://github.com/miruml/agent/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/mirurobotics/agent/compare/{{ .PreviousTag }}...{{ .Tag }}
     
 
-    For documentation, visit: https://docs.miruml.com
+    For documentation, visit: https://docs.mirurobotics.com
 
 source:
   enabled: false

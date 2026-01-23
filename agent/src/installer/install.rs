@@ -26,7 +26,8 @@ pub async fn install(cli_args: &HashMap<String, String>) {
         }
         Err(e) => {
             error!("Installation failed: {:?}", e);
-            display::print_err_msg(Some(e.to_string()))
+            display::print_err_msg(Some(e.to_string()));
+            std::process::exit(1);
         }
     }
 }
