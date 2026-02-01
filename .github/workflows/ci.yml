@@ -1,4 +1,4 @@
-name: Lint & Audit
+name: CI
 
 on:
   push:
@@ -42,3 +42,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Tests
+        run: ./scripts/test.sh
