@@ -9,8 +9,10 @@ use tracing::error;
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone, Hash)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum DeviceStatus {
     Online,
+    #[default]
     Offline,
 }
 
@@ -24,12 +26,6 @@ impl DeviceStatus {
             DeviceStatus::Online => openapi_server::models::DeviceStatus::DEVICE_STATUS_ONLINE,
             DeviceStatus::Offline => openapi_server::models::DeviceStatus::DEVICE_STATUS_OFFLINE,
         }
-    }
-}
-
-impl Default for DeviceStatus {
-    fn default() -> Self {
-        Self::Offline
     }
 }
 
