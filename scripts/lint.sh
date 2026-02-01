@@ -81,35 +81,31 @@ echo "-------------------------------"
 cargo update --verbose
 echo ""
 
-# auto formats rust code
-echo "Formatting Rust code"
-echo "--------------------"
-cargo fmt
+# auto formats rust code (excluding generated libs)
+echo "formatting code..."
+cargo fmt --package miru-agent
 echo ""
 
-# looks for unused external dependencies 
 echo "Looking for unused external dependencies"
 echo "----------------------------------------"
 cargo machete
 # cargo +nightly udeps
 echo ""
 
-# looks for unused internal code
 echo "Looking for unused internal code"
 echo "--------------------------------"
 cargo diet 
 echo ""
 
-# checks for security vulnerabilities
 echo "Checking for security vulnerabilities"
 echo "-------------------------------------"
 cargo audit
 echo ""
 
-# rust's code quality linter (it's pretty aggressive -ben)
+# rust's code quality linter (excluding generated libs)
 echo "Running Clippy"
 echo "--------------"
-cargo clippy --fix --allow-dirty
+cargo clippy --package miru-agent --fix --allow-dirty
 echo ""
 
 echo "Linting complete"
