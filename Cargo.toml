@@ -24,20 +24,20 @@ chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
 moka = { version = "0.12.10", features = ["future"] }
-reqwest = "0.12.9"
+reqwest = "0.13.1"
 openapi-client = { path = "libs/openapi-client"}
 openapi-server = { path = "libs/openapi-server"}
 openssl = { version = "0.10.64", features = ["vendored"] }
 # https://crates.io/crates/openssl-src/versions
 # OpenSSL version 3.0.8+ LTS is the currently recommended version: https://endoflife.date/openssl. CISA (https://www.cisa.gov/news-events/alerts/2023/02/09/openssl-releases-security-advisory) recognizes 3.0.0 to 3.0.7 as particularly vulnerable and must be avoided. OpenSSL 1.1.1 LTS and 1.0.2 LTS are not recommended due to EOL support. Please update your system to use OpenSSL 3.0.X LTS."
-rumqttc = "0.24.0"
+rumqttc = "0.25.1"
 secrecy = "0.10.3"
 serial_test = "3.2.0"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.132"
 serde_with = { version = "3.12.0", features = ["base64"] }
 sha2 = "0.10"
-sysinfo = "0.37.0"
+sysinfo = "0.38.0"
 tokio = { version = "1.41.1", features = ["rt-multi-thread", "fs", "signal"] }
 tower = "0.5.2"
 tower-http = { version = "0.6.2", features = ["trace"] }
