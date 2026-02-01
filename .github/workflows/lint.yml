@@ -2,9 +2,7 @@ name: Lint & Audit
 
 on:
   push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,8 +24,6 @@ jobs:
 
       - name: Install Cargo Tools (binstall)
         uses: cargo-bins/cargo-binstall@main
-        with:
-          version: latest
 
       - name: Install Linters
         run: cargo binstall --no-confirm cargo-machete cargo-diet
