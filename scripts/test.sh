@@ -6,4 +6,5 @@ git_repo_root_dir=$(git rev-parse --show-toplevel)
 
 cd "$git_repo_root_dir"
 
-cargo test --features test -- --test-threads=1
+# Suppress log output during tests
+RUST_LOG=off cargo test --features test -- --test-threads=1
