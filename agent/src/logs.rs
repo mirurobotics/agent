@@ -99,8 +99,9 @@ pub fn init(options: LogOptions) -> Result<WorkerGuard, Box<dyn std::error::Erro
     let file_appender = tracing_appender::rolling::hourly(options.log_dir, "miru.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    // set logging
-    let env_filter = EnvFilter::new(options.log_level.to_string());
+    // respect RUST_LOG environment variable if set, otherwise use provided log level
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(options.log_level.to_string()));
 
     if options.stdout {
         let subscriber = fmt()
