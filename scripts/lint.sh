@@ -82,7 +82,7 @@ cargo update --verbose
 echo ""
 
 # auto formats rust code (excluding generated libs)
-echo "formatting code..."
+echo "Formatting Code..."
 cargo fmt --package miru-agent
 echo ""
 
@@ -105,7 +105,7 @@ echo ""
 # rust's code quality linter (excluding generated libs)
 echo "Running Clippy"
 echo "--------------"
-cargo clippy --package miru-agent --fix --allow-dirty
+cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings
 echo ""
 
 echo "Linting complete"

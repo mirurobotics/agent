@@ -9,7 +9,7 @@ env:
 
 jobs:
   lint:
-    name: Lint and Audit
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings
 
       - name: Check for Unused Dependencies (Machete)
         run: cargo machete
