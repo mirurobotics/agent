@@ -1,0 +1,23 @@
+# Build artifacts
+target/
+build/dist/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Test coverage
+*.profraw
+coverage/
+
+# Misc
+*.log
+.DS_Store
+
