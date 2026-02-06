@@ -3,7 +3,7 @@ name: Builder Image
 on:
   push:
     paths:
-      - 'build/Dockerfile'
+      - 'build/Dockerfile.builder'
       - '.github/workflows/builder.yml'
   workflow_dispatch:
 
@@ -46,8 +46,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: build/Dockerfile
-          target: builder
+          file: build/Dockerfile.builder
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
