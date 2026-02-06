@@ -10,7 +10,6 @@ build/dist/
 *~
 
 # Git
-.git/
 .gitignore
 
 # Test coverage

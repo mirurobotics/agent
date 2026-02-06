@@ -14,12 +14,14 @@ FROM ghcr.io/mirurobotics/agent-builder:a32d4c0 AS build
 
 COPY . .
 
-# Uses Docker secret to avoid embedding key in image layers
+# Uses Docker secrets to avoid embedding keys in image layers
 # GORELEASER_ARGS defaults to snapshot for local builds; release.sh overrides it
 ARG GORELEASER_PREVIOUS_TAG
 ARG GORELEASER_ARGS="--snapshot"
 RUN --mount=type=secret,id=GORELEASER_KEY \
-    GORELEASER_KEY=$(cat /run/secrets/GORELEASER_KEY) \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    GORELEASER_KEY=$(cat /run/secrets/GORELEASER_KEY 2>/dev/null || true) \
+    GITHUB_TOKEN=$(cat /run/secrets/GITHUB_TOKEN 2>/dev/null || true) \
     GORELEASER_PREVIOUS_TAG="${GORELEASER_PREVIOUS_TAG}" \
     cd build && goreleaser release ${GORELEASER_ARGS} --clean
 
