@@ -20,9 +20,9 @@ ARG GORELEASER_PREVIOUS_TAG
 ARG GORELEASER_ARGS="--snapshot"
 RUN --mount=type=secret,id=GORELEASER_KEY \
     --mount=type=secret,id=GITHUB_TOKEN \
-    GORELEASER_KEY=$(cat /run/secrets/GORELEASER_KEY 2>/dev/null || true) \
-    GITHUB_TOKEN=$(cat /run/secrets/GITHUB_TOKEN 2>/dev/null || true) \
-    GORELEASER_PREVIOUS_TAG="${GORELEASER_PREVIOUS_TAG}" \
+    export GORELEASER_KEY="$(cat /run/secrets/GORELEASER_KEY 2>/dev/null || true)" && \
+    export GITHUB_TOKEN="$(cat /run/secrets/GITHUB_TOKEN 2>/dev/null || true)" && \
+    export GORELEASER_PREVIOUS_TAG="${GORELEASER_PREVIOUS_TAG}" && \
     cd build && goreleaser release ${GORELEASER_ARGS} --clean
 
 # =============================================================================
