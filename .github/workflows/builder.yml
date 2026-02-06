@@ -2,7 +2,6 @@ name: Builder Image
 
 on:
   push:
-    branches: ["**"]
     paths:
       - 'build/Dockerfile.builder'
       - '.github/workflows/builder.yml'
