@@ -10,7 +10,7 @@ members = [
 edition = "2021"
 homepage = "https://mirurobotics.com"
 rust-version = "1.93.0"
-version = "0.6.2-beta.1"
+version = "0.7.0-alpha.1"
 
 [workspace.metadata]
 git_commit = "arglebargle"
