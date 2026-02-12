@@ -7,7 +7,7 @@ use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
 use crate::deploy::fsm;
 use crate::errors::*;
 use crate::filesys::dir::Dir;
-use crate::http::{client::HTTPClient, config_instances::ConfigInstancesExt, devices::DevicesExt};
+use crate::http::{client::HTTPClient, devices::DevicesExt};
 use crate::storage::{
     config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
     device::DeviceFile,
@@ -43,7 +43,7 @@ pub enum SyncEvent {
 }
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
-pub struct SyncerArgs<HTTPClientT: ConfigInstancesExt, TokenManagerT: TokenManagerExt> {
+pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub device_id: String,
     pub device_file: Arc<DeviceFile>,
     pub http_client: Arc<HTTPClientT>,
@@ -81,7 +81,7 @@ impl SyncState {
     }
 }
 
-pub struct SingleThreadSyncer<HTTPClientT: ConfigInstancesExt> {
+pub struct SingleThreadSyncer<HTTPClientT> {
     device_id: String,
     device_file: Arc<DeviceFile>,
     http_client: Arc<HTTPClientT>,
@@ -101,7 +101,7 @@ pub struct SingleThreadSyncer<HTTPClientT: ConfigInstancesExt> {
     state: SyncState,
 }
 
-impl<HTTPClientT: ConfigInstancesExt + DevicesExt> SingleThreadSyncer<HTTPClientT> {
+impl<HTTPClientT: DevicesExt> SingleThreadSyncer<HTTPClientT> {
     pub fn new(args: SyncerArgs<HTTPClientT, TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
@@ -314,12 +314,12 @@ pub enum WorkerCommand {
     },
 }
 
-pub struct Worker<HTTPClientT: ConfigInstancesExt + Send> {
+pub struct Worker<HTTPClientT: Send> {
     syncer: SingleThreadSyncer<HTTPClientT>,
     receiver: mpsc::Receiver<WorkerCommand>,
 }
 
-impl<HTTPClientT: ConfigInstancesExt + Send> Worker<HTTPClientT> {
+impl<HTTPClientT: Send> Worker<HTTPClientT> {
     pub fn new(
         syncer: SingleThreadSyncer<HTTPClientT>,
         receiver: mpsc::Receiver<WorkerCommand>,
@@ -328,7 +328,7 @@ impl<HTTPClientT: ConfigInstancesExt + Send> Worker<HTTPClientT> {
     }
 }
 
-impl<HTTPClientT: ConfigInstancesExt + DevicesExt + Send> Worker<HTTPClientT> {
+impl<HTTPClientT: DevicesExt + Send> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {

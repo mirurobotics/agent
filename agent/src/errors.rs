@@ -66,7 +66,7 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! deserialize_error {
     ($struct_name:expr, $field_name:expr, $default:expr) => {{
-        error!(
+        ::tracing::error!(
             "'{}' missing from struct '{}', setting to default: '{:?}'",
             $field_name, $struct_name, $default
         );
@@ -77,7 +77,7 @@ macro_rules! deserialize_error {
 #[macro_export]
 macro_rules! deserialize_warn {
     ($struct_name:expr, $field_name:expr, $default:expr) => {{
-        warn!(
+        ::tracing::warn!(
             "'{}' missing from struct '{}', setting to default: '{:?}'",
             $field_name, $struct_name, $default
         );

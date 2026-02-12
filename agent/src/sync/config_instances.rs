@@ -1,12 +1,9 @@
 use crate::crud::prelude::*;
 use crate::deploy::{apply::apply, fsm};
 use crate::filesys::dir::Dir;
-use crate::http::{
-    config_instances::{
-        ActivityStatusFilter, ConfigInstanceFiltersBuilder, ConfigInstancesExt, IDFilter,
-    },
-    search::SearchOperator,
-};
+// TODO: Refactor to use DeploymentsExt instead of ConfigInstancesExt
+// Config instances are now accessed through deployments with expand=config_instances
+use crate::http::search::SearchOperator;
 use crate::models::config_instance::{ActivityStatus, ConfigInstance, ErrorStatus, TargetStatus};
 use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
 use crate::sync::errors::*;
@@ -20,7 +17,8 @@ use openapi_client::models::{
 use tracing::{debug, error};
 
 // =================================== SYNC ======================================== //
-pub async fn sync<HTTPClientT: ConfigInstancesExt>(
+// TODO: Refactor to use DeploymentsExt - config instances are now accessed through deployments
+pub async fn sync<HTTPClientT>(
     cfg_inst_cache: &ConfigInstanceCache,
     cfg_inst_content_cache: &ConfigInstanceContentCache,
     http_client: &HTTPClientT,
@@ -101,7 +99,7 @@ pub async fn sync<HTTPClientT: ConfigInstancesExt>(
 }
 
 // =================================== PULL ======================================== //
-pub async fn pull<HTTPClientT: ConfigInstancesExt>(
+pub async fn pull<HTTPClientT>(
     cfg_inst_cache: &ConfigInstanceCache,
     cfg_inst_content_cache: &ConfigInstanceContentCache,
     http_client: &HTTPClientT,
@@ -156,7 +154,7 @@ pub async fn pull<HTTPClientT: ConfigInstancesExt>(
     Ok(())
 }
 
-async fn fetch_active_cfg_insts<HTTPClientT: ConfigInstancesExt>(
+async fn fetch_active_cfg_insts<HTTPClientT>(
     http_client: &HTTPClientT,
     device_id: &str,
     token: &str,
@@ -257,7 +255,7 @@ async fn categorize_cfg_insts(
     Ok(categorized)
 }
 
-async fn fetch_cfg_insts_with_content<HTTPClientT: ConfigInstancesExt>(
+async fn fetch_cfg_insts_with_content<HTTPClientT>(
     http_client: &HTTPClientT,
     device_id: &str,
     ids: Vec<String>,
@@ -406,7 +404,7 @@ async fn update_target_status_instances(
 }
 
 // =================================== PUSH ======================================== //
-pub async fn push<HTTPClientT: ConfigInstancesExt>(
+pub async fn push<HTTPClientT>(
     cfg_inst_cache: &ConfigInstanceCache,
     http_client: &HTTPClientT,
     token: &str,

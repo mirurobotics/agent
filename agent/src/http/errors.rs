@@ -38,7 +38,7 @@ impl MiruError for RequestFailed {
 
     fn params(&self) -> Option<serde_json::Value> {
         match &self.error {
-            Some(error) => error.error.params.clone(),
+            Some(error) => Some(serde_json::to_value(&error.error.params).unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))),
             None => None,
         }
     }

@@ -1,6 +1,6 @@
 pub mod backend;
 pub mod client;
-pub mod config_instances;
+pub mod deployments;
 pub mod devices;
 pub mod errors;
 pub mod expand;
