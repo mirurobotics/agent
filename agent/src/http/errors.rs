@@ -9,7 +9,6 @@ use crate::http::client::RequestContext;
 use openapi_client::models::ErrorResponse;
 
 // external crates
-use serde_json::json;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
 
@@ -92,78 +91,6 @@ impl fmt::Display for TimeoutErr {
             self.request,
             self.request.timeout.as_secs()
         )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ConfigSchemaNotFound {
-    pub query_params: String,
-    pub trace: Box<Trace>,
-}
-
-impl MiruError for ConfigSchemaNotFound {
-    fn code(&self) -> Code {
-        Code::ResourceNotFound
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::NOT_FOUND
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        Some(json!({
-            "query_params": self.query_params,
-        }))
-    }
-}
-
-impl fmt::Display for ConfigSchemaNotFound {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Unable to find config schema with query params {:?}",
-            self.query_params
-        )
-    }
-}
-
-#[derive(Debug)]
-pub struct TooManyConfigSchemas {
-    pub expected_count: usize,
-    pub found_config_schema_ids: Vec<String>,
-    pub query_params: String,
-    pub trace: Box<Trace>,
-}
-
-impl MiruError for TooManyConfigSchemas {
-    fn code(&self) -> Code {
-        Code::ResourceNotFound
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::NOT_FOUND
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        Some(json!({
-            "expected_count": self.expected_count,
-            "found_config_schema_ids": self.found_config_schema_ids,
-            "query_params": self.query_params,
-        }))
-    }
-}
-
-impl fmt::Display for TooManyConfigSchemas {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Expected to find {} config schemas with query params {:?}, but found {} config schemas: {:?}", self.expected_count, self.query_params, self.found_config_schema_ids.len(), self.found_config_schema_ids)
     }
 }
 
@@ -472,10 +399,6 @@ pub enum HTTPErr {
     TimeoutErr(Box<TimeoutErr>),
     CacheErr(Box<CacheErr>),
 
-    // config schema errors
-    ConfigSchemaNotFound(Box<ConfigSchemaNotFound>),
-    TooManyConfigSchemas(Box<TooManyConfigSchemas>),
-
     // external crate errors
     ConnectionErr(Box<ConnectionErr>),
     DecodeRespBodyErr(Box<DecodeRespBodyErr>),
@@ -507,8 +430,6 @@ macro_rules! forward_error_method {
             Self::RequestFailed(e) => e.$method($($arg)?),
             Self::TimeoutErr(e) => e.$method($($arg)?),
             Self::CacheErr(e) => e.$method($($arg)?),
-            Self::ConfigSchemaNotFound(e) => e.$method($($arg)?),
-            Self::TooManyConfigSchemas(e) => e.$method($($arg)?),
             Self::ConnectionErr(e) => e.$method($($arg)?),
             Self::DecodeRespBodyErr(e) => e.$method($($arg)?),
             Self::InvalidHeaderValueErr(e) => e.$method($($arg)?),

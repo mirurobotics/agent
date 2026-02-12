@@ -11,91 +11,6 @@ use crate::models::errors::ModelsErr;
 use crate::storage::errors::StorageErr;
 use crate::sync::errors::SyncErr;
 
-// external crates
-use serde_json::json;
-
-#[derive(Debug)]
-pub struct DeployedConfigInstanceNotFound {
-    pub config_schema_id: String,
-    pub config_type_slug: String,
-    pub config_schema_digest: String,
-    pub network_connection_error: bool,
-    pub trace: Box<Trace>,
-}
-
-impl MiruError for DeployedConfigInstanceNotFound {
-    fn code(&self) -> Code {
-        Code::ResourceNotFound
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::NOT_FOUND
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.network_connection_error
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        Some(json!({
-            "config_schema_id": self.config_schema_id,
-            "config_type_slug": self.config_type_slug,
-            "config_schema_digest": self.config_schema_digest,
-            "synced_with_backend": !self.network_connection_error,
-        }))
-    }
-}
-
-impl fmt::Display for DeployedConfigInstanceNotFound {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.network_connection_error {
-            write!(f, "Unable to find a deployed config instance for config schema id '{}' (config type slug '{}', config schema digest '{}') locally and unable to connect to the backend to fetch the latest deployed config instance information", self.config_schema_id, self.config_type_slug, self.config_schema_digest)
-        } else {
-            write!(f, "Unable to find a deployed config instance for config schema id '{}' (config type slug '{}', config schema digest '{}') locally or with the backend", self.config_schema_id, self.config_type_slug, self.config_schema_digest)
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ConfigSchemaNotFound {
-    pub digest: String,
-    pub config_type_slug: String,
-    pub network_connection_error: bool,
-    pub trace: Box<Trace>,
-}
-
-impl MiruError for ConfigSchemaNotFound {
-    fn code(&self) -> Code {
-        Code::ResourceNotFound
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::NOT_FOUND
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        Some(json!({
-            "digest": self.digest,
-            "config_type_slug": self.config_type_slug,
-            "synced_with_backend": !self.network_connection_error,
-        }))
-    }
-}
-
-impl fmt::Display for ConfigSchemaNotFound {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.network_connection_error {
-            write!(f, "Unable to find a config schema for digest '{}' and config type slug '{}' locally and unable to connect to the backend to fetch the latest config schema information", self.digest, self.config_type_slug)
-        } else {
-            write!(f, "Unable to a config schema for digest '{}' and config type slug '{}' locally or with the backend", self.digest, self.config_type_slug)
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct ServiceModelsErr {
     pub source: ModelsErr,
@@ -308,10 +223,6 @@ impl fmt::Display for ServiceHTTPErr {
 
 #[derive(Debug)]
 pub enum ServiceErr {
-    // service errors
-    DeployedConfigInstanceNotFound(Box<DeployedConfigInstanceNotFound>),
-    ConfigSchemaNotFound(Box<ConfigSchemaNotFound>),
-
     // internal crate errors
     CacheErr(Box<ServiceCacheErr>),
     CrudErr(Box<ServiceCrudErr>),
@@ -325,9 +236,6 @@ pub enum ServiceErr {
 macro_rules! forward_error_method {
     ($self:ident, $method:ident $(, $arg:expr)?) => {
         match $self {
-            Self::DeployedConfigInstanceNotFound(e) => e.$method($($arg)?),
-            Self::ConfigSchemaNotFound(e) => e.$method($($arg)?),
-
             Self::CacheErr(e) => e.$method($($arg)?),
             Self::CrudErr(e) => e.$method($($arg)?),
             Self::FileSysErr(e) => e.$method($($arg)?),

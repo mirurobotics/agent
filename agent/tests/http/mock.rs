@@ -4,12 +4,10 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::http::config_instances::{ConfigInstanceFilters, ConfigInstancesExt};
-use miru_agent::http::config_schemas::{ConfigSchemaFilters, ConfigSchemasExt};
 use miru_agent::http::devices::DevicesExt;
 use miru_agent::http::errors::HTTPErr;
 use openapi_client::models::{
-    ActivateDeviceRequest, ConfigInstance, ConfigInstanceList, ConfigSchema, ConfigSchemaList,
-    Device, HashSchemaSerializedRequest, IssueDeviceTokenRequest, SchemaDigestResponse,
+    ActivateDeviceRequest, ConfigInstance, ConfigInstanceList, Device, IssueDeviceTokenRequest,
     TokenResponse, UpdateConfigInstanceRequest, UpdateDeviceFromAgentRequest,
 };
 
@@ -19,7 +17,6 @@ use openapi_client::models::{
 pub struct MockClient {
     pub devices_client: MockDevicesClient,
     pub config_instances_client: MockCfgInstsClient,
-    pub config_schemas_client: MockCfgSchsClient,
 }
 
 impl DevicesExt for MockClient {
@@ -294,64 +291,3 @@ impl ConfigInstancesExt for MockCfgInstsClient {
     }
 }
 
-// ============================= CONFIG SCHEMAS ==================================== //
-pub struct MockCfgSchsClient {
-    pub hash_schema_fn: Box<dyn Fn() -> Result<SchemaDigestResponse, HTTPErr> + Send + Sync>,
-    pub list_config_schemas_fn: Box<dyn Fn() -> Result<ConfigSchemaList, HTTPErr> + Send + Sync>,
-    pub find_one_config_schema_fn: Box<dyn Fn() -> Result<ConfigSchema, HTTPErr> + Send + Sync>,
-}
-
-impl Default for MockCfgSchsClient {
-    fn default() -> Self {
-        Self {
-            hash_schema_fn: Box::new(|| Ok(SchemaDigestResponse::default())),
-            list_config_schemas_fn: Box::new(|| Ok(ConfigSchemaList::default())),
-            find_one_config_schema_fn: Box::new(|| Ok(ConfigSchema::default())),
-        }
-    }
-}
-
-impl MockCfgSchsClient {
-    pub fn set_hash_schema<F>(&mut self, hash_schema_fn: F)
-    where
-        F: Fn() -> Result<SchemaDigestResponse, HTTPErr> + Send + Sync + 'static,
-    {
-        self.hash_schema_fn = Box::new(hash_schema_fn);
-    }
-
-    pub fn set_list_config_schemas<F>(&mut self, list_config_schemas_fn: F)
-    where
-        F: Fn() -> Result<ConfigSchemaList, HTTPErr> + Send + Sync + 'static,
-    {
-        self.list_config_schemas_fn = Box::new(list_config_schemas_fn);
-    }
-
-    pub fn set_find_one_config_schema<F>(&mut self, find_one_config_schema_fn: F)
-    where
-        F: Fn() -> Result<ConfigSchema, HTTPErr> + Send + Sync + 'static,
-    {
-        self.find_one_config_schema_fn = Box::new(find_one_config_schema_fn);
-    }
-}
-
-impl ConfigSchemasExt for MockCfgSchsClient {
-    async fn hash_schema(
-        &self,
-        _request: &HashSchemaSerializedRequest,
-        _: &str,
-    ) -> Result<SchemaDigestResponse, HTTPErr> {
-        (self.hash_schema_fn)()
-    }
-
-    async fn list_config_schemas(&self, _: &str, _: &str) -> Result<ConfigSchemaList, HTTPErr> {
-        (self.list_config_schemas_fn)()
-    }
-
-    async fn find_one_config_schema(
-        &self,
-        _: ConfigSchemaFilters,
-        _: &str,
-    ) -> Result<ConfigSchema, HTTPErr> {
-        (self.find_one_config_schema_fn)()
-    }
-}

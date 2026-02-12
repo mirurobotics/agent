@@ -51,16 +51,6 @@ pub(crate) async fn serve(
         // =============================== AGENT INFO ============================== //
         .route("/v1/health", get(handlers::health))
         .route("/v1/version", get(handlers::version))
-        // ============================ CONFIG INSTANCES =========================== //
-        .route(
-            "/v1/config_instances/deployed",
-            get(handlers::get_deployed_config_instance),
-        )
-        // ============================= CONFIG SCHEMAS ============================ //
-        .route(
-            "/v1/config_schemas/hash/serialized",
-            post(handlers::hash_schema),
-        )
         // ============================= DEVICE ==================================== //
         .route("/v1/device", get(handlers::get_device))
         .route("/v1/device/sync", post(handlers::sync_device))
