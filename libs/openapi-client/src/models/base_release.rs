@@ -12,33 +12,29 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ConfigType {
+pub struct BaseRelease {
     #[serde(rename = "object")]
     pub object: Object,
-    /// ID of the config type.
+    /// ID of the release.
     #[serde(rename = "id")]
     pub id: String,
-    /// Name of the config type.
-    #[serde(rename = "name")]
-    pub name: String,
-    /// An immutable, code-friendly name for the config type.
-    #[serde(rename = "slug")]
-    pub slug: String,
-    /// Timestamp of when the config type was created.
+    /// The version of the release.
+    #[serde(rename = "version")]
+    pub version: String,
+    /// Timestamp of when the release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
-    /// Timestamp of when the config type was last updated.
+    /// Timestamp of when the release was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
 }
 
-impl ConfigType {
-    pub fn new(object: Object, id: String, name: String, slug: String, created_at: String, updated_at: String) -> ConfigType {
-        ConfigType {
+impl BaseRelease {
+    pub fn new(object: Object, id: String, version: String, created_at: String, updated_at: String) -> BaseRelease {
+        BaseRelease {
             object,
             id,
-            name,
-            slug,
+            version,
             created_at,
             updated_at,
         }
@@ -47,13 +43,13 @@ impl ConfigType {
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
-    #[serde(rename = "config_type")]
-    ConfigType,
+    #[serde(rename = "release")]
+    Release,
 }
 
 impl Default for Object {
     fn default() -> Object {
-        Self::ConfigType
+        Self::Release
     }
 }
 
