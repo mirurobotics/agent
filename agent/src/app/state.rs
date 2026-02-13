@@ -112,7 +112,9 @@ impl AppState {
                 token_mngr: token_mngr.clone(),
                 cfg_inst_cache: caches.cfg_inst.clone(),
                 cfg_inst_content_cache: caches.cfg_inst_content.clone(),
+                deployment_cache: caches.deployment.clone(),
                 deployment_dir: layout.config_instance_deployment_dir(),
+                staging_dir: layout.temp_dir(),
                 fsm_settings,
                 agent_version,
                 cooldown_options: CooldownOptions {

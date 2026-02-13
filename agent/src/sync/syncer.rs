@@ -7,13 +7,14 @@ use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
 use crate::deploy::fsm;
 use crate::errors::*;
 use crate::filesys::dir::Dir;
-use crate::http::{client::HTTPClient, devices::DevicesExt};
+use crate::http::{client::HTTPClient, deployments::DeploymentsExt, devices::DevicesExt};
 use crate::storage::{
     config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
+    deployments::DeploymentCache,
     device::DeviceFile,
 };
 use crate::sync::errors::*;
-use crate::sync::{agent_version, config_instances};
+use crate::sync::{agent_version, deployments};
 use crate::trace;
 use crate::utils::{calc_exp_backoff, CooldownOptions};
 
@@ -50,7 +51,9 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub token_mngr: Arc<TokenManagerT>,
     pub cfg_inst_cache: Arc<ConfigInstanceCache>,
     pub cfg_inst_content_cache: Arc<ConfigInstanceContentCache>,
+    pub deployment_cache: Arc<DeploymentCache>,
     pub deployment_dir: Dir,
+    pub staging_dir: Dir,
     pub fsm_settings: fsm::Settings,
     pub cooldown_options: CooldownOptions,
     pub agent_version: String,
@@ -82,13 +85,15 @@ impl SyncState {
 }
 
 pub struct SingleThreadSyncer<HTTPClientT> {
-    device_id: String,
+    _device_id: String,
     device_file: Arc<DeviceFile>,
     http_client: Arc<HTTPClientT>,
     token_mngr: Arc<TokenManager>,
     cfg_inst_cache: Arc<ConfigInstanceCache>,
     cfg_inst_content_cache: Arc<ConfigInstanceContentCache>,
+    deployment_cache: Arc<DeploymentCache>,
     deployment_dir: Dir,
+    staging_dir: Dir,
     fsm_settings: fsm::Settings,
     agent_version: String,
 
@@ -101,17 +106,19 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     state: SyncState,
 }
 
-impl<HTTPClientT: DevicesExt> SingleThreadSyncer<HTTPClientT> {
+impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
     pub fn new(args: SyncerArgs<HTTPClientT, TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
-            device_id: args.device_id,
+            _device_id: args.device_id,
             device_file: args.device_file,
             http_client: args.http_client,
             token_mngr: args.token_mngr,
             cfg_inst_cache: args.cfg_inst_cache,
             cfg_inst_content_cache: args.cfg_inst_content_cache,
+            deployment_cache: args.deployment_cache,
             deployment_dir: args.deployment_dir,
+            staging_dir: args.staging_dir,
             fsm_settings: args.fsm_settings,
             cooldown_options: args.cooldown_options,
             agent_version: args.agent_version,
@@ -265,13 +272,18 @@ impl<HTTPClientT: DevicesExt> SingleThreadSyncer<HTTPClientT> {
             return Err(e);
         }
 
-        config_instances::sync(
+        let ctx = crate::deploy::filesys::DeployContext {
+            content_reader: self.cfg_inst_content_cache.as_ref(),
+            deployment_dir: &self.deployment_dir,
+            staging_dir: &self.staging_dir,
+            settings: &self.fsm_settings,
+        };
+        deployments::sync(
+            self.deployment_cache.as_ref(),
             self.cfg_inst_cache.as_ref(),
             self.cfg_inst_content_cache.as_ref(),
             self.http_client.as_ref(),
-            &self.device_id,
-            &self.deployment_dir,
-            &self.fsm_settings,
+            &ctx,
             &token.token,
         )
         .await
@@ -328,7 +340,7 @@ impl<HTTPClientT: Send> Worker<HTTPClientT> {
     }
 }
 
-impl<HTTPClientT: DevicesExt + Send> Worker<HTTPClientT> {
+impl<HTTPClientT: DevicesExt + DeploymentsExt + Send> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {

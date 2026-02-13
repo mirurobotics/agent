@@ -1,8 +1,10 @@
 // internal crates
 use crate::crud::prelude::{Find, Read};
 use crate::deploy::errors::*;
-use crate::deploy::{filesys, fsm, observer::{on_update, Observer}};
-use crate::filesys::dir::Dir;
+use crate::deploy::{
+    filesys, fsm,
+    observer::{on_update, Observer},
+};
 use crate::models::config_instance::ConfigInstance;
 use crate::models::deployment::{Deployment, DeploymentActivityStatus};
 use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
@@ -48,7 +50,12 @@ impl<'a> Observer for StorageObserver<'a> {
     async fn on_update(&mut self, deployment: &Deployment) -> Result<(), DeployErr> {
         let overwrite = true;
         self.deployment_cache
-            .write(deployment.id.clone(), deployment.clone(), is_dirty, overwrite)
+            .write(
+                deployment.id.clone(),
+                deployment.clone(),
+                is_dirty,
+                overwrite,
+            )
             .await
             .map_err(|e| {
                 DeployErr::CacheErr(Box::new(DeployCacheErr {
@@ -63,10 +70,7 @@ pub async fn apply(
     deployment: &Deployment,
     deployment_cache: &DeploymentCache,
     cfg_inst_cache: &ConfigInstanceCache,
-    cfg_inst_content_cache: &ConfigInstanceContentCache,
-    deployment_dir: &Dir,
-    staging_dir: &Dir,
-    fsm_settings: &fsm::Settings,
+    ctx: &filesys::DeployContext<'_, ConfigInstanceContentCache>,
 ) -> Result<Deployment, DeployErr> {
     debug!("Applying deployment {:?}", deployment.id);
 
@@ -98,7 +102,10 @@ pub async fn apply(
                 })));
             }
             Err(e) => {
-                error!("Failed to read config instance {} from cache: {:?}", cfg_inst_id, e);
+                error!(
+                    "Failed to read config instance {} from cache: {:?}",
+                    cfg_inst_id, e
+                );
                 return Err(DeployErr::CrudErr(Box::new(DeployCrudErr {
                     source: e,
                     trace: trace!(),
@@ -123,10 +130,7 @@ pub async fn apply(
         deployment.clone(),
         cfg_insts_to_apply,
         conflicts,
-        cfg_inst_content_cache,
-        deployment_dir,
-        staging_dir,
-        fsm_settings,
+        ctx,
         &mut observers,
     )
     .await;
@@ -136,10 +140,12 @@ pub async fn apply(
     }
 
     // Return the updated deployment from results
+    // The deployment may be in to_deploy (Deploy) or to_remove (Remove/Archive)
     let updated_deployment = deployment_results
         .to_deploy
         .into_iter()
-        .next()
+        .chain(deployment_results.to_remove.into_iter())
+        .find(|d| d.id == deployment.id)
         .unwrap_or_else(|| deployment.clone());
 
     Ok(updated_deployment)
@@ -149,38 +155,15 @@ async fn apply_deployment(
     deployment: Deployment,
     cfg_insts_to_apply: Vec<ConfigInstance>,
     conflicts: Vec<Deployment>,
-    all_cfg_inst_contents: &ConfigInstanceContentCache,
-    deployment_dir: &Dir,
-    staging_dir: &Dir,
-    fsm_settings: &fsm::Settings,
+    ctx: &filesys::DeployContext<'_, ConfigInstanceContentCache>,
     observers: &mut [&mut dyn Observer],
 ) -> (DeployResults, Result<(), DeployErr>) {
     match fsm::next_action(&deployment, true) {
         fsm::NextAction::None => (DeployResults::empty(), Ok(())),
         fsm::NextAction::Deploy => {
-            deploy_deployment(
-                deployment,
-                cfg_insts_to_apply,
-                conflicts,
-                all_cfg_inst_contents,
-                deployment_dir,
-                staging_dir,
-                fsm_settings,
-                observers,
-            )
-            .await
+            deploy_deployment(deployment, cfg_insts_to_apply, conflicts, ctx, observers).await
         }
-        fsm::NextAction::Remove => {
-            remove_deployment(
-                deployment,
-                cfg_insts_to_apply,
-                all_cfg_inst_contents,
-                deployment_dir,
-                fsm_settings,
-                observers,
-            )
-            .await
-        }
+        fsm::NextAction::Remove => remove_deployment(deployment, observers).await,
         fsm::NextAction::Archive => archive(deployment, observers).await,
         fsm::NextAction::Wait(_) => (DeployResults::empty(), Ok(())),
     }
@@ -191,10 +174,7 @@ async fn deploy_deployment(
     mut deployment: Deployment,
     cfg_insts_to_deploy: Vec<ConfigInstance>,
     conflicts: Vec<Deployment>,
-    all_cfg_inst_contents: &ConfigInstanceContentCache,
-    deployment_dir: &Dir,
-    staging_dir: &Dir,
-    fsm_settings: &fsm::Settings,
+    ctx: &filesys::DeployContext<'_, ConfigInstanceContentCache>,
     observers: &mut [&mut dyn Observer],
 ) -> (DeployResults, Result<(), DeployErr>) {
     if fsm::next_action(&deployment, true) != fsm::NextAction::Deploy {
@@ -234,14 +214,8 @@ async fn deploy_deployment(
 
     let updated_to_remove = record_removals(conflicts, observers).await;
 
-    let ctx = filesys::DeployContext {
-        content_reader: all_cfg_inst_contents,
-        deployment_dir,
-        staging_dir,
-        settings: fsm_settings,
-    };
     let (updated_deployment, result) =
-        filesys::deploy(&ctx, deployment, cfg_insts_to_deploy, observers).await;
+        filesys::deploy(ctx, deployment, cfg_insts_to_deploy, observers).await;
 
     (
         DeployResults {
@@ -260,7 +234,10 @@ async fn record_removals(
     for mut deployment in to_remove {
         deployment = fsm::remove(deployment);
         if let Err(e) = on_update(observers, &deployment).await {
-            error!("Error updating removed deployment {:?}: {:?}", deployment.id, e);
+            error!(
+                "Error updating removed deployment {:?}: {:?}",
+                deployment.id, e
+            );
         }
         out.push(deployment);
     }
@@ -270,10 +247,6 @@ async fn record_removals(
 // =================================== REMOVE ====================================== //
 async fn remove_deployment(
     deployment: Deployment,
-    _cfg_insts_to_remove: Vec<ConfigInstance>,
-    _all_cfg_inst_contents: &ConfigInstanceContentCache,
-    _deployment_dir: &Dir,
-    _fsm_settings: &fsm::Settings,
     observers: &mut [&mut dyn Observer],
 ) -> (DeployResults, Result<(), DeployErr>) {
     if fsm::next_action(&deployment, true) != fsm::NextAction::Remove {
@@ -309,9 +282,7 @@ async fn find_all_deployed_deployments(
     // Find all deployments that are currently deployed
     // Since only one deployment can be deployed at a time, all deployed deployments are conflicts
     deployment_cache
-        .find_where(|d| {
-            d.activity_status == DeploymentActivityStatus::Deployed
-        })
+        .find_where(|d| d.activity_status == DeploymentActivityStatus::Deployed)
         .await
         .map_err(|e| {
             DeployErr::CrudErr(Box::new(DeployCrudErr {

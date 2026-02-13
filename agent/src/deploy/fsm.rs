@@ -147,10 +147,7 @@ fn get_success_options(
     }
 }
 
-fn has_recovered(
-    deployment: &Deployment,
-    new_activity_status: DeploymentActivityStatus,
-) -> bool {
+fn has_recovered(deployment: &Deployment, new_activity_status: DeploymentActivityStatus) -> bool {
     // the error status only needs to be updated if it is currently retrying. If is
     // failed then it can never exit failed and if it is None then it is already correct
     if deployment.error_status != DeploymentErrorStatus::Retrying {
@@ -220,8 +217,7 @@ fn get_error_options(
 
     // determine the new status
     let mut new_error_status = Some(DeploymentErrorStatus::Retrying);
-    if attempts >= settings.max_attempts
-        || deployment.error_status == DeploymentErrorStatus::Failed
+    if attempts >= settings.max_attempts || deployment.error_status == DeploymentErrorStatus::Failed
     {
         new_error_status = Some(DeploymentErrorStatus::Failed);
     }

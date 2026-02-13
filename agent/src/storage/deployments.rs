@@ -6,4 +6,3 @@ pub type DeploymentCacheEntry = CacheEntry<DeploymentID, Deployment>;
 
 // the deployment cache is stored in a single file
 pub type DeploymentCache = FileCache<DeploymentID, Deployment>;
-

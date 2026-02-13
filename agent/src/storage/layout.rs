@@ -52,6 +52,14 @@ impl StorageLayout {
         self.config_instance_caches().subdir("contents")
     }
 
+    pub fn deployment_caches(&self) -> Dir {
+        self.caches_dir().subdir("deployments")
+    }
+
+    pub fn deployment_cache(&self) -> File {
+        self.deployment_caches().file("metadata.json")
+    }
+
     pub fn config_instance_deployment_dir(&self) -> Dir {
         self.root
             .subdir("srv")

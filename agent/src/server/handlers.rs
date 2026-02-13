@@ -8,9 +8,7 @@ use crate::server::state::ServerState;
 use crate::services::device::{get, sync};
 use crate::trace;
 use crate::utils::version_info;
-use openapi_server::models::{
-    Error, ErrorResponse, HealthResponse, VersionResponse,
-};
+use openapi_server::models::{Error, ErrorResponse, HealthResponse, VersionResponse};
 
 // external
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
@@ -88,12 +86,15 @@ pub async fn sync_device(State(state): State<Arc<ServerState>>) -> impl IntoResp
 
 // ================================ UTILITIES ====================================== //
 fn to_error_response(e: impl MiruError) -> ErrorResponse {
+    let params = e
+        .params()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
     ErrorResponse {
         error: Box::new(Error {
             code: e.code().as_str().to_string(),
-            params: e.params(),
+            params,
             message: e.to_string(),
-            debug_message: format!("{e:?}"),
         }),
     }
 }

@@ -6,18 +6,38 @@ use std::sync::Arc;
 use crate::http::client::HTTPClient;
 use crate::http::errors::HTTPErr;
 use crate::http::expand::format_expand_query;
+use crate::http::pagination::{Pagination, MAX_PAGINATE_LIMIT};
+use crate::http::query::build_query_params;
 use openapi_client::models::{
-    Deployment, UpdateDeploymentRequest,
+    Deployment, DeploymentActivityStatus, DeploymentList, UpdateDeploymentRequest,
 };
 
 #[allow(async_fn_in_trait)]
 pub trait DeploymentsExt: Send + Sync {
+    /// List deployments with optional activity_status filter, expansions, and pagination
+    async fn list_deployments<I>(
+        &self,
+        activity_status_filter: &[DeploymentActivityStatus],
+        expansions: I,
+        pagination: &Pagination,
+        token: &str,
+    ) -> Result<DeploymentList, HTTPErr>
+    where
+        I: IntoIterator + Send,
+        I::Item: fmt::Display;
+
+    /// List all deployments by paginating through all pages
+    async fn list_all_deployments<I>(
+        &self,
+        activity_status_filter: &[DeploymentActivityStatus],
+        expansions: I,
+        token: &str,
+    ) -> Result<Vec<Deployment>, HTTPErr>
+    where
+        I: IntoIterator + Send + Clone,
+        I::Item: fmt::Display;
+
     /// Get a deployment by ID
-    /// 
-    /// # Arguments
-    /// * `deployment_id` - The ID of the deployment to retrieve
-    /// * `expansions` - Optional iterator of expansions (e.g., "release", "config_instances")
-    /// * `token` - Authentication token
     async fn get_deployment<I>(
         &self,
         deployment_id: &str,
@@ -29,12 +49,6 @@ pub trait DeploymentsExt: Send + Sync {
         I::Item: fmt::Display;
 
     /// Update a deployment
-    /// 
-    /// # Arguments
-    /// * `deployment_id` - The ID of the deployment to update
-    /// * `updates` - The update request containing activity_status and/or error_status
-    /// * `expansions` - Optional iterator of expansions (e.g., "release", "config_instances")
-    /// * `token` - Authentication token
     async fn update_deployment<I>(
         &self,
         deployment_id: &str,
@@ -57,7 +71,73 @@ impl HTTPClient {
     }
 }
 
+fn format_activity_status_filter(statuses: &[DeploymentActivityStatus]) -> Option<String> {
+    if statuses.is_empty() {
+        return None;
+    }
+    let values: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+    Some(format!("activity_status={}", values.join(",")))
+}
+
 impl DeploymentsExt for HTTPClient {
+    async fn list_deployments<I>(
+        &self,
+        activity_status_filter: &[DeploymentActivityStatus],
+        expansions: I,
+        pagination: &Pagination,
+        token: &str,
+    ) -> Result<DeploymentList, HTTPErr>
+    where
+        I: IntoIterator + Send,
+        I::Item: fmt::Display,
+    {
+        let search_query = format_activity_status_filter(activity_status_filter);
+        let expand_query = format_expand_query(expansions);
+        let query_params =
+            build_query_params(search_query.as_deref(), expand_query.as_deref(), pagination);
+
+        let url = format!("{}{}", self.deployments_url(), query_params);
+        let (request, context) = self.build_get_request(&url, self.default_timeout, Some(token))?;
+        let response = self.send_cached(url, request, &context).await?.0;
+        self.parse_json_response_text::<DeploymentList>(response, &context)
+            .await
+    }
+
+    async fn list_all_deployments<I>(
+        &self,
+        activity_status_filter: &[DeploymentActivityStatus],
+        expansions: I,
+        token: &str,
+    ) -> Result<Vec<Deployment>, HTTPErr>
+    where
+        I: IntoIterator + Send + Clone,
+        I::Item: fmt::Display,
+    {
+        let mut all_deployments = Vec::new();
+        let mut pagination = Pagination {
+            limit: MAX_PAGINATE_LIMIT,
+            offset: 0,
+        };
+
+        loop {
+            let page = self
+                .list_deployments(
+                    activity_status_filter,
+                    expansions.clone(),
+                    &pagination,
+                    token,
+                )
+                .await?;
+            all_deployments.extend(page.data);
+            if !page.has_more {
+                break;
+            }
+            pagination.offset += pagination.limit;
+        }
+
+        Ok(all_deployments)
+    }
+
     async fn get_deployment<I>(
         &self,
         deployment_id: &str,
@@ -127,6 +207,37 @@ impl DeploymentsExt for HTTPClient {
 }
 
 impl DeploymentsExt for Arc<HTTPClient> {
+    async fn list_deployments<I>(
+        &self,
+        activity_status_filter: &[DeploymentActivityStatus],
+        expansions: I,
+        pagination: &Pagination,
+        token: &str,
+    ) -> Result<DeploymentList, HTTPErr>
+    where
+        I: IntoIterator + Send,
+        I::Item: fmt::Display,
+    {
+        self.as_ref()
+            .list_deployments(activity_status_filter, expansions, pagination, token)
+            .await
+    }
+
+    async fn list_all_deployments<I>(
+        &self,
+        activity_status_filter: &[DeploymentActivityStatus],
+        expansions: I,
+        token: &str,
+    ) -> Result<Vec<Deployment>, HTTPErr>
+    where
+        I: IntoIterator + Send + Clone,
+        I::Item: fmt::Display,
+    {
+        self.as_ref()
+            .list_all_deployments(activity_status_filter, expansions, token)
+            .await
+    }
+
     async fn get_deployment<I>(
         &self,
         deployment_id: &str,
@@ -158,4 +269,3 @@ impl DeploymentsExt for Arc<HTTPClient> {
             .await
     }
 }
-

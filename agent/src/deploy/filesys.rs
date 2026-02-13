@@ -32,8 +32,13 @@ pub async fn deploy<R>(
 where
     R: Read<ConfigInstanceID, serde_json::Value>,
 {
-    let write_result =
-        write(&cfg_insts, ctx.content_reader, ctx.staging_dir, ctx.deployment_dir).await;
+    let write_result = write(
+        &cfg_insts,
+        ctx.content_reader,
+        ctx.staging_dir,
+        ctx.deployment_dir,
+    )
+    .await;
 
     if let Err(e) = &write_result {
         let increment_attempts = deployment.target_status == DeploymentTargetStatus::Deployed;

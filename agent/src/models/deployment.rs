@@ -420,7 +420,9 @@ impl Deployment {
             id: backend_deployment.id,
             description: backend_deployment.description,
             status: DeploymentStatus::from_backend(&backend_deployment.status),
-            activity_status: DeploymentActivityStatus::from_backend(&backend_deployment.activity_status),
+            activity_status: DeploymentActivityStatus::from_backend(
+                &backend_deployment.activity_status,
+            ),
             error_status: DeploymentErrorStatus::from_backend(&backend_deployment.error_status),
             target_status: DeploymentTargetStatus::from_backend(&backend_deployment.target_status),
             device_id: backend_deployment.device_id,
@@ -428,11 +430,11 @@ impl Deployment {
             created_at: backend_deployment
                 .created_at
                 .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|_| DateTime::<Utc>::UNIX_EPOCH),
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             updated_at: backend_deployment
                 .updated_at
                 .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|_| DateTime::<Utc>::UNIX_EPOCH),
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             attempts: 0,
             cooldown_ends_at: None,
             config_instance_ids: backend_deployment
@@ -506,4 +508,3 @@ impl<'de> Deserialize<'de> for Deployment {
         })
     }
 }
-

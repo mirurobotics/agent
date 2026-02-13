@@ -37,11 +37,11 @@ impl Release {
             created_at: backend_release
                 .created_at
                 .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|_| DateTime::<Utc>::UNIX_EPOCH),
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             updated_at: backend_release
                 .updated_at
                 .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|_| DateTime::<Utc>::UNIX_EPOCH),
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
         }
     }
 }
@@ -65,13 +65,12 @@ impl<'de> Deserialize<'de> for Release {
         Ok(Release {
             id: result.id,
             version: result.version,
-            created_at: result.created_at.unwrap_or_else(|| {
-                deserialize_error!("release", "created_at", default.created_at)
-            }),
-            updated_at: result.updated_at.unwrap_or_else(|| {
-                deserialize_error!("release", "updated_at", default.updated_at)
-            }),
+            created_at: result
+                .created_at
+                .unwrap_or_else(|| deserialize_error!("release", "created_at", default.created_at)),
+            updated_at: result
+                .updated_at
+                .unwrap_or_else(|| deserialize_error!("release", "updated_at", default.updated_at)),
         })
     }
 }
-

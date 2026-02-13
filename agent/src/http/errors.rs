@@ -37,17 +37,17 @@ impl MiruError for RequestFailed {
     }
 
     fn params(&self) -> Option<serde_json::Value> {
-        match &self.error {
-            Some(error) => Some(serde_json::to_value(&error.error.params).unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))),
-            None => None,
-        }
+        self.error.as_ref().map(|error| {
+            serde_json::to_value(&error.error.params)
+                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+        })
     }
 }
 
 impl fmt::Display for RequestFailed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let debug_msg = match &self.error {
-            Some(error) => error.error.debug_message.clone(),
+            Some(error) => error.error.message.clone(),
             None => "unknown miru server error".to_string(),
         };
         write!(
