@@ -1,7 +1,7 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
- * The API between the Miru Backend and the Agent; for internal use only
+ * The API between the Miru Agent and any external client living on the same device as the Miru Agent
  *
  * The version of the OpenAPI document: 0.0.0
  * 
@@ -12,7 +12,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BaseRelease {
+pub struct Release {
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the release.
@@ -29,9 +29,9 @@ pub struct BaseRelease {
     pub updated_at: String,
 }
 
-impl BaseRelease {
-    pub fn new(object: Object, id: String, version: String, created_at: String, updated_at: String) -> BaseRelease {
-        BaseRelease {
+impl Release {
+    pub fn new(object: Object, id: String, version: String, created_at: String, updated_at: String) -> Release {
+        Release {
             object,
             id,
             version,

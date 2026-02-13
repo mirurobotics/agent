@@ -1,7 +1,7 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
- * The API between the Miru Backend and the Agent; for internal use only
+ * The API between the Miru Agent and any external client living on the same device as the Miru Agent
  *
  * The version of the OpenAPI document: 0.0.0
  * 
@@ -12,7 +12,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BaseDeployment {
+pub struct Deployment {
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the deployment.
@@ -41,11 +41,13 @@ pub struct BaseDeployment {
     /// Timestamp of when the device release was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
+    #[serde(rename = "config_instances", skip_serializing_if = "Option::is_none")]
+    pub config_instances: Option<Vec<models::ConfigInstance>>,
 }
 
-impl BaseDeployment {
-    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String, updated_at: String) -> BaseDeployment {
-        BaseDeployment {
+impl Deployment {
+    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String, updated_at: String) -> Deployment {
+        Deployment {
             object,
             id,
             description,
@@ -57,6 +59,7 @@ impl BaseDeployment {
             release_id,
             created_at,
             updated_at,
+            config_instances: None,
         }
     }
 }

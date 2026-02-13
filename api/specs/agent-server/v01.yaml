@@ -1,7 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Miru API
-  version: 0.1.0
+  title: Miru Agent API
+  description: The API between the Miru Agent and any external client living on the same device as the Miru Agent
+  version: 0.0.0
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -10,9 +11,9 @@ servers:
     description: localhost
     variables:
       version:
-        default: v1
+        default: beta
         enum:
-          - v1
+          - beta
 paths:
   /health:
     get:
@@ -40,43 +41,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VersionResponse'
-  /config_instances/deployed:
+  /deployments/{deployment_id}:
     get:
-      x-hidden: true
       tags:
-        - Config Instances
-      summary: Retrieve the deployed config instance
-      operationId: getDeployedConfigInstance
+        - Deployments
+      summary: Get a deployment by ID
+      operationId: getDeployment
       parameters:
-        - $ref: '#/components/parameters/config_schema_digest'
-        - $ref: '#/components/parameters/config_type_slug'
+        - $ref: '#/components/parameters/deployment_id'
       responses:
         '200':
-          description: Successfully retrieved the config instance.
+          description: Successfully retrieved the deployment.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfigInstance'
-  /config_schemas/hash/serialized:
+                $ref: '#/components/schemas/Deployment'
+  /deployments:
     post:
-      x-hidden: true
       tags:
-        - Config Schemas
-      summary: Hash a serialized config schema
-      operationId: hashConfigSchemaSerialized
+        - Deployments
+      summary: Create a deployment
+      operationId: createDeployment
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HashSchemaSerializedRequest'
+              $ref: '#/components/schemas/CreateDeploymentRequest'
       responses:
         '200':
-          description: Successfully hashed the config schema.
+          description: Successfully created the deployment.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SchemaDigestResponse'
+                $ref: '#/components/schemas/Deployment'
+  /deployments/current:
+    get:
+      tags:
+        - Deployments
+      summary: Get the current deployment
+      operationId: getCurrentDeployment
+      responses:
+        '200':
+          description: Successfully retrieved the current deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
   /device:
     get:
       tags:
@@ -105,22 +116,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SyncDeviceResponse'
-  /example-error:
+  /releases/current:
     get:
-      x-hidden: true
       tags:
-        - Errors
-      summary: Get an error
-      operationId: getError
+        - Releases
+      summary: Get the current release
+      description: Retrieve the current release.
+      operationId: getCurrentRelease
       responses:
         '200':
-          description: Successfully retrieved the error.
+          description: Successfully retrieved the current release.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/Release'
 components:
   schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
     HealthResponse:
       type: object
       required:
@@ -139,91 +157,147 @@ components:
         version:
           type: string
           description: The version of the agent.
-          example: v0.1.0
+          example: v1.0.0
         commit:
           type: string
           description: The commit hash of the agent.
           example: a1b2c3d4
-    ConfigInstanceTargetStatus:
+    DeploymentStatus:
       type: string
       description: |
-        Desired state of the config instance.
-        - Created: config instance is created and can be deployed in the future
-        - Deployed: config instance is available for consumption on the device
-        - Removed: config instance is available for historical reference but cannot be deployed and is not active on the device
+        This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'.
       enum:
-        - created
-        - deployed
-        - removed
-      x-enum-varnames:
-        - CONFIG_INSTANCE_TARGET_STATUS_CREATED
-        - CONFIG_INSTANCE_TARGET_STATUS_DEPLOYED
-        - CONFIG_INSTANCE_TARGET_STATUS_REMOVED
-    ConfigInstanceActivityStatus:
-      type: string
-      description: |
-        Last known activity state of the config instance.
-        - Created: config instance has been created and can be deployed in the future
-        - Queued: config instance is waiting to be received by the device; will be deployed as soon as the device is online
-        - Deployed: config instance is currently available for consumption on the device
-        - Removed: the config instance is available for historical reference but cannot be deployed and is not active on the device
-      enum:
-        - created
+        - drifted
+        - staged
         - queued
         - deployed
-        - removed
+        - archived
+        - failed
+        - retrying
       x-enum-varnames:
-        - CONFIG_INSTANCE_ACTIVITY_STATUS_CREATED
-        - CONFIG_INSTANCE_ACTIVITY_STATUS_QUEUED
-        - CONFIG_INSTANCE_ACTIVITY_STATUS_DEPLOYED
-        - CONFIG_INSTANCE_ACTIVITY_STATUS_REMOVED
-    ConfigInstanceErrorStatus:
+        - DEPLOYMENT_STATUS_DRIFTED
+        - DEPLOYMENT_STATUS_STAGED
+        - DEPLOYMENT_STATUS_QUEUED
+        - DEPLOYMENT_STATUS_DEPLOYED
+        - DEPLOYMENT_STATUS_ARCHIVED
+        - DEPLOYMENT_STATUS_FAILED
+        - DEPLOYMENT_STATUS_RETRYING
+    DeploymentActivityStatus:
       type: string
       description: |
-        Last known error state of the config instance deployment.
-        - None: there are no errors with the config instance deployment
-        - Retrying: an error has been encountered and the agent is attempting to try again to reach the target status
-        - Failed: a fatal error has been encountered; the config instance is archived and (if deployed) removed from the device
+        Last known activity state of the deployment.
+        - Drifted: device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed
+        - Staged: is ready to be deployed
+        - Queued: the deployment's config instances are waiting to be received by the device; will be deployed as soon as the device is online
+        - Deployed: the deployment's config instances are currently available for consumption on the device
+        - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
+      enum:
+        - drifted
+        - staged
+        - queued
+        - deployed
+        - archived
+      x-enum-varnames:
+        - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
+        - DEPLOYMENT_ACTIVITY_STATUS_STAGED
+        - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
+        - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+        - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
+    DeploymentErrorStatus:
+      type: string
+      description: |
+        Last known error state of the deployment.
+        - None: no errors
+        - Retrying: an error has been encountered and the agent is retrying to reach the target status
+        - Failed: a fatal error has been encountered; the deployment is archived and (if deployed) removed from the device
       enum:
         - none
         - failed
         - retrying
       x-enum-varnames:
-        - CONFIG_INSTANCE_ERROR_STATUS_NONE
-        - CONFIG_INSTANCE_ERROR_STATUS_FAILED
-        - CONFIG_INSTANCE_ERROR_STATUS_RETRYING
-    ConfigInstanceStatus:
+        - DEPLOYMENT_ERROR_STATUS_NONE
+        - DEPLOYMENT_ERROR_STATUS_FAILED
+        - DEPLOYMENT_ERROR_STATUS_RETRYING
+    DeploymentTargetStatus:
       type: string
       description: |
-        This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'.
+        Desired state of the deployment.
+        - Staged: is ready to be deployed
+        - Deployed: all config instances part of the deployment are available for consumption on the device
+        - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
       enum:
-        - created
-        - queued
+        - staged
         - deployed
-        - removed
-        - failed
-        - retrying
+        - archived
       x-enum-varnames:
-        - CONFIG_INSTANCE_STATUS_CREATED
-        - CONFIG_INSTANCE_STATUS_QUEUED
-        - CONFIG_INSTANCE_STATUS_DEPLOYED
-        - CONFIG_INSTANCE_STATUS_REMOVED
-        - CONFIG_INSTANCE_STATUS_FAILED
-        - CONFIG_INSTANCE_STATUS_RETRYING
+        - DEPLOYMENT_TARGET_STATUS_STAGED
+        - DEPLOYMENT_TARGET_STATUS_DEPLOYED
+        - DEPLOYMENT_TARGET_STATUS_ARCHIVED
+    BaseDeployment:
+      title: Base Deployment
+      type: object
+      required:
+        - object
+        - id
+        - description
+        - status
+        - activity_status
+        - error_status
+        - target_status
+        - device_id
+        - release_id
+        - created_at
+        - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+            - deployment
+          example: deployment
+          x-stainless-const: true
+        id:
+          type: string
+          example: dpl_123
+          description: ID of the deployment.
+        description:
+          type: string
+          example: Deployment for the motion control config instance
+          description: The description of the deployment.
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
+        activity_status:
+          $ref: '#/components/schemas/DeploymentActivityStatus'
+        error_status:
+          $ref: '#/components/schemas/DeploymentErrorStatus'
+        target_status:
+          $ref: '#/components/schemas/DeploymentTargetStatus'
+        device_id:
+          type: string
+          example: dvc_123
+          description: ID of the device.
+        release_id:
+          type: string
+          example: v1.0.0
+          description: The version of the release.
+        created_at:
+          type: string
+          format: date-time
+          example: '2024-01-01T00:00:00Z'
+          description: Timestamp of when the device release was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2024-01-01T00:00:00Z'
+          description: Timestamp of when the device release was last updated.
     BaseConfigInstance:
       title: Base Config Instance
       type: object
       required:
         - object
         - id
-        - target_status
-        - activity_status
-        - error_status
-        - status
-        - relative_filepath
+        - config_type_name
+        - filepath
         - created_at
-        - updated_at
-        - device_id
         - config_schema_id
         - config_type_id
       properties:
@@ -232,19 +306,16 @@ components:
           enum:
             - config_instance
           example: config_instance
+          x-stainless-const: true
         id:
           type: string
           example: cfg_inst_123
           description: ID of the config instance.
-        target_status:
-          $ref: '#/components/schemas/ConfigInstanceTargetStatus'
-        activity_status:
-          $ref: '#/components/schemas/ConfigInstanceActivityStatus'
-        error_status:
-          $ref: '#/components/schemas/ConfigInstanceErrorStatus'
-        status:
-          $ref: '#/components/schemas/ConfigInstanceStatus'
-        relative_filepath:
+        config_type_name:
+          type: string
+          example: Motion Control
+          description: The name of the config type.
+        filepath:
           type: string
           example: /v1/motion-control.json
           description: The file path to deploy the config instance relative to `/srv/miru/config_instances`. `v1/motion-control.json` would deploy to `/srv/miru/config_instances/v1/motion-control.json`.
@@ -253,15 +324,6 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: The timestamp of when the config instance was created.
-        updated_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: The timestamp of when the config instance was last updated.
-        device_id:
-          type: string
-          example: dvc_123
-          description: ID of the device which the config instance is deployed to.
         config_schema_id:
           type: string
           example: cfg_sch_123
@@ -270,6 +332,31 @@ components:
           type: string
           example: cfg_type_123
           description: ID of the config type which the config instance (and its schema) is a part of.
+    InstanceFormat:
+      title: Instance Format
+      type: string
+      enum:
+        - json
+      x-enum-varnames:
+        - INSTANCE_FORMAT_JSON
+    InstanceContent:
+      title: Instance Content
+      type: object
+      required:
+        - format
+        - data
+      properties:
+        format:
+          $ref: '#/components/schemas/InstanceFormat'
+        data:
+          type: string
+          description: The configuration values associated with the config instance.
+          example: |
+            {
+              "enable_autonomy": true,
+              "enable_remote_control": true,
+              "max_payload_kg": 10.0
+            }
     ConfigInstance:
       allOf:
         - $ref: '#/components/schemas/BaseConfigInstance'
@@ -278,48 +365,41 @@ components:
             - content
           properties:
             content:
-              type: object
+              allOf:
+                - $ref: '#/components/schemas/InstanceContent'
               description: The configuration values associated with the config instance
-              example:
-                enable_autonomy: true
-                enable_remote_control: false
-                max_payload_kg: 8.5
-                preferred_speed_mode: normal
-                emergency_stop_sensitivity: 0.9
-                telemetry:
-                  upload_interval_sec: 45
-                  heartbeat_interval_sec: 15
-    HashSerializedConfigSchemaFormat:
-      type: string
-      enum:
-        - json
-        - yaml
-      x-enum-varnames:
-        - HASH_SERIALIZED_CONFIG_SCHEMA_FORMAT_JSON
-        - HASH_SERIALIZED_CONFIG_SCHEMA_FORMAT_YAML
-    HashSchemaSerializedRequest:
-      title: Hash Schema Serialized Request
+    Deployment:
+      allOf:
+        - $ref: '#/components/schemas/BaseDeployment'
+        - type: object
+          properties:
+            config_instances:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConfigInstance'
+              example: null
+    CreateDeploymentRequest:
+      title: Create Deployment Request
       type: object
       required:
-        - format
-        - schema
+        - description
+        - parent_id
+        - config_instance_ids
       properties:
-        format:
-          $ref: '#/components/schemas/HashSerializedConfigSchemaFormat'
-          example: json
-        schema:
+        description:
           type: string
-          format: byte
-          example: ewogICIkc2NoZW1hIjogImh0dHBzOi8vanNvbi1zY2hlbWEub3JnL2RyYWZ0LzIwMjAtMTIvc2NoZW1hIiwKICAidHlwZSI6ICJvYmplY3QiLAogICJwcm9wZXJ0aWVzIjogewogICAgImRldmljZV9pZCI6IHsKICAgICAgInR5cGUiOiAic3RyaW5nIgogICAgfSwKICAgICJzcGVlZCI6IHsKICAgICAgInR5cGUiOiAiaW50ZWdlciIsCiAgICAgICJtaW5pbXVtIjogMSwKICAgICAgImRlZmF1bHQiOiAxMAogICAgfQogIH0sCiAgInJlcXVpcmVkIjogWyJkZXZpY2VfaWQiLCAic3BlZWQiXQp9
-    SchemaDigestResponse:
-      title: Schema Digest Response
-      type: object
-      required:
-        - digest
-      properties:
-        digest:
+          description: The description of the deployment.
+          example: Deployment for the motion control config instance
+        parent_id:
           type: string
-          example: sha256:a1b2c3d4e5f6
+          description: The ID of the deployment that was deployment before this one.
+          example: dpl_123
+        config_instance_ids:
+          type: array
+          description: The IDs of the config instances to deploy. A deployment must have exactly one config instance for each config schema in the deployment's release.
+          items:
+            type: string
+            example: cfg_inst_123
     DeviceStatus:
       type: string
       description: |
@@ -349,6 +429,7 @@ components:
           enum:
             - device
           example: device
+          x-stainless-const: true
         id:
           type: string
           example: dvc_123
@@ -421,47 +502,68 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: Timestamp of when the cooldown will end.
+    BaseRelease:
+      title: Base Release
+      type: object
+      required:
+        - object
+        - id
+        - version
+        - created_at
+        - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+            - release
+          example: release
+          x-stainless-const: true
+        id:
+          type: string
+          example: rls_123
+          description: ID of the release.
+        version:
+          type: string
+          example: v1.0.0
+          description: The version of the release.
+        created_at:
+          type: string
+          format: date-time
+          example: '2024-01-01T00:00:00Z'
+          description: Timestamp of when the release was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2024-01-01T00:00:00Z'
+          description: Timestamp of when the release was last updated.
+    Release:
+      allOf:
+        - $ref: '#/components/schemas/BaseRelease'
     Error:
       type: object
       required:
         - code
         - params
         - message
-        - debug_message
       properties:
         code:
           type: string
           example: invalid_request
         params:
+          type: object
+          additionalProperties: true
           example:
             param1: value1
             param2: value2
         message:
           type: string
           example: This is a message for a user
-        debug_message:
-          type: string
-          example: This is a message for a developer
-    ErrorResponse:
-      type: object
-      required:
-        - error
-      properties:
-        error:
-          $ref: '#/components/schemas/Error'
   parameters:
-    config_schema_digest:
-      name: config_schema_digest
-      in: query
+    deployment_id:
+      name: deployment_id
+      in: path
       required: true
-      description: The digest of the config schema.
+      description: The unique identifier of the deployment.
       schema:
         type: string
-        example: sha256:1234567890abcdef
-    config_type_slug:
-      name: config_type_slug
-      in: query
-      required: true
-      description: The slug of the config type.
-      schema:
-        type: string
+        example: dpl_123

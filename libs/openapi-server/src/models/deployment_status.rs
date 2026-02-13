@@ -1,7 +1,7 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
- * The API between the Miru Backend and the Agent; for internal use only
+ * The API between the Miru Agent and any external client living on the same device as the Miru Agent
  *
  * The version of the OpenAPI document: 0.0.0
  * 

@@ -2,67 +2,51 @@ openapi: 3.0.3
 info:
   title: Miru Backend-Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.1.0-next
+  version: 0.0.0
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-git-commit:
-    sha: 56161351c19645b95405266377a9c3607db58be9
-    url: https://github.com/mirurobotics/openapi/commit/56161351c19645b95405266377a9c3607db58be9
-    message: 'refactor: replace current_release with current_deployment on Device
-
-
-      Update Device schema to reference Deployment instead of Release.
-
-      This change updates the source schema and regenerates the OpenAPI
-
-      specifications for both CLI and frontend clients.'
-    author: Benjamin Smidt
-    branch: main
-    dirty: true
-  x-build:
-    built_at: '2026-02-12T22:27:37.215811+00:00'
 servers:
-- url: https://staging.api.mirurobotics.com/{audience}/{version}
-  description: Staging
-  variables:
-    audience:
-      default: agent
-      enum:
-      - agent
-    version:
-      default: v1
-      enum:
-      - v1
-- url: https://uat.api.mirurobotics.com/{audience}/{version}
-  description: UAT
-  variables:
-    audience:
-      default: agent
-      enum:
-      - agent
-    version:
-      default: v1
-      enum:
-      - v1
-- url: https://api.mirurobotics.com/{audience}/{version}
-  description: Production
-  variables:
-    audience:
-      default: agent
-      enum:
-      - agent
-    version:
-      default: v1
-      enum:
-      - v1
+  - url: https://staging.api.mirurobotics.com/{audience}/{version}
+    description: Staging
+    variables:
+      audience:
+        default: agent
+        enum:
+          - agent
+      version:
+        default: v1
+        enum:
+          - v1
+  - url: https://uat.api.mirurobotics.com/{audience}/{version}
+    description: UAT
+    variables:
+      audience:
+        default: agent
+        enum:
+          - agent
+      version:
+        default: v1
+        enum:
+          - v1
+  - url: https://api.mirurobotics.com/{audience}/{version}
+    description: Production
+    variables:
+      audience:
+        default: agent
+        enum:
+          - agent
+      version:
+        default: v1
+        enum:
+          - v1
 security:
-- ClerkAuth: []
+  - ClerkAuth: []
 paths:
   /version:
     get:
       tags:
-      - Version
+        - Version
       summary: Get
       description: Retrieve the version information of the application.
       operationId: getVersion
@@ -73,15 +57,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Version'
+  /deployments:
+    get:
+      tags:
+        - Deployments
+      summary: List deployments
+      operationId: listDeployments
+      parameters:
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/deployment_list_expansions'
+        - $ref: '#/components/parameters/deployment_search_activity_status'
+      responses:
+        '200':
+          description: Successfully listed the deployments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentList'
   /deployments/{deployment_id}:
     patch:
       tags:
-      - Deployments
+        - Deployments
       summary: Update a deployment
       operationId: updateDeployment
       parameters:
-      - $ref: '#/components/parameters/deployment_id'
-      - $ref: '#/components/parameters/deployment_expansions'
+        - $ref: '#/components/parameters/deployment_id'
+        - $ref: '#/components/parameters/deployment_expansions'
       requestBody:
         required: true
         content:
@@ -95,29 +97,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Deployment'
-    get:
-      tags:
-      - Deployments
-      summary: Get a deployment
-      operationId: getDeployment
-      parameters:
-      - $ref: '#/components/parameters/deployment_id'
-      - $ref: '#/components/parameters/deployment_expansions'
-      responses:
-        '200':
-          description: Successfully got the config instances.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Deployment'
   /devices/{device_id}:
     patch:
       tags:
-      - Devices
+        - Devices
       summary: Update a device by agent
       operationId: updateDeviceByAgent
       parameters:
-      - $ref: '#/components/parameters/device_id'
+        - $ref: '#/components/parameters/device_id'
       requestBody:
         required: true
         content:
@@ -134,11 +121,11 @@ paths:
   /devices/{device_id}/activate:
     post:
       tags:
-      - Devices
+        - Devices
       summary: Activate a device
       operationId: activateDevice
       parameters:
-      - $ref: '#/components/parameters/device_id'
+        - $ref: '#/components/parameters/device_id'
       requestBody:
         content:
           application/json:
@@ -154,11 +141,11 @@ paths:
   /devices/{device_id}/issue_token:
     post:
       tags:
-      - Devices
+        - Devices
       summary: Issue a device token
       operationId: issueDeviceToken
       parameters:
-      - $ref: '#/components/parameters/device_id'
+        - $ref: '#/components/parameters/device_id'
       requestBody:
         content:
           application/json:
@@ -174,14 +161,14 @@ paths:
   /cmd/devices/{device_id}/sync:
     get:
       tags:
-      - MQTT
+        - MQTT
       parameters:
-      - name: device_id
-        in: path
-        required: true
-        schema:
-          type: string
-          example: dvc_123
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: dvc_123
       summary: Trigger a device sync
       operationId: syncDevice
       responses:
@@ -194,14 +181,14 @@ paths:
   /cmd/devices/{device_id}/ping:
     get:
       tags:
-      - MQTT
+        - MQTT
       parameters:
-      - name: device_id
-        in: path
-        required: true
-        schema:
-          type: string
-          example: dvc_123
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: dvc_123
       summary: Ping a device
       operationId: devicePing
       responses:
@@ -214,14 +201,14 @@ paths:
   /resp/devices/{device_id}/pong:
     get:
       tags:
-      - MQTT
+        - MQTT
       parameters:
-      - name: device_id
-        in: path
-        required: true
-        schema:
-          type: string
-          example: dvc_123
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: dvc_123
       summary: Ping device response
       operationId: devicePong
       responses:
@@ -231,20 +218,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pong'
-  /example-error:
-    get:
-      x-hidden: true
-      tags:
-      - Errors
-      summary: Get an error
-      operationId: getError
-      responses:
-        '200':
-          description: Successfully retrieved the error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     ClerkAuth:
@@ -255,29 +228,36 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.1.0-next
+        - $API_VERSION$
       x-enum-varnames:
-      - API_VERSION
+        - API_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - dirty-56161351c19645b95405266377a9c3607db58be9
+        - $API_GIT_COMMIT$
       x-enum-varnames:
-      - API_GIT_COMMIT
+        - API_GIT_COMMIT
       x-stainless-const: true
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
     Version:
       title: Version
       type: object
       required:
-      - version
-      - git_commit
-      - api_version
-      - api_git_commit
-      - go_version
-      - build_date
-      - os
-      - arch
+        - version
+        - git_commit
+        - api_version
+        - api_git_commit
+        - go_version
+        - build_date
+        - os
+        - arch
       properties:
         version:
           type: string
@@ -312,132 +292,142 @@ components:
           type: string
           description: The architecture of the application.
           example: aarch64
-    DeploymentExpansion:
+    DeploymentListExpansion:
       type: string
       enum:
-      - release
-      - config_instances
+        - total_count
+        - release
+        - config_instances
       x-enum-varnames:
-      - DEPLOYMENT_EXPAND_RELEASE
-      - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
-    DeploymentStatus:
-      type: string
-      description: 'This status merges the ''activity_status'' and ''error_status''
-        fields, with error states taking precedence over activity states when errors
-        are present. For example, if the activity status is ''deployed'' but the error
-        status is ''failed'', the status is ''failed''. However, if the error status
-        is ''none'' and the activity status is ''deployed'', the status is ''deployed''.
-
-        '
-      enum:
-      - drifted
-      - staged
-      - queued
-      - deployed
-      - archived
-      - failed
-      - retrying
-      x-enum-varnames:
-      - DEPLOYMENT_STATUS_DRIFTED
-      - DEPLOYMENT_STATUS_STAGED
-      - DEPLOYMENT_STATUS_QUEUED
-      - DEPLOYMENT_STATUS_DEPLOYED
-      - DEPLOYMENT_STATUS_ARCHIVED
-      - DEPLOYMENT_STATUS_FAILED
-      - DEPLOYMENT_STATUS_RETRYING
+        - DEPLOYMENT_LIST_EXPAND_TOTAL_COUNT
+        - DEPLOYMENT_LIST_EXPAND_RELEASE
+        - DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES
     DeploymentActivityStatus:
       type: string
-      description: 'Last known activity state of the deployment.
-
-        - Drifted: device''s configurations have drifted since this deployment was
-        staged, and the deployment needs to be reviewed before it can be deployed
-
+      description: |
+        Last known activity state of the deployment.
+        - Drifted: device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed
         - Staged: is ready to be deployed
-
-        - Queued: the deployment''s config instances are waiting to be received by
-        the device; will be deployed as soon as the device is online
-
-        - Deployed: the deployment''s config instances are currently available for
-        consumption on the device
-
-        - Archived: the deployment is available for historical reference but cannot
-        be deployed and is not active on the device
-
-        '
+        - Queued: the deployment's config instances are waiting to be received by the device; will be deployed as soon as the device is online
+        - Deployed: the deployment's config instances are currently available for consumption on the device
+        - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
       enum:
-      - drifted
-      - staged
-      - queued
-      - deployed
-      - archived
+        - drifted
+        - staged
+        - queued
+        - deployed
+        - archived
       x-enum-varnames:
-      - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
-      - DEPLOYMENT_ACTIVITY_STATUS_STAGED
-      - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
-      - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
-      - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
-    DeploymentErrorStatus:
-      type: string
-      description: 'Last known error state of the deployment.
-
-        - None: no errors
-
-        - Retrying: an error has been encountered and the agent is retrying to reach
-        the target status
-
-        - Failed: a fatal error has been encountered; the deployment is archived and
-        (if deployed) removed from the device
-
-        '
-      enum:
-      - none
-      - failed
-      - retrying
-      x-enum-varnames:
-      - DEPLOYMENT_ERROR_STATUS_NONE
-      - DEPLOYMENT_ERROR_STATUS_FAILED
-      - DEPLOYMENT_ERROR_STATUS_RETRYING
-    DeploymentTargetStatus:
-      type: string
-      description: 'Desired state of the deployment.
-
-        - Staged: is ready to be deployed
-
-        - Deployed: all config instances part of the deployment are available for
-        consumption on the device
-
-        - Archived: the deployment is available for historical reference but cannot
-        be deployed and is not active on the device
-
-        '
-      enum:
-      - staged
-      - deployed
-      - archived
-      x-enum-varnames:
-      - DEPLOYMENT_TARGET_STATUS_STAGED
-      - DEPLOYMENT_TARGET_STATUS_DEPLOYED
-      - DEPLOYMENT_TARGET_STATUS_ARCHIVED
-    BaseDeployment:
-      title: Base Deployment
+        - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
+        - DEPLOYMENT_ACTIVITY_STATUS_STAGED
+        - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
+        - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+        - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
+    PaginatedList:
+      title: Paginated List
       type: object
       required:
-      - object
-      - id
-      - description
-      - status
-      - activity_status
-      - error_status
-      - target_status
-      - device_id
-      - release_id
-      - created_at
-      - updated_at
+        - object
+        - total_count
+        - limit
+        - offset
+        - has_more
       properties:
         object:
           type: string
           enum:
-          - deployment
+            - list
+          example: list
+          x-stainless-const: true
+        total_count:
+          type: integer
+          format: int64
+          description: The total number of items in the list. By default the total count is not returned. The total count must be expanded (using expand=total_count) to get the total number of items in the list.
+        limit:
+          type: integer
+          description: The maximum number of items to return. A limit of 15 with an offset of 0 returns items 1-15.
+          default: 10
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          description: The offset of the items to return. An offset of 10 with a limit of 10 returns items 11-20.
+          default: 0
+          minimum: 0
+        has_more:
+          type: boolean
+          description: True if there are more items in the list to return. False if there are no more items to return.
+          example: false
+    DeploymentStatus:
+      type: string
+      description: |
+        This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'.
+      enum:
+        - drifted
+        - staged
+        - queued
+        - deployed
+        - archived
+        - failed
+        - retrying
+      x-enum-varnames:
+        - DEPLOYMENT_STATUS_DRIFTED
+        - DEPLOYMENT_STATUS_STAGED
+        - DEPLOYMENT_STATUS_QUEUED
+        - DEPLOYMENT_STATUS_DEPLOYED
+        - DEPLOYMENT_STATUS_ARCHIVED
+        - DEPLOYMENT_STATUS_FAILED
+        - DEPLOYMENT_STATUS_RETRYING
+    DeploymentErrorStatus:
+      type: string
+      description: |
+        Last known error state of the deployment.
+        - None: no errors
+        - Retrying: an error has been encountered and the agent is retrying to reach the target status
+        - Failed: a fatal error has been encountered; the deployment is archived and (if deployed) removed from the device
+      enum:
+        - none
+        - failed
+        - retrying
+      x-enum-varnames:
+        - DEPLOYMENT_ERROR_STATUS_NONE
+        - DEPLOYMENT_ERROR_STATUS_FAILED
+        - DEPLOYMENT_ERROR_STATUS_RETRYING
+    DeploymentTargetStatus:
+      type: string
+      description: |
+        Desired state of the deployment.
+        - Staged: is ready to be deployed
+        - Deployed: all config instances part of the deployment are available for consumption on the device
+        - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
+      enum:
+        - staged
+        - deployed
+        - archived
+      x-enum-varnames:
+        - DEPLOYMENT_TARGET_STATUS_STAGED
+        - DEPLOYMENT_TARGET_STATUS_DEPLOYED
+        - DEPLOYMENT_TARGET_STATUS_ARCHIVED
+    BaseDeployment:
+      title: Base Deployment
+      type: object
+      required:
+        - object
+        - id
+        - description
+        - status
+        - activity_status
+        - error_status
+        - target_status
+        - device_id
+        - release_id
+        - created_at
+        - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+            - deployment
           example: deployment
           x-stainless-const: true
         id:
@@ -478,16 +468,16 @@ components:
       title: Base Release
       type: object
       required:
-      - object
-      - id
-      - version
-      - created_at
-      - updated_at
+        - object
+        - id
+        - version
+        - created_at
+        - updated_at
       properties:
         object:
           type: string
           enum:
-          - release
+            - release
           example: release
           x-stainless-const: true
         id:
@@ -511,23 +501,23 @@ components:
     Release:
       title: Release
       allOf:
-      - $ref: '#/components/schemas/BaseRelease'
+        - $ref: '#/components/schemas/BaseRelease'
     BaseConfigInstance:
       title: Base Config Instance
       type: object
       required:
-      - object
-      - id
-      - config_type_name
-      - filepath
-      - created_at
-      - config_schema_id
-      - config_type_id
+        - object
+        - id
+        - config_type_name
+        - filepath
+        - created_at
+        - config_schema_id
+        - config_type_id
       properties:
         object:
           type: string
           enum:
-          - config_instance
+            - config_instance
           example: config_instance
           x-stainless-const: true
         id:
@@ -541,8 +531,7 @@ components:
         filepath:
           type: string
           example: /v1/motion-control.json
-          description: The file path to deploy the config instance relative to `/srv/miru/config_instances`.
-            `v1/motion-control.json` would deploy to `/srv/miru/config_instances/v1/motion-control.json`.
+          description: The file path to deploy the config instance relative to `/srv/miru/config_instances`. `v1/motion-control.json` would deploy to `/srv/miru/config_instances/v1/motion-control.json`.
         created_at:
           type: string
           format: date-time
@@ -551,28 +540,26 @@ components:
         config_schema_id:
           type: string
           example: cfg_sch_123
-          description: ID of the config schema which the config instance must adhere
-            to.
+          description: ID of the config schema which the config instance must adhere to.
         config_type_id:
           type: string
           example: cfg_type_123
-          description: ID of the config type which the config instance (and its schema)
-            is a part of.
+          description: ID of the config type which the config instance (and its schema) is a part of.
     BaseConfigType:
       title: Config Type
       type: object
       required:
-      - object
-      - id
-      - name
-      - slug
-      - created_at
-      - updated_at
+        - object
+        - id
+        - name
+        - slug
+        - created_at
+        - updated_at
       properties:
         object:
           type: string
           enum:
-          - config_type
+            - config_type
           example: config_type
           x-stainless-const: true
         id:
@@ -600,59 +587,76 @@ components:
     ConfigType:
       title: Config Type
       allOf:
-      - $ref: '#/components/schemas/BaseConfigType'
+        - $ref: '#/components/schemas/BaseConfigType'
     ConfigInstance:
       title: Config Instance
       allOf:
-      - $ref: '#/components/schemas/BaseConfigInstance'
-      - type: object
-        properties:
-          config_type:
-            allOf:
-            - $ref: '#/components/schemas/ConfigType'
-            description: Expand the config type using 'expand=config_type' in the
-              query string.
-            example: null
-          content:
-            type: object
-            description: The configuration values associated with the config instance.
-              Expand the content using 'expand=content' in the query string.
-            example:
-              enable_autonomy: true
-              enable_remote_control: false
-              max_payload_kg: 8.5
-              preferred_speed_mode: normal
-              emergency_stop_sensitivity: 0.9
-              telemetry:
-                upload_interval_sec: 45
-                heartbeat_interval_sec: 15
+        - $ref: '#/components/schemas/BaseConfigInstance'
+        - type: object
+          properties:
+            config_type:
+              allOf:
+                - $ref: '#/components/schemas/ConfigType'
+              description: Expand the config type using 'expand=config_type' in the query string.
+              example: null
+            content:
+              type: object
+              description: The configuration values associated with the config instance. Expand the content using 'expand=content' in the query string.
+              example:
+                enable_autonomy: true
+                enable_remote_control: false
+                max_payload_kg: 8.5
+                preferred_speed_mode: normal
+                emergency_stop_sensitivity: 0.9
+                telemetry:
+                  upload_interval_sec: 45
+                  heartbeat_interval_sec: 15
     Deployment:
       title: Deployment
       allOf:
-      - $ref: '#/components/schemas/BaseDeployment'
-      - type: object
-        properties:
-          release:
-            allOf:
-            - $ref: '#/components/schemas/Release'
-            example: null
-            description: Expand the release using 'expand=release' in the query string.
-          config_instances:
-            type: array
-            items:
-              $ref: '#/components/schemas/ConfigInstance'
-            description: Expand the config instances using 'expand=config_instances'
-              in the query string.
+        - $ref: '#/components/schemas/BaseDeployment'
+        - type: object
+          properties:
+            release:
+              allOf:
+                - $ref: '#/components/schemas/Release'
+              example: null
+              description: Expand the release using 'expand=release' in the query string.
+            config_instances:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConfigInstance'
+              description: Expand the config instances using 'expand=config_instances' in the query string.
+    DeploymentList:
+      title: Deployment List
+      allOf:
+        - $ref: '#/components/schemas/PaginatedList'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Deployment'
+    DeploymentExpansion:
+      type: string
+      enum:
+        - release
+        - config_instances
+      x-enum-varnames:
+        - DEPLOYMENT_EXPAND_RELEASE
+        - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
     UpdateDeploymentRequest:
       title: Update Deployment Request
       type: object
       properties:
         activity_status:
           allOf:
-          - $ref: '#/components/schemas/DeploymentActivityStatus'
+            - $ref: '#/components/schemas/DeploymentActivityStatus'
         error_status:
           allOf:
-          - $ref: '#/components/schemas/DeploymentErrorStatus'
+            - $ref: '#/components/schemas/DeploymentErrorStatus'
     UpdateDeviceFromAgentRequest:
       title: Update Device From Agent Request
       type: object
@@ -663,47 +667,39 @@ components:
           example: v1.0.0
     DeviceStatus:
       type: string
-      description: 'The status of the device.
-
+      description: |
+        The status of the device.
         - Inactive: The miru agent has not yet been installed / authenticated
-
-        - Activating: The miru agent is currently being installed / authenticated
-        (should only last for a few seconds)
-
-        - Online: The miru agent has successfully pinged the server within the last
-        60 seconds.
-
-        - Offline: The miru agent has not successfully pinged the server within the
-        last 60 seconds (e.g. network issues, device is powered off, etc.)
-
-        '
+        - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds)
+        - Online: The miru agent has successfully pinged the server within the last 60 seconds.
+        - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.)
       enum:
-      - inactive
-      - activating
-      - online
-      - offline
+        - inactive
+        - activating
+        - online
+        - offline
       x-enum-varnames:
-      - DEVICE_STATUS_INACTIVE
-      - DEVICE_STATUS_ACTIVATING
-      - DEVICE_STATUS_ONLINE
-      - DEVICE_STATUS_OFFLINE
+        - DEVICE_STATUS_INACTIVE
+        - DEVICE_STATUS_ACTIVATING
+        - DEVICE_STATUS_ONLINE
+        - DEVICE_STATUS_OFFLINE
     BaseDevice:
       title: Base Device
       type: object
       required:
-      - object
-      - id
-      - name
-      - status
-      - last_connected_at
-      - last_disconnected_at
-      - created_at
-      - updated_at
+        - object
+        - id
+        - name
+        - status
+        - last_connected_at
+        - last_disconnected_at
+        - created_at
+        - updated_at
       properties:
         object:
           type: string
           enum:
-          - device
+            - device
           example: device
           x-stainless-const: true
         id:
@@ -721,15 +717,13 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           nullable: true
-          description: Timestamp of when the device was last made an initial connection
-            (this is not the same as the last time the device was seen).
+          description: Timestamp of when the device was last made an initial connection (this is not the same as the last time the device was seen).
         last_disconnected_at:
           type: string
           format: date-time
           example: '2021-01-01T00:00:00Z'
           nullable: true
-          description: Timestamp of when the device was last disconnected (this is
-            not the same as the last time the device was seen).
+          description: Timestamp of when the device was last disconnected (this is not the same as the last time the device was seen).
         created_at:
           type: string
           format: date-time
@@ -743,20 +737,26 @@ components:
     Device:
       title: Device
       allOf:
-      - $ref: '#/components/schemas/BaseDevice'
+        - $ref: '#/components/schemas/BaseDevice'
+        - type: object
+          required:
+            - session_id
+          properties:
+            session_id:
+              type: string
+              example: dvc_sess_123
+              description: Session ID of the device
     ActivateDeviceRequest:
       title: Activate Device Request
       type: object
       required:
-      - public_key_pem
+        - public_key_pem
       properties:
         public_key_pem:
           type: string
           description: The public key in PEM format
-          example: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END
-            PUBLIC KEY-----
-
-            '
+          example: |
+            -----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END PUBLIC KEY-----
         name:
           type: string
           example: Robot 1
@@ -768,9 +768,9 @@ components:
       title: Issue Device Claims
       type: object
       required:
-      - device_id
-      - nonce
-      - expiration
+        - device_id
+        - nonce
+        - expiration
       properties:
         device_id:
           type: string
@@ -788,8 +788,8 @@ components:
       title: Issue Device Token Request
       type: object
       required:
-      - claims
-      - signature
+        - claims
+        - signature
       properties:
         claims:
           $ref: '#/components/schemas/IssueDeviceClaims'
@@ -801,8 +801,8 @@ components:
       title: Token Response
       type: object
       required:
-      - token
-      - expires_at
+        - token
+        - expires_at
       properties:
         token:
           type: string
@@ -816,7 +816,7 @@ components:
     SyncDevice:
       type: object
       required:
-      - is_synced
+        - is_synced
       properties:
         is_synced:
           type: boolean
@@ -824,8 +824,8 @@ components:
     Ping:
       type: object
       required:
-      - message_id
-      - timestamp
+        - message_id
+        - timestamp
       properties:
         message_id:
           type: string
@@ -837,9 +837,9 @@ components:
     Pong:
       type: object
       required:
-      - message_id
-      - timestamp
-      - version
+        - message_id
+        - timestamp
+        - version
       properties:
         message_id:
           type: string
@@ -851,10 +851,9 @@ components:
     Error:
       type: object
       required:
-      - code
-      - params
-      - message
-      - debug_message
+        - code
+        - params
+        - message
       properties:
         code:
           type: string
@@ -868,17 +867,46 @@ components:
         message:
           type: string
           example: This is a message for a user
-        debug_message:
-          type: string
-          example: This is a message for a developer
-    ErrorResponse:
-      type: object
-      required:
-      - error
-      properties:
-        error:
-          $ref: '#/components/schemas/Error'
   parameters:
+    offset:
+      name: offset
+      in: query
+      required: false
+      description: The offset of the items to return. An offset of 10 with a limit of 10 returns items 11-20.
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: The maximum number of items to return. A limit of 15 with an offset of 0 returns items 1-15.
+      schema:
+        type: integer
+        default: 10
+        minimum: 1
+        maximum: 100
+    deployment_list_expansions:
+      name: expand
+      in: query
+      required: false
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/DeploymentListExpansion'
+        description: The fields to expand in the deployments list.
+    deployment_search_activity_status:
+      name: activity_status
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The deployment activity statuses to filter by.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/DeploymentActivityStatus'
     deployment_id:
       name: deployment_id
       in: path
