@@ -349,6 +349,11 @@ impl Dir {
         // ensure the parent directory of the new directory exists and create it if not
         new_dir.parent()?.create_if_absent().await?;
 
+        // remove the destination if it exists (rename fails on Linux for non-empty dirs)
+        if overwrite && new_dir.exists() {
+            new_dir.delete().await?;
+        }
+
         // move this directory to the new directory
         tokio::fs::rename(self.to_string(), new_dir.to_string())
             .await
