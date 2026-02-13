@@ -7,17 +7,17 @@ use crate::crud::errors::CrudErr;
 use crate::deploy::fsm;
 use crate::errors::{Code, HTTPCode, MiruError, Trace};
 use crate::filesys::errors::FileSysErr;
-use crate::models::config_instance::ConfigInstance;
+use crate::models::deployment::Deployment;
 use crate::storage::errors::StorageErr;
 
 #[derive(Debug)]
-pub struct ConfigInstanceNotDeployableErr {
-    pub cfg_inst: ConfigInstance,
+pub struct DeploymentNotDeployableErr {
+    pub deployment: Deployment,
     pub next_action: fsm::NextAction,
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConfigInstanceNotDeployableErr {
+impl MiruError for DeploymentNotDeployableErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -35,24 +35,24 @@ impl MiruError for ConfigInstanceNotDeployableErr {
     }
 }
 
-impl fmt::Display for ConfigInstanceNotDeployableErr {
+impl fmt::Display for DeploymentNotDeployableErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "cannot deploy config instance '{:?}' since it's next action is: {:?}",
-            self.cfg_inst.id, self.next_action
+            "cannot deploy deployment '{:?}' since it's next action is: {:?}",
+            self.deployment.id, self.next_action
         )
     }
 }
 
 #[derive(Debug)]
-pub struct ConfigInstanceNotRemoveableErr {
-    pub cfg_inst: ConfigInstance,
+pub struct DeploymentNotRemoveableErr {
+    pub deployment: Deployment,
     pub next_action: fsm::NextAction,
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConfigInstanceNotRemoveableErr {
+impl MiruError for DeploymentNotRemoveableErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -70,24 +70,24 @@ impl MiruError for ConfigInstanceNotRemoveableErr {
     }
 }
 
-impl fmt::Display for ConfigInstanceNotRemoveableErr {
+impl fmt::Display for DeploymentNotRemoveableErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "cannot remove config instance '{:?}' since it's next action is: {:?}",
-            self.cfg_inst.id, self.next_action
+            "cannot remove deployment '{:?}' since it's next action is: {:?}",
+            self.deployment.id, self.next_action
         )
     }
 }
 
 #[derive(Debug)]
-pub struct ConfigInstanceNotArchiveableErr {
-    pub cfg_inst: ConfigInstance,
+pub struct DeploymentNotArchiveableErr {
+    pub deployment: Deployment,
     pub next_action: fsm::NextAction,
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConfigInstanceNotArchiveableErr {
+impl MiruError for DeploymentNotArchiveableErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -105,19 +105,19 @@ impl MiruError for ConfigInstanceNotArchiveableErr {
     }
 }
 
-impl fmt::Display for ConfigInstanceNotArchiveableErr {
+impl fmt::Display for DeploymentNotArchiveableErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "cannot archive config instance '{:?}' since it's next action is: {:?}",
-            self.cfg_inst.id, self.next_action
+            "cannot archive deployment '{:?}' since it's next action is: {:?}",
+            self.deployment.id, self.next_action
         )
     }
 }
 
 #[derive(Debug)]
 pub struct ConflictingDeploymentsErr {
-    pub cfg_insts: Vec<ConfigInstance>,
+    pub deployments: Vec<Deployment>,
     pub trace: Box<Trace>,
 }
 
@@ -143,8 +143,8 @@ impl fmt::Display for ConflictingDeploymentsErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "the following config instances both desire to be deployed: {:?}",
-            self.cfg_insts
+            "the following deployments both desire to be deployed: {:?}",
+            self.deployments.iter().map(|d| &d.id).collect::<Vec<_>>()
         )
     }
 }
@@ -272,9 +272,9 @@ impl fmt::Display for DeployStorageErr {
 #[derive(Debug)]
 pub enum DeployErr {
     ConflictingDeploymentsErr(Box<ConflictingDeploymentsErr>),
-    ConfigInstanceNotDeployableErr(Box<ConfigInstanceNotDeployableErr>),
-    ConfigInstanceNotRemoveableErr(Box<ConfigInstanceNotRemoveableErr>),
-    ConfigInstanceNotArchiveableErr(Box<ConfigInstanceNotArchiveableErr>),
+    DeploymentNotDeployableErr(Box<DeploymentNotDeployableErr>),
+    DeploymentNotRemoveableErr(Box<DeploymentNotRemoveableErr>),
+    DeploymentNotArchiveableErr(Box<DeploymentNotArchiveableErr>),
 
     CacheErr(Box<DeployCacheErr>),
     CrudErr(Box<DeployCrudErr>),
@@ -286,9 +286,9 @@ macro_rules! forward_error_method {
     ($self:ident, $method:ident $(, $arg:expr)?) => {
         match $self {
             DeployErr::ConflictingDeploymentsErr(e) => e.$method($($arg)?),
-            DeployErr::ConfigInstanceNotDeployableErr(e) => e.$method($($arg)?),
-            DeployErr::ConfigInstanceNotRemoveableErr(e) => e.$method($($arg)?),
-            DeployErr::ConfigInstanceNotArchiveableErr(e) => e.$method($($arg)?),
+            DeployErr::DeploymentNotDeployableErr(e) => e.$method($($arg)?),
+            DeployErr::DeploymentNotRemoveableErr(e) => e.$method($($arg)?),
+            DeployErr::DeploymentNotArchiveableErr(e) => e.$method($($arg)?),
 
             DeployErr::CacheErr(e) => e.$method($($arg)?),
             DeployErr::CrudErr(e) => e.$method($($arg)?),

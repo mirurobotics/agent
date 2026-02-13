@@ -1,6 +1,8 @@
 // internal crates
 use crate::errors::MiruError;
-use crate::models::config_instance::{ActivityStatus, ConfigInstance, ErrorStatus, TargetStatus};
+use crate::models::deployment::{
+    Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
+};
 use crate::utils::calc_exp_backoff;
 
 // external crates
@@ -16,42 +18,41 @@ pub enum NextAction {
     Wait(TimeDelta),
 }
 
-pub fn next_action(cfg_inst: &ConfigInstance, use_cooldown: bool) -> NextAction {
+pub fn next_action(deployment: &Deployment, use_cooldown: bool) -> NextAction {
     // do nothing if the status is failed
-    if cfg_inst.error_status == ErrorStatus::Failed {
+    if deployment.error_status == DeploymentErrorStatus::Failed {
         return NextAction::None;
     }
 
     // check for cooldown
-    if use_cooldown && cfg_inst.is_in_cooldown() {
-        return NextAction::Wait(cfg_inst.cooldown_ends_at.signed_duration_since(Utc::now()));
+    if use_cooldown && deployment.is_in_cooldown() {
+        if let Some(cooldown_ends_at) = deployment.cooldown_ends_at {
+            return NextAction::Wait(cooldown_ends_at.signed_duration_since(Utc::now()));
+        }
     }
 
     // determine the next action
-    match cfg_inst.target_status {
-        TargetStatus::Created | TargetStatus::Validated => match cfg_inst.activity_status {
-            ActivityStatus::Created => NextAction::None,
-            ActivityStatus::Validating => NextAction::None,
-            ActivityStatus::Validated => NextAction::None,
-            ActivityStatus::Queued => NextAction::Archive,
-            ActivityStatus::Deployed => NextAction::Remove,
-            ActivityStatus::Removed => NextAction::None,
+    match deployment.target_status {
+        DeploymentTargetStatus::Staged => match deployment.activity_status {
+            DeploymentActivityStatus::Drifted => NextAction::None,
+            DeploymentActivityStatus::Staged => NextAction::None,
+            DeploymentActivityStatus::Queued => NextAction::Archive,
+            DeploymentActivityStatus::Deployed => NextAction::Remove,
+            DeploymentActivityStatus::Archived => NextAction::None,
         },
-        TargetStatus::Deployed => match cfg_inst.activity_status {
-            ActivityStatus::Created => NextAction::None,
-            ActivityStatus::Validating => NextAction::None,
-            ActivityStatus::Validated => NextAction::None,
-            ActivityStatus::Queued => NextAction::Deploy,
-            ActivityStatus::Deployed => NextAction::None,
-            ActivityStatus::Removed => NextAction::Deploy,
+        DeploymentTargetStatus::Deployed => match deployment.activity_status {
+            DeploymentActivityStatus::Drifted => NextAction::None,
+            DeploymentActivityStatus::Staged => NextAction::None,
+            DeploymentActivityStatus::Queued => NextAction::Deploy,
+            DeploymentActivityStatus::Deployed => NextAction::None,
+            DeploymentActivityStatus::Archived => NextAction::Deploy,
         },
-        TargetStatus::Removed => match cfg_inst.activity_status {
-            ActivityStatus::Created => NextAction::Archive,
-            ActivityStatus::Validating => NextAction::Archive,
-            ActivityStatus::Validated => NextAction::Archive,
-            ActivityStatus::Queued => NextAction::Archive,
-            ActivityStatus::Deployed => NextAction::Remove,
-            ActivityStatus::Removed => NextAction::None,
+        DeploymentTargetStatus::Archived => match deployment.activity_status {
+            DeploymentActivityStatus::Drifted => NextAction::Archive,
+            DeploymentActivityStatus::Staged => NextAction::Archive,
+            DeploymentActivityStatus::Queued => NextAction::Archive,
+            DeploymentActivityStatus::Deployed => NextAction::Remove,
+            DeploymentActivityStatus::Archived => NextAction::None,
         },
     }
 }
@@ -86,58 +87,58 @@ impl Default for Settings {
 // ================================== TRANSITIONS ================================== //
 #[derive(Debug)]
 struct TransitionOptions {
-    activity_status: Option<ActivityStatus>,
-    error_status: Option<ErrorStatus>,
+    activity_status: Option<DeploymentActivityStatus>,
+    error_status: Option<DeploymentErrorStatus>,
     attempts: Option<u32>,
     cooldown: Option<TimeDelta>,
 }
 
-fn transition(mut cfg_inst: ConfigInstance, options: TransitionOptions) -> ConfigInstance {
+fn transition(mut deployment: Deployment, options: TransitionOptions) -> Deployment {
     if let Some(activity_status) = options.activity_status {
-        cfg_inst.activity_status = activity_status;
+        deployment.activity_status = activity_status;
     }
 
     if let Some(error_status) = options.error_status {
-        cfg_inst.error_status = error_status;
+        deployment.error_status = error_status;
     }
 
     if let Some(attempts) = options.attempts {
-        cfg_inst.attempts = attempts;
+        deployment.attempts = attempts;
     }
 
     if let Some(cooldown) = options.cooldown {
-        cfg_inst.set_cooldown(cooldown);
+        deployment.set_cooldown(cooldown);
     }
 
-    cfg_inst
+    deployment
 }
 
 // ---------------------------- successful transitions ----------------------------= //
-pub fn deploy(cfg_inst: ConfigInstance) -> ConfigInstance {
-    let new_activity_status = ActivityStatus::Deployed;
-    let options = get_success_options(&cfg_inst, new_activity_status);
-    transition(cfg_inst, options)
+pub fn deploy(deployment: Deployment) -> Deployment {
+    let new_activity_status = DeploymentActivityStatus::Deployed;
+    let options = get_success_options(&deployment, new_activity_status);
+    transition(deployment, options)
 }
 
-pub fn remove(cfg_inst: ConfigInstance) -> ConfigInstance {
-    let new_activity_status = ActivityStatus::Removed;
-    let options = get_success_options(&cfg_inst, new_activity_status);
-    transition(cfg_inst, options)
+pub fn remove(deployment: Deployment) -> Deployment {
+    let new_activity_status = DeploymentActivityStatus::Archived;
+    let options = get_success_options(&deployment, new_activity_status);
+    transition(deployment, options)
 }
 
 fn get_success_options(
-    cfg_inst: &ConfigInstance,
-    new_activity_status: ActivityStatus,
+    deployment: &Deployment,
+    new_activity_status: DeploymentActivityStatus,
 ) -> TransitionOptions {
     TransitionOptions {
         activity_status: Some(new_activity_status),
-        error_status: if has_recovered(cfg_inst, new_activity_status) {
-            Some(ErrorStatus::None)
+        error_status: if has_recovered(deployment, new_activity_status) {
+            Some(DeploymentErrorStatus::None)
         } else {
             None
         },
         // reset attempts and cooldown
-        attempts: if has_recovered(cfg_inst, new_activity_status) {
+        attempts: if has_recovered(deployment, new_activity_status) {
             Some(0)
         } else {
             None
@@ -146,60 +147,59 @@ fn get_success_options(
     }
 }
 
-fn has_recovered(cfg_inst: &ConfigInstance, new_activity_status: ActivityStatus) -> bool {
+fn has_recovered(
+    deployment: &Deployment,
+    new_activity_status: DeploymentActivityStatus,
+) -> bool {
     // the error status only needs to be updated if it is currently retrying. If is
     // failed then it can never exit failed and if it is None then it is already correct
-    if cfg_inst.error_status != ErrorStatus::Retrying {
+    if deployment.error_status != DeploymentErrorStatus::Retrying {
         return false;
     }
 
-    // check if the new activity status matches the config instance's target status
-    match cfg_inst.target_status {
-        TargetStatus::Created | TargetStatus::Validated => {
-            // the created and validated target statuses are a bit interesting in that
-            // we're satisfied with the config instance being in other states as long as
+    // check if the new activity status matches the deployment's target status
+    match deployment.target_status {
+        DeploymentTargetStatus::Staged => {
+            // for staged, we're satisfied with the deployment being in other states as long as
             // it is not deployed.
             match new_activity_status {
-                ActivityStatus::Created => true,
-                ActivityStatus::Validating => true,
-                ActivityStatus::Validated => true,
-                ActivityStatus::Queued => true,
-                ActivityStatus::Deployed => false,
-                ActivityStatus::Removed => true,
+                DeploymentActivityStatus::Drifted => true,
+                DeploymentActivityStatus::Staged => true,
+                DeploymentActivityStatus::Queued => true,
+                DeploymentActivityStatus::Deployed => false,
+                DeploymentActivityStatus::Archived => true,
             }
         }
-        TargetStatus::Deployed => match new_activity_status {
-            ActivityStatus::Created => false,
-            ActivityStatus::Validating => false,
-            ActivityStatus::Validated => false,
-            ActivityStatus::Queued => false,
-            ActivityStatus::Deployed => true,
-            ActivityStatus::Removed => false,
+        DeploymentTargetStatus::Deployed => match new_activity_status {
+            DeploymentActivityStatus::Drifted => false,
+            DeploymentActivityStatus::Staged => false,
+            DeploymentActivityStatus::Queued => false,
+            DeploymentActivityStatus::Deployed => true,
+            DeploymentActivityStatus::Archived => false,
         },
-        TargetStatus::Removed => match new_activity_status {
-            ActivityStatus::Created => false,
-            ActivityStatus::Validating => false,
-            ActivityStatus::Validated => false,
-            ActivityStatus::Queued => false,
-            ActivityStatus::Deployed => false,
-            ActivityStatus::Removed => true,
+        DeploymentTargetStatus::Archived => match new_activity_status {
+            DeploymentActivityStatus::Drifted => false,
+            DeploymentActivityStatus::Staged => false,
+            DeploymentActivityStatus::Queued => false,
+            DeploymentActivityStatus::Deployed => false,
+            DeploymentActivityStatus::Archived => true,
         },
     }
 }
 
 // ----------------------------- error transitions --------------------------------- //
 pub fn error(
-    cfg_inst: ConfigInstance,
+    deployment: Deployment,
     settings: &Settings,
     e: &impl MiruError,
     increment_attempts: bool,
-) -> ConfigInstance {
+) -> Deployment {
     let options = get_error_options(
-        &cfg_inst,
+        &deployment,
         increment_attempts && should_increment_attempts(e),
         settings,
     );
-    transition(cfg_inst, options)
+    transition(deployment, options)
 }
 
 fn should_increment_attempts(e: &impl MiruError) -> bool {
@@ -207,21 +207,23 @@ fn should_increment_attempts(e: &impl MiruError) -> bool {
 }
 
 fn get_error_options(
-    cfg_inst: &ConfigInstance,
+    deployment: &Deployment,
     increment_attempts: bool,
     settings: &Settings,
 ) -> TransitionOptions {
     // determine the number of attempts
     let attempts = if increment_attempts {
-        cfg_inst.attempts.saturating_add(1)
+        deployment.attempts().saturating_add(1)
     } else {
-        cfg_inst.attempts
+        deployment.attempts()
     };
 
     // determine the new status
-    let mut new_error_status = Some(ErrorStatus::Retrying);
-    if attempts >= settings.max_attempts || cfg_inst.error_status == ErrorStatus::Failed {
-        new_error_status = Some(ErrorStatus::Failed);
+    let mut new_error_status = Some(DeploymentErrorStatus::Retrying);
+    if attempts >= settings.max_attempts
+        || deployment.error_status == DeploymentErrorStatus::Failed
+    {
+        new_error_status = Some(DeploymentErrorStatus::Failed);
     }
 
     // determine the cooldown

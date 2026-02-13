@@ -1,7 +1,7 @@
 // internal crates
 use crate::deploy::observer::HistoryObserver;
 use miru_agent::cache::file::FileCache;
-use miru_agent::deploy::{filesys::deploy_with_rollback, fsm::Settings, observer::Observer};
+use miru_agent::deploy::{filesys::deploy, fsm::Settings, observer::Observer};
 use miru_agent::filesys::dir::Dir;
 use miru_agent::filesys::path::PathExt;
 use miru_agent::models::config_instance::{
@@ -13,7 +13,7 @@ use miru_agent::utils::calc_exp_backoff;
 use chrono::{TimeDelta, Utc};
 use serde_json::json;
 
-pub mod deploy_with_rollback {
+pub mod deploy {
     use super::*;
 
     #[tokio::test]
@@ -40,7 +40,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             vec![],
             vec![cfg_inst.clone()],
             &cache,
@@ -118,7 +118,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             vec![],
             vec![cfg_inst.clone()],
             &cache,
@@ -183,7 +183,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             vec![],
             vec![cfg_inst.clone()],
             &cache,
@@ -244,7 +244,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             vec![cfg_inst.clone()],
             vec![],
             &cache,
@@ -309,7 +309,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             vec![cfg_inst.clone()],
             vec![],
             &cache,
@@ -382,7 +382,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             vec![to_remove.clone()],
             vec![to_deploy.clone()],
             &cache,
@@ -484,7 +484,7 @@ pub mod deploy_with_rollback {
         let mut observers: Vec<&mut dyn Observer> = Vec::new();
         let mut observer = HistoryObserver::new();
         observers.push(&mut observer);
-        let (deploy_results, result) = deploy_with_rollback(
+        let (deploy_results, result) = deploy(
             to_remove_instances.clone(),
             to_deploy_instances.clone(),
             &cache,

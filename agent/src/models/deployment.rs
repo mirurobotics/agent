@@ -2,7 +2,7 @@
 use crate::deserialize_error;
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::warn;
@@ -387,9 +387,11 @@ pub struct Deployment {
     pub release_id: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    // Optional expanded fields
-    pub release: Option<super::release::Release>,
-    pub config_instances: Option<Vec<super::config_instance::ConfigInstance>>,
+    // Agent-side fields for retry logic (not from backend)
+    pub attempts: u32,
+    pub cooldown_ends_at: Option<DateTime<Utc>>,
+    // Config instance IDs (not full objects)
+    pub config_instance_ids: Vec<super::config_instance::ConfigInstanceID>,
 }
 
 impl Default for Deployment {
@@ -405,8 +407,9 @@ impl Default for Deployment {
             release_id: format!("unknown-{}", Uuid::new_v4()),
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
-            release: None,
-            config_instances: None,
+            attempts: 0,
+            cooldown_ends_at: None,
+            config_instance_ids: Vec::new(),
         }
     }
 }
@@ -430,20 +433,32 @@ impl Deployment {
                 .updated_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or_else(|_| DateTime::<Utc>::UNIX_EPOCH),
-            release: backend_deployment
-                .release
-                .map(|r| super::release::Release::from_backend(*r)),
-            config_instances: backend_deployment.config_instances.map(|instances| {
-                instances
-                    .into_iter()
-                    .map(super::config_instance::ConfigInstance::from_backend)
-                    .collect()
-            }),
+            attempts: 0,
+            cooldown_ends_at: None,
+            config_instance_ids: backend_deployment
+                .config_instances
+                .map(|instances| instances.into_iter().map(|inst| inst.id).collect())
+                .unwrap_or_default(),
         }
     }
 
     pub fn status(&self) -> DeploymentStatus {
         DeploymentStatus::from_activity_and_error(&self.activity_status, &self.error_status)
+    }
+
+    pub fn is_in_cooldown(&self) -> bool {
+        match self.cooldown_ends_at {
+            Some(cooldown_ends_at) => Utc::now() < cooldown_ends_at,
+            None => false,
+        }
+    }
+
+    pub fn set_cooldown(&mut self, cooldown: TimeDelta) {
+        self.cooldown_ends_at = Some(Utc::now() + cooldown);
+    }
+
+    pub fn attempts(&self) -> u32 {
+        self.attempts
     }
 }
 
@@ -464,8 +479,7 @@ impl<'de> Deserialize<'de> for Deployment {
             release_id: String,
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
-            release: Option<super::release::Release>,
-            config_instances: Option<Vec<super::config_instance::ConfigInstance>>,
+            config_instance_ids: Vec<super::config_instance::ConfigInstanceID>,
         }
 
         let result = DeserializeDeployment::deserialize(deserializer)?;
@@ -486,8 +500,9 @@ impl<'de> Deserialize<'de> for Deployment {
             updated_at: result.updated_at.unwrap_or_else(|| {
                 deserialize_error!("deployment", "updated_at", default.updated_at)
             }),
-            release: result.release,
-            config_instances: result.config_instances,
+            attempts: 0,
+            cooldown_ends_at: None,
+            config_instance_ids: result.config_instance_ids,
         })
     }
 }

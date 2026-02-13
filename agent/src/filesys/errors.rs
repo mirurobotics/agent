@@ -672,6 +672,42 @@ impl fmt::Display for MoveFileErr {
 }
 
 #[derive(Debug)]
+pub struct MoveDirErr {
+    pub source: Box<std::io::Error>,
+    pub src_dir: Dir,
+    pub dest_dir: Dir,
+    pub trace: Box<Trace>,
+}
+
+impl MiruError for MoveDirErr {
+    fn code(&self) -> Code {
+        Code::InternalServerError
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::INTERNAL_SERVER_ERROR
+    }
+
+    fn is_network_connection_error(&self) -> bool {
+        false
+    }
+
+    fn params(&self) -> Option<serde_json::Value> {
+        None
+    }
+}
+
+impl fmt::Display for MoveDirErr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "failed to move directory '{}' to '{}': {}",
+            self.src_dir, self.dest_dir, self.source
+        )
+    }
+}
+
+#[derive(Debug)]
 pub struct OpenFileErr {
     pub source: Box<std::io::Error>,
     pub file: File,
@@ -917,6 +953,7 @@ pub enum FileSysErr {
     DeleteFileErr(Box<DeleteFileErr>),
     FileMetadataErr(Box<FileMetadataErr>),
     MoveFileErr(Box<MoveFileErr>),
+    MoveDirErr(Box<MoveDirErr>),
     OpenFileErr(Box<OpenFileErr>),
     ParseJSONErr(Box<ParseJSONErr>),
     ReadDirErr(Box<ReadDirErr>),
@@ -949,6 +986,7 @@ macro_rules! forward_error_method {
             Self::DeleteFileErr(e) => e.$method($($arg)?),
             Self::FileMetadataErr(e) => e.$method($($arg)?),
             Self::MoveFileErr(e) => e.$method($($arg)?),
+            Self::MoveDirErr(e) => e.$method($($arg)?),
             Self::OpenFileErr(e) => e.$method($($arg)?),
             Self::ParseJSONErr(e) => e.$method($($arg)?),
             Self::ReadDirErr(e) => e.$method($($arg)?),

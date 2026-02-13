@@ -4,7 +4,7 @@ use crate::logs::LogLevel;
 
 // external crates
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::error;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Settings {

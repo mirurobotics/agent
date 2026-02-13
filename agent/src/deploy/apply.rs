@@ -1,32 +1,35 @@
-// standard crates
-use std::collections::HashMap;
-
 // internal crates
-use crate::crud::config_instance::{
-    matches_config_schema_and_activity_status, matches_filepath_and_activity_status,
-};
 use crate::crud::prelude::{Find, Read};
 use crate::deploy::errors::*;
-use crate::deploy::{
-    filesys,
-    filesys::DeployResults,
-    fsm,
-    observer::{on_update, Observer},
-};
+use crate::deploy::{filesys, fsm, observer::{on_update, Observer}};
 use crate::filesys::dir::Dir;
-use crate::models::config_instance::{
-    ActivityStatus, ConfigInstance, ConfigInstanceID, TargetStatus,
-};
-use crate::storage::config_instances::{
-    ConfigInstanceCache, ConfigInstanceCacheEntry, ConfigInstanceContentCache,
-};
+use crate::models::config_instance::ConfigInstance;
+use crate::models::deployment::{Deployment, DeploymentActivityStatus};
+use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
+use crate::storage::deployments::{DeploymentCache, DeploymentCacheEntry};
+
+#[derive(Debug)]
+pub struct DeployResults {
+    pub to_remove: Vec<Deployment>,
+    pub to_deploy: Vec<Deployment>,
+}
+
+impl DeployResults {
+    pub fn empty() -> Self {
+        Self {
+            to_remove: Vec::new(),
+            to_deploy: Vec::new(),
+        }
+    }
+}
+
 use crate::trace;
 
 // external crates
 use async_trait::async_trait;
 use tracing::{debug, error, info};
 
-pub fn is_dirty(old: Option<&ConfigInstanceCacheEntry>, new: &ConfigInstance) -> bool {
+pub fn is_dirty(old: Option<&DeploymentCacheEntry>, new: &Deployment) -> bool {
     let old = match old {
         Some(old) => old,
         None => return true,
@@ -37,15 +40,15 @@ pub fn is_dirty(old: Option<&ConfigInstanceCacheEntry>, new: &ConfigInstance) ->
 }
 
 pub struct StorageObserver<'a> {
-    pub cfg_inst_cache: &'a ConfigInstanceCache,
+    pub deployment_cache: &'a DeploymentCache,
 }
 
 #[async_trait]
 impl<'a> Observer for StorageObserver<'a> {
-    async fn on_update(&mut self, cfg_inst: &ConfigInstance) -> Result<(), DeployErr> {
+    async fn on_update(&mut self, deployment: &Deployment) -> Result<(), DeployErr> {
         let overwrite = true;
-        self.cfg_inst_cache
-            .write(cfg_inst.id.clone(), cfg_inst.clone(), is_dirty, overwrite)
+        self.deployment_cache
+            .write(deployment.id.clone(), deployment.clone(), is_dirty, overwrite)
             .await
             .map_err(|e| {
                 DeployErr::CacheErr(Box::new(DeployCacheErr {
@@ -57,106 +60,120 @@ impl<'a> Observer for StorageObserver<'a> {
 }
 
 pub async fn apply(
-    mut cfg_insts_to_apply: HashMap<ConfigInstanceID, ConfigInstance>,
+    deployment: &Deployment,
+    deployment_cache: &DeploymentCache,
     cfg_inst_cache: &ConfigInstanceCache,
     cfg_inst_content_cache: &ConfigInstanceContentCache,
     deployment_dir: &Dir,
+    staging_dir: &Dir,
     fsm_settings: &fsm::Settings,
-) -> Result<HashMap<ConfigInstanceID, ConfigInstance>, DeployErr> {
-    let num_cfg_insts_to_apply = cfg_insts_to_apply.len();
-    debug!("Applying {num_cfg_insts_to_apply} config instances {cfg_insts_to_apply:?}");
+) -> Result<Deployment, DeployErr> {
+    debug!("Applying deployment {:?}", deployment.id);
 
     // observers
     let mut observers: Vec<&mut dyn Observer> = Vec::new();
-    let mut storage_observer = StorageObserver { cfg_inst_cache };
+    let mut storage_observer = StorageObserver { deployment_cache };
     observers.push(&mut storage_observer);
 
-    let mut applied_cfg_insts = HashMap::new();
-
-    // apply the deployments until there are none left to apply
-    let max_iters = 30;
-    let mut i = 0;
-    while !cfg_insts_to_apply.is_empty() {
-        i += 1;
-        if i > max_iters {
-            error!("Max iterations reached while applying deployments, exiting");
-            break;
-        }
-
-        let id = match cfg_insts_to_apply.keys().next().cloned() {
-            Some(id) => id,
-            None => break,
-        };
-        let cfg_inst = match cfg_insts_to_apply.remove(&id) {
-            Some(cfg_inst) => cfg_inst,
-            None => break,
-        };
-
-        // apply the deployment
-        let (cfg_inst_results, result) = apply_one(
-            cfg_inst,
-            cfg_inst_cache,
-            cfg_inst_content_cache,
-            deployment_dir,
-            fsm_settings,
-            &mut observers,
-        )
-        .await;
-        if let Err(e) = result {
-            error!("Error applying config instance {:?}: {:?}", id, e);
-        }
-
-        // update the config instances to apply
-        for cfg_inst in cfg_inst_results.to_remove.into_iter() {
-            if fsm::is_action_required(fsm::next_action(&cfg_inst, true)) {
-                cfg_insts_to_apply.insert(cfg_inst.id.clone(), cfg_inst);
-            } else {
-                cfg_insts_to_apply.remove(&cfg_inst.id);
-                applied_cfg_insts.insert(cfg_inst.id.clone(), cfg_inst);
+    // Query config instances from cache using IDs
+    let mut cfg_insts = Vec::new();
+    for cfg_inst_id in &deployment.config_instance_ids {
+        match cfg_inst_cache.read_optional(cfg_inst_id.clone()).await {
+            Ok(Some(cfg_inst)) => cfg_insts.push(cfg_inst),
+            Ok(None) => {
+                error!("Config instance {} not found in cache", cfg_inst_id);
+                return Err(DeployErr::CrudErr(Box::new(DeployCrudErr {
+                    source: crate::crud::errors::CrudErr::CacheErr(Box::new(
+                        crate::crud::errors::CrudCacheErr {
+                            source: crate::cache::errors::CacheErr::CacheElementNotFound(Box::new(
+                                crate::cache::errors::CacheElementNotFound {
+                                    msg: format!("Config instance {} not found", cfg_inst_id),
+                                    trace: trace!(),
+                                },
+                            )),
+                            trace: trace!(),
+                        },
+                    )),
+                    trace: trace!(),
+                })));
             }
-        }
-        for cfg_inst in cfg_inst_results.to_deploy.into_iter() {
-            if fsm::is_action_required(fsm::next_action(&cfg_inst, true)) {
-                cfg_insts_to_apply.insert(cfg_inst.id.clone(), cfg_inst);
-            } else {
-                cfg_insts_to_apply.remove(&cfg_inst.id);
-                applied_cfg_insts.insert(cfg_inst.id.clone(), cfg_inst);
+            Err(e) => {
+                error!("Failed to read config instance {} from cache: {:?}", cfg_inst_id, e);
+                return Err(DeployErr::CrudErr(Box::new(DeployCrudErr {
+                    source: e,
+                    trace: trace!(),
+                })));
             }
         }
     }
 
-    Ok(applied_cfg_insts)
+    // Filter to only those that need action
+    // Note: We're filtering config instances, but the deployment FSM determines the action
+    // For now, we'll apply all config instances in the deployment
+    let cfg_insts_to_apply = cfg_insts;
+
+    if cfg_insts_to_apply.is_empty() {
+        // No config instances need action, just return the deployment
+        return Ok(deployment.clone());
+    }
+
+    let conflicts = find_all_deployed_deployments(deployment_cache).await?;
+
+    let (deployment_results, result) = apply_deployment(
+        deployment.clone(),
+        cfg_insts_to_apply,
+        conflicts,
+        cfg_inst_content_cache,
+        deployment_dir,
+        staging_dir,
+        fsm_settings,
+        &mut observers,
+    )
+    .await;
+
+    if let Err(e) = result {
+        error!("Error applying deployment {:?}: {:?}", deployment.id, e);
+    }
+
+    // Return the updated deployment from results
+    let updated_deployment = deployment_results
+        .to_deploy
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| deployment.clone());
+
+    Ok(updated_deployment)
 }
 
-async fn apply_one<R1, R2>(
-    cfg_inst: ConfigInstance,
-    all_cfg_insts: &R1,
-    all_cfg_inst_contents: &R2,
+async fn apply_deployment(
+    deployment: Deployment,
+    cfg_insts_to_apply: Vec<ConfigInstance>,
+    conflicts: Vec<Deployment>,
+    all_cfg_inst_contents: &ConfigInstanceContentCache,
     deployment_dir: &Dir,
+    staging_dir: &Dir,
     fsm_settings: &fsm::Settings,
     observers: &mut [&mut dyn Observer],
-) -> (DeployResults, Result<(), DeployErr>)
-where
-    R1: Find<ConfigInstanceID, ConfigInstance>,
-    R2: Read<ConfigInstanceID, serde_json::Value>,
-{
-    match fsm::next_action(&cfg_inst, true) {
+) -> (DeployResults, Result<(), DeployErr>) {
+    match fsm::next_action(&deployment, true) {
         fsm::NextAction::None => (DeployResults::empty(), Ok(())),
         fsm::NextAction::Deploy => {
-            deploy(
-                cfg_inst,
-                all_cfg_insts,
+            deploy_deployment(
+                deployment,
+                cfg_insts_to_apply,
+                conflicts,
                 all_cfg_inst_contents,
                 deployment_dir,
+                staging_dir,
                 fsm_settings,
                 observers,
             )
             .await
         }
         fsm::NextAction::Remove => {
-            remove(
-                cfg_inst,
-                all_cfg_insts,
+            remove_deployment(
+                deployment,
+                cfg_insts_to_apply,
                 all_cfg_inst_contents,
                 deployment_dir,
                 fsm_settings,
@@ -164,31 +181,29 @@ where
             )
             .await
         }
-        fsm::NextAction::Archive => archive(cfg_inst, observers).await,
+        fsm::NextAction::Archive => archive(deployment, observers).await,
         fsm::NextAction::Wait(_) => (DeployResults::empty(), Ok(())),
     }
 }
 
 // =================================== DEPLOY ====================================== //
-async fn deploy<R1, R2>(
-    cfg_inst: ConfigInstance,
-    all_cfg_insts: &R1,
-    all_cfg_inst_contents: &R2,
+async fn deploy_deployment(
+    mut deployment: Deployment,
+    cfg_insts_to_deploy: Vec<ConfigInstance>,
+    conflicts: Vec<Deployment>,
+    all_cfg_inst_contents: &ConfigInstanceContentCache,
     deployment_dir: &Dir,
+    staging_dir: &Dir,
     fsm_settings: &fsm::Settings,
     observers: &mut [&mut dyn Observer],
-) -> (DeployResults, Result<(), DeployErr>)
-where
-    R1: Find<ConfigInstanceID, ConfigInstance>,
-    R2: Read<ConfigInstanceID, serde_json::Value>,
-{
-    if fsm::next_action(&cfg_inst, true) != fsm::NextAction::Deploy {
-        let next_action = fsm::next_action(&cfg_inst, true);
+) -> (DeployResults, Result<(), DeployErr>) {
+    if fsm::next_action(&deployment, true) != fsm::NextAction::Deploy {
+        let next_action = fsm::next_action(&deployment, true);
         return (
             DeployResults::empty(),
-            Err(DeployErr::ConfigInstanceNotDeployableErr(Box::new(
-                ConfigInstanceNotDeployableErr {
-                    cfg_inst,
+            Err(DeployErr::DeploymentNotDeployableErr(Box::new(
+                DeploymentNotDeployableErr {
+                    deployment,
                     next_action,
                     trace: trace!(),
                 },
@@ -196,50 +211,78 @@ where
         );
     }
 
-    // find the conflicts to remove
-    let conflicts = match find_instances_to_replace(&cfg_inst, all_cfg_insts).await {
-        Ok(conflicts) => conflicts,
-        Err(e) => return (DeployResults::empty(), Err(e)),
-    };
+    if cfg_insts_to_deploy.is_empty() {
+        // No config instances to deploy, just update the deployment status
+        let deployment = fsm::deploy(deployment);
+        let result = on_update(observers, &deployment).await;
+        return (
+            DeployResults {
+                to_remove: vec![],
+                to_deploy: vec![deployment],
+            },
+            result,
+        );
+    }
+
+    deployment.config_instance_ids = cfg_insts_to_deploy.iter().map(|ci| ci.id.clone()).collect();
 
     let replacement_ids = conflicts.iter().map(|c| &c.id).collect::<Vec<_>>();
     info!(
-        "deploying config {:?} and removing {:?}",
-        cfg_inst.id, replacement_ids
+        "deploying deployment {:?} and removing {:?}",
+        deployment.id, replacement_ids
     );
 
-    // remove the old instances and deploy the new config instance
-    filesys::deploy_with_rollback(
-        conflicts,
-        vec![cfg_inst],
-        all_cfg_inst_contents,
+    let updated_to_remove = record_removals(conflicts, observers).await;
+
+    let ctx = filesys::DeployContext {
+        content_reader: all_cfg_inst_contents,
         deployment_dir,
-        fsm_settings,
-        observers,
+        staging_dir,
+        settings: fsm_settings,
+    };
+    let (updated_deployment, result) =
+        filesys::deploy(&ctx, deployment, cfg_insts_to_deploy, observers).await;
+
+    (
+        DeployResults {
+            to_remove: updated_to_remove,
+            to_deploy: vec![updated_deployment],
+        },
+        result,
     )
-    .await
+}
+
+async fn record_removals(
+    to_remove: Vec<Deployment>,
+    observers: &mut [&mut dyn Observer],
+) -> Vec<Deployment> {
+    let mut out = Vec::with_capacity(to_remove.len());
+    for mut deployment in to_remove {
+        deployment = fsm::remove(deployment);
+        if let Err(e) = on_update(observers, &deployment).await {
+            error!("Error updating removed deployment {:?}: {:?}", deployment.id, e);
+        }
+        out.push(deployment);
+    }
+    out
 }
 
 // =================================== REMOVE ====================================== //
-async fn remove<R1, R2>(
-    mut cfg_inst: ConfigInstance,
-    all_cfg_insts: &R1,
-    all_cfg_inst_contents: &R2,
-    deployment_dir: &Dir,
-    fsm_settings: &fsm::Settings,
+async fn remove_deployment(
+    deployment: Deployment,
+    _cfg_insts_to_remove: Vec<ConfigInstance>,
+    _all_cfg_inst_contents: &ConfigInstanceContentCache,
+    _deployment_dir: &Dir,
+    _fsm_settings: &fsm::Settings,
     observers: &mut [&mut dyn Observer],
-) -> (DeployResults, Result<(), DeployErr>)
-where
-    R1: Find<ConfigInstanceID, ConfigInstance>,
-    R2: Read<ConfigInstanceID, serde_json::Value>,
-{
-    if fsm::next_action(&cfg_inst, true) != fsm::NextAction::Remove {
-        let next_action = fsm::next_action(&cfg_inst, true);
+) -> (DeployResults, Result<(), DeployErr>) {
+    if fsm::next_action(&deployment, true) != fsm::NextAction::Remove {
+        let next_action = fsm::next_action(&deployment, true);
         return (
             DeployResults::empty(),
-            Err(DeployErr::ConfigInstanceNotRemoveableErr(Box::new(
-                ConfigInstanceNotRemoveableErr {
-                    cfg_inst,
+            Err(DeployErr::DeploymentNotRemoveableErr(Box::new(
+                DeploymentNotRemoveableErr {
+                    deployment,
                     next_action,
                     trace: trace!(),
                 },
@@ -247,110 +290,27 @@ where
         );
     }
 
-    // find the replacements to deploy
-    let replacement = match find_replacement(&cfg_inst, all_cfg_insts).await {
-        Ok(replacement) => replacement,
-        Err(e) => return (DeployResults::empty(), Err(e)),
-    };
+    info!("removing deployment {:?}", deployment.id);
 
-    let mut replacements = vec![];
-    if let Some(replacement) = replacement {
-        // if a replacement exists and is in cooldown, we must wait for the new config
-        // instance to finish cooling down before we can remove this one. Thus, this
-        // config instance receives the same cooldown as the replacement so that they
-        // are removed at the same time.
-        if replacement.is_in_cooldown() {
-            cfg_inst.set_cooldown(replacement.cooldown());
-            let err_results = on_update(observers, &cfg_inst).await;
-            let deploy_results = DeployResults {
-                to_remove: vec![],
-                to_deploy: vec![cfg_inst],
-            };
-            return (deploy_results, err_results);
-        }
-        replacements.push(replacement);
-    }
-
-    let replacement_ids = replacements.iter().map(|r| &r.id).collect::<Vec<_>>();
-    info!(
-        "removing config instance {:?} and replacing it with {:?}",
-        cfg_inst.id, replacement_ids
-    );
-
-    // remove the config instance and deploy the replacement
-    filesys::deploy_with_rollback(
-        vec![cfg_inst],
-        replacements,
-        all_cfg_inst_contents,
-        deployment_dir,
-        fsm_settings,
-        observers,
+    let deployment = fsm::remove(deployment);
+    let result = on_update(observers, &deployment).await;
+    (
+        DeployResults {
+            to_remove: vec![deployment],
+            to_deploy: vec![],
+        },
+        result,
     )
-    .await
 }
 
-pub async fn find_instances_to_replace<R>(
-    cfg_inst: &ConfigInstance,
-    all_cfg_insts: &R,
-) -> Result<Vec<ConfigInstance>, DeployErr>
-where
-    R: Find<ConfigInstanceID, ConfigInstance>,
-{
-    let filepath = cfg_inst.relative_filepath.clone();
-    let cfg_sch_id = cfg_inst.config_schema_id.clone();
-    let conflicts = all_cfg_insts
-        .find_where(move |cfg_inst| {
-            // is deployed and has same config schema
-            if matches_config_schema_and_activity_status(
-                cfg_inst,
-                &cfg_sch_id,
-                ActivityStatus::Deployed,
-            ) {
-                return true;
-            }
-
-            matches_filepath_and_activity_status(cfg_inst, &filepath, ActivityStatus::Deployed)
-        })
-        .await
-        .map_err(|e| {
-            DeployErr::CrudErr(Box::new(DeployCrudErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
-
-    // validate that all conflicts do not desire to be deployed
-    for conflict in conflicts.iter() {
-        if conflict.target_status == TargetStatus::Deployed {
-            return Err(DeployErr::ConflictingDeploymentsErr(Box::new(
-                ConflictingDeploymentsErr {
-                    cfg_insts: vec![cfg_inst.clone(), conflict.clone()],
-                    trace: trace!(),
-                },
-            )));
-        }
-    }
-
-    Ok(conflicts)
-}
-
-pub async fn find_replacement<R>(
-    cfg_inst: &ConfigInstance,
-    all_cfg_insts: &R,
-) -> Result<Option<ConfigInstance>, DeployErr>
-where
-    R: Find<ConfigInstanceID, ConfigInstance>,
-{
-    let cfg_sch_id = cfg_inst.config_schema_id.clone();
-    all_cfg_insts
-        .find_one_optional("filter by config schema and next action", move |cfg_inst| {
-            // has same config schema and desires to be deployed
-            matches_config_schema_and_next_action(
-                cfg_inst,
-                &cfg_sch_id,
-                fsm::NextAction::Deploy,
-                false,
-            )
+async fn find_all_deployed_deployments(
+    deployment_cache: &DeploymentCache,
+) -> Result<Vec<Deployment>, DeployErr> {
+    // Find all deployments that are currently deployed
+    // Since only one deployment can be deployed at a time, all deployed deployments are conflicts
+    deployment_cache
+        .find_where(|d| {
+            d.activity_status == DeploymentActivityStatus::Deployed
         })
         .await
         .map_err(|e| {
@@ -359,30 +319,20 @@ where
                 trace: trace!(),
             }))
         })
-}
-
-pub fn matches_config_schema_and_next_action(
-    cfg_inst: &ConfigInstance,
-    config_schema_id: &str,
-    next_action: fsm::NextAction,
-    use_cooldown: bool,
-) -> bool {
-    cfg_inst.config_schema_id == config_schema_id
-        && fsm::next_action(cfg_inst, use_cooldown) == next_action
 }
 
 // =================================== ARCHIVE ===================================== //
 async fn archive(
-    cfg_inst: ConfigInstance,
+    deployment: Deployment,
     observers: &mut [&mut dyn Observer],
 ) -> (DeployResults, Result<(), DeployErr>) {
-    if fsm::next_action(&cfg_inst, true) != fsm::NextAction::Archive {
-        let next_action = fsm::next_action(&cfg_inst, true);
+    if fsm::next_action(&deployment, true) != fsm::NextAction::Archive {
+        let next_action = fsm::next_action(&deployment, true);
         return (
             DeployResults::empty(),
-            Err(DeployErr::ConfigInstanceNotArchiveableErr(Box::new(
-                ConfigInstanceNotArchiveableErr {
-                    cfg_inst,
+            Err(DeployErr::DeploymentNotArchiveableErr(Box::new(
+                DeploymentNotArchiveableErr {
+                    deployment,
                     next_action,
                     trace: trace!(),
                 },
@@ -391,15 +341,15 @@ async fn archive(
     }
 
     info!(
-        "Archiving config instance '{}' (it is not currently deployed)",
-        cfg_inst.id
+        "Archiving deployment '{}' (it is not currently deployed)",
+        deployment.id
     );
-    let cfg_inst = fsm::remove(cfg_inst);
+    let deployment = fsm::remove(deployment);
     return (
         DeployResults {
-            to_remove: vec![cfg_inst.clone()],
+            to_remove: vec![deployment.clone()],
             to_deploy: vec![],
         },
-        on_update(observers, &cfg_inst).await,
+        on_update(observers, &deployment).await,
     );
 }

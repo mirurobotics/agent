@@ -6,7 +6,7 @@ use std::path::PathBuf;
 // internal crates
 use crate::filesys::{
     errors::{
-        CreateDirErr, DeleteDirErr, FileSysErr, InvalidDirNameErr, ReadDirErr,
+        CreateDirErr, DeleteDirErr, FileSysErr, InvalidDirNameErr, MoveDirErr, ReadDirErr,
         UnknownCurrentDirErr, UnknownDirNameErr, UnknownHomeDirErr, UnknownParentDirForDirErr,
     },
     file::File,
@@ -321,6 +321,46 @@ impl Dir {
         if self.is_empty().await? {
             self.delete().await?;
         }
+        Ok(())
+    }
+
+    fn validate_overwrite(dest: &Dir, overwrite: bool) -> Result<(), FileSysErr> {
+        if !overwrite && dest.exists() {
+            return Err(FileSysErr::PathExistsErr(Box::new(
+                crate::filesys::errors::PathExistsErr {
+                    path: dest.path().clone(),
+                    trace: trace!(),
+                },
+            )));
+        }
+        Ok(())
+    }
+
+    /// Move this directory to a new directory. Overwrites the destination directory if it exists.
+    pub async fn move_to(&self, new_dir: &Dir, overwrite: bool) -> Result<(), FileSysErr> {
+        self.assert_exists()?;
+
+        if self.path() == new_dir.path() {
+            return Ok(());
+        }
+
+        Dir::validate_overwrite(new_dir, overwrite)?;
+
+        // ensure the parent directory of the new directory exists and create it if not
+        new_dir.parent()?.create_if_absent().await?;
+
+        // move this directory to the new directory
+        tokio::fs::rename(self.to_string(), new_dir.to_string())
+            .await
+            .map_err(|e| {
+                FileSysErr::MoveDirErr(Box::new(MoveDirErr {
+                    source: Box::new(e),
+                    src_dir: self.clone(),
+                    dest_dir: new_dir.clone(),
+                    trace: trace!(),
+                }))
+            })?;
+
         Ok(())
     }
 }
