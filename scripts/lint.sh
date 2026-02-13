@@ -103,9 +103,14 @@ cargo audit
 echo ""
 
 # rust's code quality linter (excluding generated libs)
-echo "Running Clippy"
-echo "--------------"
+echo "Running Clippy (auto-fix)"
+echo "-------------------------"
 cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings
+echo ""
+
+echo "Running Clippy (check)"
+echo "----------------------"
+cargo clippy --package miru-agent --no-deps --all-features -- -D warnings
 echo ""
 
 echo "Linting complete"
