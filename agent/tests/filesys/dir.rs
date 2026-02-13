@@ -833,11 +833,14 @@ mod move_to {
         let base_dir = Dir::create_temp_dir("testing").await.unwrap();
         let src = base_dir.subdir("src-dir");
         src.create(false).await.unwrap();
-        
+
         // Add a file to verify it moves with the directory
         let test_file = src.file("test.txt");
-        test_file.write_string("test content", false, false).await.unwrap();
-        
+        test_file
+            .write_string("test content", false, false)
+            .await
+            .unwrap();
+
         let dest = base_dir.subdir("dest-dir");
 
         // overwrite false
@@ -848,7 +851,10 @@ mod move_to {
         assert!(!src.exists());
         // Verify file moved with directory
         assert!(dest.file("test.txt").exists());
-        assert_eq!(dest.file("test.txt").read_string().await.unwrap(), "test content");
+        assert_eq!(
+            dest.file("test.txt").read_string().await.unwrap(),
+            "test content"
+        );
     }
 
     #[tokio::test]
@@ -873,17 +879,23 @@ mod move_to {
         let base_dir = Dir::create_temp_dir("testing").await.unwrap();
         let src = base_dir.subdir("src-dir");
         src.create(false).await.unwrap();
-        
+
         // Add files to src
         let src_file = src.file("src-file.txt");
-        src_file.write_string("src content", false, false).await.unwrap();
-        
+        src_file
+            .write_string("src content", false, false)
+            .await
+            .unwrap();
+
         let dest = base_dir.subdir("dest-dir");
         dest.create(false).await.unwrap();
-        
+
         // Add different files to dest
         let dest_file = dest.file("dest-file.txt");
-        dest_file.write_string("dest content", false, false).await.unwrap();
+        dest_file
+            .write_string("dest content", false, false)
+            .await
+            .unwrap();
 
         // overwrite true should succeed
         assert!(src.exists());
@@ -893,7 +905,10 @@ mod move_to {
         assert!(!src.exists());
         // Verify src file moved, dest file replaced
         assert!(dest.file("src-file.txt").exists());
-        assert_eq!(dest.file("src-file.txt").read_string().await.unwrap(), "src content");
+        assert_eq!(
+            dest.file("src-file.txt").read_string().await.unwrap(),
+            "src content"
+        );
         assert!(!dest.file("dest-file.txt").exists());
     }
 
@@ -902,16 +917,16 @@ mod move_to {
         let base_dir = Dir::create_temp_dir("testing").await.unwrap();
         let dir = base_dir.subdir("test-dir");
         dir.create(false).await.unwrap();
-        
+
         let test_file = dir.file("test.txt");
         test_file.write_string("test", false, false).await.unwrap();
-        
+
         // Moving to itself should be a no-op
         dir.move_to(&dir, false).await.unwrap();
         assert!(dir.exists());
         assert!(test_file.exists());
         assert_eq!(test_file.read_string().await.unwrap(), "test");
-        
+
         dir.move_to(&dir, true).await.unwrap();
         assert!(dir.exists());
         assert!(test_file.exists());
@@ -923,13 +938,13 @@ mod move_to {
         let base_dir = Dir::create_temp_dir("testing").await.unwrap();
         let src = base_dir.subdir("src-dir");
         src.create(false).await.unwrap();
-        
+
         // Create nested structure
         let subdir1 = src.subdir("subdir1");
         subdir1.create(false).await.unwrap();
         let subdir2 = subdir1.subdir("subdir2");
         subdir2.create(false).await.unwrap();
-        
+
         // Add files at different levels
         let file1 = src.file("file1.txt");
         file1.write_string("file1", false, false).await.unwrap();
@@ -937,26 +952,32 @@ mod move_to {
         file2.write_string("file2", false, false).await.unwrap();
         let file3 = subdir2.file("file3.txt");
         file3.write_string("file3", false, false).await.unwrap();
-        
+
         let dest = base_dir.subdir("dest-dir");
-        
+
         src.move_to(&dest, false).await.unwrap();
-        
+
         // Verify entire structure moved
         assert!(!src.exists());
         assert!(dest.exists());
         assert!(dest.file("file1.txt").exists());
         assert_eq!(dest.file("file1.txt").read_string().await.unwrap(), "file1");
-        
+
         let moved_subdir1 = dest.subdir("subdir1");
         assert!(moved_subdir1.exists());
         assert!(moved_subdir1.file("file2.txt").exists());
-        assert_eq!(moved_subdir1.file("file2.txt").read_string().await.unwrap(), "file2");
-        
+        assert_eq!(
+            moved_subdir1.file("file2.txt").read_string().await.unwrap(),
+            "file2"
+        );
+
         let moved_subdir2 = moved_subdir1.subdir("subdir2");
         assert!(moved_subdir2.exists());
         assert!(moved_subdir2.file("file3.txt").exists());
-        assert_eq!(moved_subdir2.file("file3.txt").read_string().await.unwrap(), "file3");
+        assert_eq!(
+            moved_subdir2.file("file3.txt").read_string().await.unwrap(),
+            "file3"
+        );
     }
 
     #[tokio::test]
@@ -964,15 +985,15 @@ mod move_to {
         let base_dir = Dir::create_temp_dir("testing").await.unwrap();
         let src = base_dir.subdir("src-dir");
         src.create(false).await.unwrap();
-        
+
         let test_file = src.file("test.txt");
         test_file.write_string("test", false, false).await.unwrap();
-        
+
         // Create a nested destination path (parent doesn't exist)
         let dest = base_dir.subdir("parent").subdir("dest-dir");
-        
+
         src.move_to(&dest, false).await.unwrap();
-        
+
         // Verify parent was created and directory moved
         assert!(dest.parent().unwrap().exists());
         assert!(dest.exists());
@@ -986,18 +1007,24 @@ mod move_to {
         let src = base_dir.subdir("src-dir");
         src.create(false).await.unwrap();
         let src_file = src.file("src-only.txt");
-        src_file.write_string("src only", false, false).await.unwrap();
-        
+        src_file
+            .write_string("src only", false, false)
+            .await
+            .unwrap();
+
         let dest = base_dir.subdir("dest-dir");
         dest.create(false).await.unwrap();
         let dest_file = dest.file("dest-only.txt");
-        dest_file.write_string("dest only", false, false).await.unwrap();
+        dest_file
+            .write_string("dest only", false, false)
+            .await
+            .unwrap();
         let dest_subdir = dest.subdir("dest-subdir");
         dest_subdir.create(false).await.unwrap();
-        
+
         // Move with overwrite
         src.move_to(&dest, true).await.unwrap();
-        
+
         // Verify dest content was replaced
         assert!(dest.exists());
         assert!(dest.file("src-only.txt").exists());

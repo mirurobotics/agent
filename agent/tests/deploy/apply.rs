@@ -1,24 +1,20 @@
-// std
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 // internal crates
-use miru_agent::cache::{entry::CacheEntry, file::FileCache};
+use miru_agent::cache::entry::CacheEntry;
 use miru_agent::deploy::{
-    apply::{apply, find_instances_to_replace, find_replacement, is_dirty},
-    errors::DeployErr,
+    apply::{apply, is_dirty},
+    filesys::DeployContext,
     fsm::Settings,
 };
-use miru_agent::filesys::{dir::Dir, path::PathExt};
-use miru_agent::logs::*;
-use miru_agent::models::config_instance::{
-    ActivityStatus, ConfigInstance, ErrorStatus, TargetStatus,
+use miru_agent::filesys::dir::Dir;
+use miru_agent::models::config_instance::ConfigInstance;
+use miru_agent::models::deployment::{
+    Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
 };
 use miru_agent::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
-use miru_agent::utils::calc_exp_backoff;
+use miru_agent::storage::deployments::DeploymentCache;
 
 // external crates
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 use serde_json::json;
 
 pub mod is_dirty_func {
@@ -26,87 +22,86 @@ pub mod is_dirty_func {
 
     #[tokio::test]
     async fn no_changes() {
-        let cfg_inst = ConfigInstance {
+        let deployment = Deployment {
             ..Default::default()
         };
-        let new = &cfg_inst;
         let entry = CacheEntry {
-            key: cfg_inst.id.clone(),
-            value: cfg_inst.clone(),
+            key: deployment.id.clone(),
+            value: deployment.clone(),
             is_dirty: false,
             created_at: Utc::now(),
             last_accessed: Utc::now(),
         };
         let old = Some(&entry);
-        assert!(!is_dirty(old, new));
+        assert!(!is_dirty(old, &deployment));
     }
 
     #[tokio::test]
     async fn previous_is_none() {
-        let cfg_inst = ConfigInstance {
+        let deployment = Deployment {
             ..Default::default()
         };
-        let new = &cfg_inst;
-        assert!(is_dirty(None, new));
+        assert!(is_dirty(None, &deployment));
     }
 
     #[tokio::test]
     async fn previously_dirty() {
-        let cfg_inst = ConfigInstance {
+        let deployment = Deployment {
             ..Default::default()
         };
-        let new = &cfg_inst;
         let entry = CacheEntry {
-            key: cfg_inst.id.clone(),
-            value: cfg_inst.clone(),
+            key: deployment.id.clone(),
+            value: deployment.clone(),
             is_dirty: true,
             created_at: Utc::now(),
             last_accessed: Utc::now(),
         };
         let old = Some(&entry);
-        assert!(is_dirty(old, new));
+        assert!(is_dirty(old, &deployment));
     }
 
     #[tokio::test]
     async fn activity_status_changed() {
-        let old = ConfigInstance {
-            activity_status: ActivityStatus::Queued,
+        let old_deployment = Deployment {
+            activity_status: DeploymentActivityStatus::Queued,
             ..Default::default()
         };
-        let new = ConfigInstance {
-            activity_status: ActivityStatus::Deployed,
+        let new_deployment = Deployment {
+            id: old_deployment.id.clone(),
+            activity_status: DeploymentActivityStatus::Deployed,
             ..Default::default()
         };
         let entry = CacheEntry {
-            key: old.id.clone(),
-            value: old.clone(),
+            key: old_deployment.id.clone(),
+            value: old_deployment.clone(),
             is_dirty: false,
             created_at: Utc::now(),
             last_accessed: Utc::now(),
         };
         let old = Some(&entry);
-        assert!(is_dirty(old, &new));
+        assert!(is_dirty(old, &new_deployment));
     }
 
     #[tokio::test]
     async fn error_status_changed() {
-        let old = ConfigInstance {
-            error_status: ErrorStatus::None,
+        let old_deployment = Deployment {
+            error_status: DeploymentErrorStatus::None,
             ..Default::default()
         };
-        let new = ConfigInstance {
-            error_status: ErrorStatus::Retrying,
+        let new_deployment = Deployment {
+            id: old_deployment.id.clone(),
+            error_status: DeploymentErrorStatus::Retrying,
             ..Default::default()
         };
         let entry = CacheEntry {
-            key: old.id.clone(),
-            value: old.clone(),
+            key: old_deployment.id.clone(),
+            value: old_deployment.clone(),
             is_dirty: false,
             created_at: Utc::now(),
             last_accessed: Utc::now(),
         };
         let old = Some(&entry);
-        assert!(is_dirty(old, &new));
+        assert!(is_dirty(old, &new_deployment));
     }
 }
 
@@ -114,8 +109,12 @@ pub mod apply_func {
     use super::*;
 
     #[tokio::test]
-    async fn no_instances() {
+    async fn no_config_instances() {
         let dir = Dir::create_temp_dir("apply").await.unwrap();
+        let staging_dir = Dir::create_temp_dir("apply_staging").await.unwrap();
+        let (deployment_cache, _) = DeploymentCache::spawn(16, dir.file("deployments.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
             .await
             .unwrap();
@@ -123,35 +122,52 @@ pub mod apply_func {
             .await
             .unwrap();
 
-        let result = apply(
-            HashMap::new(),
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &Settings::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 0);
+        let deployment = Deployment {
+            target_status: DeploymentTargetStatus::Deployed,
+            activity_status: DeploymentActivityStatus::Queued,
+            config_instance_ids: vec![],
+            ..Default::default()
+        };
+
+        let settings = Settings::default();
+        let ctx = DeployContext {
+            content_reader: &cfg_inst_content_cache,
+            deployment_dir: &dir,
+            staging_dir: &staging_dir,
+            settings: &settings,
+        };
+        let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
+            .await
+            .unwrap();
+
+        // With no config instances, the deployment is returned as-is
+        assert_eq!(result.id, deployment.id);
     }
 
     #[tokio::test]
     async fn deploy_1() {
         // define the config instance
         let cfg_inst = ConfigInstance {
-            relative_filepath: "/test/filepath".to_string(),
-            // target status must be deployed to increment failure attempts
-            target_status: TargetStatus::Deployed,
-            activity_status: ActivityStatus::Queued,
+            filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
 
-        // create the cache but omit the config instance content
+        // create caches
         let dir = Dir::create_temp_dir("deploy").await.unwrap();
+        let staging_dir = Dir::create_temp_dir("deploy_staging").await.unwrap();
+        let (deployment_cache, _) = DeploymentCache::spawn(16, dir.file("deployments.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
             .await
             .unwrap();
         let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
+            .await
+            .unwrap();
+
+        // write config instance to cache
+        cfg_inst_cache
+            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
             .await
             .unwrap();
         cfg_inst_content_cache
@@ -159,136 +175,108 @@ pub mod apply_func {
             .await
             .unwrap();
 
-        // deploy the config instance
-        let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([(cfg_inst.id.clone(), cfg_inst.clone())]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 1);
-        let actual = result[&cfg_inst.id].clone();
-
-        // define the expected config instance
-        let expected = ConfigInstance {
-            activity_status: ActivityStatus::Deployed,
-            ..cfg_inst
+        // define the deployment referencing the config instance
+        let deployment = Deployment {
+            target_status: DeploymentTargetStatus::Deployed,
+            activity_status: DeploymentActivityStatus::Queued,
+            config_instance_ids: vec![cfg_inst.id.clone()],
+            ..Default::default()
         };
 
-        // check that the returned config instances' states were correctly updated
-        assert_eq!(actual, expected);
+        // apply the deployment
+        let settings = Settings::default();
+        let ctx = DeployContext {
+            content_reader: &cfg_inst_content_cache,
+            deployment_dir: &dir,
+            staging_dir: &staging_dir,
+            settings: &settings,
+        };
+        let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
+            .await
+            .unwrap();
+
+        // check that the deployment's activity status was updated to Deployed
+        assert_eq!(result.activity_status, DeploymentActivityStatus::Deployed);
+        assert_eq!(result.id, deployment.id);
     }
 
     #[tokio::test]
-    async fn deploy_1_failure_1_success() {
-        // define the config instances
-        let cfg_inst1 = ConfigInstance {
-            relative_filepath: "/test/filepath1".to_string(),
-            // target status must be deployed to increment failure attempts
-            target_status: TargetStatus::Deployed,
-            activity_status: ActivityStatus::Queued,
-            ..Default::default()
-        };
-        let cfg_inst2 = ConfigInstance {
-            relative_filepath: "/test/filepath2".to_string(),
-            target_status: TargetStatus::Deployed,
-            activity_status: ActivityStatus::Queued,
+    async fn deploy_missing_content_causes_error_state() {
+        // define the config instance (content will NOT be in cache)
+        let cfg_inst = ConfigInstance {
+            filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
 
-        // create the cache but omit the config instance content
+        // create caches
         let dir = Dir::create_temp_dir("deploy").await.unwrap();
+        let staging_dir = Dir::create_temp_dir("deploy_staging").await.unwrap();
+        let (deployment_cache, _) = DeploymentCache::spawn(16, dir.file("deployments.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
             .await
             .unwrap();
         let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
             .await
             .unwrap();
-        cfg_inst_content_cache
-            .write(
-                cfg_inst1.id.clone(),
-                json!({"speed": 4}),
-                |_, _| false,
-                true,
-            )
+
+        // write config instance metadata but NOT content
+        cfg_inst_cache
+            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
             .await
             .unwrap();
 
-        // deploy the config instance
+        // define the deployment referencing the config instance
+        let deployment = Deployment {
+            target_status: DeploymentTargetStatus::Deployed,
+            activity_status: DeploymentActivityStatus::Queued,
+            config_instance_ids: vec![cfg_inst.id.clone()],
+            ..Default::default()
+        };
+
+        // apply the deployment - it should still return Ok but with error state
+        // because the deploy itself fails (missing content) but the function catches it
         let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([
-            (cfg_inst1.id.clone(), cfg_inst1.clone()),
-            (cfg_inst2.id.clone(), cfg_inst2.clone()),
-        ]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 2);
-        let actual1 = result[&cfg_inst1.id].clone();
-        let actual2 = result[&cfg_inst2.id].clone();
-
-        // define the expected config instances
-        let expected1 = ConfigInstance {
-            activity_status: ActivityStatus::Deployed,
-            ..cfg_inst1
+        let ctx = DeployContext {
+            content_reader: &cfg_inst_content_cache,
+            deployment_dir: &dir,
+            staging_dir: &staging_dir,
+            settings: &settings,
         };
-        let expected2 = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            error_status: ErrorStatus::Retrying,
-            attempts: 1,
-            cooldown_ends_at: actual2.cooldown_ends_at,
-            ..cfg_inst2
-        };
-        let cooldown = calc_exp_backoff(
-            settings.exp_backoff_base_secs,
-            2,
-            expected2.attempts,
-            settings.max_cooldown_secs,
-        );
-        let approx_cooldown_ends_at = Utc::now() + TimeDelta::seconds(cooldown as i64);
-        assert!(expected2.cooldown_ends_at <= approx_cooldown_ends_at);
-        assert!(expected2.cooldown_ends_at >= approx_cooldown_ends_at - TimeDelta::seconds(1));
+        let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
+            .await
+            .unwrap();
 
-        // check that the returned config instances' states were correctly updated
-        assert_eq!(expected1, actual1);
-        assert_eq!(expected2, actual2);
+        // The deployment should have error state due to missing content
+        assert_eq!(result.id, deployment.id);
+        assert_eq!(result.error_status, DeploymentErrorStatus::Retrying);
     }
 
     #[tokio::test]
-    async fn remove_1() {
+    async fn remove_deployment() {
         // define the config instance
-        let filepath = "/test/filepath".to_string();
         let cfg_inst = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Removed,
-            activity_status: ActivityStatus::Deployed,
+            filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
 
-        // create a dummy file at the file path to double check it is removed & not
-        // archived
-        let dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let file = dir.file(filepath.as_str());
-        file.write_json(&json!({"speed": 4}), true, true)
+        // create caches
+        let dir = Dir::create_temp_dir("remove").await.unwrap();
+        let staging_dir = Dir::create_temp_dir("remove_staging").await.unwrap();
+        let (deployment_cache, _) = DeploymentCache::spawn(16, dir.file("deployments.json"), 1000)
             .await
             .unwrap();
-
-        // create the config instance in the cache
         let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
             .await
             .unwrap();
         let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
+            .await
+            .unwrap();
+
+        // write config instance to cache
+        cfg_inst_cache
+            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
             .await
             .unwrap();
         cfg_inst_content_cache
@@ -296,708 +284,81 @@ pub mod apply_func {
             .await
             .unwrap();
 
-        // deploy the config instance
-        let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([(cfg_inst.id.clone(), cfg_inst.clone())]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 1);
-        let actual = result[&cfg_inst.id].clone();
-
-        // define the expected config instance
-        let expected = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            ..cfg_inst
+        // define a deployment targeting removal (currently deployed)
+        let deployment = Deployment {
+            target_status: DeploymentTargetStatus::Archived,
+            activity_status: DeploymentActivityStatus::Deployed,
+            config_instance_ids: vec![cfg_inst.id.clone()],
+            ..Default::default()
         };
 
-        // check that the returned config instances' states were correctly updated
-        assert_eq!(actual, expected);
+        // apply the deployment
+        let settings = Settings::default();
+        let ctx = DeployContext {
+            content_reader: &cfg_inst_content_cache,
+            deployment_dir: &dir,
+            staging_dir: &staging_dir,
+            settings: &settings,
+        };
+        let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
+            .await
+            .unwrap();
 
-        // check that the file was removed
-        assert!(!file.exists());
+        // check that the deployment's activity status was updated to Archived (removed)
+        assert_eq!(result.activity_status, DeploymentActivityStatus::Archived);
+        assert_eq!(result.id, deployment.id);
     }
 
     #[tokio::test]
-    async fn archive_1() {
-        let _ = init(LogOptions {
-            stdout: true,
-            log_level: LogLevel::Info,
-            log_dir: PathBuf::from("/tmp/miru"),
-        });
-
+    async fn archive_deployment() {
         // define the config instance
-        let filepath = "/test/filepath".to_string();
         let cfg_inst = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Removed,
-            activity_status: ActivityStatus::Queued,
+            filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
 
-        // create a dummy file at the file path to double check it is archived & not
-        // removed
-        let dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let file = dir.file(filepath.as_str());
-        file.write_json(&json!({"speed": 4}), true, true)
+        // create caches
+        let dir = Dir::create_temp_dir("archive").await.unwrap();
+        let staging_dir = Dir::create_temp_dir("archive_staging").await.unwrap();
+        let (deployment_cache, _) = DeploymentCache::spawn(16, dir.file("deployments.json"), 1000)
             .await
             .unwrap();
-
-        // create the config instance in the cache
         let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
             .await
             .unwrap();
         let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
             .await
             .unwrap();
-        cfg_inst_content_cache
-            .write(cfg_inst.id.clone(), json!({"speed": 4}), |_, _| false, true)
+
+        // write config instance to cache
+        cfg_inst_cache
+            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
             .await
             .unwrap();
 
-        // deploy the config instance
+        // define a deployment targeting archive (currently queued, target staged)
+        // FSM: target=Staged, activity=Queued -> Archive
+        let deployment = Deployment {
+            target_status: DeploymentTargetStatus::Staged,
+            activity_status: DeploymentActivityStatus::Queued,
+            config_instance_ids: vec![cfg_inst.id.clone()],
+            ..Default::default()
+        };
+
+        // apply the deployment
         let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([(cfg_inst.id.clone(), cfg_inst.clone())]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 1);
-        let actual = result[&cfg_inst.id].clone();
-
-        // define the expected config instance
-        let expected = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            ..cfg_inst
+        let ctx = DeployContext {
+            content_reader: &cfg_inst_content_cache,
+            deployment_dir: &dir,
+            staging_dir: &staging_dir,
+            settings: &settings,
         };
-
-        // check that the returned config instances' states were correctly updated
-        assert_eq!(actual, expected);
-
-        // check that the file was not actually removed
-        assert!(file.exists());
-    }
-
-    #[tokio::test]
-    async fn rollback_1_deploy_failed_different_config_schemas() {
-        // define the instances with DIFFERENT config schemas but the same filepath
-        let filepath = "/test/filepath".to_string();
-        let to_deploy = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Deployed,
-            activity_status: ActivityStatus::Queued,
-            ..Default::default()
-        };
-        let to_remove = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Removed,
-            activity_status: ActivityStatus::Deployed,
-            ..Default::default()
-        };
-
-        // create the cache but omit the config instance content
-        let dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
-            .await
-            .unwrap();
-        cfg_inst_cache
-            .write(to_remove.id.clone(), to_remove.clone(), |_, _| false, true)
-            .await
-            .unwrap();
-        cfg_inst_cache
-            .write(to_deploy.id.clone(), to_deploy.clone(), |_, _| false, true)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
-            .await
-            .unwrap();
-        let to_remove_data = json!({"speed": 4});
-        cfg_inst_content_cache
-            .write(
-                to_remove.id.clone(),
-                to_remove_data.clone(),
-                |_, _| false,
-                true,
-            )
+        let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
             .await
             .unwrap();
 
-        // deploy the config instance
-        let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([
-            (to_deploy.id.clone(), to_deploy.clone()),
-            (to_remove.id.clone(), to_remove.clone()),
-        ]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 2);
-        let actual_to_remove = result[&to_remove.id].clone();
-        let actual_to_deploy = result[&to_deploy.id].clone();
-
-        // define the expected instances
-        let expected_to_remove = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            ..to_remove
-        };
-
-        let expected_to_deploy = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            error_status: ErrorStatus::Retrying,
-            attempts: 1,
-            cooldown_ends_at: actual_to_deploy.cooldown_ends_at,
-            ..to_deploy
-        };
-        let cooldown = calc_exp_backoff(
-            settings.exp_backoff_base_secs,
-            2,
-            expected_to_deploy.attempts,
-            settings.max_cooldown_secs,
-        );
-        let approx_cooldown_ends_at = Utc::now() + TimeDelta::seconds(cooldown as i64);
-        assert!(expected_to_deploy.cooldown_ends_at <= approx_cooldown_ends_at);
-        assert!(
-            expected_to_deploy.cooldown_ends_at >= approx_cooldown_ends_at - TimeDelta::seconds(1)
-        );
-
-        // check that the returned instances' states were correctly updated
-        assert_eq!(expected_to_remove, actual_to_remove);
-        assert_eq!(expected_to_deploy, actual_to_deploy);
-    }
-
-    #[tokio::test]
-    async fn rollback_1_deploy_failed_same_config_schema() {
-        // define the instances with DIFFERENT config schemas but the same filepath
-        let filepath = "/test/filepath".to_string();
-        let to_deploy = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Deployed,
-            activity_status: ActivityStatus::Queued,
-            ..Default::default()
-        };
-        let to_remove = ConfigInstance {
-            config_schema_id: to_deploy.config_schema_id.clone(),
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Removed,
-            activity_status: ActivityStatus::Deployed,
-            ..Default::default()
-        };
-
-        // create the cache but omit the config instance content
-        let dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
-            .await
-            .unwrap();
-        cfg_inst_cache
-            .write(to_remove.id.clone(), to_remove.clone(), |_, _| false, true)
-            .await
-            .unwrap();
-        cfg_inst_cache
-            .write(to_deploy.id.clone(), to_deploy.clone(), |_, _| false, true)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
-            .await
-            .unwrap();
-        let to_remove_data = json!({"speed": 4});
-        cfg_inst_content_cache
-            .write(
-                to_remove.id.clone(),
-                to_remove_data.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        // deploy the config instance
-        let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([
-            (to_deploy.id.clone(), to_deploy.clone()),
-            (to_remove.id.clone(), to_remove.clone()),
-        ]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 2);
-        let actual_to_remove = result[&to_remove.id].clone();
-        let actual_to_deploy = result[&to_deploy.id].clone();
-
-        // define the expected instances
-        let expected_to_deploy = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            error_status: ErrorStatus::Retrying,
-            attempts: 1,
-            cooldown_ends_at: actual_to_deploy.cooldown_ends_at,
-            ..to_deploy
-        };
-        let cooldown = calc_exp_backoff(
-            settings.exp_backoff_base_secs,
-            2,
-            expected_to_deploy.attempts,
-            settings.max_cooldown_secs,
-        );
-        let approx_cooldown_ends_at = Utc::now() + TimeDelta::seconds(cooldown as i64);
-        assert!(expected_to_deploy.cooldown_ends_at <= approx_cooldown_ends_at);
-        assert!(
-            expected_to_deploy.cooldown_ends_at >= approx_cooldown_ends_at - TimeDelta::seconds(1)
-        );
-
-        let expected_to_remove = ConfigInstance {
-            activity_status: ActivityStatus::Deployed,
-            cooldown_ends_at: actual_to_remove.cooldown_ends_at,
-            ..to_remove
-        };
-
-        // check that the returned instances' states were correctly updated
-        assert_eq!(expected_to_remove, actual_to_remove);
-        assert_eq!(expected_to_deploy, actual_to_deploy);
-    }
-
-    #[tokio::test]
-    async fn replace_1() {
-        // define the instances with DIFFERENT config schemas but the same filepath
-        let filepath = "/test/filepath".to_string();
-        let to_deploy = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Deployed,
-            activity_status: ActivityStatus::Queued,
-            ..Default::default()
-        };
-        let to_remove = ConfigInstance {
-            config_schema_id: to_deploy.config_schema_id.clone(),
-            relative_filepath: filepath.clone(),
-            target_status: TargetStatus::Removed,
-            activity_status: ActivityStatus::Deployed,
-            ..Default::default()
-        };
-
-        // create the cache but omit the config instance content
-        let dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let (cfg_inst_cache, _) = ConfigInstanceCache::spawn(16, dir.file("metadata.json"), 1000)
-            .await
-            .unwrap();
-        cfg_inst_cache
-            .write(to_remove.id.clone(), to_remove.clone(), |_, _| false, true)
-            .await
-            .unwrap();
-        cfg_inst_cache
-            .write(to_deploy.id.clone(), to_deploy.clone(), |_, _| false, true)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) = ConfigInstanceContentCache::spawn(16, dir.clone(), 1000)
-            .await
-            .unwrap();
-        let to_remove_data = json!({"speed": 4});
-        cfg_inst_content_cache
-            .write(
-                to_remove.id.clone(),
-                to_remove_data.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-        let to_deploy_data = json!({"speed": 5});
-        cfg_inst_content_cache
-            .write(
-                to_deploy.id.clone(),
-                to_deploy_data.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        // deploy the config instance
-        let settings = Settings::default();
-        let cfg_insts_to_apply = HashMap::from([
-            (to_deploy.id.clone(), to_deploy.clone()),
-            (to_remove.id.clone(), to_remove.clone()),
-        ]);
-        let result = apply(
-            cfg_insts_to_apply,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
-            &dir,
-            &settings,
-        )
-        .await
-        .unwrap();
-        assert_eq!(result.len(), 2);
-        let actual_to_remove = result[&to_remove.id].clone();
-        let actual_to_deploy = result[&to_deploy.id].clone();
-
-        // define the expected instances
-        let expected_to_remove = ConfigInstance {
-            activity_status: ActivityStatus::Removed,
-            ..to_remove
-        };
-        let expected_to_deploy = ConfigInstance {
-            activity_status: ActivityStatus::Deployed,
-            ..to_deploy
-        };
-
-        // check that the returned instances' states were correctly updated
-        assert_eq!(expected_to_remove, actual_to_remove);
-        assert_eq!(expected_to_deploy, actual_to_deploy);
-    }
-}
-
-pub mod find_instances_to_replace_func {
-    use super::*;
-
-    #[tokio::test]
-    async fn no_matches() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            relative_filepath: "/test/filepath".to_string(),
-            ..Default::default()
-        };
-
-        // create a bunch of instances with that don't match
-        for i in 0..10 {
-            let cfg_inst = ConfigInstance {
-                relative_filepath: format!("/test/filepath{i}"),
-                activity_status: ActivityStatus::Deployed,
-                target_status: TargetStatus::Removed,
-                ..Default::default()
-            };
-            cache
-                .write(cfg_inst.id.clone(), cfg_inst, |_, _| false, true)
-                .await
-                .unwrap();
-        }
-        let result = find_instances_to_replace(&cfg_inst, &cache).await.unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn one_file_path_match() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let filepath = "/test/filepath".to_string();
-        let cfg_inst = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let to_replace = ConfigInstance {
-            relative_filepath: filepath.clone(),
-            activity_status: ActivityStatus::Deployed,
-            target_status: TargetStatus::Removed,
-            ..Default::default()
-        };
-        cache
-            .write(
-                to_replace.id.clone(),
-                to_replace.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        let result = find_instances_to_replace(&cfg_inst, &cache).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], to_replace);
-    }
-
-    #[tokio::test]
-    async fn one_config_schema_match() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let to_replace = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Deployed,
-            target_status: TargetStatus::Removed,
-            ..Default::default()
-        };
-        cache
-            .write(
-                to_replace.id.clone(),
-                to_replace.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        let result = find_instances_to_replace(&cfg_inst, &cache).await.unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], to_replace);
-    }
-
-    #[tokio::test]
-    async fn multiple_matches() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            relative_filepath: "/test/filepath".to_string(),
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let filepath_to_replace = ConfigInstance {
-            relative_filepath: cfg_inst.relative_filepath.clone(),
-            activity_status: ActivityStatus::Deployed,
-            target_status: TargetStatus::Removed,
-            ..Default::default()
-        };
-        cache
-            .write(
-                filepath_to_replace.id.clone(),
-                filepath_to_replace.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-        let schema_to_replace = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Deployed,
-            target_status: TargetStatus::Removed,
-            ..Default::default()
-        };
-        cache
-            .write(
-                schema_to_replace.id.clone(),
-                schema_to_replace.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        let result = find_instances_to_replace(&cfg_inst, &cache).await.unwrap();
-        assert_eq!(result.len(), 2);
-        assert!(result.contains(&schema_to_replace));
-        assert!(result.contains(&filepath_to_replace));
-    }
-
-    #[tokio::test]
-    async fn conflicting_target_status() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let to_replace = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Deployed,
-            target_status: TargetStatus::Deployed,
-            ..Default::default()
-        };
-        cache
-            .write(
-                to_replace.id.clone(),
-                to_replace.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        let error = find_instances_to_replace(&cfg_inst, &cache)
-            .await
-            .unwrap_err();
-        assert!(matches!(error, DeployErr::ConflictingDeploymentsErr(_)));
-    }
-}
-
-pub mod find_replacement_func {
-    use super::*;
-
-    #[tokio::test]
-    async fn no_matches() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            ..Default::default()
-        };
-
-        // create a bunch of instances with that don't match
-        for _ in 0..10 {
-            let cfg_inst = ConfigInstance {
-                activity_status: ActivityStatus::Queued,
-                target_status: TargetStatus::Deployed,
-                ..Default::default()
-            };
-            cache
-                .write(cfg_inst.id.clone(), cfg_inst, |_, _| false, true)
-                .await
-                .unwrap();
-        }
-
-        let result = find_replacement(&cfg_inst, &cache).await.unwrap();
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn one_match_no_cooldown() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let replacement = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Queued,
-            target_status: TargetStatus::Deployed,
-            ..Default::default()
-        };
-        cache
-            .write(
-                replacement.id.clone(),
-                replacement.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        // find the replacement
-        let result = find_replacement(&cfg_inst, &cache).await.unwrap();
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), replacement);
-    }
-
-    #[tokio::test]
-    async fn one_match_in_cooldown() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let replacement = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Queued,
-            target_status: TargetStatus::Deployed,
-            cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-            ..Default::default()
-        };
-        cache
-            .write(
-                replacement.id.clone(),
-                replacement.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        // find the replacement
-        let result = find_replacement(&cfg_inst, &cache).await.unwrap();
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), replacement);
-    }
-
-    #[tokio::test]
-    async fn multiple_matches_no_cooldown() {
-        let dir = Dir::create_temp_dir("apply").await.unwrap();
-        let (cache, _) = FileCache::spawn(16, dir.file("cache.json"), 1000)
-            .await
-            .unwrap();
-
-        let cfg_inst = ConfigInstance {
-            ..Default::default()
-        };
-
-        // create a valid replacement config instance
-        let replacement1 = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Queued,
-            target_status: TargetStatus::Deployed,
-            cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-            ..Default::default()
-        };
-        cache
-            .write(
-                replacement1.id.clone(),
-                replacement1.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-        let replacement2 = ConfigInstance {
-            config_schema_id: cfg_inst.config_schema_id.clone(),
-            activity_status: ActivityStatus::Queued,
-            target_status: TargetStatus::Deployed,
-            cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-            ..Default::default()
-        };
-        cache
-            .write(
-                replacement2.id.clone(),
-                replacement2.clone(),
-                |_, _| false,
-                true,
-            )
-            .await
-            .unwrap();
-
-        // find the replacement
-        find_replacement(&cfg_inst, &cache).await.unwrap_err();
+        // check that the deployment's activity status was updated to Archived
+        assert_eq!(result.activity_status, DeploymentActivityStatus::Archived);
+        assert_eq!(result.id, deployment.id);
     }
 }

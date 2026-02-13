@@ -4,7 +4,6 @@ use openapi_client::models::Release as BackendRelease;
 
 // external crates
 use chrono::{DateTime, Utc};
-use serde_json::json;
 
 #[test]
 fn release_from_backend() {
@@ -42,7 +41,11 @@ fn release_serialize_deserialize() {
     assert_eq!(deserialized.id, release.id);
     assert_eq!(deserialized.version, release.version);
     // DateTime comparison with small tolerance
-    let time_diff = (deserialized.created_at - release.created_at).num_seconds().abs();
-    assert!(time_diff < 1, "Time difference should be less than 1 second");
+    let time_diff = (deserialized.created_at - release.created_at)
+        .num_seconds()
+        .abs();
+    assert!(
+        time_diff < 1,
+        "Time difference should be less than 1 second"
+    );
 }
-

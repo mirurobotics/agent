@@ -4,7 +4,6 @@ use openapi_client::models::ConfigInstance as BackendConfigInstance;
 
 // external crates
 use chrono::{DateTime, Utc};
-use serde_json::json;
 
 #[test]
 fn config_instance_from_backend() {
@@ -47,11 +46,22 @@ fn config_instance_serialize_deserialize() {
     let deserialized: ConfigInstance = serde_json::from_str(&serialized).unwrap();
 
     assert_eq!(deserialized.id, config_instance.id);
-    assert_eq!(deserialized.config_type_name, config_instance.config_type_name);
+    assert_eq!(
+        deserialized.config_type_name,
+        config_instance.config_type_name
+    );
     assert_eq!(deserialized.filepath, config_instance.filepath);
-    assert_eq!(deserialized.config_schema_id, config_instance.config_schema_id);
+    assert_eq!(
+        deserialized.config_schema_id,
+        config_instance.config_schema_id
+    );
     assert_eq!(deserialized.config_type_id, config_instance.config_type_id);
     // DateTime comparison with small tolerance
-    let time_diff = (deserialized.created_at - config_instance.created_at).num_seconds().abs();
-    assert!(time_diff < 1, "Time difference should be less than 1 second");
+    let time_diff = (deserialized.created_at - config_instance.created_at)
+        .num_seconds()
+        .abs();
+    assert!(
+        time_diff < 1,
+        "Time difference should be less than 1 second"
+    );
 }

@@ -8,13 +8,13 @@ use miru_agent::models::deployment::{
 };
 use openapi_client::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendDeploymentActivityStatus,
-    DeploymentErrorStatus as BackendDeploymentErrorStatus, DeploymentStatus as BackendDeploymentStatus,
+    DeploymentErrorStatus as BackendDeploymentErrorStatus,
+    DeploymentStatus as BackendDeploymentStatus,
     DeploymentTargetStatus as BackendDeploymentTargetStatus,
 };
 
 // external crates
-use chrono::{DateTime, Utc};
-use serde_json::json;
+use chrono::Utc;
 
 #[test]
 fn serialize_deserialize_deployment_target_status() {
@@ -47,7 +47,9 @@ fn serialize_deserialize_deployment_target_status() {
         },
     ];
 
-    let mut variants = DeploymentTargetStatus::variants().into_iter().collect::<HashSet<_>>();
+    let mut variants = DeploymentTargetStatus::variants()
+        .into_iter()
+        .collect::<HashSet<_>>();
 
     for test_case in test_cases {
         variants.remove(&test_case.expected);
@@ -137,11 +139,14 @@ fn serialize_deserialize_deployment_activity_status() {
         },
     ];
 
-    let mut variants = DeploymentActivityStatus::variants().into_iter().collect::<HashSet<_>>();
+    let mut variants = DeploymentActivityStatus::variants()
+        .into_iter()
+        .collect::<HashSet<_>>();
 
     for test_case in test_cases {
         variants.remove(&test_case.expected);
-        let deserialized = serde_json::from_str::<DeploymentActivityStatus>(test_case.input).unwrap();
+        let deserialized =
+            serde_json::from_str::<DeploymentActivityStatus>(test_case.input).unwrap();
         assert_eq!(deserialized, test_case.expected);
         if test_case.valid {
             let serialized = serde_json::to_string(&test_case.expected).unwrap();
@@ -225,7 +230,9 @@ fn serialize_deserialize_deployment_error_status() {
         },
     ];
 
-    let mut variants = DeploymentErrorStatus::variants().into_iter().collect::<HashSet<_>>();
+    let mut variants = DeploymentErrorStatus::variants()
+        .into_iter()
+        .collect::<HashSet<_>>();
 
     for test_case in test_cases {
         variants.remove(&test_case.expected);
@@ -325,7 +332,9 @@ fn serialize_deserialize_deployment_status() {
         },
     ];
 
-    let mut variants = DeploymentStatus::variants().into_iter().collect::<HashSet<_>>();
+    let mut variants = DeploymentStatus::variants()
+        .into_iter()
+        .collect::<HashSet<_>>();
 
     for test_case in test_cases {
         variants.remove(&test_case.expected);
@@ -476,8 +485,6 @@ fn deployment_from_backend() {
     assert_eq!(deployment.target_status, DeploymentTargetStatus::Staged);
     assert_eq!(deployment.device_id, "device_123");
     assert_eq!(deployment.release_id, "rel_123");
-    assert_eq!(deployment.release, None);
-    assert_eq!(deployment.config_instances, None);
 }
 
 #[test]
@@ -496,4 +503,3 @@ fn deployment_status_method() {
     };
     assert_eq!(deployment.status(), DeploymentStatus::Retrying);
 }
-

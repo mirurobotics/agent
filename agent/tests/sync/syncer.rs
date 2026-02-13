@@ -14,9 +14,10 @@ use miru_agent::http::{
     client::HTTPClient,
     errors::{HTTPErr, MockErr},
 };
-use miru_agent::models::{config_instance::ActivityStatus, device::Device};
+use miru_agent::models::device::Device;
 use miru_agent::storage::{
     config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
+    deployments::DeploymentCache,
     device::DeviceFile,
 };
 use miru_agent::sync::{
@@ -112,6 +113,10 @@ pub mod shutdown {
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
+                .await
+                .unwrap();
         let (device_file, _) =
             DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
@@ -127,7 +132,9 @@ pub mod shutdown {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir,
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options: CooldownOptions::default(),
                 agent_version: Device::default().agent_version,
@@ -159,6 +166,10 @@ pub mod subscribe {
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
+                .await
+                .unwrap();
         let (device_file, _) =
             DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
@@ -177,7 +188,9 @@ pub mod subscribe {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -229,12 +242,12 @@ pub mod subscribe {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
-        http_client.set_list_all_config_instances(|| {
+        http_client.deployments_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: true,
             })))
         });
-        http_client.set_update_config_instance(|| {
+        http_client.deployments_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: true,
             })))
@@ -247,6 +260,10 @@ pub mod subscribe {
                 .unwrap();
         let (cfg_inst_content_cache, _) =
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+                .await
+                .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
                 .await
                 .unwrap();
         let (device_file, _) =
@@ -267,7 +284,9 @@ pub mod subscribe {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -325,25 +344,46 @@ pub mod sync {
     use super::*;
 
     #[tokio::test]
-    async fn config_instances() {
+    async fn deployments() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
         let auth_client = Arc::new(MockDevicesClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
-        // define the new config instance
-        let id = "new_instance".to_string();
-        let new_instance_data = serde_json::json!({"id": id});
-        let new_instance = openapi_client::models::ConfigInstance {
-            id: id.clone(),
-            target_status: openapi_client::models::ConfigInstanceTargetStatus::CONFIG_INSTANCE_TARGET_STATUS_DEPLOYED,
-            activity_status: openapi_client::models::ConfigInstanceActivityStatus::CONFIG_INSTANCE_ACTIVITY_STATUS_QUEUED,
-            content: Some(new_instance_data.clone()),
-            relative_filepath: "/test/filepath".to_string(),
-            ..Default::default()
+        // define a backend deployment with an embedded config instance
+        let backend_dep = openapi_client::models::Deployment {
+            object: openapi_client::models::deployment::Object::Deployment,
+            id: "dpl_1".to_string(),
+            description: "test".to_string(),
+            status: openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+            activity_status:
+                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
+            error_status:
+                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+            target_status:
+                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+            device_id: "dev_1".to_string(),
+            release_id: "rls_1".to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            release: None,
+            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+                object: openapi_client::models::config_instance::Object::ConfigInstance,
+                id: "ci_1".to_string(),
+                config_type_name: "test_type".to_string(),
+                filepath: "test/config.json".to_string(),
+                created_at: "2024-01-01T00:00:00Z".to_string(),
+                config_schema_id: "schema_1".to_string(),
+                config_type_id: "ct_1".to_string(),
+                config_type: None,
+                content: Some(serde_json::json!({"key": "value"})),
+            }]),
         };
+
         let http_client = Arc::new(MockClient::default());
-        let new_instance_cloned = new_instance.clone();
-        http_client.set_list_all_config_instances(move || Ok(vec![new_instance_cloned.clone()]));
+        let backend_dep_cloned = backend_dep.clone();
+        http_client
+            .deployments_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
 
         // create the caches
         let (cfg_inst_cache, _) =
@@ -354,8 +394,13 @@ pub mod sync {
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
+                .await
+                .unwrap();
         let cfg_inst_cache = Arc::new(cfg_inst_cache);
         let cfg_inst_content_cache = Arc::new(cfg_inst_content_cache);
+        let deployment_cache = Arc::new(deployment_cache);
         let (device_file, _) =
             DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
@@ -374,7 +419,9 @@ pub mod sync {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: cfg_inst_cache.clone(),
                 cfg_inst_content_cache: cfg_inst_content_cache.clone(),
-                deployment_dir: dir.clone(),
+                deployment_cache: deployment_cache.clone(),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -386,17 +433,29 @@ pub mod sync {
         syncer.sync().await.unwrap();
         let after = Utc::now();
 
-        // check the metadata cache has the new config instance
-        let cache_cfg_inst = cfg_inst_cache.read(id.clone()).await.unwrap();
-        assert_eq!(cache_cfg_inst.activity_status, ActivityStatus::Deployed);
+        // check the deployment cache has the new deployment
+        let cached_dep = deployment_cache
+            .read_optional("dpl_1".to_string())
+            .await
+            .unwrap();
+        assert!(cached_dep.is_some(), "deployment should be cached");
 
-        // check the content cache has the new config instance content
-        let cache_cfg_inst_content = cfg_inst_content_cache.read(id.clone()).await.unwrap();
-        assert_eq!(cache_cfg_inst_content, new_instance_data);
+        // check the config instance metadata cache
+        let ci = cfg_inst_cache
+            .read_optional("ci_1".to_string())
+            .await
+            .unwrap();
+        assert!(ci.is_some(), "config instance should be cached");
 
-        // check that the metadata cache isn't dirty
-        let unsynced_entries = cfg_inst_cache.get_dirty_entries().await.unwrap();
-        assert_eq!(unsynced_entries.len(), 0);
+        // check the content cache has the config instance content
+        let content = cfg_inst_content_cache
+            .read_optional("ci_1".to_string())
+            .await
+            .unwrap();
+        assert!(
+            content.is_some(),
+            "config instance content should be cached"
+        );
 
         // check the sync state
         let state = syncer.get_sync_state().await.unwrap();
@@ -420,7 +479,6 @@ pub mod sync {
         let auth_client = Arc::new(MockDevicesClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
-        // define the new config instance
         let http_client = Arc::new(MockClient::default());
 
         // create the caches
@@ -430,6 +488,10 @@ pub mod sync {
                 .unwrap();
         let (cfg_inst_content_cache, _) =
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+                .await
+                .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
                 .await
                 .unwrap();
         let cfg_inst_cache = Arc::new(cfg_inst_cache);
@@ -454,7 +516,9 @@ pub mod sync {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: cfg_inst_cache.clone(),
                 cfg_inst_content_cache: cfg_inst_content_cache.clone(),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: new_agent_version.clone(),
@@ -493,12 +557,12 @@ pub mod sync {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
-        http_client.set_list_all_config_instances(|| {
+        http_client.deployments_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: true,
             })))
         });
-        http_client.set_update_config_instance(|| {
+        http_client.deployments_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: true,
             })))
@@ -511,6 +575,10 @@ pub mod sync {
                 .unwrap();
         let (cfg_inst_content_cache, _) =
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+                .await
+                .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
                 .await
                 .unwrap();
         let (device_file, _) =
@@ -531,7 +599,9 @@ pub mod sync {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -585,12 +655,12 @@ pub mod sync {
         // all errors need to be a network connection error for the syncer to return a
         // network connection error so only set one false to test this
         let http_client = Arc::new(MockClient::default());
-        http_client.set_list_all_config_instances(|| {
+        http_client.deployments_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: false,
             })))
         });
-        http_client.set_update_config_instance(|| {
+        http_client.deployments_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: false,
             })))
@@ -603,6 +673,10 @@ pub mod sync {
                 .unwrap();
         let (cfg_inst_content_cache, _) =
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+                .await
+                .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
                 .await
                 .unwrap();
         let (device_file, _) =
@@ -623,7 +697,9 @@ pub mod sync {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -681,12 +757,12 @@ pub mod sync {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
-        http_client.set_list_all_config_instances(|| {
+        http_client.deployments_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: false,
             })))
         });
-        http_client.set_update_config_instance(|| {
+        http_client.deployments_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: false,
             })))
@@ -699,6 +775,10 @@ pub mod sync {
                 .unwrap();
         let (cfg_inst_content_cache, _) =
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+                .await
+                .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
                 .await
                 .unwrap();
         let (device_file, _) =
@@ -719,7 +799,9 @@ pub mod sync {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -771,18 +853,18 @@ pub mod sync {
         }
 
         // set the http client to return a network connection error
-        http_client.set_list_all_config_instances(|| {
+        http_client.deployments_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: true,
             })))
         });
-        http_client.set_update_config_instance(|| {
+        http_client.deployments_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(Box::new(MockErr {
                 is_network_connection_error: true,
             })))
         });
 
-        // non-network connection errors
+        // network connection errors
         let cur_err_streak = 10;
         let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
         for _ in 0..10 {
@@ -817,12 +899,12 @@ pub mod sync {
         }
 
         // set the http client to not return an error
-        http_client.set_list_all_config_instances(|| Ok(vec![]));
-        http_client.set_update_config_instance(|| {
-            Ok(openapi_client::models::ConfigInstance {
-                ..Default::default()
-            })
-        });
+        http_client
+            .deployments_client
+            .set_list_all_deployments(|| Ok(vec![]));
+        http_client
+            .deployments_client
+            .set_update_deployment(|| Ok(openapi_client::models::Deployment::default()));
 
         // recovery
         let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
@@ -876,6 +958,10 @@ pub mod sync {
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
+                .await
+                .unwrap();
         let (device_file, _) =
             DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
@@ -894,7 +980,9 @@ pub mod sync {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
@@ -938,6 +1026,10 @@ pub mod sync_if_not_in_cooldown {
             ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
+        let (deployment_cache, _) =
+            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
+                .await
+                .unwrap();
         let (device_file, _) =
             DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
@@ -956,7 +1048,9 @@ pub mod sync_if_not_in_cooldown {
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
                 cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_dir: dir.clone(),
+                deployment_cache: Arc::new(deployment_cache),
+                deployment_dir: dir.subdir("deployments"),
+                staging_dir: dir.subdir("staging"),
                 fsm_settings: fsm::Settings::default(),
                 cooldown_options,
                 agent_version: Device::default().agent_version,
