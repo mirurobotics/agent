@@ -52,10 +52,10 @@ pub fn decode_bytes(
     method: base64::engine::general_purpose::GeneralPurpose,
 ) -> Result<Vec<u8>, CryptErr> {
     method.decode(token.as_bytes()).map_err(|e| {
-        CryptErr::Base64DecodeErr(Box::new(Base64DecodeErr {
+        CryptErr::Base64DecodeErr(Base64DecodeErr {
             source: e,
             trace: trace!(),
-        }))
+        })
     })
 }
 
@@ -77,10 +77,10 @@ pub fn decode_string(
 ) -> Result<String, CryptErr> {
     let bytes = decode_bytes(token, method)?;
     let string = String::from_utf8(bytes).map_err(|e| {
-        CryptErr::ConvertBytesToStringErr(Box::new(ConvertBytesToStringErr {
+        CryptErr::ConvertBytesToStringErr(ConvertBytesToStringErr {
             source: e,
             trace: trace!(),
-        }))
+        })
     })?;
     Ok(string)
 }

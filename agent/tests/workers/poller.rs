@@ -75,9 +75,9 @@ pub mod run {
         // these sleeps should still wait for the polling interval starting from the
         // last sync attempt since errors are logged & ignored
         syncer.set_sync(|| {
-            Err(SyncErr::MockErr(Box::new(SyncMockErr {
+            Err(SyncErr::MockErr(SyncMockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
         for i in 0..10 {
             sleep_ctrl.await_sleep().await;
@@ -89,9 +89,9 @@ pub mod run {
         }
 
         syncer.set_sync(|| {
-            Err(SyncErr::MockErr(Box::new(SyncMockErr {
+            Err(SyncErr::MockErr(SyncMockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
         for i in 0..10 {
             sleep_ctrl.await_sleep().await;
@@ -159,9 +159,9 @@ pub mod run {
         // these sleeps should still wait for the syncer cooldown to end since errors
         // are logged & ignored
         syncer.set_sync(|| {
-            Err(SyncErr::MockErr(Box::new(SyncMockErr {
+            Err(SyncErr::MockErr(SyncMockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
         for _ in 0..10 {
             sleep_ctrl.await_sleep().await;
@@ -173,9 +173,9 @@ pub mod run {
         }
 
         syncer.set_sync(|| {
-            Err(SyncErr::MockErr(Box::new(SyncMockErr {
+            Err(SyncErr::MockErr(SyncMockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
         for _ in 0..10 {
             sleep_ctrl.await_sleep().await;

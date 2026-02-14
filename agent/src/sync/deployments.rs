@@ -47,13 +47,7 @@ pub async fn sync<HTTPClientT: DeploymentsExt>(
     debug!("Reading deployments which need to be applied");
     let deployments_to_apply = deployment_cache
         .find_where(|deployment| fsm::is_action_required(fsm::next_action(deployment, true)))
-        .await
-        .map_err(|e| {
-            SyncErr::CrudErr(Box::new(SyncCrudErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        .await?;
 
     // apply each deployment
     for deployment in deployments_to_apply {
@@ -64,10 +58,7 @@ pub async fn sync<HTTPClientT: DeploymentsExt>(
             }
             Err(e) => {
                 error!("Error applying deployment {}: {:?}", deployment.id, e);
-                errors.push(SyncErr::DeployErr(Box::new(SyncDeployErr {
-                    source: e,
-                    trace: trace!(),
-                })));
+                errors.push(SyncErr::from(e));
             }
         }
     }
@@ -85,10 +76,10 @@ pub async fn sync<HTTPClientT: DeploymentsExt>(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(SyncErr::SyncErrors(Box::new(SyncErrors {
-            source: errors,
+        Err(SyncErr::SyncErrors(SyncErrors {
+            errors,
             trace: trace!(),
-        })))
+        }))
     }
 }
 
@@ -153,13 +144,7 @@ async fn pull<HTTPClientT: DeploymentsExt>(
         // Check if we already have this deployment cached
         let existing = deployment_cache
             .read_optional(deployment_id.clone())
-            .await
-            .map_err(|e| {
-                SyncErr::CrudErr(Box::new(SyncCrudErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+            .await?;
 
         // Merge: preserve agent-side fields (attempts, cooldown) from cached version
         let merged = match existing {
@@ -208,12 +193,7 @@ async fn fetch_active_deployments<HTTPClientT: DeploymentsExt>(
     http_client
         .list_all_deployments(activity_status_filter, expansions, token)
         .await
-        .map_err(|e| {
-            SyncErr::HTTPClientErr(Box::new(SyncHTTPClientErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })
+        .map_err(SyncErr::from)
 }
 
 // =================================== PUSH ======================================== //
@@ -223,12 +203,7 @@ async fn push<HTTPClientT: DeploymentsExt>(
     token: &str,
 ) -> Result<(), SyncErr> {
     // get all dirty (unsynced) deployments
-    let dirty_deployments = deployment_cache.get_dirty_entries().await.map_err(|e| {
-        SyncErr::CacheErr(Box::new(SyncCacheErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    let dirty_deployments = deployment_cache.get_dirty_entries().await?;
     debug!(
         "Found {} dirty deployments to push",
         dirty_deployments.len(),
@@ -265,12 +240,7 @@ async fn push<HTTPClientT: DeploymentsExt>(
                 token,
             )
             .await
-            .map_err(|e| {
-                SyncErr::HTTPClientErr(Box::new(SyncHTTPClientErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })
+            .map_err(SyncErr::from)
         {
             error!(
                 "Failed to push deployment {} to backend: {}",
@@ -285,12 +255,7 @@ async fn push<HTTPClientT: DeploymentsExt>(
         if let Err(e) = deployment_cache
             .write(deployment.id.clone(), deployment, |_, _| false, true)
             .await
-            .map_err(|e| {
-                SyncErr::CacheErr(Box::new(SyncCacheErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })
+            .map_err(SyncErr::from)
         {
             error!(
                 "Failed to update cache for deployment {} after push: {}",
@@ -303,9 +268,9 @@ async fn push<HTTPClientT: DeploymentsExt>(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(SyncErr::SyncErrors(Box::new(SyncErrors {
-            source: errors,
+        Err(SyncErr::SyncErrors(SyncErrors {
+            errors,
             trace: trace!(),
-        })))
+        }))
     }
 }

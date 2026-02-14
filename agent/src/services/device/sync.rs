@@ -1,6 +1,5 @@
 // internal crates
 use crate::sync::{errors::*, syncer::SyncerExt};
-use crate::trace;
 use crate::{errors::Error, services::errors::*};
 use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
 
@@ -9,12 +8,7 @@ pub async fn sync_device<SyncerT: SyncerExt>(
 ) -> Result<SyncDeviceResponse, ServiceErr> {
     match syncer.sync().await {
         Ok(()) => {
-            let sync_state = syncer.get_sync_state().await.map_err(|e| {
-                ServiceErr::SyncErr(Box::new(ServiceSyncErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+            let sync_state = syncer.get_sync_state().await?;
             Ok(SyncDeviceResponse {
                 code: SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
                 message: "successfully synced".to_string(),
@@ -30,18 +24,10 @@ pub async fn sync_device<SyncerT: SyncerExt>(
             } else if e.is_network_connection_error() {
                 SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR
             } else {
-                return Err(ServiceErr::SyncErr(Box::new(ServiceSyncErr {
-                    source: e,
-                    trace: trace!(),
-                })));
+                return Err(ServiceErr::from(e));
             };
 
-            let sync_state = syncer.get_sync_state().await.map_err(|e| {
-                ServiceErr::SyncErr(Box::new(ServiceSyncErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+            let sync_state = syncer.get_sync_state().await?;
 
             Ok(SyncDeviceResponse {
                 code,

@@ -6,7 +6,6 @@ use crate::models::device::DeviceStatus;
 use crate::server::errors::*;
 use crate::server::state::ServerState;
 use crate::services::device::{get, sync};
-use crate::trace;
 use crate::utils::version_info;
 use openapi_server::models as openapi;
 
@@ -39,12 +38,7 @@ pub async fn version() -> impl IntoResponse {
 // ================================= DEVICE ======================================== //
 pub async fn get_device(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let service = async move {
-        let device = get::get_device(&state.device_file).await.map_err(|e| {
-            ServerErr::ServiceErr(Box::new(ServerServiceErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        let device = get::get_device(&state.device_file).await?;
         Ok::<openapi_server::models::Device, ServerErr>(openapi_server::models::Device {
             object: openapi_server::models::device::Object::Device,
             id: device.id.clone(),
@@ -67,12 +61,7 @@ pub async fn get_device(State(state): State<Arc<ServerState>>) -> impl IntoRespo
 
 pub async fn sync_device(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let service = async move {
-        sync::sync_device(state.syncer.as_ref()).await.map_err(|e| {
-            ServerErr::ServiceErr(Box::new(ServerServiceErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })
+        sync::sync_device(state.syncer.as_ref()).await
     };
 
     match service.await {

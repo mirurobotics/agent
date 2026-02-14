@@ -7,7 +7,6 @@ use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceConten
 use crate::storage::deployments::DeploymentCache;
 use crate::storage::errors::*;
 use crate::storage::layout::StorageLayout;
-use crate::trace;
 
 #[derive(Copy, Clone, Debug)]
 pub struct CacheCapacities {
@@ -41,13 +40,7 @@ impl Caches {
         // config instance
         let (cfg_inst_cache, cfg_inst_cache_handle) =
             ConfigInstanceCache::spawn(64, layout.config_instance_cache(), capacities.cfg_inst)
-                .await
-                .map_err(|e| {
-                    StorageErr::CacheErr(Box::new(StorageCacheErr {
-                        source: e,
-                        trace: trace!(),
-                    }))
-                })?;
+                .await?;
         let cfg_inst_cache = Arc::new(cfg_inst_cache);
 
         // config instance content
@@ -57,25 +50,12 @@ impl Caches {
                 layout.config_instance_content_cache(),
                 capacities.cfg_inst_content,
             )
-            .await
-            .map_err(|e| {
-                StorageErr::CacheErr(Box::new(StorageCacheErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+            .await?;
         let cfg_inst_content_cache = Arc::new(cfg_inst_content_cache);
 
         // deployment
         let (deployment_cache, deployment_cache_handle) =
-            DeploymentCache::spawn(64, layout.deployment_cache(), capacities.deployment)
-                .await
-                .map_err(|e| {
-                    StorageErr::CacheErr(Box::new(StorageCacheErr {
-                        source: e,
-                        trace: trace!(),
-                    }))
-                })?;
+            DeploymentCache::spawn(64, layout.deployment_cache(), capacities.deployment).await?;
         let deployment_cache = Arc::new(deployment_cache);
 
         // return the shutdown handler
@@ -100,24 +80,9 @@ impl Caches {
     }
 
     pub async fn shutdown(&self) -> Result<(), StorageErr> {
-        self.cfg_inst.shutdown().await.map_err(|e| {
-            StorageErr::CacheErr(Box::new(StorageCacheErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
-        self.cfg_inst_content.shutdown().await.map_err(|e| {
-            StorageErr::CacheErr(Box::new(StorageCacheErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
-        self.deployment.shutdown().await.map_err(|e| {
-            StorageErr::CacheErr(Box::new(StorageCacheErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        self.cfg_inst.shutdown().await?;
+        self.cfg_inst_content.shutdown().await?;
+        self.deployment.shutdown().await?;
 
         Ok(())
     }

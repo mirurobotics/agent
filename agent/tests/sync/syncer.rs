@@ -243,14 +243,14 @@ pub mod subscribe {
 
         let http_client = Arc::new(MockClient::default());
         http_client.deployments_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
         http_client.deployments_client.set_update_deployment(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
 
         // create the caches
@@ -558,14 +558,14 @@ pub mod sync {
 
         let http_client = Arc::new(MockClient::default());
         http_client.deployments_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
         http_client.deployments_client.set_update_deployment(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
 
         // create the caches
@@ -656,14 +656,14 @@ pub mod sync {
         // network connection error so only set one false to test this
         let http_client = Arc::new(MockClient::default());
         http_client.deployments_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
         http_client.deployments_client.set_update_deployment(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
 
         // create the caches
@@ -758,14 +758,14 @@ pub mod sync {
 
         let http_client = Arc::new(MockClient::default());
         http_client.deployments_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
         http_client.deployments_client.set_update_deployment(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
 
         // create the caches
@@ -854,14 +854,14 @@ pub mod sync {
 
         // set the http client to return a network connection error
         http_client.deployments_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
         http_client.deployments_client.set_update_deployment(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
 
         // network connection errors

@@ -1,365 +1,72 @@
-// standard crates
-use std::fmt;
-
-// internal crates
 use crate::authn::errors::AuthnErr;
 use crate::cache::errors::CacheErr;
 use crate::crud::errors::CrudErr;
 use crate::deploy::errors::DeployErr;
-use crate::errors::{Code, HTTPCode, Error, Trace};
+use crate::errors::Trace;
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 use crate::storage::errors::StorageErr;
 
-// external crates
 use chrono::{DateTime, Utc};
 
-#[derive(Debug)]
-pub struct SyncAuthnErr {
-    pub source: AuthnErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncAuthnErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncAuthnErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Auth error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncCacheErr {
-    pub source: CacheErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncCacheErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncCacheErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Cache error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncCrudErr {
-    pub source: CrudErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncCrudErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncCrudErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Crud error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncDeployErr {
-    pub source: DeployErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncDeployErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncDeployErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Deploy error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncHTTPClientErr {
-    pub source: HTTPErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncHTTPClientErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncHTTPClientErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "HTTP client error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncFileSysErr {
-    pub source: FileSysErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncFileSysErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncFileSysErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "file system error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncStorageErr {
-    pub source: StorageErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for SyncStorageErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for SyncStorageErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Storage error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Missing expanded config instances: expected ids: {expected_ids:?}, actual ids: {actual_ids:?}"
+)]
 pub struct MissingExpandedInstancesErr {
     pub expected_ids: Vec<String>,
     pub actual_ids: Vec<String>,
     pub trace: Box<Trace>,
 }
 
-impl Error for MissingExpandedInstancesErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for MissingExpandedInstancesErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for MissingExpandedInstancesErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Missing expanded config instances: expected ids: {:?}, actual ids: {:?}",
-            self.expected_ids, self.actual_ids
-        )
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct SyncErrors {
-    pub source: Vec<SyncErr>,
+    pub errors: Vec<SyncErr>,
     pub trace: Box<Trace>,
 }
 
-impl Error for SyncErrors {
-    fn code(&self) -> Code {
-        Code::InternalServerError
+impl std::fmt::Display for SyncErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Sync error: {:?}", self.errors)
     }
+}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
+impl crate::errors::Error for SyncErrors {
     fn is_network_connection_error(&self) -> bool {
         // is only a network connection error if all errors are network connection
         // errors
-        for err in self.source.iter() {
+        for err in self.errors.iter() {
             if !err.is_network_connection_error() {
                 return false;
             }
         }
         true
     }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
 }
 
-impl fmt::Display for SyncErrors {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Sync error: {:?}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Config instance content not found for config instance '{cfg_inst_id}'")]
 pub struct ConfigInstanceContentNotFoundErr {
     pub cfg_inst_id: String,
     pub trace: Box<Trace>,
 }
 
-impl Error for ConfigInstanceContentNotFoundErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for ConfigInstanceContentNotFoundErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Config instance content not found for config instance '{}'",
-            self.cfg_inst_id
-        )
-    }
-}
+impl crate::errors::Error for ConfigInstanceContentNotFoundErr {}
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct SyncerInCooldownErr {
     pub err_streak: u32,
     pub cooldown_ends_at: DateTime<Utc>,
     pub trace: Box<Trace>,
 }
 
-impl Error for SyncerInCooldownErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for SyncerInCooldownErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for SyncerInCooldownErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let err_streak = self.err_streak;
         let cooldown_secs = self
             .cooldown_ends_at
@@ -371,98 +78,107 @@ impl fmt::Display for SyncerInCooldownErr {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for SyncerInCooldownErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Mock error")]
 pub struct MockErr {
     pub is_network_connection_error: bool,
 }
 
-impl Error for MockErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
+impl crate::errors::Error for MockErr {
     fn is_network_connection_error(&self) -> bool {
         self.is_network_connection_error
     }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
 }
 
-impl fmt::Display for MockErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Mock error")
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SyncErr {
-    AuthnErr(Box<SyncAuthnErr>),
-    CacheErr(Box<SyncCacheErr>),
-    CrudErr(Box<SyncCrudErr>),
-    DeployErr(Box<SyncDeployErr>),
-    FileSysErr(Box<SyncFileSysErr>),
-    HTTPClientErr(Box<SyncHTTPClientErr>),
-    StorageErr(Box<SyncStorageErr>),
-    SyncErrors(Box<SyncErrors>),
-
-    MissingExpandedInstancesErr(Box<MissingExpandedInstancesErr>),
-    InCooldownErr(Box<SyncerInCooldownErr>),
-    ConfigInstanceContentNotFound(Box<ConfigInstanceContentNotFoundErr>),
-    SendActorMessageErr(Box<SendActorMessageErr>),
-    ReceiveActorMessageErr(Box<ReceiveActorMessageErr>),
-
-    MockErr(Box<MockErr>),
+    #[error(transparent)]
+    AuthnErr(AuthnErr),
+    #[error(transparent)]
+    CacheErr(CacheErr),
+    #[error(transparent)]
+    CrudErr(CrudErr),
+    #[error(transparent)]
+    DeployErr(Box<DeployErr>),
+    #[error(transparent)]
+    FileSysErr(FileSysErr),
+    #[error(transparent)]
+    HTTPClientErr(HTTPErr),
+    #[error(transparent)]
+    StorageErr(StorageErr),
+    #[error(transparent)]
+    SyncErrors(SyncErrors),
+    #[error(transparent)]
+    MissingExpandedInstancesErr(MissingExpandedInstancesErr),
+    #[error(transparent)]
+    InCooldownErr(SyncerInCooldownErr),
+    #[error(transparent)]
+    ConfigInstanceContentNotFound(ConfigInstanceContentNotFoundErr),
+    #[error(transparent)]
+    SendActorMessageErr(SendActorMessageErr),
+    #[error(transparent)]
+    ReceiveActorMessageErr(ReceiveActorMessageErr),
+    #[error(transparent)]
+    MockErr(MockErr),
 }
 
-macro_rules! forward_error_method {
-    ($self:ident, $method:ident $(, $arg:expr)?) => {
-        match $self {
-            SyncErr::AuthnErr(e) => e.$method($($arg)?),
-            SyncErr::CacheErr(e) => e.$method($($arg)?),
-            SyncErr::CrudErr(e) => e.$method($($arg)?),
-            SyncErr::DeployErr(e) => e.$method($($arg)?),
-            SyncErr::FileSysErr(e) => e.$method($($arg)?),
-            SyncErr::HTTPClientErr(e) => e.$method($($arg)?),
-            SyncErr::StorageErr(e) => e.$method($($arg)?),
-            SyncErr::SyncErrors(e) => e.$method($($arg)?),
-
-            SyncErr::MissingExpandedInstancesErr(e) => e.$method($($arg)?),
-            SyncErr::InCooldownErr(e) => e.$method($($arg)?),
-            SyncErr::ConfigInstanceContentNotFound(e) => e.$method($($arg)?),
-            SyncErr::SendActorMessageErr(e) => e.$method($($arg)?),
-            SyncErr::ReceiveActorMessageErr(e) => e.$method($($arg)?),
-
-            SyncErr::MockErr(e) => e.$method($($arg)?),
-        }
-    };
-}
-
-impl fmt::Display for SyncErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        forward_error_method!(self, fmt, f)
+impl From<AuthnErr> for SyncErr {
+    fn from(e: AuthnErr) -> Self {
+        Self::AuthnErr(e)
     }
 }
 
-impl Error for SyncErr {
-    fn code(&self) -> Code {
-        forward_error_method!(self, code)
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        forward_error_method!(self, http_status)
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        forward_error_method!(self, is_network_connection_error)
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        forward_error_method!(self, params)
+impl From<CacheErr> for SyncErr {
+    fn from(e: CacheErr) -> Self {
+        Self::CacheErr(e)
     }
 }
+
+impl From<CrudErr> for SyncErr {
+    fn from(e: CrudErr) -> Self {
+        Self::CrudErr(e)
+    }
+}
+
+impl From<DeployErr> for SyncErr {
+    fn from(e: DeployErr) -> Self {
+        Self::DeployErr(Box::new(e))
+    }
+}
+
+impl From<FileSysErr> for SyncErr {
+    fn from(e: FileSysErr) -> Self {
+        Self::FileSysErr(e)
+    }
+}
+
+impl From<HTTPErr> for SyncErr {
+    fn from(e: HTTPErr) -> Self {
+        Self::HTTPClientErr(e)
+    }
+}
+
+impl From<StorageErr> for SyncErr {
+    fn from(e: StorageErr) -> Self {
+        Self::StorageErr(e)
+    }
+}
+
+crate::impl_error!(SyncErr {
+    AuthnErr,
+    CacheErr,
+    CrudErr,
+    DeployErr,
+    FileSysErr,
+    HTTPClientErr,
+    StorageErr,
+    SyncErrors,
+    MissingExpandedInstancesErr,
+    InCooldownErr,
+    ConfigInstanceContentNotFound,
+    SendActorMessageErr,
+    ReceiveActorMessageErr,
+    MockErr,
+});

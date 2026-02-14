@@ -1,402 +1,138 @@
-// standard library
-use std::fmt;
-
-// internal crates
-use crate::errors::{Code, HTTPCode, Error, Trace};
+use crate::errors::Trace;
 use crate::filesys::errors::FileSysErr;
 
-// external crates
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid JWT: {msg}")]
 pub struct InvalidJWTErr {
     pub msg: String,
     pub trace: Box<Trace>,
 }
 
-impl Error for InvalidJWTErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for InvalidJWTErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for InvalidJWTErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid JWT: {}", self.msg)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid JWT payload format: {msg}")]
 pub struct InvalidJWTPayloadFormatErr {
     pub msg: String,
     pub trace: Box<Trace>,
 }
 
-impl Error for InvalidJWTPayloadFormatErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for InvalidJWTPayloadFormatErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for InvalidJWTPayloadFormatErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid JWT payload format: {}", self.msg)
-    }
-}
-
-#[derive(Debug)]
-pub struct CryptFileSysErr {
-    pub source: FileSysErr,
-    pub trace: Box<Trace>,
-}
-
-impl Error for CryptFileSysErr {
-    fn code(&self) -> Code {
-        self.source.code()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.source.http_status()
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.source.is_network_connection_error()
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.source.params()
-    }
-}
-
-impl fmt::Display for CryptFileSysErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "File system error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Base64 decode error: {source}")]
 pub struct Base64DecodeErr {
     pub source: base64::DecodeError,
     pub trace: Box<Trace>,
 }
 
-impl Error for Base64DecodeErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for Base64DecodeErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for Base64DecodeErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Base64 decode error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Convert bytes to string error: {source}")]
 pub struct ConvertBytesToStringErr {
     pub source: std::string::FromUtf8Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for ConvertBytesToStringErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for ConvertBytesToStringErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for ConvertBytesToStringErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Convert bytes to string error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Convert private key to PEM error: {source}")]
 pub struct ConvertPrivateKeyToPEMErr {
     pub source: openssl::error::ErrorStack,
     pub trace: Box<Trace>,
 }
 
-impl Error for ConvertPrivateKeyToPEMErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for ConvertPrivateKeyToPEMErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for ConvertPrivateKeyToPEMErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Convert private key to PEM error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Generate RSA key pair error: {source}")]
 pub struct GenerateRSAKeyPairErr {
     pub source: openssl::error::ErrorStack,
     pub trace: Box<Trace>,
 }
 
-impl Error for GenerateRSAKeyPairErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for GenerateRSAKeyPairErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for GenerateRSAKeyPairErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Generate RSA key pair error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Read key error: {source}")]
 pub struct ReadKeyErr {
     pub source: openssl::error::ErrorStack,
     pub trace: Box<Trace>,
 }
 
-impl Error for ReadKeyErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for ReadKeyErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for ReadKeyErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Read key error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("RSA to PKey error: {source}")]
 pub struct RSAToPKeyErr {
     pub source: openssl::error::ErrorStack,
     pub trace: Box<Trace>,
 }
 
-impl Error for RSAToPKeyErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for RSAToPKeyErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for RSAToPKeyErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "RSA to PKey error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Sign data error: {source}")]
 pub struct SignDataErr {
     pub source: openssl::error::ErrorStack,
     pub trace: Box<Trace>,
 }
 
-impl Error for SignDataErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for SignDataErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for SignDataErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Sign data error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Verify data error: {source}")]
 pub struct VerifyDataErr {
     pub source: openssl::error::ErrorStack,
     pub trace: Box<Trace>,
 }
 
-impl Error for VerifyDataErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for VerifyDataErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for VerifyDataErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Verify data error: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CryptErr {
-    // crate errors
-    InvalidJWTErr(Box<InvalidJWTErr>),
-    InvalidJWTPayloadErr(Box<InvalidJWTPayloadFormatErr>),
-
-    // internal crate errors
-    FileSysErr(Box<CryptFileSysErr>),
-
-    // external crate errors
-    Base64DecodeErr(Box<Base64DecodeErr>),
-    ConvertBytesToStringErr(Box<ConvertBytesToStringErr>),
-    ConvertPrivateKeyToPEMErr(Box<ConvertPrivateKeyToPEMErr>),
-    GenerateRSAKeyPairErr(Box<GenerateRSAKeyPairErr>),
-    ReadKeyErr(Box<ReadKeyErr>),
-    RSAToPKeyErr(Box<RSAToPKeyErr>),
-    SignDataErr(Box<SignDataErr>),
-    VerifyDataErr(Box<VerifyDataErr>),
+    #[error(transparent)]
+    InvalidJWTErr(InvalidJWTErr),
+    #[error(transparent)]
+    InvalidJWTPayloadErr(InvalidJWTPayloadFormatErr),
+    #[error(transparent)]
+    FileSysErr(FileSysErr),
+    #[error(transparent)]
+    Base64DecodeErr(Base64DecodeErr),
+    #[error(transparent)]
+    ConvertBytesToStringErr(ConvertBytesToStringErr),
+    #[error(transparent)]
+    ConvertPrivateKeyToPEMErr(ConvertPrivateKeyToPEMErr),
+    #[error(transparent)]
+    GenerateRSAKeyPairErr(GenerateRSAKeyPairErr),
+    #[error(transparent)]
+    ReadKeyErr(ReadKeyErr),
+    #[error(transparent)]
+    RSAToPKeyErr(RSAToPKeyErr),
+    #[error(transparent)]
+    SignDataErr(SignDataErr),
+    #[error(transparent)]
+    VerifyDataErr(VerifyDataErr),
 }
 
-macro_rules! forward_error_method {
-    ($self:ident, $method:ident $(, $arg:expr)?) => {
-        match $self {
-            Self::InvalidJWTErr(e) => e.$method($($arg)?),
-            Self::InvalidJWTPayloadErr(e) => e.$method($($arg)?),
-            Self::FileSysErr(e) => e.$method($($arg)?),
-            Self::Base64DecodeErr(e) => e.$method($($arg)?),
-            Self::ConvertBytesToStringErr(e) => e.$method($($arg)?),
-            Self::ConvertPrivateKeyToPEMErr(e) => e.$method($($arg)?),
-            Self::GenerateRSAKeyPairErr(e) => e.$method($($arg)?),
-            Self::ReadKeyErr(e) => e.$method($($arg)?),
-            Self::RSAToPKeyErr(e) => e.$method($($arg)?),
-            Self::SignDataErr(e) => e.$method($($arg)?),
-            Self::VerifyDataErr(e) => e.$method($($arg)?),
-        }
-    };
-}
-
-impl fmt::Display for CryptErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        forward_error_method!(self, fmt, f)
+impl From<FileSysErr> for CryptErr {
+    fn from(e: FileSysErr) -> Self {
+        Self::FileSysErr(e)
     }
 }
 
-impl Error for CryptErr {
-    fn code(&self) -> Code {
-        forward_error_method!(self, code)
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        forward_error_method!(self, http_status)
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        forward_error_method!(self, is_network_connection_error)
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        forward_error_method!(self, params)
-    }
-}
+crate::impl_error!(CryptErr {
+    InvalidJWTErr,
+    InvalidJWTPayloadErr,
+    FileSysErr,
+    Base64DecodeErr,
+    ConvertBytesToStringErr,
+    ConvertPrivateKeyToPEMErr,
+    GenerateRSAKeyPairErr,
+    ReadKeyErr,
+    RSAToPKeyErr,
+    SignDataErr,
+    VerifyDataErr,
+});

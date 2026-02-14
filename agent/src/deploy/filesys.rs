@@ -1,12 +1,11 @@
 // internal crates
 use crate::crud::prelude::Read;
-use crate::deploy::errors::{DeployCrudErr, DeployErr, DeployFileSysErr};
+use crate::deploy::errors::DeployErr;
 use crate::deploy::fsm;
 use crate::deploy::observer::{on_update, Observer};
 use crate::filesys::dir::Dir;
 use crate::models::config_instance::{ConfigInstance, ConfigInstanceID};
 use crate::models::deployment::{Deployment, DeploymentTargetStatus};
-use crate::trace;
 
 // standard library
 use std::path::PathBuf;
@@ -104,15 +103,9 @@ where
 }
 
 fn wrap_file_sys_err(e: crate::filesys::errors::FileSysErr) -> DeployErr {
-    DeployErr::FileSysErr(Box::new(DeployFileSysErr {
-        source: e,
-        trace: trace!(),
-    }))
+    DeployErr::from(e)
 }
 
 fn wrap_crud_err(e: crate::crud::errors::CrudErr) -> DeployErr {
-    DeployErr::CrudErr(Box::new(DeployCrudErr {
-        source: e,
-        trace: trace!(),
-    }))
+    DeployErr::from(e)
 }

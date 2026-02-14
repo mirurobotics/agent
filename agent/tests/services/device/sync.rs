@@ -23,11 +23,11 @@ pub mod errors {
         syncer.set_state(sync_state.clone());
 
         syncer.set_sync(move || {
-            Err(SyncErr::InCooldownErr(Box::new(SyncerInCooldownErr {
+            Err(SyncErr::InCooldownErr(SyncerInCooldownErr {
                 cooldown_ends_at: sync_state.cooldown_ends_at,
                 err_streak: 0,
                 trace: trace!(),
-            })))
+            }))
         });
 
         let resp = sync::sync_device(&syncer).await.unwrap();
@@ -50,9 +50,9 @@ pub mod errors {
         syncer.set_state(sync_state.clone());
 
         syncer.set_sync(move || {
-            Err(SyncErr::MockErr(Box::new(MockErr {
+            Err(SyncErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
 
         let resp = sync::sync_device(&syncer).await.unwrap();
@@ -75,9 +75,9 @@ pub mod errors {
         syncer.set_state(sync_state.clone());
 
         syncer.set_sync(move || {
-            Err(SyncErr::MockErr(Box::new(MockErr {
+            Err(SyncErr::MockErr(MockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
 
         sync::sync_device(&syncer).await.unwrap_err();

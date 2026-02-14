@@ -8,7 +8,7 @@ use crate::cache::{
         ConcurrentCache, ConcurrentCacheKey, ConcurrentCacheValue, Worker, WorkerCommand,
     },
     entry::CacheEntry,
-    errors::{CacheErr, CacheFileSysErr, CannotOverwriteCacheElement},
+    errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
 };
 use crate::filesys::{dir::Dir, file, file::File, path::PathExt};
@@ -37,12 +37,7 @@ where
     V: CacheValue,
 {
     pub async fn new(dir: Dir, capacity: usize) -> Result<Self, CacheErr> {
-        dir.create_if_absent().await.map_err(|e| {
-            CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        dir.create_if_absent().await?;
 
         Ok(Self {
             dir,
@@ -70,15 +65,7 @@ where
             return Ok(None);
         }
 
-        let entry = entry_file
-            .read_json::<CacheEntry<K, V>>()
-            .await
-            .map_err(|e| {
-                CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+        let entry = entry_file.read_json::<CacheEntry<K, V>>().await?;
 
         Ok(Some(entry))
     }
@@ -91,34 +78,21 @@ where
         let atomic = true;
         let entry_file = self.cache_entry_file(&entry.key);
         if !overwrite && entry_file.exists() {
-            return Err(CacheErr::CannotOverwriteCacheElement(Box::new(
+            return Err(CacheErr::CannotOverwriteCacheElement(
                 CannotOverwriteCacheElement {
                     key: entry.key.to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
 
-        entry_file
-            .write_json(&entry, overwrite, atomic)
-            .await
-            .map_err(|e| {
-                CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+        entry_file.write_json(&entry, overwrite, atomic).await?;
         Ok(())
     }
 
     async fn delete_entry_impl(&mut self, key: &K) -> Result<(), CacheErr> {
         let entry_file = self.cache_entry_file(key);
-        entry_file.delete().await.map_err(|e| {
-            CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        entry_file.delete().await?;
         Ok(())
     }
 
@@ -126,12 +100,7 @@ where
         if !self.dir.exists() {
             return Ok(0);
         }
-        let files = self.dir.files().await.map_err(|e| {
-            CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        let files = self.dir.files().await?;
         Ok(files.len())
     }
 
@@ -140,21 +109,11 @@ where
     }
 
     async fn prune_invalid_entries(&self) -> Result<(), CacheErr> {
-        let files = self.dir.files().await.map_err(|e| {
-            CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        let files = self.dir.files().await?;
         let futures = files.into_iter().map(|file| async move {
             match file.read_json::<CacheEntry<K, V>>().await {
                 Ok(_) => Ok(()),
-                Err(_) => file.delete().await.map_err(|e| {
-                    CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                        source: e,
-                        trace: trace!(),
-                    }))
-                }),
+                Err(_) => file.delete().await.map_err(CacheErr::from),
             }
         });
         try_join_all(futures).await?;
@@ -162,17 +121,14 @@ where
     }
 
     async fn entries(&self) -> Result<Vec<CacheEntry<K, V>>, CacheErr> {
-        let files = self.dir.files().await.map_err(|e| {
-            CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        let files = self.dir.files().await?;
         let futures = files.into_iter().map(|file| async move {
-            match file.read_json::<CacheEntry<K, V>>().await {
-                Ok(entry) => Ok(Some(entry)),
-                Err(_) => Ok(None),
-            }
+            let result: Result<Option<CacheEntry<K, V>>, CacheErr> =
+                match file.read_json::<CacheEntry<K, V>>().await {
+                    Ok(entry) => Ok(Some(entry)),
+                    Err(_) => Ok(None),
+                };
+            result
         });
         let entries = try_join_all(futures).await?;
         Ok(entries.into_iter().flatten().collect())

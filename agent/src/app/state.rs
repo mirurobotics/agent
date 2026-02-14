@@ -53,21 +53,10 @@ impl AppState {
         // storage layout stuff
         let auth_dir = layout.auth_dir();
         let private_key_file = auth_dir.private_key_file();
-        private_key_file.assert_exists().map_err(|e| {
-            ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        private_key_file.assert_exists()?;
 
-        let token_file = TokenFile::new_with_default(auth_dir.token_file(), Token::default())
-            .await
-            .map_err(|e| {
-                ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+        let token_file =
+            TokenFile::new_with_default(auth_dir.token_file(), Token::default()).await?;
 
         // get the device id
         let device_id = Self::init_device_id(layout, &token_file).await?;
@@ -77,13 +66,7 @@ impl AppState {
         let device_file = Arc::new(device_file);
 
         // initialize the caches
-        let (caches, caches_shutdown_handle) =
-            Caches::init(layout, cache_capacities).await.map_err(|e| {
-                ServerErr::StorageErr(Box::new(ServerStorageErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+        let (caches, caches_shutdown_handle) = Caches::init(layout, cache_capacities).await?;
         let caches = Arc::new(caches);
 
         // initialize the token manager
@@ -93,13 +76,7 @@ impl AppState {
             http_client.clone(),
             token_file,
             private_key_file,
-        )
-        .map_err(|e| {
-            ServerErr::AuthnErr(Box::new(ServerAuthnErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        )?;
         let token_mngr = Arc::new(token_mngr);
 
         // initialize the syncer
@@ -123,13 +100,7 @@ impl AppState {
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
             },
-        )
-        .map_err(|e| {
-            ServerErr::SyncErr(Box::new(ServerSyncErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        )?;
         let syncer = Arc::new(syncer);
 
         // initialize the activity tracker
@@ -199,26 +170,14 @@ impl AppState {
                 ..Device::default()
             },
         )
-        .await
-        .map_err(|e| {
-            ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        .await?;
 
         device_file
             .patch(device::Updates {
                 status: Some(DeviceStatus::Offline),
                 ..device::Updates::empty()
             })
-            .await
-            .map_err(|e| {
-                ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })?;
+            .await?;
         Ok((device_file, device_file_handle))
     }
 
@@ -226,39 +185,19 @@ impl AppState {
         self.shutdown_device_file().await?;
 
         // shutdown the syncer
-        self.syncer.shutdown().await.map_err(|e| {
-            ServerErr::SyncErr(Box::new(ServerSyncErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        self.syncer.shutdown().await?;
 
         // shutdown the caches
-        self.caches.shutdown().await.map_err(|e| {
-            ServerErr::StorageErr(Box::new(ServerStorageErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        self.caches.shutdown().await?;
 
         // shutdown the token manager
-        self.token_mngr.shutdown().await.map_err(|e| {
-            ServerErr::AuthnErr(Box::new(ServerAuthnErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        self.token_mngr.shutdown().await?;
 
         Ok(())
     }
 
     async fn shutdown_device_file(&self) -> Result<(), ServerErr> {
-        let device = self.device_file.read().await.map_err(|e| {
-            ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        let device = self.device_file.read().await?;
 
         // if the last known device status was online, we'll set it to be offline
         match device.status {
@@ -266,23 +205,12 @@ impl AppState {
                 info!("Shutting down device file, setting device to offline");
                 self.device_file
                     .patch(device::Updates::disconnected())
-                    .await
-                    .map_err(|e| {
-                        ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                            source: e,
-                            trace: trace!(),
-                        }))
-                    })?;
+                    .await?;
             }
             device::DeviceStatus::Offline => {
                 info!("Shutting down device file, device is already offline");
             }
         }
-        self.device_file.shutdown().await.map_err(|e| {
-            ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })
+        self.device_file.shutdown().await.map_err(ServerErr::from)
     }
 }

@@ -186,6 +186,11 @@ impl MockDevicesClient {
 }
 
 // ================================ DEPLOYMENTS ==================================== //
+
+type ListAllDeploymentsFn =
+    Mutex<Box<dyn Fn() -> Result<Vec<BackendDeployment>, HTTPErr> + Send + Sync>>;
+type UpdateDeploymentFn = Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync>>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeploymentsCall {
     ListAllDeployments,
@@ -193,10 +198,8 @@ pub enum DeploymentsCall {
 }
 
 pub struct MockDeploymentsClient {
-    pub list_all_deployments_fn:
-        Mutex<Box<dyn Fn() -> Result<Vec<BackendDeployment>, HTTPErr> + Send + Sync>>,
-    pub update_deployment_fn:
-        Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync>>,
+    pub list_all_deployments_fn: ListAllDeploymentsFn,
+    pub update_deployment_fn: UpdateDeploymentFn,
     pub calls: Arc<Mutex<Vec<DeploymentsCall>>>,
 }
 

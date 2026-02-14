@@ -38,10 +38,10 @@ impl DeviceExt for MQTTClient {
         let topic = device_sync(device_id);
         let payload = SyncDevice { is_synced: true };
         let payload_bytes = serde_json::to_vec(&payload).map_err(|e| {
-            MQTTError::SerdeErr(Box::new(SerdeErr {
+            MQTTError::SerdeErr(SerdeErr {
                 source: e,
                 trace: trace!(),
-            }))
+            })
         })?;
         self.publish(&topic, QoS::AtLeastOnce, true, &payload_bytes)
             .await
@@ -63,10 +63,10 @@ impl DeviceExt for MQTTClient {
             timestamp: Utc::now().to_rfc3339(),
         };
         let payload_bytes = serde_json::to_vec(&payload).map_err(|e| {
-            MQTTError::SerdeErr(Box::new(SerdeErr {
+            MQTTError::SerdeErr(SerdeErr {
                 source: e,
                 trace: trace!(),
-            }))
+            })
         })?;
         self.publish(&topic, QoS::AtLeastOnce, false, &payload_bytes)
             .await

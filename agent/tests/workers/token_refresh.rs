@@ -120,10 +120,10 @@ pub mod run_refresh_token_worker {
         };
         let token_mngr = MockTokenManager::new(token);
         token_mngr.set_refresh_token(Box::new(|| {
-            Err(AuthnErr::MockError(Box::new(MockError {
+            Err(AuthnErr::MockError(MockError {
                 is_network_connection_error: true,
                 trace: trace!(),
-            })))
+            }))
         }));
         let token_mngr = Arc::new(token_mngr);
 
@@ -194,10 +194,10 @@ pub mod run_refresh_token_worker {
         };
         let token_mngr = MockTokenManager::new(token);
         token_mngr.set_refresh_token(Box::new(|| {
-            Err(AuthnErr::MockError(Box::new(MockError {
+            Err(AuthnErr::MockError(MockError {
                 is_network_connection_error: false,
                 trace: trace!(),
-            })))
+            }))
         }));
         let token_mngr = Arc::new(token_mngr);
 
@@ -273,10 +273,10 @@ pub mod run_refresh_token_worker {
         };
         let token_mngr = Arc::new(MockTokenManager::new(token));
         token_mngr.set_refresh_token(Box::new(|| {
-            Err(AuthnErr::MockError(Box::new(MockError {
+            Err(AuthnErr::MockError(MockError {
                 is_network_connection_error: false,
                 trace: trace!(),
-            })))
+            }))
         }));
 
         // create a controllable sleep function

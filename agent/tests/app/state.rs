@@ -38,7 +38,7 @@ pub mod init {
         .await;
         match result {
             Err(ServerErr::FileSysErr(e)) => {
-                assert!(matches!(e.source, FileSysErr::PathDoesNotExistErr(_)));
+                assert!(matches!(e, FileSysErr::PathDoesNotExistErr(_)));
             }
             Err(e) => {
                 panic!("Expected FileSysErr not {e:?}");

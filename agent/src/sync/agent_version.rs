@@ -2,7 +2,6 @@ use crate::http::devices::DevicesExt;
 use crate::models::device;
 use crate::storage::device::DeviceFile;
 use crate::sync::errors::*;
-use crate::trace;
 
 use tracing::info;
 
@@ -12,12 +11,7 @@ pub async fn push<HTTPClientT: DevicesExt>(
     token: &str,
     agent_version: String,
 ) -> Result<(), SyncErr> {
-    let device = device_file.read().await.map_err(|e| {
-        SyncErr::FileSysErr(Box::new(SyncFileSysErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    let device = device_file.read().await?;
     if device.agent_version == agent_version {
         return Ok(());
     }
@@ -33,12 +27,7 @@ pub async fn push<HTTPClientT: DevicesExt>(
         ..device::Updates::empty()
     };
 
-    device_file.patch(updates).await.map_err(|e| {
-        SyncErr::FileSysErr(Box::new(SyncFileSysErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    device_file.patch(updates).await?;
 
     // update the backend
     http_client
@@ -49,13 +38,7 @@ pub async fn push<HTTPClientT: DevicesExt>(
             },
             token,
         )
-        .await
-        .map_err(|e| {
-            SyncErr::HTTPClientErr(Box::new(SyncHTTPClientErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        .await?;
 
     Ok(())
 }

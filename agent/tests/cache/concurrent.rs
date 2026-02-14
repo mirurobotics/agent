@@ -711,7 +711,7 @@ pub mod read {
                 .await
                 .unwrap_err(),
             CrudErr::CacheErr(ref e)
-                if matches!(e.source, CacheErr::CacheElementNotFound { .. })
+                if matches!(e, CacheErr::CacheElementNotFound { .. })
         ));
     }
 
@@ -959,7 +959,7 @@ pub mod delete {
         assert!(matches!(
             error,
             CrudErr::CacheErr(ref e)
-                if matches!(e.source, CacheErr::CacheElementNotFound { .. })
+                if matches!(e, CacheErr::CacheElementNotFound { .. })
         ));
     }
 }
@@ -1253,7 +1253,7 @@ pub mod find_one_optional {
         assert!(matches!(
             err,
             CrudErr::CacheErr(ref e)
-                if matches!(e.source, CacheErr::FoundTooManyCacheElements{ .. })
+                if matches!(e, CacheErr::FoundTooManyCacheElements{ .. })
         ));
     }
 }
@@ -1340,7 +1340,7 @@ pub mod find_one {
             .await
             .unwrap_err();
         assert!(
-            matches!(error, CrudErr::CacheErr(ref e) if matches!(e.source, CacheErr::CacheElementNotFound { .. }))
+            matches!(error, CrudErr::CacheErr(ref e) if matches!(e, CacheErr::CacheElementNotFound { .. }))
         );
 
         // one entry found
@@ -1361,7 +1361,7 @@ pub mod find_one {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, CrudErr::CacheErr(ref e) if matches!(e.source, CacheErr::FoundTooManyCacheElements{ .. }))
+            matches!(err, CrudErr::CacheErr(ref e) if matches!(e, CacheErr::FoundTooManyCacheElements{ .. }))
         );
     }
 }

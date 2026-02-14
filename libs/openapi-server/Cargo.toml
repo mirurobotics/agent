@@ -7,6 +7,11 @@ rust-version = { workspace = true }
 [lints.rust]
 unused_imports = "allow"
 
+[lints.clippy]
+derivable_impls = "allow"
+empty_docs = "allow"
+too_many_arguments = "allow"
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

@@ -184,11 +184,11 @@ impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
 
     async fn sync(&mut self) -> Result<(), SyncErr> {
         if self.state.is_in_cooldown() {
-            return Err(SyncErr::InCooldownErr(Box::new(SyncerInCooldownErr {
+            return Err(SyncErr::InCooldownErr(SyncerInCooldownErr {
                 err_streak: self.state.err_streak,
                 cooldown_ends_at: self.state.cooldown_ends_at,
                 trace: trace!(),
-            })));
+            }));
         }
 
         self.state.last_attempted_sync_at = Utc::now();
@@ -253,12 +253,7 @@ impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
     }
 
     async fn sync_impl(&mut self) -> Result<(), SyncErr> {
-        let token = self.token_mngr.get_token().await.map_err(|e| {
-            SyncErr::AuthnErr(Box::new(SyncAuthnErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        let token = self.token_mngr.get_token().await?;
 
         if let Err(e) = agent_version::push(
             self.device_file.as_ref(),
@@ -424,16 +419,16 @@ impl Syncer {
             })
             .await
             .map_err(|e| {
-                SyncErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                SyncErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?
     }
 }
@@ -445,16 +440,16 @@ impl SyncerExt for Syncer {
             .send(WorkerCommand::Shutdown { respond_to: send })
             .await
             .map_err(|e| {
-                SyncErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                SyncErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })??;
         info!("Syncer shutdown complete");
         Ok(())
@@ -466,16 +461,16 @@ impl SyncerExt for Syncer {
             .send(WorkerCommand::GetSyncState { respond_to: send })
             .await
             .map_err(|e| {
-                SyncErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                SyncErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?
     }
 
@@ -500,16 +495,16 @@ impl SyncerExt for Syncer {
             .send(WorkerCommand::SyncIfNotInCooldown { respond_to: send })
             .await
             .map_err(|e| {
-                SyncErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                SyncErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })??;
         Ok(())
     }
@@ -520,16 +515,16 @@ impl SyncerExt for Syncer {
             .send(WorkerCommand::Sync { respond_to: send })
             .await
             .map_err(|e| {
-                SyncErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                SyncErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?
     }
 
@@ -539,16 +534,16 @@ impl SyncerExt for Syncer {
             .send(WorkerCommand::Subscribe { respond_to: send })
             .await
             .map_err(|e| {
-                SyncErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                SyncErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?
     }
 }

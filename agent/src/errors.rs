@@ -1,6 +1,3 @@
-// standard library
-use std::fmt;
-
 // external crates
 use axum::http::StatusCode;
 #[allow(unused_imports)]
@@ -25,14 +22,19 @@ impl Code {
     }
 }
 
-pub trait Error
-where
-    Self: fmt::Debug + fmt::Display,
-{
-    fn code(&self) -> Code;
-    fn http_status(&self) -> HTTPCode;
-    fn params(&self) -> Option<serde_json::Value>;
-    fn is_network_connection_error(&self) -> bool;
+pub trait Error: std::error::Error {
+    fn code(&self) -> Code {
+        Code::InternalServerError
+    }
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::INTERNAL_SERVER_ERROR
+    }
+    fn params(&self) -> Option<serde_json::Value> {
+        None
+    }
+    fn is_network_connection_error(&self) -> bool {
+        false
+    }
 }
 
 pub fn are_all_network_connection_errors<I>(errors: I) -> bool
@@ -49,7 +51,6 @@ where
 pub struct Trace {
     pub file: &'static str,
     pub line: u32,
-    // pub stack_trace: Backtrace,
 }
 
 #[macro_export]
@@ -58,8 +59,35 @@ macro_rules! trace {
         Box::new($crate::errors::Trace {
             file: file!(),
             line: line!(),
-            // stack_trace: backtrace::Backtrace::new(),
         })
+    };
+}
+
+#[macro_export]
+macro_rules! impl_error {
+    ($enum_name:ident { $($variant:ident),+ $(,)? }) => {
+        impl $crate::errors::Error for $enum_name {
+            fn code(&self) -> $crate::errors::Code {
+                match self {
+                    $(Self::$variant(e) => e.code(),)+
+                }
+            }
+            fn http_status(&self) -> $crate::errors::HTTPCode {
+                match self {
+                    $(Self::$variant(e) => e.http_status(),)+
+                }
+            }
+            fn is_network_connection_error(&self) -> bool {
+                match self {
+                    $(Self::$variant(e) => e.is_network_connection_error(),)+
+                }
+            }
+            fn params(&self) -> Option<serde_json::Value> {
+                match self {
+                    $(Self::$variant(e) => e.params(),)+
+                }
+            }
+        }
     };
 }
 

@@ -6,7 +6,9 @@ use crate::filesys::dir::Dir;
 use crate::http::search::SearchOperator;
 use crate::models::config_instance::{ActivityStatus, ConfigInstance, ErrorStatus, TargetStatus};
 use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
-use crate::sync::errors::*;
+use crate::sync::errors::{
+    ConfigInstanceContentNotFoundErr, MissingExpandedInstancesErr, SyncErr, SyncErrors,
+};
 use crate::trace;
 use openapi_client::models::{
     ConfigInstance as BackendConfigInstance, ConfigInstanceActivityStatus, ConfigInstanceExpand,
@@ -50,13 +52,7 @@ pub async fn sync<HTTPClientT>(
     debug!("Reading config instances which need to be applied");
     let cfg_insts_to_apply = cfg_inst_cache
         .find_where(|cfg_inst| fsm::is_action_required(fsm::next_action(cfg_inst, true)))
-        .await
-        .map_err(|e| {
-            SyncErr::CrudErr(Box::new(SyncCrudErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        .await?;
     let cfg_insts_to_apply = cfg_insts_to_apply
         .into_iter()
         .map(|cfg_inst| (cfg_inst.id.clone(), cfg_inst))
@@ -70,13 +66,7 @@ pub async fn sync<HTTPClientT>(
         deployment_dir,
         fsm_settings,
     )
-    .await
-    .map_err(|e| {
-        SyncErr::DeployErr(Box::new(SyncDeployErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    .await?;
 
     // push config instances to server
     debug!("Pushing config instances to server");
@@ -91,10 +81,10 @@ pub async fn sync<HTTPClientT>(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(SyncErr::SyncErrors(Box::new(SyncErrors {
-            source: errors,
+        Err(SyncErr::SyncErrors(SyncErrors {
+            errors,
             trace: trace!(),
-        })))
+        }))
     }
 }
 
@@ -177,12 +167,7 @@ async fn fetch_active_cfg_insts<HTTPClientT>(
     http_client
         .list_all_config_instances(filters, &[] as &[ConfigInstanceExpand], token)
         .await
-        .map_err(|e| {
-            SyncErr::HTTPClientErr(Box::new(SyncHTTPClientErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })
+        .map_err(SyncErr::from)
 }
 
 #[derive(Debug)]
@@ -217,13 +202,7 @@ async fn categorize_cfg_insts(
         // check if the config instance is known
         let mut storage_inst = match cfg_inst_cache
             .read_optional(server_inst.id.clone())
-            .await
-            .map_err(|e| {
-                SyncErr::CrudErr(Box::new(SyncCrudErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })? {
+            .await? {
             Some(storage_inst) => {
                 debug!("Found config instance {}in cache", storage_inst.id);
                 storage_inst
@@ -279,22 +258,16 @@ async fn fetch_cfg_insts_with_content<HTTPClientT>(
             [ConfigInstanceExpand::CONFIG_INSTANCE_EXPAND_CONTENT],
             token,
         )
-        .await
-        .map_err(|e| {
-            SyncErr::HTTPClientErr(Box::new(SyncHTTPClientErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        .await?;
 
     if cfg_insts.len() != ids.len() {
-        return Err(SyncErr::MissingExpandedInstancesErr(Box::new(
+        return Err(SyncErr::MissingExpandedInstancesErr(
             MissingExpandedInstancesErr {
                 expected_ids: ids,
                 actual_ids: cfg_insts.iter().map(|inst| inst.id.clone()).collect(),
                 trace: trace!(),
             },
-        )));
+        ));
     }
 
     Ok(cfg_insts)
@@ -313,12 +286,12 @@ async fn add_unknown_cfg_insts_to_storage(
         let cfg_inst_content = match unknown_inst.content {
             Some(cfg_inst_content) => cfg_inst_content,
             None => {
-                return Err(SyncErr::ConfigInstanceContentNotFound(Box::new(
+                return Err(SyncErr::ConfigInstanceContentNotFound(
                     ConfigInstanceContentNotFoundErr {
                         cfg_inst_id: unknown_inst.id.clone(),
                         trace: trace!(),
                     },
-                )));
+                ));
             }
         };
         unknown_inst.content = None;
@@ -410,12 +383,9 @@ pub async fn push<HTTPClientT>(
     token: &str,
 ) -> Result<(), SyncErr> {
     // get all unsynced config instances
-    let unsynced_cfg_insts = cfg_inst_cache.get_dirty_entries().await.map_err(|e| {
-        SyncErr::CacheErr(Box::new(SyncCacheErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    let unsynced_cfg_insts = cfg_inst_cache
+        .get_dirty_entries()
+        .await?;
     debug!(
         "Found {} unsynced config instances: {:?}",
         unsynced_cfg_insts.len(),
@@ -444,12 +414,7 @@ pub async fn push<HTTPClientT>(
         if let Err(e) = http_client
             .update_config_instance(&inst.id, &updates, token)
             .await
-            .map_err(|e| {
-                SyncErr::HTTPClientErr(Box::new(SyncHTTPClientErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })
+            .map_err(SyncErr::from)
         {
             error!(
                 "Failed to push config instance {} to backend: {}",
@@ -465,12 +430,7 @@ pub async fn push<HTTPClientT>(
         if let Err(e) = cfg_inst_cache
             .write(inst.id.clone(), inst, |_, _| false, true)
             .await
-            .map_err(|e| {
-                SyncErr::CacheErr(Box::new(SyncCacheErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })
+            .map_err(SyncErr::from)
         {
             error!(
                 "Failed to update cache for config instance {} after pushing to the server: {}",
@@ -483,9 +443,9 @@ pub async fn push<HTTPClientT>(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(SyncErr::SyncErrors(Box::new(SyncErrors {
-            source: errors,
+        Err(SyncErr::SyncErrors(SyncErrors {
+            errors,
             trace: trace!(),
-        })))
+        }))
     }
 }

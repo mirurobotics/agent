@@ -8,7 +8,7 @@ use std::{
 
 // internal crates
 use crate::filesys::{file::File, path::PathExt};
-use crate::server::errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr, ServerFileSysErr};
+use crate::server::errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr};
 use crate::server::handlers;
 use crate::server::state::ServerState;
 use crate::trace;
@@ -93,10 +93,10 @@ pub(crate) async fn serve(
             .with_graceful_shutdown(shutdown_signal)
             .await
             .map_err(|e| {
-                ServerErr::RunAxumServerErr(Box::new(RunAxumServerErr {
+                ServerErr::RunAxumServerErr(RunAxumServerErr {
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })
     });
 
@@ -109,14 +109,14 @@ async fn acquire_unix_socket_listener(
 ) -> Result<UnixListener, ServerErr> {
     let listener = if let Ok(listen_fds) = env::var("LISTEN_FDS") {
         let listen_fds = listen_fds.parse::<u32>().map_err(|e| {
-            ServerErr::BindUnixSocketErr(Box::new(BindUnixSocketErr {
+            ServerErr::BindUnixSocketErr(BindUnixSocketErr {
                 socket_file: socket_file.clone(),
                 source: std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("Failed to parse LISTEN_FDS: {e}"),
                 ),
                 trace: trace!(),
-            }))
+            })
         })?;
         if listen_fds >= 1 {
             // FD#3 is the first one
@@ -124,18 +124,18 @@ async fn acquire_unix_socket_listener(
             // SAFETY: fd=3 was handed to us by systemd
             let std_listener = unsafe { std::os::unix::net::UnixListener::from_raw_fd(fd) };
             std_listener.set_nonblocking(true).map_err(|e| {
-                ServerErr::BindUnixSocketErr(Box::new(BindUnixSocketErr {
+                ServerErr::BindUnixSocketErr(BindUnixSocketErr {
                     socket_file: socket_file.clone(),
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })?;
             UnixListener::from_std(std_listener).map_err(|e| {
-                ServerErr::BindUnixSocketErr(Box::new(BindUnixSocketErr {
+                ServerErr::BindUnixSocketErr(BindUnixSocketErr {
                     socket_file: socket_file.clone(),
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })?
         } else {
             fallback.await?
@@ -147,18 +147,13 @@ async fn acquire_unix_socket_listener(
 }
 
 async fn create_unix_socket_listener(socket_file: &File) -> Result<UnixListener, ServerErr> {
-    socket_file.delete().await.map_err(|e| {
-        ServerErr::FileSysErr(Box::new(ServerFileSysErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    socket_file.delete().await?;
     let socket_path = socket_file.path();
     tokio::net::UnixListener::bind(socket_path).map_err(|e| {
-        ServerErr::BindUnixSocketErr(Box::new(BindUnixSocketErr {
+        ServerErr::BindUnixSocketErr(BindUnixSocketErr {
             socket_file: socket_file.clone(),
             source: e,
             trace: trace!(),
-        }))
+        })
     })
 }

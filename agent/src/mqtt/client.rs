@@ -226,16 +226,16 @@ impl MQTTClient {
         )
         .await
         .map_err(|_| {
-            MQTTError::TimeoutErr(Box::new(TimeoutErr {
+            MQTTError::TimeoutErr(TimeoutErr {
                 msg: "Publish timeout".to_string(),
                 trace: trace!(),
-            }))
+            })
         })?
         .map_err(|e| {
-            MQTTError::PublishErr(Box::new(PublishErr {
+            MQTTError::PublishErr(PublishErr {
                 source: e,
                 trace: trace!(),
-            }))
+            })
         })?;
 
         Ok(())
@@ -245,16 +245,16 @@ impl MQTTClient {
         timeout(self.timeouts.subscribe, self.client.subscribe(topic, qos))
             .await
             .map_err(|_| {
-                MQTTError::TimeoutErr(Box::new(TimeoutErr {
+                MQTTError::TimeoutErr(TimeoutErr {
                     msg: "Subscribe timeout".to_string(),
                     trace: trace!(),
-                }))
+                })
             })?
             .map_err(|e| {
-                MQTTError::PublishErr(Box::new(PublishErr {
+                MQTTError::PublishErr(PublishErr {
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })?;
 
         Ok(())
@@ -264,16 +264,16 @@ impl MQTTClient {
         timeout(self.timeouts.unsubscribe, self.client.unsubscribe(topic))
             .await
             .map_err(|_| {
-                MQTTError::TimeoutErr(Box::new(TimeoutErr {
+                MQTTError::TimeoutErr(TimeoutErr {
                     msg: "Unsubscribe timeout".to_string(),
                     trace: trace!(),
-                }))
+                })
             })?
             .map_err(|e| {
-                MQTTError::PublishErr(Box::new(PublishErr {
+                MQTTError::PublishErr(PublishErr {
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })?;
 
         Ok(())
@@ -283,16 +283,16 @@ impl MQTTClient {
         timeout(self.timeouts.disconnect, self.client.disconnect())
             .await
             .map_err(|_| {
-                MQTTError::TimeoutErr(Box::new(TimeoutErr {
+                MQTTError::TimeoutErr(TimeoutErr {
                     msg: "Disconnect timeout".to_string(),
                     trace: trace!(),
-                }))
+                })
             })?
             .map_err(|e| {
-                MQTTError::PublishErr(Box::new(PublishErr {
+                MQTTError::PublishErr(PublishErr {
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })?;
 
         Ok(())
@@ -308,25 +308,25 @@ pub async fn poll(eventloop: &mut EventLoop) -> Result<Event, MQTTError> {
             | rumqttc::ConnectionError::MqttState(rumqttc::StateError::AwaitPingResp)
             | rumqttc::ConnectionError::FlushTimeout
             | rumqttc::ConnectionError::NotConnAck(_) => {
-                MQTTError::NetworkConnectionErr(Box::new(NetworkConnectionErr {
+                MQTTError::NetworkConnectionErr(NetworkConnectionErr {
                     source: e,
                     trace: trace!(),
-                }))
+                })
             }
 
             // mqtt broker rejected the authentication
             rumqttc::ConnectionError::ConnectionRefused(_) => {
-                MQTTError::AuthenticationErr(Box::new(AuthenticationErr {
+                MQTTError::AuthenticationErr(AuthenticationErr {
                     source: e,
                     trace: trace!(),
-                }))
+                })
             }
 
             // all other errors
-            _ => MQTTError::PollErr(Box::new(PollErr {
+            _ => MQTTError::PollErr(PollErr {
                 source: e,
                 trace: trace!(),
-            })),
+            }),
         }
     })
 }

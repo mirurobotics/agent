@@ -154,11 +154,11 @@ impl HTTPClient {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
-                HTTPErr::InvalidHeaderValueErr(Box::new(InvalidHeaderValueErr {
+                HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
                     msg: e.to_string(),
                     source: e,
                     trace: trace!(),
-                }))
+                })
             })?,
         );
         Ok(())
@@ -192,10 +192,10 @@ impl HTTPClient {
 
         // build
         let reqwest = request.build().map_err(|e| {
-            HTTPErr::BuildReqwestErr(Box::new(BuildReqwestErr {
+            HTTPErr::BuildReqwestErr(BuildReqwestErr {
                 source: e,
                 trace: trace!(),
-            }))
+            })
         })?;
         Ok((
             reqwest,
@@ -249,11 +249,11 @@ impl HTTPClient {
         let response = timeout(time_limit, self.client.execute(request))
             .await
             .map_err(|e| {
-                HTTPErr::TimeoutErr(Box::new(TimeoutErr {
+                HTTPErr::TimeoutErr(TimeoutErr {
                     msg: e.to_string(),
                     request: context.clone(),
                     trace: trace!(),
-                }))
+                })
             })?
             .map_err(|e| reqwest_err_to_http_client_err(e, context, trace!()))?;
         Ok(response)
@@ -275,14 +275,14 @@ impl HTTPClient {
             })
             .await
             .map_err(|e: Arc<HTTPErr>| {
-                HTTPErr::CacheErr(Box::new(CacheErr {
+                HTTPErr::CacheErr(CacheErr {
                     code: e.code(),
                     http_status: e.http_status(),
                     is_network_connection_error: e.is_network_connection_error(),
                     params: e.params(),
                     msg: e.to_string(),
                     trace: trace!(),
-                }))
+                })
             })?;
         let is_cache_hit = result.1 != id;
         Ok((result.0, is_cache_hit))
@@ -293,10 +293,10 @@ impl HTTPClient {
         T: Serialize,
     {
         serde_json::to_string(payload).map_err(|e| {
-            HTTPErr::MarshalJSONErr(Box::new(MarshalJSONErr {
+            HTTPErr::MarshalJSONErr(MarshalJSONErr {
                 source: e,
                 trace: trace!(),
-            }))
+            })
         })
     }
 
@@ -316,12 +316,12 @@ impl HTTPClient {
                     .ok(),
                 Err(_) => None,
             };
-            return Err(HTTPErr::RequestFailed(Box::new(RequestFailed {
+            return Err(HTTPErr::RequestFailed(RequestFailed {
                 request: context.clone(),
                 status,
                 error: error_response,
                 trace: trace!(),
-            })));
+            }));
         }
 
         let text = response
@@ -340,11 +340,11 @@ impl HTTPClient {
         T: DeserializeOwned,
     {
         serde_json::from_str::<T>(&text).map_err(|e| {
-            HTTPErr::UnmarshalJSONErr(Box::new(UnmarshalJSONErr {
+            HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {
                 request: context.clone(),
                 source: e,
                 trace: trace!(),
-            }))
+            })
         })
     }
 

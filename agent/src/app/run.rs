@@ -213,19 +213,9 @@ async fn init_token_refresh_worker(
 }
 
 async fn refresh_if_expired(token_mngr: &TokenManager) -> Result<(), ServerErr> {
-    let token = token_mngr.get_token().await.map_err(|e| {
-        ServerErr::AuthnErr(Box::new(ServerAuthnErr {
-            source: e,
-            trace: trace!(),
-        }))
-    })?;
+    let token = token_mngr.get_token().await?;
     if token.is_expired() {
-        token_mngr.refresh_token().await.map_err(|e| {
-            ServerErr::AuthnErr(Box::new(ServerAuthnErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })?;
+        token_mngr.refresh_token().await?;
     }
     Ok(())
 }
@@ -350,12 +340,12 @@ impl ShutdownManager {
         state_handle: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), ServerErr> {
         if self.app_state.is_some() {
-            return Err(ServerErr::ShutdownMngrDuplicateArgErr(Box::new(
+            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
                     arg_name: "app_state".to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         self.app_state = Some(AppStateShutdownParams {
             state,
@@ -369,12 +359,12 @@ impl ShutdownManager {
         token_refresh_handle: JoinHandle<()>,
     ) -> Result<(), ServerErr> {
         if self.token_refresh_worker_handle.is_some() {
-            return Err(ServerErr::ShutdownMngrDuplicateArgErr(Box::new(
+            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
                     arg_name: "token_refresh_handle".to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         self.token_refresh_worker_handle = Some(token_refresh_handle);
         Ok(())
@@ -385,12 +375,12 @@ impl ShutdownManager {
         poller_handle: JoinHandle<()>,
     ) -> Result<(), ServerErr> {
         if self.poller_worker_handle.is_some() {
-            return Err(ServerErr::ShutdownMngrDuplicateArgErr(Box::new(
+            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
                     arg_name: "poller_handle".to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         self.poller_worker_handle = Some(poller_handle);
         Ok(())
@@ -401,12 +391,12 @@ impl ShutdownManager {
         mqtt_handle: JoinHandle<()>,
     ) -> Result<(), ServerErr> {
         if self.mqtt_worker_handle.is_some() {
-            return Err(ServerErr::ShutdownMngrDuplicateArgErr(Box::new(
+            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
                     arg_name: "mqtt_handle".to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         self.mqtt_worker_handle = Some(mqtt_handle);
         Ok(())
@@ -417,12 +407,12 @@ impl ShutdownManager {
         socket_server_handle: JoinHandle<Result<(), ServerErr>>,
     ) -> Result<(), ServerErr> {
         if self.socket_server_handle.is_some() {
-            return Err(ServerErr::ShutdownMngrDuplicateArgErr(Box::new(
+            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
                     arg_name: "server_handle".to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         self.socket_server_handle = Some(socket_server_handle);
         Ok(())
@@ -457,10 +447,10 @@ impl ShutdownManager {
         // 1. refresh
         if let Some(token_refresh_worker_handle) = self.token_refresh_worker_handle.take() {
             token_refresh_worker_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(Box::new(JoinHandleErr {
+                ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         } else {
             info!(
@@ -471,10 +461,10 @@ impl ShutdownManager {
         // 2. poller
         if let Some(poller_worker_handle) = self.poller_worker_handle.take() {
             poller_worker_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(Box::new(JoinHandleErr {
+                ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         } else {
             info!("Poller worker handle not found, skipping poller worker shutdown...");
@@ -483,10 +473,10 @@ impl ShutdownManager {
         // 3. mqtt
         if let Some(mqtt_worker_handle) = self.mqtt_worker_handle.take() {
             mqtt_worker_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(Box::new(JoinHandleErr {
+                ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         } else {
             info!("MQTT worker handle not found, skipping MQTT worker shutdown...");
@@ -495,10 +485,10 @@ impl ShutdownManager {
         // 4. server
         if let Some(socket_server_handle) = self.socket_server_handle.take() {
             socket_server_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(Box::new(JoinHandleErr {
+                ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })??;
         } else {
             info!("Socket server handle not found, skipping socket server shutdown...");

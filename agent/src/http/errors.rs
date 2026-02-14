@@ -1,18 +1,9 @@
-// standard library
-use std::fmt;
-
-// internal crates
-use crate::errors::Trace;
-use crate::errors::{Code, HTTPCode, Error};
+use crate::errors::{Code, HTTPCode, Trace};
 use crate::http::backend::BackendErrorCodes;
 use crate::http::client::RequestContext;
 use openapi_client::models::ErrorResponse;
 
-// external crates
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct RequestFailed {
     pub request: RequestContext,
     pub status: reqwest::StatusCode,
@@ -20,32 +11,8 @@ pub struct RequestFailed {
     pub trace: Box<Trace>,
 }
 
-impl Error for RequestFailed {
-    fn code(&self) -> Code {
-        match &self.error {
-            Some(error) => Code::BackendError(error.error.code.clone()),
-            None => Code::InternalServerError,
-        }
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.status
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.error.as_ref().map(|error| {
-            serde_json::to_value(&error.error.params)
-                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
-        })
-    }
-}
-
-impl fmt::Display for RequestFailed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for RequestFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let debug_msg = match &self.error {
             Some(error) => error.error.message.clone(),
             None => "unknown miru server error".to_string(),
@@ -58,33 +25,35 @@ impl fmt::Display for RequestFailed {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for RequestFailed {
+    fn code(&self) -> Code {
+        match &self.error {
+            Some(error) => Code::BackendError(error.error.code.clone()),
+            None => Code::InternalServerError,
+        }
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        self.status
+    }
+
+    fn params(&self) -> Option<serde_json::Value> {
+        self.error.as_ref().map(|error| {
+            serde_json::to_value(&error.error.params)
+                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 pub struct TimeoutErr {
     pub msg: String,
     pub request: RequestContext,
     pub trace: Box<Trace>,
 }
 
-impl Error for TimeoutErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        true
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for TimeoutErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for TimeoutErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Request {} timed out after {} seconds",
@@ -94,7 +63,14 @@ impl fmt::Display for TimeoutErr {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for TimeoutErr {
+    fn is_network_connection_error(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("HTTP request cache error: {msg}")]
 pub struct CacheErr {
     pub msg: String,
     pub code: Code,
@@ -104,7 +80,7 @@ pub struct CacheErr {
     pub trace: Box<Trace>,
 }
 
-impl Error for CacheErr {
+impl crate::errors::Error for CacheErr {
     fn code(&self) -> Code {
         self.code.clone()
     }
@@ -122,39 +98,15 @@ impl Error for CacheErr {
     }
 }
 
-impl fmt::Display for CacheErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "HTTP request cache error: {}", self.msg)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct ConnectionErr {
     pub request: RequestContext,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for ConnectionErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        true
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for ConnectionErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ConnectionErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Request {} failed with network connection error: {}",
@@ -163,33 +115,21 @@ impl fmt::Display for ConnectionErr {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for ConnectionErr {
+    fn is_network_connection_error(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 pub struct DecodeRespBodyErr {
     pub request: RequestContext,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for DecodeRespBodyErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for DecodeRespBodyErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for DecodeRespBodyErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Request {} failed to decode response body: {}",
@@ -198,94 +138,36 @@ impl fmt::Display for DecodeRespBodyErr {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for DecodeRespBodyErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid header value: {source}")]
 pub struct InvalidHeaderValueErr {
     pub msg: String,
     pub source: reqwest::header::InvalidHeaderValue,
     pub trace: Box<Trace>,
 }
 
-impl Error for InvalidHeaderValueErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for InvalidHeaderValueErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for InvalidHeaderValueErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid header value: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to marshal JSON body: {source}")]
 pub struct MarshalJSONErr {
     pub source: serde_json::Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for MarshalJSONErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for MarshalJSONErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for MarshalJSONErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Failed to marshal JSON body: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct UnmarshalJSONErr {
     pub request: RequestContext,
     pub source: serde_json::Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for UnmarshalJSONErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for UnmarshalJSONErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for UnmarshalJSONErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Request {} failed to unmarshal JSON: {}",
@@ -294,63 +176,26 @@ impl fmt::Display for UnmarshalJSONErr {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for UnmarshalJSONErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to build request: {source}")]
 pub struct BuildReqwestErr {
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for BuildReqwestErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
+impl crate::errors::Error for BuildReqwestErr {}
 
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for BuildReqwestErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Failed to build request: {}", self.source)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct ReqwestErr {
     pub request: RequestContext,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
 
-impl Error for ReqwestErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        false
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
-}
-
-impl fmt::Display for ReqwestErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ReqwestErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Request {} failed with reqwest crate error: {}",
@@ -359,57 +204,44 @@ impl fmt::Display for ReqwestErr {
     }
 }
 
-#[derive(Debug)]
+impl crate::errors::Error for ReqwestErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Mock error (is network connection error: {is_network_connection_error})")]
 pub struct MockErr {
     pub is_network_connection_error: bool,
 }
 
-impl Error for MockErr {
-    fn code(&self) -> Code {
-        Code::InternalServerError
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::INTERNAL_SERVER_ERROR
-    }
-
+impl crate::errors::Error for MockErr {
     fn is_network_connection_error(&self) -> bool {
         self.is_network_connection_error
     }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        None
-    }
 }
 
-impl fmt::Display for MockErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Mock error (is network connection error: {})",
-            self.is_network_connection_error
-        )
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum HTTPErr {
-    // HTTP errors
-    RequestFailed(Box<RequestFailed>),
-    TimeoutErr(Box<TimeoutErr>),
-    CacheErr(Box<CacheErr>),
-
-    // external crate errors
-    ConnectionErr(Box<ConnectionErr>),
-    DecodeRespBodyErr(Box<DecodeRespBodyErr>),
-    InvalidHeaderValueErr(Box<InvalidHeaderValueErr>),
-    MarshalJSONErr(Box<MarshalJSONErr>),
-    UnmarshalJSONErr(Box<UnmarshalJSONErr>),
-    ReqwestErr(Box<ReqwestErr>),
-    BuildReqwestErr(Box<BuildReqwestErr>),
-
-    // mock errors (not for production use)
-    MockErr(Box<MockErr>),
+    #[error(transparent)]
+    RequestFailed(RequestFailed),
+    #[error(transparent)]
+    TimeoutErr(TimeoutErr),
+    #[error(transparent)]
+    CacheErr(CacheErr),
+    #[error(transparent)]
+    ConnectionErr(ConnectionErr),
+    #[error(transparent)]
+    DecodeRespBodyErr(DecodeRespBodyErr),
+    #[error(transparent)]
+    InvalidHeaderValueErr(InvalidHeaderValueErr),
+    #[error(transparent)]
+    MarshalJSONErr(MarshalJSONErr),
+    #[error(transparent)]
+    UnmarshalJSONErr(UnmarshalJSONErr),
+    #[error(transparent)]
+    ReqwestErr(ReqwestErr),
+    #[error(transparent)]
+    BuildReqwestErr(BuildReqwestErr),
+    #[error(transparent)]
+    MockErr(MockErr),
 }
 
 impl HTTPErr {
@@ -424,47 +256,19 @@ impl HTTPErr {
     }
 }
 
-macro_rules! forward_error_method {
-    ($self:ident, $method:ident $(, $arg:expr)?) => {
-        match $self {
-            Self::RequestFailed(e) => e.$method($($arg)?),
-            Self::TimeoutErr(e) => e.$method($($arg)?),
-            Self::CacheErr(e) => e.$method($($arg)?),
-            Self::ConnectionErr(e) => e.$method($($arg)?),
-            Self::DecodeRespBodyErr(e) => e.$method($($arg)?),
-            Self::InvalidHeaderValueErr(e) => e.$method($($arg)?),
-            Self::MarshalJSONErr(e) => e.$method($($arg)?),
-            Self::UnmarshalJSONErr(e) => e.$method($($arg)?),
-            Self::ReqwestErr(e) => e.$method($($arg)?),
-            Self::BuildReqwestErr(e) => e.$method($($arg)?),
-            Self::MockErr(e) => e.$method($($arg)?),
-        }
-    };
-}
-
-impl fmt::Display for HTTPErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        forward_error_method!(self, fmt, f)
-    }
-}
-
-impl Error for HTTPErr {
-    fn code(&self) -> Code {
-        forward_error_method!(self, code)
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        forward_error_method!(self, http_status)
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        forward_error_method!(self, is_network_connection_error)
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        forward_error_method!(self, params)
-    }
-}
+crate::impl_error!(HTTPErr {
+    RequestFailed,
+    TimeoutErr,
+    CacheErr,
+    ConnectionErr,
+    DecodeRespBodyErr,
+    InvalidHeaderValueErr,
+    MarshalJSONErr,
+    UnmarshalJSONErr,
+    ReqwestErr,
+    BuildReqwestErr,
+    MockErr,
+});
 
 pub fn reqwest_err_to_http_client_err(
     e: reqwest::Error,
@@ -472,28 +276,28 @@ pub fn reqwest_err_to_http_client_err(
     trace: Box<Trace>,
 ) -> HTTPErr {
     if e.is_connect() {
-        HTTPErr::ConnectionErr(Box::new(ConnectionErr {
+        HTTPErr::ConnectionErr(ConnectionErr {
             request: context.clone(),
             source: e,
             trace,
-        }))
+        })
     } else if e.is_decode() {
-        HTTPErr::DecodeRespBodyErr(Box::new(DecodeRespBodyErr {
+        HTTPErr::DecodeRespBodyErr(DecodeRespBodyErr {
             request: context.clone(),
             source: e,
             trace,
-        }))
+        })
     } else if e.is_timeout() {
-        HTTPErr::TimeoutErr(Box::new(TimeoutErr {
+        HTTPErr::TimeoutErr(TimeoutErr {
             msg: e.to_string(),
             request: context.clone(),
             trace,
-        }))
+        })
     } else {
-        HTTPErr::ReqwestErr(Box::new(ReqwestErr {
+        HTTPErr::ReqwestErr(ReqwestErr {
             request: context.clone(),
             source: e,
             trace,
-        }))
+        })
     }
 }

@@ -245,9 +245,9 @@ pub mod handle_sync_events {
         let mqtt_client = MockDeviceClient::default();
         let syncer = MockSyncer::default();
         syncer.set_sync(|| {
-            Err(SyncErr::MockErr(Box::new(SyncMockErr {
+            Err(SyncErr::MockErr(SyncMockErr {
                 is_network_connection_error: false,
-            })))
+            }))
         });
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
@@ -340,10 +340,10 @@ pub mod handle_mqtt_error {
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
-        let error = MQTTError::MockErr(Box::new(MockErr {
+        let error = MQTTError::MockErr(MockErr {
             is_authentication_error: true,
             is_network_connection_error: false,
-        }));
+        });
 
         let options = Options::default();
         let (client, eventloop) = MQTTClient::new(&options).await;
@@ -399,10 +399,10 @@ pub mod handle_mqtt_error {
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
-        let error = MQTTError::MockErr(Box::new(MockErr {
+        let error = MQTTError::MockErr(MockErr {
             is_authentication_error: false,
             is_network_connection_error: true,
-        }));
+        });
 
         let options = Options::default();
         let (client, eventloop) = MQTTClient::new(&options).await;

@@ -10,7 +10,6 @@ use crate::installer::{display, errors::*};
 use crate::logs::{init, LogOptions};
 use crate::models::device::{Device, DeviceStatus};
 use crate::storage::{layout::StorageLayout, settings, setup::clean_storage_setup};
-use crate::trace;
 use crate::utils::version_info;
 use openapi_client::models::ActivateDeviceRequest;
 
@@ -95,14 +94,7 @@ pub async fn bootstrap<HTTPClientT: DevicesExt>(
     let temp_dir = layout.temp_dir();
     let private_key_file = temp_dir.file("private.key");
     let public_key_file = temp_dir.file("public.key");
-    rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
-        .await
-        .map_err(|e| {
-            InstallErr::CryptErr(InstallCryptErr {
-                source: e,
-                trace: trace!(),
-            })
-        })?;
+    rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true).await?;
 
     // activate the device
     let device = activate(http_client, &public_key_file, token, device_name).await?;
@@ -125,21 +117,10 @@ pub async fn bootstrap<HTTPClientT: DevicesExt>(
         &private_key_file,
         &public_key_file,
     )
-    .await
-    .map_err(|e| {
-        InstallErr::StorageErr(InstallStorageErr {
-            source: e,
-            trace: trace!(),
-        })
-    })?;
+    .await?;
 
     // delete the temporary directory
-    temp_dir.delete().await.map_err(|e| {
-        InstallErr::FileSysErr(InstallFileSysErr {
-            source: e,
-            trace: trace!(),
-        })
-    })?;
+    temp_dir.delete().await?;
 
     Ok(())
 }
@@ -150,20 +131,10 @@ pub async fn activate<HTTPClientT: DevicesExt>(
     token: &str,
     device_name: Option<String>,
 ) -> Result<openapi_client::models::Device, InstallErr> {
-    let device_id = jwt::extract_device_id(token).map_err(|e| {
-        InstallErr::CryptErr(InstallCryptErr {
-            source: e,
-            trace: trace!(),
-        })
-    })?;
+    let device_id = jwt::extract_device_id(token)?;
 
     // activate the device with the server
-    let public_key_pem = public_key_file.read_string().await.map_err(|e| {
-        InstallErr::FileSysErr(InstallFileSysErr {
-            source: e,
-            trace: trace!(),
-        })
-    })?;
+    let public_key_pem = public_key_file.read_string().await?;
     let payload = ActivateDeviceRequest {
         public_key_pem,
         name: device_name,
@@ -171,13 +142,7 @@ pub async fn activate<HTTPClientT: DevicesExt>(
     };
     let device = http_client
         .activate_device(&device_id, &payload, token)
-        .await
-        .map_err(|e| {
-            InstallErr::HTTPErr(InstallHTTPErr {
-                source: e,
-                trace: trace!(),
-            })
-        })?;
+        .await?;
 
     // complete
     display::info(

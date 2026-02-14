@@ -175,9 +175,9 @@ pub mod sync_tests {
 
         let http_client = MockClient::default();
         http_client.deployments_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(Box::new(MockErr {
+            Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
-            })))
+            }))
         });
 
         let fsm_settings = fsm::Settings::default();

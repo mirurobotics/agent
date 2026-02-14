@@ -8,7 +8,7 @@ use crate::cache::{
         ConcurrentCache, ConcurrentCacheKey, ConcurrentCacheValue, Worker, WorkerCommand,
     },
     entry::CacheEntry,
-    errors::{CacheErr, CacheFileSysErr, CannotOverwriteCacheElement},
+    errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
 };
 use crate::filesys::{file::File, path::PathExt};
@@ -38,14 +38,7 @@ where
     pub async fn new(file: File, capacity: usize) -> Result<Self, CacheErr> {
         if !file.exists() {
             let empty_cache: HashMap<K, CacheEntry<K, V>> = HashMap::new();
-            file.write_json(&empty_cache, true, true)
-                .await
-                .map_err(|e| {
-                    CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                        source: e,
-                        trace: trace!(),
-                    }))
-                })?;
+            file.write_json(&empty_cache, true, true).await?;
         }
 
         Ok(Self {
@@ -60,21 +53,14 @@ where
         self.file
             .read_json::<HashMap<K, CacheEntry<K, V>>>()
             .await
-            .map_err(|e| {
-                CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })
+            .map_err(CacheErr::from)
     }
 
     async fn write_cache(&self, cache: &HashMap<K, CacheEntry<K, V>>) -> Result<(), CacheErr> {
-        self.file.write_json(cache, true, true).await.map_err(|e| {
-            CacheErr::FileSysErr(Box::new(CacheFileSysErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })
+        self.file
+            .write_json(cache, true, true)
+            .await
+            .map_err(CacheErr::from)
     }
 }
 
@@ -95,12 +81,12 @@ where
     ) -> Result<(), CacheErr> {
         let mut cache = self.read_cache().await?;
         if !overwrite && cache.contains_key(&entry.key) {
-            return Err(CacheErr::CannotOverwriteCacheElement(Box::new(
+            return Err(CacheErr::CannotOverwriteCacheElement(
                 CannotOverwriteCacheElement {
                     key: entry.key.to_string(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         cache.insert(entry.key.clone(), entry.clone());
         self.write_cache(&cache).await?;

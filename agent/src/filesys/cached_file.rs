@@ -214,17 +214,17 @@ where
             .await
             .map_err(|e| {
                 error!("Failed to send shutdown command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                FileSysErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
             error!("Failed to receive shutdown response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })??;
         info!(
             "{} cached file shutdown complete",
@@ -240,17 +240,17 @@ where
             .await
             .map_err(|e| {
                 error!("Failed to send read command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                FileSysErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
             error!("Failed to receive read response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })
     }
 
@@ -264,17 +264,17 @@ where
             .await
             .map_err(|e| {
                 error!("Failed to send write command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                FileSysErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
             error!("Failed to receive write response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?
     }
 
@@ -288,17 +288,17 @@ where
             .await
             .map_err(|e| {
                 error!("Failed to send patch command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(Box::new(SendActorMessageErr {
+                FileSysErr::SendActorMessageErr(SendActorMessageErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })?;
         recv.await.map_err(|e| {
             error!("Failed to receive patch response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(Box::new(ReceiveActorMessageErr {
+            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?
     }
 }

@@ -47,10 +47,10 @@ impl Dir {
     pub fn new_home_dir() -> Result<Dir, FileSysErr> {
         let home_dir = std::env::var("HOME")
             .map_err(|e| {
-                FileSysErr::UnknownHomeDirErr(Box::new(UnknownHomeDirErr {
+                FileSysErr::UnknownHomeDirErr(UnknownHomeDirErr {
                     source: Box::new(e),
                     trace: trace!(),
-                }))
+                })
             })
             .map(PathBuf::from)?;
         Ok(Dir { path: home_dir })
@@ -58,10 +58,10 @@ impl Dir {
 
     pub fn new_current_dir() -> Result<Dir, FileSysErr> {
         let current_dir = std::env::current_dir().map_err(|e| {
-            FileSysErr::UnknownCurrentDirErr(Box::new(UnknownCurrentDirErr {
+            FileSysErr::UnknownCurrentDirErr(UnknownCurrentDirErr {
                 source: Box::new(e),
                 trace: trace!(),
-            }))
+            })
         })?;
         Ok(Dir { path: current_dir })
     }
@@ -83,18 +83,18 @@ impl Dir {
         let file_name_os_str = match self.path.file_name() {
             Some(name) => name,
             None => {
-                return Err(FileSysErr::UnknownDirNameErr(Box::new(UnknownDirNameErr {
+                return Err(FileSysErr::UnknownDirNameErr(UnknownDirNameErr {
                     dir: self.clone(),
                     trace: trace!(),
-                })));
+                }));
             }
         };
         match file_name_os_str.to_str() {
             Some(name) => Ok(name),
-            None => Err(FileSysErr::UnknownDirNameErr(Box::new(UnknownDirNameErr {
+            None => Err(FileSysErr::UnknownDirNameErr(UnknownDirNameErr {
                 dir: self.clone(),
                 trace: trace!(),
-            }))),
+            })),
         }
     }
 
@@ -102,12 +102,12 @@ impl Dir {
         let abs_path = self.abs_path()?;
         let parent = abs_path
             .parent()
-            .ok_or(FileSysErr::UnknownParentDirForDirErr(Box::new(
+            .ok_or(FileSysErr::UnknownParentDirForDirErr(
                 UnknownParentDirForDirErr {
                     dir: self.clone(),
                     trace: trace!(),
                 },
-            )))?;
+            ))?;
         Ok(Dir::new(parent))
     }
 
@@ -132,10 +132,10 @@ impl Dir {
 
     pub fn assert_valid_dir_name(dir_name: &str) -> Result<(), FileSysErr> {
         if !Dir::is_valid_dir_name(dir_name) {
-            return Err(FileSysErr::InvalidDirNameErr(Box::new(InvalidDirNameErr {
+            return Err(FileSysErr::InvalidDirNameErr(InvalidDirNameErr {
                 name: dir_name.to_string(),
                 trace: trace!(),
-            })));
+            }));
         }
         Ok(())
     }
@@ -163,11 +163,11 @@ impl Dir {
         tokio::fs::create_dir_all(self.to_string())
             .await
             .map_err(|e| {
-                FileSysErr::CreateDirErr(Box::new(CreateDirErr {
+                FileSysErr::CreateDirErr(CreateDirErr {
                     source: Box::new(e),
                     dir: self.clone(),
                     trace: trace!(),
-                }))
+                })
             })?;
         Ok(())
     }
@@ -178,11 +178,11 @@ impl Dir {
             return Ok(());
         }
         tokio::fs::remove_dir_all(self.path()).await.map_err(|e| {
-            FileSysErr::DeleteDirErr(Box::new(DeleteDirErr {
+            FileSysErr::DeleteDirErr(DeleteDirErr {
                 source: Box::new(e),
                 dir: self.clone(),
                 trace: trace!(),
-            }))
+            })
         })?;
         Ok(())
     }
@@ -212,19 +212,19 @@ impl Dir {
     pub async fn subdirs(&self) -> Result<Vec<Dir>, FileSysErr> {
         let mut dirs = Vec::new();
         let mut entries = tokio::fs::read_dir(self.to_string()).await.map_err(|e| {
-            FileSysErr::ReadDirErr(Box::new(ReadDirErr {
+            FileSysErr::ReadDirErr(ReadDirErr {
                 source: Box::new(e),
                 dir: self.clone(),
                 trace: trace!(),
-            }))
+            })
         })?;
 
         while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            FileSysErr::ReadDirErr(Box::new(ReadDirErr {
+            FileSysErr::ReadDirErr(ReadDirErr {
                 source: Box::new(e),
                 dir: self.clone(),
                 trace: trace!(),
-            }))
+            })
         })? {
             if entry.path().is_dir() {
                 let dir = Dir::new(entry.path());
@@ -240,19 +240,19 @@ impl Dir {
         let mut files = Vec::new();
 
         let mut entries = tokio::fs::read_dir(self.to_string()).await.map_err(|e| {
-            FileSysErr::ReadDirErr(Box::new(ReadDirErr {
+            FileSysErr::ReadDirErr(ReadDirErr {
                 source: Box::new(e),
                 dir: self.clone(),
                 trace: trace!(),
-            }))
+            })
         })?;
 
         while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            FileSysErr::ReadDirErr(Box::new(ReadDirErr {
+            FileSysErr::ReadDirErr(ReadDirErr {
                 source: Box::new(e),
                 dir: self.clone(),
                 trace: trace!(),
-            }))
+            })
         })? {
             if entry.path().is_file() {
                 let file = File::new(entry.path());
@@ -326,12 +326,12 @@ impl Dir {
 
     fn validate_overwrite(dest: &Dir, overwrite: bool) -> Result<(), FileSysErr> {
         if !overwrite && dest.exists() {
-            return Err(FileSysErr::PathExistsErr(Box::new(
+            return Err(FileSysErr::PathExistsErr(
                 crate::filesys::errors::PathExistsErr {
                     path: dest.path().clone(),
                     trace: trace!(),
                 },
-            )));
+            ));
         }
         Ok(())
     }
@@ -358,12 +358,12 @@ impl Dir {
         tokio::fs::rename(self.to_string(), new_dir.to_string())
             .await
             .map_err(|e| {
-                FileSysErr::MoveDirErr(Box::new(MoveDirErr {
+                FileSysErr::MoveDirErr(MoveDirErr {
                     source: Box::new(e),
                     src_dir: self.clone(),
                     dest_dir: new_dir.clone(),
                     trace: trace!(),
-                }))
+                })
             })?;
 
         Ok(())

@@ -57,12 +57,7 @@ impl<'a> Observer for StorageObserver<'a> {
                 overwrite,
             )
             .await
-            .map_err(|e| {
-                DeployErr::CacheErr(Box::new(DeployCacheErr {
-                    source: e,
-                    trace: trace!(),
-                }))
-            })
+            .map_err(DeployErr::from)
     }
 }
 
@@ -86,30 +81,21 @@ pub async fn apply(
             Ok(Some(cfg_inst)) => cfg_insts.push(cfg_inst),
             Ok(None) => {
                 error!("Config instance {} not found in cache", cfg_inst_id);
-                return Err(DeployErr::CrudErr(Box::new(DeployCrudErr {
-                    source: crate::crud::errors::CrudErr::CacheErr(Box::new(
-                        crate::crud::errors::CrudCacheErr {
-                            source: crate::cache::errors::CacheErr::CacheElementNotFound(Box::new(
-                                crate::cache::errors::CacheElementNotFound {
-                                    msg: format!("Config instance {} not found", cfg_inst_id),
-                                    trace: trace!(),
-                                },
-                            )),
+                return Err(DeployErr::from(crate::crud::errors::CrudErr::from(
+                    crate::cache::errors::CacheErr::CacheElementNotFound(
+                        crate::cache::errors::CacheElementNotFound {
+                            msg: format!("Config instance {} not found", cfg_inst_id),
                             trace: trace!(),
                         },
-                    )),
-                    trace: trace!(),
-                })));
+                    ),
+                )));
             }
             Err(e) => {
                 error!(
                     "Failed to read config instance {} from cache: {:?}",
                     cfg_inst_id, e
                 );
-                return Err(DeployErr::CrudErr(Box::new(DeployCrudErr {
-                    source: e,
-                    trace: trace!(),
-                })));
+                return Err(DeployErr::from(e));
             }
         }
     }
@@ -181,13 +167,13 @@ async fn deploy_deployment(
         let next_action = fsm::next_action(&deployment, true);
         return (
             DeployResults::empty(),
-            Err(DeployErr::DeploymentNotDeployableErr(Box::new(
+            Err(DeployErr::DeploymentNotDeployableErr(
                 DeploymentNotDeployableErr {
                     deployment,
                     next_action,
                     trace: trace!(),
                 },
-            ))),
+            )),
         );
     }
 
@@ -253,13 +239,13 @@ async fn remove_deployment(
         let next_action = fsm::next_action(&deployment, true);
         return (
             DeployResults::empty(),
-            Err(DeployErr::DeploymentNotRemoveableErr(Box::new(
+            Err(DeployErr::DeploymentNotRemoveableErr(
                 DeploymentNotRemoveableErr {
                     deployment,
                     next_action,
                     trace: trace!(),
                 },
-            ))),
+            )),
         );
     }
 
@@ -284,12 +270,7 @@ async fn find_all_deployed_deployments(
     deployment_cache
         .find_where(|d| d.activity_status == DeploymentActivityStatus::Deployed)
         .await
-        .map_err(|e| {
-            DeployErr::CrudErr(Box::new(DeployCrudErr {
-                source: e,
-                trace: trace!(),
-            }))
-        })
+        .map_err(DeployErr::from)
 }
 
 // =================================== ARCHIVE ===================================== //
@@ -301,13 +282,13 @@ async fn archive(
         let next_action = fsm::next_action(&deployment, true);
         return (
             DeployResults::empty(),
-            Err(DeployErr::DeploymentNotArchiveableErr(Box::new(
+            Err(DeployErr::DeploymentNotArchiveableErr(
                 DeploymentNotArchiveableErr {
                     deployment,
                     next_action,
                     trace: trace!(),
                 },
-            ))),
+            )),
         );
     }
 
