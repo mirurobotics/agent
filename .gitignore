@@ -42,3 +42,6 @@ venv/
 
 # api
 **/codegen/
+
+# coverage reports
+target/coverage/
