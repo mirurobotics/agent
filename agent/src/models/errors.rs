@@ -2,7 +2,7 @@
 use std::fmt;
 
 // internal crates
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 
 #[derive(Debug)]
 pub struct DateTimeParseErr {
@@ -10,7 +10,7 @@ pub struct DateTimeParseErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DateTimeParseErr {
+impl Error for DateTimeParseErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -53,7 +53,7 @@ impl fmt::Display for ModelsErr {
     }
 }
 
-impl MiruError for ModelsErr {
+impl Error for ModelsErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

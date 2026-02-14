@@ -4,7 +4,7 @@ use std::fmt;
 // internal crates
 use crate::cache::errors::CacheErr;
 use crate::crypt::errors::CryptErr;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 
 #[derive(Debug)]
@@ -13,7 +13,7 @@ pub struct DeviceNotActivatedErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeviceNotActivatedErr {
+impl Error for DeviceNotActivatedErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -43,7 +43,7 @@ pub struct StorageCacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for StorageCacheErr {
+impl Error for StorageCacheErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -73,7 +73,7 @@ pub struct StorageCryptErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for StorageCryptErr {
+impl Error for StorageCryptErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -103,7 +103,7 @@ pub struct StorageFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for StorageFileSysErr {
+impl Error for StorageFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -133,7 +133,7 @@ pub struct JoinHandleErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for JoinHandleErr {
+impl Error for JoinHandleErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -163,7 +163,7 @@ pub struct PruneCacheErrs {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for PruneCacheErrs {
+impl Error for PruneCacheErrs {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -221,7 +221,7 @@ impl fmt::Display for StorageErr {
     }
 }
 
-impl MiruError for StorageErr {
+impl Error for StorageErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

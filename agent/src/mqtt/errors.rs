@@ -3,7 +3,7 @@ use std::fmt;
 
 // internal crates
 use crate::errors::Trace;
-use crate::errors::{Code, HTTPCode, MiruError};
+use crate::errors::{Code, HTTPCode, Error};
 
 // external crates
 #[allow(unused_imports)]
@@ -15,7 +15,7 @@ pub struct AuthenticationErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for AuthenticationErr {
+impl Error for AuthenticationErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -45,7 +45,7 @@ pub struct NetworkConnectionErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for NetworkConnectionErr {
+impl Error for NetworkConnectionErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -75,7 +75,7 @@ pub struct PollErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for PollErr {
+impl Error for PollErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -105,7 +105,7 @@ pub struct TimeoutErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for TimeoutErr {
+impl Error for TimeoutErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -135,7 +135,7 @@ pub struct PublishErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for PublishErr {
+impl Error for PublishErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -165,7 +165,7 @@ pub struct SerdeErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SerdeErr {
+impl Error for SerdeErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -195,7 +195,7 @@ pub struct MockErr {
     pub is_network_connection_error: bool,
 }
 
-impl MiruError for MockErr {
+impl Error for MockErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -255,7 +255,7 @@ impl fmt::Display for MQTTError {
     }
 }
 
-impl MiruError for MQTTError {
+impl Error for MQTTError {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

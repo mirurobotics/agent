@@ -2,7 +2,7 @@
 use std::fmt;
 
 // internal crates
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 
 #[derive(Debug)]
@@ -11,7 +11,7 @@ pub struct CacheElementNotFound {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CacheElementNotFound {
+impl Error for CacheElementNotFound {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -41,7 +41,7 @@ pub struct CacheFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CacheFileSysErr {
+impl Error for CacheFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -73,7 +73,7 @@ pub struct FoundTooManyCacheElements {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for FoundTooManyCacheElements {
+impl Error for FoundTooManyCacheElements {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -107,7 +107,7 @@ pub struct CannotOverwriteCacheElement {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CannotOverwriteCacheElement {
+impl Error for CannotOverwriteCacheElement {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -137,7 +137,7 @@ pub struct SendActorMessageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SendActorMessageErr {
+impl Error for SendActorMessageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -167,7 +167,7 @@ pub struct ReceiveActorMessageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReceiveActorMessageErr {
+impl Error for ReceiveActorMessageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -220,7 +220,7 @@ impl fmt::Display for CacheErr {
     }
 }
 
-impl MiruError for CacheErr {
+impl Error for CacheErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::errors::MiruError;
+use miru_agent::errors::Error;
 use miru_agent::mqtt::client::{
     poll, ConnectAddress, Credentials, MQTTClient, OptionsBuilder, Protocol,
 };

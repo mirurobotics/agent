@@ -3,7 +3,7 @@ use std::fmt;
 
 // internal crates
 use crate::errors::Trace;
-use crate::errors::{Code, HTTPCode, MiruError};
+use crate::errors::{Code, HTTPCode, Error};
 use crate::http::backend::BackendErrorCodes;
 use crate::http::client::RequestContext;
 use openapi_client::models::ErrorResponse;
@@ -20,7 +20,7 @@ pub struct RequestFailed {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for RequestFailed {
+impl Error for RequestFailed {
     fn code(&self) -> Code {
         match &self.error {
             Some(error) => Code::BackendError(error.error.code.clone()),
@@ -65,7 +65,7 @@ pub struct TimeoutErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for TimeoutErr {
+impl Error for TimeoutErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -104,7 +104,7 @@ pub struct CacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CacheErr {
+impl Error for CacheErr {
     fn code(&self) -> Code {
         self.code.clone()
     }
@@ -135,7 +135,7 @@ pub struct ConnectionErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConnectionErr {
+impl Error for ConnectionErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -170,7 +170,7 @@ pub struct DecodeRespBodyErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DecodeRespBodyErr {
+impl Error for DecodeRespBodyErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -205,7 +205,7 @@ pub struct InvalidHeaderValueErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InvalidHeaderValueErr {
+impl Error for InvalidHeaderValueErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -235,7 +235,7 @@ pub struct MarshalJSONErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for MarshalJSONErr {
+impl Error for MarshalJSONErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -266,7 +266,7 @@ pub struct UnmarshalJSONErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnmarshalJSONErr {
+impl Error for UnmarshalJSONErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -300,7 +300,7 @@ pub struct BuildReqwestErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for BuildReqwestErr {
+impl Error for BuildReqwestErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -331,7 +331,7 @@ pub struct ReqwestErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReqwestErr {
+impl Error for ReqwestErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -364,7 +364,7 @@ pub struct MockErr {
     pub is_network_connection_error: bool,
 }
 
-impl MiruError for MockErr {
+impl Error for MockErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -448,7 +448,7 @@ impl fmt::Display for HTTPErr {
     }
 }
 
-impl MiruError for HTTPErr {
+impl Error for HTTPErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

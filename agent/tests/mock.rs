@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 // internal crates
-use miru_agent::errors::{Code, HTTPCode, MiruError};
+use miru_agent::errors::{Code, HTTPCode, Error};
 
 #[derive(Debug)]
 pub struct MockMiruError {
@@ -19,7 +19,7 @@ impl MockMiruError {
     }
 }
 
-impl MiruError for MockMiruError {
+impl Error for MockMiruError {
     fn code(&self) -> Code {
         Code::InternalServerError
     }

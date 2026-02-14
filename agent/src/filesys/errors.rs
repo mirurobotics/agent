@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 // internal crates
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::{dir::Dir, file::File};
 
 #[derive(Debug)]
@@ -12,7 +12,7 @@ pub struct UnknownHomeDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnknownHomeDirErr {
+impl Error for UnknownHomeDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -42,7 +42,7 @@ pub struct InvalidDirNameErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InvalidDirNameErr {
+impl Error for InvalidDirNameErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -72,7 +72,7 @@ pub struct UnknownDirNameErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnknownDirNameErr {
+impl Error for UnknownDirNameErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -106,7 +106,7 @@ pub struct UnknownFileNameErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnknownFileNameErr {
+impl Error for UnknownFileNameErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -140,7 +140,7 @@ pub struct PathDoesNotExistErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for PathDoesNotExistErr {
+impl Error for PathDoesNotExistErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -174,7 +174,7 @@ pub struct PathExistsErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for PathExistsErr {
+impl Error for PathExistsErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -209,7 +209,7 @@ pub struct InvalidFileOverwriteErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InvalidFileOverwriteErr {
+impl Error for InvalidFileOverwriteErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -243,7 +243,7 @@ pub struct UnknownParentDirForDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnknownParentDirForDirErr {
+impl Error for UnknownParentDirForDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -277,7 +277,7 @@ pub struct UnknownParentDirForFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnknownParentDirForFileErr {
+impl Error for UnknownParentDirForFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -312,7 +312,7 @@ pub struct ReadDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReadDirErr {
+impl Error for ReadDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -343,7 +343,7 @@ pub struct AtomicWriteFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for AtomicWriteFileErr {
+impl Error for AtomicWriteFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -373,7 +373,7 @@ pub struct ConvertUTF8Err {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConvertUTF8Err {
+impl Error for ConvertUTF8Err {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -405,7 +405,7 @@ pub struct CopyFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CopyFileErr {
+impl Error for CopyFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -440,7 +440,7 @@ pub struct CreateDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CreateDirErr {
+impl Error for CreateDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -476,7 +476,7 @@ pub struct CreateSymlinkErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CreateSymlinkErr {
+impl Error for CreateSymlinkErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -510,7 +510,7 @@ pub struct CreateTmpDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CreateTmpDirErr {
+impl Error for CreateTmpDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -541,7 +541,7 @@ pub struct DeleteDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeleteDirErr {
+impl Error for DeleteDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -576,7 +576,7 @@ pub struct DeleteFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeleteFileErr {
+impl Error for DeleteFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -607,7 +607,7 @@ pub struct FileMetadataErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for FileMetadataErr {
+impl Error for FileMetadataErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -643,7 +643,7 @@ pub struct MoveFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for MoveFileErr {
+impl Error for MoveFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -679,7 +679,7 @@ pub struct MoveDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for MoveDirErr {
+impl Error for MoveDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -714,7 +714,7 @@ pub struct OpenFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for OpenFileErr {
+impl Error for OpenFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -745,7 +745,7 @@ pub struct ParseJSONErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ParseJSONErr {
+impl Error for ParseJSONErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -780,7 +780,7 @@ pub struct ReadFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReadFileErr {
+impl Error for ReadFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -810,7 +810,7 @@ pub struct UnknownCurrentDirErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for UnknownCurrentDirErr {
+impl Error for UnknownCurrentDirErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -841,7 +841,7 @@ pub struct WriteFileErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for WriteFileErr {
+impl Error for WriteFileErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -875,7 +875,7 @@ pub struct SendActorMessageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SendActorMessageErr {
+impl Error for SendActorMessageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -905,7 +905,7 @@ pub struct ReceiveActorMessageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReceiveActorMessageErr {
+impl Error for ReceiveActorMessageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -1008,7 +1008,7 @@ impl fmt::Display for FileSysErr {
     }
 }
 
-impl MiruError for FileSysErr {
+impl Error for FileSysErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

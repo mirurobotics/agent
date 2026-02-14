@@ -4,7 +4,7 @@ use std::fmt;
 // internal crates
 use crate::cache::errors::CacheErr;
 use crate::crud::errors::CrudErr;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 use crate::models::errors::ModelsErr;
@@ -17,7 +17,7 @@ pub struct ServiceModelsErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceModelsErr {
+impl Error for ServiceModelsErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -47,7 +47,7 @@ pub struct ServiceSyncErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceSyncErr {
+impl Error for ServiceSyncErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -77,7 +77,7 @@ pub struct ServiceCacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceCacheErr {
+impl Error for ServiceCacheErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -107,7 +107,7 @@ pub struct ServiceCrudErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceCrudErr {
+impl Error for ServiceCrudErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -137,7 +137,7 @@ pub struct ServiceFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceFileSysErr {
+impl Error for ServiceFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -167,7 +167,7 @@ pub struct ServiceStorageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceStorageErr {
+impl Error for ServiceStorageErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -197,7 +197,7 @@ pub struct ServiceHTTPErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServiceHTTPErr {
+impl Error for ServiceHTTPErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -253,7 +253,7 @@ impl fmt::Display for ServiceErr {
     }
 }
 
-impl MiruError for ServiceErr {
+impl Error for ServiceErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

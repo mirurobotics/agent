@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 // internal crates
-use crate::errors::MiruError;
+use crate::errors::Error;
 use crate::http::{
     errors::{reqwest_err_to_http_client_err, HTTPErr},
     errors::{

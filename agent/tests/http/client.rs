@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // internal crates
-use miru_agent::errors::MiruError;
+use miru_agent::errors::Error;
 use miru_agent::http::client::HTTPClient;
 use miru_agent::http::errors::HTTPErr;
 

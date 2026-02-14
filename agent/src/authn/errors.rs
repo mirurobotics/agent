@@ -3,7 +3,7 @@ use std::fmt;
 
 // internal crates
 use crate::crypt::errors::CryptErr;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 
@@ -13,7 +13,7 @@ pub struct TimestampConversionErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for TimestampConversionErr {
+impl Error for TimestampConversionErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -43,7 +43,7 @@ pub struct AuthCryptErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for AuthCryptErr {
+impl Error for AuthCryptErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -73,7 +73,7 @@ pub struct AuthFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for AuthFileSysErr {
+impl Error for AuthFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -103,7 +103,7 @@ pub struct AuthHTTPErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for AuthHTTPErr {
+impl Error for AuthHTTPErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -133,7 +133,7 @@ pub struct SerdeErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SerdeErr {
+impl Error for SerdeErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -163,7 +163,7 @@ pub struct SendActorMessageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SendActorMessageErr {
+impl Error for SendActorMessageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -193,7 +193,7 @@ pub struct ReceiveActorMessageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReceiveActorMessageErr {
+impl Error for ReceiveActorMessageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -223,7 +223,7 @@ pub struct MockError {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for MockError {
+impl Error for MockError {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -291,7 +291,7 @@ impl fmt::Display for AuthnErr {
     }
 }
 
-impl MiruError for AuthnErr {
+impl Error for AuthnErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

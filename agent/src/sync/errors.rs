@@ -6,7 +6,7 @@ use crate::authn::errors::AuthnErr;
 use crate::cache::errors::CacheErr;
 use crate::crud::errors::CrudErr;
 use crate::deploy::errors::DeployErr;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 use crate::storage::errors::StorageErr;
@@ -20,7 +20,7 @@ pub struct SyncAuthnErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncAuthnErr {
+impl Error for SyncAuthnErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -50,7 +50,7 @@ pub struct SyncCacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncCacheErr {
+impl Error for SyncCacheErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -80,7 +80,7 @@ pub struct SyncCrudErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncCrudErr {
+impl Error for SyncCrudErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -110,7 +110,7 @@ pub struct SyncDeployErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncDeployErr {
+impl Error for SyncDeployErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -140,7 +140,7 @@ pub struct SyncHTTPClientErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncHTTPClientErr {
+impl Error for SyncHTTPClientErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -170,7 +170,7 @@ pub struct SyncFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncFileSysErr {
+impl Error for SyncFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -200,7 +200,7 @@ pub struct SyncStorageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncStorageErr {
+impl Error for SyncStorageErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -231,7 +231,7 @@ pub struct MissingExpandedInstancesErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for MissingExpandedInstancesErr {
+impl Error for MissingExpandedInstancesErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -265,7 +265,7 @@ pub struct SyncErrors {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncErrors {
+impl Error for SyncErrors {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -302,7 +302,7 @@ pub struct ConfigInstanceContentNotFoundErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConfigInstanceContentNotFoundErr {
+impl Error for ConfigInstanceContentNotFoundErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -340,7 +340,7 @@ pub struct SyncerInCooldownErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SyncerInCooldownErr {
+impl Error for SyncerInCooldownErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -376,7 +376,7 @@ pub struct MockErr {
     pub is_network_connection_error: bool,
 }
 
-impl MiruError for MockErr {
+impl Error for MockErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -449,7 +449,7 @@ impl fmt::Display for SyncErr {
     }
 }
 
-impl MiruError for SyncErr {
+impl Error for SyncErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

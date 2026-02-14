@@ -4,7 +4,7 @@ use std::fmt;
 // internal crates
 use crate::authn::errors::AuthnErr;
 use crate::crypt::errors::CryptErr;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 use crate::storage::errors::StorageErr;
@@ -15,7 +15,7 @@ pub struct InstallAuthnErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InstallAuthnErr {
+impl Error for InstallAuthnErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -45,7 +45,7 @@ pub struct InstallCryptErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InstallCryptErr {
+impl Error for InstallCryptErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -75,7 +75,7 @@ pub struct InstallFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InstallFileSysErr {
+impl Error for InstallFileSysErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -105,7 +105,7 @@ pub struct InstallHTTPErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InstallHTTPErr {
+impl Error for InstallHTTPErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -135,7 +135,7 @@ pub struct InstallStorageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InstallStorageErr {
+impl Error for InstallStorageErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -190,7 +190,7 @@ impl fmt::Display for InstallErr {
     }
 }
 
-impl MiruError for InstallErr {
+impl Error for InstallErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

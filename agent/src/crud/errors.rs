@@ -3,7 +3,7 @@ use std::fmt;
 
 // internal crates
 use crate::cache::errors::CacheErr;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::storage::errors::StorageErr;
 
 // external crates
@@ -15,7 +15,7 @@ pub struct CrudStorageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CrudStorageErr {
+impl Error for CrudStorageErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -45,7 +45,7 @@ pub struct CrudCacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CrudCacheErr {
+impl Error for CrudCacheErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -90,7 +90,7 @@ impl fmt::Display for CrudErr {
     }
 }
 
-impl MiruError for CrudErr {
+impl Error for CrudErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

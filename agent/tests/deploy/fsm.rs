@@ -1,5 +1,5 @@
 use miru_agent::deploy::fsm;
-use miru_agent::errors::MiruError;
+use miru_agent::errors::Error;
 use miru_agent::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
 };
@@ -555,7 +555,7 @@ pub mod transitions {
     fn validate_error_transition(
         deployment: Deployment,
         settings: &fsm::Settings,
-        e: &impl MiruError,
+        e: &impl Error,
         increment_attempts: bool,
     ) {
         let attempts = if increment_attempts && !e.is_network_connection_error() {

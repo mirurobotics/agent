@@ -5,7 +5,7 @@ use std::fmt;
 use crate::cache::errors::CacheErr;
 use crate::crud::errors::CrudErr;
 use crate::deploy::fsm;
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 use crate::models::deployment::Deployment;
 use crate::storage::errors::StorageErr;
@@ -17,7 +17,7 @@ pub struct DeploymentNotDeployableErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeploymentNotDeployableErr {
+impl Error for DeploymentNotDeployableErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -52,7 +52,7 @@ pub struct DeploymentNotRemoveableErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeploymentNotRemoveableErr {
+impl Error for DeploymentNotRemoveableErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -87,7 +87,7 @@ pub struct DeploymentNotArchiveableErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeploymentNotArchiveableErr {
+impl Error for DeploymentNotArchiveableErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -121,7 +121,7 @@ pub struct ConflictingDeploymentsErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConflictingDeploymentsErr {
+impl Error for ConflictingDeploymentsErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -155,7 +155,7 @@ pub struct DeployFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeployFileSysErr {
+impl Error for DeployFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -185,7 +185,7 @@ pub struct DeployCacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeployCacheErr {
+impl Error for DeployCacheErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -215,7 +215,7 @@ pub struct DeployCrudErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeployCrudErr {
+impl Error for DeployCrudErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -245,7 +245,7 @@ pub struct DeployStorageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for DeployStorageErr {
+impl Error for DeployStorageErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -304,7 +304,7 @@ impl fmt::Display for DeployErr {
     }
 }
 
-impl MiruError for DeployErr {
+impl Error for DeployErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

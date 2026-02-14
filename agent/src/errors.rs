@@ -25,7 +25,7 @@ impl Code {
     }
 }
 
-pub trait MiruError
+pub trait Error
 where
     Self: fmt::Debug + fmt::Display,
 {
@@ -38,7 +38,7 @@ where
 pub fn are_all_network_connection_errors<I>(errors: I) -> bool
 where
     I: IntoIterator,
-    I::Item: AsRef<dyn MiruError>,
+    I::Item: AsRef<dyn Error>,
 {
     errors
         .into_iter()

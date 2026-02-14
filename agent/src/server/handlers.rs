@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::errors::MiruError;
+use crate::errors::Error;
 use crate::models::device::DeviceStatus;
 use crate::server::errors::*;
 use crate::server::state::ServerState;
 use crate::services::device::{get, sync};
 use crate::trace;
 use crate::utils::version_info;
-use openapi_server::models::{Error, ErrorResponse, HealthResponse, VersionResponse};
+use openapi_server::models as openapi;
 
 // external
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
@@ -19,7 +19,7 @@ use tracing::error;
 pub async fn health() -> impl IntoResponse {
     (
         StatusCode::OK,
-        Json(HealthResponse {
+        Json(openapi::HealthResponse {
             status: "ok".to_string(),
         }),
     )
@@ -29,7 +29,7 @@ pub async fn version() -> impl IntoResponse {
     let version_info = version_info();
     (
         StatusCode::OK,
-        Json(VersionResponse {
+        Json(openapi::VersionResponse {
             version: version_info.version,
             commit: version_info.commit,
         }),
@@ -85,13 +85,13 @@ pub async fn sync_device(State(state): State<Arc<ServerState>>) -> impl IntoResp
 }
 
 // ================================ UTILITIES ====================================== //
-fn to_error_response(e: impl MiruError) -> ErrorResponse {
+fn to_error_response(e: impl Error) -> openapi::ErrorResponse {
     let params = e
         .params()
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
-    ErrorResponse {
-        error: Box::new(Error {
+    openapi::ErrorResponse {
+        error: Box::new(openapi::Error {
             code: e.code().as_str().to_string(),
             params,
             message: e.to_string(),

@@ -1,7 +1,7 @@
 // internal crates
 use crate::sync::{errors::*, syncer::SyncerExt};
 use crate::trace;
-use crate::{errors::MiruError, services::errors::*};
+use crate::{errors::Error, services::errors::*};
 use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
 
 pub async fn sync_device<SyncerT: SyncerExt>(

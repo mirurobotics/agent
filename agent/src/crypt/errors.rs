@@ -2,7 +2,7 @@
 use std::fmt;
 
 // internal crates
-use crate::errors::{Code, HTTPCode, MiruError, Trace};
+use crate::errors::{Code, HTTPCode, Error, Trace};
 use crate::filesys::errors::FileSysErr;
 
 // external crates
@@ -15,7 +15,7 @@ pub struct InvalidJWTErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InvalidJWTErr {
+impl Error for InvalidJWTErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -45,7 +45,7 @@ pub struct InvalidJWTPayloadFormatErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for InvalidJWTPayloadFormatErr {
+impl Error for InvalidJWTPayloadFormatErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -75,7 +75,7 @@ pub struct CryptFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for CryptFileSysErr {
+impl Error for CryptFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -105,7 +105,7 @@ pub struct Base64DecodeErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for Base64DecodeErr {
+impl Error for Base64DecodeErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -135,7 +135,7 @@ pub struct ConvertBytesToStringErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConvertBytesToStringErr {
+impl Error for ConvertBytesToStringErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -165,7 +165,7 @@ pub struct ConvertPrivateKeyToPEMErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ConvertPrivateKeyToPEMErr {
+impl Error for ConvertPrivateKeyToPEMErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -195,7 +195,7 @@ pub struct GenerateRSAKeyPairErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for GenerateRSAKeyPairErr {
+impl Error for GenerateRSAKeyPairErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -225,7 +225,7 @@ pub struct ReadKeyErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ReadKeyErr {
+impl Error for ReadKeyErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -255,7 +255,7 @@ pub struct RSAToPKeyErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for RSAToPKeyErr {
+impl Error for RSAToPKeyErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -285,7 +285,7 @@ pub struct SignDataErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SignDataErr {
+impl Error for SignDataErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -315,7 +315,7 @@ pub struct VerifyDataErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for VerifyDataErr {
+impl Error for VerifyDataErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -383,7 +383,7 @@ impl fmt::Display for CryptErr {
     }
 }
 
-impl MiruError for CryptErr {
+impl Error for CryptErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

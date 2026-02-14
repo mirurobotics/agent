@@ -5,7 +5,7 @@ use std::fmt;
 use crate::authn::errors::AuthnErr;
 use crate::cache::errors::CacheErr;
 use crate::crypt::errors::CryptErr;
-use crate::errors::MiruError;
+use crate::errors::Error;
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::filesys::errors::FileSysErr;
 use crate::filesys::file::File;
@@ -20,7 +20,7 @@ pub struct ServerCacheErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerCacheErr {
+impl Error for ServerCacheErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -51,7 +51,7 @@ pub struct MissingDeviceIDErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for MissingDeviceIDErr {
+impl Error for MissingDeviceIDErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -81,7 +81,7 @@ pub struct ShutdownMngrDuplicateArgErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ShutdownMngrDuplicateArgErr {
+impl Error for ShutdownMngrDuplicateArgErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -115,7 +115,7 @@ pub struct ServerAuthnErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerAuthnErr {
+impl Error for ServerAuthnErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -145,7 +145,7 @@ pub struct ServerCryptErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerCryptErr {
+impl Error for ServerCryptErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -175,7 +175,7 @@ pub struct ServerFileSysErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerFileSysErr {
+impl Error for ServerFileSysErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -205,7 +205,7 @@ pub struct ServerHTTPErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerHTTPErr {
+impl Error for ServerHTTPErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -235,7 +235,7 @@ pub struct ServerStorageErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerStorageErr {
+impl Error for ServerStorageErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -265,7 +265,7 @@ pub struct ServerServiceErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerServiceErr {
+impl Error for ServerServiceErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -295,7 +295,7 @@ pub struct ServerSyncErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for ServerSyncErr {
+impl Error for ServerSyncErr {
     fn code(&self) -> Code {
         self.source.code()
     }
@@ -326,7 +326,7 @@ pub struct BindUnixSocketErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for BindUnixSocketErr {
+impl Error for BindUnixSocketErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -360,7 +360,7 @@ pub struct RunAxumServerErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for RunAxumServerErr {
+impl Error for RunAxumServerErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -390,7 +390,7 @@ pub struct JoinHandleErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for JoinHandleErr {
+impl Error for JoinHandleErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -420,7 +420,7 @@ pub struct SendShutdownSignalErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for SendShutdownSignalErr {
+impl Error for SendShutdownSignalErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -450,7 +450,7 @@ pub struct TimestampConversionErr {
     pub trace: Box<Trace>,
 }
 
-impl MiruError for TimestampConversionErr {
+impl Error for TimestampConversionErr {
     fn code(&self) -> Code {
         Code::InternalServerError
     }
@@ -526,7 +526,7 @@ impl fmt::Display for ServerErr {
     }
 }
 
-impl MiruError for ServerErr {
+impl Error for ServerErr {
     fn code(&self) -> Code {
         forward_error_method!(self, code)
     }

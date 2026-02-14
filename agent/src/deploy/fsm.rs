@@ -1,5 +1,5 @@
 // internal crates
-use crate::errors::MiruError;
+use crate::errors::Error;
 use crate::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
 };
@@ -188,7 +188,7 @@ fn has_recovered(deployment: &Deployment, new_activity_status: DeploymentActivit
 pub fn error(
     deployment: Deployment,
     settings: &Settings,
-    e: &impl MiruError,
+    e: &impl Error,
     increment_attempts: bool,
 ) -> Deployment {
     let options = get_error_options(
@@ -199,7 +199,7 @@ pub fn error(
     transition(deployment, options)
 }
 
-fn should_increment_attempts(e: &impl MiruError) -> bool {
+fn should_increment_attempts(e: &impl Error) -> bool {
     !e.is_network_connection_error()
 }
 
