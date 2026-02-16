@@ -13,7 +13,7 @@ use crate::http::{
 };
 use crate::telemetry::SystemInfo;
 use crate::trace;
-use crate::utils::version_info;
+use crate::version;
 use openapi_client::models::ErrorResponse;
 
 // external crates
@@ -64,10 +64,9 @@ pub struct Headers {
 
 impl Default for Headers {
     fn default() -> Self {
-        let version_info = version_info();
         Self {
             // build information
-            agent_version: version_info.version,
+            agent_version: version::build_info().version,
 
             // host information
             host_name: SystemInfo::host_name(),

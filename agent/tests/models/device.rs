@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 // internal crates
 use miru_agent::models::device::{Device, DeviceStatus, Updates};
-use miru_agent::utils::Mergeable;
+use miru_agent::models::Mergeable;
 
 // external crates
 use chrono::{Duration, Utc};

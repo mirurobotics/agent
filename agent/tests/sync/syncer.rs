@@ -6,6 +6,7 @@ use miru_agent::authn::{
     token::Token,
     token_mngr::{TokenFile, TokenManager},
 };
+use miru_agent::cooldown;
 use miru_agent::crud::prelude::*;
 use miru_agent::deploy::fsm;
 use miru_agent::errors::*;
@@ -27,7 +28,6 @@ use miru_agent::sync::{
         SyncerExt, Worker,
     },
 };
-use miru_agent::utils::{calc_exp_backoff, CooldownOptions};
 
 use crate::authn::token_mngr::spawn as spawn_token_manager;
 use crate::http::mock::{MockClient, MockDevicesClient};
@@ -135,8 +135,12 @@ pub mod shutdown {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options: CooldownOptions::default(),
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff: cooldown::Backoff {
+                    base_secs: 15,
+                    growth_factor: 2,
+                    max_secs: 12 * 60 * 60,
+                },
                 agent_version: Device::default().agent_version,
             },
         )
@@ -175,9 +179,10 @@ pub mod subscribe {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 1,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -191,8 +196,8 @@ pub mod subscribe {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
@@ -271,9 +276,10 @@ pub mod subscribe {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 1,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -287,8 +293,8 @@ pub mod subscribe {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
@@ -406,9 +412,10 @@ pub mod sync {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -422,8 +429,8 @@ pub mod sync {
                 deployment_cache: deployment_cache.clone(),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
@@ -467,7 +474,7 @@ pub mod sync {
         assert!(state.last_attempted_sync_at < after);
         assert!(state.last_synced_at > before);
         assert!(state.last_synced_at < after);
-        let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
+        let base_cooldown_duration = TimeDelta::seconds(backoff.base_secs);
         assert!(state.cooldown_ends_at > before + base_cooldown_duration);
         assert!(state.cooldown_ends_at < after + base_cooldown_duration);
         assert_eq!(state.err_streak, 0);
@@ -503,9 +510,10 @@ pub mod sync {
         let device_file = Arc::new(device_file);
 
         let new_agent_version = "v1.0.1".to_string();
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -519,8 +527,8 @@ pub mod sync {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: new_agent_version.clone(),
             },
         )
@@ -544,7 +552,7 @@ pub mod sync {
         assert!(state.last_attempted_sync_at < after);
         assert!(state.last_synced_at > before);
         assert!(state.last_synced_at < after);
-        let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
+        let base_cooldown_duration = TimeDelta::seconds(backoff.base_secs);
         assert!(state.cooldown_ends_at > before + base_cooldown_duration);
         assert!(state.cooldown_ends_at < after + base_cooldown_duration);
         assert_eq!(state.err_streak, 0);
@@ -586,9 +594,10 @@ pub mod sync {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -602,14 +611,14 @@ pub mod sync {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
         .unwrap();
 
-        let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
+        let base_cooldown_duration = TimeDelta::seconds(backoff.base_secs);
         for _ in 0..10 {
             let before = Utc::now();
             let error = syncer.sync().await.unwrap_err();
@@ -684,9 +693,10 @@ pub mod sync {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -700,8 +710,8 @@ pub mod sync {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
@@ -724,12 +734,7 @@ pub mod sync {
             assert!(state.last_attempted_sync_at > before);
             assert!(state.last_attempted_sync_at < after);
             assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-            let cooldown_secs = calc_exp_backoff(
-                cooldown_options.base_secs,
-                cooldown_options.growth_factor,
-                i + 1,
-                cooldown_options.max_secs,
-            );
+            let cooldown_secs = cooldown::calc(&backoff, i + 1);
             let cooldown_duration = TimeDelta::seconds(cooldown_secs);
             assert!(state.cooldown_ends_at > before + cooldown_duration);
             assert!(state.cooldown_ends_at < after + cooldown_duration);
@@ -786,9 +791,10 @@ pub mod sync {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -802,8 +808,8 @@ pub mod sync {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
@@ -827,12 +833,7 @@ pub mod sync {
             assert!(state.last_attempted_sync_at > before);
             assert!(state.last_attempted_sync_at < after);
             assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-            let cooldown_secs = calc_exp_backoff(
-                cooldown_options.base_secs,
-                cooldown_options.growth_factor,
-                i + 1,
-                cooldown_options.max_secs,
-            );
+            let cooldown_secs = cooldown::calc(&backoff, i + 1);
             let cooldown_duration = TimeDelta::seconds(cooldown_secs);
             assert!(state.cooldown_ends_at > before + cooldown_duration);
             assert!(state.cooldown_ends_at < after + cooldown_duration);
@@ -866,7 +867,7 @@ pub mod sync {
 
         // network connection errors
         let cur_err_streak = 10;
-        let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
+        let base_cooldown_duration = TimeDelta::seconds(backoff.base_secs);
         for _ in 0..10 {
             let before = Utc::now();
             let error = syncer.sync().await.unwrap_err();
@@ -907,7 +908,7 @@ pub mod sync {
             .set_update_deployment(|| Ok(openapi_client::models::Deployment::default()));
 
         // recovery
-        let base_cooldown_duration = TimeDelta::seconds(cooldown_options.base_secs);
+        let base_cooldown_duration = TimeDelta::seconds(backoff.base_secs);
         for _ in 0..10 {
             let before = Utc::now();
             syncer.sync().await.unwrap();
@@ -967,9 +968,10 @@ pub mod sync {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -983,8 +985,8 @@ pub mod sync {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )
@@ -1035,9 +1037,10 @@ pub mod sync_if_not_in_cooldown {
                 .await
                 .unwrap();
 
-        let cooldown_options = CooldownOptions {
+        let backoff = cooldown::Backoff {
             base_secs: 10,
-            ..CooldownOptions::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
         let (syncer, _) = spawn(
             32,
@@ -1051,8 +1054,8 @@ pub mod sync_if_not_in_cooldown {
                 deployment_cache: Arc::new(deployment_cache),
                 deployment_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
-                fsm_settings: fsm::Settings::default(),
-                cooldown_options,
+                dpl_retry_policy: fsm::RetryPolicy::default(),
+                backoff,
                 agent_version: Device::default().agent_version,
             },
         )

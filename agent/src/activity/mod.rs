@@ -7,17 +7,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::error;
 
 #[derive(Clone, Debug)]
-pub struct ActivityTracker {
+pub struct Tracker {
     last_activity: Arc<AtomicU64>,
 }
 
-impl Default for ActivityTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ActivityTracker {
+impl Tracker {
     pub fn new() -> Self {
         Self {
             last_activity: Arc::new(AtomicU64::new(

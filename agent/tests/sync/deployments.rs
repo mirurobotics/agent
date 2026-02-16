@@ -70,12 +70,12 @@ pub mod sync_tests {
                 .unwrap();
 
         let http_client = MockClient::default();
-        let fsm_settings = fsm::Settings::default();
+        let dpl_retry_policy = fsm::RetryPolicy::default();
         let ctx = filesys::DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir.subdir("deployments"),
             staging_dir: &dir.subdir("staging"),
-            settings: &fsm_settings,
+            retry_policy: &dpl_retry_policy,
         };
 
         let result = sync(
@@ -114,12 +114,12 @@ pub mod sync_tests {
             .deployments_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
-        let fsm_settings = fsm::Settings::default();
+        let dpl_retry_policy = fsm::RetryPolicy::default();
         let ctx = filesys::DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir.subdir("deployments"),
             staging_dir: &dir.subdir("staging"),
-            settings: &fsm_settings,
+            retry_policy: &dpl_retry_policy,
         };
 
         let _result = sync(
@@ -180,12 +180,12 @@ pub mod sync_tests {
             }))
         });
 
-        let fsm_settings = fsm::Settings::default();
+        let dpl_retry_policy = fsm::RetryPolicy::default();
         let ctx = filesys::DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir.subdir("deployments"),
             staging_dir: &dir.subdir("staging"),
-            settings: &fsm_settings,
+            retry_policy: &dpl_retry_policy,
         };
 
         let result = sync(

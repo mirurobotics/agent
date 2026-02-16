@@ -76,7 +76,9 @@ where
             Component::CurDir => (),
             Component::ParentDir => match abs_path.last() {
                 Some(Component::RootDir) => (),
-                Some(Component::Normal(_)) => { abs_path.pop(); }
+                Some(Component::Normal(_)) => {
+                    abs_path.pop();
+                }
                 None
                 | Some(Component::CurDir)
                 | Some(Component::ParentDir)

@@ -1,5 +1,5 @@
 // external crates
-use crate::utils::Mergeable;
+use crate::models::Mergeable;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

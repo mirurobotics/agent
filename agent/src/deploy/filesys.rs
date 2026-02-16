@@ -17,7 +17,7 @@ pub struct DeployContext<'a, R> {
     pub content_reader: &'a R,
     pub deployment_dir: &'a Dir,
     pub staging_dir: &'a Dir,
-    pub settings: &'a fsm::Settings,
+    pub retry_policy: &'a fsm::RetryPolicy,
 }
 
 /// Writes the given config instances to the deployment directory (atomic replace),
@@ -41,7 +41,7 @@ where
 
     if let Err(e) = &write_result {
         let increment_attempts = deployment.target_status == DeploymentTargetStatus::Deployed;
-        let deployment = fsm::error(deployment, ctx.settings, e, increment_attempts);
+        let deployment = fsm::error(deployment, ctx.retry_policy, e, increment_attempts);
         if let Err(obs_e) = on_update(observers, &deployment).await {
             return (deployment, Err(obs_e));
         }

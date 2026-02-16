@@ -3,11 +3,12 @@ use std::future::Future;
 use std::sync::Arc;
 
 // internal crates
-use crate::activity::ActivityTracker;
+use crate::activity;
 use crate::authn::{
     token::Token,
     token_mngr::{TokenFile, TokenManager, TokenManagerExt},
 };
+use crate::cooldown;
 use crate::crypt::jwt;
 use crate::deploy::fsm;
 use crate::filesys::path::PathExt;
@@ -24,7 +25,6 @@ use crate::storage::{
 };
 use crate::sync::syncer::{Syncer, SyncerArgs, SyncerExt};
 use crate::trace;
-use crate::utils::CooldownOptions;
 
 // external crates
 use tokio::task::JoinHandle;
@@ -39,7 +39,7 @@ pub struct AppState {
     pub syncer: Arc<Syncer>,
     pub caches: Arc<Caches>,
     pub token_mngr: Arc<TokenManager>,
-    pub activity_tracker: Arc<ActivityTracker>,
+    pub activity_tracker: Arc<activity::Tracker>,
 }
 
 impl AppState {
@@ -48,7 +48,7 @@ impl AppState {
         layout: &StorageLayout,
         cache_capacities: CacheCapacities,
         http_client: Arc<HTTPClient>,
-        fsm_settings: fsm::Settings,
+        dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth_dir();
@@ -92,9 +92,9 @@ impl AppState {
                 deployment_cache: caches.deployment.clone(),
                 deployment_dir: layout.config_instance_deployment_dir(),
                 staging_dir: layout.temp_dir(),
-                fsm_settings,
+                dpl_retry_policy,
                 agent_version,
-                cooldown_options: CooldownOptions {
+                backoff: cooldown::Backoff {
                     base_secs: 1,
                     growth_factor: 2,
                     max_secs: 12 * 60 * 60, // 12 hours
@@ -104,7 +104,7 @@ impl AppState {
         let syncer = Arc::new(syncer);
 
         // initialize the activity tracker
-        let activity_tracker = Arc::new(ActivityTracker::new());
+        let activity_tracker = Arc::new(activity::Tracker::new());
 
         let shutdown_handle = async move {
             let handles = vec![token_mngr_handle, syncer_handle, device_file_handle];

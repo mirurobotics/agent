@@ -13,12 +13,6 @@ pub struct SystemInfo {
     pub tot_swap: u64,
 }
 
-impl Default for SystemInfo {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SystemInfo {
     pub fn new() -> Self {
         // create a new system
@@ -67,8 +61,4 @@ impl SystemInfo {
     pub fn used_swap(&self) -> u64 {
         self.system.used_swap()
     }
-}
-
-pub fn sys_info() -> SystemInfo {
-    SystemInfo::new()
 }

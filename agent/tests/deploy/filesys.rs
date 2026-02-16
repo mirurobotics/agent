@@ -1,15 +1,15 @@
 // internal crates
 use crate::deploy::observer::HistoryObserver;
 use miru_agent::cache::file::FileCache;
+use miru_agent::cooldown;
 use miru_agent::deploy::filesys::{deploy, DeployContext};
-use miru_agent::deploy::fsm::Settings;
+use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::observer::Observer;
 use miru_agent::filesys::dir::Dir;
 use miru_agent::models::config_instance::ConfigInstance;
 use miru_agent::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
 };
-use miru_agent::utils::calc_exp_backoff;
 
 // external crates
 use chrono::{TimeDelta, Utc};
@@ -41,7 +41,7 @@ pub mod deploy {
             .unwrap();
 
         // build the deploy context
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
         staging_dir.create(true).await.unwrap();
@@ -49,7 +49,7 @@ pub mod deploy {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
 
         // deploy
@@ -72,12 +72,7 @@ pub mod deploy {
         assert_eq!(result_deployment.attempts, 1);
 
         // verify cooldown was set
-        let cooldown = calc_exp_backoff(
-            settings.exp_backoff_base_secs,
-            2,
-            result_deployment.attempts,
-            settings.max_cooldown_secs,
-        );
+        let cooldown = cooldown::calc(&retry_policy.backoff, result_deployment.attempts);
         let approx_cooldown_ends_at = Utc::now() + TimeDelta::seconds(cooldown);
         let actual_cooldown = result_deployment.cooldown_ends_at.unwrap();
         assert!(actual_cooldown <= approx_cooldown_ends_at);
@@ -128,14 +123,14 @@ pub mod deploy {
             .unwrap();
 
         // build the deploy context
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let staging_dir = temp_dir.subdir("staging");
         staging_dir.create(true).await.unwrap();
         let ctx = DeployContext {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
 
         // deploy
@@ -200,7 +195,7 @@ pub mod deploy {
             .unwrap();
 
         // build the deploy context
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
         staging_dir.create(true).await.unwrap();
@@ -208,7 +203,7 @@ pub mod deploy {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
 
         // deploy
@@ -275,7 +270,7 @@ pub mod deploy {
         }
 
         // build the deploy context
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
         staging_dir.create(true).await.unwrap();
@@ -283,7 +278,7 @@ pub mod deploy {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
 
         // deploy
@@ -334,7 +329,7 @@ pub mod deploy {
             .unwrap();
 
         // build the deploy context
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
         staging_dir.create(true).await.unwrap();
@@ -342,7 +337,7 @@ pub mod deploy {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
 
         // deploy

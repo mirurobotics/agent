@@ -4,6 +4,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
+use crate::cooldown;
 use crate::deploy::fsm;
 use crate::errors::*;
 use crate::filesys::dir::Dir;
@@ -16,7 +17,6 @@ use crate::storage::{
 use crate::sync::errors::*;
 use crate::sync::{agent_version, deployments};
 use crate::trace;
-use crate::utils::{calc_exp_backoff, CooldownOptions};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -54,8 +54,8 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deployment_cache: Arc<DeploymentCache>,
     pub deployment_dir: Dir,
     pub staging_dir: Dir,
-    pub fsm_settings: fsm::Settings,
-    pub cooldown_options: CooldownOptions,
+    pub dpl_retry_policy: fsm::RetryPolicy,
+    pub backoff: cooldown::Backoff,
     pub agent_version: String,
 }
 
@@ -94,7 +94,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     deployment_cache: Arc<DeploymentCache>,
     deployment_dir: Dir,
     staging_dir: Dir,
-    fsm_settings: fsm::Settings,
+    dpl_retry_policy: fsm::RetryPolicy,
     agent_version: String,
 
     // subscribers
@@ -102,7 +102,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     subscriber_rx: watch::Receiver<SyncEvent>,
 
     // syncer state
-    cooldown_options: CooldownOptions,
+    backoff: cooldown::Backoff,
     state: SyncState,
 }
 
@@ -119,8 +119,8 @@ impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
             deployment_cache: args.deployment_cache,
             deployment_dir: args.deployment_dir,
             staging_dir: args.staging_dir,
-            fsm_settings: args.fsm_settings,
-            cooldown_options: args.cooldown_options,
+            dpl_retry_policy: args.dpl_retry_policy,
+            backoff: args.backoff,
             agent_version: args.agent_version,
             state: SyncState {
                 last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -209,7 +209,7 @@ impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
                 self.state.last_synced_at = Utc::now();
                 self.state.cooldown_ends_at = Utc::now();
                 self.state.err_streak = 0;
-                (true, self.cooldown_options.base_secs)
+                (true, self.backoff.base_secs)
             }
             Err(e) => {
                 if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncFailed(SyncFailure {
@@ -218,25 +218,20 @@ impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
                     error!("failed to send sync failed event: {:?}", e);
                 }
                 // network connection errors are expected to happen and do not count
-                // toward the error streak. We want to be able to retry syncing from network connection errors even if the previous errors were not network connection errors so we use an error streak of 0 when calculating the cooldown period
+                // toward the error streak. We want to be able to retry syncing from
+                // network connection errors even if the previous errors were not
+                // network connection errors so we use an error streak of 0 when
+                // calculating the cooldown period
                 if e.is_network_connection_error() {
                     debug!(
                         "unable to sync with backend due to a network connection error: {:?}",
                         e
                     );
-                    (false, self.cooldown_options.base_secs)
+                    (false, self.backoff.base_secs)
                 } else {
                     error!("unable to sync with backend: {:?}", e);
                     self.state.err_streak += 1;
-                    (
-                        false,
-                        calc_exp_backoff(
-                            self.cooldown_options.base_secs,
-                            self.cooldown_options.growth_factor,
-                            self.state.err_streak,
-                            self.cooldown_options.max_secs,
-                        ),
-                    )
+                    (false, cooldown::calc(&self.backoff, self.state.err_streak))
                 }
             }
         };
@@ -271,7 +266,7 @@ impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
             content_reader: self.cfg_inst_content_cache.as_ref(),
             deployment_dir: &self.deployment_dir,
             staging_dir: &self.staging_dir,
-            settings: &self.fsm_settings,
+            retry_policy: &self.dpl_retry_policy,
         };
         deployments::sync(
             self.deployment_cache.as_ref(),

@@ -4,9 +4,8 @@ use std::time::Duration;
 
 // internal crates
 use miru_agent::authn::{errors::*, token::Token};
+use miru_agent::cooldown;
 use miru_agent::trace;
-use miru_agent::utils::calc_exp_backoff;
-use miru_agent::utils::CooldownOptions;
 use miru_agent::workers::token_refresh::{
     calc_refresh_wait, run_token_refresh_worker, TokenRefreshWorkerOptions,
 };
@@ -42,9 +41,10 @@ pub mod run_refresh_token_worker {
 
         // set the cooldown options
         let refresh_advance_secs = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         // run the worker
@@ -52,7 +52,7 @@ pub mod run_refresh_token_worker {
         let sleep_ctrl_for_spawn = sleep_ctrl.clone();
         let options = TokenRefreshWorkerOptions {
             refresh_advance_secs,
-            polling: cooldown,
+            backoff: cooldown,
         };
         let token_refresh_handle = tokio::spawn(async move {
             run_token_refresh_worker(
@@ -140,9 +140,10 @@ pub mod run_refresh_token_worker {
 
         // set the cooldown options
         let refresh_advance_secs = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         // run the worker
@@ -150,7 +151,7 @@ pub mod run_refresh_token_worker {
         let sleep_ctrl_for_spawn = sleep_ctrl.clone();
         let options = TokenRefreshWorkerOptions {
             refresh_advance_secs,
-            polling: cooldown,
+            backoff: cooldown,
         };
         let token_refresh_handle = tokio::spawn(async move {
             run_token_refresh_worker(
@@ -214,9 +215,10 @@ pub mod run_refresh_token_worker {
 
         // set the cooldown options
         let refresh_advance_secs = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         // run the worker
@@ -224,7 +226,7 @@ pub mod run_refresh_token_worker {
         let sleep_ctrl_for_spawn = sleep_ctrl.clone();
         let options = TokenRefreshWorkerOptions {
             refresh_advance_secs,
-            polling: cooldown,
+            backoff: cooldown,
         };
         let token_refresh_handle = tokio::spawn(async move {
             run_token_refresh_worker(
@@ -243,12 +245,7 @@ pub mod run_refresh_token_worker {
             sleep_ctrl.release().await;
             sleep_ctrl.await_sleep().await;
             let last_sleep = sleep_ctrl.get_last_attempted_sleep().unwrap();
-            let expected_sleep_secs = calc_exp_backoff(
-                cooldown.base_secs,
-                cooldown.growth_factor,
-                i + 1,
-                cooldown.max_secs,
-            );
+            let expected_sleep_secs = cooldown::calc(&cooldown, i + 1);
             assert_eq!(last_sleep.as_secs(), expected_sleep_secs as u64);
             expected_get_token_calls += 1;
             expected_refresh_token_calls += 1;
@@ -292,9 +289,10 @@ pub mod run_refresh_token_worker {
 
         // set the cooldown options
         let refresh_advance_secs = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         // run the worker
@@ -302,7 +300,7 @@ pub mod run_refresh_token_worker {
         let sleep_ctrl_for_spawn = sleep_ctrl.clone();
         let options = TokenRefreshWorkerOptions {
             refresh_advance_secs,
-            polling: cooldown,
+            backoff: cooldown,
         };
         let token_refresh_handle = tokio::spawn(async move {
             run_token_refresh_worker(
@@ -321,12 +319,7 @@ pub mod run_refresh_token_worker {
             sleep_ctrl.release().await;
             sleep_ctrl.await_sleep().await;
             let last_sleep = sleep_ctrl.get_last_attempted_sleep().unwrap();
-            let expected_sleep_secs = calc_exp_backoff(
-                cooldown.base_secs,
-                cooldown.growth_factor,
-                i + 1,
-                cooldown.max_secs,
-            );
+            let expected_sleep_secs = cooldown::calc(&cooldown, i + 1);
             assert_eq!(last_sleep.as_secs(), expected_sleep_secs as u64);
             expected_get_token_calls += 1;
             expected_refresh_token_calls += 1;
@@ -374,21 +367,17 @@ pub mod calc_refresh_wait {
         let token_mngr = MockTokenManager::new(token);
 
         let refresh_advance = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         for i in 0..10 {
             let err_streak = i;
             let actual =
                 calc_refresh_wait(&token_mngr, refresh_advance, err_streak, cooldown).await;
-            let expected_secs = calc_exp_backoff(
-                cooldown.base_secs,
-                cooldown.growth_factor,
-                err_streak,
-                cooldown.max_secs,
-            );
+            let expected_secs = cooldown::calc(&cooldown, err_streak);
             let expected = Duration::from_secs(expected_secs as u64);
             assert_eq!(expected, actual);
         }
@@ -403,21 +392,17 @@ pub mod calc_refresh_wait {
         let token_mngr = MockTokenManager::new(token);
 
         let refresh_advance = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         for i in 0..10 {
             let err_streak = i;
             let sleep_duration =
                 calc_refresh_wait(&token_mngr, refresh_advance, err_streak, cooldown).await;
-            let expected_secs = calc_exp_backoff(
-                cooldown.base_secs,
-                cooldown.growth_factor,
-                err_streak,
-                cooldown.max_secs,
-            );
+            let expected_secs = cooldown::calc(&cooldown, err_streak);
             let expected = Duration::from_secs(expected_secs as u64);
             assert_eq!(sleep_duration, expected);
         }
@@ -432,9 +417,10 @@ pub mod calc_refresh_wait {
         let token_mngr = MockTokenManager::new(token);
 
         let refresh_advance = 10 * 60; // 10 minutes
-        let cooldown = CooldownOptions {
+        let cooldown = cooldown::Backoff {
             base_secs: 30,
-            ..Default::default()
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60,
         };
 
         // expect to wait until 10 minutes before expiration (25 minutes)

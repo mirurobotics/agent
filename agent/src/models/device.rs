@@ -1,6 +1,6 @@
 // internal crates
 use crate::deserialize_error;
-use crate::utils::Mergeable;
+use crate::models::Mergeable;
 
 // external crates
 use chrono::{DateTime, Utc};

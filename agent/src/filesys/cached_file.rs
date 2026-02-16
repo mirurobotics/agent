@@ -4,8 +4,8 @@ use std::sync::Arc;
 // internal crates
 use crate::{
     filesys::{errors::*, file::File},
+    models::Mergeable,
     trace,
-    utils::Mergeable,
 };
 
 // external crates

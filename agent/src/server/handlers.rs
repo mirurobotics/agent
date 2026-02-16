@@ -6,7 +6,7 @@ use crate::models::device::DeviceStatus;
 use crate::server::errors::*;
 use crate::server::state::ServerState;
 use crate::services::device::{get, sync};
-use crate::utils::version_info;
+use crate::version;
 use openapi_server::models as openapi;
 
 // external
@@ -25,12 +25,12 @@ pub async fn health() -> impl IntoResponse {
 }
 
 pub async fn version() -> impl IntoResponse {
-    let version_info = version_info();
+    let build_info = version::build_info();
     (
         StatusCode::OK,
         Json(openapi::VersionResponse {
-            version: version_info.version,
-            commit: version_info.commit,
+            version: build_info.version,
+            commit: build_info.commit,
         }),
     )
 }
@@ -60,9 +60,7 @@ pub async fn get_device(State(state): State<Arc<ServerState>>) -> impl IntoRespo
 }
 
 pub async fn sync_device(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
-    let service = async move {
-        sync::sync_device(state.syncer.as_ref()).await
-    };
+    let service = async move { sync::sync_device(state.syncer.as_ref()).await };
 
     match service.await {
         Ok(device) => (StatusCode::OK, Json(json!(device))),

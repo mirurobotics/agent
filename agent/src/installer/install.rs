@@ -10,7 +10,7 @@ use crate::installer::{display, errors::*};
 use crate::logs::{init, LogOptions};
 use crate::models::device::{Device, DeviceStatus};
 use crate::storage::{layout::StorageLayout, settings, setup::clean_storage_setup};
-use crate::utils::version_info;
+use crate::version;
 use openapi_client::models::ActivateDeviceRequest;
 
 // external crates
@@ -106,7 +106,7 @@ pub async fn bootstrap<HTTPClientT: DevicesExt>(
             id: device.id,
             name: device.name,
             session_id: device.session_id,
-            agent_version: version_info().version,
+            agent_version: version::build_info().version,
             activated: true,
             status: DeviceStatus::Online,
             last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -138,7 +138,7 @@ pub async fn activate<HTTPClientT: DevicesExt>(
     let payload = ActivateDeviceRequest {
         public_key_pem,
         name: device_name,
-        agent_version: Some(version_info().version),
+        agent_version: Some(version::build_info().version),
     };
     let device = http_client
         .activate_device(&device_id, &payload, token)

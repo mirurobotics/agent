@@ -1,9 +1,9 @@
+use miru_agent::cooldown;
 use miru_agent::deploy::fsm;
 use miru_agent::errors::Error;
 use miru_agent::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
 };
-use miru_agent::utils::calc_exp_backoff;
 
 use crate::mock::MockMiruError;
 
@@ -554,7 +554,7 @@ pub mod transitions {
 
     fn validate_error_transition(
         deployment: Deployment,
-        settings: &fsm::Settings,
+        retry_policy: &fsm::RetryPolicy,
         e: &impl Error,
         increment_attempts: bool,
     ) {
@@ -563,14 +563,14 @@ pub mod transitions {
         } else {
             deployment.attempts
         };
-        let expected_err_status = if attempts >= settings.max_attempts
+        let expected_err_status = if attempts >= retry_policy.max_attempts
             || deployment.error_status == DeploymentErrorStatus::Failed
         {
             DeploymentErrorStatus::Failed
         } else {
             DeploymentErrorStatus::Retrying
         };
-        let actual = fsm::error(deployment.clone(), settings, e, increment_attempts);
+        let actual = fsm::error(deployment.clone(), retry_policy, e, increment_attempts);
 
         let expected = Deployment {
             error_status: expected_err_status,
@@ -585,12 +585,7 @@ pub mod transitions {
 
         // check the cooldown
         let now = Utc::now();
-        let cooldown = calc_exp_backoff(
-            settings.exp_backoff_base_secs,
-            2,
-            attempts,
-            settings.max_cooldown_secs,
-        );
+        let cooldown = cooldown::calc(&retry_policy.backoff, attempts);
         let expected_cooldown_ends_at = now + TimeDelta::seconds(cooldown);
         assert!(
             actual.cooldown_ends_at <= Some(expected_cooldown_ends_at),
@@ -608,10 +603,13 @@ pub mod transitions {
 
     #[test]
     fn error_transition() {
-        let settings = fsm::Settings {
+        let retry_policy = fsm::RetryPolicy {
             max_attempts: 5,
-            exp_backoff_base_secs: 1,
-            max_cooldown_secs: 60,
+            backoff: cooldown::Backoff {
+                base_secs: 1,
+                growth_factor: 2,
+                max_secs: 60,
+            },
         };
 
         for i in 0..4 {
@@ -624,7 +622,7 @@ pub mod transitions {
                 deployment.attempts = 0;
                 validate_error_transition(
                     deployment,
-                    &settings,
+                    &retry_policy,
                     &MockMiruError::new(network_err),
                     increment_attempts,
                 );
@@ -633,10 +631,10 @@ pub mod transitions {
             // failed attempts not reached max
             let deployments = def_deps_w_all_status_combos();
             for mut deployment in deployments {
-                deployment.attempts = settings.max_attempts - 2;
+                deployment.attempts = retry_policy.max_attempts - 2;
                 validate_error_transition(
                     deployment,
-                    &settings,
+                    &retry_policy,
                     &MockMiruError::new(network_err),
                     increment_attempts,
                 );
@@ -645,10 +643,10 @@ pub mod transitions {
             // failed attempts reached max
             let deployments = def_deps_w_all_status_combos();
             for mut deployment in deployments {
-                deployment.attempts = settings.max_attempts - 1;
+                deployment.attempts = retry_policy.max_attempts - 1;
                 validate_error_transition(
                     deployment,
-                    &settings,
+                    &retry_policy,
                     &MockMiruError::new(network_err),
                     increment_attempts,
                 );
@@ -657,10 +655,10 @@ pub mod transitions {
             // failed attempts exceeding max
             let deployments = def_deps_w_all_status_combos();
             for mut deployment in deployments {
-                deployment.attempts = settings.max_attempts + 1;
+                deployment.attempts = retry_policy.max_attempts + 1;
                 validate_error_transition(
                     deployment,
-                    &settings,
+                    &retry_policy,
                     &MockMiruError::new(network_err),
                     increment_attempts,
                 );

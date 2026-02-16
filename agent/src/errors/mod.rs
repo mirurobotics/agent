@@ -37,16 +37,6 @@ pub trait Error: std::error::Error {
     }
 }
 
-pub fn are_all_network_connection_errors<I>(errors: I) -> bool
-where
-    I: IntoIterator,
-    I::Item: AsRef<dyn Error>,
-{
-    errors
-        .into_iter()
-        .all(|e| e.as_ref().is_network_connection_error())
-}
-
 #[derive(Debug, Clone)]
 pub struct Trace {
     pub file: &'static str,

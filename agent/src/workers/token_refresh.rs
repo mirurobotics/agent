@@ -5,8 +5,8 @@ use std::time::Duration;
 
 // internal crates
 use crate::authn::token_mngr::TokenManagerExt;
+use crate::cooldown;
 use crate::errors::*;
-use crate::utils::{calc_exp_backoff, CooldownOptions};
 
 // external crates
 use chrono::Utc;
@@ -15,14 +15,14 @@ use tracing::{debug, error, info};
 #[derive(Debug, Clone)]
 pub struct TokenRefreshWorkerOptions {
     pub refresh_advance_secs: i64,
-    pub polling: CooldownOptions,
+    pub backoff: cooldown::Backoff,
 }
 
 impl Default for TokenRefreshWorkerOptions {
     fn default() -> Self {
         Self {
             refresh_advance_secs: 60 * 15, // 15 minutes
-            polling: CooldownOptions {
+            backoff: cooldown::Backoff {
                 base_secs: 12,
                 growth_factor: 2,
                 max_secs: 60 * 60, // 1 hour
@@ -59,7 +59,7 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
                     token_mngr,
                     options.refresh_advance_secs,
                     err_streak,
-                    options.polling,
+                    options.backoff,
                 )
                 .await
             }
@@ -73,7 +73,7 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
                         // (even if the previous errors were not network connection
                         // errors) so we use an error streak of 0
                         0,
-                        options.polling,
+                        options.backoff,
                     )
                     .await
                 } else {
@@ -83,7 +83,7 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
                         token_mngr,
                         options.refresh_advance_secs,
                         err_streak,
-                        options.polling,
+                        options.backoff,
                     )
                     .await
                 }
@@ -108,15 +108,10 @@ pub async fn calc_refresh_wait<TokenManagerT: TokenManagerExt>(
     token_mngr: &TokenManagerT,
     refresh_advance_secs: i64,
     err_streak: u32,
-    cooldown: CooldownOptions,
+    backoff: cooldown::Backoff,
 ) -> Duration {
     // calculate the cooldown period
-    let cooldown_secs = calc_exp_backoff(
-        cooldown.base_secs,
-        cooldown.growth_factor,
-        err_streak,
-        cooldown.max_secs,
-    );
+    let cooldown_secs = cooldown::calc(&backoff, err_streak);
 
     match token_mngr.get_token().await {
         Ok(token) => {

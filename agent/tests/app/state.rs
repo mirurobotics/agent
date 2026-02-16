@@ -33,7 +33,7 @@ pub mod init {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await;
         match result {
@@ -65,7 +65,7 @@ pub mod init {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await;
         assert!(matches!(result, Err(ServerErr::MissingDeviceIDErr(_))));
@@ -97,7 +97,7 @@ pub mod init {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await
         .unwrap();
@@ -141,7 +141,7 @@ pub mod init {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await
         .unwrap();
@@ -183,7 +183,7 @@ pub mod init {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await
         .unwrap();
@@ -220,7 +220,7 @@ pub mod shutdown {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await
         .unwrap();
@@ -257,7 +257,7 @@ pub mod shutdown {
             &layout,
             CacheCapacities::default(),
             Arc::new(HTTPClient::new("doesntmatter").await),
-            fsm::Settings::default(),
+            fsm::RetryPolicy::default(),
         )
         .await
         .unwrap();

@@ -9,6 +9,9 @@ build = "build.rs"
 [features]
 test = []
 
+[lints.clippy]
+new_without_default = "allow"
+
 [dependencies]
 async-trait = { workspace = true }
 atomicwrites = { workspace = true }

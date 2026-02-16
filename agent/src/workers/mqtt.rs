@@ -6,6 +6,7 @@ use std::time::Duration;
 
 // internal modules
 use crate::authn::{token::Token, token_mngr::TokenManagerExt};
+use crate::cooldown;
 use crate::errors::*;
 use crate::models::device::{self, Device, DeviceStatus};
 use crate::mqtt::{
@@ -16,7 +17,6 @@ use crate::mqtt::{
 };
 use crate::storage::device::DeviceFile;
 use crate::sync::syncer::{SyncEvent, SyncerExt};
-use crate::utils::{calc_exp_backoff, CooldownOptions};
 
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};
@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct Options {
-    pub cooldown: CooldownOptions,
+    pub backoff: cooldown::Backoff,
     pub broker_address: ConnectAddress,
 }
 
@@ -33,7 +33,7 @@ impl Default for Options {
     fn default() -> Self {
         let five_mins = 5 * 60;
         Self {
-            cooldown: CooldownOptions {
+            backoff: cooldown::Backoff {
                 base_secs: 1,
                 growth_factor: 2,
                 max_secs: five_mins,
@@ -147,12 +147,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
         }
 
         // sleep for the cooldown period to prevent throttling from mqtt errors
-        let cooldown_secs = calc_exp_backoff(
-            options.cooldown.base_secs,
-            options.cooldown.growth_factor,
-            state.err_streak,
-            options.cooldown.max_secs,
-        );
+        let cooldown_secs = cooldown::calc(&options.backoff, state.err_streak);
         let cooldown_duration = Duration::from_secs(cooldown_secs as u64);
         sleep_fn(cooldown_duration).await;
     }

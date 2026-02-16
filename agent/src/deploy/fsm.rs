@@ -1,9 +1,9 @@
 // internal crates
+use crate::cooldown;
 use crate::errors::Error;
 use crate::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
 };
-use crate::utils::calc_exp_backoff;
 
 // external crates
 use chrono::{TimeDelta, Utc};
@@ -68,18 +68,20 @@ pub fn is_action_required(action: NextAction) -> bool {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Settings {
+pub struct RetryPolicy {
     pub max_attempts: u32,
-    pub exp_backoff_base_secs: i64,
-    pub max_cooldown_secs: i64,
+    pub backoff: cooldown::Backoff,
 }
 
-impl Default for Settings {
+impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
             max_attempts: 2147483647, // a VERY large number
-            exp_backoff_base_secs: 15,
-            max_cooldown_secs: 86400, // 24 hours
+            backoff: cooldown::Backoff {
+                base_secs: 15,
+                growth_factor: 2,
+                max_secs: 86400, // 24 hours
+            },
         }
     }
 }
@@ -187,14 +189,14 @@ fn has_recovered(deployment: &Deployment, new_activity_status: DeploymentActivit
 // ----------------------------- error transitions --------------------------------- //
 pub fn error(
     deployment: Deployment,
-    settings: &Settings,
+    retry_policy: &RetryPolicy,
     e: &impl Error,
     increment_attempts: bool,
 ) -> Deployment {
     let options = get_error_options(
         &deployment,
         increment_attempts && should_increment_attempts(e),
-        settings,
+        retry_policy,
     );
     transition(deployment, options)
 }
@@ -206,7 +208,7 @@ fn should_increment_attempts(e: &impl Error) -> bool {
 fn get_error_options(
     deployment: &Deployment,
     increment_attempts: bool,
-    settings: &Settings,
+    retry_policy: &RetryPolicy,
 ) -> TransitionOptions {
     // determine the number of attempts
     let attempts = if increment_attempts {
@@ -217,18 +219,14 @@ fn get_error_options(
 
     // determine the new status
     let mut new_error_status = Some(DeploymentErrorStatus::Retrying);
-    if attempts >= settings.max_attempts || deployment.error_status == DeploymentErrorStatus::Failed
+    if attempts >= retry_policy.max_attempts
+        || deployment.error_status == DeploymentErrorStatus::Failed
     {
         new_error_status = Some(DeploymentErrorStatus::Failed);
     }
 
     // determine the cooldown
-    let cooldown = calc_exp_backoff(
-        settings.exp_backoff_base_secs,
-        2,
-        attempts,
-        settings.max_cooldown_secs,
-    );
+    let cooldown = cooldown::calc(&retry_policy.backoff, attempts);
 
     TransitionOptions {
         activity_status: None,

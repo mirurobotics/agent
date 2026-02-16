@@ -3,7 +3,7 @@ use miru_agent::cache::entry::CacheEntry;
 use miru_agent::deploy::{
     apply::{apply, is_dirty},
     filesys::DeployContext,
-    fsm::Settings,
+    fsm::RetryPolicy,
 };
 use miru_agent::filesys::dir::Dir;
 use miru_agent::models::config_instance::ConfigInstance;
@@ -129,12 +129,12 @@ pub mod apply_func {
             ..Default::default()
         };
 
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let ctx = DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
         let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
             .await
@@ -184,12 +184,12 @@ pub mod apply_func {
         };
 
         // apply the deployment
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let ctx = DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
         let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
             .await
@@ -237,12 +237,12 @@ pub mod apply_func {
 
         // apply the deployment - it should still return Ok but with error state
         // because the deploy itself fails (missing content) but the function catches it
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let ctx = DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
         let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
             .await
@@ -293,12 +293,12 @@ pub mod apply_func {
         };
 
         // apply the deployment
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let ctx = DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
         let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
             .await
@@ -346,12 +346,12 @@ pub mod apply_func {
         };
 
         // apply the deployment
-        let settings = Settings::default();
+        let retry_policy = RetryPolicy::default();
         let ctx = DeployContext {
             content_reader: &cfg_inst_content_cache,
             deployment_dir: &dir,
             staging_dir: &staging_dir,
-            settings: &settings,
+            retry_policy: &retry_policy,
         };
         let result = apply(&deployment, &deployment_cache, &cfg_inst_cache, &ctx)
             .await

@@ -11,7 +11,7 @@ use miru_agent::mqtt::client::ConnectAddress;
 use miru_agent::storage::device::assert_activated;
 use miru_agent::storage::layout::StorageLayout;
 use miru_agent::storage::settings::Settings;
-use miru_agent::utils::version_info;
+use miru_agent::version;
 use miru_agent::workers::mqtt;
 
 // external
@@ -36,7 +36,7 @@ async fn main() {
     }
 
     // print the version & exit
-    let version_info = version_info();
+    let version_info = version::build_info();
     if cli_args.contains_key("version") {
         println!("{:?}", version_info);
         return;
@@ -97,7 +97,8 @@ async fn main() {
         ..Default::default()
     };
     info!("Running the server with options: {:?}", options);
-    let result = run(version_info.version, options, await_shutdown_signal()).await;
+    let build_info = version::build_info();
+    let result = run(build_info.version, options, await_shutdown_signal()).await;
     if let Err(e) = result {
         error!("Failed to run the server: {e}");
     }

@@ -40,7 +40,7 @@ pub struct AppOptions {
 
     pub storage: StorageOptions,
     pub token_refresh_worker: TokenRefreshWorkerOptions,
-    pub fsm_settings: fsm::Settings,
+    pub dpl_retry_policy: fsm::RetryPolicy,
 
     pub backend_base_url: String,
 
@@ -61,7 +61,7 @@ impl Default for AppOptions {
 
             storage: StorageOptions::default(),
             token_refresh_worker: TokenRefreshWorkerOptions::default(),
-            fsm_settings: fsm::Settings::default(),
+            dpl_retry_policy: fsm::RetryPolicy::default(),
 
             backend_base_url: "https://api.mirurobotics.com/agent/v1".to_string(),
 

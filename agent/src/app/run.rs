@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 // internal crates
-use crate::activity::ActivityTracker;
+use crate::activity;
 use crate::app::{
     options::{AppOptions, LifecycleOptions},
     state::AppState,
@@ -88,7 +88,7 @@ pub async fn run(
 }
 
 async fn await_idle_timeout(
-    activity_tracker: Arc<ActivityTracker>,
+    activity_tracker: Arc<activity::Tracker>,
     idle_timeout: Duration,
     poll_interval: Duration,
 ) -> Result<(), ServerErr> {
@@ -174,7 +174,7 @@ async fn init_app_state(
         &options.storage.layout,
         options.storage.cache_capacities,
         Arc::new(HTTPClient::new(&options.backend_base_url).await),
-        options.fsm_settings,
+        options.dpl_retry_policy,
     )
     .await?;
     let app_state = Arc::new(app_state);
