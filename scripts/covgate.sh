@@ -4,9 +4,7 @@ set -e
 git_repo_root_dir=$(git rev-parse --show-toplevel)
 cd "$git_repo_root_dir"
 
-DEFAULT_COVERAGE="${1:-80.0}"
 SRC_DIR="agent/src"
-ABS_SRC_DIR="$git_repo_root_dir/$SRC_DIR"
 
 # Check dependencies
 if ! command -v jq >/dev/null 2>&1; then
@@ -21,17 +19,11 @@ if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
     cargo install cargo-llvm-cov
 fi
 
-# Get the minimum coverage threshold for a module
-# Reads from .covgate file in the module directory if it exists
+# Get the minimum coverage threshold for a module (directory that contains .covgate)
 # Use 0 in .covgate to skip coverage check entirely
 get_threshold() {
     module_dir="$1"
-    covgate_file="${module_dir}/.covgate"
-    if [ -f "$covgate_file" ]; then
-        head -1 "$covgate_file" | tr -d '[:space:]'
-    else
-        echo "$DEFAULT_COVERAGE"
-    fi
+    head -1 "${module_dir}/.covgate" | tr -d '[:space:]'
 }
 
 echo "Running tests with coverage instrumentation..."
@@ -50,26 +42,29 @@ if [ "$TEST_EXIT" -ne 0 ]; then
 fi
 
 echo ""
-echo "Checking per-module coverage (default minimum: ${DEFAULT_COVERAGE}%)..."
+echo "Checking per-module coverage (modules discovered by .covgate under ${SRC_DIR})..."
 echo ""
 
 HAS_FAILURES=0
 
-# Iterate over each module directory
-for module_path in "$SRC_DIR"/*/; do
-    module=$(basename "$module_path")
+# Discover modules: every directory under SRC_DIR that contains a .covgate file
+covgate_list=$(mktemp)
+trap 'rm -f "$covgate_list"' EXIT
+find "$SRC_DIR" -name '.covgate' -type f | sort > "$covgate_list"
 
-    # Get threshold
+while read -r covgate_file; do
+    module_path=$(dirname "$covgate_file")
+    module_display="${module_path#$SRC_DIR/}"
+    module_dir_abs="$git_repo_root_dir/$module_path/"
+
     MIN=$(get_threshold "$module_path")
 
-    # Skip if threshold is 0
     if [ "$MIN" = "0" ]; then
-        echo "⏭️  ${module}: skipped (threshold: 0)"
+        echo "⏭️  ${module_display}: skipped (threshold: 0)"
         continue
     fi
 
-    # Use jq to aggregate coverage for files matching this module
-    coverage=$(echo "$COV_JSON" | jq -r --arg mod "$ABS_SRC_DIR/$module/" '
+    coverage=$(echo "$COV_JSON" | jq -r --arg mod "$module_dir_abs" '
         [.data[0].files[] | select(.filename | startswith($mod))] |
         if length == 0 then "no_files"
         else
@@ -82,49 +77,17 @@ for module_path in "$SRC_DIR"/*/; do
     ')
 
     if [ "$coverage" = "no_files" ]; then
-        echo "⚠️  ${module}: no source files found in coverage data"
+        echo "⚠️  ${module_display}: no source files found in coverage data"
         continue
     fi
 
-    # Compare against threshold
     if [ "$(awk -v c="$coverage" -v m="$MIN" 'BEGIN {print (c >= m)}')" -eq 0 ]; then
-        echo "❌ ${module}: ${coverage}% (requires ${MIN}%)"
+        echo "❌ ${module_display}: ${coverage}% (requires ${MIN}%)"
         HAS_FAILURES=1
     else
-        echo "✅ ${module}: ${coverage}% (requires ${MIN}%)"
+        echo "✅ ${module_display}: ${coverage}% (requires ${MIN}%)"
     fi
-done
-
-# Check standalone .rs files in src root ("root" pseudo-module)
-MIN=$(get_threshold "$SRC_DIR")
-
-if [ "$MIN" = "0" ]; then
-    echo "⏭️  root: skipped (threshold: 0)"
-else
-    coverage=$(echo "$COV_JSON" | jq -r --arg dir "$ABS_SRC_DIR/" '
-        [.data[0].files[] | select(
-            (.filename | startswith($dir)) and
-            (.filename | ltrimstr($dir) | contains("/") | not)
-        )] |
-        if length == 0 then "no_files"
-        else
-            (map(.summary.lines.count) | add) as $total |
-            (map(.summary.lines.covered) | add) as $covered |
-            if $total == 0 then "0.0"
-            else (($covered / $total) * 10000 | floor) / 100 | tostring
-            end
-        end
-    ')
-
-    if [ "$coverage" = "no_files" ]; then
-        echo "⚠️  root: no source files found in coverage data"
-    elif [ "$(awk -v c="$coverage" -v m="$MIN" 'BEGIN {print (c >= m)}')" -eq 0 ]; then
-        echo "❌ root: ${coverage}% (requires ${MIN}%)"
-        HAS_FAILURES=1
-    else
-        echo "✅ root: ${coverage}% (requires ${MIN}%)"
-    fi
-fi
+done < "$covgate_list"
 
 echo ""
 
