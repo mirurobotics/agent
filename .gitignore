@@ -16,9 +16,6 @@ Cargo.lock
 # docker tarballs used for testing
 *.gz
 
-# logs
-logs/
-
 # zip file
 *.zip
 *.deb

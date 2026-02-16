@@ -7,7 +7,7 @@ use crate::crypt::{jwt, rsa};
 use crate::filesys::{dir::Dir, file::File, path::PathExt};
 use crate::http::{client::HTTPClient, devices::DevicesExt};
 use crate::installer::{display, errors::*};
-use crate::logs::{init, LogOptions};
+use crate::logs;
 use crate::models::device::{Device, DeviceStatus};
 use crate::storage::{layout::StorageLayout, settings, setup::clean_storage_setup};
 use crate::version;
@@ -35,13 +35,13 @@ async fn install_helper(
     cli_args: &HashMap<String, String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_dir = Dir::create_temp_dir("miru-agent-installer-logs").await?;
-    let options = LogOptions {
+    let options = logs::Options {
         // sending logs to stdout will interfere with the installer outputs
         stdout: false,
         log_dir: tmp_dir.path().to_path_buf(),
         ..Default::default()
     };
-    let guard = init(options)?;
+    let guard = logs::init(options)?;
 
     let mut settings = settings::Settings::default();
 

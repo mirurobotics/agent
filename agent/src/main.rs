@@ -6,7 +6,7 @@ use std::env;
 use miru_agent::app::options::{AppOptions, LifecycleOptions};
 use miru_agent::app::run::run;
 use miru_agent::installer::install::install;
-use miru_agent::logs::{init, LogOptions};
+use miru_agent::logs;
 use miru_agent::mqtt::client::ConnectAddress;
 use miru_agent::storage::device::assert_activated;
 use miru_agent::storage::layout::StorageLayout;
@@ -68,11 +68,11 @@ async fn main() {
     };
 
     // initialize the logging
-    let log_options = LogOptions {
+    let log_options = logs::Options {
         log_level: settings.log_level,
         ..Default::default()
     };
-    let result = init(log_options);
+    let result = logs::init(log_options);
     if let Err(e) = result {
         println!("Failed to initialize logging: {e}");
     }

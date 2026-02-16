@@ -9,7 +9,7 @@ use miru_agent::deploy::fsm;
 use miru_agent::filesys::dir::Dir;
 use miru_agent::filesys::errors::FileSysErr;
 use miru_agent::http::client::HTTPClient;
-use miru_agent::logs::*;
+use miru_agent::logs;
 use miru_agent::models::{
     device,
     device::{Device, DeviceStatus},
@@ -230,9 +230,9 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn success_device_online() {
-        let _ = init(LogOptions {
+        let _ = logs::init(logs::Options {
             stdout: true,
-            log_level: LogLevel::Info,
+            log_level: logs::LogLevel::Info,
             log_dir: PathBuf::from("/tmp/miru"),
         });
 
