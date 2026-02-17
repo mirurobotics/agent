@@ -37,10 +37,11 @@ pub trait Error: std::error::Error {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Trace {
     pub file: &'static str,
     pub line: u32,
+    pub backtrace: std::backtrace::Backtrace,
 }
 
 #[macro_export]
@@ -49,6 +50,7 @@ macro_rules! trace {
         Box::new($crate::errors::Trace {
             file: file!(),
             line: line!(),
+            backtrace: std::backtrace::Backtrace::capture(),
         })
     };
 }
