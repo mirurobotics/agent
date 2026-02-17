@@ -130,6 +130,7 @@ async fn idle_timeout_reached() {
             is_persistent: false,
             idle_timeout: Duration::from_millis(100),
             idle_timeout_poll_interval: Duration::from_millis(10),
+            max_shutdown_delay: Duration::from_secs(5),
             ..Default::default()
         },
         server: ServerOptions {
@@ -138,8 +139,8 @@ async fn idle_timeout_reached() {
         ..Default::default()
     };
 
-    // should safely run and shutdown in about 100ms
-    tokio::time::timeout(Duration::from_secs(5), async move {
+    // idle timeout triggers after ~100ms; shutdown may take up to max_shutdown_delay (5s)
+    tokio::time::timeout(Duration::from_secs(15), async move {
         run(Device::default().agent_version, options, async {
             let _ = tokio::signal::ctrl_c().await;
         })

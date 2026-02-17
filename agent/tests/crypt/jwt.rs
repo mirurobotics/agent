@@ -7,23 +7,25 @@ use miru_agent::crypt::jwt::Claims;
 // external crates
 use chrono::Utc;
 use serde_json::json;
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
 
 pub mod decode {
     use super::*;
 
     #[test]
     fn invalid_jwt_format() {
-        let token_2_parts = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJkZXZpY2UiLCJleHAiOjE3MjE1MTcwMzQsImlhdCI6MTcyMTQ5NTQzNCwiaXNzIjoiTWlydSIsInN1YiI6Ijc1ODk5YWE0LWIwOGEtNDA0Ny04NTI2LThmMGIxYjgzMjk3MyJ9";
-        let result = jwt::decode(token_2_parts);
-        assert!(result.is_err());
-        assert!(matches!(result, Err(CryptErr::InvalidJWTErr { .. })));
-
-        let token_4_parts = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJkZXZpY2UiLCJleHAiOjE3MjE1MTcwMzQsImlhdCI6MTcyMTQ5NTQzNCwiaXNzIjoiTWlydSIsInN1YiI6Ijc1ODk5YWE0LWIwOGEtNDA0Ny04NTI2LThmMGIxYjgzMjk3MyJ9.UIqAz_V-ZuZLIHUXwLHw-A2CrXBQrpXnJAMlVfmMXYY.arglebargle";
-        let result = jwt::decode(token_4_parts);
-        assert!(result.is_err());
-        assert!(matches!(result, Err(CryptErr::InvalidJWTErr { .. })));
+        let cases = vec![
+            ("", "empty string"),
+            ("single_part", "one part"),
+            ("two.parts", "two parts"),
+            ("eyJ.eyJ.sig.extra", "four parts"),
+        ];
+        for (token, label) in cases {
+            let result = jwt::decode(token);
+            assert!(
+                matches!(result, Err(CryptErr::InvalidJWTErr { .. })),
+                "expected InvalidJWTErr for {label}, got {result:?}"
+            );
+        }
     }
 
     #[test]
@@ -216,13 +218,75 @@ pub mod validate_claims {
             exp: now + 1000,
             sub: "75899aa4-b08a-4047-8526-880b1b832973".to_string(),
         };
-        let result = jwt::validate_claims(claim);
-        assert!(result.is_ok());
+        let device_id = jwt::validate_claims(claim).unwrap();
+        assert_eq!(device_id, "75899aa4-b08a-4047-8526-880b1b832973");
+    }
+
+    #[test]
+    fn iat_within_tolerance_is_valid() {
+        let now = Utc::now().timestamp();
+        // iat 10 seconds in the future is within the 15-second tolerance
+        let claim = Claims {
+            iss: "miru".to_string(),
+            aud: "device".to_string(),
+            iat: now + 10,
+            exp: now + 1000,
+            sub: "device-1".to_string(),
+        };
+        assert!(jwt::validate_claims(claim).is_ok());
     }
 }
 
-#[test]
-#[ignore]
-fn test_validate() {
-    // testing this would be redundant since it's such a simple wrapper
+pub mod validate {
+    use super::*;
+
+    // NOTE: jwt::validate performs claims validation only (issuer, audience, expiry, iat).
+    // It does NOT verify the cryptographic signature — that is the backend's responsibility.
+    // The fabricated signature in these tests is therefore intentional.
+
+    #[test]
+    fn success() {
+        let now = Utc::now().timestamp();
+        let payload = json!({
+            "iss": "miru",
+            "aud": "device",
+            "exp": now + 1000,
+            "iat": now,
+            "sub": "75899aa4-b08a-4047-8526-880b1b832973"
+        })
+        .to_string();
+
+        let token = format!(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{}.UIqAz_V-ZuZLIHUXwLHw-A2CrXBQrpXnJAMlVfmMXYY",
+            base64::encode_string_url_safe_no_pad(&payload)
+        );
+        let device_id = jwt::validate(&token).unwrap();
+        assert_eq!(device_id, "75899aa4-b08a-4047-8526-880b1b832973");
+    }
+
+    #[test]
+    fn expired_token() {
+        let now = Utc::now().timestamp();
+        let payload = json!({
+            "iss": "miru",
+            "aud": "device",
+            "exp": now - 100,
+            "iat": now - 200,
+            "sub": "75899aa4-b08a-4047-8526-880b1b832973"
+        })
+        .to_string();
+
+        let token = format!(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{}.UIqAz_V-ZuZLIHUXwLHw-A2CrXBQrpXnJAMlVfmMXYY",
+            base64::encode_string_url_safe_no_pad(&payload)
+        );
+        let result = jwt::validate(&token);
+        assert!(matches!(result, Err(CryptErr::InvalidJWTErr { .. })));
+    }
+
+    #[test]
+    fn invalid_format() {
+        let result = jwt::validate("not.a.valid-token");
+        assert!(result.is_err());
+    }
 }

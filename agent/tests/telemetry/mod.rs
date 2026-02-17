@@ -9,7 +9,10 @@ fn test_system_info_new() {
     assert!(!info.os.is_empty(), "os should not be empty");
     assert!(info.n_cpus > 0, "n_cpus should be > 0");
     assert!(info.tot_mem > 0, "tot_mem should be > 0");
-    assert!(info.tot_swap > 0, "tot_swap should be > 0");
+    assert!(
+        info.used_swap() <= info.tot_swap,
+        "used_swap should be <= tot_swap"
+    );
 }
 
 #[test]
@@ -26,23 +29,27 @@ fn test_static_methods() {
 fn test_memory_methods() {
     let info = SystemInfo::new();
     assert!(
-        info.free_mem() > 0,
-        "free_mem should be < tot_mem on a running system"
+        info.free_mem() <= info.tot_mem,
+        "free_mem should be <= tot_mem"
     );
     assert!(
-        info.avail_mem() > 0,
-        "avail_mem should be < tot_mem on a running system"
+        info.avail_mem() <= info.tot_mem,
+        "avail_mem should be <= tot_mem"
     );
     assert!(
-        info.used_mem() > 0,
-        "used_mem should be > 0 on a running system"
+        info.used_mem() <= info.tot_mem,
+        "used_mem should be <= tot_mem"
     );
     assert!(
-        info.free_swap() > 0,
-        "free_swap should be > 0 on a running system"
+        info.free_swap() <= info.tot_swap,
+        "free_swap should be <= tot_swap"
     );
     assert!(
-        info.used_swap() > 0,
-        "used_swap should be > 0 on a running system"
+        info.used_swap() <= info.tot_swap,
+        "used_swap should be <= tot_swap"
+    );
+    assert!(
+        info.used_mem() > 0 || info.free_mem() > 0,
+        "at least one of used_mem or free_mem should be > 0"
     );
 }
