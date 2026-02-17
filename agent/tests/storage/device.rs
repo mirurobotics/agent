@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::dir::Dir;
+use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::models::device::Device;
 use miru_agent::storage::{device::assert_activated, errors::StorageErr};
 
@@ -20,7 +20,7 @@ pub mod assert_activated {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
         let device_file = dir.file("device.json");
         device_file
-            .write_string("not a valid device", true, true)
+            .write_string("not a valid device", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -36,7 +36,10 @@ pub mod assert_activated {
             activated: false,
             ..Default::default()
         };
-        device_file.write_json(&device, true, true).await.unwrap();
+        device_file
+            .write_json(&device, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
 
         let result = assert_activated(&device_file).await.unwrap_err();
         assert!(matches!(result, StorageErr::DeviceNotActivatedErr { .. }));

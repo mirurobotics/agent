@@ -1,3 +1,6 @@
+// standard library
+use std::os::unix::fs::PermissionsExt;
+
 // internal crates
 use crate::crypt::errors::{
     ConvertPrivateKeyToPEMErr, CryptErr, GenerateRSAKeyPairErr, RSAToPKeyErr, ReadKeyErr,
@@ -5,6 +8,7 @@ use crate::crypt::errors::{
 };
 use crate::filesys::file::File;
 use crate::filesys::path::PathExt;
+use crate::filesys::{Atomic, Overwrite, WriteOptions};
 use crate::trace;
 
 // external libraries
@@ -28,7 +32,7 @@ pub async fn gen_key_pair(
     num_bits: u32,
     private_key_file: &File,
     public_key_file: &File,
-    overwrite: bool,
+    overwrite: Overwrite,
 ) -> Result<(), CryptErr> {
     // Generate the RSA key pair
     let rsa = Rsa::generate(num_bits).map_err(|e| {
@@ -46,11 +50,18 @@ pub async fn gen_key_pair(
         })
     })?;
     private_key_file
-        .write_bytes(&private_key_pem, overwrite, true)
+        .write_bytes(
+            &private_key_pem,
+            WriteOptions {
+                overwrite,
+                atomic: Atomic::Yes,
+            },
+        )
         .await?;
     // 600 gives the owner read/write permissions. Permissions to the group and others
     // are not granted.
-    private_key_file.set_permissions(0o600).await?;
+    let permissions = std::fs::Permissions::from_mode(0o600);
+    private_key_file.set_permissions(permissions).await?;
 
     // Extract and write the public key
     let public_key_pem = rsa.public_key_to_pem().map_err(|e| {
@@ -60,11 +71,18 @@ pub async fn gen_key_pair(
         })
     })?;
     public_key_file
-        .write_bytes(&public_key_pem, overwrite, true)
+        .write_bytes(
+            &public_key_pem,
+            WriteOptions {
+                overwrite,
+                atomic: Atomic::Yes,
+            },
+        )
         .await?;
     // 640 gives the owner read/write permissions, the group read permissions, and
     // nothing for other
-    public_key_file.set_permissions(0o640).await?;
+    let permissions = std::fs::Permissions::from_mode(0o640);
+    public_key_file.set_permissions(permissions).await?;
 
     Ok(())
 }

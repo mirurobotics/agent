@@ -6,8 +6,8 @@ use std::sync::Arc;
 use miru_agent::app::state::AppState;
 use miru_agent::authn::token::Token;
 use miru_agent::deploy::fsm;
-use miru_agent::filesys::dir::Dir;
 use miru_agent::filesys::errors::FileSysErr;
+use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::http::client::HTTPClient;
 use miru_agent::logs;
 use miru_agent::models::{
@@ -56,7 +56,7 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth_dir().private_key_file();
         private_key_file
-            .write_string("test", false, false)
+            .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -80,7 +80,7 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth_dir().private_key_file();
         private_key_file
-            .write_string("test", false, false)
+            .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -90,7 +90,10 @@ pub mod init {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY".to_string(),
                 expires_at: Utc::now(),
             };
-        token_file.write_json(&token, false, false).await.unwrap();
+        token_file
+            .write_json(&token, WriteOptions::default())
+            .await
+            .unwrap();
 
         let (state, _) = AppState::init(
             Device::default().agent_version,
@@ -127,14 +130,17 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth_dir().private_key_file();
         private_key_file
-            .write_string("test", false, false)
+            .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device_file();
         let device = Device::default();
-        device_file.write_json(&device, false, false).await.unwrap();
+        device_file
+            .write_json(&device, WriteOptions::default())
+            .await
+            .unwrap();
 
         let (state, _) = AppState::init(
             Device::default().agent_version,
@@ -164,7 +170,7 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth_dir().private_key_file();
         private_key_file
-            .write_string("test", false, false)
+            .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -176,7 +182,10 @@ pub mod init {
             status: DeviceStatus::Online,
             ..Device::default()
         };
-        device_file.write_json(&device, false, false).await.unwrap();
+        device_file
+            .write_json(&device, WriteOptions::default())
+            .await
+            .unwrap();
 
         let _ = AppState::init(
             Device::default().agent_version,
@@ -206,14 +215,17 @@ pub mod shutdown {
         // create a private key file
         let private_key_file = layout.auth_dir().private_key_file();
         private_key_file
-            .write_string("test", false, false)
+            .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device_file();
         let device = Device::default();
-        device_file.write_json(&device, false, false).await.unwrap();
+        device_file
+            .write_json(&device, WriteOptions::default())
+            .await
+            .unwrap();
 
         let (state, state_handle) = AppState::init(
             Device::default().agent_version,
@@ -242,14 +254,17 @@ pub mod shutdown {
         // create a private key file
         let private_key_file = layout.auth_dir().private_key_file();
         private_key_file
-            .write_string("test", false, false)
+            .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device_file();
         let device = Device::default();
-        device_file.write_json(&device, true, false).await.unwrap();
+        device_file
+            .write_json(&device, WriteOptions::OVERWRITE)
+            .await
+            .unwrap();
 
         let before_shutdown = Utc::now();
         let (state, state_handle) = AppState::init(

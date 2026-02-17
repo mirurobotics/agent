@@ -5,6 +5,7 @@ use miru_agent::cache::{
 };
 use miru_agent::crud::errors::CrudErr;
 use miru_agent::crud::prelude::*;
+use miru_agent::filesys::Overwrite;
 
 // external crates
 use chrono::Utc;
@@ -311,7 +312,10 @@ pub mod size {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
         assert_eq!(cache.size().await.unwrap(), 10);
 
@@ -320,7 +324,10 @@ pub mod size {
             let j = i + 10;
             let key = format!("key{j}");
             let value = format!("value{j}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
         assert_eq!(cache.size().await.unwrap(), 20);
 
@@ -329,7 +336,10 @@ pub mod size {
             let j = i + 5;
             let key = format!("key{j}");
             let value = format!("value{j}");
-            cache.write(key, value, |_, _| true, true).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Allow)
+                .await
+                .unwrap();
         }
         assert_eq!(cache.size().await.unwrap(), 20);
     }
@@ -357,13 +367,13 @@ pub mod entry_map {
         let key1 = "key1".to_string();
         let value1 = "value1".to_string();
         cache
-            .write(key1.clone(), value1.clone(), |_, _| true, false)
+            .write(key1.clone(), value1.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
         let key2 = "key2".to_string();
         let value2 = "value2".to_string();
         cache
-            .write(key2.clone(), value2.clone(), |_, _| true, false)
+            .write(key2.clone(), value2.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -402,13 +412,13 @@ pub mod value_map {
         let key1 = "key1".to_string();
         let value1 = "value1".to_string();
         cache
-            .write(key1.clone(), value1.clone(), |_, _| true, false)
+            .write(key1.clone(), value1.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
         let key2 = "key2".to_string();
         let value2 = "value2".to_string();
         cache
-            .write(key2.clone(), value2.clone(), |_, _| true, false)
+            .write(key2.clone(), value2.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -441,13 +451,13 @@ pub mod entries {
         let key1 = "key1".to_string();
         let value1 = "value1".to_string();
         cache
-            .write(key1.clone(), value1.clone(), |_, _| true, false)
+            .write(key1.clone(), value1.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
         let key2 = "key2".to_string();
         let value2 = "value2".to_string();
         cache
-            .write(key2.clone(), value2.clone(), |_, _| true, false)
+            .write(key2.clone(), value2.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -483,13 +493,13 @@ pub mod values {
         let key1 = "key1".to_string();
         let value1 = "value1".to_string();
         cache
-            .write(key1.clone(), value1.clone(), |_, _| true, false)
+            .write(key1.clone(), value1.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
         let key2 = "key2".to_string();
         let value2 = "value2".to_string();
         cache
-            .write(key2.clone(), value2.clone(), |_, _| true, false)
+            .write(key2.clone(), value2.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -542,7 +552,7 @@ pub mod read_entry_optional {
         let value = "value".to_string();
         let before_write = Utc::now();
         cache
-            .write(key.clone(), value.clone(), |_, _| false, false)
+            .write(key.clone(), value.clone(), |_, _| false, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -614,7 +624,7 @@ pub mod read_entry {
         let value = "value".to_string();
         let before_write = Utc::now();
         cache
-            .write(key.clone(), value.clone(), |_, _| false, false)
+            .write(key.clone(), value.clone(), |_, _| false, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -674,7 +684,7 @@ pub mod read_optional {
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
-            .write(key.clone(), value.clone(), |_, _| true, false)
+            .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
         let before_read = Utc::now();
@@ -730,7 +740,7 @@ pub mod read {
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
-            .write(key.clone(), value.clone(), |_, _| true, false)
+            .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -767,7 +777,7 @@ pub mod write {
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
-            .write(key.clone(), value.clone(), |_, _| false, false)
+            .write(key.clone(), value.clone(), |_, _| false, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -800,7 +810,7 @@ pub mod write {
         let value = "value".to_string();
         let before_write = Utc::now();
         cache
-            .write(key.clone(), value.clone(), |_, _| true, true)
+            .write(key.clone(), value.clone(), |_, _| true, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -832,14 +842,14 @@ pub mod write {
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
-            .write(key.clone(), value.clone(), |_, _| true, false)
+            .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
         // should throw an error since already exists
         assert!(matches!(
             cache
-                .write(key.clone(), value.clone(), |_, _| true, false)
+                .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
                 .await
                 .unwrap_err(),
             CacheErr::CannotOverwriteCacheElement { .. }
@@ -862,13 +872,13 @@ pub mod write {
         let value = "value".to_string();
         let before_creation = Utc::now();
         cache
-            .write(key.clone(), value.clone(), |_, _| true, false)
+            .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
 
         // should not throw an error since overwrite is true
         cache
-            .write(key.clone(), value.clone(), |_, _| false, true)
+            .write(key.clone(), value.clone(), |_, _| false, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -902,14 +912,20 @@ pub mod write {
         for i in 0..11 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         // each write should trigger a prune
         for i in 11..20 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
             assert_eq!(cache.size().await.unwrap(), 11);
         }
     }
@@ -949,7 +965,7 @@ pub mod delete {
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
-            .write(key.clone(), value.clone(), |_, _| false, false)
+            .write(key.clone(), value.clone(), |_, _| false, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -999,7 +1015,10 @@ pub mod prune {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         // prune the cache
@@ -1030,7 +1049,10 @@ pub mod prune {
         for i in 0..20 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         // prune the cache
@@ -1071,7 +1093,10 @@ pub mod find_entries_where {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         let after_write = Utc::now();
@@ -1123,7 +1148,10 @@ pub mod find_where {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         let after_write = Utc::now();
@@ -1168,7 +1196,10 @@ pub mod find_one_entry_optional {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         let after_write = Utc::now();
@@ -1220,7 +1251,10 @@ pub mod find_one_optional {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         let after_write = Utc::now();
@@ -1278,7 +1312,10 @@ pub mod find_one_entry {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         let after_write = Utc::now();
@@ -1329,7 +1366,10 @@ pub mod find_one {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         let after_write = Utc::now();
@@ -1386,7 +1426,10 @@ pub mod get_dirty_entries {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         // get dirty entries
@@ -1397,7 +1440,10 @@ pub mod get_dirty_entries {
         for i in 10..20 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| false, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| false, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         // dirty entries should be the same as before

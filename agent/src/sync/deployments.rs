@@ -1,5 +1,6 @@
 use crate::crud::prelude::*;
 use crate::deploy::{apply::apply, filesys, fsm};
+use crate::filesys::Overwrite;
 use crate::http::deployments::DeploymentsExt;
 use crate::models::config_instance::ConfigInstance;
 use crate::models::deployment::Deployment;
@@ -112,9 +113,13 @@ async fn pull<HTTPClientT: DeploymentsExt>(
 
             // Store config instance content if expanded
             if let Some(ref content) = backend_ci.content {
-                let overwrite = true;
                 if let Err(e) = cfg_inst_content_cache
-                    .write(ci_id.clone(), content.clone(), |_, _| false, overwrite)
+                    .write(
+                        ci_id.clone(),
+                        content.clone(),
+                        |_, _| false,
+                        Overwrite::Allow,
+                    )
                     .await
                 {
                     error!(
@@ -126,9 +131,8 @@ async fn pull<HTTPClientT: DeploymentsExt>(
             }
 
             // Store config instance metadata
-            let overwrite = true;
             if let Err(e) = cfg_inst_cache
-                .write(ci_id.clone(), ci, |_, _| false, overwrite)
+                .write(ci_id.clone(), ci, |_, _| false, Overwrite::Allow)
                 .await
             {
                 error!(
@@ -166,9 +170,13 @@ async fn pull<HTTPClientT: DeploymentsExt>(
         };
 
         // Write to cache
-        let overwrite = true;
         if let Err(e) = deployment_cache
-            .write(deployment_id.clone(), merged, |_, _| false, overwrite)
+            .write(
+                deployment_id.clone(),
+                merged,
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
         {
             error!(
@@ -253,7 +261,12 @@ async fn push<HTTPClientT: DeploymentsExt>(
         // update the cache to mark as clean
         let deployment_id = deployment.id.clone();
         if let Err(e) = deployment_cache
-            .write(deployment.id.clone(), deployment, |_, _| false, true)
+            .write(
+                deployment.id.clone(),
+                deployment,
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .map_err(SyncErr::from)
         {

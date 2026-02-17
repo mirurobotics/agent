@@ -7,6 +7,7 @@ use crate::cache::{
     entry::CacheEntry,
     errors::{CacheErr, ReceiveActorMessageErr, SendActorMessageErr},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
+    Overwrite,
 };
 use crate::crud::{errors::CrudErr, prelude::*};
 use crate::trace;
@@ -60,7 +61,7 @@ where
         key: K,
         value: V,
         is_dirty: IsDirty<K, V>,
-        overwrite: bool,
+        overwrite: Overwrite,
         respond_to: oneshot::Sender<Result<(), CacheErr>>,
     },
     Delete {
@@ -435,7 +436,7 @@ where
         key: K,
         value: V,
         is_dirty: F,
-        overwrite: bool,
+        overwrite: Overwrite,
     ) -> Result<(), CacheErr>
     where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync + 'static,

@@ -4,7 +4,7 @@ use std::env;
 
 // internal crates
 use crate::crypt::{jwt, rsa};
-use crate::filesys::{dir::Dir, file::File, path::PathExt};
+use crate::filesys::{dir::Dir, file::File, path::PathExt, Overwrite};
 use crate::http::{client::HTTPClient, devices::DevicesExt};
 use crate::installer::{display, errors::*};
 use crate::logs;
@@ -94,7 +94,7 @@ pub async fn bootstrap<HTTPClientT: DevicesExt>(
     let temp_dir = layout.temp_dir();
     let private_key_file = temp_dir.file("private.key");
     let public_key_file = temp_dir.file("public.key");
-    rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true).await?;
+    rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
 
     // activate the device
     let device = activate(http_client, &public_key_file, token, device_name).await?;

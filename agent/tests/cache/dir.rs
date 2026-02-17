@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::{concurrent_cache_tests, single_thread_cache_tests};
 use miru_agent::cache::dir::{DirCache, SingleThreadDirCache};
 use miru_agent::crud::prelude::*;
-use miru_agent::filesys::{dir::Dir, path::PathExt};
+use miru_agent::filesys::{dir::Dir, path::PathExt, Overwrite, WriteOptions};
 
 // external crates
 use tokio::task::JoinHandle;
@@ -56,7 +56,7 @@ pub mod concurrent {
         // write invalid json files to files in the cache directory
         let invalid_json_file = dir.file("invalid.json");
         invalid_json_file
-            .write_string("invalid json", true, false)
+            .write_string("invalid json", WriteOptions::OVERWRITE)
             .await
             .unwrap();
 
@@ -64,7 +64,10 @@ pub mod concurrent {
         for i in 0..10 {
             let key = format!("key{i}");
             let value = format!("value{i}");
-            cache.write(key, value, |_, _| true, false).await.unwrap();
+            cache
+                .write(key, value, |_, _| true, Overwrite::Deny)
+                .await
+                .unwrap();
         }
 
         // prune the cache

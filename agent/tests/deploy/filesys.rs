@@ -5,7 +5,7 @@ use miru_agent::cooldown;
 use miru_agent::deploy::filesys::{deploy, DeployContext};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::observer::Observer;
-use miru_agent::filesys::dir::Dir;
+use miru_agent::filesys::{dir::Dir, Overwrite, WriteOptions};
 use miru_agent::models::config_instance::ConfigInstance;
 use miru_agent::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
@@ -44,7 +44,7 @@ pub mod deploy {
         let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
-        staging_dir.create(true).await.unwrap();
+        staging_dir.create().await.unwrap();
         let ctx = DeployContext {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
@@ -110,7 +110,7 @@ pub mod deploy {
                 cfg_inst.id.clone(),
                 cfg_inst_content.clone(),
                 |_, _| false,
-                true,
+                Overwrite::Allow,
             )
             .await
             .unwrap();
@@ -118,14 +118,14 @@ pub mod deploy {
         // create the file in the deployment directory (simulating pre-existing file)
         let deployment_dir = temp_dir.subdir("deployments");
         let file = deployment_dir.file(filepath.as_str());
-        file.write_json(&cfg_inst_content, true, true)
+        file.write_json(&cfg_inst_content, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
         // build the deploy context
         let retry_policy = RetryPolicy::default();
         let staging_dir = temp_dir.subdir("staging");
-        staging_dir.create(true).await.unwrap();
+        staging_dir.create().await.unwrap();
         let ctx = DeployContext {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
@@ -189,7 +189,7 @@ pub mod deploy {
                 cfg_inst.id.clone(),
                 cfg_inst_content.clone(),
                 |_, _| false,
-                true,
+                Overwrite::Allow,
             )
             .await
             .unwrap();
@@ -198,7 +198,7 @@ pub mod deploy {
         let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
-        staging_dir.create(true).await.unwrap();
+        staging_dir.create().await.unwrap();
         let ctx = DeployContext {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
@@ -263,7 +263,12 @@ pub mod deploy {
         for cfg_inst in &cfg_insts {
             let content = json!({"filepath": cfg_inst.filepath.clone()});
             cache
-                .write(cfg_inst.id.clone(), content.clone(), |_, _| false, true)
+                .write(
+                    cfg_inst.id.clone(),
+                    content.clone(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
                 .await
                 .unwrap();
             contents.push(content);
@@ -273,7 +278,7 @@ pub mod deploy {
         let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
-        staging_dir.create(true).await.unwrap();
+        staging_dir.create().await.unwrap();
         let ctx = DeployContext {
             content_reader: &cache,
             deployment_dir: &deployment_dir,
@@ -332,7 +337,7 @@ pub mod deploy {
         let retry_policy = RetryPolicy::default();
         let deployment_dir = temp_dir.subdir("deployments");
         let staging_dir = temp_dir.subdir("staging");
-        staging_dir.create(true).await.unwrap();
+        staging_dir.create().await.unwrap();
         let ctx = DeployContext {
             content_reader: &cache,
             deployment_dir: &deployment_dir,

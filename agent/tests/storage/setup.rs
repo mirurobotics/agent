@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, file::File, path::PathExt};
+use miru_agent::filesys::{dir::Dir, file::File, path::PathExt, WriteOptions};
 use miru_agent::models::device::Device;
 use miru_agent::storage::settings::Settings;
 use miru_agent::storage::{layout::StorageLayout, setup::clean_storage_setup};
@@ -44,12 +44,12 @@ pub mod setup_storage {
         let temp_dir = layout.temp_dir();
         let private_key_file = temp_dir.file("private_key.pem");
         private_key_file
-            .write_string("test", true, true)
+            .write_string("test", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         let public_key_file = temp_dir.file("public_key.pem");
         public_key_file
-            .write_string("test", true, true)
+            .write_string("test", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -139,7 +139,7 @@ pub mod setup_storage {
         // create the agent file
         let device_file = layout.device_file();
         device_file
-            .write_json(&Device::default(), true, true)
+            .write_json(&Device::default(), WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -169,7 +169,7 @@ pub mod setup_storage {
 
         // create the auth directory
         let auth_dir = layout.auth_dir();
-        auth_dir.root.create(false).await.unwrap();
+        auth_dir.root.create().await.unwrap();
 
         // setup the storage
         let device = Device::default();
@@ -250,7 +250,10 @@ pub mod setup_storage {
         // create the caches directory
         let caches_dir = layout.caches_dir();
         let subfile = caches_dir.file("test");
-        subfile.write_string("test", true, true).await.unwrap();
+        subfile
+            .write_string("test", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
         assert!(subfile.exists());
 
         // setup the storage
@@ -284,7 +287,10 @@ pub mod setup_storage {
         // create the config instance deployment directory
         let config_instance_deployment_dir = layout.config_instance_deployment_dir();
         let subfile = config_instance_deployment_dir.file("test");
-        subfile.write_string("test", true, true).await.unwrap();
+        subfile
+            .write_string("test", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
         assert!(subfile.exists());
 
         // setup the storage

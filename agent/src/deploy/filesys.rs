@@ -4,6 +4,7 @@ use crate::deploy::errors::DeployErr;
 use crate::deploy::fsm;
 use crate::deploy::observer::{on_update, Observer};
 use crate::filesys::dir::Dir;
+use crate::filesys::{Overwrite, WriteOptions};
 use crate::models::config_instance::{ConfigInstance, ConfigInstanceID};
 use crate::models::deployment::{Deployment, DeploymentTargetStatus};
 
@@ -77,8 +78,7 @@ where
             .as_nanos()
     );
     let temp_dir = staging_dir.subdir(PathBuf::from(name));
-    temp_dir.create(true).await.map_err(wrap_file_sys_err)?;
-
+    temp_dir.create().await.map_err(wrap_file_sys_err)?;
     for cfg_inst in cfg_insts {
         let content = match content_fetcher.read(cfg_inst.id.clone()).await {
             Ok(c) => c,
@@ -89,13 +89,16 @@ where
         };
 
         let dest = temp_dir.file(&cfg_inst.filepath);
-        if let Err(e) = dest.write_json(&content, true, true).await {
+        if let Err(e) = dest
+            .write_json(&content, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+        {
             let _ = temp_dir.delete().await;
             return Err(wrap_file_sys_err(e));
         }
     }
 
-    if let Err(e) = temp_dir.move_to(deployment_dir, true).await {
+    if let Err(e) = temp_dir.move_to(deployment_dir, Overwrite::Allow).await {
         let _ = temp_dir.delete().await;
         return Err(wrap_file_sys_err(e));
     }

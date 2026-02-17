@@ -1,9 +1,48 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, path, path::PathExt};
+use miru_agent::filesys::{dir::Dir, path, path::PathExt, Atomic, Overwrite, WriteOptions};
 // external crates
 use std::path::PathBuf;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
+
+pub mod exists {
+    use super::*;
+
+    #[tokio::test]
+    async fn existing_path() {
+        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        assert!(dir.exists());
+    }
+
+    #[test]
+    fn nonexistent_path() {
+        let dir = Dir::new(PathBuf::from("/nonexistent/path/abc123"));
+        assert!(!dir.exists());
+    }
+}
+
+pub mod write_options {
+    use super::*;
+
+    #[test]
+    fn default() {
+        let opts = WriteOptions::default();
+        assert_eq!(opts.overwrite, Overwrite::Deny);
+        assert_eq!(opts.atomic, Atomic::No);
+    }
+
+    #[test]
+    fn overwrite_atomic() {
+        assert_eq!(WriteOptions::OVERWRITE_ATOMIC.overwrite, Overwrite::Allow);
+        assert_eq!(WriteOptions::OVERWRITE_ATOMIC.atomic, Atomic::Yes);
+    }
+
+    #[test]
+    fn overwrite() {
+        assert_eq!(WriteOptions::OVERWRITE.overwrite, Overwrite::Allow);
+        assert_eq!(WriteOptions::OVERWRITE.atomic, Atomic::No);
+    }
+}
 
 pub mod abs_path {
     // test cases taken from path-clean crate https://github.com/danreeves/path-clean/blob/3876d7cb5367997bcda17ce165bf69c4f434cb93/src/lib.rs#L108

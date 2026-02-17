@@ -10,8 +10,9 @@ use crate::cache::{
     entry::CacheEntry,
     errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
+    Overwrite,
 };
-use crate::filesys::{dir::Dir, file, file::File, path::PathExt};
+use crate::filesys::{dir::Dir, file, file::File, path::PathExt, Atomic, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -73,11 +74,10 @@ where
     async fn write_entry_impl(
         &mut self,
         entry: &CacheEntry<K, V>,
-        overwrite: bool,
+        overwrite: Overwrite,
     ) -> Result<(), CacheErr> {
-        let atomic = true;
         let entry_file = self.cache_entry_file(&entry.key);
-        if !overwrite && entry_file.exists() {
+        if overwrite == Overwrite::Deny && entry_file.exists() {
             return Err(CacheErr::CannotOverwriteCacheElement(
                 CannotOverwriteCacheElement {
                     key: entry.key.to_string(),
@@ -86,7 +86,11 @@ where
             ));
         }
 
-        entry_file.write_json(&entry, overwrite, atomic).await?;
+        let opts = WriteOptions {
+            overwrite,
+            atomic: Atomic::Yes,
+        };
+        entry_file.write_json(&entry, opts).await?;
         Ok(())
     }
 

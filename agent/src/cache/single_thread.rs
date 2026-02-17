@@ -7,6 +7,7 @@ use std::hash::Hash;
 use crate::cache::{
     entry::CacheEntry,
     errors::{CacheElementNotFound, CacheErr, FoundTooManyCacheElements},
+    Overwrite,
 };
 use crate::trace;
 
@@ -36,7 +37,7 @@ where
     async fn write_entry_impl(
         &mut self,
         entry: &CacheEntry<K, V>,
-        overwrite: bool,
+        overwrite: Overwrite,
     ) -> Result<(), CacheErr>;
 
     async fn delete_entry_impl(&mut self, key: &K) -> Result<(), CacheErr>;
@@ -62,7 +63,7 @@ where
         last_accessed: DateTime<Utc>,
     ) -> Result<(), CacheErr> {
         entry.last_accessed = last_accessed;
-        self.write_entry_impl(entry, true).await?;
+        self.write_entry_impl(entry, Overwrite::Allow).await?;
         Ok(())
     }
 
@@ -104,7 +105,7 @@ where
     async fn write_entry(
         &mut self,
         entry: &CacheEntry<K, V>,
-        overwrite: bool,
+        overwrite: Overwrite,
     ) -> Result<(), CacheErr> {
         self.prune().await?;
         self.write_entry_impl(entry, overwrite).await?;
@@ -116,7 +117,7 @@ where
         key: K,
         value: V,
         is_dirty: F,
-        overwrite: bool,
+        overwrite: Overwrite,
     ) -> Result<(), CacheErr>
     where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync,

@@ -9,7 +9,7 @@ use miru_agent::authn::{
     token_mngr::{SingleThreadTokenManager, TokenFile, TokenManager, TokenManagerExt, Worker},
 };
 use miru_agent::crypt::rsa;
-use miru_agent::filesys::{dir::Dir, file::File};
+use miru_agent::filesys::{dir::Dir, file::File, Overwrite, WriteOptions};
 use miru_agent::http::{
     client::HTTPClient,
     errors::{HTTPErr, MockErr},
@@ -98,7 +98,7 @@ pub mod spawn {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -126,7 +126,7 @@ pub mod shutdown {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -155,7 +155,7 @@ pub mod get_token {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         private_key_file
-            .write_string("private_key", false, false)
+            .write_string("private_key", WriteOptions::default())
             .await
             .unwrap();
 
@@ -187,7 +187,7 @@ pub mod refresh_token {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         private_key_file
-            .write_string("private_key", false, false)
+            .write_string("private_key", WriteOptions::default())
             .await
             .unwrap();
 
@@ -223,7 +223,7 @@ pub mod refresh_token {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -261,7 +261,7 @@ pub mod refresh_token {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -307,7 +307,7 @@ pub mod refresh_token {
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 

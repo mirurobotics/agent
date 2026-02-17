@@ -1,4 +1,5 @@
 // internal crates
+use crate::cache::Overwrite;
 use crate::crud::prelude::{Find, Read};
 use crate::deploy::errors::*;
 use crate::deploy::{
@@ -48,13 +49,12 @@ pub struct StorageObserver<'a> {
 #[async_trait]
 impl<'a> Observer for StorageObserver<'a> {
     async fn on_update(&mut self, deployment: &Deployment) -> Result<(), DeployErr> {
-        let overwrite = true;
         self.deployment_cache
             .write(
                 deployment.id.clone(),
                 deployment.clone(),
                 is_dirty,
-                overwrite,
+                Overwrite::Allow,
             )
             .await
             .map_err(DeployErr::from)

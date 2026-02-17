@@ -10,8 +10,9 @@ use crate::cache::{
     entry::CacheEntry,
     errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
+    Overwrite,
 };
-use crate::filesys::{file::File, path::PathExt};
+use crate::filesys::{file::File, path::PathExt, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -38,7 +39,8 @@ where
     pub async fn new(file: File, capacity: usize) -> Result<Self, CacheErr> {
         if !file.exists() {
             let empty_cache: HashMap<K, CacheEntry<K, V>> = HashMap::new();
-            file.write_json(&empty_cache, true, true).await?;
+            file.write_json(&empty_cache, WriteOptions::OVERWRITE_ATOMIC)
+                .await?;
         }
 
         Ok(Self {
@@ -58,7 +60,7 @@ where
 
     async fn write_cache(&self, cache: &HashMap<K, CacheEntry<K, V>>) -> Result<(), CacheErr> {
         self.file
-            .write_json(cache, true, true)
+            .write_json(cache, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .map_err(CacheErr::from)
     }
@@ -77,10 +79,10 @@ where
     async fn write_entry_impl(
         &mut self,
         entry: &CacheEntry<K, V>,
-        overwrite: bool,
+        overwrite: Overwrite,
     ) -> Result<(), CacheErr> {
         let mut cache = self.read_cache().await?;
-        if !overwrite && cache.contains_key(&entry.key) {
+        if overwrite == Overwrite::Deny && cache.contains_key(&entry.key) {
             return Err(CacheErr::CannotOverwriteCacheElement(
                 CannotOverwriteCacheElement {
                     key: entry.key.to_string(),

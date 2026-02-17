@@ -4,7 +4,7 @@ use std::path::PathBuf;
 // internal crates
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
-use miru_agent::filesys::{dir::Dir, file::File};
+use miru_agent::filesys::{dir::Dir, file::File, WriteOptions};
 use miru_agent::models::device::Device;
 use miru_agent::server::serve::ServerOptions;
 use miru_agent::storage::layout::StorageLayout;
@@ -18,14 +18,17 @@ async fn prepare_valid_server_storage(dir: Dir) {
     // create a private key file
     let private_key_file = layout.auth_dir().private_key_file();
     private_key_file
-        .write_string("test", false, false)
+        .write_string("test", WriteOptions::default())
         .await
         .unwrap();
 
     // create the device file
     let device_file = layout.device_file();
     let device = Device::default();
-    device_file.write_json(&device, false, false).await.unwrap();
+    device_file
+        .write_json(&device, WriteOptions::default())
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

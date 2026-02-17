@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::{
-    filesys::{errors::*, file::File},
+    filesys::{errors::*, file::File, Atomic, Overwrite, WriteOptions},
     models::Mergeable,
     trace,
 };
@@ -51,15 +51,26 @@ where
         let result = Self::new(file.clone()).await;
         match result {
             Ok(cached_file) => Ok(cached_file),
-            Err(_) => Self::create(file, &default, true).await,
+            Err(_) => Self::create(file, &default, Overwrite::Allow).await,
         }
     }
 
-    pub async fn create(file: File, data: &ContentT, overwrite: bool) -> Result<Self, FileSysErr>
+    pub async fn create(
+        file: File,
+        data: &ContentT,
+        overwrite: Overwrite,
+    ) -> Result<Self, FileSysErr>
     where
         Self: Sized,
     {
-        file.write_json(data, overwrite, true).await?;
+        file.write_json(
+            data,
+            WriteOptions {
+                overwrite,
+                atomic: Atomic::Yes,
+            },
+        )
+        .await?;
         Self::new(file).await
     }
 
@@ -68,7 +79,9 @@ where
     }
 
     pub async fn write(&mut self, data: ContentT) -> Result<(), FileSysErr> {
-        self.file.write_json(&data, true, true).await?;
+        self.file
+            .write_json(&data, WriteOptions::OVERWRITE_ATOMIC)
+            .await?;
         self.cache = Arc::new(data);
         Ok(())
     }
@@ -207,25 +220,31 @@ where
         Ok((Self { sender }, worker_handle))
     }
 
-    pub async fn shutdown(&self) -> Result<(), FileSysErr> {
+    async fn send_command<R>(
+        &self,
+        op: &str,
+        make_cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand<ContentT, UpdatesT>,
+    ) -> Result<R, FileSysErr> {
         let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Shutdown { respond_to: send })
-            .await
-            .map_err(|e| {
-                error!("Failed to send shutdown command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
+        self.sender.send(make_cmd(send)).await.map_err(|e| {
+            error!("Failed to send {op} command to actor: {e:?}");
+            FileSysErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
         recv.await.map_err(|e| {
-            error!("Failed to receive shutdown response from actor: {:?}", e);
+            error!("Failed to receive {op} response from actor: {e:?}");
             FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
-        })??;
+        })
+    }
+
+    pub async fn shutdown(&self) -> Result<(), FileSysErr> {
+        self.send_command("shutdown", |tx| WorkerCommand::Shutdown { respond_to: tx })
+            .await??;
         info!(
             "{} cached file shutdown complete",
             std::any::type_name::<ContentT>()
@@ -234,71 +253,23 @@ where
     }
 
     pub async fn read(&self) -> Result<Arc<ContentT>, FileSysErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Read { respond_to: send })
+        self.send_command("read", |tx| WorkerCommand::Read { respond_to: tx })
             .await
-            .map_err(|e| {
-                error!("Failed to send read command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            error!("Failed to receive read response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })
     }
 
     pub async fn write(&self, data: ContentT) -> Result<(), FileSysErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Write {
-                data,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                error!("Failed to send write command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            error!("Failed to receive write response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command("write", |tx| WorkerCommand::Write {
+            data,
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn patch(&self, updates: UpdatesT) -> Result<(), FileSysErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Patch {
-                updates,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                error!("Failed to send patch command to actor: {:?}", e);
-                FileSysErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            error!("Failed to receive patch response from actor: {:?}", e);
-            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command("patch", |tx| WorkerCommand::Patch {
+            updates,
+            respond_to: tx,
+        })
+        .await?
     }
 }

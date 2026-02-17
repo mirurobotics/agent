@@ -10,7 +10,7 @@ use miru_agent::cooldown;
 use miru_agent::crud::prelude::*;
 use miru_agent::deploy::fsm;
 use miru_agent::errors::*;
-use miru_agent::filesys::dir::Dir;
+use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::http::{
     client::HTTPClient,
     errors::{HTTPErr, MockErr},
@@ -46,7 +46,7 @@ pub async fn create_token_manager(
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
     private_key_file
-        .write_string("private_key", true, true)
+        .write_string("private_key", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 

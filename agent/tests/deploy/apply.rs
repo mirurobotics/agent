@@ -5,7 +5,7 @@ use miru_agent::deploy::{
     filesys::DeployContext,
     fsm::RetryPolicy,
 };
-use miru_agent::filesys::dir::Dir;
+use miru_agent::filesys::{dir::Dir, Overwrite};
 use miru_agent::models::config_instance::ConfigInstance;
 use miru_agent::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentTargetStatus,
@@ -167,11 +167,21 @@ pub mod apply_func {
 
         // write config instance to cache
         cfg_inst_cache
-            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
+            .write(
+                cfg_inst.id.clone(),
+                cfg_inst.clone(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .unwrap();
         cfg_inst_content_cache
-            .write(cfg_inst.id.clone(), json!({"speed": 4}), |_, _| false, true)
+            .write(
+                cfg_inst.id.clone(),
+                json!({"speed": 4}),
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .unwrap();
 
@@ -223,7 +233,12 @@ pub mod apply_func {
 
         // write config instance metadata but NOT content
         cfg_inst_cache
-            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
+            .write(
+                cfg_inst.id.clone(),
+                cfg_inst.clone(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .unwrap();
 
@@ -276,11 +291,21 @@ pub mod apply_func {
 
         // write config instance to cache
         cfg_inst_cache
-            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
+            .write(
+                cfg_inst.id.clone(),
+                cfg_inst.clone(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .unwrap();
         cfg_inst_content_cache
-            .write(cfg_inst.id.clone(), json!({"speed": 4}), |_, _| false, true)
+            .write(
+                cfg_inst.id.clone(),
+                json!({"speed": 4}),
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .unwrap();
 
@@ -332,7 +357,12 @@ pub mod apply_func {
 
         // write config instance to cache
         cfg_inst_cache
-            .write(cfg_inst.id.clone(), cfg_inst.clone(), |_, _| false, true)
+            .write(
+                cfg_inst.id.clone(),
+                cfg_inst.clone(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
             .await
             .unwrap();
 

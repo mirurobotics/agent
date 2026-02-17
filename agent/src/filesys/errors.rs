@@ -1,10 +1,13 @@
+// standard library
 use std::path::PathBuf;
 
+// internal crates
 use crate::errors::Trace;
+use crate::filesys::Overwrite;
 use crate::filesys::{dir::Dir, file::File};
 
 #[derive(Debug, thiserror::Error)]
-#[error("Unable to find home directory: {source}")]
+#[error("unable to find home directory: {source}")]
 pub struct UnknownHomeDirErr {
     pub source: Box<std::env::VarError>,
     pub trace: Box<Trace>,
@@ -13,7 +16,7 @@ pub struct UnknownHomeDirErr {
 impl crate::errors::Error for UnknownHomeDirErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Invalid directory name: {name}")]
+#[error("invalid directory name: {name}")]
 pub struct InvalidDirNameErr {
     pub name: String,
     pub trace: Box<Trace>,
@@ -40,46 +43,28 @@ pub struct UnknownFileNameErr {
 impl crate::errors::Error for UnknownFileNameErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("path does not exist: {path}")]
 pub struct PathDoesNotExistErr {
     pub path: PathBuf,
     pub trace: Box<Trace>,
 }
 
-impl std::fmt::Display for PathDoesNotExistErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "path does not exist: {}",
-            self.path.to_str().unwrap_or("unknown")
-        )
-    }
-}
-
 impl crate::errors::Error for PathDoesNotExistErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("path exists: {path}")]
 pub struct PathExistsErr {
     pub path: PathBuf,
     pub trace: Box<Trace>,
 }
 
-impl std::fmt::Display for PathExistsErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "path exists: {}",
-            self.path.to_str().unwrap_or("unknown")
-        )
-    }
-}
-
 impl crate::errors::Error for PathExistsErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("cannot overwrite existing file (allow overwrite is {overwrite}): {file}")]
+#[error("cannot overwrite existing file (overwrite is {overwrite:?}): {file}")]
 pub struct InvalidFileOverwriteErr {
     pub file: File,
-    pub overwrite: bool,
+    pub overwrite: Overwrite,
     pub trace: Box<Trace>,
 }
 
@@ -131,17 +116,6 @@ pub struct ConvertUTF8Err {
 }
 
 impl crate::errors::Error for ConvertUTF8Err {}
-
-#[derive(Debug, thiserror::Error)]
-#[error("failed to copy file '{src_file}' to '{dest_file}': {source}")]
-pub struct CopyFileErr {
-    pub source: Box<std::io::Error>,
-    pub src_file: File,
-    pub dest_file: File,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for CopyFileErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("failed to create directory '{dir}': {source}")]
@@ -224,6 +198,22 @@ pub struct MoveDirErr {
 }
 
 impl crate::errors::Error for MoveDirErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "failed to move directory '{src_dir}' to '{dest_dir}' and rollback failed (trash: '{trash_dir}'): primary={primary_source}; rollback={rollback_source}; cleanup={cleanup_source:?}"
+)]
+pub struct MoveDirRollbackErr {
+    pub primary_source: Box<std::io::Error>,
+    pub rollback_source: Box<std::io::Error>,
+    pub cleanup_source: Option<Box<std::io::Error>>,
+    pub src_dir: Dir,
+    pub dest_dir: Dir,
+    pub trash_dir: Dir,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for MoveDirRollbackErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("failed to open file '{file}': {source}")]
@@ -317,8 +307,6 @@ pub enum FileSysErr {
     #[error(transparent)]
     ConvertUTF8Err(ConvertUTF8Err),
     #[error(transparent)]
-    CopyFileErr(CopyFileErr),
-    #[error(transparent)]
     CreateDirErr(CreateDirErr),
     #[error(transparent)]
     CreateSymlinkErr(CreateSymlinkErr),
@@ -334,6 +322,8 @@ pub enum FileSysErr {
     MoveFileErr(MoveFileErr),
     #[error(transparent)]
     MoveDirErr(MoveDirErr),
+    #[error(transparent)]
+    MoveDirRollbackErr(MoveDirRollbackErr),
     #[error(transparent)]
     OpenFileErr(OpenFileErr),
     #[error(transparent)]
@@ -365,7 +355,6 @@ crate::impl_error!(FileSysErr {
     UnknownParentDirForFileErr,
     AtomicWriteFileErr,
     ConvertUTF8Err,
-    CopyFileErr,
     CreateDirErr,
     CreateSymlinkErr,
     CreateTmpDirErr,
@@ -374,6 +363,7 @@ crate::impl_error!(FileSysErr {
     FileMetadataErr,
     MoveFileErr,
     MoveDirErr,
+    MoveDirRollbackErr,
     OpenFileErr,
     ParseJSONErr,
     ReadDirErr,

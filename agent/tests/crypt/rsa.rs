@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::crypt::errors::CryptErr;
 use miru_agent::crypt::rsa;
-use miru_agent::filesys::{dir::Dir, file::File, path::PathExt};
+use miru_agent::filesys::{dir::Dir, file::File, path::PathExt, Overwrite, WriteOptions};
 
 // external crates
 #[allow(unused_imports)]
@@ -24,7 +24,8 @@ pub mod gen_key_pair {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        let result = rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true).await;
+        let result =
+            rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await;
         assert!(result.is_ok());
 
         assert!(private_key_file.exists());
@@ -44,7 +45,8 @@ pub mod gen_key_pair {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        let result = rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true).await;
+        let result =
+            rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await;
         assert!(result.is_ok());
 
         assert!(private_key_file.exists());
@@ -62,7 +64,8 @@ pub mod gen_key_pair {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        let result = rsa::gen_key_pair(4096, &private_key_file, &public_key_file, false).await;
+        let result =
+            rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny).await;
         assert!(result.is_ok());
 
         assert!(private_key_file.exists());
@@ -82,10 +85,10 @@ pub mod gen_key_pair {
 
         // public key file exists
         public_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
         assert!(public_key_file.exists());
@@ -94,10 +97,10 @@ pub mod gen_key_pair {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
         private_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, false)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
             .await
             .unwrap_err();
 
@@ -117,20 +120,20 @@ pub mod gen_key_pair {
 
         // public key file exists
         public_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, false)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
             .await
             .unwrap_err();
         public_key_file.delete().await.unwrap();
 
         // private key file exists
         private_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, false)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
             .await
             .unwrap_err();
     }
@@ -145,7 +148,7 @@ pub mod gen_key_pair {
         let public_key_file = File::new(public_key_path.clone());
 
         // Invalid key size
-        let result = rsa::gen_key_pair(0, &private_key_file, &public_key_file, true)
+        let result = rsa::gen_key_pair(0, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap_err();
         assert!(matches!(result, CryptErr::GenerateRSAKeyPairErr { .. }));
@@ -166,7 +169,7 @@ pub mod read_private_key {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -183,7 +186,7 @@ pub mod read_private_key {
         private_key_file.delete().await.unwrap();
 
         private_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
         let result = rsa::read_private_key(&private_key_file).await;
@@ -217,7 +220,7 @@ pub mod read_public_key {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -234,7 +237,7 @@ pub mod read_public_key {
         public_key_file.delete().await.unwrap();
 
         public_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
         let result = rsa::read_public_key(&public_key_file).await;
@@ -268,7 +271,7 @@ pub mod sign {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -286,7 +289,7 @@ pub mod sign {
         private_key_file.delete().await.unwrap();
 
         private_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
         let data = b"hello world";
@@ -322,7 +325,7 @@ pub mod verify {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, true)
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -342,7 +345,7 @@ pub mod verify {
         public_key_file.delete().await.unwrap();
 
         public_key_file
-            .write_bytes(&[4, 4], true, false)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
             .await
             .unwrap();
         let data = b"hello world";
