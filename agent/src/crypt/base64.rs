@@ -8,10 +8,7 @@ use base64::{
 };
 
 // encode bytes using the specified base64 method
-pub fn encode_bytes(
-    bytes: &[u8],
-    method: base64::engine::general_purpose::GeneralPurpose,
-) -> String {
+fn encode_bytes(bytes: &[u8], method: base64::engine::general_purpose::GeneralPurpose) -> String {
     method.encode(bytes)
 }
 
@@ -28,10 +25,7 @@ pub fn encode_bytes_url_safe(bytes: &[u8]) -> String {
 }
 
 // encode a string using the specified base64 method
-pub fn encode_string(
-    string: &str,
-    method: base64::engine::general_purpose::GeneralPurpose,
-) -> String {
+fn encode_string(string: &str, method: base64::engine::general_purpose::GeneralPurpose) -> String {
     encode_bytes(string.as_bytes(), method)
 }
 
@@ -47,7 +41,7 @@ pub fn encode_string_url_safe(string: &str) -> String {
     encode_string(string, URL_SAFE)
 }
 
-pub fn decode_bytes(
+fn decode_bytes(
     token: &str,
     method: base64::engine::general_purpose::GeneralPurpose,
 ) -> Result<Vec<u8>, CryptErr> {
@@ -71,7 +65,7 @@ pub fn decode_bytes_url_safe(token: &str) -> Result<Vec<u8>, CryptErr> {
     decode_bytes(token, URL_SAFE)
 }
 
-pub fn decode_string(
+fn decode_string(
     token: &str,
     method: base64::engine::general_purpose::GeneralPurpose,
 ) -> Result<String, CryptErr> {
