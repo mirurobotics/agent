@@ -36,9 +36,9 @@ async fn main() {
     }
 
     // print the version & exit
-    let version_info = version::build_info();
     if cli_args.contains_key("version") {
-        println!("{:?}", version_info);
+        println!("Version: {}", version::VERSION);
+        println!("Commit: {}", version::COMMIT);
         return;
     }
 
@@ -97,8 +97,12 @@ async fn main() {
         ..Default::default()
     };
     info!("Running the server with options: {:?}", options);
-    let build_info = version::build_info();
-    let result = run(build_info.version, options, await_shutdown_signal()).await;
+    let result = run(
+        version::VERSION.to_string(),
+        options,
+        await_shutdown_signal(),
+    )
+    .await;
     if let Err(e) = result {
         error!("Failed to run the server: {e}");
     }

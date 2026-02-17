@@ -106,7 +106,7 @@ pub async fn bootstrap<HTTPClientT: DevicesExt>(
             id: device.id,
             name: device.name,
             session_id: device.session_id,
-            agent_version: version::build_info().version,
+            agent_version: version::VERSION.to_string(),
             activated: true,
             status: DeviceStatus::Online,
             last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -138,7 +138,7 @@ pub async fn activate<HTTPClientT: DevicesExt>(
     let payload = ActivateDeviceRequest {
         public_key_pem,
         name: device_name,
-        agent_version: Some(version::build_info().version),
+        agent_version: Some(version::VERSION.to_string()),
     };
     let device = http_client
         .activate_device(&device_id, &payload, token)

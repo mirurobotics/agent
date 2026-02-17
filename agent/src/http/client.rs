@@ -66,7 +66,7 @@ impl Default for Headers {
     fn default() -> Self {
         Self {
             // build information
-            agent_version: version::build_info().version,
+            agent_version: version::VERSION.to_string(),
 
             // host information
             host_name: SystemInfo::host_name(),

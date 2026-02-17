@@ -25,12 +25,11 @@ pub async fn health() -> impl IntoResponse {
 }
 
 pub async fn version() -> impl IntoResponse {
-    let build_info = version::build_info();
     (
         StatusCode::OK,
         Json(openapi::VersionResponse {
-            version: build_info.version,
-            commit: build_info.commit,
+            version: version::VERSION.to_string(),
+            commit: version::COMMIT.to_string(),
         }),
     )
 }
