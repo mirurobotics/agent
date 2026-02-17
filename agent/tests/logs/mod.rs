@@ -100,7 +100,11 @@ fn deserialize_non_string_falls_back_to_default() {
     ];
     for input in &cases {
         let result: LogLevel = serde_json::from_value(input.clone()).unwrap();
-        assert_eq!(result, LogLevel::Info, "non-string input {input} should fall back to Info");
+        assert_eq!(
+            result,
+            LogLevel::Info,
+            "non-string input {input} should fall back to Info"
+        );
     }
 }
 

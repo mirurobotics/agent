@@ -4,9 +4,63 @@ use openapi_client::models::Release as BackendRelease;
 
 // external crates
 use chrono::{DateTime, Utc};
+use serde_json::json;
+
+// harness
+use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+
+// ─── fixture ─────────────────────────────────────────────────────────────────
+
+impl ModelFixture for Release {
+    fn required_fields() -> Vec<RequiredField> {
+        vec![
+            RequiredField {
+                key: "id",
+                value: json!("rel_123"),
+            },
+            RequiredField {
+                key: "version",
+                value: json!("1.0.0"),
+            },
+        ]
+    }
+
+    fn optional_fields() -> Vec<OptionalField> {
+        vec![
+            OptionalField {
+                key: "created_at",
+                value: json!("2023-11-14T22:13:20Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+            OptionalField {
+                key: "updated_at",
+                value: json!("2023-11-14T22:15:00Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+        ]
+    }
+}
+
+serde_tests!(Release);
 
 #[test]
-fn release_from_backend() {
+fn defaults() {
+    let actual = Release::default();
+    let id = actual.id.clone();
+    assert!(id.starts_with("unknown-"));
+    let expected = Release {
+        id,
+        version: String::new(),
+        created_at: DateTime::<Utc>::UNIX_EPOCH,
+        updated_at: DateTime::<Utc>::UNIX_EPOCH,
+    };
+    assert_eq!(actual, expected);
+}
+
+// ─── model-specific tests ────────────────────────────────────────────────────
+
+#[test]
+fn from_backend() {
     let now = Utc::now();
     let backend_release = BackendRelease {
         object: openapi_client::models::release::Object::Release,
@@ -20,32 +74,22 @@ fn release_from_backend() {
 
     assert_eq!(release.id, "rel_123");
     assert_eq!(release.version, "1.0.0");
-    // Note: We can't directly compare DateTime due to potential parsing differences,
-    // but we can verify it's not the epoch
     assert!(release.created_at > DateTime::<Utc>::UNIX_EPOCH);
     assert!(release.updated_at > DateTime::<Utc>::UNIX_EPOCH);
 }
 
 #[test]
-fn release_serialize_deserialize() {
-    let release = Release {
-        id: "rel_123".to_string(),
-        version: "1.0.0".to_string(),
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+fn from_backend_invalid_dates() {
+    let backend_release = BackendRelease {
+        object: openapi_client::models::release::Object::Release,
+        id: "rel_789".to_string(),
+        version: "3.0.0".to_string(),
+        created_at: "not-a-date".to_string(),
+        updated_at: "also-not-a-date".to_string(),
     };
 
-    let serialized = serde_json::to_string(&release).unwrap();
-    let deserialized: Release = serde_json::from_str(&serialized).unwrap();
-
-    assert_eq!(deserialized.id, release.id);
-    assert_eq!(deserialized.version, release.version);
-    // DateTime comparison with small tolerance
-    let time_diff = (deserialized.created_at - release.created_at)
-        .num_seconds()
-        .abs();
-    assert!(
-        time_diff < 1,
-        "Time difference should be less than 1 second"
-    );
+    let release = Release::from_backend(backend_release);
+    assert_eq!(release.id, "rel_789");
+    assert_eq!(release.created_at, DateTime::<Utc>::UNIX_EPOCH);
+    assert_eq!(release.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }

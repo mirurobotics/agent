@@ -1,88 +1,236 @@
-// standard library
-use std::collections::HashSet;
-
 // internal crates
 use miru_agent::models::deployment::{
     Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentStatus,
     DeploymentTargetStatus,
 };
-use openapi_client::models::{
-    Deployment as BackendDeployment, DeploymentActivityStatus as BackendDeploymentActivityStatus,
-    DeploymentErrorStatus as BackendDeploymentErrorStatus,
-    DeploymentStatus as BackendDeploymentStatus,
-    DeploymentTargetStatus as BackendDeploymentTargetStatus,
-};
+use openapi_client::models as backend_client;
 
 // external crates
-use chrono::Utc;
+use chrono::{DateTime, TimeDelta, Utc};
+use serde_json::json;
+
+// harness
+use crate::models::harnesses::{
+    serde_tests, status_serde_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
+    StatusFixture,
+};
+
+// ─── model tests ───────────────────────────────────────────────────────────
+
+impl ModelFixture for Deployment {
+    fn required_fields() -> Vec<RequiredField> {
+        vec![
+            RequiredField {
+                key: "id",
+                value: json!("dpl_123"),
+            },
+            RequiredField {
+                key: "description",
+                value: json!("Test"),
+            },
+            RequiredField {
+                key: "status",
+                value: json!("deployed"),
+            },
+            RequiredField {
+                key: "activity_status",
+                value: json!("deployed"),
+            },
+            RequiredField {
+                key: "error_status",
+                value: json!("none"),
+            },
+            RequiredField {
+                key: "target_status",
+                value: json!("deployed"),
+            },
+            RequiredField {
+                key: "device_id",
+                value: json!("device_123"),
+            },
+            RequiredField {
+                key: "release_id",
+                value: json!("rel_123"),
+            },
+            RequiredField {
+                key: "config_instance_ids",
+                value: json!(["cfg_1", "cfg_2"]),
+            },
+        ]
+    }
+
+    fn optional_fields() -> Vec<OptionalField> {
+        vec![
+            OptionalField {
+                key: "created_at",
+                value: json!("2023-11-14T22:13:20Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+            OptionalField {
+                key: "updated_at",
+                value: json!("2023-11-14T22:15:00Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+            OptionalField {
+                key: "attempts",
+                value: json!(3),
+                default_value: json!(0),
+            },
+            OptionalField {
+                key: "cooldown_ends_at",
+                value: json!("2099-01-01T00:00:00Z"),
+                default_value: json!(null),
+            },
+        ]
+    }
+}
+
+serde_tests!(Deployment);
 
 #[test]
-fn serialize_deserialize_deployment_target_status() {
-    struct TestCase {
-        input: &'static str,
-        expected: DeploymentTargetStatus,
-        valid: bool,
-    }
+fn status_method() {
+    let deployment = Deployment {
+        activity_status: DeploymentActivityStatus::Deployed,
+        error_status: DeploymentErrorStatus::None,
+        ..Default::default()
+    };
+    assert_eq!(deployment.status(), DeploymentStatus::Deployed);
 
-    let test_cases = vec![
-        TestCase {
-            input: "\"staged\"",
-            expected: DeploymentTargetStatus::Staged,
-            valid: true,
-        },
-        TestCase {
-            input: "\"deployed\"",
-            expected: DeploymentTargetStatus::Deployed,
-            valid: true,
-        },
-        TestCase {
-            input: "\"archived\"",
-            expected: DeploymentTargetStatus::Archived,
-            valid: true,
-        },
-        TestCase {
-            input: "\"unknown\"",
-            expected: DeploymentTargetStatus::Staged,
-            valid: false,
-        },
-    ];
-
-    let mut variants = DeploymentTargetStatus::variants()
-        .into_iter()
-        .collect::<HashSet<_>>();
-
-    for test_case in test_cases {
-        variants.remove(&test_case.expected);
-        let deserialized = serde_json::from_str::<DeploymentTargetStatus>(test_case.input).unwrap();
-        assert_eq!(deserialized, test_case.expected);
-        if test_case.valid {
-            let serialized = serde_json::to_string(&test_case.expected).unwrap();
-            assert_eq!(serialized, test_case.input);
-        }
-    }
-
-    assert!(variants.is_empty(), "variants: {variants:?}");
+    let deployment = Deployment {
+        activity_status: DeploymentActivityStatus::Staged,
+        error_status: DeploymentErrorStatus::Retrying,
+        ..Default::default()
+    };
+    assert_eq!(deployment.status(), DeploymentStatus::Retrying);
 }
 
 #[test]
-fn deployment_target_status_backend_conversions() {
+fn is_in_cooldown_method() {
+    let deployment = Deployment::default();
+    assert!(!deployment.is_in_cooldown());
+
+    let mut deployment = Deployment::default();
+    deployment.set_cooldown(TimeDelta::hours(1));
+    assert!(deployment.is_in_cooldown());
+
+    let deployment = Deployment {
+        cooldown_ends_at: Some(Utc::now() - TimeDelta::hours(1)),
+        ..Default::default()
+    };
+    assert!(!deployment.is_in_cooldown());
+}
+
+#[test]
+fn set_cooldown_method() {
+    let mut deployment = Deployment::default();
+    assert!(deployment.cooldown_ends_at.is_none());
+
+    deployment.set_cooldown(TimeDelta::seconds(60));
+    assert!(deployment.cooldown_ends_at.is_some());
+
+    let cooldown_end = deployment.cooldown_ends_at.unwrap();
+    let expected_approx = Utc::now() + TimeDelta::seconds(60);
+    let diff = (cooldown_end - expected_approx).num_seconds().abs();
+    assert!(diff < 2, "cooldown_ends_at should be ~60s from now");
+}
+
+#[test]
+fn attempts_method() {
+    let deployment = Deployment::default();
+    assert_eq!(deployment.attempts(), 0);
+
+    let deployment = Deployment {
+        attempts: 1,
+        ..Default::default()
+    };
+    assert_eq!(deployment.attempts(), 1);
+}
+
+#[test]
+fn defaults() {
+    let actual = Deployment::default();
+
+    let id = actual.id.clone();
+    assert!(id.starts_with("unknown-"));
+    let device_id = actual.device_id.clone();
+    assert!(device_id.starts_with("unknown-"));
+    let release_id = actual.release_id.clone();
+    assert!(release_id.starts_with("unknown-"));
+    let expected = Deployment {
+        id,
+        description: String::new(),
+        status: DeploymentStatus::Staged,
+        activity_status: DeploymentActivityStatus::Staged,
+        error_status: DeploymentErrorStatus::None,
+        target_status: DeploymentTargetStatus::Staged,
+        device_id,
+        release_id,
+        created_at: DateTime::<Utc>::UNIX_EPOCH,
+        updated_at: DateTime::<Utc>::UNIX_EPOCH,
+        attempts: 0,
+        cooldown_ends_at: None,
+        config_instance_ids: Vec::new(),
+    };
+
+    assert_eq!(actual, expected);
+}
+
+// ─── target status enum tests ─────────────────────────────────────────────
+
+impl StatusFixture for DeploymentTargetStatus {
+    fn variants() -> Vec<Self> {
+        DeploymentTargetStatus::variants()
+    }
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                input: "\"staged\"",
+                expected: DeploymentTargetStatus::Staged,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"deployed\"",
+                expected: DeploymentTargetStatus::Deployed,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"archived\"",
+                expected: DeploymentTargetStatus::Archived,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"unknown\"",
+                expected: DeploymentTargetStatus::Staged,
+                valid: false,
+            },
+        ]
+    }
+}
+
+mod target_status {
+    use super::*;
+    status_serde_tests!(DeploymentTargetStatus);
+}
+
+#[test]
+fn target_status_backend_conversions() {
     struct TestCase {
         storage: DeploymentTargetStatus,
-        backend: BackendDeploymentTargetStatus,
+        backend: backend_client::DeploymentTargetStatus,
     }
 
     let test_cases = vec![
         TestCase {
             storage: DeploymentTargetStatus::Staged,
-            backend: BackendDeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+            backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
         },
         TestCase {
             storage: DeploymentTargetStatus::Deployed,
-            backend: BackendDeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+            backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
         },
         TestCase {
             storage: DeploymentTargetStatus::Archived,
-            backend: BackendDeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+            backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
         },
     ];
 
@@ -98,92 +246,79 @@ fn deployment_target_status_backend_conversions() {
     }
 }
 
-#[test]
-fn serialize_deserialize_deployment_activity_status() {
-    struct TestCase {
-        input: &'static str,
-        expected: DeploymentActivityStatus,
-        valid: bool,
+// ─── activity status enum tests ──────────────────────────────────────────────
+impl StatusFixture for DeploymentActivityStatus {
+    fn variants() -> Vec<Self> {
+        DeploymentActivityStatus::variants()
     }
-
-    let test_cases = vec![
-        TestCase {
-            input: "\"drifted\"",
-            expected: DeploymentActivityStatus::Drifted,
-            valid: true,
-        },
-        TestCase {
-            input: "\"staged\"",
-            expected: DeploymentActivityStatus::Staged,
-            valid: true,
-        },
-        TestCase {
-            input: "\"queued\"",
-            expected: DeploymentActivityStatus::Queued,
-            valid: true,
-        },
-        TestCase {
-            input: "\"deployed\"",
-            expected: DeploymentActivityStatus::Deployed,
-            valid: true,
-        },
-        TestCase {
-            input: "\"archived\"",
-            expected: DeploymentActivityStatus::Archived,
-            valid: true,
-        },
-        TestCase {
-            input: "\"unknown\"",
-            expected: DeploymentActivityStatus::Drifted,
-            valid: false,
-        },
-    ];
-
-    let mut variants = DeploymentActivityStatus::variants()
-        .into_iter()
-        .collect::<HashSet<_>>();
-
-    for test_case in test_cases {
-        variants.remove(&test_case.expected);
-        let deserialized =
-            serde_json::from_str::<DeploymentActivityStatus>(test_case.input).unwrap();
-        assert_eq!(deserialized, test_case.expected);
-        if test_case.valid {
-            let serialized = serde_json::to_string(&test_case.expected).unwrap();
-            assert_eq!(serialized, test_case.input);
-        }
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                input: "\"drifted\"",
+                expected: DeploymentActivityStatus::Drifted,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"staged\"",
+                expected: DeploymentActivityStatus::Staged,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"queued\"",
+                expected: DeploymentActivityStatus::Queued,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"deployed\"",
+                expected: DeploymentActivityStatus::Deployed,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"archived\"",
+                expected: DeploymentActivityStatus::Archived,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"unknown\"",
+                expected: DeploymentActivityStatus::Drifted,
+                valid: false,
+            },
+        ]
     }
+}
 
-    assert!(variants.is_empty(), "variants: {variants:?}");
+mod activity_status {
+    use super::*;
+    status_serde_tests!(DeploymentActivityStatus);
 }
 
 #[test]
-fn deployment_activity_status_backend_conversions() {
+fn activity_status_backend_conversions() {
     struct TestCase {
         storage: DeploymentActivityStatus,
-        backend: BackendDeploymentActivityStatus,
+        backend: backend_client::DeploymentActivityStatus,
     }
 
     let test_cases = vec![
         TestCase {
             storage: DeploymentActivityStatus::Drifted,
-            backend: BackendDeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
+            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
         },
         TestCase {
             storage: DeploymentActivityStatus::Staged,
-            backend: BackendDeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
         },
         TestCase {
             storage: DeploymentActivityStatus::Queued,
-            backend: BackendDeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
+            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         },
         TestCase {
             storage: DeploymentActivityStatus::Deployed,
-            backend: BackendDeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
         },
         TestCase {
             storage: DeploymentActivityStatus::Archived,
-            backend: BackendDeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
         },
     ];
 
@@ -199,73 +334,61 @@ fn deployment_activity_status_backend_conversions() {
     }
 }
 
-#[test]
-fn serialize_deserialize_deployment_error_status() {
-    struct TestCase {
-        input: &'static str,
-        expected: DeploymentErrorStatus,
-        valid: bool,
+// ─── error status enum tests ──────────────────────────────────────────────
+impl StatusFixture for DeploymentErrorStatus {
+    fn variants() -> Vec<Self> {
+        DeploymentErrorStatus::variants()
     }
-
-    let test_cases = vec![
-        TestCase {
-            input: "\"none\"",
-            expected: DeploymentErrorStatus::None,
-            valid: true,
-        },
-        TestCase {
-            input: "\"failed\"",
-            expected: DeploymentErrorStatus::Failed,
-            valid: true,
-        },
-        TestCase {
-            input: "\"retrying\"",
-            expected: DeploymentErrorStatus::Retrying,
-            valid: true,
-        },
-        TestCase {
-            input: "\"unknown\"",
-            expected: DeploymentErrorStatus::None,
-            valid: false,
-        },
-    ];
-
-    let mut variants = DeploymentErrorStatus::variants()
-        .into_iter()
-        .collect::<HashSet<_>>();
-
-    for test_case in test_cases {
-        variants.remove(&test_case.expected);
-        let deserialized = serde_json::from_str::<DeploymentErrorStatus>(test_case.input).unwrap();
-        assert_eq!(deserialized, test_case.expected);
-        if test_case.valid {
-            let serialized = serde_json::to_string(&test_case.expected).unwrap();
-            assert_eq!(serialized, test_case.input);
-        }
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                input: "\"none\"",
+                expected: DeploymentErrorStatus::None,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"failed\"",
+                expected: DeploymentErrorStatus::Failed,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"retrying\"",
+                expected: DeploymentErrorStatus::Retrying,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"unknown\"",
+                expected: DeploymentErrorStatus::None,
+                valid: false,
+            },
+        ]
     }
+}
 
-    assert!(variants.is_empty(), "variants: {variants:?}");
+mod error_status {
+    use super::*;
+    status_serde_tests!(DeploymentErrorStatus);
 }
 
 #[test]
-fn deployment_error_status_backend_conversions() {
+fn error_status_backend_conversions() {
     struct TestCase {
         storage: DeploymentErrorStatus,
-        backend: BackendDeploymentErrorStatus,
+        backend: backend_client::DeploymentErrorStatus,
     }
 
     let test_cases = vec![
         TestCase {
             storage: DeploymentErrorStatus::None,
-            backend: BackendDeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+            backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
         },
         TestCase {
             storage: DeploymentErrorStatus::Failed,
-            backend: BackendDeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
+            backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
         },
         TestCase {
             storage: DeploymentErrorStatus::Retrying,
-            backend: BackendDeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
+            backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
         },
     ];
 
@@ -281,109 +404,96 @@ fn deployment_error_status_backend_conversions() {
     }
 }
 
-#[test]
-fn serialize_deserialize_deployment_status() {
-    struct TestCase {
-        input: &'static str,
-        expected: DeploymentStatus,
-        valid: bool,
+impl StatusFixture for DeploymentStatus {
+    fn variants() -> Vec<Self> {
+        DeploymentStatus::variants()
     }
-
-    let test_cases = vec![
-        TestCase {
-            input: "\"drifted\"",
-            expected: DeploymentStatus::Drifted,
-            valid: true,
-        },
-        TestCase {
-            input: "\"staged\"",
-            expected: DeploymentStatus::Staged,
-            valid: true,
-        },
-        TestCase {
-            input: "\"queued\"",
-            expected: DeploymentStatus::Queued,
-            valid: true,
-        },
-        TestCase {
-            input: "\"deployed\"",
-            expected: DeploymentStatus::Deployed,
-            valid: true,
-        },
-        TestCase {
-            input: "\"archived\"",
-            expected: DeploymentStatus::Archived,
-            valid: true,
-        },
-        TestCase {
-            input: "\"failed\"",
-            expected: DeploymentStatus::Failed,
-            valid: true,
-        },
-        TestCase {
-            input: "\"retrying\"",
-            expected: DeploymentStatus::Retrying,
-            valid: true,
-        },
-        TestCase {
-            input: "\"unknown\"",
-            expected: DeploymentStatus::Drifted,
-            valid: false,
-        },
-    ];
-
-    let mut variants = DeploymentStatus::variants()
-        .into_iter()
-        .collect::<HashSet<_>>();
-
-    for test_case in test_cases {
-        variants.remove(&test_case.expected);
-        let deserialized = serde_json::from_str::<DeploymentStatus>(test_case.input).unwrap();
-        assert_eq!(deserialized, test_case.expected);
-        if test_case.valid {
-            let serialized = serde_json::to_string(&test_case.expected).unwrap();
-            assert_eq!(serialized, test_case.input);
-        }
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                input: "\"drifted\"",
+                expected: DeploymentStatus::Drifted,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"staged\"",
+                expected: DeploymentStatus::Staged,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"queued\"",
+                expected: DeploymentStatus::Queued,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"deployed\"",
+                expected: DeploymentStatus::Deployed,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"archived\"",
+                expected: DeploymentStatus::Archived,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"failed\"",
+                expected: DeploymentStatus::Failed,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"retrying\"",
+                expected: DeploymentStatus::Retrying,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"unknown\"",
+                expected: DeploymentStatus::Drifted,
+                valid: false,
+            },
+        ]
     }
+}
 
-    assert!(variants.is_empty(), "variants: {variants:?}");
+mod status {
+    use super::*;
+    status_serde_tests!(DeploymentStatus);
 }
 
 #[test]
-fn deployment_status_backend_conversions() {
+fn status_backend_conversion() {
     struct TestCase {
         storage: DeploymentStatus,
-        backend: BackendDeploymentStatus,
+        backend: backend_client::DeploymentStatus,
     }
 
     let test_cases = vec![
         TestCase {
             storage: DeploymentStatus::Drifted,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
         },
         TestCase {
             storage: DeploymentStatus::Staged,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
         },
         TestCase {
             storage: DeploymentStatus::Queued,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
         },
         TestCase {
             storage: DeploymentStatus::Deployed,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
         },
         TestCase {
             storage: DeploymentStatus::Archived,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
         },
         TestCase {
             storage: DeploymentStatus::Failed,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
         },
         TestCase {
             storage: DeploymentStatus::Retrying,
-            backend: BackendDeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
         },
     ];
 
@@ -400,7 +510,7 @@ fn deployment_status_backend_conversions() {
 }
 
 #[test]
-fn deployment_status_from_activity_and_error() {
+fn status_from_activity_and_error() {
     struct TestCase {
         activity_status: DeploymentActivityStatus,
         error_status: DeploymentErrorStatus,
@@ -408,7 +518,6 @@ fn deployment_status_from_activity_and_error() {
     }
 
     let test_cases = vec![
-        // No error cases
         TestCase {
             activity_status: DeploymentActivityStatus::Drifted,
             error_status: DeploymentErrorStatus::None,
@@ -434,7 +543,6 @@ fn deployment_status_from_activity_and_error() {
             error_status: DeploymentErrorStatus::None,
             expected: DeploymentStatus::Archived,
         },
-        // Error cases take precedence
         TestCase {
             activity_status: DeploymentActivityStatus::Deployed,
             error_status: DeploymentErrorStatus::Retrying,
@@ -456,50 +564,79 @@ fn deployment_status_from_activity_and_error() {
     }
 }
 
+// ─── from-backend tests ──────────────────────────────────────────────────────
+
 #[test]
-fn deployment_from_backend() {
+fn from_backend() {
     let now = Utc::now();
-    let backend_deployment = BackendDeployment {
-        object: openapi_client::models::deployment::Object::Deployment,
+    let backend_deployment = backend_client::Deployment {
+        object: backend_client::deployment::Object::Deployment,
         id: "dpl_123".to_string(),
         description: "Test deployment".to_string(),
-        status: BackendDeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-        activity_status: BackendDeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
-        error_status: BackendDeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-        target_status: BackendDeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+        status: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+        activity_status:
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+        error_status: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+        target_status: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
         device_id: "device_123".to_string(),
         release_id: "rel_123".to_string(),
         created_at: now.to_rfc3339(),
         updated_at: now.to_rfc3339(),
         release: None,
+        config_instances: Some(vec![
+            backend_client::ConfigInstance {
+                object: backend_client::config_instance::Object::ConfigInstance,
+                id: "cfg_1".to_string(),
+                ..Default::default()
+            },
+            backend_client::ConfigInstance {
+                object: backend_client::config_instance::Object::ConfigInstance,
+                id: "cfg_2".to_string(),
+                ..Default::default()
+            },
+        ]),
+    };
+
+    let actual = Deployment::from_backend(backend_deployment);
+
+    let expected = Deployment {
+        id: "dpl_123".to_string(),
+        description: "Test deployment".to_string(),
+        status: DeploymentStatus::Staged,
+        activity_status: DeploymentActivityStatus::Staged,
+        error_status: DeploymentErrorStatus::None,
+        target_status: DeploymentTargetStatus::Staged,
+        device_id: "device_123".to_string(),
+        release_id: "rel_123".to_string(),
+        created_at: now,
+        updated_at: now,
+        attempts: 0,
+        cooldown_ends_at: None,
+        config_instance_ids: vec!["cfg_1".to_string(), "cfg_2".to_string()],
+    };
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn from_backend_invalid_dates() {
+    let backend_deployment = backend_client::Deployment {
+        object: backend_client::deployment::Object::Deployment,
+        id: "dpl_bad_dates".to_string(),
+        description: "Bad dates".to_string(),
+        status: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+        activity_status:
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+        error_status: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+        target_status: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+        device_id: "device_123".to_string(),
+        release_id: "rel_123".to_string(),
+        created_at: "not-a-date".to_string(),
+        updated_at: "also-not-a-date".to_string(),
+        release: None,
         config_instances: None,
     };
 
     let deployment = Deployment::from_backend(backend_deployment);
-
-    assert_eq!(deployment.id, "dpl_123");
-    assert_eq!(deployment.description, "Test deployment");
-    assert_eq!(deployment.status, DeploymentStatus::Staged);
-    assert_eq!(deployment.activity_status, DeploymentActivityStatus::Staged);
-    assert_eq!(deployment.error_status, DeploymentErrorStatus::None);
-    assert_eq!(deployment.target_status, DeploymentTargetStatus::Staged);
-    assert_eq!(deployment.device_id, "device_123");
-    assert_eq!(deployment.release_id, "rel_123");
-}
-
-#[test]
-fn deployment_status_method() {
-    let deployment = Deployment {
-        activity_status: DeploymentActivityStatus::Deployed,
-        error_status: DeploymentErrorStatus::None,
-        ..Default::default()
-    };
-    assert_eq!(deployment.status(), DeploymentStatus::Deployed);
-
-    let deployment = Deployment {
-        activity_status: DeploymentActivityStatus::Staged,
-        error_status: DeploymentErrorStatus::Retrying,
-        ..Default::default()
-    };
-    assert_eq!(deployment.status(), DeploymentStatus::Retrying);
+    assert_eq!(deployment.created_at, DateTime::<Utc>::UNIX_EPOCH);
+    assert_eq!(deployment.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }

@@ -6,55 +6,132 @@ use miru_agent::models::device::{Device, DeviceStatus, Updates};
 use miru_agent::models::Mergeable;
 
 // external crates
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
+
+// harness
+use crate::models::harnesses::{
+    serde_tests, status_serde_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
+    StatusFixture,
+};
+
+// ─── fixture ─────────────────────────────────────────────────────────────────
+
+impl ModelFixture for Device {
+    fn required_fields() -> Vec<RequiredField> {
+        vec![
+            RequiredField {
+                key: "device_id",
+                value: json!("123"),
+            },
+            RequiredField {
+                key: "session_id",
+                value: json!("123"),
+            },
+        ]
+    }
+
+    fn optional_fields() -> Vec<OptionalField> {
+        vec![
+            OptionalField {
+                key: "name",
+                value: json!("test"),
+                default_value: json!("placeholder"),
+            },
+            OptionalField {
+                key: "agent_version",
+                value: json!("v1.0.0"),
+                default_value: json!("placeholder"),
+            },
+            OptionalField {
+                key: "activated",
+                value: json!(true),
+                default_value: json!(false),
+            },
+            OptionalField {
+                key: "status",
+                value: json!("online"),
+                default_value: json!("offline"),
+            },
+            OptionalField {
+                key: "last_synced_at",
+                value: json!("2023-11-14T22:13:20Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+            OptionalField {
+                key: "last_connected_at",
+                value: json!("2023-11-14T22:15:00Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+            OptionalField {
+                key: "last_disconnected_at",
+                value: json!("2023-11-14T22:16:40Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+        ]
+    }
+}
+
+serde_tests!(Device);
 
 #[test]
-fn serialize_deserialize_device_status() {
-    struct TestCase {
-        input: &'static str,
-        expected: DeviceStatus,
-        valid: bool,
+fn defaults() {
+    let device = Device::default();
+
+    let expected = Device {
+        id: "placeholder".to_string(),
+        session_id: "placeholder".to_string(),
+        name: "placeholder".to_string(),
+        agent_version: "placeholder".to_string(),
+        activated: false,
+        status: DeviceStatus::Offline,
+        last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+        last_connected_at: DateTime::<Utc>::UNIX_EPOCH,
+        last_disconnected_at: DateTime::<Utc>::UNIX_EPOCH,
+    };
+    assert_eq!(device, expected);
+}
+
+// ─── status enum tests ───────────────────────────────────────────────────────
+
+impl StatusFixture for DeviceStatus {
+    fn variants() -> Vec<Self> {
+        DeviceStatus::variants()
     }
-
-    let test_cases = vec![
-        TestCase {
-            input: "\"online\"",
-            expected: DeviceStatus::Online,
-            valid: true,
-        },
-        TestCase {
-            input: "\"offline\"",
-            expected: DeviceStatus::Offline,
-            valid: true,
-        },
-        // default
-        TestCase {
-            input: "\"unknown\"",
-            expected: DeviceStatus::Offline,
-            valid: false,
-        },
-    ];
-
-    let mut variants = DeviceStatus::variants().into_iter().collect::<HashSet<_>>();
-
-    for test_case in test_cases {
-        variants.remove(&test_case.expected);
-        let deserialized = serde_json::from_str::<DeviceStatus>(test_case.input).unwrap();
-        assert_eq!(deserialized, test_case.expected);
-        if test_case.valid {
-            let serialized = serde_json::to_string(&test_case.expected).unwrap();
-            assert_eq!(serialized, test_case.input);
-        }
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                input: "\"online\"",
+                expected: DeviceStatus::Online,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"offline\"",
+                expected: DeviceStatus::Offline,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"unknown\"",
+                expected: DeviceStatus::Offline,
+                valid: false,
+            },
+        ]
     }
+}
 
-    assert!(variants.is_empty(), "variants: {variants:?}");
+mod status {
+    use super::*;
+    status_serde_tests!(DeviceStatus);
 }
 
 #[test]
-fn device_status_sdk_conversion() {
+fn status_default() {
+    let status = DeviceStatus::default();
+    assert_eq!(status, DeviceStatus::Offline);
+}
+
+#[test]
+fn status_sdk_conversion() {
     struct TestCase {
         storage: DeviceStatus,
         sdk: openapi_server::models::DeviceStatus,
@@ -81,73 +158,10 @@ fn device_status_sdk_conversion() {
     assert!(variants.is_empty(), "variants: {variants:?}");
 }
 
-#[test]
-fn serialize_deserialize_device() {
-    let expected = Device {
-        id: "123".to_string(),
-        session_id: "123".to_string(),
-        name: "test".to_string(),
-        agent_version: "v1.0.0".to_string(),
-        activated: true,
-        status: DeviceStatus::Online,
-        last_synced_at: Utc::now(),
-        last_connected_at: Utc::now(),
-        last_disconnected_at: Utc::now(),
-    };
-    let serialized = serde_json::to_string(&expected).unwrap();
-    let deserialized = serde_json::from_str::<Device>(&serialized).unwrap();
-    assert_eq!(deserialized, expected);
-}
+// ─── merge tests ──────────────────────────────────────────────────────────────
 
 #[test]
-fn deserialize_device() {
-    let expected = Device {
-        id: "123".to_string(), // serialized as 'device_id'
-        session_id: "123".to_string(),
-        name: "test".to_string(),
-        agent_version: "v1.0.0".to_string(),
-        activated: true,
-        status: DeviceStatus::Online,
-        last_synced_at: Utc::now(),
-        last_connected_at: Utc::now(),
-        last_disconnected_at: Utc::now(),
-    };
-    let valid_input = json!({
-        "device_id": expected.id,
-        "session_id": expected.session_id,
-        "name": expected.name,
-        "agent_version": expected.agent_version,
-        "activated": expected.activated,
-        "status": expected.status,
-        "last_synced_at": expected.last_synced_at,
-        "last_connected_at": expected.last_connected_at,
-        "last_disconnected_at": expected.last_disconnected_at,
-    });
-    let device: Device = serde_json::from_value(valid_input).unwrap();
-    assert_eq!(device, expected);
-
-    let empty_input = json!({});
-    assert!(serde_json::from_value::<Device>(empty_input).is_err());
-
-    let expected = Device {
-        // required fields
-        id: "123".to_string(), // serialized as 'device_id'
-        // rest are defaults
-        ..Default::default()
-    };
-    let valid_input = json!({
-        "device_id": expected.id,
-        "session_id": expected.session_id,
-    });
-    let device: Device = serde_json::from_value(valid_input).unwrap();
-    assert_eq!(device, expected);
-
-    // invalid JSON
-    assert!(serde_json::from_str::<Device>("invalid-json").is_err());
-}
-
-#[test]
-fn device_merge_empty() {
+fn merge_empty() {
     let initial = Device {
         id: "123".to_string(),
         session_id: "123".to_string(),
@@ -167,7 +181,7 @@ fn device_merge_empty() {
 }
 
 #[test]
-fn device_merge_all() {
+fn merge_all() {
     let initial = Device {
         id: "123".to_string(),
         session_id: "123".to_string(),
@@ -203,4 +217,66 @@ fn device_merge_all() {
     let mut actual = initial.clone();
     actual.merge(updates);
     assert_eq!(expected, actual);
+}
+
+// ─── updates tests ────────────────────────────────────────────────────────────
+#[test]
+fn updates_empty() {
+    let actual = Updates::empty();
+    let expected = Updates {
+        id: None,
+        name: None,
+        agent_version: None,
+        activated: None,
+        status: None,
+        last_synced_at: None,
+        last_connected_at: None,
+        last_disconnected_at: None,
+    };
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn updates_disconnected() {
+    let before = Utc::now();
+    let actual = Updates::disconnected();
+    let after = Utc::now();
+
+    let disconnected_at = actual.last_disconnected_at.unwrap();
+    assert!(disconnected_at >= before && disconnected_at <= after);
+
+    let expected = Updates {
+        status: Some(DeviceStatus::Offline),
+        last_disconnected_at: Some(disconnected_at),
+        ..Updates::empty()
+    };
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn updates_connected() {
+    let before = Utc::now();
+    let actual = Updates::connected();
+    let after = Utc::now();
+
+    let connected_at = actual.last_connected_at.unwrap();
+    assert!(connected_at >= before && connected_at <= after);
+
+    let expected = Updates {
+        status: Some(DeviceStatus::Online),
+        last_connected_at: Some(connected_at),
+        ..Updates::empty()
+    };
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn updates_set_agent_version() {
+    let updates = Updates::set_agent_version("v2.0.0".to_string());
+    let expected = Updates {
+        agent_version: Some("v2.0.0".to_string()),
+        ..Updates::empty()
+    };
+    assert_eq!(updates, expected);
 }

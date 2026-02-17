@@ -3,7 +3,6 @@ pub mod app;
 pub mod authn;
 pub mod cache;
 pub mod cooldown;
-pub mod crud;
 pub mod crypt;
 pub mod deploy;
 pub mod errors;

@@ -1,3 +1,5 @@
+pub mod harnesses;
+
 pub mod config_instance;
 pub mod deployment;
 pub mod device;
