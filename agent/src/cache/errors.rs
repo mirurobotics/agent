@@ -11,21 +11,12 @@ pub struct CacheElementNotFound {
 impl crate::errors::Error for CacheElementNotFound {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("expected to find {expected_count} elements when filtering by '{filter_name}' but found {actual_count}")]
 pub struct FoundTooManyCacheElements {
     pub expected_count: usize,
     pub actual_count: usize,
     pub filter_name: String,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for FoundTooManyCacheElements {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "expected to find {} elements when filtering by '{}' but found {}",
-            self.expected_count, self.filter_name, self.actual_count
-        )
-    }
 }
 
 impl crate::errors::Error for FoundTooManyCacheElements {}

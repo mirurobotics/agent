@@ -321,114 +321,63 @@ where
     K: ConcurrentCacheKey,
     V: ConcurrentCacheValue,
 {
-    pub async fn shutdown(&self) -> Result<(), CacheErr> {
-        info!("Shutting down {} cache...", std::any::type_name::<V>());
+    async fn send_command<R>(
+        &self,
+        cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand<K, V>,
+    ) -> Result<R, CacheErr> {
         let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Shutdown { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
+        self.sender.send(cmd(send)).await.map_err(|e| {
+            CacheErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
         recv.await.map_err(|e| {
             CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
-        })??;
+        })
+    }
+
+    pub async fn shutdown(&self) -> Result<(), CacheErr> {
+        info!("Shutting down {} cache...", std::any::type_name::<V>());
+        self.send_command(|tx| WorkerCommand::Shutdown { respond_to: tx })
+            .await??;
         info!("{} cache shutdown complete", std::any::type_name::<V>());
         Ok(())
     }
 
     pub async fn read_entry_optional(&self, key: K) -> Result<Option<CacheEntry<K, V>>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::ReadEntryOptional {
-                key,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::ReadEntryOptional {
+            key,
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn read_entry(&self, key: K) -> Result<CacheEntry<K, V>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::ReadEntry {
-                key,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::ReadEntry {
+            key,
+            respond_to: tx,
+        })
+        .await?
     }
 
     async fn read_optional_impl(&self, key: K) -> Result<Option<V>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::ReadOptional {
-                key,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::ReadOptional {
+            key,
+            respond_to: tx,
+        })
+        .await?
     }
 
     async fn read_impl(&self, key: K) -> Result<V, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Read {
-                key,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Read {
+            key,
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn write<F>(
@@ -441,189 +390,63 @@ where
     where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Write {
-                key,
-                value,
-                is_dirty: Box::new(is_dirty),
-                overwrite,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Write {
+            key,
+            value,
+            is_dirty: Box::new(is_dirty),
+            overwrite,
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn delete(&self, key: K) -> Result<(), CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Delete {
-                key,
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Delete {
+            key,
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn prune(&self) -> Result<(), CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Prune { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Prune { respond_to: tx })
+            .await?
     }
 
     pub async fn size(&self) -> Result<usize, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Size { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Size { respond_to: tx })
+            .await?
     }
 
     pub async fn entries(&self) -> Result<Vec<CacheEntry<K, V>>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Entries { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Entries { respond_to: tx })
+            .await?
     }
 
     pub async fn values(&self) -> Result<Vec<V>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Values { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Values { respond_to: tx })
+            .await?
     }
 
     pub async fn entry_map(&self) -> Result<HashMap<K, CacheEntry<K, V>>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::EntryMap { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::EntryMap { respond_to: tx })
+            .await?
     }
 
     pub async fn value_map(&self) -> Result<HashMap<K, V>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::ValueMap { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::ValueMap { respond_to: tx })
+            .await?
     }
 
     pub async fn find_entries_where<F>(&self, filter: F) -> Result<Vec<CacheEntry<K, V>>, CacheErr>
     where
         F: Fn(&CacheEntry<K, V>) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::FindEntriesWhere {
-                filter: Box::new(filter),
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::FindEntriesWhere {
+            filter: Box::new(filter),
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn find_one_entry_optional<F>(
@@ -634,26 +457,12 @@ where
     where
         F: Fn(&CacheEntry<K, V>) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::FindOneEntryOptional {
-                filter_name,
-                filter: Box::new(filter),
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::FindOneEntryOptional {
+            filter_name,
+            filter: Box::new(filter),
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn find_one_entry<F>(
@@ -664,51 +473,23 @@ where
     where
         F: Fn(&CacheEntry<K, V>) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::FindOneEntry {
-                filter_name,
-                filter: Box::new(filter),
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::FindOneEntry {
+            filter_name,
+            filter: Box::new(filter),
+            respond_to: tx,
+        })
+        .await?
     }
 
     async fn find_where_impl<F>(&self, filter: F) -> Result<Vec<V>, CacheErr>
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::FindWhere {
-                filter: Box::new(filter),
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::FindWhere {
+            filter: Box::new(filter),
+            respond_to: tx,
+        })
+        .await?
     }
 
     async fn find_one_optional_impl<F>(
@@ -719,71 +500,29 @@ where
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::FindOneOptional {
-                filter_name,
-                filter: Box::new(filter),
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::FindOneOptional {
+            filter_name,
+            filter: Box::new(filter),
+            respond_to: tx,
+        })
+        .await?
     }
 
     async fn find_one_impl<F>(&self, filter_name: &'static str, filter: F) -> Result<V, CacheErr>
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::FindOne {
-                filter_name,
-                filter: Box::new(filter),
-                respond_to: send,
-            })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::FindOne {
+            filter_name,
+            filter: Box::new(filter),
+            respond_to: tx,
+        })
+        .await?
     }
 
     pub async fn get_dirty_entries(&self) -> Result<Vec<CacheEntry<K, V>>, CacheErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::GetDirtyEntries { respond_to: send })
-            .await
-            .map_err(|e| {
-                CacheErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            CacheErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::GetDirtyEntries { respond_to: tx })
+            .await?
     }
 }
 
