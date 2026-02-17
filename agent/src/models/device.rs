@@ -1,6 +1,7 @@
 // internal crates
 use crate::deserialize_error;
 use crate::models::Mergeable;
+use openapi_server::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -21,10 +22,10 @@ impl DeviceStatus {
         vec![DeviceStatus::Online, DeviceStatus::Offline]
     }
 
-    pub fn to_sdk(device_status: &DeviceStatus) -> openapi_server::models::DeviceStatus {
+    pub fn to_sdk(device_status: &DeviceStatus) -> agent_server::DeviceStatus {
         match device_status {
-            DeviceStatus::Online => openapi_server::models::DeviceStatus::DEVICE_STATUS_ONLINE,
-            DeviceStatus::Offline => openapi_server::models::DeviceStatus::DEVICE_STATUS_OFFLINE,
+            DeviceStatus::Online => agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
+            DeviceStatus::Offline => agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
         }
     }
 }
@@ -171,7 +172,7 @@ impl Mergeable<Updates> for Device {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Updates {
     pub id: Option<String>,
     pub name: Option<String>,

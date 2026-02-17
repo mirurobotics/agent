@@ -212,9 +212,9 @@ fn get_error_options(
 ) -> TransitionOptions {
     // determine the number of attempts
     let attempts = if increment_attempts {
-        deployment.attempts().saturating_add(1)
+        deployment.attempts.saturating_add(1)
     } else {
-        deployment.attempts()
+        deployment.attempts
     };
 
     // determine the new status

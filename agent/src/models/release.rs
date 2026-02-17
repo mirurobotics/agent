@@ -1,5 +1,6 @@
 // internal crates
 use crate::deserialize_error;
+use openapi_client::models as backend_client;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -30,15 +31,15 @@ impl Default for Release {
 }
 
 impl Release {
-    pub fn from_backend(backend_release: openapi_client::models::Release) -> Release {
+    pub fn from_backend(release: backend_client::Release) -> Release {
         Release {
-            id: backend_release.id,
-            version: backend_release.version,
-            created_at: backend_release
+            id: release.id,
+            version: release.version,
+            created_at: release
                 .created_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
-            updated_at: backend_release
+            updated_at: release
                 .updated_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),

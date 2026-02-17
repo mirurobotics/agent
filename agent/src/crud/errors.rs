@@ -9,12 +9,6 @@ pub enum CrudErr {
     CacheErr(CacheErr),
 }
 
-impl From<StorageErr> for CrudErr {
-    fn from(e: StorageErr) -> Self {
-        Self::StorageErr(e)
-    }
-}
-
 impl From<CacheErr> for CrudErr {
     fn from(e: CacheErr) -> Self {
         Self::CacheErr(e)

@@ -1,5 +1,7 @@
 // internal crates
 use crate::deserialize_error;
+use crate::models::config_instance::ConfigInstanceID;
+use openapi_client::models as backend_client;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -51,16 +53,16 @@ impl DeploymentTargetStatus {
     }
 
     pub fn from_backend(
-        target_status: &openapi_client::models::DeploymentTargetStatus,
+        target_status: &backend_client::DeploymentTargetStatus,
     ) -> DeploymentTargetStatus {
         match target_status {
-            openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED => {
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED => {
                 DeploymentTargetStatus::Staged
             }
-            openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED => {
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED => {
                 DeploymentTargetStatus::Deployed
             }
-            openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED => {
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED => {
                 DeploymentTargetStatus::Archived
             }
         }
@@ -68,16 +70,16 @@ impl DeploymentTargetStatus {
 
     pub fn to_backend(
         target_status: &DeploymentTargetStatus,
-    ) -> openapi_client::models::DeploymentTargetStatus {
+    ) -> backend_client::DeploymentTargetStatus {
         match target_status {
             DeploymentTargetStatus::Staged => {
-                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
+                backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
             }
             DeploymentTargetStatus::Deployed => {
-                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED
+                backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED
             }
             DeploymentTargetStatus::Archived => {
-                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED
+                backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED
             }
         }
     }
@@ -131,22 +133,22 @@ impl DeploymentActivityStatus {
     }
 
     pub fn from_backend(
-        activity_status: &openapi_client::models::DeploymentActivityStatus,
+        activity_status: &backend_client::DeploymentActivityStatus,
     ) -> DeploymentActivityStatus {
         match activity_status {
-            openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED => {
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED => {
                 DeploymentActivityStatus::Drifted
             }
-            openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED => {
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED => {
                 DeploymentActivityStatus::Staged
             }
-            openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => {
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => {
                 DeploymentActivityStatus::Queued
             }
-            openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => {
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => {
                 DeploymentActivityStatus::Deployed
             }
-            openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => {
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => {
                 DeploymentActivityStatus::Archived
             }
         }
@@ -154,22 +156,22 @@ impl DeploymentActivityStatus {
 
     pub fn to_backend(
         activity_status: &DeploymentActivityStatus,
-    ) -> openapi_client::models::DeploymentActivityStatus {
+    ) -> backend_client::DeploymentActivityStatus {
         match activity_status {
             DeploymentActivityStatus::Drifted => {
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
+                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
             }
             DeploymentActivityStatus::Staged => {
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED
+                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED
             }
             DeploymentActivityStatus::Queued => {
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
+                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
             }
             DeploymentActivityStatus::Deployed => {
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
             }
             DeploymentActivityStatus::Archived => {
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
+                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
             }
         }
     }
@@ -217,16 +219,16 @@ impl DeploymentErrorStatus {
     }
 
     pub fn from_backend(
-        error_status: &openapi_client::models::DeploymentErrorStatus,
+        error_status: &backend_client::DeploymentErrorStatus,
     ) -> DeploymentErrorStatus {
         match error_status {
-            openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE => {
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE => {
                 DeploymentErrorStatus::None
             }
-            openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED => {
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED => {
                 DeploymentErrorStatus::Failed
             }
-            openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING => {
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING => {
                 DeploymentErrorStatus::Retrying
             }
         }
@@ -234,16 +236,16 @@ impl DeploymentErrorStatus {
 
     pub fn to_backend(
         error_status: &DeploymentErrorStatus,
-    ) -> openapi_client::models::DeploymentErrorStatus {
+    ) -> backend_client::DeploymentErrorStatus {
         match error_status {
             DeploymentErrorStatus::None => {
-                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE
+                backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE
             }
             DeploymentErrorStatus::Failed => {
-                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED
+                backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED
             }
             DeploymentErrorStatus::Retrying => {
-                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING
+                backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING
             }
         }
     }
@@ -302,54 +304,42 @@ impl DeploymentStatus {
         ]
     }
 
-    pub fn from_backend(status: &openapi_client::models::DeploymentStatus) -> DeploymentStatus {
+    pub fn from_backend(status: &backend_client::DeploymentStatus) -> DeploymentStatus {
         match status {
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => {
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => {
                 DeploymentStatus::Drifted
             }
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => {
-                DeploymentStatus::Staged
-            }
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => {
-                DeploymentStatus::Queued
-            }
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => {
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => DeploymentStatus::Staged,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => DeploymentStatus::Queued,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => {
                 DeploymentStatus::Deployed
             }
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => {
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => {
                 DeploymentStatus::Archived
             }
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => {
-                DeploymentStatus::Failed
-            }
-            openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => {
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => DeploymentStatus::Failed,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => {
                 DeploymentStatus::Retrying
             }
         }
     }
 
-    pub fn to_backend(status: &DeploymentStatus) -> openapi_client::models::DeploymentStatus {
+    pub fn to_backend(status: &DeploymentStatus) -> backend_client::DeploymentStatus {
         match status {
             DeploymentStatus::Drifted => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED
+                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED
             }
-            DeploymentStatus::Staged => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_STAGED
-            }
-            DeploymentStatus::Queued => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED
-            }
+            DeploymentStatus::Staged => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+            DeploymentStatus::Queued => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
             DeploymentStatus::Deployed => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED
+                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED
             }
             DeploymentStatus::Archived => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED
+                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED
             }
-            DeploymentStatus::Failed => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_FAILED
-            }
+            DeploymentStatus::Failed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
             DeploymentStatus::Retrying => {
-                openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING
+                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING
             }
         }
     }
@@ -387,11 +377,10 @@ pub struct Deployment {
     pub release_id: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub config_instance_ids: Vec<ConfigInstanceID>,
     // Agent-side fields for retry logic (not from backend)
     pub attempts: u32,
     pub cooldown_ends_at: Option<DateTime<Utc>>,
-    // Config instance IDs (not full objects)
-    pub config_instance_ids: Vec<super::config_instance::ConfigInstanceID>,
 }
 
 impl Default for Deployment {
@@ -415,29 +404,27 @@ impl Default for Deployment {
 }
 
 impl Deployment {
-    pub fn from_backend(backend_deployment: openapi_client::models::Deployment) -> Deployment {
+    pub fn from_backend(deployment: backend_client::Deployment) -> Deployment {
         Deployment {
-            id: backend_deployment.id,
-            description: backend_deployment.description,
-            status: DeploymentStatus::from_backend(&backend_deployment.status),
-            activity_status: DeploymentActivityStatus::from_backend(
-                &backend_deployment.activity_status,
-            ),
-            error_status: DeploymentErrorStatus::from_backend(&backend_deployment.error_status),
-            target_status: DeploymentTargetStatus::from_backend(&backend_deployment.target_status),
-            device_id: backend_deployment.device_id,
-            release_id: backend_deployment.release_id,
-            created_at: backend_deployment
+            id: deployment.id,
+            description: deployment.description,
+            status: DeploymentStatus::from_backend(&deployment.status),
+            activity_status: DeploymentActivityStatus::from_backend(&deployment.activity_status),
+            error_status: DeploymentErrorStatus::from_backend(&deployment.error_status),
+            target_status: DeploymentTargetStatus::from_backend(&deployment.target_status),
+            device_id: deployment.device_id,
+            release_id: deployment.release_id,
+            created_at: deployment
                 .created_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
-            updated_at: backend_deployment
+            updated_at: deployment
                 .updated_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             attempts: 0,
             cooldown_ends_at: None,
-            config_instance_ids: backend_deployment
+            config_instance_ids: deployment
                 .config_instances
                 .map(|instances| instances.into_iter().map(|inst| inst.id).collect())
                 .unwrap_or_default(),
@@ -481,7 +468,9 @@ impl<'de> Deserialize<'de> for Deployment {
             release_id: String,
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
-            config_instance_ids: Vec<super::config_instance::ConfigInstanceID>,
+            attempts: Option<u32>,
+            cooldown_ends_at: Option<DateTime<Utc>>,
+            config_instance_ids: Vec<ConfigInstanceID>,
         }
 
         let result = DeserializeDeployment::deserialize(deserializer)?;
@@ -502,8 +491,10 @@ impl<'de> Deserialize<'de> for Deployment {
             updated_at: result.updated_at.unwrap_or_else(|| {
                 deserialize_error!("deployment", "updated_at", default.updated_at)
             }),
-            attempts: 0,
-            cooldown_ends_at: None,
+            attempts: result
+                .attempts
+                .unwrap_or_else(|| deserialize_error!("deployment", "attempts", default.attempts)),
+            cooldown_ends_at: result.cooldown_ends_at,
             config_instance_ids: result.config_instance_ids,
         })
     }

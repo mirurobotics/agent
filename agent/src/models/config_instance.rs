@@ -1,5 +1,6 @@
 // internal crates
 use crate::deserialize_error;
+use openapi_client::models as backend_client;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -35,22 +36,20 @@ impl Default for ConfigInstance {
 }
 
 impl ConfigInstance {
-    pub fn from_backend(
-        backend_instance: openapi_client::models::ConfigInstance,
-    ) -> ConfigInstance {
+    pub fn from_backend(cfg_inst: backend_client::ConfigInstance) -> ConfigInstance {
         ConfigInstance {
-            id: backend_instance.id,
-            config_type_name: backend_instance.config_type_name,
-            filepath: backend_instance.filepath,
-            created_at: backend_instance
+            id: cfg_inst.id,
+            config_type_name: cfg_inst.config_type_name,
+            filepath: cfg_inst.filepath,
+            created_at: cfg_inst
                 .created_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or_else(|e| {
                     error!("Error parsing created_at: {}", e);
                     DateTime::<Utc>::UNIX_EPOCH
                 }),
-            config_schema_id: backend_instance.config_schema_id,
-            config_type_id: backend_instance.config_type_id,
+            config_schema_id: cfg_inst.config_schema_id,
+            config_type_id: cfg_inst.config_type_id,
         }
     }
 }
