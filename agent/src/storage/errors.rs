@@ -23,15 +23,10 @@ pub struct JoinHandleErr {
 impl crate::errors::Error for JoinHandleErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to prune caches: {sources:?}")]
 pub struct PruneCacheErrs {
     pub sources: Vec<CacheErr>,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for PruneCacheErrs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "failed to prune caches: {:?}", self.sources)
-    }
 }
 
 impl crate::errors::Error for PruneCacheErrs {}

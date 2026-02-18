@@ -22,15 +22,10 @@ pub struct MissingExpandedInstancesErr {
 impl crate::errors::Error for MissingExpandedInstancesErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("Sync error: {errors:?}")]
 pub struct SyncErrors {
     pub errors: Vec<SyncErr>,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for SyncErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Sync error: {:?}", self.errors)
-    }
 }
 
 impl crate::errors::Error for SyncErrors {

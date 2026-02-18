@@ -17,7 +17,7 @@ impl std::fmt::Display for DeploymentNotDeployableErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "cannot deploy deployment '{:?}' since it's next action is: {:?}",
+            "cannot deploy deployment '{}' since it's next action is: {:?}",
             self.deployment.id, self.next_action
         )
     }
@@ -36,7 +36,7 @@ impl std::fmt::Display for DeploymentNotRemoveableErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "cannot remove deployment '{:?}' since it's next action is: {:?}",
+            "cannot remove deployment '{}' since it's next action is: {:?}",
             self.deployment.id, self.next_action
         )
     }
@@ -55,7 +55,7 @@ impl std::fmt::Display for DeploymentNotArchiveableErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "cannot archive deployment '{:?}' since it's next action is: {:?}",
+            "cannot archive deployment '{}' since it's next action is: {:?}",
             self.deployment.id, self.next_action
         )
     }
