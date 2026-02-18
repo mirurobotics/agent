@@ -1,111 +1,86 @@
 // internal crates
-use crate::http::client::HTTPClient;
 use crate::http::errors::HTTPErr;
+use crate::http::request::{self, Params};
+use crate::http::response;
+use crate::http::ClientI;
 use openapi_client::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };
 
-#[allow(async_fn_in_trait)]
-pub trait DevicesExt: Send + Sync {
-    async fn activate_device(
-        &self,
-        device_id: &str,
-        payload: &ActivateDeviceRequest,
-        token: &str,
-    ) -> Result<Device, HTTPErr>;
+// ================================ PARAM STRUCTS ================================== //
 
-    async fn issue_device_token(
-        &self,
-        device_id: &str,
-        payload: &IssueDeviceTokenRequest,
-    ) -> Result<TokenResponse, HTTPErr>;
-
-    async fn update_device(
-        &self,
-        device_id: &str,
-        payload: &UpdateDeviceFromAgentRequest,
-        token: &str,
-    ) -> Result<Device, HTTPErr>;
+pub struct ActivateParams<'a> {
+    pub device_id: &'a str,
+    pub payload: &'a ActivateDeviceRequest,
+    pub token: &'a str,
 }
 
-impl HTTPClient {
-    fn devices_url(&self) -> String {
-        format!("{}/devices", self.base_url)
-    }
-
-    fn device_url(&self, device_id: &str) -> String {
-        format!("{}/{}", self.devices_url(), device_id)
-    }
+pub struct IssueTokenParams<'a> {
+    pub device_id: &'a str,
+    pub payload: &'a IssueDeviceTokenRequest,
 }
 
-impl DevicesExt for HTTPClient {
-    async fn activate_device(
-        &self,
-        device_id: &str,
-        payload: &ActivateDeviceRequest,
-        token: &str,
-    ) -> Result<Device, HTTPErr> {
-        // build the request
-        let url = format!("{}/activate", self.device_url(device_id));
-        let (request, context) = self.build_post_request(
+pub struct UpdateParams<'a> {
+    pub device_id: &'a str,
+    pub payload: &'a UpdateDeviceFromAgentRequest,
+    pub token: &'a str,
+}
+
+// ================================ FREE FUNCTIONS ================================= //
+
+pub async fn activate(
+    client: &impl ClientI,
+    params: ActivateParams<'_>,
+) -> Result<Device, HTTPErr> {
+    let url = format!(
+        "{}/devices/{}/activate",
+        client.base_url(),
+        params.device_id
+    );
+    let (text, context) = client
+        .execute(
+            Params::post(
+                &url,
+                request::marshal_json(params.payload)?,
+                client.default_timeout(),
+            )
+            .with_token(params.token),
+        )
+        .await?;
+    response::parse_json(text, &context)
+}
+
+pub async fn issue_token(
+    client: &impl ClientI,
+    params: IssueTokenParams<'_>,
+) -> Result<TokenResponse, HTTPErr> {
+    let url = format!(
+        "{}/devices/{}/issue_token",
+        client.base_url(),
+        params.device_id
+    );
+    let (text, context) = client
+        .execute(Params::post(
             &url,
-            self.marshal_json_payload(payload)?,
-            self.default_timeout,
-            Some(token),
-        )?;
+            request::marshal_json(params.payload)?,
+            client.default_timeout(),
+        ))
+        .await?;
+    response::parse_json(text, &context)
+}
 
-        // send the request (no caching)
-        let http_resp = self.send(request, &context).await?;
-        let text_resp = self.handle_response(http_resp, &context).await?;
-
-        // parse the response
-        self.parse_json_response_text::<Device>(text_resp, &context)
-            .await
-    }
-
-    async fn issue_device_token(
-        &self,
-        device_id: &str,
-        payload: &IssueDeviceTokenRequest,
-    ) -> Result<TokenResponse, HTTPErr> {
-        let url = format!("{}/issue_token", self.device_url(device_id));
-        let (request, context) = self.build_post_request(
-            &url,
-            self.marshal_json_payload(payload)?,
-            self.default_timeout,
-            None,
-        )?;
-
-        // send the request (no caching)
-        let http_resp = self.send(request, &context).await?;
-        let text_resp = self.handle_response(http_resp, &context).await?;
-
-        // parse the response
-        self.parse_json_response_text::<TokenResponse>(text_resp, &context)
-            .await
-    }
-
-    async fn update_device(
-        &self,
-        device_id: &str,
-        payload: &UpdateDeviceFromAgentRequest,
-        token: &str,
-    ) -> Result<Device, HTTPErr> {
-        let url = self.device_url(device_id);
-        let (request, context) = self.build_patch_request(
-            &url,
-            self.marshal_json_payload(payload)?,
-            self.default_timeout,
-            Some(token),
-        )?;
-
-        // send the request (no caching)
-        let http_resp = self.send(request, &context).await?;
-        let text_resp = self.handle_response(http_resp, &context).await?;
-
-        // parse the response
-        self.parse_json_response_text::<Device>(text_resp, &context)
-            .await
-    }
+pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<Device, HTTPErr> {
+    let url = format!("{}/devices/{}", client.base_url(), params.device_id);
+    let (text, context) = client
+        .execute(
+            Params::patch(
+                &url,
+                request::marshal_json(params.payload)?,
+                client.default_timeout(),
+            )
+            .with_token(params.token),
+        )
+        .await?;
+    response::parse_json(text, &context)
 }

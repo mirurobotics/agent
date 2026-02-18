@@ -11,10 +11,8 @@ use miru_agent::crud::prelude::*;
 use miru_agent::deploy::fsm;
 use miru_agent::errors::*;
 use miru_agent::filesys::{dir::Dir, WriteOptions};
-use miru_agent::http::{
-    client::HTTPClient,
-    errors::{HTTPErr, MockErr},
-};
+use miru_agent::http;
+use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::device::Device;
 use miru_agent::storage::{
     config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
@@ -30,7 +28,7 @@ use miru_agent::sync::{
 };
 
 use crate::authn::token_mngr::spawn as spawn_token_manager;
-use crate::http::mock::{MockClient, MockDevicesClient};
+use crate::http::mock::MockClient;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -39,7 +37,7 @@ use tokio::task::JoinHandle;
 
 pub async fn create_token_manager(
     dir: &Dir,
-    http_client: Arc<MockDevicesClient>,
+    http_client: Arc<MockClient>,
 ) -> (TokenManager, JoinHandle<()>) {
     let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
         .await
@@ -101,7 +99,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn shutdown() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         // create the caches
@@ -122,7 +120,7 @@ pub mod shutdown {
                 .await
                 .unwrap();
 
-        let http_client = Arc::new(HTTPClient::new("doesntmatter").await);
+        let http_client = Arc::new(http::Client::new("doesntmatter").await);
         let (syncer, worker_handler) = Syncer::spawn(
             32,
             SyncerArgs {
@@ -157,7 +155,7 @@ pub mod subscribe {
     #[tokio::test]
     async fn sync_success() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let http_client = Arc::new(MockClient::default());
 
@@ -243,16 +241,16 @@ pub mod subscribe {
     #[tokio::test]
     async fn sync_failure() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
-        http_client.deployments_client.set_list_all_deployments(|| {
+        http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))
         });
-        http_client.deployments_client.set_update_deployment(|| {
+        http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))
@@ -352,7 +350,7 @@ pub mod sync {
     #[tokio::test]
     async fn deployments() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         // define a backend deployment with an embedded config instance
@@ -387,9 +385,7 @@ pub mod sync {
 
         let http_client = Arc::new(MockClient::default());
         let backend_dep_cloned = backend_dep.clone();
-        http_client
-            .deployments_client
-            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
+        http_client.set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
 
         // create the caches
         let (cfg_inst_cache, _) =
@@ -483,7 +479,7 @@ pub mod sync {
     #[tokio::test]
     async fn agent_version() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
@@ -561,16 +557,16 @@ pub mod sync {
     #[tokio::test]
     async fn network_error() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
-        http_client.deployments_client.set_list_all_deployments(|| {
+        http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))
         });
-        http_client.deployments_client.set_update_deployment(|| {
+        http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))
@@ -658,18 +654,18 @@ pub mod sync {
     #[tokio::test]
     async fn non_network_error() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         // all errors need to be a network connection error for the syncer to return a
         // network connection error so only set one false to test this
         let http_client = Arc::new(MockClient::default());
-        http_client.deployments_client.set_list_all_deployments(|| {
+        http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
             }))
         });
-        http_client.deployments_client.set_update_deployment(|| {
+        http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
             }))
@@ -758,16 +754,16 @@ pub mod sync {
     #[tokio::test]
     async fn non_network_error_to_network_error_to_recovery() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         let http_client = Arc::new(MockClient::default());
-        http_client.deployments_client.set_list_all_deployments(|| {
+        http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
             }))
         });
-        http_client.deployments_client.set_update_deployment(|| {
+        http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: false,
             }))
@@ -854,12 +850,12 @@ pub mod sync {
         }
 
         // set the http client to return a network connection error
-        http_client.deployments_client.set_list_all_deployments(|| {
+        http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))
         });
-        http_client.deployments_client.set_update_deployment(|| {
+        http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))
@@ -900,12 +896,8 @@ pub mod sync {
         }
 
         // set the http client to not return an error
-        http_client
-            .deployments_client
-            .set_list_all_deployments(|| Ok(vec![]));
-        http_client
-            .deployments_client
-            .set_update_deployment(|| Ok(openapi_client::models::Deployment::default()));
+        http_client.set_list_all_deployments(|| Ok(vec![]));
+        http_client.set_update_deployment(|| Ok(openapi_client::models::Deployment::default()));
 
         // recovery
         let base_cooldown_duration = TimeDelta::seconds(backoff.base_secs);
@@ -946,7 +938,7 @@ pub mod sync {
     #[tokio::test]
     async fn in_cooldown_error() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let http_client = Arc::new(MockClient::default());
 
@@ -1015,7 +1007,7 @@ pub mod sync_if_not_in_cooldown {
     #[tokio::test]
     async fn sync_if_not_in_cooldown() {
         let dir = Dir::create_temp_dir("spawn").await.unwrap();
-        let auth_client = Arc::new(MockDevicesClient::default());
+        let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let http_client = Arc::new(MockClient::default());
 

@@ -5,7 +5,7 @@ use miru_agent::storage::device::DeviceFile;
 use miru_agent::storage::layout::StorageLayout;
 use miru_agent::sync::agent_version::push;
 
-use crate::http::mock::MockDevicesClient;
+use crate::http::mock::MockClient;
 
 pub mod push {
     use super::*;
@@ -24,7 +24,7 @@ pub mod push {
         let (device_file, _) = DeviceFile::spawn_with_default(64, layout.device_file(), device)
             .await
             .unwrap();
-        let http_client = MockDevicesClient::default();
+        let http_client = MockClient::default();
 
         push(&device_file, &http_client, "token", agent_version.clone())
             .await
@@ -53,7 +53,7 @@ pub mod push {
         let (device_file, _) = DeviceFile::spawn_with_default(64, layout.device_file(), device)
             .await
             .unwrap();
-        let http_client = MockDevicesClient::default();
+        let http_client = MockClient::default();
 
         push(
             &device_file,

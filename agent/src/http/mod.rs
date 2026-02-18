@@ -7,4 +7,8 @@ pub mod expand;
 pub mod pagination;
 pub mod prelude;
 pub mod query;
+pub mod request;
+pub mod response;
 pub mod search;
+
+pub use client::{Client, ClientI};

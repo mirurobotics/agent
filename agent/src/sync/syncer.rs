@@ -8,7 +8,7 @@ use crate::cooldown;
 use crate::deploy::fsm;
 use crate::errors::*;
 use crate::filesys::dir::Dir;
-use crate::http::{client::HTTPClient, deployments::DeploymentsExt, devices::DevicesExt};
+use crate::http;
 use crate::storage::{
     config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
     deployments::DeploymentCache,
@@ -106,7 +106,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     state: SyncState,
 }
 
-impl<HTTPClientT: DevicesExt + DeploymentsExt> SingleThreadSyncer<HTTPClientT> {
+impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
     pub fn new(args: SyncerArgs<HTTPClientT, TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
@@ -330,7 +330,7 @@ impl<HTTPClientT: Send> Worker<HTTPClientT> {
     }
 }
 
-impl<HTTPClientT: DevicesExt + DeploymentsExt + Send> Worker<HTTPClientT> {
+impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -387,7 +387,7 @@ pub struct Syncer {
 impl Syncer {
     pub fn spawn(
         buffer_size: usize,
-        args: SyncerArgs<HTTPClient, TokenManager>,
+        args: SyncerArgs<http::Client, TokenManager>,
     ) -> Result<(Self, JoinHandle<()>), SyncErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {

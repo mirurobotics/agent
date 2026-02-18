@@ -8,7 +8,7 @@ use miru_agent::authn::token::Token;
 use miru_agent::deploy::fsm;
 use miru_agent::filesys::errors::FileSysErr;
 use miru_agent::filesys::{dir::Dir, WriteOptions};
-use miru_agent::http::client::HTTPClient;
+use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{
     device,
@@ -32,7 +32,7 @@ pub mod init {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await;
@@ -64,7 +64,7 @@ pub mod init {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await;
@@ -99,7 +99,7 @@ pub mod init {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await
@@ -146,7 +146,7 @@ pub mod init {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await
@@ -191,7 +191,7 @@ pub mod init {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await
@@ -231,7 +231,7 @@ pub mod shutdown {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await
@@ -271,7 +271,7 @@ pub mod shutdown {
             Device::default().agent_version,
             &layout,
             CacheCapacities::default(),
-            Arc::new(HTTPClient::new("doesntmatter").await),
+            Arc::new(http::Client::new("doesntmatter").await),
             fsm::RetryPolicy::default(),
         )
         .await

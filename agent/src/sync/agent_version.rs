@@ -1,11 +1,12 @@
-use crate::http::devices::DevicesExt;
+use crate::http;
+use crate::http::devices;
 use crate::models::device;
 use crate::storage::device::DeviceFile;
 use crate::sync::errors::*;
 
 use tracing::info;
 
-pub async fn push<HTTPClientT: DevicesExt>(
+pub async fn push<HTTPClientT: http::ClientI>(
     device_file: &DeviceFile,
     http_client: &HTTPClientT,
     token: &str,
@@ -30,15 +31,17 @@ pub async fn push<HTTPClientT: DevicesExt>(
     device_file.patch(updates).await?;
 
     // update the backend
-    http_client
-        .update_device(
-            &device.id,
-            &openapi_client::models::UpdateDeviceFromAgentRequest {
+    devices::update(
+        http_client,
+        devices::UpdateParams {
+            device_id: &device.id,
+            payload: &openapi_client::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(agent_version),
             },
             token,
-        )
-        .await?;
+        },
+    )
+    .await?;
 
     Ok(())
 }

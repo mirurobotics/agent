@@ -5,7 +5,8 @@ use std::env;
 // internal crates
 use crate::crypt::{jwt, rsa};
 use crate::filesys::{dir::Dir, file::File, path::PathExt, Overwrite};
-use crate::http::{client::HTTPClient, devices::DevicesExt};
+use crate::http;
+use crate::http::devices;
 use crate::installer::{display, errors::*};
 use crate::logs;
 use crate::models::device::{Device, DeviceStatus};
@@ -65,7 +66,7 @@ async fn install_helper(
     }
 
     // run the installation
-    let http_client = HTTPClient::new(&settings.backend.base_url).await;
+    let http_client = http::Client::new(&settings.backend.base_url).await;
     let layout = StorageLayout::default();
     bootstrap(
         &layout,
@@ -82,7 +83,7 @@ async fn install_helper(
 }
 
 // walks user through the installation process
-pub async fn bootstrap<HTTPClientT: DevicesExt>(
+pub async fn bootstrap<HTTPClientT: http::ClientI>(
     layout: &StorageLayout,
     http_client: &HTTPClientT,
     settings: &settings::Settings,
@@ -125,7 +126,7 @@ pub async fn bootstrap<HTTPClientT: DevicesExt>(
     Ok(())
 }
 
-pub async fn activate<HTTPClientT: DevicesExt>(
+pub async fn activate<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     public_key_file: &File,
     token: &str,
@@ -140,9 +141,15 @@ pub async fn activate<HTTPClientT: DevicesExt>(
         name: device_name,
         agent_version: Some(version::VERSION.to_string()),
     };
-    let device = http_client
-        .activate_device(&device_id, &payload, token)
-        .await?;
+    let device = devices::activate(
+        http_client,
+        devices::ActivateParams {
+            device_id: &device_id,
+            payload: &payload,
+            token,
+        },
+    )
+    .await?;
 
     // complete
     display::info(

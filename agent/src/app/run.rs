@@ -11,7 +11,7 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
-use crate::http::client::HTTPClient;
+use crate::http;
 use crate::server::{errors::*, serve::serve, state::ServerState};
 use crate::trace;
 use crate::workers::{
@@ -173,7 +173,7 @@ async fn init_app_state(
         agent_version,
         &options.storage.layout,
         options.storage.cache_capacities,
-        Arc::new(HTTPClient::new(&options.backend_base_url).await),
+        Arc::new(http::Client::new(&options.backend_base_url).await),
         options.dpl_retry_policy,
     )
     .await?;

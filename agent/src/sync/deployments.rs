@@ -1,7 +1,8 @@
 use crate::crud::prelude::*;
 use crate::deploy::{apply::apply, filesys, fsm};
 use crate::filesys::Overwrite;
-use crate::http::deployments::DeploymentsExt;
+use crate::http;
+use crate::http::deployments;
 use crate::models::config_instance::ConfigInstance;
 use crate::models::deployment::Deployment;
 use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
@@ -17,7 +18,7 @@ use openapi_client::models::{
 use tracing::{debug, error};
 
 // =================================== SYNC ======================================== //
-pub async fn sync<HTTPClientT: DeploymentsExt>(
+pub async fn sync<HTTPClientT: http::ClientI>(
     deployment_cache: &DeploymentCache,
     cfg_inst_cache: &ConfigInstanceCache,
     cfg_inst_content_cache: &ConfigInstanceContentCache,
@@ -85,7 +86,7 @@ pub async fn sync<HTTPClientT: DeploymentsExt>(
 }
 
 // =================================== PULL ======================================== //
-async fn pull<HTTPClientT: DeploymentsExt>(
+async fn pull<HTTPClientT: http::ClientI>(
     deployment_cache: &DeploymentCache,
     cfg_inst_cache: &ConfigInstanceCache,
     cfg_inst_content_cache: &ConfigInstanceContentCache,
@@ -189,7 +190,7 @@ async fn pull<HTTPClientT: DeploymentsExt>(
     Ok(())
 }
 
-async fn fetch_active_deployments<HTTPClientT: DeploymentsExt>(
+async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     token: &str,
 ) -> Result<Vec<openapi_client::models::Deployment>, SyncErr> {
@@ -197,15 +198,21 @@ async fn fetch_active_deployments<HTTPClientT: DeploymentsExt>(
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
     ];
-    let expansions = [DeploymentListExpansion::DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES];
-    http_client
-        .list_all_deployments(activity_status_filter, expansions, token)
-        .await
-        .map_err(SyncErr::from)
+    let expansions = &[DeploymentListExpansion::DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES];
+    deployments::list_all(
+        http_client,
+        deployments::ListAllParams {
+            activity_status_filter,
+            expansions,
+            token,
+        },
+    )
+    .await
+    .map_err(SyncErr::from)
 }
 
 // =================================== PUSH ======================================== //
-async fn push<HTTPClientT: DeploymentsExt>(
+async fn push<HTTPClientT: http::ClientI>(
     deployment_cache: &DeploymentCache,
     http_client: &HTTPClientT,
     token: &str,
@@ -240,15 +247,17 @@ async fn push<HTTPClientT: DeploymentsExt>(
             deployment.id, updates
         );
 
-        if let Err(e) = http_client
-            .update_deployment(
-                &deployment.id,
-                &updates,
-                &[] as &[DeploymentListExpansion],
+        if let Err(e) = deployments::update(
+            http_client,
+            deployments::UpdateParams {
+                deployment_id: &deployment.id,
+                updates: &updates,
+                expansions: &[],
                 token,
-            )
-            .await
-            .map_err(SyncErr::from)
+            },
+        )
+        .await
+        .map_err(SyncErr::from)
         {
             error!(
                 "Failed to push deployment {} to backend: {}",

@@ -110,9 +110,7 @@ pub mod sync_tests {
 
         let http_client = MockClient::default();
         let backend_dep = make_backend_deployment("dpl_1");
-        http_client
-            .deployments_client
-            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+        http_client.set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
         let dpl_retry_policy = fsm::RetryPolicy::default();
         let ctx = filesys::DeployContext {
@@ -174,7 +172,7 @@ pub mod sync_tests {
                 .unwrap();
 
         let http_client = MockClient::default();
-        http_client.deployments_client.set_list_all_deployments(|| {
+        http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
                 is_network_connection_error: true,
             }))

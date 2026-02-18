@@ -1,11 +1,11 @@
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::http::backend::BackendErrorCodes;
-use crate::http::client::RequestContext;
+use crate::http::request::Context;
 use openapi_client::models::ErrorResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailed {
-    pub request: RequestContext,
+    pub request: Context,
     pub status: reqwest::StatusCode,
     pub error: Option<ErrorResponse>,
     pub trace: Box<Trace>,
@@ -19,7 +19,7 @@ impl std::fmt::Display for RequestFailed {
         };
         write!(
             f,
-            "Request {} failed with status code {}: {}",
+            "request {} failed with status code {}: {}",
             self.request, self.status, debug_msg
         )
     }
@@ -48,7 +48,7 @@ impl crate::errors::Error for RequestFailed {
 #[derive(Debug, thiserror::Error)]
 pub struct TimeoutErr {
     pub msg: String,
-    pub request: RequestContext,
+    pub request: Context,
     pub trace: Box<Trace>,
 }
 
@@ -56,7 +56,7 @@ impl std::fmt::Display for TimeoutErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Request {} timed out after {} seconds",
+            "request {} timed out after {} seconds",
             self.request,
             self.request.timeout.as_secs()
         )
@@ -99,20 +99,11 @@ impl crate::errors::Error for CacheErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("request {request} failed with network connection error: {source}")]
 pub struct ConnectionErr {
-    pub request: RequestContext,
+    pub request: Context,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for ConnectionErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Request {} failed with network connection error: {}",
-            self.request, self.source
-        )
-    }
 }
 
 impl crate::errors::Error for ConnectionErr {
@@ -122,26 +113,17 @@ impl crate::errors::Error for ConnectionErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("request {request} failed to decode response body: {source}")]
 pub struct DecodeRespBodyErr {
-    pub request: RequestContext,
+    pub request: Context,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for DecodeRespBodyErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Request {} failed to decode response body: {}",
-            self.request, self.source
-        )
-    }
 }
 
 impl crate::errors::Error for DecodeRespBodyErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Invalid header value: {source}")]
+#[error("invalid header value: {source}")]
 pub struct InvalidHeaderValueErr {
     pub msg: String,
     pub source: reqwest::header::InvalidHeaderValue,
@@ -151,7 +133,7 @@ pub struct InvalidHeaderValueErr {
 impl crate::errors::Error for InvalidHeaderValueErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to marshal JSON body: {source}")]
+#[error("failed to marshal JSON body: {source}")]
 pub struct MarshalJSONErr {
     pub source: serde_json::Error,
     pub trace: Box<Trace>,
@@ -161,7 +143,7 @@ impl crate::errors::Error for MarshalJSONErr {}
 
 #[derive(Debug, thiserror::Error)]
 pub struct UnmarshalJSONErr {
-    pub request: RequestContext,
+    pub request: Context,
     pub source: serde_json::Error,
     pub trace: Box<Trace>,
 }
@@ -179,7 +161,7 @@ impl std::fmt::Display for UnmarshalJSONErr {
 impl crate::errors::Error for UnmarshalJSONErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to build request: {source}")]
+#[error("failed to build request: {source}")]
 pub struct BuildReqwestErr {
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
@@ -188,20 +170,11 @@ pub struct BuildReqwestErr {
 impl crate::errors::Error for BuildReqwestErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("request {request} failed with reqwest crate error: {source}")]
 pub struct ReqwestErr {
-    pub request: RequestContext,
+    pub request: Context,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for ReqwestErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Request {} failed with reqwest crate error: {}",
-            self.request, self.source
-        )
-    }
 }
 
 impl crate::errors::Error for ReqwestErr {}
@@ -272,7 +245,7 @@ crate::impl_error!(HTTPErr {
 
 pub fn reqwest_err_to_http_client_err(
     e: reqwest::Error,
-    context: &RequestContext,
+    context: &Context,
     trace: Box<Trace>,
 ) -> HTTPErr {
     if e.is_connect() {

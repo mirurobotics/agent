@@ -12,7 +12,7 @@ use crate::cooldown;
 use crate::crypt::jwt;
 use crate::deploy::fsm;
 use crate::filesys::path::PathExt;
-use crate::http::client::HTTPClient;
+use crate::http;
 use crate::models::{
     device,
     device::{Device, DeviceStatus},
@@ -35,7 +35,7 @@ pub type DeviceID = String;
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub device_file: Arc<DeviceFile>,
-    pub http_client: Arc<HTTPClient>,
+    pub http_client: Arc<http::Client>,
     pub syncer: Arc<Syncer>,
     pub caches: Arc<Caches>,
     pub token_mngr: Arc<TokenManager>,
@@ -47,7 +47,7 @@ impl AppState {
         agent_version: String,
         layout: &StorageLayout,
         cache_capacities: CacheCapacities,
-        http_client: Arc<HTTPClient>,
+        http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), ServerErr> {
         // storage layout stuff

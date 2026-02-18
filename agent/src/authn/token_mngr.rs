@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::authn::{errors::*, token, token::Token};
 use crate::crypt::{base64, rsa};
 use crate::filesys::{cached_file::SingleThreadCachedFile, file::File, path::PathExt};
-use crate::http::{client::HTTPClient, devices::DevicesExt};
+use crate::http;
+use crate::http::devices;
 use crate::trace;
 use openapi_client::models::{IssueDeviceClaims, IssueDeviceTokenRequest};
 
@@ -36,14 +37,14 @@ pub trait TokenManagerExt {
 }
 
 // ======================== SINGLE THREADED IMPLEMENTATION ========================= //
-pub struct SingleThreadTokenManager<HTTPClientT: DevicesExt> {
+pub struct SingleThreadTokenManager<HTTPClientT: http::ClientI> {
     device_id: String,
     http_client: Arc<HTTPClientT>,
     token_file: TokenFile,
     private_key_file: File,
 }
 
-impl<HTTPClientT: DevicesExt> SingleThreadTokenManager<HTTPClientT> {
+impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
     pub fn new(
         device_id: String,
         http_client: Arc<HTTPClientT>,
@@ -80,10 +81,14 @@ impl<HTTPClientT: DevicesExt> SingleThreadTokenManager<HTTPClientT> {
         let payload = self.prepare_issue_token_request().await?;
 
         // send the token request
-        let resp = self
-            .http_client
-            .issue_device_token(&self.device_id, &payload)
-            .await?;
+        let resp = devices::issue_token(
+            self.http_client.as_ref(),
+            devices::IssueTokenParams {
+                device_id: &self.device_id,
+                payload: &payload,
+            },
+        )
+        .await?;
 
         // format the response
         let expires_at = resp.expires_at.parse::<DateTime<Utc>>().map_err(|e| {
@@ -150,12 +155,12 @@ pub enum WorkerCommand {
     },
 }
 
-pub struct Worker<HTTPClientT: DevicesExt> {
+pub struct Worker<HTTPClientT: http::ClientI> {
     token_mngr: SingleThreadTokenManager<HTTPClientT>,
     receiver: Receiver<WorkerCommand>,
 }
 
-impl<HTTPClientT: DevicesExt> Worker<HTTPClientT> {
+impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
     pub fn new(
         token_mngr: SingleThreadTokenManager<HTTPClientT>,
         receiver: Receiver<WorkerCommand>,
@@ -167,7 +172,7 @@ impl<HTTPClientT: DevicesExt> Worker<HTTPClientT> {
     }
 }
 
-impl<HTTPClientT: DevicesExt> Worker<HTTPClientT> {
+impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -200,10 +205,10 @@ pub struct TokenManager {
 }
 
 impl TokenManager {
-    pub fn spawn(
+    pub fn spawn<HTTPClientT: http::ClientI + 'static>(
         buffer_size: usize,
         device_id: String,
-        http_client: Arc<HTTPClient>,
+        http_client: Arc<HTTPClientT>,
         token_file: TokenFile,
         private_key_file: File,
     ) -> Result<(Self, JoinHandle<()>), AuthnErr> {

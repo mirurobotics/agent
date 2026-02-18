@@ -4,8 +4,10 @@ use std::time::{Duration, Instant};
 
 // internal crates
 use miru_agent::errors::Error;
-use miru_agent::http::client::HTTPClient;
+use miru_agent::http;
 use miru_agent::http::errors::HTTPErr;
+use miru_agent::http::request::Params;
+use miru_agent::http::response;
 
 // external crates
 use futures::future::join_all;
@@ -19,12 +21,13 @@ pub mod headers {
     #[tokio::test]
     #[serial_test::serial(example_com)]
     async fn validate_headers() {
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
         let request = http_client
-            .build_get_request("https://example.com/", Duration::from_secs(1), None)
+            .build_request(Params::get("https://example.com/", Duration::from_secs(1)))
             .unwrap();
         let headers = request.0.headers();
         assert!(headers.contains_key("X-Miru-Agent-Version"));
+        assert!(headers.contains_key("X-Miru-API-Version"));
         assert!(headers.contains_key("X-Host-Name"));
         assert!(headers.contains_key("X-Arch"));
         assert!(headers.contains_key("X-Language"));
@@ -32,15 +35,15 @@ pub mod headers {
     }
 }
 
-pub mod build_get_request {
+pub mod build_request {
     use super::*;
 
     #[tokio::test]
     #[serial_test::serial(example_com)]
     async fn get_httpbin_org() {
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
         let request = http_client
-            .build_get_request("https://example.com/", Duration::from_secs(1), None)
+            .build_request(Params::get("https://example.com/", Duration::from_secs(1)))
             .unwrap();
         let result = http_client.send(request.0, &request.1).await.unwrap();
         assert!(result.status().is_success());
@@ -52,7 +55,7 @@ pub mod build_post_request {
 
     #[tokio::test]
     async fn post_to_postman_echo() {
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
 
         // Create a simple JSON payload
         let payload = serde_json::json!({
@@ -62,12 +65,11 @@ pub mod build_post_request {
 
         let body = serde_json::to_string(&payload).unwrap();
         let request = http_client
-            .build_post_request(
+            .build_request(Params::post(
                 "https://postman-echo.com/post",
                 body,
                 Duration::from_secs(10),
-                None,
-            )
+            ))
             .unwrap();
         let response = http_client.send(request.0, &request.1).await.unwrap();
         println!("response: {response:?}");
@@ -92,9 +94,12 @@ pub mod send {
         #[tokio::test]
         #[serial_test::serial(example_com)]
         async fn get_httpbin_org() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let request = http_client
-                .build_get_request("https://httpbin.org/get", Duration::from_secs(10), None)
+                .build_request(Params::get(
+                    "https://httpbin.org/get",
+                    Duration::from_secs(10),
+                ))
                 .unwrap();
             let result = http_client.send(request.0, &request.1).await.unwrap();
             assert!(result.status().is_success());
@@ -106,9 +111,9 @@ pub mod send {
 
         #[tokio::test]
         async fn network_connection_error() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let request = http_client
-                .build_get_request("http://localhost:5454", Duration::from_secs(1), None)
+                .build_request(Params::get("http://localhost:5454", Duration::from_secs(1)))
                 .unwrap();
             let result = http_client.send(request.0, &request.1).await.unwrap_err();
             assert!(result.is_network_connection_error());
@@ -117,9 +122,12 @@ pub mod send {
         #[tokio::test]
         #[serial_test::serial(example_dot_com)]
         async fn timeout_error() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let request = http_client
-                .build_get_request("https://example.com/", Duration::from_millis(1), None)
+                .build_request(Params::get(
+                    "https://example.com/",
+                    Duration::from_millis(1),
+                ))
                 .unwrap();
             let result = http_client.send(request.0, &request.1).await.unwrap_err();
             assert!(matches!(result, HTTPErr::TimeoutErr { .. }));
@@ -136,13 +144,13 @@ pub mod send_cached {
         #[tokio::test]
         #[serial_test::serial(example_dot_com)]
         async fn sequential_cache_hit() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let url = "https://example.com/";
 
             // send the first request
             let start = Instant::now();
             let request = http_client
-                .build_get_request(url, Duration::from_secs(1), None)
+                .build_request(Params::get(url, Duration::from_secs(1)))
                 .unwrap();
             let is_cache_hit = http_client
                 .send_cached(url.to_string(), request.0, &request.1)
@@ -157,7 +165,7 @@ pub mod send_cached {
             for _ in 0..5 {
                 let start = Instant::now();
                 let request = http_client
-                    .build_get_request(url, Duration::from_secs(1), None)
+                    .build_request(Params::get(url, Duration::from_secs(1)))
                     .unwrap();
                 let is_cache_hit = http_client
                     .send_cached(url.to_string(), request.0, &request.1)
@@ -173,7 +181,7 @@ pub mod send_cached {
         #[tokio::test]
         #[serial_test::serial(example_dot_com)]
         async fn concurrent_cache_hit() {
-            let http_client = Arc::new(HTTPClient::new("doesntmatter").await);
+            let http_client = Arc::new(http::Client::new("doesntmatter").await);
             let url = "https://example.com/";
 
             let start = Instant::now();
@@ -186,7 +194,7 @@ pub mod send_cached {
                 let url = url.to_string();
                 let handle = tokio::spawn(async move {
                     let request = http_client
-                        .build_get_request(&url, Duration::from_secs(3), None)
+                        .build_request(Params::get(&url, Duration::from_secs(3)))
                         .unwrap();
                     http_client
                         .send_cached(url.to_string(), request.0, &request.1)
@@ -217,13 +225,13 @@ pub mod send_cached {
 
         #[tokio::test]
         async fn errors_not_cached() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let url = "https://httpstat.us/404";
 
             // send the first request
             let start = Instant::now();
             let request = http_client
-                .build_get_request(url, Duration::from_secs(1), None)
+                .build_request(Params::get(url, Duration::from_secs(1)))
                 .unwrap();
             http_client
                 .send_cached(url.to_string(), request.0, &request.1)
@@ -236,7 +244,7 @@ pub mod send_cached {
             for _ in 0..5 {
                 let start = Instant::now();
                 let request = http_client
-                    .build_get_request(url, Duration::from_secs(1), None)
+                    .build_request(Params::get(url, Duration::from_secs(1)))
                     .unwrap();
                 http_client
                     .send_cached(url.to_string(), request.0, &request.1)
@@ -251,7 +259,7 @@ pub mod send_cached {
         #[serial_test::serial(example_com)]
         async fn cache_expired() {
             let url = "https://example.com/";
-            let http_client = HTTPClient::new_with(
+            let http_client = http::Client::new_with(
                 url,
                 Duration::from_secs(1),
                 Cache::builder()
@@ -262,7 +270,7 @@ pub mod send_cached {
             // send the first request
             let start = Instant::now();
             let request = http_client
-                .build_get_request(url, Duration::from_secs(1), None)
+                .build_request(Params::get(url, Duration::from_secs(1)))
                 .unwrap();
             http_client
                 .send_cached(url.to_string(), request.0, &request.1)
@@ -277,7 +285,7 @@ pub mod send_cached {
             // send subsequent requests and check they are not cached
             let start = Instant::now();
             let request = http_client
-                .build_get_request(url, Duration::from_secs(1), None)
+                .build_request(Params::get(url, Duration::from_secs(1)))
                 .unwrap();
             http_client
                 .send_cached(url.to_string(), request.0, &request.1)
@@ -293,9 +301,9 @@ pub mod send_cached {
 
         #[tokio::test]
         async fn network_connection_error() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let request = http_client
-                .build_get_request("http://localhost:5454", Duration::from_secs(1), None)
+                .build_request(Params::get("http://localhost:5454", Duration::from_secs(1)))
                 .unwrap();
             let result = http_client
                 .send_cached("test".to_string(), request.0, &request.1)
@@ -307,9 +315,12 @@ pub mod send_cached {
         #[tokio::test]
         #[serial_test::serial(example_com)]
         async fn timeout_error() {
-            let http_client = HTTPClient::new("doesntmatter").await;
+            let http_client = http::Client::new("doesntmatter").await;
             let request = http_client
-                .build_get_request("https://example.com/", Duration::from_millis(1), None)
+                .build_request(Params::get(
+                    "https://example.com/",
+                    Duration::from_millis(1),
+                ))
                 .unwrap();
             let result = http_client
                 .send_cached("test".to_string(), request.0, &request.1)
@@ -326,21 +337,17 @@ pub mod handle_response {
     #[tokio::test]
     async fn endpoint_not_found() {
         // make a request to a non-existent endpoint
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
         let request = http_client
-            .build_get_request(
+            .build_request(Params::get(
                 "https://httpbin.org/get/this-page-should-not-exist",
                 Duration::from_secs(3),
-                None,
-            )
+            ))
             .unwrap();
         let resp = http_client.send(request.0, &request.1).await.unwrap();
 
-        // call the handle_response method
-        let response = http_client
-            .handle_response(resp, &request.1)
-            .await
-            .unwrap_err();
+        // call the handle response function
+        let response = response::handle(resp, &request.1).await.unwrap_err();
         assert!(matches!(response, HTTPErr::RequestFailed { .. }));
     }
 }

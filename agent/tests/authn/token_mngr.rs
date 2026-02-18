@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::http::mock::MockDevicesClient;
+use crate::http::mock::MockClient;
 use miru_agent::authn::{
     errors::AuthnErr,
     token::Token,
@@ -10,10 +10,8 @@ use miru_agent::authn::{
 };
 use miru_agent::crypt::rsa;
 use miru_agent::filesys::{dir::Dir, file::File, Overwrite, WriteOptions};
-use miru_agent::http::{
-    client::HTTPClient,
-    errors::{HTTPErr, MockErr},
-};
+use miru_agent::http;
+use miru_agent::http::errors::{HTTPErr, MockErr};
 use openapi_client::models::TokenResponse;
 
 // external crates
@@ -24,7 +22,7 @@ use tokio::task::JoinHandle;
 pub fn spawn(
     buffer_size: usize,
     device_id: String,
-    http_client: Arc<MockDevicesClient>,
+    http_client: Arc<MockClient>,
     token_file: TokenFile,
     private_key_file: File,
 ) -> Result<(TokenManager, JoinHandle<()>), AuthnErr> {
@@ -50,7 +48,7 @@ pub mod spawn {
         token_file.file.delete().await.unwrap();
 
         // spawn the token manager
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
         let result = TokenManager::spawn(
             32,
             "device_id".to_string(),
@@ -76,7 +74,7 @@ pub mod spawn {
         private_key_file.delete().await.unwrap();
 
         // spawn the token manager
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
         let result = TokenManager::spawn(
             32,
             "device_id".to_string(),
@@ -102,7 +100,7 @@ pub mod spawn {
             .await
             .unwrap();
 
-        let http_client = HTTPClient::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").await;
         TokenManager::spawn(
             32,
             "device_id".to_string(),
@@ -130,7 +128,7 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        let mock_http_client = MockDevicesClient::default();
+        let mock_http_client = MockClient::default();
         let (token_mngr, worker_handle) = spawn(
             32,
             "device_id".to_string(),
@@ -159,7 +157,7 @@ pub mod get_token {
             .await
             .unwrap();
 
-        let mock_http_client = MockDevicesClient::default();
+        let mock_http_client = MockClient::default();
 
         let (token_mngr, _) = spawn(
             32,
@@ -192,12 +190,14 @@ pub mod refresh_token {
             .unwrap();
 
         // prepare the mock http client
-        let mut mock_http_client = MockDevicesClient::default();
         let expected = TokenResponse {
             token: "token".to_string(),
             expires_at: Utc::now().to_rfc3339(),
         };
-        mock_http_client.issue_device_token_fn = Box::new(move || Ok(expected.clone()));
+        let mock_http_client = MockClient {
+            issue_device_token_fn: Box::new(move || Ok(expected.clone())),
+            ..Default::default()
+        };
 
         // spawn the token manager
         let (token_mngr, _) = spawn(
@@ -228,7 +228,7 @@ pub mod refresh_token {
             .unwrap();
 
         // prepare the mock http client
-        let mock_http_client = MockDevicesClient {
+        let mock_http_client = MockClient {
             issue_device_token_fn: Box::new(move || {
                 Err(HTTPErr::MockErr(MockErr {
                     is_network_connection_error: false,
@@ -272,7 +272,7 @@ pub mod refresh_token {
             expires_at: expires_at.to_rfc3339(),
         };
         let resp_clone = resp.clone();
-        let mock_http_client = MockDevicesClient {
+        let mock_http_client = MockClient {
             issue_device_token_fn: Box::new(move || Ok(resp_clone.clone())),
             ..Default::default()
         };
@@ -318,7 +318,7 @@ pub mod refresh_token {
             expires_at: expires_at.to_rfc3339(),
         };
         let resp_clone = resp.clone();
-        let mock_http_client = MockDevicesClient {
+        let mock_http_client = MockClient {
             issue_device_token_fn: Box::new(move || Ok(resp_clone.clone())),
             ..Default::default()
         };
