@@ -2,14 +2,18 @@
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::http;
-use miru_agent::http::errors::HTTPErr;
-use miru_agent::http::request::Params;
+use miru_agent::http::{self, errors::HTTPErr, request::Params};
 use openapi_client::models::{
-    deployment_list, Deployment as BackendDeployment, DeploymentList, Device, TokenResponse,
+    deployment_list, Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError,
+    ErrorResponse, TokenResponse,
 };
 
 // external crates
+use axum::http::StatusCode;
+use axum::Json;
+use axum::Router;
+use serde::Serialize;
+use tokio::net::TcpListener;
 use tokio::time::Duration;
 
 // ================================ MOCK CALL ======================================= //
@@ -85,48 +89,60 @@ impl MockClient {
             .count()
     }
 
+    fn match_route(method: &reqwest::Method, path: &str) -> MockCall {
+        use reqwest::Method;
+        match (method, path) {
+            (m, p) if *m == Method::POST && p.ends_with("/activate") => MockCall::ActivateDevice,
+            (m, p) if *m == Method::POST && p.ends_with("/issue_token") => {
+                MockCall::IssueDeviceToken
+            }
+            (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => MockCall::UpdateDevice,
+            (m, p) if *m == Method::GET && p == "/deployments" => MockCall::ListDeployments,
+            (m, p) if *m == Method::GET && p.starts_with("/deployments/") => {
+                MockCall::GetDeployment
+            }
+            (m, p) if *m == Method::PATCH && p.starts_with("/deployments/") => {
+                MockCall::UpdateDeployment
+            }
+            _ => panic!("MockClient: unhandled route: {method} {path}"),
+        }
+    }
+
+    fn handle_route(&self, call: &MockCall) -> Result<String, HTTPErr> {
+        match call {
+            MockCall::ActivateDevice => json(&(self.activate_device_fn)()?),
+            MockCall::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
+            MockCall::UpdateDevice => json(&(self.update_device_fn)()?),
+            MockCall::ListDeployments => {
+                let data = (self.list_all_deployments_fn.lock().unwrap())()?;
+                let list = DeploymentList::new(
+                    deployment_list::Object::List,
+                    data.len() as i64,
+                    100,
+                    0,
+                    false,
+                    data,
+                );
+                json(&list)
+            }
+            MockCall::GetDeployment => json(&(self.get_deployment_fn.lock().unwrap())()?),
+            MockCall::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
+        }
+    }
+
     fn dispatch(&self, method: &reqwest::Method, url: &str) -> Result<String, HTTPErr> {
         let path = url
             .strip_prefix(http::ClientI::base_url(self))
             .unwrap_or(url);
         let path = path.split('?').next().unwrap_or(path);
-
-        if *method == reqwest::Method::POST && path.ends_with("/activate") {
-            self.calls.lock().unwrap().push(MockCall::ActivateDevice);
-            let result = (self.activate_device_fn)()?;
-            Ok(serde_json::to_string(&result).unwrap())
-        } else if *method == reqwest::Method::POST && path.ends_with("/issue_token") {
-            self.calls.lock().unwrap().push(MockCall::IssueDeviceToken);
-            let result = (self.issue_device_token_fn)()?;
-            Ok(serde_json::to_string(&result).unwrap())
-        } else if *method == reqwest::Method::PATCH && path.starts_with("/devices/") {
-            self.calls.lock().unwrap().push(MockCall::UpdateDevice);
-            let result = (self.update_device_fn)()?;
-            Ok(serde_json::to_string(&result).unwrap())
-        } else if *method == reqwest::Method::GET && path == "/deployments" {
-            self.calls.lock().unwrap().push(MockCall::ListDeployments);
-            let data = (self.list_all_deployments_fn.lock().unwrap())()?;
-            let list = DeploymentList::new(
-                deployment_list::Object::List,
-                data.len() as i64,
-                100,
-                0,
-                false,
-                data,
-            );
-            Ok(serde_json::to_string(&list).unwrap())
-        } else if *method == reqwest::Method::GET && path.starts_with("/deployments/") {
-            self.calls.lock().unwrap().push(MockCall::GetDeployment);
-            let result = (self.get_deployment_fn.lock().unwrap())()?;
-            Ok(serde_json::to_string(&result).unwrap())
-        } else if *method == reqwest::Method::PATCH && path.starts_with("/deployments/") {
-            self.calls.lock().unwrap().push(MockCall::UpdateDeployment);
-            let result = (self.update_deployment_fn.lock().unwrap())()?;
-            Ok(serde_json::to_string(&result).unwrap())
-        } else {
-            panic!("MockClient: unhandled route: {} {}", method, url)
-        }
+        let call = Self::match_route(method, path);
+        self.calls.lock().unwrap().push(call.clone());
+        self.handle_route(&call)
     }
+}
+
+fn json<T: Serialize>(val: &T) -> Result<String, HTTPErr> {
+    Ok(serde_json::to_string(val).unwrap())
 }
 
 impl http::ClientI for MockClient {
@@ -134,15 +150,71 @@ impl http::ClientI for MockClient {
         "http://mock"
     }
 
-    fn default_timeout(&self) -> Duration {
-        Duration::from_secs(10)
-    }
-
     async fn execute(&self, params: Params<'_>) -> Result<String, HTTPErr> {
         self.dispatch(&params.method, params.url)
     }
+}
 
-    async fn execute_cached(&self, params: Params<'_>) -> Result<String, HTTPErr> {
-        self.execute(params).await
+// ================================ MOCK SERVER ==================================== //
+pub struct Server {
+    pub base_url: String,
+    _handle: tokio::task::JoinHandle<()>,
+}
+
+pub async fn run_server(router: Router) -> Server {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    Server {
+        base_url,
+        _handle: handle,
     }
+}
+
+pub async fn ok() -> &'static str {
+    "ok"
+}
+
+pub async fn hello() -> &'static str {
+    "hello"
+}
+
+pub async fn empty() -> &'static str {
+    ""
+}
+
+pub async fn echo(body: String) -> String {
+    body
+}
+
+pub async fn json_response() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"name": "alice", "age": 30}))
+}
+
+pub async fn not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
+}
+
+pub async fn unauthorized() -> (StatusCode, Json<ErrorResponse>) {
+    let body = ErrorResponse::new(ApiError::new(
+        "invalid_jwt_auth".to_string(),
+        std::collections::HashMap::new(),
+        "invalid token".to_string(),
+    ));
+    (StatusCode::UNAUTHORIZED, Json(body))
+}
+
+pub async fn internal_server_error() -> StatusCode {
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
+pub async fn bad_json() -> &'static str {
+    "not valid json{"
+}
+
+pub async fn slow() -> &'static str {
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    "done"
 }

@@ -9,11 +9,18 @@ use openapi_client::models::ErrorResponse;
 // external crates
 use serde::de::DeserializeOwned;
 
-pub async fn handle(response: reqwest::Response, meta: request::Meta) -> Result<String, HTTPErr> {
-    let status = response.status();
+#[derive(Debug)]
+pub struct Response {
+    pub reqwest: reqwest::Response,
+    pub meta: request::Meta,
+}
+
+pub async fn handle(resp: Response) -> Result<String, HTTPErr> {
+    let status = resp.reqwest.status();
+    let meta = resp.meta;
 
     if !status.is_success() {
-        let error_response = match response.text().await {
+        let error_response = match resp.reqwest.text().await {
             Ok(text) => parse_json::<ErrorResponse>(text, meta.clone()).ok(),
             Err(_) => None,
         };
@@ -24,11 +31,10 @@ pub async fn handle(response: reqwest::Response, meta: request::Meta) -> Result<
             trace: trace!(),
         }))
     } else {
-        let text = response
-            .text()
-            .await
-            .map_err(|e| reqwest_err_to_http_client_err(e, meta, trace!()))?;
-        Ok(text)
+        match resp.reqwest.text().await {
+            Ok(text) => Ok(text),
+            Err(e) => Err(reqwest_err_to_http_client_err(e, meta, trace!())),
+        }
     }
 }
 

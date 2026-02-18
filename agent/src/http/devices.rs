@@ -1,7 +1,7 @@
 // internal crates
+use crate::http;
 use crate::http::errors::HTTPErr;
 use crate::http::request;
-use crate::http::response;
 use crate::http::ClientI;
 use openapi_client::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
@@ -38,15 +38,9 @@ pub async fn activate(
         client.base_url(),
         params.device_id
     );
-    let request = request::Params::post(
-        &url,
-        request::marshal_json(params.payload)?,
-        client.default_timeout(),
-    )
-    .with_token(params.token);
-    let meta = request.meta();
-    let text = client.execute(request).await?;
-    response::parse_json(text, meta)
+    let request = request::Params::post(&url, request::marshal_json(params.payload)?)
+        .with_token(params.token);
+    http::client::fetch(client, request).await
 }
 
 pub async fn issue_token(
@@ -58,25 +52,13 @@ pub async fn issue_token(
         client.base_url(),
         params.device_id
     );
-    let request = request::Params::post(
-        &url,
-        request::marshal_json(params.payload)?,
-        client.default_timeout(),
-    );
-    let meta = request.meta();
-    let text = client.execute(request).await?;
-    response::parse_json(text, meta)
+    let request = request::Params::post(&url, request::marshal_json(params.payload)?);
+    http::client::fetch(client, request).await
 }
 
 pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<Device, HTTPErr> {
     let url = format!("{}/devices/{}", client.base_url(), params.device_id);
-    let request = request::Params::patch(
-        &url,
-        request::marshal_json(params.payload)?,
-        client.default_timeout(),
-    )
-    .with_token(params.token);
-    let meta = request.meta();
-    let text = client.execute(request).await?;
-    response::parse_json(text, meta)
+    let request = request::Params::patch(&url, request::marshal_json(params.payload)?)
+        .with_token(params.token);
+    http::client::fetch(client, request).await
 }

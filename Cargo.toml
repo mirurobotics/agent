@@ -23,7 +23,6 @@ base64 = "0.22.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
-moka = { version = "0.12.10", features = ["future"] }
 reqwest = { version = "0.13.1", features = ["query"] }
 openapi-client = { path = "libs/openapi-client"}
 openapi-server = { path = "libs/openapi-server"}
@@ -47,7 +46,7 @@ tracing = "0.1.40"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 users = "0.11.0"
-uuid = "1.16.0"
+uuid = { version = "1.16.0", features = ["v4"] }
 
 [profile.release]
 debug = false

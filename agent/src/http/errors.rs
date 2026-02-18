@@ -1,5 +1,4 @@
 use crate::errors::{Code, HTTPCode, Trace};
-use crate::http::backend::BackendErrorCodes;
 use crate::http::request;
 use openapi_client::models::ErrorResponse;
 
@@ -69,58 +68,48 @@ impl crate::errors::Error for TimeoutErr {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("HTTP request cache error: {msg}")]
-pub struct CacheErr {
-    pub msg: String,
-    pub code: Code,
-    pub http_status: HTTPCode,
-    pub is_network_connection_error: bool,
-    pub params: Option<serde_json::Value>,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for CacheErr {
-    fn code(&self) -> Code {
-        self.code.clone()
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        self.http_status
-    }
-
-    fn is_network_connection_error(&self) -> bool {
-        self.is_network_connection_error
-    }
-
-    fn params(&self) -> Option<serde_json::Value> {
-        self.params.clone()
-    }
+#[derive(Debug, PartialEq)]
+pub enum ReqwestErrKind {
+    Connection,
+    DecodeBody,
+    Other,
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("request {request} failed with network connection error: {source}")]
-pub struct ConnectionErr {
+pub struct ReqwestErr {
+    pub kind: ReqwestErrKind,
     pub request: request::Meta,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
 
-impl crate::errors::Error for ConnectionErr {
-    fn is_network_connection_error(&self) -> bool {
-        true
+impl std::fmt::Display for ReqwestErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            ReqwestErrKind::Connection => write!(
+                f,
+                "request {} failed with network connection error: {}",
+                self.request, self.source
+            ),
+            ReqwestErrKind::DecodeBody => write!(
+                f,
+                "request {} failed to decode response body: {}",
+                self.request, self.source
+            ),
+            ReqwestErrKind::Other => write!(
+                f,
+                "request {} failed with reqwest crate error: {}",
+                self.request, self.source
+            ),
+        }
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("request {request} failed to decode response body: {source}")]
-pub struct DecodeRespBodyErr {
-    pub request: request::Meta,
-    pub source: reqwest::Error,
-    pub trace: Box<Trace>,
+impl crate::errors::Error for ReqwestErr {
+    fn is_network_connection_error(&self) -> bool {
+        self.kind == ReqwestErrKind::Connection
+    }
 }
-
-impl crate::errors::Error for DecodeRespBodyErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("invalid header value: {source}")]
@@ -131,6 +120,16 @@ pub struct InvalidHeaderValueErr {
 }
 
 impl crate::errors::Error for InvalidHeaderValueErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid request URL '{url}': {msg}")]
+pub struct InvalidURLErr {
+    pub url: String,
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidURLErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("failed to marshal JSON body: {source}")]
@@ -161,16 +160,6 @@ pub struct BuildReqwestErr {
 impl crate::errors::Error for BuildReqwestErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("request {request} failed with reqwest crate error: {source}")]
-pub struct ReqwestErr {
-    pub request: request::Meta,
-    pub source: reqwest::Error,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for ReqwestErr {}
-
-#[derive(Debug, thiserror::Error)]
 #[error("Mock error (is network connection error: {is_network_connection_error})")]
 pub struct MockErr {
     pub is_network_connection_error: bool,
@@ -189,13 +178,9 @@ pub enum HTTPErr {
     #[error(transparent)]
     TimeoutErr(TimeoutErr),
     #[error(transparent)]
-    CacheErr(CacheErr),
-    #[error(transparent)]
-    ConnectionErr(ConnectionErr),
-    #[error(transparent)]
-    DecodeRespBodyErr(DecodeRespBodyErr),
-    #[error(transparent)]
     InvalidHeaderValueErr(InvalidHeaderValueErr),
+    #[error(transparent)]
+    InvalidURLErr(InvalidURLErr),
     #[error(transparent)]
     MarshalJSONErr(MarshalJSONErr),
     #[error(transparent)]
@@ -208,25 +193,11 @@ pub enum HTTPErr {
     MockErr(MockErr),
 }
 
-impl HTTPErr {
-    pub fn is_invalid_token_error(&self) -> bool {
-        match self {
-            HTTPErr::RequestFailed(e) => match &e.error {
-                Some(error) => error.error.code == BackendErrorCodes::InvalidJWTAuth.as_str(),
-                None => false,
-            },
-            _ => false,
-        }
-    }
-}
-
 crate::impl_error!(HTTPErr {
     RequestFailed,
     TimeoutErr,
-    CacheErr,
-    ConnectionErr,
-    DecodeRespBodyErr,
     InvalidHeaderValueErr,
+    InvalidURLErr,
     MarshalJSONErr,
     UnmarshalJSONErr,
     ReqwestErr,
@@ -239,26 +210,22 @@ pub fn reqwest_err_to_http_client_err(
     meta: request::Meta,
     trace: Box<Trace>,
 ) -> HTTPErr {
-    if e.is_connect() {
-        HTTPErr::ConnectionErr(ConnectionErr {
-            request: meta,
-            source: e,
-            trace,
-        })
-    } else if e.is_decode() {
-        HTTPErr::DecodeRespBodyErr(DecodeRespBodyErr {
-            request: meta,
-            source: e,
-            trace,
-        })
-    } else if e.is_timeout() {
+    if e.is_timeout() {
         HTTPErr::TimeoutErr(TimeoutErr {
             msg: e.to_string(),
             request: meta,
             trace,
         })
     } else {
+        let kind = if e.is_connect() {
+            ReqwestErrKind::Connection
+        } else if e.is_decode() {
+            ReqwestErrKind::DecodeBody
+        } else {
+            ReqwestErrKind::Other
+        };
         HTTPErr::ReqwestErr(ReqwestErr {
+            kind,
             request: meta,
             source: e,
             trace,

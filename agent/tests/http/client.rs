@@ -1,88 +1,29 @@
-// internal crates
+// standard library
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // internal crates
+use crate::http::mock;
 use miru_agent::errors::Error;
 use miru_agent::http;
 use miru_agent::http::errors::HTTPErr;
 use miru_agent::http::request::Params;
-use miru_agent::http::response;
+use miru_agent::http::ClientI;
 
 // external crates
-use futures::future::join_all;
-use moka::future::Cache;
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
+use axum::routing::{get, post};
+use axum::Router;
+use serde::Deserialize;
 
-pub mod headers {
-    use super::*;
-
-    #[tokio::test]
-    #[serial_test::serial(example_com)]
-    async fn validate_headers() {
-        let http_client = http::Client::new("doesntmatter").await;
-        let request = http_client
-            .build_request(Params::get("https://example.com/", Duration::from_secs(1)))
-            .unwrap();
-        let headers = request.headers();
-        assert!(headers.contains_key("X-Miru-Agent-Version"));
-        assert!(headers.contains_key("X-Miru-API-Version"));
-        assert!(headers.contains_key("X-Host-Name"));
-        assert!(headers.contains_key("X-Arch"));
-        assert!(headers.contains_key("X-Language"));
-        assert!(headers.contains_key("X-OS"));
-    }
-}
-
-pub mod build_request {
-    use super::*;
-
-    #[tokio::test]
-    #[serial_test::serial(example_com)]
-    async fn get_httpbin_org() {
-        let http_client = http::Client::new("doesntmatter").await;
-        let params = Params::get("https://example.com/", Duration::from_secs(1));
-        let meta = params.meta();
-        let request = http_client.build_request(params).unwrap();
-        let (result, _) = http_client.send(meta, request).await.unwrap();
-        assert!(result.status().is_success());
-    }
-}
-
-pub mod build_post_request {
-    use super::*;
-
-    #[tokio::test]
-    async fn post_to_postman_echo() {
-        let http_client = http::Client::new("doesntmatter").await;
-
-        // Create a simple JSON payload
-        let payload = serde_json::json!({
-            "test": "data",
-            "number": 42
-        });
-
-        let body = serde_json::to_string(&payload).unwrap();
-        let params = Params::post(
-            "https://postman-echo.com/post",
-            body,
-            Duration::from_secs(10),
-        );
-        let meta = params.meta();
-        let request = http_client.build_request(params).unwrap();
-        let (response, _) = http_client.send(meta, request).await.unwrap();
-        println!("response: {response:?}");
-        assert!(response.status().is_success());
-
-        // Parse and verify the response
-        let text = response.text().await.unwrap();
-        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-
-        // httpbin.org echoes back the JSON data in the "json" field
-        assert_eq!(json["json"]["test"], "data");
-        assert_eq!(json["json"]["number"], 42);
-    }
+fn router() -> Router {
+    Router::new()
+        .route("/ok", get(mock::ok))
+        .route("/json", get(mock::json_response))
+        .route("/echo", post(mock::echo))
+        .route("/not-found", get(mock::not_found))
+        .route("/server-error", get(mock::internal_server_error))
+        .route("/slow", get(mock::slow))
+        .route("/bad-json", get(mock::bad_json))
 }
 
 pub mod send {
@@ -92,14 +33,39 @@ pub mod send {
         use super::*;
 
         #[tokio::test]
-        #[serial_test::serial(example_com)]
-        async fn get_httpbin_org() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let params = Params::get("https://httpbin.org/get", Duration::from_secs(10));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            let (result, _) = http_client.send(meta, request).await.unwrap();
-            assert!(result.status().is_success());
+        async fn get_200_returns_success() {
+            let server = mock::run_server(router()).await;
+            let client = http::Client::new(&server.base_url).await;
+            let url = format!("{}/ok", server.base_url);
+            let params = Params::get(&url);
+            let req = client.build_request(params).unwrap();
+            let resp = client.send(req).await.unwrap();
+            assert!(resp.reqwest.status().is_success());
+        }
+
+        #[tokio::test]
+        async fn post_200_with_body() {
+            let server = mock::run_server(router()).await;
+            let client = http::Client::new(&server.base_url).await;
+            let url = format!("{}/echo", server.base_url);
+            let params = Params::post(&url, "hello".into());
+            let req = client.build_request(params).unwrap();
+            let resp = client.send(req).await.unwrap();
+            assert!(resp.reqwest.status().is_success());
+            let text = resp.reqwest.text().await.unwrap();
+            assert_eq!(text, "hello");
+        }
+
+        #[tokio::test]
+        async fn response_body_matches_mock() {
+            let server = mock::run_server(router()).await;
+            let client = http::Client::new(&server.base_url).await;
+            let url = format!("{}/ok", server.base_url);
+            let params = Params::get(&url);
+            let req = client.build_request(params).unwrap();
+            let resp = client.send(req).await.unwrap();
+            let text = resp.reqwest.text().await.unwrap();
+            assert_eq!(text, "ok");
         }
     }
 
@@ -107,238 +73,145 @@ pub mod send {
         use super::*;
 
         #[tokio::test]
-        async fn network_connection_error() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let params = Params::get("http://localhost:5454", Duration::from_secs(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            let result = http_client.send(meta, request).await.unwrap_err();
-            assert!(result.is_network_connection_error());
+        async fn connection_refused() {
+            let client = http::Client::new("http://127.0.0.1:1").await;
+            let params = Params::get("http://127.0.0.1:1/nope");
+            let req = client.build_request(params).unwrap();
+            let err = client.send(req).await.unwrap_err();
+            assert!(matches!(err, HTTPErr::ReqwestErr(_)));
+            assert!(err.is_network_connection_error());
         }
 
         #[tokio::test]
-        #[serial_test::serial(example_dot_com)]
-        async fn timeout_error() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let params = Params::get("https://example.com/", Duration::from_millis(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            let result = http_client.send(meta, request).await.unwrap_err();
-            assert!(matches!(result, HTTPErr::TimeoutErr { .. }));
+        async fn timeout() {
+            let server = mock::run_server(router()).await;
+            let client = http::Client::new(&server.base_url).await;
+            let url = format!("{}/slow", server.base_url);
+            let params = Params::get(&url).with_timeout(Duration::from_millis(50));
+            let req = client.build_request(params).unwrap();
+            let err = client.send(req).await.unwrap_err();
+            assert!(matches!(err, HTTPErr::TimeoutErr { .. }));
         }
     }
 }
 
-pub mod send_cached {
-    use super::*;
-
-    pub mod success {
-        use super::*;
-
-        #[tokio::test]
-        #[serial_test::serial(example_dot_com)]
-        async fn sequential_cache_hit() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let url = "https://example.com/";
-
-            // send the first request
-            let start = Instant::now();
-            let params = Params::get(url, Duration::from_secs(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            let is_cache_hit = http_client
-                .send_cached(meta, url.to_string(), request)
-                .await
-                .unwrap()
-                .1;
-            assert!(!is_cache_hit);
-            let duration = start.elapsed();
-            assert!(duration > Duration::from_millis(10));
-
-            // send subsequent requests and check they are cached
-            for _ in 0..5 {
-                let start = Instant::now();
-                let params = Params::get(url, Duration::from_secs(1));
-                let meta = params.meta();
-                let request = http_client.build_request(params).unwrap();
-                let is_cache_hit = http_client
-                    .send_cached(meta, url.to_string(), request)
-                    .await
-                    .unwrap()
-                    .1;
-                assert!(is_cache_hit);
-                let duration = start.elapsed();
-                assert!(duration < Duration::from_millis(300));
-            }
-        }
-
-        #[tokio::test]
-        #[serial_test::serial(example_dot_com)]
-        async fn concurrent_cache_hit() {
-            let http_client = Arc::new(http::Client::new("doesntmatter").await);
-            let url = "https://example.com/";
-
-            let start = Instant::now();
-            let mut handles = Vec::new();
-
-            // spawn a bunch of concurrent requests
-            let num_requests = 50;
-            for _ in 0..num_requests {
-                let http_client = http_client.clone();
-                let url = url.to_string();
-                let handle = tokio::spawn(async move {
-                    let params = Params::get(&url, Duration::from_secs(3));
-                    let meta = params.meta();
-                    let request = http_client.build_request(params).unwrap();
-                    http_client
-                        .send_cached(meta, url.to_string(), request)
-                        .await
-                        .unwrap()
-                        .1
-                });
-                handles.push(handle);
-            }
-
-            // Wait for all requests to complete
-            let results = join_all(handles).await;
-
-            // should only have one request that is not cached
-            let cache_hits = results
-                .iter()
-                .filter(|r| *r.as_ref().unwrap()) // First unwrap for JoinHandle, second for Result
-                .count();
-            assert_eq!(cache_hits, num_requests - 1);
-            let duration = start.elapsed();
-            assert!(duration < Duration::from_millis(500));
-
-            // Verify all requests succeeded
-            for result in results {
-                result.unwrap(); // Unwrap JoinHandle result
-            }
-        }
-
-        #[tokio::test]
-        async fn errors_not_cached() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let url = "https://httpstat.us/404";
-
-            // send the first request
-            let start = Instant::now();
-            let params = Params::get(url, Duration::from_secs(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            http_client
-                .send_cached(meta, url.to_string(), request)
-                .await
-                .unwrap_err();
-            let duration = start.elapsed();
-            assert!(duration > Duration::from_millis(10));
-
-            // send subsequent requests and check they are not cached
-            for _ in 0..5 {
-                let start = Instant::now();
-                let params = Params::get(url, Duration::from_secs(1));
-                let meta = params.meta();
-                let request = http_client.build_request(params).unwrap();
-                http_client
-                    .send_cached(meta, url.to_string(), request)
-                    .await
-                    .unwrap_err();
-                let duration = start.elapsed();
-                assert!(duration > Duration::from_millis(10));
-            }
-        }
-
-        #[tokio::test]
-        #[serial_test::serial(example_com)]
-        async fn cache_expired() {
-            let url = "https://example.com/";
-            let http_client = http::Client::new_with(
-                url,
-                Duration::from_secs(1),
-                Cache::builder()
-                    .time_to_live(Duration::from_millis(100))
-                    .build(),
-            );
-
-            // send the first request
-            let start = Instant::now();
-            let params = Params::get(url, Duration::from_secs(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            http_client
-                .send_cached(meta, url.to_string(), request)
-                .await
-                .unwrap();
-            let duration = start.elapsed();
-            assert!(duration > Duration::from_millis(10));
-
-            // wait for the cache to expire
-            std::thread::sleep(Duration::from_secs(1));
-
-            // send subsequent requests and check they are not cached
-            let start = Instant::now();
-            let params = Params::get(url, Duration::from_secs(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            http_client
-                .send_cached(meta, url.to_string(), request)
-                .await
-                .unwrap();
-            let duration = start.elapsed();
-            assert!(duration > Duration::from_millis(10));
-        }
-    }
-
-    pub mod errors {
-        use super::*;
-
-        #[tokio::test]
-        async fn network_connection_error() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let params = Params::get("http://localhost:5454", Duration::from_secs(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            let result = http_client
-                .send_cached(meta, "test".to_string(), request)
-                .await
-                .unwrap_err();
-            assert!(result.is_network_connection_error());
-        }
-
-        #[tokio::test]
-        #[serial_test::serial(example_com)]
-        async fn timeout_error() {
-            let http_client = http::Client::new("doesntmatter").await;
-            let params = Params::get("https://example.com/", Duration::from_millis(1));
-            let meta = params.meta();
-            let request = http_client.build_request(params).unwrap();
-            let result = http_client
-                .send_cached(meta, "test".to_string(), request)
-                .await
-                .unwrap_err();
-            assert!(matches!(result, HTTPErr::CacheErr { .. }));
-        }
-    }
-}
-
-pub mod handle_response {
+pub mod execute {
     use super::*;
 
     #[tokio::test]
-    async fn endpoint_not_found() {
-        // make a request to a non-existent endpoint
-        let http_client = http::Client::new("doesntmatter").await;
-        let params = Params::get(
-            "https://httpbin.org/get/this-page-should-not-exist",
-            Duration::from_secs(3),
-        );
-        let meta = params.meta();
-        let request = http_client.build_request(params).unwrap();
-        let (resp, meta) = http_client.send(meta, request).await.unwrap();
+    async fn ok_route_returns_body_text() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).await;
+        let url = format!("{}/ok", server.base_url);
+        let params = Params::get(&url);
+        let text = client.execute(params).await.unwrap();
+        assert_eq!(text, "ok");
+    }
 
-        // call the handle response function
-        let response = response::handle(resp, meta).await.unwrap_err();
-        assert!(matches!(response, HTTPErr::RequestFailed { .. }));
+    #[tokio::test]
+    async fn not_found_returns_request_failed() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).await;
+        let url = format!("{}/not-found", server.base_url);
+        let params = Params::get(&url);
+        let err = client.execute(params).await.unwrap_err();
+        assert!(matches!(err, HTTPErr::RequestFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn server_error_returns_request_failed() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).await;
+        let url = format!("{}/server-error", server.base_url);
+        let params = Params::get(&url);
+        let err = client.execute(params).await.unwrap_err();
+        assert!(matches!(err, HTTPErr::RequestFailed(_)));
+    }
+}
+
+pub mod fetch {
+    use super::*;
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Person {
+        name: String,
+        age: u32,
+    }
+
+    #[tokio::test]
+    async fn valid_json_response_deserializes() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).await;
+        let url = format!("{}/json", server.base_url);
+        let params = Params::get(&url);
+        let person: Person = http::client::fetch(&client, params).await.unwrap();
+        assert_eq!(
+            person,
+            Person {
+                name: "alice".into(),
+                age: 30
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_json_returns_unmarshal_err() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).await;
+        let url = format!("{}/bad-json", server.base_url);
+        let params = Params::get(&url);
+        let result: Result<Person, _> = http::client::fetch(&client, params).await;
+        assert!(matches!(result, Err(HTTPErr::UnmarshalJSONErr(_))));
+    }
+
+    #[tokio::test]
+    async fn http_error_returns_request_failed() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).await;
+        let url = format!("{}/not-found", server.base_url);
+        let params = Params::get(&url);
+        let result: Result<Person, _> = http::client::fetch(&client, params).await;
+        assert!(matches!(result, Err(HTTPErr::RequestFailed(_))));
+    }
+}
+
+pub mod new_with {
+    use super::*;
+
+    #[test]
+    fn sets_base_url() {
+        let client = http::Client::new_with("http://custom-host:9090");
+        assert_eq!(client.base_url(), "http://custom-host:9090");
+    }
+
+    #[tokio::test]
+    async fn can_send_requests() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new_with(&server.base_url);
+        let url = format!("{}/ok", server.base_url);
+        let params = Params::get(&url);
+        let text = client.execute(params).await.unwrap();
+        assert_eq!(text, "ok");
+    }
+}
+
+pub mod arc_delegation {
+    use super::*;
+
+    #[tokio::test]
+    async fn base_url_delegates() {
+        let server = mock::run_server(router()).await;
+        let client = Arc::new(http::Client::new(&server.base_url).await);
+        assert_eq!(client.base_url(), server.base_url);
+    }
+
+    #[tokio::test]
+    async fn execute_delegates() {
+        let server = mock::run_server(router()).await;
+        let client = Arc::new(http::Client::new(&server.base_url).await);
+        let url = format!("{}/ok", server.base_url);
+        let params = Params::get(&url);
+        let text = client.execute(params).await.unwrap();
+        assert_eq!(text, "ok");
     }
 }

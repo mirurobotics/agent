@@ -1,8 +1,8 @@
 // internal crates
+use crate::http;
 use crate::http::errors::HTTPErr;
 use crate::http::query::{Page, QueryParams, MAX_PAGE_LIMIT};
 use crate::http::request;
-use crate::http::response;
 use crate::http::ClientI;
 use openapi_client::models::{
     Deployment, DeploymentActivityStatus, DeploymentList, DeploymentListExpansion,
@@ -20,12 +20,6 @@ pub struct ListParams<'a> {
 
 pub struct ListAllParams<'a> {
     pub activity_status_filter: &'a [DeploymentActivityStatus],
-    pub expansions: &'a [DeploymentListExpansion],
-    pub token: &'a str,
-}
-
-pub struct GetParams<'a> {
-    pub deployment_id: &'a str,
     pub expansions: &'a [DeploymentListExpansion],
     pub token: &'a str,
 }
@@ -55,12 +49,10 @@ pub async fn list(
     qp = qp.expand(params.expansions);
 
     let url = format!("{}/deployments", client.base_url());
-    let request = request::Params::get(&url, client.default_timeout())
+    let request = request::Params::get(&url)
         .with_query(qp)
         .with_token(params.token);
-    let meta = request.meta();
-    let text = client.execute_cached(request).await?;
-    response::parse_json(text, meta)
+    http::client::fetch(client, request).await
 }
 
 pub async fn list_all(
@@ -93,19 +85,6 @@ pub async fn list_all(
 
     Ok(all_deployments)
 }
-
-pub async fn get(client: &impl ClientI, params: GetParams<'_>) -> Result<Deployment, HTTPErr> {
-    let qp = QueryParams::new().expand(params.expansions);
-
-    let url = format!("{}/deployments/{}", client.base_url(), params.deployment_id,);
-    let request = request::Params::get(&url, client.default_timeout())
-        .with_query(qp)
-        .with_token(params.token);
-    let meta = request.meta();
-    let text = client.execute_cached(request).await?;
-    response::parse_json(text, meta)
-}
-
 pub async fn update(
     client: &impl ClientI,
     params: UpdateParams<'_>,
@@ -113,14 +92,8 @@ pub async fn update(
     let qp = QueryParams::new().expand(params.expansions);
 
     let url = format!("{}/deployments/{}", client.base_url(), params.deployment_id,);
-    let request = request::Params::patch(
-        &url,
-        request::marshal_json(params.updates)?,
-        client.default_timeout(),
-    )
-    .with_query(qp)
-    .with_token(params.token);
-    let meta = request.meta();
-    let text = client.execute(request).await?;
-    response::parse_json(text, meta)
+    let request = request::Params::patch(&url, request::marshal_json(params.updates)?)
+        .with_query(qp)
+        .with_token(params.token);
+    http::client::fetch(client, request).await
 }

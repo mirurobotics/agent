@@ -2,18 +2,21 @@
 use std::fmt;
 
 // internal crates
-use crate::http::errors::{BuildReqwestErr, HTTPErr, InvalidHeaderValueErr, MarshalJSONErr};
+use crate::http::errors::{
+    BuildReqwestErr, HTTPErr, InvalidHeaderValueErr, InvalidURLErr, MarshalJSONErr,
+};
 use crate::http::query::QueryParams;
 use crate::telemetry::SystemInfo;
 use crate::trace;
 use crate::version;
-
 // external crates
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Serialize;
 use tokio::time::Duration;
 
-#[derive(Clone, Debug)]
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Params<'a> {
     pub method: reqwest::Method,
     pub url: &'a str,
@@ -24,53 +27,71 @@ pub struct Params<'a> {
 }
 
 impl<'a> Params<'a> {
-    pub fn meta(&self) -> Meta {
-        Meta {
-            url: self.url_with_query(),
+    pub fn meta(&self) -> Result<Meta, HTTPErr> {
+        Ok(Meta {
+            url: self.url_with_query()?,
             method: self.method.clone(),
             timeout: self.timeout,
-        }
+        })
     }
 
-    pub fn url_with_query(&self) -> String {
+    pub fn url_with_query(&self) -> Result<String, HTTPErr> {
         if self.query.is_empty() {
-            return self.url.to_string();
+            return Ok(self.url.to_string());
         }
-        let pairs: Vec<String> = self.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        format!("{}?{}", self.url, pairs.join("&"))
+
+        let pairs: Vec<(&str, &str)> = self
+            .query
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        reqwest::Url::parse_with_params(self.url, &pairs)
+            .map(|url| url.to_string())
+            .map_err(|source| {
+                HTTPErr::InvalidURLErr(InvalidURLErr {
+                    url: self.url.to_string(),
+                    msg: source.to_string(),
+                    trace: trace!(),
+                })
+            })
     }
 
-    pub fn get(url: &'a str, timeout: Duration) -> Self {
+    pub fn get(url: &'a str) -> Self {
         Self {
             method: reqwest::Method::GET,
             url,
             query: Vec::new(),
             body: None,
-            timeout,
+            timeout: DEFAULT_TIMEOUT,
             token: None,
         }
     }
 
-    pub fn post(url: &'a str, body: String, timeout: Duration) -> Self {
+    pub fn post(url: &'a str, body: String) -> Self {
         Self {
             method: reqwest::Method::POST,
             url,
             query: Vec::new(),
             body: Some(body),
-            timeout,
+            timeout: DEFAULT_TIMEOUT,
             token: None,
         }
     }
 
-    pub fn patch(url: &'a str, body: String, timeout: Duration) -> Self {
+    pub fn patch(url: &'a str, body: String) -> Self {
         Self {
             method: reqwest::Method::PATCH,
             url,
             query: Vec::new(),
             body: Some(body),
-            timeout,
+            timeout: DEFAULT_TIMEOUT,
             token: None,
         }
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     pub fn with_token(mut self, token: &'a str) -> Self {
@@ -84,7 +105,12 @@ impl<'a> Params<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+pub struct Request {
+    pub meta: Meta,
+    pub reqwest: reqwest::Request,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Meta {
     pub url: String,
     pub method: reqwest::Method,
@@ -133,27 +159,29 @@ impl Default for Headers {
 }
 
 impl Headers {
-    pub fn to_map(&self) -> HeaderMap {
+    pub fn to_map(&self) -> Result<HeaderMap, HTTPErr> {
         let mut headers = HeaderMap::new();
-        if let Ok(value) = HeaderValue::from_str(&self.agent_version) {
-            headers.insert("X-Miru-Agent-Version", value);
+        insert_header(&mut headers, "X-Miru-Agent-Version", &self.agent_version)?;
+        insert_header(&mut headers, "X-Miru-API-Version", &self.api_version)?;
+        insert_header(&mut headers, "X-Host-Name", &self.host_name)?;
+        insert_header(&mut headers, "X-Arch", &self.arch)?;
+        insert_header(&mut headers, "X-Language", &self.language)?;
+        insert_header(&mut headers, "X-OS", &self.os)?;
+        Ok(headers)
+    }
+}
+
+fn insert_header(headers: &mut HeaderMap, key: &'static str, value: &str) -> Result<(), HTTPErr> {
+    match HeaderValue::from_str(value) {
+        Ok(value) => {
+            headers.insert(key, value);
+            Ok(())
         }
-        if let Ok(value) = HeaderValue::from_str(&self.api_version) {
-            headers.insert("X-Miru-API-Version", value);
-        }
-        if let Ok(value) = HeaderValue::from_str(&self.host_name) {
-            headers.insert("X-Host-Name", value);
-        }
-        if let Ok(value) = HeaderValue::from_str(&self.arch) {
-            headers.insert("X-Arch", value);
-        }
-        if let Ok(value) = HeaderValue::from_str(&self.language) {
-            headers.insert("X-Language", value);
-        }
-        if let Ok(value) = HeaderValue::from_str(&self.os) {
-            headers.insert("X-OS", value);
-        }
-        headers
+        Err(source) => Err(HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
+            msg: format!("failed to set header {key}: {source}"),
+            source,
+            trace: trace!(),
+        })),
     }
 }
 
@@ -169,25 +197,12 @@ where
     })
 }
 
-fn add_token_to_headers(headers: &mut HeaderMap, token: &str) -> Result<(), HTTPErr> {
-    headers.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
-            HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
-                msg: e.to_string(),
-                source: e,
-                trace: trace!(),
-            })
-        })?,
-    );
-    Ok(())
-}
-
 pub fn build(
     client: &reqwest::Client,
     headers: &Headers,
     params: Params,
-) -> Result<reqwest::Request, HTTPErr> {
+) -> Result<Request, HTTPErr> {
+    let meta = params.meta()?;
     let mut request = client.request(params.method.clone(), params.url);
 
     // query params
@@ -195,7 +210,7 @@ pub fn build(
         request = request.query(&params.query);
     }
     // headers
-    let mut header_map = headers.to_map();
+    let mut header_map = headers.to_map()?;
     if let Some(token) = params.token {
         add_token_to_headers(&mut header_map, token)?;
     }
@@ -214,5 +229,19 @@ pub fn build(
             trace: trace!(),
         })
     })?;
-    Ok(reqwest)
+    Ok(Request { meta, reqwest })
+}
+
+fn add_token_to_headers(headers: &mut HeaderMap, token: &str) -> Result<(), HTTPErr> {
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
+            HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
+                msg: e.to_string(),
+                source: e,
+                trace: trace!(),
+            })
+        })?,
+    );
+    Ok(())
 }

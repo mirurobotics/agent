@@ -19,7 +19,6 @@ axum = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
-moka = { workspace = true }
 openapi-client = { workspace = true }
 openapi-server = { workspace = true }
 openssl = { workspace = true }
