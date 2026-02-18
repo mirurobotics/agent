@@ -69,7 +69,6 @@ pub trait ClientI: Send + Sync {
     /// Same as execute but with response caching.
     fn execute_cached(
         &self,
-        key: String,
         params: request::Params<'_>,
     ) -> impl std::future::Future<Output = Result<String, HTTPErr>> + Send;
 }
@@ -91,11 +90,8 @@ impl ClientI for Client {
         Ok(text)
     }
 
-    async fn execute_cached(
-        &self,
-        key: String,
-        params: request::Params<'_>,
-    ) -> Result<String, HTTPErr> {
+    async fn execute_cached(&self, params: request::Params<'_>) -> Result<String, HTTPErr> {
+        let key = params.url_with_query();
         let meta = params.meta();
         let request = self.build_request(params)?;
         let (text, _is_cache_hit) = self.send_cached(meta, key, request).await?;
@@ -116,12 +112,8 @@ impl<T: ClientI> ClientI for Arc<T> {
         self.as_ref().execute(params).await
     }
 
-    async fn execute_cached(
-        &self,
-        key: String,
-        params: request::Params<'_>,
-    ) -> Result<String, HTTPErr> {
-        self.as_ref().execute_cached(key, params).await
+    async fn execute_cached(&self, params: request::Params<'_>) -> Result<String, HTTPErr> {
+        self.as_ref().execute_cached(params).await
     }
 }
 

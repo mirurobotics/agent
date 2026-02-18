@@ -24,7 +24,7 @@ chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
 moka = { version = "0.12.10", features = ["future"] }
-reqwest = "0.13.1"
+reqwest = { version = "0.13.1", features = ["query"] }
 openapi-client = { path = "libs/openapi-client"}
 openapi-server = { path = "libs/openapi-server"}
 openssl = { version = "0.10.64", features = ["vendored"] }

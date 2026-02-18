@@ -3,6 +3,7 @@ use std::fmt;
 
 // internal crates
 use crate::http::errors::{BuildReqwestErr, HTTPErr, InvalidHeaderValueErr, MarshalJSONErr};
+use crate::http::query::QueryParams;
 use crate::telemetry::SystemInfo;
 use crate::trace;
 use crate::version;
@@ -16,6 +17,7 @@ use tokio::time::Duration;
 pub struct Params<'a> {
     pub method: reqwest::Method,
     pub url: &'a str,
+    pub query: Vec<(String, String)>,
     pub body: Option<String>,
     pub timeout: Duration,
     pub token: Option<&'a str>,
@@ -24,16 +26,25 @@ pub struct Params<'a> {
 impl<'a> Params<'a> {
     pub fn meta(&self) -> Meta {
         Meta {
-            url: self.url.to_string(),
+            url: self.url_with_query(),
             method: self.method.clone(),
             timeout: self.timeout,
         }
+    }
+
+    pub fn url_with_query(&self) -> String {
+        if self.query.is_empty() {
+            return self.url.to_string();
+        }
+        let pairs: Vec<String> = self.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        format!("{}?{}", self.url, pairs.join("&"))
     }
 
     pub fn get(url: &'a str, timeout: Duration) -> Self {
         Self {
             method: reqwest::Method::GET,
             url,
+            query: Vec::new(),
             body: None,
             timeout,
             token: None,
@@ -44,6 +55,7 @@ impl<'a> Params<'a> {
         Self {
             method: reqwest::Method::POST,
             url,
+            query: Vec::new(),
             body: Some(body),
             timeout,
             token: None,
@@ -54,6 +66,7 @@ impl<'a> Params<'a> {
         Self {
             method: reqwest::Method::PATCH,
             url,
+            query: Vec::new(),
             body: Some(body),
             timeout,
             token: None,
@@ -62,6 +75,11 @@ impl<'a> Params<'a> {
 
     pub fn with_token(mut self, token: &'a str) -> Self {
         self.token = Some(token);
+        self
+    }
+
+    pub fn with_query(mut self, qp: QueryParams) -> Self {
+        self.query = qp.into_pairs();
         self
     }
 }
@@ -172,6 +190,10 @@ pub fn build(
 ) -> Result<reqwest::Request, HTTPErr> {
     let mut request = client.request(params.method.clone(), params.url);
 
+    // query params
+    if !params.query.is_empty() {
+        request = request.query(&params.query);
+    }
     // headers
     let mut header_map = headers.to_map();
     if let Some(token) = params.token {

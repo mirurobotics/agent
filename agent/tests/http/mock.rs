@@ -142,7 +142,7 @@ impl http::ClientI for MockClient {
         self.dispatch(&params.method, params.url)
     }
 
-    async fn execute_cached(&self, _key: String, params: Params<'_>) -> Result<String, HTTPErr> {
+    async fn execute_cached(&self, params: Params<'_>) -> Result<String, HTTPErr> {
         self.execute(params).await
     }
 }
