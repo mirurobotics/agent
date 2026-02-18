@@ -44,6 +44,17 @@ fn token_merge_empty() {
 }
 
 #[test]
+fn debug_redacts_token() {
+    let token = Token {
+        token: "secret-value".to_string(),
+        expires_at: Utc::now(),
+    };
+    let debug_output = format!("{:?}", token);
+    assert!(debug_output.contains("[REDACTED]"));
+    assert!(!debug_output.contains("secret-value"));
+}
+
+#[test]
 fn token_merge_all() {
     let initial = Token {
         token: "123".to_string(),
