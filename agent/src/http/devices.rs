@@ -1,6 +1,6 @@
 // internal crates
 use crate::http::errors::HTTPErr;
-use crate::http::request::{self, Params};
+use crate::http::request;
 use crate::http::response;
 use crate::http::ClientI;
 use openapi_client::models::{
@@ -38,17 +38,15 @@ pub async fn activate(
         client.base_url(),
         params.device_id
     );
-    let (text, context) = client
-        .execute(
-            Params::post(
-                &url,
-                request::marshal_json(params.payload)?,
-                client.default_timeout(),
-            )
-            .with_token(params.token),
-        )
-        .await?;
-    response::parse_json(text, &context)
+    let request = request::Params::post(
+        &url,
+        request::marshal_json(params.payload)?,
+        client.default_timeout(),
+    )
+    .with_token(params.token);
+    let meta = request.meta();
+    let text = client.execute(request).await?;
+    response::parse_json(text, meta)
 }
 
 pub async fn issue_token(
@@ -60,27 +58,25 @@ pub async fn issue_token(
         client.base_url(),
         params.device_id
     );
-    let (text, context) = client
-        .execute(Params::post(
-            &url,
-            request::marshal_json(params.payload)?,
-            client.default_timeout(),
-        ))
-        .await?;
-    response::parse_json(text, &context)
+    let request = request::Params::post(
+        &url,
+        request::marshal_json(params.payload)?,
+        client.default_timeout(),
+    );
+    let meta = request.meta();
+    let text = client.execute(request).await?;
+    response::parse_json(text, meta)
 }
 
 pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<Device, HTTPErr> {
     let url = format!("{}/devices/{}", client.base_url(), params.device_id);
-    let (text, context) = client
-        .execute(
-            Params::patch(
-                &url,
-                request::marshal_json(params.payload)?,
-                client.default_timeout(),
-            )
-            .with_token(params.token),
-        )
-        .await?;
-    response::parse_json(text, &context)
+    let request = request::Params::patch(
+        &url,
+        request::marshal_json(params.payload)?,
+        client.default_timeout(),
+    )
+    .with_token(params.token);
+    let meta = request.meta();
+    let text = client.execute(request).await?;
+    response::parse_json(text, meta)
 }

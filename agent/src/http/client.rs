@@ -6,8 +6,7 @@ use crate::errors::Error;
 use crate::http::{
     errors::{reqwest_err_to_http_client_err, HTTPErr},
     errors::{CacheErr, TimeoutErr},
-    request::{self, Context, Headers, Params},
-    response,
+    request, response,
 };
 use crate::trace;
 
@@ -28,7 +27,7 @@ pub struct Client {
     client: reqwest::Client,
     base_url: String,
     default_timeout: Duration,
-    headers: Headers,
+    headers: request::Headers,
     cache: Cache<RequestKey, (Response, RequestID)>,
 }
 
@@ -61,18 +60,18 @@ pub trait ClientI: Send + Sync {
     fn base_url(&self) -> &str;
     fn default_timeout(&self) -> Duration;
 
-    /// Build, send, handle response — returns body text + request context.
+    /// Build, send, handle response — returns body text.
     fn execute(
         &self,
-        params: Params<'_>,
-    ) -> impl std::future::Future<Output = Result<(String, Context), HTTPErr>> + Send;
+        params: request::Params<'_>,
+    ) -> impl std::future::Future<Output = Result<String, HTTPErr>> + Send;
 
     /// Same as execute but with response caching.
     fn execute_cached(
         &self,
         key: String,
-        params: Params<'_>,
-    ) -> impl std::future::Future<Output = Result<(String, Context), HTTPErr>> + Send;
+        params: request::Params<'_>,
+    ) -> impl std::future::Future<Output = Result<String, HTTPErr>> + Send;
 }
 
 impl ClientI for Client {
@@ -84,21 +83,23 @@ impl ClientI for Client {
         self.default_timeout
     }
 
-    async fn execute(&self, params: Params<'_>) -> Result<(String, Context), HTTPErr> {
-        let (request, context) = self.build_request(params)?;
-        let http_resp = self.send(request, &context).await?;
-        let text = response::handle(http_resp, &context).await?;
-        Ok((text, context))
+    async fn execute(&self, params: request::Params<'_>) -> Result<String, HTTPErr> {
+        let meta = params.meta();
+        let request = self.build_request(params)?;
+        let (http_resp, meta) = self.send(meta, request).await?;
+        let text = response::handle(http_resp, meta).await?;
+        Ok(text)
     }
 
     async fn execute_cached(
         &self,
         key: String,
-        params: Params<'_>,
-    ) -> Result<(String, Context), HTTPErr> {
-        let (request, context) = self.build_request(params)?;
-        let (text, _is_cache_hit) = self.send_cached(key, request, &context).await?;
-        Ok((text, context))
+        params: request::Params<'_>,
+    ) -> Result<String, HTTPErr> {
+        let meta = params.meta();
+        let request = self.build_request(params)?;
+        let (text, _is_cache_hit) = self.send_cached(meta, key, request).await?;
+        Ok(text)
     }
 }
 
@@ -111,15 +112,15 @@ impl<T: ClientI> ClientI for Arc<T> {
         self.as_ref().default_timeout()
     }
 
-    async fn execute(&self, params: Params<'_>) -> Result<(String, Context), HTTPErr> {
+    async fn execute(&self, params: request::Params<'_>) -> Result<String, HTTPErr> {
         self.as_ref().execute(params).await
     }
 
     async fn execute_cached(
         &self,
         key: String,
-        params: Params<'_>,
-    ) -> Result<(String, Context), HTTPErr> {
+        params: request::Params<'_>,
+    ) -> Result<String, HTTPErr> {
         self.as_ref().execute_cached(key, params).await
     }
 }
@@ -132,53 +133,50 @@ impl Client {
             client: client.clone(),
             base_url: base_url.to_string(),
             default_timeout: Duration::from_secs(10),
-            headers: Headers::default(),
+            headers: request::Headers::default(),
             cache: Cache::builder()
                 .time_to_live(Duration::from_secs(2))
                 .build(),
         }
     }
 
-    pub fn build_request(&self, params: Params) -> Result<(reqwest::Request, Context), HTTPErr> {
+    pub fn build_request(&self, params: request::Params) -> Result<reqwest::Request, HTTPErr> {
         request::build(&self.client, &self.headers, params)
     }
 
     pub async fn send(
         &self,
+        meta: request::Meta,
         request: reqwest::Request,
-        context: &Context,
-    ) -> Result<reqwest::Response, HTTPErr> {
+    ) -> Result<(reqwest::Response, request::Meta), HTTPErr> {
         let time_limit = match request.timeout() {
             Some(time_limit) => *time_limit,
             None => self.default_timeout,
         };
-        // request server
-        let response = timeout(time_limit, self.client.execute(request))
-            .await
-            .map_err(|e| {
-                HTTPErr::TimeoutErr(TimeoutErr {
-                    msg: e.to_string(),
-                    request: context.clone(),
-                    trace: trace!(),
-                })
-            })?
-            .map_err(|e| reqwest_err_to_http_client_err(e, context, trace!()))?;
-        Ok(response)
+        match timeout(time_limit, self.client.execute(request)).await {
+            Err(e) => Err(HTTPErr::TimeoutErr(TimeoutErr {
+                msg: e.to_string(),
+                request: meta,
+                trace: trace!(),
+            })),
+            Ok(Err(e)) => Err(reqwest_err_to_http_client_err(e, meta, trace!())),
+            Ok(Ok(response)) => Ok((response, meta)),
+        }
     }
 
     pub async fn send_cached(
         &self,
+        meta: request::Meta,
         key: RequestKey,
         request: reqwest::Request,
-        context: &Context,
     ) -> Result<(String, IsCacheHit), HTTPErr> {
         let id = Uuid::new_v4();
 
         let result = self
             .cache
             .try_get_with(key, async move {
-                let response = self.send(request, context).await?;
-                Ok((response::handle(response, context).await?, id))
+                let (response, meta) = self.send(meta, request).await?;
+                Ok((response::handle(response, meta).await?, id))
             })
             .await
             .map_err(|e: Arc<HTTPErr>| {
@@ -204,7 +202,7 @@ impl Client {
             client: reqwest::Client::new(),
             base_url: base_url.to_string(),
             default_timeout,
-            headers: Headers::default(),
+            headers: request::Headers::default(),
             cache,
         }
     }

@@ -1,11 +1,11 @@
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::http::backend::BackendErrorCodes;
-use crate::http::request::Context;
+use crate::http::request;
 use openapi_client::models::ErrorResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailed {
-    pub request: Context,
+    pub request: request::Meta,
     pub status: reqwest::StatusCode,
     pub error: Option<ErrorResponse>,
     pub trace: Box<Trace>,
@@ -48,7 +48,7 @@ impl crate::errors::Error for RequestFailed {
 #[derive(Debug, thiserror::Error)]
 pub struct TimeoutErr {
     pub msg: String,
-    pub request: Context,
+    pub request: request::Meta,
     pub trace: Box<Trace>,
 }
 
@@ -101,7 +101,7 @@ impl crate::errors::Error for CacheErr {
 #[derive(Debug, thiserror::Error)]
 #[error("request {request} failed with network connection error: {source}")]
 pub struct ConnectionErr {
-    pub request: Context,
+    pub request: request::Meta,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
@@ -115,7 +115,7 @@ impl crate::errors::Error for ConnectionErr {
 #[derive(Debug, thiserror::Error)]
 #[error("request {request} failed to decode response body: {source}")]
 pub struct DecodeRespBodyErr {
-    pub request: Context,
+    pub request: request::Meta,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
@@ -142,20 +142,11 @@ pub struct MarshalJSONErr {
 impl crate::errors::Error for MarshalJSONErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("request {request} failed to unmarshal JSON: {source}")]
 pub struct UnmarshalJSONErr {
-    pub request: Context,
+    pub request: request::Meta,
     pub source: serde_json::Error,
     pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for UnmarshalJSONErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Request {} failed to unmarshal JSON: {}",
-            self.request, self.source
-        )
-    }
 }
 
 impl crate::errors::Error for UnmarshalJSONErr {}
@@ -172,7 +163,7 @@ impl crate::errors::Error for BuildReqwestErr {}
 #[derive(Debug, thiserror::Error)]
 #[error("request {request} failed with reqwest crate error: {source}")]
 pub struct ReqwestErr {
-    pub request: Context,
+    pub request: request::Meta,
     pub source: reqwest::Error,
     pub trace: Box<Trace>,
 }
@@ -245,30 +236,30 @@ crate::impl_error!(HTTPErr {
 
 pub fn reqwest_err_to_http_client_err(
     e: reqwest::Error,
-    context: &Context,
+    meta: request::Meta,
     trace: Box<Trace>,
 ) -> HTTPErr {
     if e.is_connect() {
         HTTPErr::ConnectionErr(ConnectionErr {
-            request: context.clone(),
+            request: meta,
             source: e,
             trace,
         })
     } else if e.is_decode() {
         HTTPErr::DecodeRespBodyErr(DecodeRespBodyErr {
-            request: context.clone(),
+            request: meta,
             source: e,
             trace,
         })
     } else if e.is_timeout() {
         HTTPErr::TimeoutErr(TimeoutErr {
             msg: e.to_string(),
-            request: context.clone(),
+            request: meta,
             trace,
         })
     } else {
         HTTPErr::ReqwestErr(ReqwestErr {
-            request: context.clone(),
+            request: meta,
             source: e,
             trace,
         })

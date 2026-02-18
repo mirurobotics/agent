@@ -22,6 +22,14 @@ pub struct Params<'a> {
 }
 
 impl<'a> Params<'a> {
+    pub fn meta(&self) -> Meta {
+        Meta {
+            url: self.url.to_string(),
+            method: self.method.clone(),
+            timeout: self.timeout,
+        }
+    }
+
     pub fn get(url: &'a str, timeout: Duration) -> Self {
         Self {
             method: reqwest::Method::GET,
@@ -59,21 +67,20 @@ impl<'a> Params<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Context {
+pub struct Meta {
     pub url: String,
     pub method: reqwest::Method,
     pub timeout: Duration,
 }
 
-// Context is safe to send between threads since all fields are Send + Sync
-impl fmt::Display for Context {
+impl fmt::Display for Meta {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{} {} (timeout: {}ms)",
             self.method,
             self.url,
-            self.timeout.as_millis()
+            self.timeout.as_millis(),
         )
     }
 }
@@ -162,8 +169,7 @@ pub fn build(
     client: &reqwest::Client,
     headers: &Headers,
     params: Params,
-) -> Result<(reqwest::Request, Context), HTTPErr> {
-    // request type (GET, POST, etc.)
+) -> Result<reqwest::Request, HTTPErr> {
     let mut request = client.request(params.method.clone(), params.url);
 
     // headers
@@ -172,12 +178,10 @@ pub fn build(
         add_token_to_headers(&mut header_map, token)?;
     }
     request = request.headers(header_map);
-
     // body
     if let Some(body) = params.body {
         request = request.body(body);
     }
-
     // timeout
     request = request.timeout(params.timeout);
 
@@ -188,12 +192,5 @@ pub fn build(
             trace: trace!(),
         })
     })?;
-    Ok((
-        reqwest,
-        Context {
-            url: params.url.to_string(),
-            method: params.method,
-            timeout: params.timeout,
-        },
-    ))
+    Ok(reqwest)
 }

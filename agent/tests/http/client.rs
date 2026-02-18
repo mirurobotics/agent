@@ -25,7 +25,7 @@ pub mod headers {
         let request = http_client
             .build_request(Params::get("https://example.com/", Duration::from_secs(1)))
             .unwrap();
-        let headers = request.0.headers();
+        let headers = request.headers();
         assert!(headers.contains_key("X-Miru-Agent-Version"));
         assert!(headers.contains_key("X-Miru-API-Version"));
         assert!(headers.contains_key("X-Host-Name"));
@@ -42,10 +42,10 @@ pub mod build_request {
     #[serial_test::serial(example_com)]
     async fn get_httpbin_org() {
         let http_client = http::Client::new("doesntmatter").await;
-        let request = http_client
-            .build_request(Params::get("https://example.com/", Duration::from_secs(1)))
-            .unwrap();
-        let result = http_client.send(request.0, &request.1).await.unwrap();
+        let params = Params::get("https://example.com/", Duration::from_secs(1));
+        let meta = params.meta();
+        let request = http_client.build_request(params).unwrap();
+        let (result, _) = http_client.send(meta, request).await.unwrap();
         assert!(result.status().is_success());
     }
 }
@@ -64,14 +64,14 @@ pub mod build_post_request {
         });
 
         let body = serde_json::to_string(&payload).unwrap();
-        let request = http_client
-            .build_request(Params::post(
-                "https://postman-echo.com/post",
-                body,
-                Duration::from_secs(10),
-            ))
-            .unwrap();
-        let response = http_client.send(request.0, &request.1).await.unwrap();
+        let params = Params::post(
+            "https://postman-echo.com/post",
+            body,
+            Duration::from_secs(10),
+        );
+        let meta = params.meta();
+        let request = http_client.build_request(params).unwrap();
+        let (response, _) = http_client.send(meta, request).await.unwrap();
         println!("response: {response:?}");
         assert!(response.status().is_success());
 
@@ -95,13 +95,10 @@ pub mod send {
         #[serial_test::serial(example_com)]
         async fn get_httpbin_org() {
             let http_client = http::Client::new("doesntmatter").await;
-            let request = http_client
-                .build_request(Params::get(
-                    "https://httpbin.org/get",
-                    Duration::from_secs(10),
-                ))
-                .unwrap();
-            let result = http_client.send(request.0, &request.1).await.unwrap();
+            let params = Params::get("https://httpbin.org/get", Duration::from_secs(10));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
+            let (result, _) = http_client.send(meta, request).await.unwrap();
             assert!(result.status().is_success());
         }
     }
@@ -112,10 +109,10 @@ pub mod send {
         #[tokio::test]
         async fn network_connection_error() {
             let http_client = http::Client::new("doesntmatter").await;
-            let request = http_client
-                .build_request(Params::get("http://localhost:5454", Duration::from_secs(1)))
-                .unwrap();
-            let result = http_client.send(request.0, &request.1).await.unwrap_err();
+            let params = Params::get("http://localhost:5454", Duration::from_secs(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
+            let result = http_client.send(meta, request).await.unwrap_err();
             assert!(result.is_network_connection_error());
         }
 
@@ -123,13 +120,10 @@ pub mod send {
         #[serial_test::serial(example_dot_com)]
         async fn timeout_error() {
             let http_client = http::Client::new("doesntmatter").await;
-            let request = http_client
-                .build_request(Params::get(
-                    "https://example.com/",
-                    Duration::from_millis(1),
-                ))
-                .unwrap();
-            let result = http_client.send(request.0, &request.1).await.unwrap_err();
+            let params = Params::get("https://example.com/", Duration::from_millis(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
+            let result = http_client.send(meta, request).await.unwrap_err();
             assert!(matches!(result, HTTPErr::TimeoutErr { .. }));
         }
     }
@@ -149,11 +143,11 @@ pub mod send_cached {
 
             // send the first request
             let start = Instant::now();
-            let request = http_client
-                .build_request(Params::get(url, Duration::from_secs(1)))
-                .unwrap();
+            let params = Params::get(url, Duration::from_secs(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
             let is_cache_hit = http_client
-                .send_cached(url.to_string(), request.0, &request.1)
+                .send_cached(meta, url.to_string(), request)
                 .await
                 .unwrap()
                 .1;
@@ -164,11 +158,11 @@ pub mod send_cached {
             // send subsequent requests and check they are cached
             for _ in 0..5 {
                 let start = Instant::now();
-                let request = http_client
-                    .build_request(Params::get(url, Duration::from_secs(1)))
-                    .unwrap();
+                let params = Params::get(url, Duration::from_secs(1));
+                let meta = params.meta();
+                let request = http_client.build_request(params).unwrap();
                 let is_cache_hit = http_client
-                    .send_cached(url.to_string(), request.0, &request.1)
+                    .send_cached(meta, url.to_string(), request)
                     .await
                     .unwrap()
                     .1;
@@ -193,11 +187,11 @@ pub mod send_cached {
                 let http_client = http_client.clone();
                 let url = url.to_string();
                 let handle = tokio::spawn(async move {
-                    let request = http_client
-                        .build_request(Params::get(&url, Duration::from_secs(3)))
-                        .unwrap();
+                    let params = Params::get(&url, Duration::from_secs(3));
+                    let meta = params.meta();
+                    let request = http_client.build_request(params).unwrap();
                     http_client
-                        .send_cached(url.to_string(), request.0, &request.1)
+                        .send_cached(meta, url.to_string(), request)
                         .await
                         .unwrap()
                         .1
@@ -230,11 +224,11 @@ pub mod send_cached {
 
             // send the first request
             let start = Instant::now();
-            let request = http_client
-                .build_request(Params::get(url, Duration::from_secs(1)))
-                .unwrap();
+            let params = Params::get(url, Duration::from_secs(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
             http_client
-                .send_cached(url.to_string(), request.0, &request.1)
+                .send_cached(meta, url.to_string(), request)
                 .await
                 .unwrap_err();
             let duration = start.elapsed();
@@ -243,11 +237,11 @@ pub mod send_cached {
             // send subsequent requests and check they are not cached
             for _ in 0..5 {
                 let start = Instant::now();
-                let request = http_client
-                    .build_request(Params::get(url, Duration::from_secs(1)))
-                    .unwrap();
+                let params = Params::get(url, Duration::from_secs(1));
+                let meta = params.meta();
+                let request = http_client.build_request(params).unwrap();
                 http_client
-                    .send_cached(url.to_string(), request.0, &request.1)
+                    .send_cached(meta, url.to_string(), request)
                     .await
                     .unwrap_err();
                 let duration = start.elapsed();
@@ -269,11 +263,11 @@ pub mod send_cached {
 
             // send the first request
             let start = Instant::now();
-            let request = http_client
-                .build_request(Params::get(url, Duration::from_secs(1)))
-                .unwrap();
+            let params = Params::get(url, Duration::from_secs(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
             http_client
-                .send_cached(url.to_string(), request.0, &request.1)
+                .send_cached(meta, url.to_string(), request)
                 .await
                 .unwrap();
             let duration = start.elapsed();
@@ -284,11 +278,11 @@ pub mod send_cached {
 
             // send subsequent requests and check they are not cached
             let start = Instant::now();
-            let request = http_client
-                .build_request(Params::get(url, Duration::from_secs(1)))
-                .unwrap();
+            let params = Params::get(url, Duration::from_secs(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
             http_client
-                .send_cached(url.to_string(), request.0, &request.1)
+                .send_cached(meta, url.to_string(), request)
                 .await
                 .unwrap();
             let duration = start.elapsed();
@@ -302,11 +296,11 @@ pub mod send_cached {
         #[tokio::test]
         async fn network_connection_error() {
             let http_client = http::Client::new("doesntmatter").await;
-            let request = http_client
-                .build_request(Params::get("http://localhost:5454", Duration::from_secs(1)))
-                .unwrap();
+            let params = Params::get("http://localhost:5454", Duration::from_secs(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
             let result = http_client
-                .send_cached("test".to_string(), request.0, &request.1)
+                .send_cached(meta, "test".to_string(), request)
                 .await
                 .unwrap_err();
             assert!(result.is_network_connection_error());
@@ -316,14 +310,11 @@ pub mod send_cached {
         #[serial_test::serial(example_com)]
         async fn timeout_error() {
             let http_client = http::Client::new("doesntmatter").await;
-            let request = http_client
-                .build_request(Params::get(
-                    "https://example.com/",
-                    Duration::from_millis(1),
-                ))
-                .unwrap();
+            let params = Params::get("https://example.com/", Duration::from_millis(1));
+            let meta = params.meta();
+            let request = http_client.build_request(params).unwrap();
             let result = http_client
-                .send_cached("test".to_string(), request.0, &request.1)
+                .send_cached(meta, "test".to_string(), request)
                 .await
                 .unwrap_err();
             assert!(matches!(result, HTTPErr::CacheErr { .. }));
@@ -338,16 +329,16 @@ pub mod handle_response {
     async fn endpoint_not_found() {
         // make a request to a non-existent endpoint
         let http_client = http::Client::new("doesntmatter").await;
-        let request = http_client
-            .build_request(Params::get(
-                "https://httpbin.org/get/this-page-should-not-exist",
-                Duration::from_secs(3),
-            ))
-            .unwrap();
-        let resp = http_client.send(request.0, &request.1).await.unwrap();
+        let params = Params::get(
+            "https://httpbin.org/get/this-page-should-not-exist",
+            Duration::from_secs(3),
+        );
+        let meta = params.meta();
+        let request = http_client.build_request(params).unwrap();
+        let (resp, meta) = http_client.send(meta, request).await.unwrap();
 
         // call the handle response function
-        let response = response::handle(resp, &request.1).await.unwrap_err();
+        let response = response::handle(resp, meta).await.unwrap_err();
         assert!(matches!(response, HTTPErr::RequestFailed { .. }));
     }
 }

@@ -3,7 +3,7 @@ use crate::http::errors::HTTPErr;
 use crate::http::expand::format_expand_query;
 use crate::http::pagination::{Pagination, MAX_PAGINATE_LIMIT};
 use crate::http::query::build_query_params;
-use crate::http::request::{self, Params};
+use crate::http::request;
 use crate::http::response;
 use crate::http::ClientI;
 use openapi_client::models::{
@@ -64,13 +64,10 @@ pub async fn list(
     );
 
     let url = format!("{}/deployments{}", client.base_url(), query_params);
-    let (text, context) = client
-        .execute_cached(
-            url.clone(),
-            Params::get(&url, client.default_timeout()).with_token(params.token),
-        )
-        .await?;
-    response::parse_json(text, &context)
+    let request = request::Params::get(&url, client.default_timeout()).with_token(params.token);
+    let meta = request.meta();
+    let text = client.execute_cached(url.clone(), request).await?;
+    response::parse_json(text, meta)
 }
 
 pub async fn list_all(
@@ -118,13 +115,10 @@ pub async fn get(client: &impl ClientI, params: GetParams<'_>) -> Result<Deploym
         params.deployment_id,
         query_params
     );
-    let (text, context) = client
-        .execute_cached(
-            url.clone(),
-            Params::get(&url, client.default_timeout()).with_token(params.token),
-        )
-        .await?;
-    response::parse_json(text, &context)
+    let request = request::Params::get(&url, client.default_timeout()).with_token(params.token);
+    let meta = request.meta();
+    let text = client.execute_cached(url.clone(), request).await?;
+    response::parse_json(text, meta)
 }
 
 pub async fn update(
@@ -144,15 +138,13 @@ pub async fn update(
         params.deployment_id,
         query_params
     );
-    let (text, context) = client
-        .execute(
-            Params::patch(
-                &url,
-                request::marshal_json(params.updates)?,
-                client.default_timeout(),
-            )
-            .with_token(params.token),
-        )
-        .await?;
-    response::parse_json(text, &context)
+    let request = request::Params::patch(
+        &url,
+        request::marshal_json(params.updates)?,
+        client.default_timeout(),
+    )
+    .with_token(params.token);
+    let meta = request.meta();
+    let text = client.execute(request).await?;
+    response::parse_json(text, meta)
 }

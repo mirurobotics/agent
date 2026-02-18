@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use miru_agent::http;
 use miru_agent::http::errors::HTTPErr;
-use miru_agent::http::request::{Context, Params};
+use miru_agent::http::request::Params;
 use openapi_client::models::{
     deployment_list, Deployment as BackendDeployment, DeploymentList, Device, TokenResponse,
 };
@@ -138,21 +138,11 @@ impl http::ClientI for MockClient {
         Duration::from_secs(10)
     }
 
-    async fn execute(&self, params: Params<'_>) -> Result<(String, Context), HTTPErr> {
-        let context = Context {
-            url: params.url.to_string(),
-            method: params.method.clone(),
-            timeout: params.timeout,
-        };
-        let text = self.dispatch(&params.method, params.url)?;
-        Ok((text, context))
+    async fn execute(&self, params: Params<'_>) -> Result<String, HTTPErr> {
+        self.dispatch(&params.method, params.url)
     }
 
-    async fn execute_cached(
-        &self,
-        _key: String,
-        params: Params<'_>,
-    ) -> Result<(String, Context), HTTPErr> {
+    async fn execute_cached(&self, _key: String, params: Params<'_>) -> Result<String, HTTPErr> {
         self.execute(params).await
     }
 }
