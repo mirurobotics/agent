@@ -34,7 +34,7 @@ pub async fn push<HTTPClientT: http::ClientI>(
     devices::update(
         http_client,
         devices::UpdateParams {
-            device_id: &device.id,
+            id: &device.id,
             payload: &openapi_client::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(agent_version),
             },

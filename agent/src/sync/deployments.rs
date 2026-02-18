@@ -202,7 +202,7 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
     deployments::list_all(
         http_client,
         deployments::ListAllParams {
-            activity_status_filter,
+            activity_status: activity_status_filter,
             expansions,
             token,
         },
@@ -250,7 +250,7 @@ async fn push<HTTPClientT: http::ClientI>(
         if let Err(e) = deployments::update(
             http_client,
             deployments::UpdateParams {
-                deployment_id: &deployment.id,
+                id: &deployment.id,
                 updates: &updates,
                 expansions: &[],
                 token,

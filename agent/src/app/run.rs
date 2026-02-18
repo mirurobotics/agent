@@ -173,7 +173,7 @@ async fn init_app_state(
         agent_version,
         &options.storage.layout,
         options.storage.cache_capacities,
-        Arc::new(http::Client::new(&options.backend_base_url).await),
+        Arc::new(http::Client::new(&options.backend_base_url)?),
         options.dpl_retry_policy,
     )
     .await?;

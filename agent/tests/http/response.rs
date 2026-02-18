@@ -24,7 +24,7 @@ pub mod handle {
     #[tokio::test]
     async fn ok_returns_body_text() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/ok", server.base_url);
         let params = Params::get(&url);
         let req = client.build_request(params).unwrap();
@@ -36,7 +36,7 @@ pub mod handle {
     #[tokio::test]
     async fn empty_body_returns_empty_string() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/empty", server.base_url);
         let params = Params::get(&url);
         let req = client.build_request(params).unwrap();
@@ -48,7 +48,7 @@ pub mod handle {
     #[tokio::test]
     async fn not_found_returns_request_failed_no_error() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/not-found", server.base_url);
         let params = Params::get(&url);
         let req = client.build_request(params).unwrap();
@@ -66,7 +66,7 @@ pub mod handle {
     #[tokio::test]
     async fn unauthorized_returns_request_failed_with_error() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/unauthorized", server.base_url);
         let params = Params::get(&url);
         let req = client.build_request(params).unwrap();

@@ -120,7 +120,7 @@ pub mod shutdown {
                 .await
                 .unwrap();
 
-        let http_client = Arc::new(http::Client::new("doesntmatter").await);
+        let http_client = Arc::new(http::Client::new("doesntmatter").unwrap());
         let (syncer, worker_handler) = Syncer::spawn(
             32,
             SyncerArgs {

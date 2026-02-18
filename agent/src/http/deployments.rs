@@ -12,20 +12,20 @@ use openapi_client::models::{
 // ================================ PARAM STRUCTS ================================== //
 
 pub struct ListParams<'a> {
-    pub activity_status_filter: &'a [DeploymentActivityStatus],
+    pub activity_status: &'a [DeploymentActivityStatus],
     pub expansions: &'a [DeploymentListExpansion],
     pub pagination: &'a Page,
     pub token: &'a str,
 }
 
 pub struct ListAllParams<'a> {
-    pub activity_status_filter: &'a [DeploymentActivityStatus],
+    pub activity_status: &'a [DeploymentActivityStatus],
     pub expansions: &'a [DeploymentListExpansion],
     pub token: &'a str,
 }
 
 pub struct UpdateParams<'a> {
-    pub deployment_id: &'a str,
+    pub id: &'a str,
     pub updates: &'a UpdateDeploymentRequest,
     pub expansions: &'a [DeploymentListExpansion],
     pub token: &'a str,
@@ -38,9 +38,9 @@ pub async fn list(
     params: ListParams<'_>,
 ) -> Result<DeploymentList, HTTPErr> {
     let mut qp = QueryParams::new().paginate(params.pagination);
-    if !params.activity_status_filter.is_empty() {
+    if !params.activity_status.is_empty() {
         let values: Vec<String> = params
-            .activity_status_filter
+            .activity_status
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -69,7 +69,7 @@ pub async fn list_all(
         let page = list(
             client,
             ListParams {
-                activity_status_filter: params.activity_status_filter,
+                activity_status: params.activity_status,
                 expansions: params.expansions,
                 pagination: &pagination,
                 token: params.token,
@@ -85,13 +85,14 @@ pub async fn list_all(
 
     Ok(all_deployments)
 }
+
 pub async fn update(
     client: &impl ClientI,
     params: UpdateParams<'_>,
 ) -> Result<Deployment, HTTPErr> {
     let qp = QueryParams::new().expand(params.expansions);
 
-    let url = format!("{}/deployments/{}", client.base_url(), params.deployment_id,);
+    let url = format!("{}/deployments/{}", client.base_url(), params.id,);
     let request = request::Params::patch(&url, request::marshal_json(params.updates)?)
         .with_query(qp)
         .with_token(params.token);

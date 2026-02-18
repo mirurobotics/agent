@@ -35,7 +35,7 @@ pub mod send {
         #[tokio::test]
         async fn get_200_returns_success() {
             let server = mock::run_server(router()).await;
-            let client = http::Client::new(&server.base_url).await;
+            let client = http::Client::new(&server.base_url).unwrap();
             let url = format!("{}/ok", server.base_url);
             let params = Params::get(&url);
             let req = client.build_request(params).unwrap();
@@ -46,7 +46,7 @@ pub mod send {
         #[tokio::test]
         async fn post_200_with_body() {
             let server = mock::run_server(router()).await;
-            let client = http::Client::new(&server.base_url).await;
+            let client = http::Client::new(&server.base_url).unwrap();
             let url = format!("{}/echo", server.base_url);
             let params = Params::post(&url, "hello".into());
             let req = client.build_request(params).unwrap();
@@ -59,7 +59,7 @@ pub mod send {
         #[tokio::test]
         async fn response_body_matches_mock() {
             let server = mock::run_server(router()).await;
-            let client = http::Client::new(&server.base_url).await;
+            let client = http::Client::new(&server.base_url).unwrap();
             let url = format!("{}/ok", server.base_url);
             let params = Params::get(&url);
             let req = client.build_request(params).unwrap();
@@ -74,7 +74,7 @@ pub mod send {
 
         #[tokio::test]
         async fn connection_refused() {
-            let client = http::Client::new("http://127.0.0.1:1").await;
+            let client = http::Client::new("http://127.0.0.1:1").unwrap();
             let params = Params::get("http://127.0.0.1:1/nope");
             let req = client.build_request(params).unwrap();
             let err = client.send(req).await.unwrap_err();
@@ -85,7 +85,7 @@ pub mod send {
         #[tokio::test]
         async fn timeout() {
             let server = mock::run_server(router()).await;
-            let client = http::Client::new(&server.base_url).await;
+            let client = http::Client::new(&server.base_url).unwrap();
             let url = format!("{}/slow", server.base_url);
             let params = Params::get(&url).with_timeout(Duration::from_millis(50));
             let req = client.build_request(params).unwrap();
@@ -101,17 +101,17 @@ pub mod execute {
     #[tokio::test]
     async fn ok_route_returns_body_text() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/ok", server.base_url);
         let params = Params::get(&url);
-        let text = client.execute(params).await.unwrap();
+        let (text, _) = client.execute(params).await.unwrap();
         assert_eq!(text, "ok");
     }
 
     #[tokio::test]
     async fn not_found_returns_request_failed() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/not-found", server.base_url);
         let params = Params::get(&url);
         let err = client.execute(params).await.unwrap_err();
@@ -121,7 +121,7 @@ pub mod execute {
     #[tokio::test]
     async fn server_error_returns_request_failed() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/server-error", server.base_url);
         let params = Params::get(&url);
         let err = client.execute(params).await.unwrap_err();
@@ -141,7 +141,7 @@ pub mod fetch {
     #[tokio::test]
     async fn valid_json_response_deserializes() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/json", server.base_url);
         let params = Params::get(&url);
         let person: Person = http::client::fetch(&client, params).await.unwrap();
@@ -157,7 +157,7 @@ pub mod fetch {
     #[tokio::test]
     async fn invalid_json_returns_unmarshal_err() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/bad-json", server.base_url);
         let params = Params::get(&url);
         let result: Result<Person, _> = http::client::fetch(&client, params).await;
@@ -167,31 +167,11 @@ pub mod fetch {
     #[tokio::test]
     async fn http_error_returns_request_failed() {
         let server = mock::run_server(router()).await;
-        let client = http::Client::new(&server.base_url).await;
+        let client = http::Client::new(&server.base_url).unwrap();
         let url = format!("{}/not-found", server.base_url);
         let params = Params::get(&url);
         let result: Result<Person, _> = http::client::fetch(&client, params).await;
         assert!(matches!(result, Err(HTTPErr::RequestFailed(_))));
-    }
-}
-
-pub mod new_with {
-    use super::*;
-
-    #[test]
-    fn sets_base_url() {
-        let client = http::Client::new_with("http://custom-host:9090");
-        assert_eq!(client.base_url(), "http://custom-host:9090");
-    }
-
-    #[tokio::test]
-    async fn can_send_requests() {
-        let server = mock::run_server(router()).await;
-        let client = http::Client::new_with(&server.base_url);
-        let url = format!("{}/ok", server.base_url);
-        let params = Params::get(&url);
-        let text = client.execute(params).await.unwrap();
-        assert_eq!(text, "ok");
     }
 }
 
@@ -201,17 +181,17 @@ pub mod arc_delegation {
     #[tokio::test]
     async fn base_url_delegates() {
         let server = mock::run_server(router()).await;
-        let client = Arc::new(http::Client::new(&server.base_url).await);
+        let client = Arc::new(http::Client::new(&server.base_url).unwrap());
         assert_eq!(client.base_url(), server.base_url);
     }
 
     #[tokio::test]
     async fn execute_delegates() {
         let server = mock::run_server(router()).await;
-        let client = Arc::new(http::Client::new(&server.base_url).await);
+        let client = Arc::new(http::Client::new(&server.base_url).unwrap());
         let url = format!("{}/ok", server.base_url);
         let params = Params::get(&url);
-        let text = client.execute(params).await.unwrap();
+        let (text, _) = client.execute(params).await.unwrap();
         assert_eq!(text, "ok");
     }
 }

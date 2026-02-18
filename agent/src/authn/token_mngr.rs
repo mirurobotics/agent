@@ -84,7 +84,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
         let resp = devices::issue_token(
             self.http_client.as_ref(),
             devices::IssueTokenParams {
-                device_id: &self.device_id,
+                id: &self.device_id,
                 payload: &payload,
             },
         )

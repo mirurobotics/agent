@@ -48,7 +48,7 @@ pub mod spawn {
         token_file.file.delete().await.unwrap();
 
         // spawn the token manager
-        let http_client = http::Client::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").unwrap();
         let result = TokenManager::spawn(
             32,
             "device_id".to_string(),
@@ -74,7 +74,7 @@ pub mod spawn {
         private_key_file.delete().await.unwrap();
 
         // spawn the token manager
-        let http_client = http::Client::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").unwrap();
         let result = TokenManager::spawn(
             32,
             "device_id".to_string(),
@@ -100,7 +100,7 @@ pub mod spawn {
             .await
             .unwrap();
 
-        let http_client = http::Client::new("doesntmatter").await;
+        let http_client = http::Client::new("doesntmatter").unwrap();
         TokenManager::spawn(
             32,
             "device_id".to_string(),

@@ -66,7 +66,7 @@ async fn install_helper(
     }
 
     // run the installation
-    let http_client = http::Client::new(&settings.backend.base_url).await;
+    let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = StorageLayout::default();
     bootstrap(
         &layout,
@@ -144,7 +144,7 @@ pub async fn activate<HTTPClientT: http::ClientI>(
     let device = devices::activate(
         http_client,
         devices::ActivateParams {
-            device_id: &device_id,
+            id: &device_id,
             payload: &payload,
             token,
         },
