@@ -1,23 +1,22 @@
 // internal crates
 use miru_agent::errors::Error;
-use miru_agent::mqtt::client::{
-    poll, ConnectAddress, Credentials, MQTTClient, OptionsBuilder, Protocol,
-};
+use miru_agent::mqtt::client::{poll, MQTTClient};
+use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol};
 
 // external crates
 use rumqttc::QoS;
 
 #[tokio::test]
 async fn test_mqtt_client() {
-    let username = "username";
-    let password = "password";
-    let options = OptionsBuilder::new(Credentials::new(username.to_string(), password.to_string()))
-        .with_connect_address(ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: "broker.emqx.io".to_string(),
-            port: 1883,
-        })
-        .build();
+    let options = Options::new(Credentials {
+        username: "username".to_string(),
+        password: "password".to_string(),
+    })
+    .with_connect_address(ConnectAddress {
+        protocol: Protocol::TCP,
+        broker: "broker.emqx.io".to_string(),
+        port: 1883,
+    });
 
     // create the client and subscribe to the device sync topic
     let (client, mut eventloop) = MQTTClient::new(&options).await;
@@ -42,14 +41,15 @@ async fn test_mqtt_client() {
 
 #[tokio::test]
 async fn invalid_broker_url() {
-    let credentials = Credentials::new("test".to_string(), "test".to_string());
-    let options = OptionsBuilder::new(credentials)
-        .with_connect_address(ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: "arglebargle.com".to_string(),
-            port: 1883,
-        })
-        .build();
+    let options = Options::new(Credentials {
+        username: "test".to_string(),
+        password: "test".to_string(),
+    })
+    .with_connect_address(ConnectAddress {
+        protocol: Protocol::TCP,
+        broker: "arglebargle.com".to_string(),
+        port: 1883,
+    });
 
     // create the client and subscribe to the device sync topic
     let (_, mut eventloop) = MQTTClient::new(&options).await;
@@ -60,14 +60,15 @@ async fn invalid_broker_url() {
 
 #[tokio::test]
 async fn invalid_username_or_password() {
-    let credentials = Credentials::new("username".to_string(), "password".to_string());
-    let options = OptionsBuilder::new(credentials)
-        .with_connect_address(ConnectAddress {
-            protocol: Protocol::SSL,
-            broker: "staging.mqtt.mirurobotics.com".to_string(),
-            port: 8883,
-        })
-        .build();
+    let options = Options::new(Credentials {
+        username: "username".to_string(),
+        password: "password".to_string(),
+    })
+    .with_connect_address(ConnectAddress {
+        protocol: Protocol::SSL,
+        broker: "staging.mqtt.mirurobotics.com".to_string(),
+        port: 8883,
+    });
 
     // create the client and subscribe to the device sync topic
     let (_, mut eventloop) = MQTTClient::new(&options).await;

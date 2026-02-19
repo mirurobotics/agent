@@ -3,9 +3,10 @@ use miru_agent::authn::token::Token;
 use miru_agent::filesys::dir::Dir;
 use miru_agent::models::device::{Device, DeviceStatus};
 use miru_agent::mqtt::{
-    client::{MQTTClient, Options},
+    client::MQTTClient,
     device::{Ping, SyncDevice},
     errors::*,
+    options::Options,
     topics,
 };
 use miru_agent::storage::{device::DeviceFile, layout::StorageLayout};

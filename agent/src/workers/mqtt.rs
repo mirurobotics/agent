@@ -10,9 +10,10 @@ use crate::cooldown;
 use crate::errors::*;
 use crate::models::device::{self, Device, DeviceStatus};
 use crate::mqtt::{
-    client::{poll, ConnectAddress, Credentials, MQTTClient, OptionsBuilder},
+    client::{poll, MQTTClient},
     device::{DeviceExt, Ping, SyncDevice},
     errors::*,
+    options::{ConnectAddress, Credentials, Options as MqttOptions},
     topics,
 };
 use crate::storage::device::DeviceFile;
@@ -170,10 +171,9 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
         username: device_session_id.to_string(),
         password: token,
     };
-    let options = OptionsBuilder::new(credentials)
+    let options = MqttOptions::new(credentials)
         .with_connect_address(broker_address)
-        .with_client_id(device_id.to_string())
-        .build();
+        .with_client_id(device_id.to_string());
     let (mqtt_client, eventloop) = MQTTClient::new(&options).await;
 
     // subscribe to device synchronization updates
