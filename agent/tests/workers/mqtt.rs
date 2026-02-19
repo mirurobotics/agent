@@ -17,7 +17,7 @@ use miru_agent::sync::{
 use miru_agent::workers::mqtt::{self, handle_error, handle_event, handle_syncer_event};
 
 use crate::authn::mock::MockTokenManager;
-use crate::mqtt::mock::MockDeviceClient;
+use crate::mqtt::mock::MockClient;
 use crate::sync::mock::MockSyncer;
 
 // external crates
@@ -30,9 +30,12 @@ pub mod handle_syncer_event {
     #[tokio::test]
     async fn sync_success_publishes_device_sync() {
         let event = SyncEvent::SyncSuccess;
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         handle_syncer_event(&event, "device_id", &mqtt_client).await;
-        assert_eq!(mqtt_client.num_publish_device_sync_calls(), 1);
+        assert_eq!(
+            mqtt_client.num_publish_calls_to(&topics::device_sync("device_id")),
+            1
+        );
     }
 
     #[tokio::test]
@@ -44,9 +47,12 @@ pub mod handle_syncer_event {
             SyncEvent::CooldownEnd(CooldownEnd::FromSyncSuccess),
             SyncEvent::CooldownEnd(CooldownEnd::FromSyncFailure),
         ] {
-            let mqtt_client = MockDeviceClient::default();
+            let mqtt_client = MockClient::default();
             handle_syncer_event(&event, "device_id", &mqtt_client).await;
-            assert_eq!(mqtt_client.num_publish_device_sync_calls(), 0);
+            assert_eq!(
+                mqtt_client.num_publish_calls_to(&topics::device_sync("device_id")),
+                0
+            );
         }
     }
 }
@@ -68,7 +74,7 @@ pub mod handle_connection_events {
             code: ConnectReturnCode::RefusedProtocolVersion,
             session_present: false,
         }));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
@@ -98,7 +104,7 @@ pub mod handle_connection_events {
             code: ConnectReturnCode::Success,
             session_present: false,
         }));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let before_event = Utc::now();
         let err_streak =
@@ -129,7 +135,7 @@ pub mod handle_connection_events {
         .unwrap();
 
         let event = Event::Incoming(Incoming::Disconnect);
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let before_event = Utc::now();
         let err_streak =
@@ -162,7 +168,7 @@ pub mod handle_sync_events {
             QoS::AtLeastOnce,
             "invalid".to_string(),
         )));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
@@ -189,7 +195,7 @@ pub mod handle_sync_events {
             QoS::AtLeastOnce,
             payload_bytes,
         )));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
@@ -216,7 +222,7 @@ pub mod handle_sync_events {
             QoS::AtLeastOnce,
             payload_bytes,
         )));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
@@ -243,7 +249,7 @@ pub mod handle_sync_events {
             QoS::AtLeastOnce,
             payload_bytes,
         )));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         syncer.set_sync(|| {
             Err(SyncErr::MockErr(SyncMockErr {
@@ -277,13 +283,16 @@ pub mod handle_ping_events {
             QoS::AtLeastOnce,
             "invalid".to_string(),
         )));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
         assert_eq!(err_streak, 0);
 
-        assert_eq!(mqtt_client.num_publish_device_pong_calls(), 0);
+        assert_eq!(
+            mqtt_client.num_publish_calls_to(&topics::device_pong(&device.id)),
+            0
+        );
     }
 
     #[tokio::test]
@@ -307,13 +316,16 @@ pub mod handle_ping_events {
             QoS::AtLeastOnce,
             payload_bytes,
         )));
-        let mqtt_client = MockDeviceClient::default();
+        let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
         let err_streak =
             handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
         assert_eq!(err_streak, 0);
 
-        assert_eq!(mqtt_client.num_publish_device_pong_calls(), 1);
+        assert_eq!(
+            mqtt_client.num_publish_calls_to(&topics::device_pong(&device.id)),
+            1
+        );
     }
 }
 

@@ -30,6 +30,7 @@ openssl = { version = "0.10.64", features = ["vendored"] }
 # https://crates.io/crates/openssl-src/versions
 # OpenSSL version 3.0.8+ LTS is the currently recommended version: https://endoflife.date/openssl. CISA (https://www.cisa.gov/news-events/alerts/2023/02/09/openssl-releases-security-advisory) recognizes 3.0.0 to 3.0.7 as particularly vulnerable and must be avoided. OpenSSL 1.1.1 LTS and 1.0.2 LTS are not recommended due to EOL support. Please update your system to use OpenSSL 3.0.X LTS."
 rumqttc = "0.25.1"
+rumqttd = "0.20.0"
 secrecy = "0.10.3"
 serial_test = "3.2.0"
 serde = { version = "1.0.215", features = ["derive"] }

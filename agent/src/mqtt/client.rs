@@ -1,3 +1,7 @@
+// standard library
+use std::future::Future;
+use std::time::Duration;
+
 // internal crates
 use crate::mqtt::errors::*;
 use crate::mqtt::options::{Options, Protocol, Timeouts};
@@ -6,7 +10,27 @@ use crate::trace;
 // external crates
 use chrono::{DateTime, Utc};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, Transport};
-use tokio::time::timeout;
+
+pub struct Publish<'a> {
+    pub topic: &'a str,
+    pub qos: QoS,
+    pub retained: bool,
+    pub payload: &'a [u8],
+}
+
+pub trait ClientI: Send + Sync {
+    fn publish(&self, msg: Publish<'_>) -> impl Future<Output = Result<(), MQTTError>> + Send;
+
+    fn subscribe(
+        &self,
+        topic: &str,
+        qos: QoS,
+    ) -> impl Future<Output = Result<(), MQTTError>> + Send;
+
+    fn unsubscribe(&self, topic: &str) -> impl Future<Output = Result<(), MQTTError>> + Send;
+
+    fn disconnect(&self) -> impl Future<Output = Result<(), MQTTError>> + Send;
+}
 
 pub struct MQTTClient {
     pub created_at: DateTime<Utc>,
@@ -45,90 +69,68 @@ impl MQTTClient {
             eventloop,
         )
     }
+}
 
-    pub async fn publish(
-        &self,
-        topic: &str,
-        qos: QoS,
-        retained: bool,
-        payload: &[u8],
-    ) -> Result<(), MQTTError> {
-        timeout(
+impl ClientI for MQTTClient {
+    async fn publish(&self, msg: Publish<'_>) -> Result<(), MQTTError> {
+        with_timeout(
             self.timeouts.publish,
-            self.client.publish(topic, qos, retained, payload),
+            self.client
+                .publish(msg.topic, msg.qos, msg.retained, msg.payload),
+            "Publish timeout",
+            |e| {
+                MQTTError::PublishErr(PublishErr {
+                    source: e,
+                    trace: trace!(),
+                })
+            },
         )
         .await
-        .map_err(|_| {
-            MQTTError::TimeoutErr(TimeoutErr {
-                msg: "Publish timeout".to_string(),
-                trace: trace!(),
-            })
-        })?
-        .map_err(|e| {
-            MQTTError::PublishErr(PublishErr {
-                source: e,
-                trace: trace!(),
-            })
-        })?;
-
-        Ok(())
     }
 
-    pub async fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), MQTTError> {
-        timeout(self.timeouts.subscribe, self.client.subscribe(topic, qos))
-            .await
-            .map_err(|_| {
-                MQTTError::TimeoutErr(TimeoutErr {
-                    msg: "Subscribe timeout".to_string(),
-                    trace: trace!(),
-                })
-            })?
-            .map_err(|e| {
-                MQTTError::PublishErr(PublishErr {
+    async fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), MQTTError> {
+        with_timeout(
+            self.timeouts.subscribe,
+            self.client.subscribe(topic, qos),
+            "Subscribe timeout",
+            |e| {
+                MQTTError::SubscribeErr(SubscribeErr {
                     source: e,
                     trace: trace!(),
                 })
-            })?;
-
-        Ok(())
+            },
+        )
+        .await
     }
 
-    pub async fn unsubscribe(&self, topic: &str) -> Result<(), MQTTError> {
-        timeout(self.timeouts.unsubscribe, self.client.unsubscribe(topic))
-            .await
-            .map_err(|_| {
-                MQTTError::TimeoutErr(TimeoutErr {
-                    msg: "Unsubscribe timeout".to_string(),
-                    trace: trace!(),
-                })
-            })?
-            .map_err(|e| {
-                MQTTError::PublishErr(PublishErr {
+    async fn unsubscribe(&self, topic: &str) -> Result<(), MQTTError> {
+        with_timeout(
+            self.timeouts.unsubscribe,
+            self.client.unsubscribe(topic),
+            "Unsubscribe timeout",
+            |e| {
+                MQTTError::UnsubscribeErr(UnsubscribeErr {
                     source: e,
                     trace: trace!(),
                 })
-            })?;
-
-        Ok(())
+            },
+        )
+        .await
     }
 
-    pub async fn disconnect(&self) -> Result<(), MQTTError> {
-        timeout(self.timeouts.disconnect, self.client.disconnect())
-            .await
-            .map_err(|_| {
-                MQTTError::TimeoutErr(TimeoutErr {
-                    msg: "Disconnect timeout".to_string(),
-                    trace: trace!(),
-                })
-            })?
-            .map_err(|e| {
-                MQTTError::PublishErr(PublishErr {
+    async fn disconnect(&self) -> Result<(), MQTTError> {
+        with_timeout(
+            self.timeouts.disconnect,
+            self.client.disconnect(),
+            "Disconnect timeout",
+            |e| {
+                MQTTError::DisconnectErr(DisconnectErr {
                     source: e,
                     trace: trace!(),
                 })
-            })?;
-
-        Ok(())
+            },
+        )
+        .await
     }
 }
 
@@ -162,4 +164,24 @@ pub async fn poll(eventloop: &mut EventLoop) -> Result<Event, MQTTError> {
             }),
         }
     })
+}
+
+async fn with_timeout<F>(
+    duration: Duration,
+    future: F,
+    timeout_msg: &str,
+    map_err: impl FnOnce(rumqttc::ClientError) -> MQTTError,
+) -> Result<(), MQTTError>
+where
+    F: Future<Output = Result<(), rumqttc::ClientError>>,
+{
+    tokio::time::timeout(duration, future)
+        .await
+        .map_err(|_| {
+            MQTTError::TimeoutErr(TimeoutErr {
+                msg: timeout_msg.to_string(),
+                trace: trace!(),
+            })
+        })?
+        .map_err(map_err)
 }

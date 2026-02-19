@@ -58,6 +58,45 @@ impl crate::errors::Error for PublishErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("Failed to subscribe: {source}")]
+pub struct SubscribeErr {
+    pub source: rumqttc::ClientError,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for SubscribeErr {
+    fn is_network_connection_error(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to unsubscribe: {source}")]
+pub struct UnsubscribeErr {
+    pub source: rumqttc::ClientError,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for UnsubscribeErr {
+    fn is_network_connection_error(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to disconnect: {source}")]
+pub struct DisconnectErr {
+    pub source: rumqttc::ClientError,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for DisconnectErr {
+    fn is_network_connection_error(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 #[error("Serialization error: {source}")]
 pub struct SerdeErr {
     pub source: serde_json::Error,
@@ -92,6 +131,12 @@ pub enum MQTTError {
     #[error(transparent)]
     PublishErr(PublishErr),
     #[error(transparent)]
+    SubscribeErr(SubscribeErr),
+    #[error(transparent)]
+    UnsubscribeErr(UnsubscribeErr),
+    #[error(transparent)]
+    DisconnectErr(DisconnectErr),
+    #[error(transparent)]
     SerdeErr(SerdeErr),
     #[error(transparent)]
     MockErr(MockErr),
@@ -103,6 +148,9 @@ crate::impl_error!(MQTTError {
     TimeoutErr,
     PollErr,
     PublishErr,
+    SubscribeErr,
+    UnsubscribeErr,
+    DisconnectErr,
     SerdeErr,
     MockErr,
 });

@@ -39,4 +39,5 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 
 [dev-dependencies]
+rumqttd = { workspace = true }
 serial_test = { workspace = true }

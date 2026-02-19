@@ -9,9 +9,10 @@ use crate::authn::{token::Token, token_mngr::TokenManagerExt};
 use crate::cooldown;
 use crate::errors::*;
 use crate::models::device::{self, Device, DeviceStatus};
+use crate::mqtt;
 use crate::mqtt::{
-    client::{poll, MQTTClient},
-    device::{DeviceExt, Ping, SyncDevice},
+    client::{poll, ClientI, MQTTClient},
+    device::{Ping, SyncDevice},
     errors::*,
     options::{ConnectAddress, Credentials, Options as MqttOptions},
     topics,
@@ -177,17 +178,17 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
     let (mqtt_client, eventloop) = MQTTClient::new(&options).await;
 
     // subscribe to device synchronization updates
-    if let Err(e) = mqtt_client.subscribe_device_sync(device_id).await {
+    if let Err(e) = mqtt::device::subscribe_sync(&mqtt_client, device_id).await {
         error!("error subscribing to device synchronization updates: {e:?}");
     };
-    if let Err(e) = mqtt_client.subscribe_device_ping(device_id).await {
+    if let Err(e) = mqtt::device::subscribe_ping(&mqtt_client, device_id).await {
         error!("error subscribing to device ping updates: {e:?}");
     };
 
     (mqtt_client, eventloop)
 }
 
-pub async fn handle_syncer_event<MQTTClientT: DeviceExt>(
+pub async fn handle_syncer_event<MQTTClientT: ClientI>(
     event: &SyncEvent,
     device_id: &str,
     mqtt_client: &MQTTClientT,
@@ -198,7 +199,7 @@ pub async fn handle_syncer_event<MQTTClientT: DeviceExt>(
 
     // whenever the syncer has synced, we need to publish this synchronization to the
     // backend
-    match mqtt_client.publish_device_sync(device_id).await {
+    match mqtt::device::publish_sync(mqtt_client, device_id).await {
         Ok(_) => {
             info!("successfully published device sync to backend");
         }
@@ -210,7 +211,7 @@ pub async fn handle_syncer_event<MQTTClientT: DeviceExt>(
 
 type ErrStreak = u32;
 
-pub async fn handle_event<MQTTClientT: DeviceExt, SyncerT: SyncerExt>(
+pub async fn handle_event<MQTTClientT: ClientI, SyncerT: SyncerExt>(
     event: &Event,
     mqtt_client: &MQTTClientT,
     syncer: &SyncerT,
@@ -272,7 +273,7 @@ async fn handle_sync_event<SyncerT: SyncerExt>(publish: &Publish, syncer: &Synce
     }
 }
 
-async fn handle_ping_event<MQTTClientT: DeviceExt>(
+async fn handle_ping_event<MQTTClientT: ClientI>(
     publish: &Publish,
     client: &MQTTClientT,
     device_id: &str,
@@ -290,7 +291,7 @@ async fn handle_ping_event<MQTTClientT: DeviceExt>(
             return;
         }
     };
-    if let Err(e) = client.publish_device_pong(device_id, message_id).await {
+    if let Err(e) = mqtt::device::publish_pong(client, device_id, message_id).await {
         error!("error publishing ping response: {e:?}");
     } else {
         info!("successfully published ping response");
