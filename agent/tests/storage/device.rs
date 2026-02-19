@@ -44,4 +44,20 @@ pub mod assert_activated {
         let result = assert_activated(&device_file).await.unwrap_err();
         assert!(matches!(result, StorageErr::DeviceNotActivatedErr { .. }));
     }
+
+    #[tokio::test]
+    async fn device_activated() {
+        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let device_file = dir.file("device.json");
+        let device = Device {
+            activated: true,
+            ..Default::default()
+        };
+        device_file
+            .write_json(&device, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        assert_activated(&device_file).await.unwrap();
+    }
 }
