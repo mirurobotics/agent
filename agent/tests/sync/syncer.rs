@@ -27,7 +27,6 @@ use miru_agent::sync::{
     },
 };
 
-use crate::authn::token_mngr::spawn as spawn_token_manager;
 use crate::http::mock::MockClient;
 
 // external crates
@@ -48,7 +47,7 @@ pub async fn create_token_manager(
         .await
         .unwrap();
 
-    spawn_token_manager(
+    TokenManager::spawn(
         32,
         "device_id".to_string(),
         http_client.clone(),

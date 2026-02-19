@@ -37,7 +37,7 @@ pub trait TokenManagerExt {
 }
 
 // ======================== SINGLE THREADED IMPLEMENTATION ========================= //
-pub struct SingleThreadTokenManager<HTTPClientT: http::ClientI> {
+pub(crate) struct SingleThreadTokenManager<HTTPClientT: http::ClientI> {
     device_id: String,
     http_client: Arc<HTTPClientT>,
     token_file: TokenFile,
@@ -45,7 +45,7 @@ pub struct SingleThreadTokenManager<HTTPClientT: http::ClientI> {
 }
 
 impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
-    pub fn new(
+    pub(crate) fn new(
         device_id: String,
         http_client: Arc<HTTPClientT>,
         token_file: TokenFile,
@@ -143,7 +143,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
 }
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
-pub enum WorkerCommand {
+pub(crate) enum WorkerCommand {
     GetToken {
         respond_to: oneshot::Sender<Result<Arc<Token>, AuthnErr>>,
     },
@@ -155,25 +155,13 @@ pub enum WorkerCommand {
     },
 }
 
-pub struct Worker<HTTPClientT: http::ClientI> {
+pub(crate) struct Worker<HTTPClientT: http::ClientI> {
     token_mngr: SingleThreadTokenManager<HTTPClientT>,
     receiver: Receiver<WorkerCommand>,
 }
 
 impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
-    pub fn new(
-        token_mngr: SingleThreadTokenManager<HTTPClientT>,
-        receiver: Receiver<WorkerCommand>,
-    ) -> Self {
-        Self {
-            token_mngr,
-            receiver,
-        }
-    }
-}
-
-impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
-    pub async fn run(mut self) {
+    pub(crate) async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
                 WorkerCommand::Shutdown { respond_to } => {
@@ -226,70 +214,48 @@ impl TokenManager {
         Ok((Self { sender }, worker_handle))
     }
 
-    pub fn new(sender: Sender<WorkerCommand>) -> Self {
-        Self { sender }
+    async fn send_command<R>(
+        &self,
+        op: &str,
+        make_cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand,
+    ) -> Result<R, AuthnErr> {
+        let (send, recv) = oneshot::channel();
+        self.sender.send(make_cmd(send)).await.map_err(|e| {
+            error!("Failed to send {op} command to actor: {e:?}");
+            AuthnErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+        recv.await.map_err(|e| {
+            error!("Failed to receive {op} response from actor: {e:?}");
+            AuthnErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })
     }
 }
 
 impl TokenManagerExt for TokenManager {
     async fn shutdown(&self) -> Result<(), AuthnErr> {
         info!("Shutting down token manager...");
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Shutdown { respond_to: send })
-            .await
-            .map_err(|e| {
-                AuthnErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            AuthnErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })??;
+        self.send_command("shutdown", |tx| WorkerCommand::Shutdown { respond_to: tx })
+            .await??;
         info!("Token manager shutdown complete");
         Ok(())
     }
 
     async fn get_token(&self) -> Result<Arc<Token>, AuthnErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::GetToken { respond_to: send })
-            .await
-            .map_err(|e| {
-                AuthnErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            AuthnErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command("get_token", |tx| WorkerCommand::GetToken { respond_to: tx })
+            .await?
     }
 
     async fn refresh_token(&self) -> Result<(), AuthnErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::RefreshToken { respond_to: send })
-            .await
-            .map_err(|e| {
-                AuthnErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            AuthnErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command("refresh_token", |tx| WorkerCommand::RefreshToken {
+            respond_to: tx,
+        })
+        .await?
     }
 }
 
