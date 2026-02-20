@@ -1,4 +1,4 @@
-use crate::http::mock::{CapturedRequest, MockCall, MockClient};
+use crate::http::mock::{Call, CapturedRequest, MockClient};
 use miru_agent::http::devices::{self, ActivateParams, IssueTokenParams, UpdateParams};
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use openapi_client::models::{
@@ -37,7 +37,7 @@ pub mod activate {
         .unwrap();
 
         assert_eq!(result, Device::default());
-        assert_eq!(mock.call_count(MockCall::ActivateDevice), 1);
+        assert_eq!(mock.call_count(Call::ActivateDevice), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
@@ -93,7 +93,7 @@ pub mod issue_token {
         .unwrap();
 
         assert_eq!(result, TokenResponse::default());
-        assert_eq!(mock.call_count(MockCall::IssueDeviceToken), 1);
+        assert_eq!(mock.call_count(Call::IssueDeviceToken), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
@@ -151,7 +151,7 @@ pub mod update {
         .unwrap();
 
         assert_eq!(result, Device::default());
-        assert_eq!(mock.call_count(MockCall::UpdateDevice), 1);
+        assert_eq!(mock.call_count(Call::UpdateDevice), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::http::mock::{CapturedRequest, MockCall, MockClient};
+use crate::http::mock::{Call, CapturedRequest, MockClient};
 use miru_agent::http::deployments::{self, ListAllParams, ListParams, UpdateParams};
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::http::query::Page;
@@ -49,7 +49,7 @@ pub mod list {
             ..DeploymentList::default()
         };
         assert_eq!(result, expected);
-        assert_eq!(mock.call_count(MockCall::ListDeployments), 1);
+        assert_eq!(mock.call_count(Call::ListDeployments), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
@@ -182,7 +182,7 @@ pub mod list_all {
             ..BackendDeployment::default()
         }];
         assert_eq!(result, expected);
-        assert_eq!(mock.call_count(MockCall::ListDeployments), 1);
+        assert_eq!(mock.call_count(Call::ListDeployments), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
@@ -247,7 +247,7 @@ pub mod list_all {
             },
         ];
         assert_eq!(result, expected);
-        assert_eq!(mock.call_count(MockCall::ListDeployments), 2);
+        assert_eq!(mock.call_count(Call::ListDeployments), 2);
 
         let base_req = CapturedRequest {
             method: reqwest::Method::GET,
@@ -291,7 +291,7 @@ pub mod list_all {
 
         let expected: Vec<BackendDeployment> = vec![];
         assert_eq!(result, expected);
-        assert_eq!(mock.call_count(MockCall::ListDeployments), 1);
+        assert_eq!(mock.call_count(Call::ListDeployments), 1);
     }
 
     #[tokio::test]
@@ -349,7 +349,7 @@ pub mod update {
             ..BackendDeployment::default()
         };
         assert_eq!(result, expected);
-        assert_eq!(mock.call_count(MockCall::UpdateDeployment), 1);
+        assert_eq!(mock.call_count(Call::UpdateDeployment), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {

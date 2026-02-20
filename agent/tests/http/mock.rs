@@ -19,7 +19,7 @@ use tokio::time::Duration;
 // ================================ MOCK CALL ======================================= //
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum MockCall {
+pub enum Call {
     ActivateDevice,
     IssueDeviceToken,
     UpdateDevice,
@@ -51,7 +51,7 @@ pub struct MockClient {
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
     pub update_deployment_fn: SingleDeploymentFn,
-    pub calls: Arc<Mutex<Vec<MockCall>>>,
+    pub calls: Arc<Mutex<Vec<Call>>>,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -106,7 +106,7 @@ impl MockClient {
         *self.update_deployment_fn.lock().unwrap() = Box::new(f);
     }
 
-    pub fn call_count(&self, target: MockCall) -> usize {
+    pub fn call_count(&self, target: Call) -> usize {
         self.calls
             .lock()
             .unwrap()
@@ -116,43 +116,39 @@ impl MockClient {
     }
 
     pub fn num_update_device_calls(&self) -> usize {
-        self.call_count(MockCall::UpdateDevice)
+        self.call_count(Call::UpdateDevice)
     }
 
     pub fn requests(&self) -> Vec<CapturedRequest> {
         self.requests.lock().unwrap().clone()
     }
 
-    fn match_route(method: &reqwest::Method, path: &str) -> MockCall {
+    fn match_route(method: &reqwest::Method, path: &str) -> Call {
         use reqwest::Method;
         match (method, path) {
-            (m, p) if *m == Method::POST && p.ends_with("/activate") => MockCall::ActivateDevice,
-            (m, p) if *m == Method::POST && p.ends_with("/issue_token") => {
-                MockCall::IssueDeviceToken
-            }
-            (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => MockCall::UpdateDevice,
-            (m, p) if *m == Method::GET && p == "/deployments" => MockCall::ListDeployments,
-            (m, p) if *m == Method::GET && p.starts_with("/deployments/") => {
-                MockCall::GetDeployment
-            }
+            (m, p) if *m == Method::POST && p.ends_with("/activate") => Call::ActivateDevice,
+            (m, p) if *m == Method::POST && p.ends_with("/issue_token") => Call::IssueDeviceToken,
+            (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
+            (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
+            (m, p) if *m == Method::GET && p.starts_with("/deployments/") => Call::GetDeployment,
             (m, p) if *m == Method::PATCH && p.starts_with("/deployments/") => {
-                MockCall::UpdateDeployment
+                Call::UpdateDeployment
             }
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
     }
 
-    fn handle_route(&self, call: &MockCall) -> Result<String, HTTPErr> {
+    fn handle_route(&self, call: &Call) -> Result<String, HTTPErr> {
         match call {
-            MockCall::ActivateDevice => json(&(self.activate_device_fn)()?),
-            MockCall::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
-            MockCall::UpdateDevice => json(&(self.update_device_fn)()?),
-            MockCall::ListDeployments => {
+            Call::ActivateDevice => json(&(self.activate_device_fn)()?),
+            Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
+            Call::UpdateDevice => json(&(self.update_device_fn)()?),
+            Call::ListDeployments => {
                 let list = (self.list_deployments_fn.lock().unwrap())()?;
                 json(&list)
             }
-            MockCall::GetDeployment => json(&(self.get_deployment_fn.lock().unwrap())()?),
-            MockCall::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
+            Call::GetDeployment => json(&(self.get_deployment_fn.lock().unwrap())()?),
+            Call::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
         }
     }
 
