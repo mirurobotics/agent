@@ -159,8 +159,8 @@ fn has_recovered(deployment: &Deployment, new_activity_status: DeploymentActivit
     // check if the new activity status matches the deployment's target status
     match deployment.target_status {
         DeploymentTargetStatus::Staged => {
-            // for staged, we're satisfied with the deployment being in other states as long as
-            // it is not deployed.
+            // for staged, we're satisfied with the deployment being in other states as
+            // long as it is not deployed.
             match new_activity_status {
                 DeploymentActivityStatus::Drifted => true,
                 DeploymentActivityStatus::Staged => true,

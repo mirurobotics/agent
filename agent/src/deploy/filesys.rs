@@ -78,13 +78,13 @@ where
             .as_nanos()
     );
     let temp_dir = staging_dir.subdir(PathBuf::from(name));
-    temp_dir.create().await.map_err(wrap_file_sys_err)?;
+    temp_dir.create().await?;
     for cfg_inst in cfg_insts {
         let content = match content_fetcher.read(cfg_inst.id.clone()).await {
             Ok(c) => c,
             Err(e) => {
                 let _ = temp_dir.delete().await;
-                return Err(wrap_crud_err(e));
+                return Err(DeployErr::from(e));
             }
         };
 
@@ -94,21 +94,13 @@ where
             .await
         {
             let _ = temp_dir.delete().await;
-            return Err(wrap_file_sys_err(e));
+            return Err(DeployErr::from(e));
         }
     }
 
     if let Err(e) = temp_dir.move_to(deployment_dir, Overwrite::Allow).await {
         let _ = temp_dir.delete().await;
-        return Err(wrap_file_sys_err(e));
+        return Err(DeployErr::from(e));
     }
     Ok(())
-}
-
-fn wrap_file_sys_err(e: crate::filesys::errors::FileSysErr) -> DeployErr {
-    DeployErr::from(e)
-}
-
-fn wrap_crud_err(e: crate::crud::errors::CrudErr) -> DeployErr {
-    DeployErr::from(e)
 }
