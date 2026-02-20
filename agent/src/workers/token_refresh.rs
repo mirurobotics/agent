@@ -64,7 +64,7 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
                 .await
             }
             Err(e) => {
-                if e.is_network_connection_error() {
+                if e.is_network_conn_err() {
                     debug!("unable to refresh token due to a network connection error: {e:?}");
                     calc_refresh_wait(
                         token_mngr,

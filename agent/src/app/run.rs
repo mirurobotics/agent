@@ -229,13 +229,13 @@ async fn init_poller_worker(
     info!("Initializing poller worker...");
 
     let syncer = app_state.syncer.clone();
-    let device_file = app_state.device_file.clone();
+    let device_stor = app_state.device_stor.clone();
 
     let poller_handle = tokio::spawn(async move {
         poller::run(
             &options,
             syncer.as_ref(),
-            device_file.as_ref(),
+            device_stor.as_ref(),
             tokio::time::sleep,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
@@ -257,14 +257,14 @@ async fn init_mqtt_worker(
 
     let token_mngr = app_state.token_mngr.clone();
     let syncer = app_state.syncer.clone();
-    let device_file = app_state.device_file.clone();
+    let device_stor = app_state.device_stor.clone();
 
     let mqtt_handle = tokio::spawn(async move {
         mqtt::run(
             &options,
             token_mngr.as_ref(),
             syncer.as_ref(),
-            device_file.as_ref(),
+            device_stor.as_ref(),
             tokio::time::sleep,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
@@ -286,7 +286,7 @@ async fn init_socket_server(
 
     // run the axum server with graceful shutdown
     let server_state = ServerState::new(
-        app_state.device_file.clone(),
+        app_state.device_stor.clone(),
         app_state.http_client.clone(),
         app_state.syncer.clone(),
         app_state.caches.clone(),

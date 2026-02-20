@@ -1,5 +1,5 @@
 // external crates
-use crate::models::Mergeable;
+use crate::models::Patch;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -38,12 +38,12 @@ impl Updates {
     }
 }
 
-impl Mergeable<Updates> for Token {
-    fn merge(&mut self, updates: Updates) {
-        if let Some(token) = updates.token {
+impl Patch<Updates> for Token {
+    fn patch(&mut self, patch: Updates) {
+        if let Some(token) = patch.token {
             self.token = token;
         }
-        if let Some(expires_at) = updates.expires_at {
+        if let Some(expires_at) = patch.expires_at {
             self.expires_at = expires_at;
         }
     }

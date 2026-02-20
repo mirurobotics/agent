@@ -32,7 +32,7 @@ pub trait Error: std::error::Error {
     fn params(&self) -> Option<serde_json::Value> {
         None
     }
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         false
     }
 }
@@ -69,9 +69,9 @@ macro_rules! impl_error {
                     $(Self::$variant(e) => e.http_status(),)+
                 }
             }
-            fn is_network_connection_error(&self) -> bool {
+            fn is_network_conn_err(&self) -> bool {
                 match self {
-                    $(Self::$variant(e) => e.is_network_connection_error(),)+
+                    $(Self::$variant(e) => e.is_network_conn_err(),)+
                 }
             }
             fn params(&self) -> Option<serde_json::Value> {

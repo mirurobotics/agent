@@ -63,7 +63,7 @@ impl std::fmt::Display for TimeoutErr {
 }
 
 impl crate::errors::Error for TimeoutErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -106,7 +106,7 @@ impl std::fmt::Display for ReqwestErr {
 }
 
 impl crate::errors::Error for ReqwestErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         self.kind == ReqwestErrKind::Connection
     }
 }
@@ -160,14 +160,14 @@ pub struct BuildReqwestErr {
 impl crate::errors::Error for BuildReqwestErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Mock error (is network connection error: {is_network_connection_error})")]
+#[error("Mock error (is network connection error: {is_network_conn_err})")]
 pub struct MockErr {
-    pub is_network_connection_error: bool,
+    pub is_network_conn_err: bool,
 }
 
 impl crate::errors::Error for MockErr {
-    fn is_network_connection_error(&self) -> bool {
-        self.is_network_connection_error
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
     }
 }
 

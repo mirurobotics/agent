@@ -6,7 +6,7 @@ use std::time::Duration;
 
 // internal modules
 use crate::models::device;
-use crate::storage::device::DeviceFile;
+use crate::storage::Device;
 use crate::sync::syncer::{CooldownEnd, SyncEvent, SyncerExt};
 
 // external crates
@@ -31,7 +31,7 @@ impl Default for Options {
 pub async fn run<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
-    device_file: &DeviceFile,
+    device_stor: &Device,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -46,7 +46,7 @@ pub async fn run<F, Fut, SyncerT: SyncerExt>(
         _ = run_impl(
             options,
             syncer,
-            device_file,
+            device_stor,
             sleep_fn,
         ) => {}
     }
@@ -55,7 +55,7 @@ pub async fn run<F, Fut, SyncerT: SyncerExt>(
 async fn run_impl<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
-    device_file: &DeviceFile,
+    device_stor: &Device,
     sleep_fn: F, // for testing purposes
 ) where
     F: Fn(Duration) -> Fut,
@@ -118,7 +118,7 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
                             last_synced_at: Some(Utc::now()),
                             ..device::Updates::empty()
                         };
-                        let _ = device_file.patch(patch).await;
+                        let _ = device_stor.patch(patch).await;
                     }
                     _ => {}
                 }

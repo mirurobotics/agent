@@ -1,12 +1,16 @@
 use crate::crud::prelude::*;
-use crate::deploy::{apply::apply, filesys, fsm};
+use crate::deploy::{
+    apply::{self, apply},
+    fsm,
+    observer::{self, Observer},
+};
+use crate::filesys::dir::Dir;
 use crate::filesys::Overwrite;
 use crate::http;
 use crate::http::deployments;
 use crate::models::config_instance::ConfigInstance;
 use crate::models::deployment::Deployment;
-use crate::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
-use crate::storage::deployments::DeploymentCache;
+use crate::storage;
 use crate::sync::errors::*;
 use crate::trace;
 use openapi_client::models::{
@@ -18,12 +22,15 @@ use openapi_client::models::{
 use tracing::{debug, error};
 
 // =================================== SYNC ======================================== //
+#[allow(clippy::too_many_arguments)]
 pub async fn sync<HTTPClientT: http::ClientI>(
-    deployment_cache: &DeploymentCache,
-    cfg_inst_cache: &ConfigInstanceCache,
-    cfg_inst_content_cache: &ConfigInstanceContentCache,
+    deployment_stor: &storage::Deployments,
+    cfg_inst_stor: &storage::CfgInsts,
+    cfg_inst_content_stor: &storage::CfgInstContent,
     http_client: &HTTPClientT,
-    ctx: &filesys::DeployContext<'_, ConfigInstanceContentCache>,
+    staging_dir: &Dir,
+    target_dir: &Dir,
+    retry_policy: &fsm::RetryPolicy,
     token: &str,
 ) -> Result<(), SyncErr> {
     let mut errors = Vec::new();
@@ -31,9 +38,9 @@ pub async fn sync<HTTPClientT: http::ClientI>(
     // pull deployments from server
     debug!("Pulling deployments from server");
     let result = pull(
-        deployment_cache,
-        cfg_inst_cache,
-        cfg_inst_content_cache,
+        deployment_stor,
+        cfg_inst_stor,
+        cfg_inst_content_stor,
         http_client,
         token,
     )
@@ -45,29 +52,41 @@ pub async fn sync<HTTPClientT: http::ClientI>(
         }
     };
 
-    // read the deployments which need to be applied
-    debug!("Reading deployments which need to be applied");
-    let deployments_to_apply = deployment_cache
-        .find_where(|deployment| fsm::is_action_required(fsm::next_action(deployment, true)))
-        .await?;
-
-    // apply each deployment
-    for deployment in deployments_to_apply {
-        debug!("Applying deployment {}", deployment.id);
-        match apply(&deployment, deployment_cache, cfg_inst_cache, ctx).await {
-            Ok(_updated) => {
-                debug!("Successfully applied deployment {}", deployment.id);
-            }
-            Err(e) => {
-                error!("Error applying deployment {}: {:?}", deployment.id, e);
-                errors.push(SyncErr::from(e));
-            }
+    // apply deployments
+    debug!("Applying deployments");
+    let args = apply::Args {
+        deployments: deployment_stor,
+        cfg_insts: cfg_inst_stor,
+        contents: cfg_inst_content_stor,
+        target_dir,
+        staging_dir,
+        retry_policy,
+    };
+    let mut storage_observer = observer::Storage { deployment_stor };
+    let mut observers: Vec<&mut dyn Observer> = vec![&mut storage_observer];
+    let outcomes = match apply(&args, &mut observers).await {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to apply deployments: {e}");
+            errors.push(SyncErr::from(e));
+            vec![]
+        }
+    };
+    for outcome in outcomes {
+        if let Some(e) = outcome.error {
+            error!(
+                "Error applying deployment {}: {:?}",
+                outcome.deployment.id, e
+            );
+            errors.push(SyncErr::from(e));
+        } else {
+            debug!("Successfully applied deployment {}", outcome.deployment.id);
         }
     }
 
     // push deployment status updates to server
     debug!("Pushing deployment status updates to server");
-    let result = push(deployment_cache, http_client, token).await;
+    let result = push(deployment_stor, http_client, token).await;
     match result {
         Ok(_) => (),
         Err(e) => {
@@ -87,9 +106,9 @@ pub async fn sync<HTTPClientT: http::ClientI>(
 
 // =================================== PULL ======================================== //
 async fn pull<HTTPClientT: http::ClientI>(
-    deployment_cache: &DeploymentCache,
-    cfg_inst_cache: &ConfigInstanceCache,
-    cfg_inst_content_cache: &ConfigInstanceContentCache,
+    deployment_stor: &storage::Deployments,
+    cfg_inst_stor: &storage::CfgInsts,
+    cfg_inst_content_stor: &storage::CfgInstContent,
     http_client: &HTTPClientT,
     token: &str,
 ) -> Result<(), SyncErr> {
@@ -114,7 +133,7 @@ async fn pull<HTTPClientT: http::ClientI>(
 
             // Store config instance content if expanded
             if let Some(ref content) = backend_ci.content {
-                if let Err(e) = cfg_inst_content_cache
+                if let Err(e) = cfg_inst_content_stor
                     .write(
                         ci_id.clone(),
                         content.clone(),
@@ -132,7 +151,7 @@ async fn pull<HTTPClientT: http::ClientI>(
             }
 
             // Store config instance metadata
-            if let Err(e) = cfg_inst_cache
+            if let Err(e) = cfg_inst_stor
                 .write(ci_id.clone(), ci, |_, _| false, Overwrite::Allow)
                 .await
             {
@@ -147,16 +166,13 @@ async fn pull<HTTPClientT: http::ClientI>(
         let new_deployment = Deployment::from_backend(backend_deployment);
 
         // Check if we already have this deployment cached
-        let existing = deployment_cache
-            .read_optional(deployment_id.clone())
-            .await?;
+        let existing = deployment_stor.read_optional(deployment_id.clone()).await?;
 
         // Merge: preserve agent-side fields (attempts, cooldown) from cached version
         let merged = match existing {
             Some(cached) => Deployment {
                 // Update from backend
                 description: new_deployment.description,
-                status: new_deployment.status,
                 activity_status: new_deployment.activity_status,
                 error_status: new_deployment.error_status,
                 target_status: new_deployment.target_status,
@@ -171,7 +187,7 @@ async fn pull<HTTPClientT: http::ClientI>(
         };
 
         // Write to cache
-        if let Err(e) = deployment_cache
+        if let Err(e) = deployment_stor
             .write(
                 deployment_id.clone(),
                 merged,
@@ -213,12 +229,12 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
 
 // =================================== PUSH ======================================== //
 async fn push<HTTPClientT: http::ClientI>(
-    deployment_cache: &DeploymentCache,
+    deployment_stor: &storage::Deployments,
     http_client: &HTTPClientT,
     token: &str,
 ) -> Result<(), SyncErr> {
     // get all dirty (unsynced) deployments
-    let dirty_deployments = deployment_cache.get_dirty_entries().await?;
+    let dirty_deployments = deployment_stor.get_dirty_entries().await?;
     debug!(
         "Found {} dirty deployments to push",
         dirty_deployments.len(),
@@ -229,14 +245,12 @@ async fn push<HTTPClientT: http::ClientI>(
     for dirty_entry in dirty_deployments {
         let deployment = dirty_entry.value;
 
-        let activity_status = Some(
-            crate::models::deployment::DeploymentActivityStatus::to_backend(
-                &deployment.activity_status,
-            ),
-        );
-        let error_status = Some(
-            crate::models::deployment::DeploymentErrorStatus::to_backend(&deployment.error_status),
-        );
+        let activity_status = Some(crate::models::deployment::DplActivity::to_backend(
+            &deployment.activity_status,
+        ));
+        let error_status = Some(crate::models::deployment::DplErrStatus::to_backend(
+            &deployment.error_status,
+        ));
         let updates = UpdateDeploymentRequest {
             activity_status,
             error_status,
@@ -269,7 +283,7 @@ async fn push<HTTPClientT: http::ClientI>(
 
         // update the cache to mark as clean
         let deployment_id = deployment.id.clone();
-        if let Err(e) = deployment_cache
+        if let Err(e) = deployment_stor
             .write(
                 deployment.id.clone(),
                 deployment,

@@ -17,7 +17,7 @@ use crate::mqtt::{
     options::{ConnectAddress, Credentials, Options as MqttOptions},
     topics,
 };
-use crate::storage::device::DeviceFile;
+use crate::storage;
 use crate::sync::syncer::{SyncEvent, SyncerExt};
 
 // external crates
@@ -49,7 +49,7 @@ pub async fn run<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt>(
     options: &Options,
     token_mngr: &TokenManagerT,
     syncer: &SyncerT,
-    device_file: &DeviceFile,
+    device_stor: &storage::Device,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -65,7 +65,7 @@ pub async fn run<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt>(
             options,
             token_mngr,
             syncer,
-            device_file,
+            device_stor,
             sleep_fn,
         ) => {}
     }
@@ -75,7 +75,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
     options: &Options,
     token_mngr: &TokenManagerT,
     syncer: &SyncerT,
-    device_file: &DeviceFile,
+    device_stor: &storage::Device,
     sleep_fn: F,
 ) where
     F: Fn(Duration) -> Fut,
@@ -90,7 +90,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
         watch::channel(SyncEvent::SyncSuccess).1
     });
 
-    let device = device_file
+    let device = device_stor
         .read()
         .await
         .unwrap_or_else(|_| Arc::new(device::Device::default()));
@@ -131,7 +131,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
                             &state.client,
                             syncer,
                             &device.id,
-                            device_file,
+                            device_stor,
                         ).await;
                     }
                     Err(e) => {
@@ -141,7 +141,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
                             &device,
                             token_mngr,
                             &options.broker_address,
-                            device_file,
+                            device_stor,
                         ).await;
                     }
                 }
@@ -216,7 +216,7 @@ pub async fn handle_event<MQTTClientT: ClientI, SyncerT: SyncerExt>(
     mqtt_client: &MQTTClientT,
     syncer: &SyncerT,
     device_id: &str,
-    device_file: &DeviceFile,
+    device_stor: &storage::Device,
 ) -> ErrStreak {
     let err_streak = 0;
 
@@ -227,12 +227,12 @@ pub async fn handle_event<MQTTClientT: ClientI, SyncerT: SyncerExt>(
                 return err_streak;
             }
             info!("Established connection to mqtt broker");
-            let _ = device_file.patch(device::Updates::connected()).await;
+            let _ = device_stor.patch(device::Updates::connected()).await;
         }
         // update the device connection status on successful disconnections
         Event::Incoming(Incoming::Disconnect) => {
             info!("Disconnected from mqtt broker");
-            let _ = device_file.patch(device::Updates::disconnected()).await;
+            let _ = device_stor.patch(device::Updates::disconnected()).await;
         }
 
         // sync the device if the payload is a sync request
@@ -310,9 +310,9 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     device: &Device,
     token_mngr: &TokenManagerT,
     broker_address: &ConnectAddress,
-    device_file: &DeviceFile,
+    device_stor: &storage::Device,
 ) -> State {
-    state.err_streak = if e.is_network_connection_error() {
+    state.err_streak = if e.is_network_conn_err() {
         // don't increment the error streak on network connection errors
         state.err_streak
     } else {
@@ -320,14 +320,14 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     };
 
     // update the device to be offline
-    match device_file.read().await {
+    match device_stor.read().await {
         Ok(device) => {
             if device.status == DeviceStatus::Online {
-                let _ = device_file.patch(device::Updates::disconnected()).await;
+                let _ = device_stor.patch(device::Updates::disconnected()).await;
             }
         }
         Err(_) => {
-            let _ = device_file.patch(device::Updates::disconnected()).await;
+            let _ = device_stor.patch(device::Updates::disconnected()).await;
         }
     }
 
@@ -350,7 +350,7 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
         state
     }
     // network connection error -> ignore
-    else if e.is_network_connection_error() {
+    else if e.is_network_conn_err() {
         debug!("network connection error while polling backend for sync command via mqtt: {e:?}");
         state
     // other errors -> log

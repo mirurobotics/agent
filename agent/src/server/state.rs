@@ -5,12 +5,12 @@ use std::sync::Arc;
 use crate::activity;
 use crate::authn::token_mngr::TokenManager;
 use crate::http;
-use crate::storage::{caches::Caches, device::DeviceFile};
+use crate::storage::{Caches, Device};
 use crate::sync::syncer::Syncer;
 
 #[derive(Clone, Debug)]
 pub struct ServerState {
-    pub device_file: Arc<DeviceFile>,
+    pub device_stor: Arc<Device>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<Syncer>,
     pub caches: Arc<Caches>,
@@ -20,7 +20,7 @@ pub struct ServerState {
 
 impl ServerState {
     pub fn new(
-        device_file: Arc<DeviceFile>,
+        device_stor: Arc<Device>,
         http_client: Arc<http::Client>,
         syncer: Arc<Syncer>,
         caches: Arc<Caches>,
@@ -28,7 +28,7 @@ impl ServerState {
         activity_tracker: Arc<activity::Tracker>,
     ) -> Self {
         ServerState {
-            device_file,
+            device_stor,
             http_client,
             syncer,
             caches,

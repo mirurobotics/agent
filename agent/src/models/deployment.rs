@@ -1,6 +1,7 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::config_instance::ConfigInstanceID;
+use crate::models::config_instance::CfgInstID;
+use crate::models::Patch;
 use openapi_client::models as backend_client;
 
 // external crates
@@ -13,7 +14,7 @@ use uuid::Uuid;
 // =========================== DEPLOYMENT TARGET STATUS ============================== //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum DeploymentTargetStatus {
+pub enum DplTarget {
     #[default]
     Staged,
     Deployed,
@@ -21,17 +22,17 @@ pub enum DeploymentTargetStatus {
     Archived,
 }
 
-impl<'de> Deserialize<'de> for DeploymentTargetStatus {
+impl<'de> Deserialize<'de> for DplTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let default = DeploymentTargetStatus::default();
+        let default = DplTarget::default();
         match s.as_str() {
-            "staged" => Ok(DeploymentTargetStatus::Staged),
-            "deployed" => Ok(DeploymentTargetStatus::Deployed),
-            "archived" => Ok(DeploymentTargetStatus::Archived),
+            "staged" => Ok(DplTarget::Staged),
+            "deployed" => Ok(DplTarget::Deployed),
+            "archived" => Ok(DplTarget::Archived),
             status => {
                 warn!(
                     "deployment target status '{}' is not valid, defaulting to {:?}",
@@ -43,42 +44,34 @@ impl<'de> Deserialize<'de> for DeploymentTargetStatus {
     }
 }
 
-impl DeploymentTargetStatus {
-    pub fn variants() -> Vec<DeploymentTargetStatus> {
-        vec![
-            DeploymentTargetStatus::Staged,
-            DeploymentTargetStatus::Deployed,
-            DeploymentTargetStatus::Archived,
-        ]
+impl DplTarget {
+    pub fn variants() -> Vec<DplTarget> {
+        vec![DplTarget::Staged, DplTarget::Deployed, DplTarget::Archived]
     }
 
-    pub fn from_backend(
-        target_status: &backend_client::DeploymentTargetStatus,
-    ) -> DeploymentTargetStatus {
+    pub fn from_backend(target_status: &backend_client::DeploymentTargetStatus) -> DplTarget {
         match target_status {
             backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED => {
-                DeploymentTargetStatus::Staged
+                DplTarget::Staged
             }
             backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED => {
-                DeploymentTargetStatus::Deployed
+                DplTarget::Deployed
             }
             backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED => {
-                DeploymentTargetStatus::Archived
+                DplTarget::Archived
             }
         }
     }
 
-    pub fn to_backend(
-        target_status: &DeploymentTargetStatus,
-    ) -> backend_client::DeploymentTargetStatus {
+    pub fn to_backend(target_status: &DplTarget) -> backend_client::DeploymentTargetStatus {
         match target_status {
-            DeploymentTargetStatus::Staged => {
+            DplTarget::Staged => {
                 backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
             }
-            DeploymentTargetStatus::Deployed => {
+            DplTarget::Deployed => {
                 backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED
             }
-            DeploymentTargetStatus::Archived => {
+            DplTarget::Archived => {
                 backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED
             }
         }
@@ -88,7 +81,7 @@ impl DeploymentTargetStatus {
 // ========================= DEPLOYMENT ACTIVITY STATUS ============================= //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum DeploymentActivityStatus {
+pub enum DplActivity {
     #[default]
     Drifted,
     Staged,
@@ -97,19 +90,19 @@ pub enum DeploymentActivityStatus {
     Archived,
 }
 
-impl<'de> Deserialize<'de> for DeploymentActivityStatus {
+impl<'de> Deserialize<'de> for DplActivity {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let default = DeploymentActivityStatus::default();
+        let default = DplActivity::default();
         match s.as_str() {
-            "drifted" => Ok(DeploymentActivityStatus::Drifted),
-            "staged" => Ok(DeploymentActivityStatus::Staged),
-            "queued" => Ok(DeploymentActivityStatus::Queued),
-            "deployed" => Ok(DeploymentActivityStatus::Deployed),
-            "archived" => Ok(DeploymentActivityStatus::Archived),
+            "drifted" => Ok(DplActivity::Drifted),
+            "staged" => Ok(DplActivity::Staged),
+            "queued" => Ok(DplActivity::Queued),
+            "deployed" => Ok(DplActivity::Deployed),
+            "archived" => Ok(DplActivity::Archived),
             status => {
                 warn!(
                     "deployment activity status '{}' is not valid, defaulting to {:?}",
@@ -121,56 +114,52 @@ impl<'de> Deserialize<'de> for DeploymentActivityStatus {
     }
 }
 
-impl DeploymentActivityStatus {
-    pub fn variants() -> Vec<DeploymentActivityStatus> {
+impl DplActivity {
+    pub fn variants() -> Vec<DplActivity> {
         vec![
-            DeploymentActivityStatus::Drifted,
-            DeploymentActivityStatus::Staged,
-            DeploymentActivityStatus::Queued,
-            DeploymentActivityStatus::Deployed,
-            DeploymentActivityStatus::Archived,
+            DplActivity::Drifted,
+            DplActivity::Staged,
+            DplActivity::Queued,
+            DplActivity::Deployed,
+            DplActivity::Archived,
         ]
     }
 
-    pub fn from_backend(
-        activity_status: &backend_client::DeploymentActivityStatus,
-    ) -> DeploymentActivityStatus {
+    pub fn from_backend(activity_status: &backend_client::DeploymentActivityStatus) -> DplActivity {
         match activity_status {
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED => {
-                DeploymentActivityStatus::Drifted
+                DplActivity::Drifted
             }
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED => {
-                DeploymentActivityStatus::Staged
+                DplActivity::Staged
             }
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => {
-                DeploymentActivityStatus::Queued
+                DplActivity::Queued
             }
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => {
-                DeploymentActivityStatus::Deployed
+                DplActivity::Deployed
             }
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => {
-                DeploymentActivityStatus::Archived
+                DplActivity::Archived
             }
         }
     }
 
-    pub fn to_backend(
-        activity_status: &DeploymentActivityStatus,
-    ) -> backend_client::DeploymentActivityStatus {
+    pub fn to_backend(activity_status: &DplActivity) -> backend_client::DeploymentActivityStatus {
         match activity_status {
-            DeploymentActivityStatus::Drifted => {
+            DplActivity::Drifted => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
             }
-            DeploymentActivityStatus::Staged => {
+            DplActivity::Staged => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED
             }
-            DeploymentActivityStatus::Queued => {
+            DplActivity::Queued => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
             }
-            DeploymentActivityStatus::Deployed => {
+            DplActivity::Deployed => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
             }
-            DeploymentActivityStatus::Archived => {
+            DplActivity::Archived => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
             }
         }
@@ -180,24 +169,24 @@ impl DeploymentActivityStatus {
 // =========================== DEPLOYMENT ERROR STATUS =============================== //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum DeploymentErrorStatus {
+pub enum DplErrStatus {
     #[default]
     None,
     Failed,
     Retrying,
 }
 
-impl<'de> Deserialize<'de> for DeploymentErrorStatus {
+impl<'de> Deserialize<'de> for DplErrStatus {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let default = DeploymentErrorStatus::default();
+        let default = DplErrStatus::default();
         match s.as_str() {
-            "none" => Ok(DeploymentErrorStatus::None),
-            "failed" => Ok(DeploymentErrorStatus::Failed),
-            "retrying" => Ok(DeploymentErrorStatus::Retrying),
+            "none" => Ok(DplErrStatus::None),
+            "failed" => Ok(DplErrStatus::Failed),
+            "retrying" => Ok(DplErrStatus::Retrying),
             status => {
                 warn!(
                     "deployment error status '{}' is not valid, defaulting to {:?}",
@@ -209,42 +198,38 @@ impl<'de> Deserialize<'de> for DeploymentErrorStatus {
     }
 }
 
-impl DeploymentErrorStatus {
-    pub fn variants() -> Vec<DeploymentErrorStatus> {
+impl DplErrStatus {
+    pub fn variants() -> Vec<DplErrStatus> {
         vec![
-            DeploymentErrorStatus::None,
-            DeploymentErrorStatus::Failed,
-            DeploymentErrorStatus::Retrying,
+            DplErrStatus::None,
+            DplErrStatus::Failed,
+            DplErrStatus::Retrying,
         ]
     }
 
-    pub fn from_backend(
-        error_status: &backend_client::DeploymentErrorStatus,
-    ) -> DeploymentErrorStatus {
+    pub fn from_backend(error_status: &backend_client::DeploymentErrorStatus) -> DplErrStatus {
         match error_status {
             backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE => {
-                DeploymentErrorStatus::None
+                DplErrStatus::None
             }
             backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED => {
-                DeploymentErrorStatus::Failed
+                DplErrStatus::Failed
             }
             backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING => {
-                DeploymentErrorStatus::Retrying
+                DplErrStatus::Retrying
             }
         }
     }
 
-    pub fn to_backend(
-        error_status: &DeploymentErrorStatus,
-    ) -> backend_client::DeploymentErrorStatus {
+    pub fn to_backend(error_status: &DplErrStatus) -> backend_client::DeploymentErrorStatus {
         match error_status {
-            DeploymentErrorStatus::None => {
+            DplErrStatus::None => {
                 backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE
             }
-            DeploymentErrorStatus::Failed => {
+            DplErrStatus::Failed => {
                 backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED
             }
-            DeploymentErrorStatus::Retrying => {
+            DplErrStatus::Retrying => {
                 backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING
             }
         }
@@ -254,7 +239,7 @@ impl DeploymentErrorStatus {
 // =============================== DEPLOYMENT STATUS ================================ //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum DeploymentStatus {
+pub enum DplStatus {
     #[default]
     Drifted,
     Staged,
@@ -265,21 +250,21 @@ pub enum DeploymentStatus {
     Retrying,
 }
 
-impl<'de> Deserialize<'de> for DeploymentStatus {
+impl<'de> Deserialize<'de> for DplStatus {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let default = DeploymentStatus::default();
+        let default = DplStatus::default();
         match s.as_str() {
-            "drifted" => Ok(DeploymentStatus::Drifted),
-            "staged" => Ok(DeploymentStatus::Staged),
-            "queued" => Ok(DeploymentStatus::Queued),
-            "deployed" => Ok(DeploymentStatus::Deployed),
-            "archived" => Ok(DeploymentStatus::Archived),
-            "failed" => Ok(DeploymentStatus::Failed),
-            "retrying" => Ok(DeploymentStatus::Retrying),
+            "drifted" => Ok(DplStatus::Drifted),
+            "staged" => Ok(DplStatus::Staged),
+            "queued" => Ok(DplStatus::Queued),
+            "deployed" => Ok(DplStatus::Deployed),
+            "archived" => Ok(DplStatus::Archived),
+            "failed" => Ok(DplStatus::Failed),
+            "retrying" => Ok(DplStatus::Retrying),
             status => {
                 warn!(
                     "deployment status '{}' is not valid, defaulting to {:?}",
@@ -291,73 +276,57 @@ impl<'de> Deserialize<'de> for DeploymentStatus {
     }
 }
 
-impl DeploymentStatus {
-    pub fn variants() -> Vec<DeploymentStatus> {
+impl DplStatus {
+    pub fn variants() -> Vec<DplStatus> {
         vec![
-            DeploymentStatus::Drifted,
-            DeploymentStatus::Staged,
-            DeploymentStatus::Queued,
-            DeploymentStatus::Deployed,
-            DeploymentStatus::Archived,
-            DeploymentStatus::Failed,
-            DeploymentStatus::Retrying,
+            DplStatus::Drifted,
+            DplStatus::Staged,
+            DplStatus::Queued,
+            DplStatus::Deployed,
+            DplStatus::Archived,
+            DplStatus::Failed,
+            DplStatus::Retrying,
         ]
     }
 
-    pub fn from_backend(status: &backend_client::DeploymentStatus) -> DeploymentStatus {
+    pub fn from_backend(status: &backend_client::DeploymentStatus) -> DplStatus {
         match status {
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => {
-                DeploymentStatus::Drifted
-            }
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => DeploymentStatus::Staged,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => DeploymentStatus::Queued,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => {
-                DeploymentStatus::Deployed
-            }
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => {
-                DeploymentStatus::Archived
-            }
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => DeploymentStatus::Failed,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => {
-                DeploymentStatus::Retrying
-            }
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => DplStatus::Drifted,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => DplStatus::Staged,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => DplStatus::Queued,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => DplStatus::Deployed,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => DplStatus::Archived,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => DplStatus::Failed,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => DplStatus::Retrying,
         }
     }
 
-    pub fn to_backend(status: &DeploymentStatus) -> backend_client::DeploymentStatus {
+    pub fn to_backend(status: &DplStatus) -> backend_client::DeploymentStatus {
         match status {
-            DeploymentStatus::Drifted => {
-                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED
-            }
-            DeploymentStatus::Staged => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-            DeploymentStatus::Queued => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            DeploymentStatus::Deployed => {
-                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED
-            }
-            DeploymentStatus::Archived => {
-                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED
-            }
-            DeploymentStatus::Failed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-            DeploymentStatus::Retrying => {
-                backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING
-            }
+            DplStatus::Drifted => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+            DplStatus::Staged => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+            DplStatus::Queued => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+            DplStatus::Deployed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            DplStatus::Archived => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+            DplStatus::Failed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+            DplStatus::Retrying => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
         }
     }
 
     pub fn from_activity_and_error(
-        activity_status: &DeploymentActivityStatus,
-        error_status: &DeploymentErrorStatus,
-    ) -> DeploymentStatus {
+        activity_status: &DplActivity,
+        error_status: &DplErrStatus,
+    ) -> DplStatus {
         match error_status {
-            DeploymentErrorStatus::None => match activity_status {
-                DeploymentActivityStatus::Drifted => DeploymentStatus::Drifted,
-                DeploymentActivityStatus::Staged => DeploymentStatus::Staged,
-                DeploymentActivityStatus::Queued => DeploymentStatus::Queued,
-                DeploymentActivityStatus::Deployed => DeploymentStatus::Deployed,
-                DeploymentActivityStatus::Archived => DeploymentStatus::Archived,
+            DplErrStatus::None => match activity_status {
+                DplActivity::Drifted => DplStatus::Drifted,
+                DplActivity::Staged => DplStatus::Staged,
+                DplActivity::Queued => DplStatus::Queued,
+                DplActivity::Deployed => DplStatus::Deployed,
+                DplActivity::Archived => DplStatus::Archived,
             },
-            DeploymentErrorStatus::Retrying => DeploymentStatus::Retrying,
-            DeploymentErrorStatus::Failed => DeploymentStatus::Failed,
+            DplErrStatus::Retrying => DplStatus::Retrying,
+            DplErrStatus::Failed => DplStatus::Failed,
         }
     }
 }
@@ -369,18 +338,17 @@ pub type DeploymentID = String;
 pub struct Deployment {
     pub id: String,
     pub description: String,
-    pub status: DeploymentStatus,
-    pub activity_status: DeploymentActivityStatus,
-    pub error_status: DeploymentErrorStatus,
-    pub target_status: DeploymentTargetStatus,
+    pub activity_status: DplActivity,
+    pub error_status: DplErrStatus,
+    pub target_status: DplTarget,
     pub device_id: String,
     pub release_id: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    pub config_instance_ids: Vec<ConfigInstanceID>,
+    pub config_instance_ids: Vec<CfgInstID>,
     // Agent-side fields for retry logic (not from backend)
     pub attempts: u32,
-    pub cooldown_ends_at: Option<DateTime<Utc>>,
+    pub cooldown_ends_at: DateTime<Utc>,
 }
 
 impl Default for Deployment {
@@ -388,16 +356,15 @@ impl Default for Deployment {
         Self {
             id: format!("unknown-{}", Uuid::new_v4()),
             description: String::new(),
-            status: DeploymentStatus::Staged,
-            activity_status: DeploymentActivityStatus::Staged,
-            error_status: DeploymentErrorStatus::None,
-            target_status: DeploymentTargetStatus::Staged,
+            activity_status: DplActivity::Staged,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Staged,
             device_id: format!("unknown-{}", Uuid::new_v4()),
             release_id: format!("unknown-{}", Uuid::new_v4()),
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
             attempts: 0,
-            cooldown_ends_at: None,
+            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             config_instance_ids: Vec::new(),
         }
     }
@@ -408,10 +375,9 @@ impl Deployment {
         Deployment {
             id: deployment.id,
             description: deployment.description,
-            status: DeploymentStatus::from_backend(&deployment.status),
-            activity_status: DeploymentActivityStatus::from_backend(&deployment.activity_status),
-            error_status: DeploymentErrorStatus::from_backend(&deployment.error_status),
-            target_status: DeploymentTargetStatus::from_backend(&deployment.target_status),
+            activity_status: DplActivity::from_backend(&deployment.activity_status),
+            error_status: DplErrStatus::from_backend(&deployment.error_status),
+            target_status: DplTarget::from_backend(&deployment.target_status),
             device_id: deployment.device_id,
             release_id: deployment.release_id,
             created_at: deployment
@@ -423,7 +389,7 @@ impl Deployment {
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             attempts: 0,
-            cooldown_ends_at: None,
+            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             config_instance_ids: deployment
                 .config_instances
                 .map(|instances| instances.into_iter().map(|inst| inst.id).collect())
@@ -431,19 +397,16 @@ impl Deployment {
         }
     }
 
-    pub fn status(&self) -> DeploymentStatus {
-        DeploymentStatus::from_activity_and_error(&self.activity_status, &self.error_status)
+    pub fn status(&self) -> DplStatus {
+        DplStatus::from_activity_and_error(&self.activity_status, &self.error_status)
     }
 
     pub fn is_in_cooldown(&self) -> bool {
-        match self.cooldown_ends_at {
-            Some(cooldown_ends_at) => Utc::now() < cooldown_ends_at,
-            None => false,
-        }
+        Utc::now() < self.cooldown_ends_at
     }
 
     pub fn set_cooldown(&mut self, cooldown: TimeDelta) {
-        self.cooldown_ends_at = Some(Utc::now() + cooldown);
+        self.cooldown_ends_at = Utc::now() + cooldown;
     }
 
     pub fn attempts(&self) -> u32 {
@@ -460,17 +423,16 @@ impl<'de> Deserialize<'de> for Deployment {
         pub struct DeserializeDeployment {
             id: String,
             description: String,
-            status: DeploymentStatus,
-            activity_status: DeploymentActivityStatus,
-            error_status: DeploymentErrorStatus,
-            target_status: DeploymentTargetStatus,
+            activity_status: DplActivity,
+            error_status: DplErrStatus,
+            target_status: DplTarget,
             device_id: String,
             release_id: String,
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
             attempts: Option<u32>,
             cooldown_ends_at: Option<DateTime<Utc>>,
-            config_instance_ids: Vec<ConfigInstanceID>,
+            config_instance_ids: Vec<CfgInstID>,
         }
 
         let result = DeserializeDeployment::deserialize(deserializer)?;
@@ -479,7 +441,6 @@ impl<'de> Deserialize<'de> for Deployment {
         Ok(Deployment {
             id: result.id,
             description: result.description,
-            status: result.status,
             activity_status: result.activity_status,
             error_status: result.error_status,
             target_status: result.target_status,
@@ -494,8 +455,46 @@ impl<'de> Deserialize<'de> for Deployment {
             attempts: result
                 .attempts
                 .unwrap_or_else(|| deserialize_error!("deployment", "attempts", default.attempts)),
-            cooldown_ends_at: result.cooldown_ends_at,
+            cooldown_ends_at: result
+                .cooldown_ends_at
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             config_instance_ids: result.config_instance_ids,
         })
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Updates {
+    pub activity_status: Option<DplActivity>,
+    pub error_status: Option<DplErrStatus>,
+    pub attempts: Option<u32>,
+    pub cooldown: Option<TimeDelta>,
+}
+
+impl Updates {
+    pub fn empty() -> Self {
+        Self {
+            activity_status: None,
+            error_status: None,
+            attempts: None,
+            cooldown: None,
+        }
+    }
+}
+
+impl Patch<Updates> for Deployment {
+    fn patch(&mut self, patch: Updates) {
+        if let Some(activity_status) = patch.activity_status {
+            self.activity_status = activity_status;
+        }
+        if let Some(error_status) = patch.error_status {
+            self.error_status = error_status;
+        }
+        if let Some(attempts) = patch.attempts {
+            self.attempts = attempts;
+        }
+        if let Some(cooldown) = patch.cooldown {
+            self.set_cooldown(cooldown);
+        }
     }
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::{
     filesys::{errors::*, file::File, Atomic, Overwrite, WriteOptions},
-    models::Mergeable,
+    models::Patch,
     trace,
 };
 
@@ -19,18 +19,18 @@ use tracing::{error, info};
 
 // ============================== SINGLE THREADED ================================== //
 #[derive(Debug)]
-pub struct SingleThreadCachedFile<ContentT, UpdatesT>
+pub struct SingleThreadCachedFile<ContentT, PatchT>
 where
-    ContentT: Clone + Serialize + DeserializeOwned + Mergeable<UpdatesT> + PartialEq,
+    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub file: File,
     cache: Arc<ContentT>,
-    _phantom: std::marker::PhantomData<UpdatesT>,
+    _phantom: std::marker::PhantomData<PatchT>,
 }
 
-impl<ContentT, UpdatesT> SingleThreadCachedFile<ContentT, UpdatesT>
+impl<ContentT, PatchT> SingleThreadCachedFile<ContentT, PatchT>
 where
-    ContentT: Clone + Serialize + DeserializeOwned + Mergeable<UpdatesT> + PartialEq,
+    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub async fn new(file: File) -> Result<Self, FileSysErr> {
         let cache = file.read_json::<ContentT>().await?;
@@ -86,10 +86,10 @@ where
         Ok(())
     }
 
-    pub async fn patch(&mut self, updates: UpdatesT) -> Result<(), FileSysErr> {
+    pub async fn patch(&mut self, patch: PatchT) -> Result<(), FileSysErr> {
         let copy = (*self.cache).clone();
         let mut content = (*self.cache).clone();
-        content.merge(updates);
+        content.patch(patch);
         // only write the content if it has changed
         if content == copy {
             return Ok(());
@@ -100,21 +100,21 @@ where
 
 // ================================ CONCURRENT ===================================== //
 
-pub trait ConcurrentUpdatesT: Send + Sync + 'static {}
-impl<T> ConcurrentUpdatesT for T where T: Send + Sync + 'static {}
+pub trait ConcurrentPatchT: Send + Sync + 'static {}
+impl<T> ConcurrentPatchT for T where T: Send + Sync + 'static {}
 
-pub trait ConcurrentContentT<UpdatesT>:
-    Clone + Serialize + DeserializeOwned + Mergeable<UpdatesT> + Send + Sync + 'static + PartialEq
+pub trait ConcurrentContentT<PatchT>:
+    Clone + Serialize + DeserializeOwned + Patch<PatchT> + Send + Sync + 'static + PartialEq
 {
 }
 impl<T, U> ConcurrentContentT<U> for T where
-    T: Clone + Serialize + DeserializeOwned + Mergeable<U> + Send + Sync + 'static + PartialEq
+    T: Clone + Serialize + DeserializeOwned + Patch<U> + Send + Sync + 'static + PartialEq
 {
 }
 
-pub enum WorkerCommand<ContentT, UpdatesT>
+pub enum WorkerCommand<ContentT, PatchT>
 where
-    ContentT: Clone + Serialize + DeserializeOwned + Mergeable<UpdatesT>,
+    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT>,
 {
     Shutdown {
         respond_to: oneshot::Sender<Result<(), FileSysErr>>,
@@ -127,22 +127,22 @@ where
         respond_to: oneshot::Sender<Result<(), FileSysErr>>,
     },
     Patch {
-        updates: UpdatesT,
+        patch: PatchT,
         respond_to: oneshot::Sender<Result<(), FileSysErr>>,
     },
 }
 
-pub struct Worker<ContentT, UpdatesT>
+pub struct Worker<ContentT, PatchT>
 where
-    ContentT: Clone + Serialize + DeserializeOwned + Mergeable<UpdatesT> + PartialEq,
+    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
-    pub file: SingleThreadCachedFile<ContentT, UpdatesT>,
-    pub receiver: Receiver<WorkerCommand<ContentT, UpdatesT>>,
+    pub file: SingleThreadCachedFile<ContentT, PatchT>,
+    pub receiver: Receiver<WorkerCommand<ContentT, PatchT>>,
 }
 
-impl<ContentT, UpdatesT> Worker<ContentT, UpdatesT>
+impl<ContentT, PatchT> Worker<ContentT, PatchT>
 where
-    ContentT: Clone + Serialize + DeserializeOwned + Mergeable<UpdatesT> + PartialEq,
+    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
@@ -165,11 +165,8 @@ where
                         error!("Actor failed to write file");
                     }
                 }
-                WorkerCommand::Patch {
-                    updates,
-                    respond_to,
-                } => {
-                    let result = self.file.patch(updates).await;
+                WorkerCommand::Patch { patch, respond_to } => {
+                    let result = self.file.patch(patch).await;
                     if respond_to.send(result).is_err() {
                         error!("Actor failed to patch file");
                     }
@@ -180,18 +177,18 @@ where
 }
 
 #[derive(Debug)]
-pub struct ConcurrentCachedFile<ContentT, UpdatesT>
+pub struct ConcurrentCachedFile<ContentT, PatchT>
 where
-    UpdatesT: ConcurrentUpdatesT,
-    ContentT: ConcurrentContentT<UpdatesT>,
+    PatchT: ConcurrentPatchT,
+    ContentT: ConcurrentContentT<PatchT>,
 {
-    sender: Sender<WorkerCommand<ContentT, UpdatesT>>,
+    sender: Sender<WorkerCommand<ContentT, PatchT>>,
 }
 
-impl<ContentT, UpdatesT> ConcurrentCachedFile<ContentT, UpdatesT>
+impl<ContentT, PatchT> ConcurrentCachedFile<ContentT, PatchT>
 where
-    UpdatesT: ConcurrentUpdatesT,
-    ContentT: ConcurrentContentT<UpdatesT>,
+    PatchT: ConcurrentPatchT,
+    ContentT: ConcurrentContentT<PatchT>,
 {
     pub async fn spawn(
         buffer_size: usize,
@@ -223,7 +220,7 @@ where
     async fn send_command<R>(
         &self,
         op: &str,
-        make_cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand<ContentT, UpdatesT>,
+        make_cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand<ContentT, PatchT>,
     ) -> Result<R, FileSysErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(make_cmd(send)).await.map_err(|e| {
@@ -265,9 +262,9 @@ where
         .await?
     }
 
-    pub async fn patch(&self, updates: UpdatesT) -> Result<(), FileSysErr> {
+    pub async fn patch(&self, patch: PatchT) -> Result<(), FileSysErr> {
         self.send_command("patch", |tx| WorkerCommand::Patch {
-            updates,
+            patch,
             respond_to: tx,
         })
         .await?

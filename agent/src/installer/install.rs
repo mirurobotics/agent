@@ -8,7 +8,7 @@ use crate::filesys::{file::File, Overwrite};
 use crate::http;
 use crate::installer::errors::*;
 use crate::models::device::Device;
-use crate::storage::{self, layout::StorageLayout, settings};
+use crate::storage::{self, settings};
 use crate::version;
 use openapi_client::models as backend_client;
 
@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 
 pub async fn install<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    layout: &StorageLayout,
+    layout: &storage::Layout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,

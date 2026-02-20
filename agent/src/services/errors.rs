@@ -3,7 +3,7 @@ use crate::crud::errors::CrudErr;
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 use crate::models::errors::ModelsErr;
-use crate::storage::errors::StorageErr;
+use crate::storage::StorageErr;
 use crate::sync::errors::SyncErr;
 
 #[derive(Debug, thiserror::Error)]

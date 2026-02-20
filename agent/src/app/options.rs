@@ -4,7 +4,7 @@ use std::time::Duration;
 // internal crates
 use crate::deploy::fsm;
 use crate::server::serve::ServerOptions;
-use crate::storage::{caches::CacheCapacities, layout::StorageLayout};
+use crate::storage::{Capacities, Layout};
 use crate::workers::{mqtt, poller, token_refresh::TokenRefreshWorkerOptions};
 
 #[derive(Debug, Clone, Copy)]
@@ -30,8 +30,8 @@ impl Default for LifecycleOptions {
 
 #[derive(Debug, Default)]
 pub struct StorageOptions {
-    pub layout: StorageLayout,
-    pub cache_capacities: CacheCapacities,
+    pub layout: Layout,
+    pub cache_capacities: Capacities,
 }
 
 #[derive(Debug)]

@@ -1,106 +1,112 @@
 // internal crates
 use crate::crud::prelude::Read;
 use crate::deploy::errors::DeployErr;
-use crate::deploy::fsm;
-use crate::deploy::observer::{on_update, Observer};
 use crate::filesys::dir::Dir;
 use crate::filesys::{Overwrite, WriteOptions};
-use crate::models::config_instance::{ConfigInstance, ConfigInstanceID};
-use crate::models::deployment::{Deployment, DeploymentTargetStatus};
-
-// standard library
-use std::path::PathBuf;
+use crate::models::config_instance::{CfgInstID, ConfigInstance};
+use crate::models::deployment::{Deployment, DplTarget};
 
 // external crates
-use tracing::info;
+use tracing::{info, warn};
 
-pub struct DeployContext<'a, R> {
-    pub content_reader: &'a R,
-    pub deployment_dir: &'a Dir,
-    pub staging_dir: &'a Dir,
-    pub retry_policy: &'a fsm::RetryPolicy,
-}
-
-/// Writes the given config instances to the deployment directory (atomic replace),
-/// then updates the deployment's state and notifies observers.
-pub async fn deploy<R>(
-    ctx: &DeployContext<'_, R>,
-    deployment: Deployment,
-    cfg_insts: Vec<ConfigInstance>,
-    observers: &mut [&mut dyn Observer],
-) -> (Deployment, Result<(), DeployErr>)
-where
-    R: Read<ConfigInstanceID, serde_json::Value>,
-{
-    let write_result = write(
-        &cfg_insts,
-        ctx.content_reader,
-        ctx.staging_dir,
-        ctx.deployment_dir,
-    )
-    .await;
-
-    if let Err(e) = &write_result {
-        let increment_attempts = deployment.target_status == DeploymentTargetStatus::Deployed;
-        let deployment = fsm::error(deployment, ctx.retry_policy, e, increment_attempts);
-        if let Err(obs_e) = on_update(observers, &deployment).await {
-            return (deployment, Err(obs_e));
-        }
-        return (deployment, write_result);
-    }
-
-    info!(
-        "Deployed deployment '{}' with {} config instances to filesystem",
-        deployment.id,
-        cfg_insts.len()
-    );
-    let deployment = fsm::deploy(deployment);
-    if let Err(e) = on_update(observers, &deployment).await {
-        return (deployment, Err(e));
-    }
-    (deployment, Ok(()))
-}
-
-async fn write<R>(
-    cfg_insts: &[ConfigInstance],
-    content_fetcher: &R,
+/// Reads the deployment's config instances and writes them to the target directory
+/// via an atomic staging-directory swap.
+pub async fn deploy<CIR, CR>(
+    cfg_insts: &CIR,
+    contents: &CR,
     staging_dir: &Dir,
-    deployment_dir: &Dir,
+    target_dir: &Dir,
+    deployment: &Deployment,
 ) -> Result<(), DeployErr>
 where
-    R: Read<ConfigInstanceID, serde_json::Value>,
+    CIR: Read<CfgInstID, ConfigInstance>,
+    CR: Read<CfgInstID, serde_json::Value>,
 {
-    let name = format!(
-        "deploy_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
+    debug_assert!(
+        !deployment.config_instance_ids.is_empty(),
+        "deployment '{}' has no config instances",
+        deployment.id,
     );
-    let temp_dir = staging_dir.subdir(PathBuf::from(name));
-    temp_dir.create().await?;
-    for cfg_inst in cfg_insts {
-        let content = match content_fetcher.read(cfg_inst.id.clone()).await {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = temp_dir.delete().await;
-                return Err(DeployErr::from(e));
-            }
-        };
+    debug_assert_eq!(
+        deployment.target_status,
+        DplTarget::Deployed,
+        "deployment '{}' is not targeting deployed status",
+        deployment.id,
+    );
+    let cfg_insts = read_config_instances(cfg_insts, &deployment.config_instance_ids).await?;
 
-        let dest = temp_dir.file(&cfg_inst.filepath);
-        if let Err(e) = dest
-            .write_json(&content, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-        {
-            let _ = temp_dir.delete().await;
-            return Err(DeployErr::from(e));
+    write_files(&cfg_insts, contents, staging_dir, target_dir).await?;
+
+    info!(
+        "wrote {} config instances to filesystem for deployment '{}'",
+        deployment.config_instance_ids.len(),
+        deployment.id,
+    );
+
+    Ok(())
+}
+
+async fn read_config_instances<CIR>(
+    reader: &CIR,
+    ids: &[CfgInstID],
+) -> Result<Vec<ConfigInstance>, DeployErr>
+where
+    CIR: Read<CfgInstID, ConfigInstance>,
+{
+    let mut cfg_insts = Vec::with_capacity(ids.len());
+    for id in ids {
+        let cfg_inst = reader.read(id.clone()).await.map_err(DeployErr::from)?;
+        cfg_insts.push(cfg_inst);
+    }
+    Ok(cfg_insts)
+}
+
+async fn write_files<CR>(
+    cfg_insts: &[ConfigInstance],
+    content_reader: &CR,
+    staging_dir: &Dir,
+    target_dir: &Dir,
+) -> Result<(), DeployErr>
+where
+    CR: Read<CfgInstID, serde_json::Value>,
+{
+    let temp_dir = create_temp_dir(staging_dir).await?;
+
+    let result: Result<(), DeployErr> = async {
+        for cfg_inst in cfg_insts {
+            write_file(cfg_inst, content_reader, &temp_dir).await?;
         }
+        // we assume the the move_to operation is atomic--if it fails the current
+        // directory is assumed to be as it was before the move_to operation.
+        temp_dir.move_to(target_dir, Overwrite::Allow).await?;
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = temp_dir.delete().await {
+        warn!("failed to clean up temporary directory: {e}");
     }
 
-    if let Err(e) = temp_dir.move_to(deployment_dir, Overwrite::Allow).await {
-        let _ = temp_dir.delete().await;
-        return Err(DeployErr::from(e));
-    }
+    result
+}
+
+async fn create_temp_dir(staging_dir: &Dir) -> Result<Dir, DeployErr> {
+    let temp_dir = staging_dir.subdir(uuid::Uuid::new_v4().to_string());
+    temp_dir.create_if_absent().await?;
+    Ok(temp_dir)
+}
+
+async fn write_file<CR>(
+    cfg_inst: &ConfigInstance,
+    content_reader: &CR,
+    dest_dir: &Dir,
+) -> Result<(), DeployErr>
+where
+    CR: Read<CfgInstID, serde_json::Value>,
+{
+    let content = content_reader.read(cfg_inst.id.clone()).await?;
+    let dest = dest_dir.file(&cfg_inst.filepath);
+    dest.write_json(&content, WriteOptions::OVERWRITE_ATOMIC)
+        .await?;
     Ok(())
 }

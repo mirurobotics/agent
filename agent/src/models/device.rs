@@ -1,6 +1,6 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::Mergeable;
+use crate::models::Patch;
 use openapi_server::models as agent_server;
 
 // external crates
@@ -159,30 +159,30 @@ impl Device {
     }
 }
 
-impl Mergeable<Updates> for Device {
-    fn merge(&mut self, updates: Updates) {
-        if let Some(id) = updates.id {
+impl Patch<Updates> for Device {
+    fn patch(&mut self, patch: Updates) {
+        if let Some(id) = patch.id {
             self.id = id;
         }
-        if let Some(name) = updates.name {
+        if let Some(name) = patch.name {
             self.name = name;
         }
-        if let Some(agent_version) = updates.agent_version {
+        if let Some(agent_version) = patch.agent_version {
             self.agent_version = agent_version;
         }
-        if let Some(activated) = updates.activated {
+        if let Some(activated) = patch.activated {
             self.activated = activated;
         }
-        if let Some(status) = updates.status {
+        if let Some(status) = patch.status {
             self.status = status;
         }
-        if let Some(last_synced_at) = updates.last_synced_at {
+        if let Some(last_synced_at) = patch.last_synced_at {
             self.last_synced_at = last_synced_at;
         }
-        if let Some(last_connected_at) = updates.last_connected_at {
+        if let Some(last_connected_at) = patch.last_connected_at {
             self.last_connected_at = last_connected_at;
         }
-        if let Some(last_disconnected_at) = updates.last_disconnected_at {
+        if let Some(last_disconnected_at) = patch.last_disconnected_at {
             self.last_disconnected_at = last_disconnected_at;
         }
     }

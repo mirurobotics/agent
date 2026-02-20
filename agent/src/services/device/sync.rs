@@ -21,7 +21,7 @@ pub async fn sync_device<SyncerT: SyncerExt>(
         Err(e) => {
             let code = if matches!(e, SyncErr::InCooldownErr(_)) {
                 SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN
-            } else if e.is_network_connection_error() {
+            } else if e.is_network_conn_err() {
                 SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR
             } else {
                 return Err(ServiceErr::from(e));

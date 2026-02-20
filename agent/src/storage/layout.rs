@@ -7,11 +7,11 @@ use crate::filesys::file::File;
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Debug)]
-pub struct StorageLayout {
+pub struct Layout {
     pub root: Dir,
 }
 
-impl StorageLayout {
+impl Layout {
     pub fn new(root: Dir) -> Self {
         Self { root }
     }
@@ -68,7 +68,7 @@ impl StorageLayout {
     }
 }
 
-impl Default for StorageLayout {
+impl Default for Layout {
     fn default() -> Self {
         Self::new(Dir::new("/"))
     }

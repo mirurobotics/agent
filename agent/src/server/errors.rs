@@ -6,7 +6,7 @@ use crate::filesys::errors::FileSysErr;
 use crate::filesys::file::File;
 use crate::http::errors::HTTPErr;
 use crate::services::errors::ServiceErr;
-use crate::storage::errors::StorageErr;
+use crate::storage::StorageErr;
 use crate::sync::errors::SyncErr;
 
 #[derive(Debug, thiserror::Error)]

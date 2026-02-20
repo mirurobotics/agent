@@ -10,9 +10,7 @@ use miru_agent::http;
 use miru_agent::installer::{display, errors::*, install};
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
-use miru_agent::storage::device::assert_activated;
-use miru_agent::storage::layout::StorageLayout;
-use miru_agent::storage::settings::Settings;
+use miru_agent::storage;
 use miru_agent::version;
 use miru_agent::workers::mqtt;
 use openapi_client::models as backend_client;
@@ -52,7 +50,7 @@ async fn run_installer(args: cli::InstallArgs) -> Result<backend_client::Device,
 
     let settings = install::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
-    let layout = StorageLayout::default();
+    let layout = storage::Layout::default();
     let token = install::read_token_from_env()?;
 
     let result = install::install(&http_client, &layout, &settings, &token, args.device_name).await;
@@ -84,16 +82,16 @@ fn handle_install_result(result: Result<backend_client::Device, InstallErr>) {
 
 async fn run_agent() {
     // check the agent has been activated
-    let layout = StorageLayout::default();
+    let layout = storage::Layout::default();
     let device_file = layout.device_file();
-    if let Err(e) = assert_activated(&device_file).await {
+    if let Err(e) = storage::assert_activated(&device_file).await {
         error!("Device is not yet activated: {}", e);
         return;
     }
 
     // retrieve the settings files
     let settings_file = layout.settings_file();
-    let settings = match settings_file.read_json::<Settings>().await {
+    let settings = match settings_file.read_json::<storage::Settings>().await {
         Ok(settings) => settings,
         Err(e) => {
             error!("Unable to read settings file: {}", e);

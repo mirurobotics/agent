@@ -1,8 +1,8 @@
 // internal crates
 use crate::cache::{dir::DirCache, entry::CacheEntry, file::FileCache};
-use crate::models::config_instance::{ConfigInstance, ConfigInstanceID};
+use crate::models::config_instance::{CfgInstID, ConfigInstance};
 
-pub type ConfigInstanceCacheEntry = CacheEntry<ConfigInstanceID, ConfigInstance>;
+pub type CfgInstEntry = CacheEntry<CfgInstID, ConfigInstance>;
 
 // the config instance cache is all stored in a single file while the config instance
 // content is stored in a directory with a file for each cache entry. This is for
@@ -11,5 +11,5 @@ pub type ConfigInstanceCacheEntry = CacheEntry<ConfigInstanceID, ConfigInstance>
 // configuration content can be quite large so they each need to be stored in their own
 // file to maintain a small memory footprint. This is also why we have a separate cache
 // for the content.
-pub type ConfigInstanceCache = FileCache<ConfigInstanceID, ConfigInstance>;
-pub type ConfigInstanceContentCache = DirCache<ConfigInstanceID, serde_json::Value>;
+pub type CfgInsts = FileCache<CfgInstID, ConfigInstance>;
+pub type CfgInstContent = DirCache<CfgInstID, serde_json::Value>;

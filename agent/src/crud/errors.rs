@@ -1,5 +1,5 @@
 use crate::cache::errors::CacheErr;
-use crate::storage::errors::StorageErr;
+use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CrudErr {

@@ -5,7 +5,7 @@ use crate::deploy::errors::DeployErr;
 use crate::errors::Trace;
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
-use crate::storage::errors::StorageErr;
+use crate::storage::StorageErr;
 
 use chrono::{DateTime, Utc};
 
@@ -29,15 +29,10 @@ pub struct SyncErrors {
 }
 
 impl crate::errors::Error for SyncErrors {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         // is only a network connection error if all errors are network connection
         // errors
-        for err in self.errors.iter() {
-            if !err.is_network_connection_error() {
-                return false;
-            }
-        }
-        true
+        !self.errors.is_empty() && self.errors.iter().all(|e| e.is_network_conn_err())
     }
 }
 
@@ -78,12 +73,12 @@ impl crate::errors::Error for SyncerInCooldownErr {}
 #[derive(Debug, thiserror::Error)]
 #[error("Mock error")]
 pub struct MockErr {
-    pub is_network_connection_error: bool,
+    pub is_network_conn_err: bool,
 }
 
 impl crate::errors::Error for MockErr {
-    fn is_network_connection_error(&self) -> bool {
-        self.is_network_connection_error
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
     }
 }
 

@@ -1,13 +1,14 @@
 // internal crates
+use super::errors::*;
+use super::layout::Layout;
+use super::settings::Settings;
 use crate::authn::token::Token;
 use crate::filesys::file::File;
 use crate::filesys::{Overwrite, WriteOptions};
 use crate::models::device::Device;
-use crate::storage::settings::Settings;
-use crate::storage::{errors::*, layout::StorageLayout};
 
 pub async fn bootstrap(
-    layout: &StorageLayout,
+    layout: &Layout,
     device: &Device,
     settings: &Settings,
     private_key_file: &File,

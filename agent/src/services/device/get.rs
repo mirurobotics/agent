@@ -1,9 +1,9 @@
 // internal crates
-use crate::models::device::Device;
+use crate::models;
 use crate::services::errors::*;
-use crate::storage::device::DeviceFile;
+use crate::storage;
 
-pub async fn get_device(device_file: &DeviceFile) -> Result<Device, ServiceErr> {
-    let device = device_file.read().await?;
+pub async fn get_device(device_stor: &storage::Device) -> Result<models::Device, ServiceErr> {
+    let device = device_stor.read().await?;
     Ok((*device).clone())
 }

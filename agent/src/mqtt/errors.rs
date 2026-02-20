@@ -17,7 +17,7 @@ pub struct NetworkConnectionErr {
 }
 
 impl crate::errors::Error for NetworkConnectionErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -39,7 +39,7 @@ pub struct TimeoutErr {
 }
 
 impl crate::errors::Error for TimeoutErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -52,7 +52,7 @@ pub struct PublishErr {
 }
 
 impl crate::errors::Error for PublishErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -65,7 +65,7 @@ pub struct SubscribeErr {
 }
 
 impl crate::errors::Error for SubscribeErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -78,7 +78,7 @@ pub struct UnsubscribeErr {
 }
 
 impl crate::errors::Error for UnsubscribeErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -91,7 +91,7 @@ pub struct DisconnectErr {
 }
 
 impl crate::errors::Error for DisconnectErr {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         true
     }
 }
@@ -106,15 +106,15 @@ pub struct SerdeErr {
 impl crate::errors::Error for SerdeErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Mock MQTT error (is authentication error: {is_authentication_error}, is network connection error: {is_network_connection_error})")]
+#[error("Mock MQTT error (is authentication error: {is_authentication_error}, is network connection error: {is_network_conn_err})")]
 pub struct MockErr {
     pub is_authentication_error: bool,
-    pub is_network_connection_error: bool,
+    pub is_network_conn_err: bool,
 }
 
 impl crate::errors::Error for MockErr {
-    fn is_network_connection_error(&self) -> bool {
-        self.is_network_connection_error
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
     }
 }
 

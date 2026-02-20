@@ -42,15 +42,15 @@ pub struct ReceiveActorMessageErr {
 impl crate::errors::Error for ReceiveActorMessageErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("mock error (is network connection error: {is_network_connection_error})")]
+#[error("mock error (is network connection error: {is_network_conn_err})")]
 pub struct MockError {
-    pub is_network_connection_error: bool,
+    pub is_network_conn_err: bool,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for MockError {
-    fn is_network_connection_error(&self) -> bool {
-        self.is_network_connection_error
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
     }
 }
 

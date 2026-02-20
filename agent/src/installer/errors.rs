@@ -3,7 +3,7 @@ use crate::crypt::errors::CryptErr;
 use crate::errors::Trace;
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
-use crate::storage::errors::StorageErr;
+use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Missing environment variable: {name}")]
@@ -110,7 +110,7 @@ mod tests {
         #[test]
         fn from_http_err() {
             let err = HTTPErr::MockErr(crate::http::errors::MockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             });
             let install_err = InstallErr::from(err);
             assert!(matches!(install_err, InstallErr::HTTPErr(_)));
@@ -118,11 +118,10 @@ mod tests {
 
         #[test]
         fn from_storage_err() {
-            let err =
-                StorageErr::DeviceNotActivatedErr(crate::storage::errors::DeviceNotActivatedErr {
-                    msg: "test".to_string(),
-                    trace: crate::trace!(),
-                });
+            let err = StorageErr::DeviceNotActivatedErr(crate::storage::DeviceNotActivatedErr {
+                msg: "test".to_string(),
+                trace: crate::trace!(),
+            });
             let install_err = InstallErr::from(err);
             assert!(matches!(install_err, InstallErr::StorageErr(_)));
         }

@@ -10,7 +10,7 @@ use tracing::error;
 use uuid::Uuid;
 
 // =============================== CONFIG INSTANCE ================================= //
-pub type ConfigInstanceID = String;
+pub type CfgInstID = String;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ConfigInstance {

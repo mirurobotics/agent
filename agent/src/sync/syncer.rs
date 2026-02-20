@@ -9,11 +9,7 @@ use crate::deploy::fsm;
 use crate::errors::*;
 use crate::filesys::dir::Dir;
 use crate::http;
-use crate::storage::{
-    config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
-    deployments::DeploymentCache,
-    device::DeviceFile,
-};
+use crate::storage::{CfgInstContent, CfgInsts, Deployments, Device};
 use crate::sync::errors::*;
 use crate::sync::{agent_version, deployments};
 use crate::trace;
@@ -27,7 +23,7 @@ use tracing::{debug, error, info};
 // =============================== SYNCER EVENTS ================================== //
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncFailure {
-    pub is_network_connection_error: bool,
+    pub is_network_conn_err: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,12 +42,12 @@ pub enum SyncEvent {
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub device_id: String,
-    pub device_file: Arc<DeviceFile>,
+    pub device_stor: Arc<Device>,
     pub http_client: Arc<HTTPClientT>,
     pub token_mngr: Arc<TokenManagerT>,
-    pub cfg_inst_cache: Arc<ConfigInstanceCache>,
-    pub cfg_inst_content_cache: Arc<ConfigInstanceContentCache>,
-    pub deployment_cache: Arc<DeploymentCache>,
+    pub cfg_inst_cache: Arc<CfgInsts>,
+    pub cfg_inst_content_cache: Arc<CfgInstContent>,
+    pub deployment_cache: Arc<Deployments>,
     pub deployment_dir: Dir,
     pub staging_dir: Dir,
     pub dpl_retry_policy: fsm::RetryPolicy,
@@ -86,12 +82,12 @@ impl SyncState {
 
 pub struct SingleThreadSyncer<HTTPClientT> {
     _device_id: String,
-    device_file: Arc<DeviceFile>,
+    device_stor: Arc<Device>,
     http_client: Arc<HTTPClientT>,
     token_mngr: Arc<TokenManager>,
-    cfg_inst_cache: Arc<ConfigInstanceCache>,
-    cfg_inst_content_cache: Arc<ConfigInstanceContentCache>,
-    deployment_cache: Arc<DeploymentCache>,
+    cfg_inst_cache: Arc<CfgInsts>,
+    cfg_inst_content_cache: Arc<CfgInstContent>,
+    deployment_cache: Arc<Deployments>,
     deployment_dir: Dir,
     staging_dir: Dir,
     dpl_retry_policy: fsm::RetryPolicy,
@@ -111,7 +107,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
             _device_id: args.device_id,
-            device_file: args.device_file,
+            device_stor: args.device_stor,
             http_client: args.http_client,
             token_mngr: args.token_mngr,
             cfg_inst_cache: args.cfg_inst_cache,
@@ -213,7 +209,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             }
             Err(e) => {
                 if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncFailed(SyncFailure {
-                    is_network_connection_error: e.is_network_connection_error(),
+                    is_network_conn_err: e.is_network_conn_err(),
                 })) {
                     error!("failed to send sync failed event: {:?}", e);
                 }
@@ -222,7 +218,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
                 // network connection errors even if the previous errors were not
                 // network connection errors so we use an error streak of 0 when
                 // calculating the cooldown period
-                if e.is_network_connection_error() {
+                if e.is_network_conn_err() {
                     debug!(
                         "unable to sync with backend due to a network connection error: {:?}",
                         e
@@ -251,7 +247,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         let token = self.token_mngr.get_token().await?;
 
         if let Err(e) = agent_version::push(
-            self.device_file.as_ref(),
+            self.device_stor.as_ref(),
             self.http_client.as_ref(),
             &token.token,
             self.agent_version.clone(),
@@ -262,18 +258,14 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             return Err(e);
         }
 
-        let ctx = crate::deploy::filesys::DeployContext {
-            content_reader: self.cfg_inst_content_cache.as_ref(),
-            deployment_dir: &self.deployment_dir,
-            staging_dir: &self.staging_dir,
-            retry_policy: &self.dpl_retry_policy,
-        };
         deployments::sync(
             self.deployment_cache.as_ref(),
             self.cfg_inst_cache.as_ref(),
             self.cfg_inst_content_cache.as_ref(),
             self.http_client.as_ref(),
-            &ctx,
+            &self.staging_dir,
+            &self.deployment_dir,
+            &self.dpl_retry_policy,
             &token.token,
         )
         .await
