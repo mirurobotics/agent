@@ -2,9 +2,9 @@
 use miru_agent::filesys::{dir::Dir, file::File, path::PathExt, WriteOptions};
 use miru_agent::models::device::Device;
 use miru_agent::storage::settings::Settings;
-use miru_agent::storage::{layout::StorageLayout, setup::clean_storage_setup};
+use miru_agent::storage::{layout::StorageLayout, setup};
 
-pub mod setup_storage {
+pub mod bootstrap {
     use super::*;
 
     async fn validate_storage(layout: &StorageLayout) {
@@ -20,17 +20,17 @@ pub mod setup_storage {
 
         // token file
         let auth_layout = layout.auth_dir();
-        let token_file = auth_layout.token_file();
+        let token_file = auth_layout.token();
         assert!(token_file.exists());
 
         // private key file
-        let private_key_file = auth_layout.private_key_file();
+        let private_key_file = auth_layout.private_key();
         assert!(private_key_file.exists());
         let private_key_contents = private_key_file.read_string().await.unwrap();
         assert!(!private_key_contents.is_empty());
 
         // public key file
-        let public_key_file = auth_layout.public_key_file();
+        let public_key_file = auth_layout.public_key();
         assert!(public_key_file.exists());
         let public_key_contents = public_key_file.read_string().await.unwrap();
         assert!(!public_key_contents.is_empty());
@@ -68,7 +68,7 @@ pub mod setup_storage {
 
         // setup the storage
         let device = Device::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -91,7 +91,7 @@ pub mod setup_storage {
 
         // setup the storage
         let device = Device::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -113,7 +113,7 @@ pub mod setup_storage {
 
         // setup the storage
         let device = Device::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -145,7 +145,7 @@ pub mod setup_storage {
 
         // setup the storage
         let device = Device::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -174,7 +174,7 @@ pub mod setup_storage {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -199,7 +199,7 @@ pub mod setup_storage {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -224,7 +224,7 @@ pub mod setup_storage {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -258,7 +258,7 @@ pub mod setup_storage {
 
         // setup the storage
         let device = Device::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -295,7 +295,7 @@ pub mod setup_storage {
 
         // setup the storage
         let device = Device::default();
-        clean_storage_setup(
+        setup::bootstrap(
             &layout,
             &device,
             &settings,

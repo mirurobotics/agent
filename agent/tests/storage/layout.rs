@@ -126,7 +126,7 @@ pub mod auth_layout {
     fn private_key_file() {
         let layout = StorageLayout::default();
         let auth = layout.auth_dir();
-        let file = auth.private_key_file();
+        let file = auth.private_key();
         assert_eq!(file.to_string(), "/var/lib/miru/auth/private_key.pem");
     }
 
@@ -134,7 +134,7 @@ pub mod auth_layout {
     fn public_key_file() {
         let layout = StorageLayout::default();
         let auth = layout.auth_dir();
-        let file = auth.public_key_file();
+        let file = auth.public_key();
         assert_eq!(file.to_string(), "/var/lib/miru/auth/public_key.pem");
     }
 
@@ -142,7 +142,7 @@ pub mod auth_layout {
     fn token_file() {
         let layout = StorageLayout::default();
         let auth = layout.auth_dir();
-        let file = auth.token_file();
+        let file = auth.token();
         assert_eq!(file.to_string(), "/var/lib/miru/auth/token.json");
     }
 }

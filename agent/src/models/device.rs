@@ -143,6 +143,22 @@ impl<'de> Deserialize<'de> for Device {
     }
 }
 
+impl Device {
+    pub fn from_activation(api_device: &openapi_client::models::Device) -> Device {
+        Device {
+            id: api_device.id.clone(),
+            name: api_device.name.clone(),
+            session_id: api_device.session_id.clone(),
+            agent_version: crate::version::VERSION.to_string(),
+            activated: true,
+            status: DeviceStatus::Online,
+            last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+            last_connected_at: DateTime::<Utc>::UNIX_EPOCH,
+            last_disconnected_at: DateTime::<Utc>::UNIX_EPOCH,
+        }
+    }
+}
+
 impl Mergeable<Updates> for Device {
     fn merge(&mut self, updates: Updates) {
         if let Some(id) = updates.id {
@@ -219,5 +235,32 @@ impl Updates {
             agent_version: Some(version),
             ..Self::empty()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_activation_maps_fields() {
+        let api_device = openapi_client::models::Device {
+            id: "dev-123".to_string(),
+            name: "my-robot".to_string(),
+            session_id: "sess-456".to_string(),
+            ..Default::default()
+        };
+
+        let device = Device::from_activation(&api_device);
+
+        assert_eq!(device.id, "dev-123");
+        assert_eq!(device.name, "my-robot");
+        assert_eq!(device.session_id, "sess-456");
+        assert_eq!(device.agent_version, crate::version::VERSION);
+        assert!(device.activated);
+        assert_eq!(device.status, DeviceStatus::Online);
+        assert_eq!(device.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
+        assert_eq!(device.last_connected_at, DateTime::<Utc>::UNIX_EPOCH);
+        assert_eq!(device.last_disconnected_at, DateTime::<Utc>::UNIX_EPOCH);
     }
 }

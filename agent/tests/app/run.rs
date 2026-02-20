@@ -16,7 +16,7 @@ async fn prepare_valid_server_storage(dir: Dir) {
     let layout = StorageLayout::new(dir);
 
     // create a private key file
-    let private_key_file = layout.auth_dir().private_key_file();
+    let private_key_file = layout.auth_dir().private_key();
     private_key_file
         .write_string("test", WriteOptions::default())
         .await

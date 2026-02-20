@@ -1,11 +1,13 @@
 // standard library
-use std::collections::HashMap;
 use std::env;
 
 // internal
 use miru_agent::app::options::{AppOptions, LifecycleOptions};
 use miru_agent::app::run::run;
-use miru_agent::installer::install::install;
+use miru_agent::cli;
+use miru_agent::filesys::{dir::Dir, path::PathExt};
+use miru_agent::http;
+use miru_agent::installer::{display, errors::*, install};
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
 use miru_agent::storage::device::assert_activated;
@@ -13,6 +15,7 @@ use miru_agent::storage::layout::StorageLayout;
 use miru_agent::storage::settings::Settings;
 use miru_agent::version;
 use miru_agent::workers::mqtt;
+use openapi_client::models as backend_client;
 
 // external
 use tokio::signal::unix::signal;
@@ -20,35 +23,66 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() {
-    // parse the command line arguments
-    let args: Vec<String> = env::args().collect();
-    let mut cli_args: HashMap<String, String> = HashMap::new();
-    for arg in args.iter().skip(1) {
-        if let Some((key, value)) = arg.split_once('=') {
-            // Handle --key=value format
-            let clean_key = key.trim_start_matches('-');
-            cli_args.insert(clean_key.to_string(), value.to_string());
-        } else if arg.starts_with("--") {
-            // Handle standalone flags like --version
-            let clean_key = arg.trim_start_matches('-');
-            cli_args.insert(clean_key.to_string(), "true".to_string());
-        }
-    }
+    let cli_args = cli::Args::parse(&env::args().collect::<Vec<String>>());
 
-    // print the version & exit
-    if cli_args.contains_key("version") {
-        println!("Version: {}", version::VERSION);
-        println!("Commit: {}", version::COMMIT);
+    if cli_args.display_version {
+        println!("{}", version::format());
         return;
     }
 
-    // run the installer
-    if cli_args.contains_key("install") {
-        return install(&cli_args).await;
+    if let Some(install_args) = cli_args.install_args {
+        let result = run_installer(install_args).await;
+        handle_install_result(result);
+        return;
     }
 
-    // run the agent starting here
+    run_agent().await;
+}
 
+async fn run_installer(args: cli::InstallArgs) -> Result<backend_client::Device, InstallErr> {
+    // initialize logging
+    let tmp_dir = Dir::create_temp_dir("miru-agent-installer-logs").await?;
+    let options = logs::Options {
+        // sending logs to stdout will interfere with the installer outputs
+        stdout: false,
+        log_dir: tmp_dir.path().to_path_buf(),
+        ..Default::default()
+    };
+    let _guard = logs::init(options);
+
+    let settings = install::determine_settings(&args);
+    let http_client = http::Client::new(&settings.backend.base_url)?;
+    let layout = StorageLayout::default();
+    let token = install::read_token_from_env()?;
+
+    let result = install::install(&http_client, &layout, &settings, &token, args.device_name).await;
+
+    drop(_guard);
+    if let Err(e) = tmp_dir.delete().await {
+        eprintln!("failed to clean up installer log dir: {e}");
+    }
+
+    result
+}
+
+fn handle_install_result(result: Result<backend_client::Device, InstallErr>) {
+    match result {
+        Ok(device) => {
+            let msg = format!(
+                "Successfully activated this device as {}!",
+                display::color(&device.name, display::Colors::Green)
+            );
+            println!("{}", display::format_info(msg.as_str()));
+        }
+        Err(e) => {
+            error!("Installation failed: {:?}", e);
+            println!("An error occurred during your installation. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run_agent() {
     // check the agent has been activated
     let layout = StorageLayout::default();
     let device_file = layout.device_file();
@@ -72,10 +106,7 @@ async fn main() {
         log_level: settings.log_level,
         ..Default::default()
     };
-    let result = logs::init(log_options);
-    if let Err(e) = result {
-        println!("Failed to initialize logging: {e}");
-    }
+    let _guard = logs::init(log_options);
 
     // run the server
     let options = AppOptions {

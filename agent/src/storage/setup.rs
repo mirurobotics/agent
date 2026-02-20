@@ -6,7 +6,7 @@ use crate::models::device::Device;
 use crate::storage::settings::Settings;
 use crate::storage::{errors::*, layout::StorageLayout};
 
-pub async fn clean_storage_setup(
+pub async fn bootstrap(
     layout: &StorageLayout,
     device: &Device,
     settings: &Settings,
@@ -31,17 +31,17 @@ pub async fn clean_storage_setup(
 
     // overwrite the auth file
     let token = Token::default();
-    let auth_file = auth_dir.token_file();
+    let auth_file = auth_dir.token();
     auth_file
         .write_json(&token, WriteOptions::OVERWRITE_ATOMIC)
         .await?;
 
     // move the private and public keys to the auth directory
     private_key_file
-        .move_to(&auth_dir.private_key_file(), Overwrite::Allow)
+        .move_to(&auth_dir.private_key(), Overwrite::Allow)
         .await?;
     public_key_file
-        .move_to(&auth_dir.public_key_file(), Overwrite::Allow)
+        .move_to(&auth_dir.public_key(), Overwrite::Allow)
         .await?;
 
     // wipe the config instance deployment directory

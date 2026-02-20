@@ -54,7 +54,7 @@ pub mod init {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
         let layout = StorageLayout::new(dir);
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key_file();
+        let private_key_file = layout.auth_dir().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
@@ -78,14 +78,14 @@ pub mod init {
         let layout = StorageLayout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key_file();
+        let private_key_file = layout.auth_dir().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the token file with a token containing a device id
-        let token_file = layout.auth_dir().token_file();
+        let token_file = layout.auth_dir().token();
         let token = Token {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY".to_string(),
                 expires_at: Utc::now(),
@@ -128,7 +128,7 @@ pub mod init {
         let layout = StorageLayout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key_file();
+        let private_key_file = layout.auth_dir().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
@@ -153,7 +153,7 @@ pub mod init {
         .unwrap();
 
         // the token file should now have the default token
-        let token_file = layout.auth_dir().token_file();
+        let token_file = layout.auth_dir().token();
         let token = token_file.read_json::<Token>().await.unwrap();
         assert_eq!(token.token, Token::default().token);
 
@@ -168,7 +168,7 @@ pub mod init {
         let layout = StorageLayout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key_file();
+        let private_key_file = layout.auth_dir().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
@@ -213,7 +213,7 @@ pub mod shutdown {
         let layout = StorageLayout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key_file();
+        let private_key_file = layout.auth_dir().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
@@ -252,7 +252,7 @@ pub mod shutdown {
         let layout = StorageLayout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key_file();
+        let private_key_file = layout.auth_dir().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await

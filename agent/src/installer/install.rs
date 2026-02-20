@@ -1,164 +1,181 @@
 // standard library
-use std::collections::HashMap;
 use std::env;
 
 // internal crates
+use crate::cli;
 use crate::crypt::{jwt, rsa};
-use crate::filesys::{dir::Dir, file::File, path::PathExt, Overwrite};
+use crate::filesys::{file::File, Overwrite};
 use crate::http;
-use crate::http::devices;
-use crate::installer::{display, errors::*};
-use crate::logs;
-use crate::models::device::{Device, DeviceStatus};
-use crate::storage::{layout::StorageLayout, settings, setup::clean_storage_setup};
+use crate::installer::errors::*;
+use crate::models::device::Device;
+use crate::storage::{self, layout::StorageLayout, settings};
 use crate::version;
-use openapi_client::models::ActivateDeviceRequest;
+use openapi_client::models as backend_client;
 
 // external crates
-use chrono::{DateTime, Utc};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
-pub async fn install(cli_args: &HashMap<String, String>) {
-    match install_helper(cli_args).await {
-        Ok(_) => {
-            info!("Installation successful");
-        }
-        Err(e) => {
-            error!("Installation failed: {:?}", e);
-            display::print_err_msg(Some(e.to_string()));
-            std::process::exit(1);
-        }
-    }
-}
-
-async fn install_helper(
-    cli_args: &HashMap<String, String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let tmp_dir = Dir::create_temp_dir("miru-agent-installer-logs").await?;
-    let options = logs::Options {
-        // sending logs to stdout will interfere with the installer outputs
-        stdout: false,
-        log_dir: tmp_dir.path().to_path_buf(),
-        ..Default::default()
-    };
-    let guard = logs::init(options)?;
-
-    let mut settings = settings::Settings::default();
-
-    // retrieve the activation token
-    let token_env_var = "MIRU_ACTIVATION_TOKEN";
-    let activation_token = match env::var(token_env_var) {
-        Ok(token) => token,
-        Err(_) => {
-            let msg = format!("The {} environment variable is not set", token_env_var);
-            error!("{}", msg);
-            return Err(msg.into());
-        }
-    };
-
-    // set optional settings
-    if let Some(backend_host) = cli_args.get("backend-host") {
-        settings.backend.base_url = format!("{}/agent/v1", backend_host);
-    }
-    if let Some(mqtt_broker_host) = cli_args.get("mqtt-broker-host") {
-        settings.mqtt_broker.host = mqtt_broker_host.to_string();
-    }
-
-    // run the installation
-    let http_client = http::Client::new(&settings.backend.base_url)?;
-    let layout = StorageLayout::default();
-    bootstrap(
-        &layout,
-        &http_client,
-        &settings,
-        activation_token.as_str(),
-        cli_args.get("device-name").map(|name| name.to_string()),
-    )
-    .await?;
-
-    drop(guard);
-
-    Ok(())
-}
-
-// walks user through the installation process
-pub async fn bootstrap<HTTPClientT: http::ClientI>(
-    layout: &StorageLayout,
+pub async fn install<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
+    layout: &StorageLayout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
-) -> Result<(), InstallErr> {
-    // generate new public and private keys in a temporary directory which will be the
-    // device's new authentication if the activation is successful
+) -> Result<backend_client::Device, InstallErr> {
     let temp_dir = layout.temp_dir();
-    let private_key_file = temp_dir.file("private.key");
-    let public_key_file = temp_dir.file("public.key");
-    rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
 
-    // activate the device
-    let device = activate(http_client, &public_key_file, token, device_name).await?;
+    let result = async {
+        // generate new public and private keys in a temporary directory which will be
+        // the device's new authentication if the activation is successful
+        let private_key_file = temp_dir.file("private.key");
+        let public_key_file = temp_dir.file("public.key");
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
 
-    // setup a clean storage layout with the new authentication & device id
-    clean_storage_setup(
-        layout,
-        &Device {
-            id: device.id,
-            name: device.name,
-            session_id: device.session_id,
-            agent_version: version::VERSION.to_string(),
-            activated: true,
-            status: DeviceStatus::Online,
-            last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-            last_connected_at: DateTime::<Utc>::UNIX_EPOCH,
-            last_disconnected_at: DateTime::<Utc>::UNIX_EPOCH,
-        },
-        settings,
-        &private_key_file,
-        &public_key_file,
-    )
-    .await?;
+        let device =
+            register_with_backend(http_client, &public_key_file, token, device_name).await?;
+        storage::setup::bootstrap(
+            layout,
+            &Device::from_activation(&device),
+            settings,
+            &private_key_file,
+            &public_key_file,
+        )
+        .await?;
+        Ok(device)
+    }
+    .await;
 
-    // delete the temporary directory
-    temp_dir.delete().await?;
-
-    Ok(())
+    if let Err(e) = temp_dir.delete().await {
+        warn!("failed to clean up temp dir: {e}");
+    }
+    result
 }
 
-pub async fn activate<HTTPClientT: http::ClientI>(
+const TOKEN_ENV_VAR: &str = "MIRU_ACTIVATION_TOKEN";
+
+pub fn read_token_from_env() -> Result<String, InstallErr> {
+    match env::var(TOKEN_ENV_VAR) {
+        Ok(token) => Ok(token),
+        Err(_) => {
+            error!("The {TOKEN_ENV_VAR} environment variable is not set");
+            Err(InstallErr::MissingEnvVarErr(MissingEnvVarErr {
+                name: TOKEN_ENV_VAR.to_string(),
+                trace: crate::trace!(),
+            }))
+        }
+    }
+}
+
+async fn register_with_backend<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     public_key_file: &File,
     token: &str,
     device_name: Option<String>,
-) -> Result<openapi_client::models::Device, InstallErr> {
+) -> Result<backend_client::Device, InstallErr> {
     let device_id = jwt::extract_device_id(token)?;
-
-    // activate the device with the server
     let public_key_pem = public_key_file.read_string().await?;
-    let payload = ActivateDeviceRequest {
+    let payload = backend_client::ActivateDeviceRequest {
         public_key_pem,
         name: device_name,
         agent_version: Some(version::VERSION.to_string()),
     };
-    let device = devices::activate(
-        http_client,
-        devices::ActivateParams {
-            id: &device_id,
-            payload: &payload,
-            token,
-        },
-    )
-    .await?;
+    let params = http::devices::ActivateParams {
+        id: &device_id,
+        payload: &payload,
+        token,
+    };
+    Ok(http::devices::activate(http_client, params).await?)
+}
 
-    // complete
-    display::info(
-        format!(
-            "Successfully activated this device as {}!",
-            display::color(&device.name, display::Colors::Green)
-        )
-        .as_str(),
-    );
+pub fn determine_settings(args: &cli::InstallArgs) -> settings::Settings {
+    let mut settings = settings::Settings::default();
+    if let Some(backend_host) = &args.backend_host {
+        settings.backend.base_url = format!("{}/agent/v1", backend_host);
+    }
+    if let Some(mqtt_broker_host) = &args.mqtt_broker_host {
+        settings.mqtt_broker.host = mqtt_broker_host.to_string();
+    }
+    settings
+}
 
-    Ok(device)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should not be poisoned")
+    }
+
+    mod read_token_from_env {
+        use super::*;
+
+        #[test]
+        fn returns_token_when_set() {
+            let _env_lock = lock_env();
+            env::set_var("MIRU_ACTIVATION_TOKEN", "test-token-123");
+            let result = read_token_from_env();
+            assert_eq!(result.unwrap(), "test-token-123");
+            env::remove_var("MIRU_ACTIVATION_TOKEN");
+        }
+
+        #[test]
+        fn returns_error_when_not_set() {
+            let _env_lock = lock_env();
+            env::remove_var("MIRU_ACTIVATION_TOKEN");
+            let result = read_token_from_env();
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, InstallErr::MissingEnvVarErr(ref e) if e.name == "MIRU_ACTIVATION_TOKEN"),
+                "expected MissingEnvVarErr, got: {err:?}"
+            );
+        }
+    }
+
+    mod determine_settings {
+        use super::*;
+
+        #[test]
+        fn backend_host_appends_agent_v1_suffix() {
+            let args = cli::InstallArgs {
+                backend_host: Some("https://custom.example.com".to_string()),
+                ..Default::default()
+            };
+
+            let settings = determine_settings(&args);
+
+            assert_eq!(
+                settings.backend.base_url,
+                "https://custom.example.com/agent/v1"
+            );
+        }
+
+        #[test]
+        fn mqtt_broker_host_override() {
+            let args = cli::InstallArgs {
+                mqtt_broker_host: Some("mqtt.custom.example.com".to_string()),
+                ..Default::default()
+            };
+
+            let settings = determine_settings(&args);
+
+            assert_eq!(settings.mqtt_broker.host, "mqtt.custom.example.com");
+        }
+
+        #[test]
+        fn no_overrides_preserves_defaults() {
+            let args = cli::InstallArgs::default();
+            let defaults = settings::Settings::default();
+
+            let settings = determine_settings(&args);
+
+            assert_eq!(settings.backend.base_url, defaults.backend.base_url);
+            assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
+        }
+    }
 }

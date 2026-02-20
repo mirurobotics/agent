@@ -83,15 +83,15 @@ impl AuthLayout {
         Self { root }
     }
 
-    pub fn private_key_file(&self) -> File {
+    pub fn private_key(&self) -> File {
         self.root.file("private_key.pem")
     }
 
-    pub fn public_key_file(&self) -> File {
+    pub fn public_key(&self) -> File {
         self.root.file("public_key.pem")
     }
 
-    pub fn token_file(&self) -> File {
+    pub fn token(&self) -> File {
         self.root.file("token.json")
     }
 }

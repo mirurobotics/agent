@@ -25,39 +25,53 @@ pub fn color(text: &str, color: Colors) -> String {
     format!("\x1b[{color_code}m{text}\x1b[0m")
 }
 
-pub fn info(text: &str) {
-    println!("{}{}", color("==> ", Colors::Green), text);
+pub fn format_info(text: &str) -> String {
+    format!("{}{}", color("==> ", Colors::Green), text)
 }
 
-pub fn bold(text: &str) -> String {
-    format!("\x1b[1m{text}\x1b[0m")
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub fn color_rgb(text: &str, r: u8, g: u8, b: u8) -> String {
-    format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
-}
+    mod color {
+        use super::*;
 
-pub fn print_title(title: &str) {
-    let width = title.len() + 4;
-    let border = "═".repeat(width);
+        #[test]
+        fn all_variants() {
+            let cases = vec![
+                (Colors::Red, "31"),
+                (Colors::Green, "32"),
+                (Colors::Yellow, "33"),
+                (Colors::Blue, "34"),
+                (Colors::Magenta, "35"),
+                (Colors::Cyan, "36"),
+                (Colors::White, "37"),
+            ];
+            for (variant, expected_code) in cases {
+                let result = color("hello", variant);
+                assert_eq!(
+                    result,
+                    format!("\x1b[{expected_code}mhello\x1b[0m"),
+                    "wrong ANSI code for color {expected_code}"
+                );
+            }
+        }
 
-    println!("╔{border}╗");
-    println!("║  {title}  ║");
-    println!("╚{border}╝");
-}
-
-pub fn print_err_msg(err: Option<String>) {
-    println!("An error occurred during your installation. Contact us at ben@mirurobotics.com for immediate support.\n");
-
-    if let Some(e) = err {
-        println!("Error: {e}\n");
+        #[test]
+        fn empty_text() {
+            let result = color("", Colors::Red);
+            assert_eq!(result, "\x1b[31m\x1b[0m");
+        }
     }
-}
 
-pub fn format_url(url: &str, display_text: &str) -> String {
-    format!(
-        "\x1b]8;{}\x1b\\{}\x1b]8;\x1b\\",
-        url,
-        bold(&color(display_text, Colors::Green))
-    )
+    mod format_info {
+        use super::*;
+
+        #[test]
+        fn formats_with_green_arrow() {
+            let result = format_info("test message");
+            let expected = format!("{}test message", color("==> ", Colors::Green));
+            assert_eq!(result, expected);
+        }
+    }
 }

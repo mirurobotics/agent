@@ -8,6 +8,7 @@ pub mod deploy;
 pub mod errors;
 pub mod filesys;
 pub mod http;
+pub mod installer;
 pub mod logs;
 pub mod mock;
 pub mod models;

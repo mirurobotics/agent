@@ -52,11 +52,10 @@ impl AppState {
     ) -> Result<(Self, impl Future<Output = ()>), ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth_dir();
-        let private_key_file = auth_dir.private_key_file();
+        let private_key_file = auth_dir.private_key();
         private_key_file.assert_exists()?;
 
-        let token_file =
-            TokenFile::new_with_default(auth_dir.token_file(), Token::default()).await?;
+        let token_file = TokenFile::new_with_default(auth_dir.token(), Token::default()).await?;
 
         // get the device id
         let device_id = Self::init_device_id(layout, &token_file).await?;
