@@ -71,7 +71,7 @@ async fn invalid_broker_url() {
 
     let err = poll(&mut eventloop).await.unwrap_err();
     assert!(matches!(err, MQTTError::NetworkConnectionErr(_)));
-    assert!(err.is_network_connection_error());
+    assert!(err.is_network_conn_err());
 }
 
 #[tokio::test]
@@ -126,7 +126,7 @@ async fn publish_err() {
         .await
         .unwrap_err();
     assert!(matches!(err, MQTTError::PublishErr(_)));
-    assert!(err.is_network_connection_error());
+    assert!(err.is_network_conn_err());
 }
 
 #[tokio::test]
@@ -139,7 +139,7 @@ async fn subscribe_err() {
         .await
         .unwrap_err();
     assert!(matches!(err, MQTTError::SubscribeErr(_)));
-    assert!(err.is_network_connection_error());
+    assert!(err.is_network_conn_err());
 }
 
 #[tokio::test]
@@ -149,7 +149,7 @@ async fn unsubscribe_err() {
 
     let err = client.unsubscribe("test").await.unwrap_err();
     assert!(matches!(err, MQTTError::UnsubscribeErr(_)));
-    assert!(err.is_network_connection_error());
+    assert!(err.is_network_conn_err());
 }
 
 #[tokio::test]
@@ -159,7 +159,7 @@ async fn disconnect_err() {
 
     let err = client.disconnect().await.unwrap_err();
     assert!(matches!(err, MQTTError::DisconnectErr(_)));
-    assert!(err.is_network_connection_error());
+    assert!(err.is_network_conn_err());
 }
 
 #[tokio::test]
@@ -194,5 +194,5 @@ async fn publish_timeout() {
         .await
         .unwrap_err();
     assert!(matches!(err, MQTTError::TimeoutErr(_)));
-    assert!(err.is_network_connection_error());
+    assert!(err.is_network_conn_err());
 }

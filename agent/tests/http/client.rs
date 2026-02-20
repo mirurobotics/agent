@@ -79,7 +79,7 @@ pub mod send {
             let req = client.build_request(params).unwrap();
             let err = client.send(req).await.unwrap_err();
             assert!(matches!(err, HTTPErr::ReqwestErr(_)));
-            assert!(err.is_network_connection_error());
+            assert!(err.is_network_conn_err());
         }
 
         #[tokio::test]

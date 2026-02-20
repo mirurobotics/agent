@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::logs::LogLevel;
-use miru_agent::storage::settings::{Backend, MQTTBroker, Settings};
+use miru_agent::storage::{Backend, MQTTBroker, Settings};
 
 // external crates
 use serde_json::json;

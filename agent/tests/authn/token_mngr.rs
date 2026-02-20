@@ -218,7 +218,7 @@ pub mod refresh_token {
         let mock_client = MockClient {
             issue_device_token_fn: Box::new(|| {
                 Err(HTTPErr::MockErr(MockErr {
-                    is_network_connection_error: false,
+                    is_network_conn_err: false,
                 }))
             }),
             ..Default::default()

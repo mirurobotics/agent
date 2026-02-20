@@ -7,13 +7,13 @@ use miru_agent::app::run::run;
 use miru_agent::filesys::{dir::Dir, file::File, WriteOptions};
 use miru_agent::models::device::Device;
 use miru_agent::server::serve::ServerOptions;
-use miru_agent::storage::layout::StorageLayout;
+use miru_agent::storage::Layout;
 
 // external crates
 use tokio::time::Duration;
 
 async fn prepare_valid_server_storage(dir: Dir) {
-    let layout = StorageLayout::new(dir);
+    let layout = Layout::new(dir);
 
     // create a private key file
     let private_key_file = layout.auth_dir().private_key();
@@ -36,7 +36,7 @@ async fn invalid_app_state_initialization() {
     let dir = Dir::create_temp_dir("testing").await.unwrap();
     let options = AppOptions {
         storage: StorageOptions {
-            layout: StorageLayout::new(dir),
+            layout: Layout::new(dir),
             ..Default::default()
         },
         ..Default::default()
@@ -58,7 +58,7 @@ async fn max_runtime_reached() {
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: StorageLayout::new(dir),
+            layout: Layout::new(dir),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -91,7 +91,7 @@ async fn is_persistent() {
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: StorageLayout::new(dir),
+            layout: Layout::new(dir),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -123,7 +123,7 @@ async fn idle_timeout_reached() {
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: StorageLayout::new(dir),
+            layout: Layout::new(dir),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -161,7 +161,7 @@ async fn shutdown_signal_received() {
             ..Default::default()
         },
         storage: StorageOptions {
-            layout: StorageLayout::new(dir),
+            layout: Layout::new(dir),
             ..Default::default()
         },
         server: ServerOptions {

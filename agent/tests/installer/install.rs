@@ -5,8 +5,7 @@ use miru_agent::filesys::path::PathExt;
 use miru_agent::http::errors::HTTPErr;
 use miru_agent::installer::errors::InstallErr;
 use miru_agent::installer::install;
-use miru_agent::storage::layout::StorageLayout;
-use miru_agent::storage::settings::Settings;
+use miru_agent::storage::{Layout, Settings};
 use openapi_client::models::Device;
 
 use crate::http::mock;
@@ -51,7 +50,7 @@ pub mod install_fn {
         let device_name = "test-device";
 
         let root = Dir::create_temp_dir("install-test").await.unwrap();
-        let layout = StorageLayout::new(root.clone());
+        let layout = Layout::new(root.clone());
         let settings = Settings::default();
 
         let mock = MockClient {
@@ -106,13 +105,13 @@ pub mod install_fn {
         let token = new_jwt(DEVICE_ID);
 
         let root = Dir::create_temp_dir("install-test").await.unwrap();
-        let layout = StorageLayout::new(root.clone());
+        let layout = Layout::new(root.clone());
         let settings = Settings::default();
 
         let mock = MockClient {
             activate_device_fn: Box::new(|| {
                 Err(HTTPErr::MockErr(miru_agent::http::errors::MockErr {
-                    is_network_connection_error: true,
+                    is_network_conn_err: true,
                 }))
             }),
             ..MockClient::default()
@@ -138,7 +137,7 @@ pub mod install_fn {
     #[tokio::test]
     async fn invalid_jwt_returns_error() {
         let root = Dir::create_temp_dir("install-test").await.unwrap();
-        let layout = StorageLayout::new(root.clone());
+        let layout = Layout::new(root.clone());
         let settings = Settings::default();
         let mock = MockClient::default();
 

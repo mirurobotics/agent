@@ -2,12 +2,11 @@
 // These replace the old config_instances sync tests.
 
 use miru_agent::crud::prelude::*;
-use miru_agent::deploy::{filesys, fsm};
+use miru_agent::deploy::fsm;
 use miru_agent::filesys::dir::Dir;
 use miru_agent::http::errors::*;
-use miru_agent::models::deployment::{DeploymentActivityStatus, DeploymentTargetStatus};
-use miru_agent::storage::config_instances::{ConfigInstanceCache, ConfigInstanceContentCache};
-use miru_agent::storage::deployments::DeploymentCache;
+use miru_agent::models::deployment::{DplActivity, DplTarget};
+use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments};
 use miru_agent::sync::deployments::sync;
 
 use crate::http::mock::MockClient;
@@ -56,34 +55,30 @@ pub mod sync_tests {
     async fn pull_and_push_empty() {
         let dir = Dir::create_temp_dir("sync_empty").await.unwrap();
 
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
 
         let http_client = MockClient::default();
         let dpl_retry_policy = fsm::RetryPolicy::default();
-        let ctx = filesys::DeployContext {
-            content_reader: &cfg_inst_content_cache,
-            deployment_dir: &dir.subdir("deployments"),
-            staging_dir: &dir.subdir("staging"),
-            retry_policy: &dpl_retry_policy,
-        };
+        let staging_dir = dir.subdir("staging");
+        let target_dir = dir.subdir("deployments");
 
         let result = sync(
             &deployment_cache,
             &cfg_inst_cache,
             &cfg_inst_content_cache,
             &http_client,
-            &ctx,
+            &staging_dir,
+            &target_dir,
+            &dpl_retry_policy,
             "test_token",
         )
         .await;
@@ -95,16 +90,14 @@ pub mod sync_tests {
     async fn pull_stores_deployments_and_config_instances() {
         let dir = Dir::create_temp_dir("sync_pull").await.unwrap();
 
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
 
@@ -113,19 +106,17 @@ pub mod sync_tests {
         http_client.set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
         let dpl_retry_policy = fsm::RetryPolicy::default();
-        let ctx = filesys::DeployContext {
-            content_reader: &cfg_inst_content_cache,
-            deployment_dir: &dir.subdir("deployments"),
-            staging_dir: &dir.subdir("staging"),
-            retry_policy: &dpl_retry_policy,
-        };
+        let staging_dir = dir.subdir("staging");
+        let target_dir = dir.subdir("deployments");
 
         let _result = sync(
             &deployment_cache,
             &cfg_inst_cache,
             &cfg_inst_content_cache,
             &http_client,
-            &ctx,
+            &staging_dir,
+            &target_dir,
+            &dpl_retry_policy,
             "test_token",
         )
         .await;
@@ -140,8 +131,8 @@ pub mod sync_tests {
         assert_eq!(cached.id, "dpl_1");
         // After sync (pull + apply + push), the deployment should be deployed
         // because FSM: target=Deployed, activity=Queued → Deploy → Deployed
-        assert_eq!(cached.activity_status, DeploymentActivityStatus::Deployed);
-        assert_eq!(cached.target_status, DeploymentTargetStatus::Deployed);
+        assert_eq!(cached.activity_status, DplActivity::Deployed);
+        assert_eq!(cached.target_status, DplTarget::Deployed);
         assert_eq!(cached.config_instance_ids, vec!["dpl_1_ci_1"]);
 
         // Check that config instance was cached
@@ -158,40 +149,36 @@ pub mod sync_tests {
     async fn pull_failure_returns_error() {
         let dir = Dir::create_temp_dir("sync_fail").await.unwrap();
 
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
 
         let http_client = MockClient::default();
         http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
 
         let dpl_retry_policy = fsm::RetryPolicy::default();
-        let ctx = filesys::DeployContext {
-            content_reader: &cfg_inst_content_cache,
-            deployment_dir: &dir.subdir("deployments"),
-            staging_dir: &dir.subdir("staging"),
-            retry_policy: &dpl_retry_policy,
-        };
+        let staging_dir = dir.subdir("staging");
+        let target_dir = dir.subdir("deployments");
 
         let result = sync(
             &deployment_cache,
             &cfg_inst_cache,
             &cfg_inst_content_cache,
             &http_client,
-            &ctx,
+            &staging_dir,
+            &target_dir,
+            &dpl_retry_policy,
             "test_token",
         )
         .await;

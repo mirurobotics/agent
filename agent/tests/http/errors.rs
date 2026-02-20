@@ -126,13 +126,13 @@ pub mod timeout_err {
     }
 
     #[test]
-    fn is_network_connection_error_returns_true() {
+    fn is_network_conn_err_returns_true() {
         let err = TimeoutErr {
             msg: "timed out".to_string(),
             request: meta(),
             trace: trace(),
         };
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 }
 
@@ -140,10 +140,10 @@ pub mod reqwest_err_kind {
     use super::*;
 
     // We can't easily construct a real reqwest::Error, so we test display via
-    // the HTTPErr wrapper and test is_network_connection_error on ReqwestErrKind.
+    // the HTTPErr wrapper and test is_network_conn_err on ReqwestErrKind.
 
     #[test]
-    fn connection_is_network_connection_error() {
+    fn connection_is_network_conn_err() {
         // Make a real reqwest::Error by connecting to a refused port
         let rt = tokio::runtime::Runtime::new().unwrap();
         let err = rt
@@ -161,7 +161,7 @@ pub mod reqwest_err_kind {
             source: err,
             trace: trace(),
         };
-        assert!(reqwest_err.is_network_connection_error());
+        assert!(reqwest_err.is_network_conn_err());
         let display = format!("{reqwest_err}");
         assert!(display.contains("network connection error"));
     }
@@ -184,7 +184,7 @@ pub mod reqwest_err_kind {
             source: err,
             trace: trace(),
         };
-        assert!(!reqwest_err.is_network_connection_error());
+        assert!(!reqwest_err.is_network_conn_err());
     }
 }
 
@@ -192,25 +192,25 @@ pub mod mock_err {
     use super::*;
 
     #[test]
-    fn is_network_connection_error_delegates_to_field_true() {
+    fn is_network_conn_err_delegates_to_field_true() {
         let err = MockErr {
-            is_network_connection_error: true,
+            is_network_conn_err: true,
         };
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
-    fn is_network_connection_error_delegates_to_field_false() {
+    fn is_network_conn_err_delegates_to_field_false() {
         let err = MockErr {
-            is_network_connection_error: false,
+            is_network_conn_err: false,
         };
-        assert!(!err.is_network_connection_error());
+        assert!(!err.is_network_conn_err());
     }
 
     #[test]
     fn display_format() {
         let err = MockErr {
-            is_network_connection_error: true,
+            is_network_conn_err: true,
         };
         let display = format!("{err}");
         assert!(display.contains("true"));

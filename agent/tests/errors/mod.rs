@@ -55,14 +55,14 @@ fn test_error_trait_defaults() {
         axum::http::StatusCode::INTERNAL_SERVER_ERROR
     );
     assert!(err.params().is_none());
-    assert!(!err.is_network_connection_error());
+    assert!(!err.is_network_conn_err());
 }
 
 #[test]
 fn test_impl_error_macro_dispatch() {
     // MockErr uses trait defaults for code/http_status/params
     let mock = HTTPErr::MockErr(MockErr {
-        is_network_connection_error: false,
+        is_network_conn_err: false,
     });
     assert_eq!(
         mock.code().as_str(),
@@ -73,7 +73,7 @@ fn test_impl_error_macro_dispatch() {
         axum::http::StatusCode::INTERNAL_SERVER_ERROR
     );
     assert!(mock.params().is_none());
-    assert!(!mock.is_network_connection_error());
+    assert!(!mock.is_network_conn_err());
 
     // RequestFailed has custom implementations for code/http_status/params
     let request_failed = HTTPErr::RequestFailed(RequestFailed {
@@ -95,5 +95,5 @@ fn test_impl_error_macro_dispatch() {
         axum::http::StatusCode::BAD_REQUEST
     );
     assert!(request_failed.params().is_none());
-    assert!(!request_failed.is_network_connection_error());
+    assert!(!request_failed.is_network_conn_err());
 }

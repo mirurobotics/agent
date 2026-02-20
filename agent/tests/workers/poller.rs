@@ -4,7 +4,7 @@ use std::sync::Arc;
 // internal crates
 use miru_agent::filesys::dir::Dir;
 use miru_agent::models::device::Device;
-use miru_agent::storage::{device::DeviceFile, layout::StorageLayout};
+use miru_agent::storage::{self, Layout};
 use miru_agent::sync::{
     errors::{MockErr as SyncMockErr, SyncErr},
     syncer::{CooldownEnd, SyncEvent, SyncFailure, SyncState},
@@ -23,10 +23,10 @@ pub mod run {
     #[tokio::test]
     async fn syncer_not_in_cooldown() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 
@@ -76,7 +76,7 @@ pub mod run {
         // last sync attempt since errors are logged & ignored
         syncer.set_sync(|| {
             Err(SyncErr::MockErr(SyncMockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
         for i in 0..10 {
@@ -90,7 +90,7 @@ pub mod run {
 
         syncer.set_sync(|| {
             Err(SyncErr::MockErr(SyncMockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
         for i in 0..10 {
@@ -106,10 +106,10 @@ pub mod run {
     #[tokio::test]
     async fn syncer_in_cooldown() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 
@@ -160,7 +160,7 @@ pub mod run {
         // are logged & ignored
         syncer.set_sync(|| {
             Err(SyncErr::MockErr(SyncMockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
         for _ in 0..10 {
@@ -174,7 +174,7 @@ pub mod run {
 
         syncer.set_sync(|| {
             Err(SyncErr::MockErr(SyncMockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
         for _ in 0..10 {
@@ -190,10 +190,10 @@ pub mod run {
     #[tokio::test]
     async fn ignored_syncer_events() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 
@@ -234,7 +234,7 @@ pub mod run {
         for event in [
             SyncEvent::SyncSuccess,
             SyncEvent::SyncFailed(SyncFailure {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }),
             SyncEvent::CooldownEnd(CooldownEnd::FromSyncSuccess),
         ] {
@@ -252,10 +252,10 @@ pub mod run {
     #[tokio::test]
     async fn syncer_cooldown_end_from_sync_failure_event() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 

@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::models::device::Device;
-use miru_agent::storage::{device::assert_activated, errors::StorageErr};
+use miru_agent::storage::{assert_activated, StorageErr};
 
 pub mod assert_activated {
     use super::*;

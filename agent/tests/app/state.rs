@@ -15,8 +15,7 @@ use miru_agent::models::{
     device::{Device, DeviceStatus},
 };
 use miru_agent::server::errors::ServerErr;
-use miru_agent::storage::caches::CacheCapacities;
-use miru_agent::storage::layout::StorageLayout;
+use miru_agent::storage::{Capacities, Layout};
 
 // external crates
 use chrono::Utc;
@@ -27,11 +26,11 @@ pub mod init {
     #[tokio::test]
     async fn fail_missing_private_key_file() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let result = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -52,7 +51,7 @@ pub mod init {
     #[tokio::test]
     async fn fail_missing_device_id() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         // create a private key file
         let private_key_file = layout.auth_dir().private_key();
         private_key_file
@@ -63,7 +62,7 @@ pub mod init {
         let result = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -75,7 +74,7 @@ pub mod init {
     async fn success_missing_device_file_but_valid_token() {
         let begin_test = Utc::now().timestamp();
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth_dir().private_key();
@@ -98,7 +97,7 @@ pub mod init {
         let (state, _) = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -125,7 +124,7 @@ pub mod init {
     async fn success_missing_token_file() {
         let begin_test = Utc::now().timestamp();
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth_dir().private_key();
@@ -145,7 +144,7 @@ pub mod init {
         let (state, _) = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -165,7 +164,7 @@ pub mod init {
     #[tokio::test]
     async fn success_set_device_to_offline_on_boot() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth_dir().private_key();
@@ -190,7 +189,7 @@ pub mod init {
         let _ = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -210,7 +209,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn success_device_offline() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth_dir().private_key();
@@ -230,7 +229,7 @@ pub mod shutdown {
         let (state, state_handle) = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -249,7 +248,7 @@ pub mod shutdown {
         });
 
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth_dir().private_key();
@@ -270,7 +269,7 @@ pub mod shutdown {
         let (state, state_handle) = AppState::init(
             Device::default().agent_version,
             &layout,
-            CacheCapacities::default(),
+            Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
@@ -279,7 +278,7 @@ pub mod shutdown {
 
         // set the device to be online
         state
-            .device_file
+            .device_stor
             .patch(device::Updates::connected())
             .await
             .unwrap();

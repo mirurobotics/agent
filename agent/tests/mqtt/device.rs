@@ -11,7 +11,7 @@ use rumqttc::QoS;
 fn mock_error() -> MQTTError {
     MQTTError::MockErr(MockErr {
         is_authentication_error: false,
-        is_network_connection_error: false,
+        is_network_conn_err: false,
     })
 }
 

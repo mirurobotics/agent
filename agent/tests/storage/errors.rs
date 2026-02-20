@@ -1,7 +1,7 @@
 use miru_agent::cache::errors::{CacheElementNotFound, CacheErr};
 use miru_agent::crypt::errors::{CryptErr, InvalidJWTErr};
 use miru_agent::filesys::errors::{FileSysErr, InvalidDirNameErr};
-use miru_agent::storage::errors::StorageErr;
+use miru_agent::storage::StorageErr;
 
 fn cache_err() -> CacheErr {
     CacheErr::CacheElementNotFound(CacheElementNotFound {

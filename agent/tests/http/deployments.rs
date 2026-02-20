@@ -11,7 +11,7 @@ use openapi_client::models::{
 
 fn mock_err() -> HTTPErr {
     HTTPErr::MockErr(MockErr {
-        is_network_connection_error: false,
+        is_network_conn_err: false,
     })
 }
 

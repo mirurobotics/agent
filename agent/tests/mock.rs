@@ -20,7 +20,7 @@ impl MockMiruError {
 }
 
 impl Error for MockMiruError {
-    fn is_network_connection_error(&self) -> bool {
+    fn is_network_conn_err(&self) -> bool {
         self.network_err
     }
 }

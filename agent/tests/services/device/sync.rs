@@ -51,7 +51,7 @@ pub mod errors {
 
         syncer.set_sync(move || {
             Err(SyncErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
 
@@ -76,7 +76,7 @@ pub mod errors {
 
         syncer.set_sync(move || {
             Err(SyncErr::MockErr(MockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
 

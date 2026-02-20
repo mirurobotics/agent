@@ -9,7 +9,7 @@ use miru_agent::mqtt::{
     options::Options,
     topics,
 };
-use miru_agent::storage::{device::DeviceFile, layout::StorageLayout};
+use miru_agent::storage::{self, Layout};
 use miru_agent::sync::{
     errors::{MockErr as SyncMockErr, SyncErr},
     syncer::{CooldownEnd, SyncEvent, SyncFailure},
@@ -42,7 +42,7 @@ pub mod handle_syncer_event {
     async fn ignored_syncer_events() {
         for event in [
             SyncEvent::SyncFailed(SyncFailure {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }),
             SyncEvent::CooldownEnd(CooldownEnd::FromSyncSuccess),
             SyncEvent::CooldownEnd(CooldownEnd::FromSyncFailure),
@@ -63,10 +63,10 @@ pub mod handle_connection_events {
     #[tokio::test]
     async fn unsuccessful_connack_event_is_ignored() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 
@@ -86,9 +86,9 @@ pub mod handle_connection_events {
     #[tokio::test]
     async fn successful_connack_event() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
-        let (device_file, _) = DeviceFile::spawn_with_default(
+        let (device_file, _) = storage::Device::spawn_with_default(
             64,
             layout.device_file(),
             Device {
@@ -120,9 +120,9 @@ pub mod handle_connection_events {
     #[tokio::test]
     async fn disconnect_event() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
-        let (device_file, _) = DeviceFile::spawn_with_default(
+        let (device_file, _) = storage::Device::spawn_with_default(
             64,
             layout.device_file(),
             Device {
@@ -155,11 +155,11 @@ pub mod handle_sync_events {
     #[tokio::test]
     async fn sync_request_unserializable() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device::default();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -180,11 +180,11 @@ pub mod handle_sync_events {
     #[tokio::test]
     async fn sync_request_is_synced() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device::default();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -207,11 +207,11 @@ pub mod handle_sync_events {
     #[tokio::test]
     async fn sync_request_is_not_synced() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device::default();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -234,11 +234,11 @@ pub mod handle_sync_events {
     #[tokio::test]
     async fn sync_error() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device::default();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -253,7 +253,7 @@ pub mod handle_sync_events {
         let syncer = MockSyncer::default();
         syncer.set_sync(|| {
             Err(SyncErr::MockErr(SyncMockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
         let err_streak =
@@ -270,11 +270,11 @@ pub mod handle_ping_events {
     #[tokio::test]
     async fn ping_request_unserializable() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device::default();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -298,11 +298,11 @@ pub mod handle_ping_events {
     #[tokio::test]
     async fn pong_success() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device::default();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -335,7 +335,7 @@ pub mod handle_mqtt_error {
     #[tokio::test]
     async fn authentication_error_triggers_token_refresh() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device {
             id: "device_id".to_string(),
@@ -344,7 +344,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -355,7 +355,7 @@ pub mod handle_mqtt_error {
         let token_mngr = MockTokenManager::new(token);
         let error = MQTTError::MockErr(MockErr {
             is_authentication_error: true,
-            is_network_connection_error: false,
+            is_network_conn_err: false,
         });
 
         let options = Options::default();
@@ -394,7 +394,7 @@ pub mod handle_mqtt_error {
     #[tokio::test]
     async fn other_errors_are_ignored() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let device = Device {
             id: "device_id".to_string(),
@@ -403,7 +403,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
                 .await
                 .unwrap();
 
@@ -414,7 +414,7 @@ pub mod handle_mqtt_error {
         let token_mngr = MockTokenManager::new(token);
         let error = MQTTError::MockErr(MockErr {
             is_authentication_error: false,
-            is_network_connection_error: true,
+            is_network_conn_err: true,
         });
 
         let options = Options::default();

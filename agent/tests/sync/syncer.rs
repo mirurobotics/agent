@@ -14,11 +14,7 @@ use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::device::Device;
-use miru_agent::storage::{
-    config_instances::{ConfigInstanceCache, ConfigInstanceContentCache},
-    deployments::DeploymentCache,
-    device::DeviceFile,
-};
+use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments};
 use miru_agent::sync::{
     errors::SyncErr,
     syncer::{
@@ -102,20 +98,18 @@ pub mod shutdown {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -124,7 +118,7 @@ pub mod shutdown {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -159,20 +153,18 @@ pub mod subscribe {
         let http_client = Arc::new(MockClient::default());
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -185,7 +177,7 @@ pub mod subscribe {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -246,30 +238,28 @@ pub mod subscribe {
         let http_client = Arc::new(MockClient::default());
         http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
         http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -282,7 +272,7 @@ pub mod subscribe {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -328,7 +318,7 @@ pub mod subscribe {
         assert_eq!(
             events[0],
             SyncEvent::SyncFailed(SyncFailure {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             })
         );
         assert_eq!(
@@ -387,23 +377,21 @@ pub mod sync {
         http_client.set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let cfg_inst_cache = Arc::new(cfg_inst_cache);
         let cfg_inst_content_cache = Arc::new(cfg_inst_content_cache);
         let deployment_cache = Arc::new(deployment_cache);
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -416,7 +404,7 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: cfg_inst_cache.clone(),
@@ -484,22 +472,20 @@ pub mod sync {
         let http_client = Arc::new(MockClient::default());
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let cfg_inst_cache = Arc::new(cfg_inst_cache);
         let cfg_inst_content_cache = Arc::new(cfg_inst_content_cache);
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
         let device_file = Arc::new(device_file);
@@ -514,7 +500,7 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: device_file.clone(),
+                device_stor: device_file.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: cfg_inst_cache.clone(),
@@ -562,30 +548,28 @@ pub mod sync {
         let http_client = Arc::new(MockClient::default());
         http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
         http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -598,7 +582,7 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -620,7 +604,7 @@ pub mod sync {
             let after = Utc::now();
 
             // check error type
-            assert!(error.is_network_connection_error());
+            assert!(error.is_network_conn_err());
 
             // check the sync state
             let state = syncer.get_sync_state().await.unwrap();
@@ -661,30 +645,28 @@ pub mod sync {
         let http_client = Arc::new(MockClient::default());
         http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
         http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -697,7 +679,7 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -718,7 +700,7 @@ pub mod sync {
             let after = Utc::now();
 
             // check error type
-            assert!(!error.is_network_connection_error());
+            assert!(!error.is_network_conn_err());
 
             // check the sync state
             let state = syncer.get_sync_state().await.unwrap();
@@ -759,30 +741,28 @@ pub mod sync {
         let http_client = Arc::new(MockClient::default());
         http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
         http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: false,
+                is_network_conn_err: false,
             }))
         });
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -795,7 +775,7 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -817,7 +797,7 @@ pub mod sync {
             let after = Utc::now();
 
             // check error type
-            assert!(!error.is_network_connection_error());
+            assert!(!error.is_network_conn_err());
 
             // check the sync state
             let state = syncer.get_sync_state().await.unwrap();
@@ -851,12 +831,12 @@ pub mod sync {
         // set the http client to return a network connection error
         http_client.set_list_all_deployments(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
         http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_connection_error: true,
+                is_network_conn_err: true,
             }))
         });
 
@@ -869,7 +849,7 @@ pub mod sync {
             let after = Utc::now();
 
             // check error type
-            assert!(error.is_network_connection_error());
+            assert!(error.is_network_conn_err());
 
             // check the sync state
             let state = syncer.get_sync_state().await.unwrap();
@@ -942,20 +922,18 @@ pub mod sync {
         let http_client = Arc::new(MockClient::default());
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -968,7 +946,7 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),
@@ -1011,20 +989,18 @@ pub mod sync_if_not_in_cooldown {
         let http_client = Arc::new(MockClient::default());
 
         // create the caches
-        let (cfg_inst_cache, _) =
-            ConfigInstanceCache::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+            .await
+            .unwrap();
         let (cfg_inst_content_cache, _) =
-            ConfigInstanceContentCache::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
                 .await
                 .unwrap();
-        let (deployment_cache, _) =
-            DeploymentCache::spawn(16, dir.file("deployment_cache.json"), 1000)
-                .await
-                .unwrap();
+        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+            .await
+            .unwrap();
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, dir.file("device.json"), Device::default())
+            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
                 .await
                 .unwrap();
 
@@ -1037,7 +1013,7 @@ pub mod sync_if_not_in_cooldown {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_file: Arc::new(device_file),
+                device_stor: Arc::new(device_file),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 cfg_inst_cache: Arc::new(cfg_inst_cache),

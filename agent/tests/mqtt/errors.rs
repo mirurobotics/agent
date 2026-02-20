@@ -21,7 +21,7 @@ fn connection_error_auth() -> ConnectionError {
     ConnectionError::ConnectionRefused(ConnectReturnCode::BadUserNamePassword)
 }
 
-mod is_network_connection_error {
+mod is_network_conn_err {
     use super::*;
 
     #[test]
@@ -30,7 +30,7 @@ mod is_network_connection_error {
             source: connection_error_auth(),
             trace: trace(),
         });
-        assert!(!err.is_network_connection_error());
+        assert!(!err.is_network_conn_err());
     }
 
     #[test]
@@ -39,7 +39,7 @@ mod is_network_connection_error {
             source: connection_error_network(),
             trace: trace(),
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
@@ -48,7 +48,7 @@ mod is_network_connection_error {
             msg: "timed out".to_string(),
             trace: trace(),
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
@@ -57,7 +57,7 @@ mod is_network_connection_error {
             source: ConnectionError::RequestsDone,
             trace: trace(),
         });
-        assert!(!err.is_network_connection_error());
+        assert!(!err.is_network_conn_err());
     }
 
     #[test]
@@ -66,7 +66,7 @@ mod is_network_connection_error {
             source: client_error(),
             trace: trace(),
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
@@ -75,7 +75,7 @@ mod is_network_connection_error {
             source: client_error(),
             trace: trace(),
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
@@ -84,7 +84,7 @@ mod is_network_connection_error {
             source: client_error(),
             trace: trace(),
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
@@ -93,7 +93,7 @@ mod is_network_connection_error {
             source: client_error(),
             trace: trace(),
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
@@ -103,25 +103,25 @@ mod is_network_connection_error {
             source,
             trace: trace(),
         });
-        assert!(!err.is_network_connection_error());
+        assert!(!err.is_network_conn_err());
     }
 
     #[test]
     fn mock_err_delegates_true() {
         let err = MQTTError::MockErr(MockErr {
             is_authentication_error: false,
-            is_network_connection_error: true,
+            is_network_conn_err: true,
         });
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 
     #[test]
     fn mock_err_delegates_false() {
         let err = MQTTError::MockErr(MockErr {
             is_authentication_error: false,
-            is_network_connection_error: false,
+            is_network_conn_err: false,
         });
-        assert!(!err.is_network_connection_error());
+        assert!(!err.is_network_conn_err());
     }
 }
 
@@ -168,7 +168,7 @@ mod is_authentication_error {
     fn mock_err_delegates_true() {
         let err = MQTTError::MockErr(MockErr {
             is_authentication_error: true,
-            is_network_connection_error: false,
+            is_network_conn_err: false,
         });
         assert!(err.is_authentication_error());
     }
@@ -177,7 +177,7 @@ mod is_authentication_error {
     fn mock_err_delegates_false() {
         let err = MQTTError::MockErr(MockErr {
             is_authentication_error: false,
-            is_network_connection_error: false,
+            is_network_conn_err: false,
         });
         assert!(!err.is_authentication_error());
     }
@@ -281,7 +281,7 @@ mod display {
     fn mock_err() {
         let err = MockErr {
             is_authentication_error: true,
-            is_network_connection_error: false,
+            is_network_conn_err: false,
         };
         let msg = format!("{err}");
         assert!(msg.contains("true"));
@@ -311,7 +311,7 @@ mod poll_error_classification {
     // verify the classification indirectly through real connection attempts.
 
     #[tokio::test]
-    async fn unreachable_host_is_network_connection_error() {
+    async fn unreachable_host_is_network_conn_err() {
         // Connect to a port that refuses connections
         let opts = Options::new(Credentials {
             username: "test".to_string(),
@@ -326,7 +326,7 @@ mod poll_error_classification {
         let (_, mut eventloop) = miru_agent::mqtt::client::MQTTClient::new(&opts).await;
 
         let err = poll(&mut eventloop).await.unwrap_err();
-        assert!(err.is_network_connection_error());
+        assert!(err.is_network_conn_err());
     }
 }
 

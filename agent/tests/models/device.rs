@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 // internal crates
 use miru_agent::models::device::{Device, DeviceStatus, Updates};
-use miru_agent::models::Mergeable;
+use miru_agent::models::Patch;
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
@@ -176,7 +176,7 @@ fn merge_empty() {
     let updates = Updates::empty();
     let expected = initial.clone();
     let mut actual = initial.clone();
-    actual.merge(updates);
+    actual.patch(updates);
     assert_eq!(expected, actual);
 }
 
@@ -215,7 +215,7 @@ fn merge_all() {
         last_disconnected_at: updates.last_disconnected_at.unwrap(),
     };
     let mut actual = initial.clone();
-    actual.merge(updates);
+    actual.patch(updates);
     assert_eq!(expected, actual);
 }
 

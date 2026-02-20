@@ -1,8 +1,8 @@
 // internal crates
 use miru_agent::models::deployment::{
-    Deployment, DeploymentActivityStatus, DeploymentErrorStatus, DeploymentStatus,
-    DeploymentTargetStatus,
+    Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget, Updates,
 };
+use miru_agent::models::Patch;
 use openapi_client::models as backend_client;
 
 // external crates
@@ -27,10 +27,6 @@ impl ModelFixture for Deployment {
             RequiredField {
                 key: "description",
                 value: json!("Test"),
-            },
-            RequiredField {
-                key: "status",
-                value: json!("deployed"),
             },
             RequiredField {
                 key: "activity_status",
@@ -79,7 +75,7 @@ impl ModelFixture for Deployment {
             OptionalField {
                 key: "cooldown_ends_at",
                 value: json!("2099-01-01T00:00:00Z"),
-                default_value: json!(null),
+                default_value: json!("1970-01-01T00:00:00Z"),
             },
         ]
     }
@@ -90,18 +86,18 @@ serde_tests!(Deployment);
 #[test]
 fn status_method() {
     let deployment = Deployment {
-        activity_status: DeploymentActivityStatus::Deployed,
-        error_status: DeploymentErrorStatus::None,
+        activity_status: DplActivity::Deployed,
+        error_status: DplErrStatus::None,
         ..Default::default()
     };
-    assert_eq!(deployment.status(), DeploymentStatus::Deployed);
+    assert_eq!(deployment.status(), DplStatus::Deployed);
 
     let deployment = Deployment {
-        activity_status: DeploymentActivityStatus::Staged,
-        error_status: DeploymentErrorStatus::Retrying,
+        activity_status: DplActivity::Staged,
+        error_status: DplErrStatus::Retrying,
         ..Default::default()
     };
-    assert_eq!(deployment.status(), DeploymentStatus::Retrying);
+    assert_eq!(deployment.status(), DplStatus::Retrying);
 }
 
 #[test]
@@ -114,7 +110,7 @@ fn is_in_cooldown_method() {
     assert!(deployment.is_in_cooldown());
 
     let deployment = Deployment {
-        cooldown_ends_at: Some(Utc::now() - TimeDelta::hours(1)),
+        cooldown_ends_at: Utc::now() - TimeDelta::hours(1),
         ..Default::default()
     };
     assert!(!deployment.is_in_cooldown());
@@ -123,14 +119,14 @@ fn is_in_cooldown_method() {
 #[test]
 fn set_cooldown_method() {
     let mut deployment = Deployment::default();
-    assert!(deployment.cooldown_ends_at.is_none());
+    assert_eq!(deployment.cooldown_ends_at, DateTime::<Utc>::UNIX_EPOCH);
 
     deployment.set_cooldown(TimeDelta::seconds(60));
-    assert!(deployment.cooldown_ends_at.is_some());
 
-    let cooldown_end = deployment.cooldown_ends_at.unwrap();
     let expected_approx = Utc::now() + TimeDelta::seconds(60);
-    let diff = (cooldown_end - expected_approx).num_seconds().abs();
+    let diff = (deployment.cooldown_ends_at - expected_approx)
+        .num_seconds()
+        .abs();
     assert!(diff < 2, "cooldown_ends_at should be ~60s from now");
 }
 
@@ -159,16 +155,15 @@ fn defaults() {
     let expected = Deployment {
         id,
         description: String::new(),
-        status: DeploymentStatus::Staged,
-        activity_status: DeploymentActivityStatus::Staged,
-        error_status: DeploymentErrorStatus::None,
-        target_status: DeploymentTargetStatus::Staged,
+        activity_status: DplActivity::Staged,
+        error_status: DplErrStatus::None,
+        target_status: DplTarget::Staged,
         device_id,
         release_id,
         created_at: DateTime::<Utc>::UNIX_EPOCH,
         updated_at: DateTime::<Utc>::UNIX_EPOCH,
         attempts: 0,
-        cooldown_ends_at: None,
+        cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         config_instance_ids: Vec::new(),
     };
 
@@ -177,30 +172,30 @@ fn defaults() {
 
 // ─── target status enum tests ─────────────────────────────────────────────
 
-impl StatusFixture for DeploymentTargetStatus {
+impl StatusFixture for DplTarget {
     fn variants() -> Vec<Self> {
-        DeploymentTargetStatus::variants()
+        DplTarget::variants()
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
                 input: "\"staged\"",
-                expected: DeploymentTargetStatus::Staged,
+                expected: DplTarget::Staged,
                 valid: true,
             },
             StatusCase {
                 input: "\"deployed\"",
-                expected: DeploymentTargetStatus::Deployed,
+                expected: DplTarget::Deployed,
                 valid: true,
             },
             StatusCase {
                 input: "\"archived\"",
-                expected: DeploymentTargetStatus::Archived,
+                expected: DplTarget::Archived,
                 valid: true,
             },
             StatusCase {
                 input: "\"unknown\"",
-                expected: DeploymentTargetStatus::Staged,
+                expected: DplTarget::Staged,
                 valid: false,
             },
         ]
@@ -209,78 +204,75 @@ impl StatusFixture for DeploymentTargetStatus {
 
 mod target_status {
     use super::*;
-    status_serde_tests!(DeploymentTargetStatus);
+    status_serde_tests!(DplTarget);
 }
 
 #[test]
 fn target_status_backend_conversions() {
     struct TestCase {
-        storage: DeploymentTargetStatus,
+        storage: DplTarget,
         backend: backend_client::DeploymentTargetStatus,
     }
 
     let test_cases = vec![
         TestCase {
-            storage: DeploymentTargetStatus::Staged,
+            storage: DplTarget::Staged,
             backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
         },
         TestCase {
-            storage: DeploymentTargetStatus::Deployed,
+            storage: DplTarget::Deployed,
             backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
         },
         TestCase {
-            storage: DeploymentTargetStatus::Archived,
+            storage: DplTarget::Archived,
             backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
         },
     ];
 
     for test_case in test_cases {
         assert_eq!(
-            DeploymentTargetStatus::from_backend(&test_case.backend),
+            DplTarget::from_backend(&test_case.backend),
             test_case.storage
         );
-        assert_eq!(
-            DeploymentTargetStatus::to_backend(&test_case.storage),
-            test_case.backend
-        );
+        assert_eq!(DplTarget::to_backend(&test_case.storage), test_case.backend);
     }
 }
 
 // ─── activity status enum tests ──────────────────────────────────────────────
-impl StatusFixture for DeploymentActivityStatus {
+impl StatusFixture for DplActivity {
     fn variants() -> Vec<Self> {
-        DeploymentActivityStatus::variants()
+        DplActivity::variants()
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
                 input: "\"drifted\"",
-                expected: DeploymentActivityStatus::Drifted,
+                expected: DplActivity::Drifted,
                 valid: true,
             },
             StatusCase {
                 input: "\"staged\"",
-                expected: DeploymentActivityStatus::Staged,
+                expected: DplActivity::Staged,
                 valid: true,
             },
             StatusCase {
                 input: "\"queued\"",
-                expected: DeploymentActivityStatus::Queued,
+                expected: DplActivity::Queued,
                 valid: true,
             },
             StatusCase {
                 input: "\"deployed\"",
-                expected: DeploymentActivityStatus::Deployed,
+                expected: DplActivity::Deployed,
                 valid: true,
             },
             StatusCase {
                 input: "\"archived\"",
-                expected: DeploymentActivityStatus::Archived,
+                expected: DplActivity::Archived,
                 valid: true,
             },
             StatusCase {
                 input: "\"unknown\"",
-                expected: DeploymentActivityStatus::Drifted,
+                expected: DplActivity::Drifted,
                 valid: false,
             },
         ]
@@ -289,76 +281,76 @@ impl StatusFixture for DeploymentActivityStatus {
 
 mod activity_status {
     use super::*;
-    status_serde_tests!(DeploymentActivityStatus);
+    status_serde_tests!(DplActivity);
 }
 
 #[test]
 fn activity_status_backend_conversions() {
     struct TestCase {
-        storage: DeploymentActivityStatus,
+        storage: DplActivity,
         backend: backend_client::DeploymentActivityStatus,
     }
 
     let test_cases = vec![
         TestCase {
-            storage: DeploymentActivityStatus::Drifted,
+            storage: DplActivity::Drifted,
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
         },
         TestCase {
-            storage: DeploymentActivityStatus::Staged,
+            storage: DplActivity::Staged,
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
         },
         TestCase {
-            storage: DeploymentActivityStatus::Queued,
+            storage: DplActivity::Queued,
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         },
         TestCase {
-            storage: DeploymentActivityStatus::Deployed,
+            storage: DplActivity::Deployed,
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
         },
         TestCase {
-            storage: DeploymentActivityStatus::Archived,
+            storage: DplActivity::Archived,
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
         },
     ];
 
     for test_case in test_cases {
         assert_eq!(
-            DeploymentActivityStatus::from_backend(&test_case.backend),
+            DplActivity::from_backend(&test_case.backend),
             test_case.storage
         );
         assert_eq!(
-            DeploymentActivityStatus::to_backend(&test_case.storage),
+            DplActivity::to_backend(&test_case.storage),
             test_case.backend
         );
     }
 }
 
 // ─── error status enum tests ──────────────────────────────────────────────
-impl StatusFixture for DeploymentErrorStatus {
+impl StatusFixture for DplErrStatus {
     fn variants() -> Vec<Self> {
-        DeploymentErrorStatus::variants()
+        DplErrStatus::variants()
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
                 input: "\"none\"",
-                expected: DeploymentErrorStatus::None,
+                expected: DplErrStatus::None,
                 valid: true,
             },
             StatusCase {
                 input: "\"failed\"",
-                expected: DeploymentErrorStatus::Failed,
+                expected: DplErrStatus::Failed,
                 valid: true,
             },
             StatusCase {
                 input: "\"retrying\"",
-                expected: DeploymentErrorStatus::Retrying,
+                expected: DplErrStatus::Retrying,
                 valid: true,
             },
             StatusCase {
                 input: "\"unknown\"",
-                expected: DeploymentErrorStatus::None,
+                expected: DplErrStatus::None,
                 valid: false,
             },
         ]
@@ -367,87 +359,87 @@ impl StatusFixture for DeploymentErrorStatus {
 
 mod error_status {
     use super::*;
-    status_serde_tests!(DeploymentErrorStatus);
+    status_serde_tests!(DplErrStatus);
 }
 
 #[test]
 fn error_status_backend_conversions() {
     struct TestCase {
-        storage: DeploymentErrorStatus,
+        storage: DplErrStatus,
         backend: backend_client::DeploymentErrorStatus,
     }
 
     let test_cases = vec![
         TestCase {
-            storage: DeploymentErrorStatus::None,
+            storage: DplErrStatus::None,
             backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
         },
         TestCase {
-            storage: DeploymentErrorStatus::Failed,
+            storage: DplErrStatus::Failed,
             backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
         },
         TestCase {
-            storage: DeploymentErrorStatus::Retrying,
+            storage: DplErrStatus::Retrying,
             backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
         },
     ];
 
     for test_case in test_cases {
         assert_eq!(
-            DeploymentErrorStatus::from_backend(&test_case.backend),
+            DplErrStatus::from_backend(&test_case.backend),
             test_case.storage
         );
         assert_eq!(
-            DeploymentErrorStatus::to_backend(&test_case.storage),
+            DplErrStatus::to_backend(&test_case.storage),
             test_case.backend
         );
     }
 }
 
-impl StatusFixture for DeploymentStatus {
+impl StatusFixture for DplStatus {
     fn variants() -> Vec<Self> {
-        DeploymentStatus::variants()
+        DplStatus::variants()
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
                 input: "\"drifted\"",
-                expected: DeploymentStatus::Drifted,
+                expected: DplStatus::Drifted,
                 valid: true,
             },
             StatusCase {
                 input: "\"staged\"",
-                expected: DeploymentStatus::Staged,
+                expected: DplStatus::Staged,
                 valid: true,
             },
             StatusCase {
                 input: "\"queued\"",
-                expected: DeploymentStatus::Queued,
+                expected: DplStatus::Queued,
                 valid: true,
             },
             StatusCase {
                 input: "\"deployed\"",
-                expected: DeploymentStatus::Deployed,
+                expected: DplStatus::Deployed,
                 valid: true,
             },
             StatusCase {
                 input: "\"archived\"",
-                expected: DeploymentStatus::Archived,
+                expected: DplStatus::Archived,
                 valid: true,
             },
             StatusCase {
                 input: "\"failed\"",
-                expected: DeploymentStatus::Failed,
+                expected: DplStatus::Failed,
                 valid: true,
             },
             StatusCase {
                 input: "\"retrying\"",
-                expected: DeploymentStatus::Retrying,
+                expected: DplStatus::Retrying,
                 valid: true,
             },
             StatusCase {
                 input: "\"unknown\"",
-                expected: DeploymentStatus::Drifted,
+                expected: DplStatus::Drifted,
                 valid: false,
             },
         ]
@@ -456,112 +448,177 @@ impl StatusFixture for DeploymentStatus {
 
 mod status {
     use super::*;
-    status_serde_tests!(DeploymentStatus);
+    status_serde_tests!(DplStatus);
 }
 
 #[test]
 fn status_backend_conversion() {
     struct TestCase {
-        storage: DeploymentStatus,
+        storage: DplStatus,
         backend: backend_client::DeploymentStatus,
     }
 
     let test_cases = vec![
         TestCase {
-            storage: DeploymentStatus::Drifted,
+            storage: DplStatus::Drifted,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
         },
         TestCase {
-            storage: DeploymentStatus::Staged,
+            storage: DplStatus::Staged,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
         },
         TestCase {
-            storage: DeploymentStatus::Queued,
+            storage: DplStatus::Queued,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
         },
         TestCase {
-            storage: DeploymentStatus::Deployed,
+            storage: DplStatus::Deployed,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
         },
         TestCase {
-            storage: DeploymentStatus::Archived,
+            storage: DplStatus::Archived,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
         },
         TestCase {
-            storage: DeploymentStatus::Failed,
+            storage: DplStatus::Failed,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
         },
         TestCase {
-            storage: DeploymentStatus::Retrying,
+            storage: DplStatus::Retrying,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
         },
     ];
 
     for test_case in test_cases {
         assert_eq!(
-            DeploymentStatus::from_backend(&test_case.backend),
+            DplStatus::from_backend(&test_case.backend),
             test_case.storage
         );
-        assert_eq!(
-            DeploymentStatus::to_backend(&test_case.storage),
-            test_case.backend
-        );
+        assert_eq!(DplStatus::to_backend(&test_case.storage), test_case.backend);
     }
 }
 
 #[test]
 fn status_from_activity_and_error() {
     struct TestCase {
-        activity_status: DeploymentActivityStatus,
-        error_status: DeploymentErrorStatus,
-        expected: DeploymentStatus,
+        activity_status: DplActivity,
+        error_status: DplErrStatus,
+        expected: DplStatus,
     }
 
     let test_cases = vec![
         TestCase {
-            activity_status: DeploymentActivityStatus::Drifted,
-            error_status: DeploymentErrorStatus::None,
-            expected: DeploymentStatus::Drifted,
+            activity_status: DplActivity::Drifted,
+            error_status: DplErrStatus::None,
+            expected: DplStatus::Drifted,
         },
         TestCase {
-            activity_status: DeploymentActivityStatus::Staged,
-            error_status: DeploymentErrorStatus::None,
-            expected: DeploymentStatus::Staged,
+            activity_status: DplActivity::Staged,
+            error_status: DplErrStatus::None,
+            expected: DplStatus::Staged,
         },
         TestCase {
-            activity_status: DeploymentActivityStatus::Queued,
-            error_status: DeploymentErrorStatus::None,
-            expected: DeploymentStatus::Queued,
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::None,
+            expected: DplStatus::Queued,
         },
         TestCase {
-            activity_status: DeploymentActivityStatus::Deployed,
-            error_status: DeploymentErrorStatus::None,
-            expected: DeploymentStatus::Deployed,
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            expected: DplStatus::Deployed,
         },
         TestCase {
-            activity_status: DeploymentActivityStatus::Archived,
-            error_status: DeploymentErrorStatus::None,
-            expected: DeploymentStatus::Archived,
+            activity_status: DplActivity::Archived,
+            error_status: DplErrStatus::None,
+            expected: DplStatus::Archived,
         },
         TestCase {
-            activity_status: DeploymentActivityStatus::Deployed,
-            error_status: DeploymentErrorStatus::Retrying,
-            expected: DeploymentStatus::Retrying,
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::Retrying,
+            expected: DplStatus::Retrying,
         },
         TestCase {
-            activity_status: DeploymentActivityStatus::Staged,
-            error_status: DeploymentErrorStatus::Failed,
-            expected: DeploymentStatus::Failed,
+            activity_status: DplActivity::Staged,
+            error_status: DplErrStatus::Failed,
+            expected: DplStatus::Failed,
         },
     ];
 
     for test_case in test_cases {
-        let result = DeploymentStatus::from_activity_and_error(
-            &test_case.activity_status,
-            &test_case.error_status,
-        );
+        let result =
+            DplStatus::from_activity_and_error(&test_case.activity_status, &test_case.error_status);
         assert_eq!(result, test_case.expected);
     }
+}
+
+// ─── update tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn update_empty() {
+    let initial = Deployment::default();
+    let expected = initial.clone();
+    let mut actual = initial;
+    actual.patch(Updates::empty());
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn update_all() {
+    let initial = Deployment::default();
+    let updates = Updates {
+        activity_status: Some(DplActivity::Deployed),
+        error_status: Some(DplErrStatus::Retrying),
+        attempts: Some(5),
+        cooldown: Some(TimeDelta::seconds(120)),
+    };
+    let mut actual = initial.clone();
+    actual.patch(updates);
+
+    let diff = (actual.cooldown_ends_at - Utc::now()).num_seconds();
+    assert!((diff - 120).abs() < 2, "cooldown should be ~120s from now");
+
+    let expected = Deployment {
+        activity_status: DplActivity::Deployed,
+        error_status: DplErrStatus::Retrying,
+        attempts: 5,
+        cooldown_ends_at: actual.cooldown_ends_at,
+        ..initial
+    };
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn update_partial() {
+    let initial = Deployment {
+        activity_status: DplActivity::Queued,
+        error_status: DplErrStatus::None,
+        attempts: 3,
+        ..Default::default()
+    };
+    let updates = Updates {
+        activity_status: Some(DplActivity::Deployed),
+        ..Updates::empty()
+    };
+    let mut actual = initial.clone();
+    actual.patch(updates);
+
+    let expected = Deployment {
+        activity_status: DplActivity::Deployed,
+        ..initial
+    };
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn updates_empty() {
+    let actual = Updates::empty();
+    let expected = Updates {
+        activity_status: None,
+        error_status: None,
+        attempts: None,
+        cooldown: None,
+    };
+    assert_eq!(actual, expected);
 }
 
 // ─── from-backend tests ──────────────────────────────────────────────────────
@@ -602,16 +659,15 @@ fn from_backend() {
     let expected = Deployment {
         id: "dpl_123".to_string(),
         description: "Test deployment".to_string(),
-        status: DeploymentStatus::Staged,
-        activity_status: DeploymentActivityStatus::Staged,
-        error_status: DeploymentErrorStatus::None,
-        target_status: DeploymentTargetStatus::Staged,
+        activity_status: DplActivity::Staged,
+        error_status: DplErrStatus::None,
+        target_status: DplTarget::Staged,
         device_id: "device_123".to_string(),
         release_id: "rel_123".to_string(),
         created_at: now,
         updated_at: now,
         attempts: 0,
-        cooldown_ends_at: None,
+        cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         config_instance_ids: vec!["cfg_1".to_string(), "cfg_2".to_string()],
     };
     assert_eq!(actual, expected);

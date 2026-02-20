@@ -1,8 +1,7 @@
 // internal crates
 use miru_agent::filesys::dir::Dir;
 use miru_agent::models::device::Device;
-use miru_agent::storage::device::DeviceFile;
-use miru_agent::storage::layout::StorageLayout;
+use miru_agent::storage::{self, Layout};
 use miru_agent::sync::agent_version::push;
 
 use crate::http::mock::MockClient;
@@ -13,7 +12,7 @@ pub mod push {
     #[tokio::test]
     async fn same_version() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let agent_version = Device::default().agent_version;
         let device = Device {
@@ -21,9 +20,10 @@ pub mod push {
             ..Device::default()
         };
 
-        let (device_file, _) = DeviceFile::spawn_with_default(64, layout.device_file(), device)
-            .await
-            .unwrap();
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device_file(), device)
+                .await
+                .unwrap();
         let http_client = MockClient::default();
 
         push(&device_file, &http_client, "token", agent_version.clone())
@@ -41,7 +41,7 @@ pub mod push {
     #[tokio::test]
     async fn different_version() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let old_agent_version = Device::default().agent_version;
         let new_agent_version = "v1.0.1".to_string();
@@ -50,9 +50,10 @@ pub mod push {
             ..Device::default()
         };
 
-        let (device_file, _) = DeviceFile::spawn_with_default(64, layout.device_file(), device)
-            .await
-            .unwrap();
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device_file(), device)
+                .await
+                .unwrap();
         let http_client = MockClient::default();
 
         push(

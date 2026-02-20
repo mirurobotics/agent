@@ -3,7 +3,7 @@ use miru_agent::filesys::dir::Dir;
 use miru_agent::models::device::Device;
 use miru_agent::services::device::get;
 use miru_agent::services::errors::*;
-use miru_agent::storage::{device::DeviceFile, layout::StorageLayout};
+use miru_agent::storage::{self, Layout};
 
 pub mod errors {
     use super::*;
@@ -11,10 +11,10 @@ pub mod errors {
     #[tokio::test]
     async fn device_file_shutdown() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
         device_file.shutdown().await.unwrap();
@@ -30,10 +30,10 @@ pub mod success {
     #[tokio::test]
     async fn device_file_does_not_exist() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 
@@ -46,10 +46,10 @@ pub mod success {
     #[tokio::test]
     async fn device_file_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         let (device_file, _) =
-            DeviceFile::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
                 .await
                 .unwrap();
 

@@ -1,13 +1,12 @@
 // internal crates
 use miru_agent::filesys::{dir::Dir, file::File, path::PathExt, WriteOptions};
 use miru_agent::models::device::Device;
-use miru_agent::storage::settings::Settings;
-use miru_agent::storage::{layout::StorageLayout, setup};
+use miru_agent::storage::{self, Layout, Settings};
 
 pub mod bootstrap {
     use super::*;
 
-    async fn validate_storage(layout: &StorageLayout) {
+    async fn validate_storage(layout: &Layout) {
         // agent file
         let device_file = layout.device_file();
         let device_file_content = device_file.read_json::<Device>().await.unwrap();
@@ -40,7 +39,7 @@ pub mod bootstrap {
         assert!(config_instance_deployment_dir.exists());
     }
 
-    async fn create_temp_key_files(layout: &StorageLayout) -> (File, File) {
+    async fn create_temp_key_files(layout: &Layout) -> (File, File) {
         let temp_dir = layout.temp_dir();
         let private_key_file = temp_dir.file("private_key.pem");
         private_key_file
@@ -59,7 +58,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn src_public_key_file_doesnt_exist() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
@@ -68,7 +67,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -82,7 +81,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn src_private_key_file_doesnt_exist() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
@@ -91,7 +90,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -105,7 +104,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn clean_install() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
@@ -113,7 +112,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -130,7 +129,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn device_file_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
@@ -145,7 +144,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -162,7 +161,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn auth_directory_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
@@ -174,7 +173,7 @@ pub mod bootstrap {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -191,7 +190,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn private_key_file_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
@@ -199,7 +198,7 @@ pub mod bootstrap {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -216,7 +215,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn public_key_file_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
@@ -224,7 +223,7 @@ pub mod bootstrap {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -241,7 +240,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn caches_directory_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
@@ -258,7 +257,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -278,7 +277,7 @@ pub mod bootstrap {
     #[tokio::test]
     async fn config_instance_deployment_directory_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
-        let layout = StorageLayout::new(dir);
+        let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
@@ -295,7 +294,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        setup::bootstrap(
+        storage::setup::bootstrap(
             &layout,
             &device,
             &settings,
