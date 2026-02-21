@@ -11,21 +11,21 @@ use serde::{Deserialize, Serialize};
 
 ///
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub enum ApiVersion {
-    #[serde(rename = "v0.1.0-next")]
-    API_VERSION,
+pub enum InstanceFormat {
+    #[serde(rename = "json")]
+    INSTANCE_FORMAT_JSON,
 }
 
-impl std::fmt::Display for ApiVersion {
+impl std::fmt::Display for InstanceFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_VERSION => write!(f, "v0.1.0-next"),
+            Self::INSTANCE_FORMAT_JSON => write!(f, "json"),
         }
     }
 }
 
-impl Default for ApiVersion {
-    fn default() -> ApiVersion {
-        Self::API_VERSION
+impl Default for InstanceFormat {
+    fn default() -> InstanceFormat {
+        Self::INSTANCE_FORMAT_JSON
     }
 }
