@@ -1,6 +1,6 @@
 // internal crates
 use crate::crud::prelude::Read;
-use crate::deploy::errors::DeployErr;
+use crate::deploy::errors::{DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr};
 use crate::filesys::dir::Dir;
 use crate::filesys::{Overwrite, WriteOptions};
 use crate::models::config_instance::{CfgInstID, ConfigInstance};
@@ -20,19 +20,9 @@ pub async fn deploy<CIR, CR>(
 ) -> Result<(), DeployErr>
 where
     CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
-    debug_assert!(
-        !deployment.config_instance_ids.is_empty(),
-        "deployment '{}' has no config instances",
-        deployment.id,
-    );
-    debug_assert_eq!(
-        deployment.target_status,
-        DplTarget::Deployed,
-        "deployment '{}' is not targeting deployed status",
-        deployment.id,
-    );
+    validate_deployment(deployment)?;
     let cfg_insts = read_config_instances(cfg_insts, &deployment.config_instance_ids).await?;
 
     write_files(&cfg_insts, contents, staging_dir, target_dir).await?;
@@ -42,6 +32,25 @@ where
         deployment.config_instance_ids.len(),
         deployment.id,
     );
+
+    Ok(())
+}
+
+fn validate_deployment(deployment: &Deployment) -> Result<(), DeployErr> {
+    if deployment.config_instance_ids.is_empty() {
+        return Err(EmptyConfigInstancesErr {
+            deployment_id: deployment.id.clone(),
+        }
+        .into());
+    }
+
+    if deployment.target_status != DplTarget::Deployed {
+        return Err(InvalidDeploymentTargetErr {
+            deployment_id: deployment.id.clone(),
+            target_status: deployment.target_status,
+        }
+        .into());
+    }
 
     Ok(())
 }
@@ -68,7 +77,7 @@ async fn write_files<CR>(
     target_dir: &Dir,
 ) -> Result<(), DeployErr>
 where
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
     let temp_dir = create_temp_dir(staging_dir).await?;
 
@@ -84,6 +93,7 @@ where
     .await;
 
     if let Err(e) = temp_dir.delete().await {
+        debug_assert!(false, "failed to clean up temporary directory: {e}");
         warn!("failed to clean up temporary directory: {e}");
     }
 
@@ -102,11 +112,11 @@ async fn write_file<CR>(
     dest_dir: &Dir,
 ) -> Result<(), DeployErr>
 where
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
     let content = content_reader.read(cfg_inst.id.clone()).await?;
     let dest = dest_dir.file(&cfg_inst.filepath);
-    dest.write_json(&content, WriteOptions::OVERWRITE_ATOMIC)
+    dest.write_string(&content, WriteOptions::OVERWRITE_ATOMIC)
         .await?;
     Ok(())
 }

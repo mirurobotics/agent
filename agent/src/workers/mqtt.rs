@@ -246,6 +246,7 @@ pub async fn handle_event<MQTTClientT: ClientI, SyncerT: SyncerExt>(
                     handle_ping_event(publish, mqtt_client, device_id).await;
                 }
                 topics::SubscriptionTopics::Unknown => {
+                    debug_assert!(false, "unknown topic: {}", publish.topic);
                     warn!("unknown topic: {}", publish.topic);
                 }
             }

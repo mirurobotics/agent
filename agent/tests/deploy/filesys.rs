@@ -1,51 +1,53 @@
 // internal crates
-use miru_agent::cache::file::FileCache;
+use miru_agent::deploy::errors::DeployErr;
 use miru_agent::deploy::filesys::deploy;
-use miru_agent::filesys::path::PathExt;
 use miru_agent::filesys::{dir::Dir, Overwrite, WriteOptions};
-use miru_agent::models::config_instance::ConfigInstance;
-use miru_agent::models::deployment::{Deployment, DplActivity, DplTarget};
+use miru_agent::models::{
+    config_instance::ConfigInstance,
+    deployment::{Deployment, DplActivity, DplTarget},
+};
+use miru_agent::storage;
 
 // external crates
 use serde_json::json;
 
 struct Fixture {
-    ci_meta_cache: FileCache<String, ConfigInstance>,
-    content_cache: FileCache<String, serde_json::Value>,
+    cfg_inst_meta: storage::CfgInsts,
+    cfg_inst_content: storage::CfgInstContent,
     staging_dir: Dir,
-    deployment_dir: Dir,
+    target_dir: Dir,
     _temp_dir: Dir,
 }
 
 impl Fixture {
     async fn new() -> Self {
         let temp_dir = Dir::create_temp_dir("deploy-filesys-test").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
+        let resources_dir = temp_dir.subdir("resources");
 
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
+        let (cfg_inst_meta, _) =
+            storage::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
                 .await
                 .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
+        let (cfg_inst_content, _) =
+            storage::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
                 .await
                 .unwrap();
 
         let staging_dir = temp_dir.subdir("staging");
         staging_dir.create().await.unwrap();
-        let deployment_dir = temp_dir.subdir("deployments");
+        let target_dir = temp_dir.subdir("deployments");
 
         Self {
-            ci_meta_cache,
-            content_cache,
+            cfg_inst_meta,
+            cfg_inst_content,
             staging_dir,
-            deployment_dir,
+            target_dir,
             _temp_dir: temp_dir,
         }
     }
 
-    async fn seed_config_instance(&self, cfg_inst: &ConfigInstance, content: &serde_json::Value) {
-        self.ci_meta_cache
+    async fn seed_cfg_inst(&self, cfg_inst: &ConfigInstance, content: String) {
+        self.cfg_inst_meta
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -54,7 +56,7 @@ impl Fixture {
             )
             .await
             .unwrap();
-        self.content_cache
+        self.cfg_inst_content
             .write(
                 cfg_inst.id.clone(),
                 content.clone(),
@@ -65,7 +67,7 @@ impl Fixture {
             .unwrap();
     }
 
-    fn make_deployment(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
+    fn new_deployment(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
         Deployment {
             target_status: DplTarget::Deployed,
             activity_status: DplActivity::Queued,
@@ -79,10 +81,10 @@ impl Fixture {
         deployment: &Deployment,
     ) -> Result<(), miru_agent::deploy::errors::DeployErr> {
         deploy(
-            &self.ci_meta_cache,
-            &self.content_cache,
+            &self.cfg_inst_meta,
+            &self.cfg_inst_content,
             &self.staging_dir,
-            &self.deployment_dir,
+            &self.target_dir,
             deployment,
         )
         .await
@@ -91,24 +93,25 @@ impl Fixture {
 
 pub mod deploy_func {
     use super::*;
+    use miru_agent::filesys::path::PathExt;
 
     #[tokio::test]
     async fn creates_new_file() {
         let f = Fixture::new().await;
         let cfg_inst = ConfigInstance {
-            filepath: "/test/filepath".to_string(),
+            filepath: "/test/filepath.json".to_string(),
             ..Default::default()
         };
-        let content = json!({"speed": 4});
-        f.seed_config_instance(&cfg_inst, &content).await;
+        let content = "{\"speed\": 4}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
 
-        let deployment = f.make_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .deployment_dir
+            .target_dir
             .file(&cfg_inst.filepath)
-            .read_json::<serde_json::Value>()
+            .read_string()
             .await
             .unwrap();
         assert_eq!(actual, content);
@@ -122,24 +125,19 @@ pub mod deploy_func {
             filepath: filepath.clone(),
             ..Default::default()
         };
-        let new_content = json!({"speed": 4});
-        f.seed_config_instance(&cfg_inst, &new_content).await;
+        let new_content = "{\"speed\": 4}".to_string();
+        f.seed_cfg_inst(&cfg_inst, new_content.clone()).await;
 
         // pre-populate the target with old content
-        let file = f.deployment_dir.file(&filepath);
+        let file = f.target_dir.file(&filepath);
         file.write_json(&json!({"old": true}), WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
-        let deployment = f.make_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = f
-            .deployment_dir
-            .file(&filepath)
-            .read_json::<serde_json::Value>()
-            .await
-            .unwrap();
+        let actual = f.target_dir.file(&filepath).read_string().await.unwrap();
         assert_eq!(actual, new_content);
     }
 
@@ -153,23 +151,55 @@ pub mod deploy_func {
                 filepath: format!("/test/filepath{i}"),
                 ..Default::default()
             };
-            let content = json!({"index": i});
-            f.seed_config_instance(&cfg_inst, &content).await;
+            let content = format!("{{\"index\": {i}}}");
+            f.seed_cfg_inst(&cfg_inst, content.clone()).await;
             cfg_insts.push(cfg_inst);
             contents.push(content);
         }
 
-        let deployment = f.make_deployment(&cfg_insts);
+        let deployment = f.new_deployment(&cfg_insts);
         f.deploy(&deployment).await.unwrap();
 
         for (i, cfg_inst) in cfg_insts.iter().enumerate() {
             let actual = f
-                .deployment_dir
+                .target_dir
                 .file(&cfg_inst.filepath)
-                .read_json::<serde_json::Value>()
+                .read_string()
                 .await
                 .unwrap();
             assert_eq!(actual, contents[i]);
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_config_instance_ids_returns_error() {
+        let f = Fixture::new().await;
+        let deployment = f.new_deployment(&[]);
+
+        let result = f.deploy(&deployment).await;
+        assert!(matches!(result, Err(DeployErr::EmptyConfigInstances(_))));
+    }
+
+    #[tokio::test]
+    async fn wrong_target_status_returns_error() {
+        let f = Fixture::new().await;
+        let cfg_inst = ConfigInstance {
+            filepath: "/test/filepath".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_inst, "{\"ok\": true}".to_string())
+            .await;
+
+        let mut deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        deployment.target_status = DplTarget::Staged;
+
+        let result = f.deploy(&deployment).await;
+        match result {
+            Err(DeployErr::InvalidDeploymentTarget(err)) => {
+                assert_eq!(err.deployment_id, deployment.id);
+                assert_eq!(err.target_status, DplTarget::Staged);
+            }
+            _ => panic!("expected InvalidDeploymentTarget error"),
         }
     }
 
@@ -194,7 +224,7 @@ pub mod deploy_func {
             ..Default::default()
         };
         // seed metadata but not content
-        f.ci_meta_cache
+        f.cfg_inst_meta
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -204,7 +234,7 @@ pub mod deploy_func {
             .await
             .unwrap();
 
-        let deployment = f.make_deployment(&[cfg_inst]);
+        let deployment = f.new_deployment(&[cfg_inst]);
         let result = f.deploy(&deployment).await;
         assert!(result.is_err());
     }
@@ -216,10 +246,10 @@ pub mod deploy_func {
             filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
-        f.seed_config_instance(&cfg_inst, &json!({"ok": true}))
+        f.seed_cfg_inst(&cfg_inst, "{\"ok\": true}".to_string())
             .await;
 
-        let deployment = f.make_deployment(&[cfg_inst]);
+        let deployment = f.new_deployment(&[cfg_inst]);
         f.deploy(&deployment).await.unwrap();
 
         // staging_dir itself should still exist but have no subdirectories
@@ -240,7 +270,7 @@ pub mod deploy_func {
             ..Default::default()
         };
         // seed metadata but NOT content — write_file will fail when reading content
-        f.ci_meta_cache
+        f.cfg_inst_meta
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -250,7 +280,7 @@ pub mod deploy_func {
             .await
             .unwrap();
 
-        let deployment = f.make_deployment(&[cfg_inst]);
+        let deployment = f.new_deployment(&[cfg_inst]);
         let result = f.deploy(&deployment).await;
         assert!(result.is_err());
 
@@ -271,11 +301,11 @@ pub mod deploy_func {
             filepath: "/test/good".to_string(),
             ..Default::default()
         };
-        f.seed_config_instance(&good_cfg, &json!({"good": true}))
+        f.seed_cfg_inst(&good_cfg, "{\"good\": true}".to_string())
             .await;
 
         // pre-populate the target directory with existing content
-        let existing_file = f.deployment_dir.file("/test/existing");
+        let existing_file = f.target_dir.file("/test/existing");
         let existing_content = json!({"existing": true});
         existing_file
             .write_json(&existing_content, WriteOptions::OVERWRITE_ATOMIC)
@@ -288,7 +318,7 @@ pub mod deploy_func {
             ..Default::default()
         };
         // seed metadata for bad_cfg but NOT content
-        f.ci_meta_cache
+        f.cfg_inst_meta
             .write(
                 bad_cfg.id.clone(),
                 bad_cfg.clone(),
@@ -306,6 +336,12 @@ pub mod deploy_func {
         let result = f.deploy(&deployment).await;
         assert!(result.is_err());
 
+        // the staging dir was never swapped in, so good_cfg's file should not appear
+        assert!(
+            !f.target_dir.file("/test/good").exists(),
+            "staged files should not appear in target after failure",
+        );
+
         // the existing target dir content should be untouched
         let actual = existing_file
             .read_json::<serde_json::Value>()
@@ -321,19 +357,19 @@ pub mod deploy_func {
             filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
-        let content = json!({"new": true});
-        f.seed_config_instance(&cfg_inst, &content).await;
+        let content = "{\"new\": true}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
 
         // deployment_dir does not exist yet
-        assert!(!f.deployment_dir.exists());
+        assert!(!f.target_dir.exists());
 
-        let deployment = f.make_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .deployment_dir
+            .target_dir
             .file(&cfg_inst.filepath)
-            .read_json::<serde_json::Value>()
+            .read_string()
             .await
             .unwrap();
         assert_eq!(actual, content);
@@ -346,19 +382,19 @@ pub mod deploy_func {
             filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
-        let content = json!({"speed": 4});
-        f.seed_config_instance(&cfg_inst, &content).await;
+        let content = "{\"speed\": 4}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
 
-        let deployment = f.make_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
 
         // deploy twice
         f.deploy(&deployment).await.unwrap();
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .deployment_dir
+            .target_dir
             .file(&cfg_inst.filepath)
-            .read_json::<serde_json::Value>()
+            .read_string()
             .await
             .unwrap();
         assert_eq!(actual, content);
@@ -373,26 +409,32 @@ pub mod deploy_func {
             filepath: "/test/file_a".to_string(),
             ..Default::default()
         };
-        f.seed_config_instance(&cfg_a, &json!({"a": true})).await;
-        let deployment_a = f.make_deployment(std::slice::from_ref(&cfg_a));
+        f.seed_cfg_inst(&cfg_a, "{\"a\": true}".to_string()).await;
+        let deployment_a = f.new_deployment(std::slice::from_ref(&cfg_a));
         f.deploy(&deployment_a).await.unwrap();
-        assert!(f.deployment_dir.file("/test/file_a").exists());
+        assert!(f.target_dir.file("/test/file_a").exists());
 
         // second deploy writes only file_b (different config instance set)
         let cfg_b = ConfigInstance {
             filepath: "/test/file_b".to_string(),
             ..Default::default()
         };
-        f.seed_config_instance(&cfg_b, &json!({"b": true})).await;
-        let deployment_b = f.make_deployment(std::slice::from_ref(&cfg_b));
+        f.seed_cfg_inst(&cfg_b, "{\"b\": true}".to_string()).await;
+        let deployment_b = f.new_deployment(std::slice::from_ref(&cfg_b));
         f.deploy(&deployment_b).await.unwrap();
 
         // file_a should be gone since the staging dir replaced the entire target
         assert!(
-            !f.deployment_dir.file("/test/file_a").exists(),
+            !f.target_dir.file("/test/file_a").exists(),
             "stale files from previous deploy should be removed",
         );
-        assert!(f.deployment_dir.file("/test/file_b").exists());
+        let actual = f
+            .target_dir
+            .file("/test/file_b")
+            .read_string()
+            .await
+            .unwrap();
+        assert_eq!(actual, "{\"b\": true}");
     }
 
     #[tokio::test]
@@ -402,16 +444,16 @@ pub mod deploy_func {
             filepath: "/deeply/nested/path/config.json".to_string(),
             ..Default::default()
         };
-        let content = json!({"nested": true});
-        f.seed_config_instance(&cfg_inst, &content).await;
+        let content = "{\"nested\": true}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
 
-        let deployment = f.make_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .deployment_dir
+            .target_dir
             .file(&cfg_inst.filepath)
-            .read_json::<serde_json::Value>()
+            .read_string()
             .await
             .unwrap();
         assert_eq!(actual, content);

@@ -28,7 +28,7 @@ pub async fn apply<DR, CIR, CR>(
 where
     DR: Find<DeploymentID, Deployment>,
     CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
     let target_deployed = find_target_deployed(args.deployments).await?;
 
@@ -48,6 +48,7 @@ where
         None => {
             let outcomes = apply_actionables(args, observers, None).await?;
             if let Err(e) = args.target_dir.delete().await {
+                debug_assert!(false, "failed to delete target directory: {e}");
                 warn!("failed to delete target directory: {e}");
             }
             Ok(outcomes)
@@ -79,7 +80,7 @@ async fn apply_actionables<DR, CIR, CR>(
 where
     DR: Find<DeploymentID, Deployment>,
     CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
     let mut outcomes = Vec::new();
     let actionable = args
@@ -109,7 +110,7 @@ async fn apply_one<DR, CIR, CR>(
 ) -> Outcome
 where
     CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
     match fsm::next_action(&deployment) {
         fsm::NextAction::None => {
@@ -165,7 +166,7 @@ async fn deploy<CIR, CR>(
 ) -> Outcome
 where
     CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, serde_json::Value>,
+    CR: Read<CfgInstID, String>,
 {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
 

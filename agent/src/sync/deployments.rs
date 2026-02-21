@@ -136,7 +136,7 @@ async fn pull<HTTPClientT: http::ClientI>(
                 if let Err(e) = cfg_inst_content_stor
                     .write(
                         ci_id.clone(),
-                        content.clone(),
+                        content.data.clone(),
                         |_, _| false,
                         Overwrite::Allow,
                     )

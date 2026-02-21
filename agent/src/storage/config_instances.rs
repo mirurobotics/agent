@@ -12,4 +12,4 @@ pub type CfgInstEntry = CacheEntry<CfgInstID, ConfigInstance>;
 // file to maintain a small memory footprint. This is also why we have a separate store
 // for the content.
 pub type CfgInsts = FileCache<CfgInstID, ConfigInstance>;
-pub type CfgInstContent = DirCache<CfgInstID, serde_json::Value>;
+pub type CfgInstContent = DirCache<CfgInstID, String>;

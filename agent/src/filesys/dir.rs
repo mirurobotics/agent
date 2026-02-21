@@ -323,6 +323,7 @@ impl Dir {
             Ok(()) => {
                 // step 3: clean up trash (best-effort)
                 if let Err(e) = trash_dir.delete().await {
+                    debug_assert!(false, "failed to delete trash directory: {e}");
                     warn!("failed to delete trash directory: {e}");
                 }
                 Ok(())

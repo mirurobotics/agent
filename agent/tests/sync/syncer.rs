@@ -343,7 +343,10 @@ pub mod sync {
                 config_schema_id: "schema_1".to_string(),
                 config_type_id: "ct_1".to_string(),
                 config_type: None,
-                content: Some(serde_json::json!({"key": "value"})),
+                content: Some(Box::new(openapi_client::models::InstanceContent {
+                    format: openapi_client::models::InstanceFormat::INSTANCE_FORMAT_JSON,
+                    data: "{\"key\": \"value\"}".to_string(),
+                })),
             }]),
         };
 

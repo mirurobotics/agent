@@ -1,101 +1,55 @@
 // internal crates
 use crate::deploy::observer::HistoryObserver;
-use miru_agent::cache::file::FileCache;
+use miru_agent::deploy::apply::{apply, Args, Outcome};
+use miru_agent::deploy::errors::DeployErr;
+use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::observer::Observer;
-use miru_agent::deploy::{
-    apply::{apply, Args},
-    fsm::RetryPolicy,
-};
 use miru_agent::filesys::{dir::Dir, Overwrite};
 use miru_agent::models::config_instance::ConfigInstance;
 use miru_agent::models::deployment::{Deployment, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage::Deployments;
+use miru_agent::storage;
 
-// external crates
-use serde_json::json;
+struct Fixture {
+    deployments: storage::Deployments,
+    cfg_insts: storage::CfgInsts,
+    cfg_inst_content: storage::CfgInstContent,
+    staging_dir: Dir,
+    target_dir: Dir,
+    _temp_dir: Dir,
+}
 
-pub mod apply_func {
-    use super::*;
+impl Fixture {
+    async fn new() -> Self {
+        let temp_dir = Dir::create_temp_dir("apply-test").await.unwrap();
+        let resources_dir = temp_dir.subdir("resources");
 
-    #[tokio::test]
-    async fn no_config_instances() {
-        let temp_dir = Dir::create_temp_dir("apply").await.unwrap();
-        let staging_dir = Dir::create_temp_dir("apply_staging").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
-
-        let (deployment_cache, _) =
-            Deployments::spawn(16, cache_dir.file("deployments.json"), 1000)
+        let (deployments, _) =
+            storage::Deployments::spawn(16, resources_dir.file("deployments.json"), 1000)
                 .await
                 .unwrap();
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
-                .await
-                .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
-                .await
-                .unwrap();
-
-        let deployment = Deployment {
-            target_status: DplTarget::Deployed,
-            activity_status: DplActivity::Queued,
-            config_instance_ids: vec![],
-            ..Default::default()
-        };
-        deployment_cache
-            .write(
-                deployment.id.clone(),
-                deployment.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
+        let (cfg_insts, _) = storage::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
             .await
             .unwrap();
+        let (cfg_inst_content, _) =
+            storage::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
+                .await
+                .unwrap();
 
+        let staging_dir = temp_dir.subdir("staging");
         let target_dir = temp_dir.subdir("target");
-        let retry_policy = RetryPolicy::default();
-        let args = Args {
-            deployments: &deployment_cache,
-            cfg_insts: &ci_meta_cache,
-            contents: &content_cache,
-            target_dir: &target_dir,
-            staging_dir: &staging_dir,
-            retry_policy: &retry_policy,
-        };
 
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = apply(&args, &mut observers).await.unwrap();
-
-        assert_eq!(outcomes.len(), 1);
-        assert!(outcomes[0].error.is_some());
+        Self {
+            deployments,
+            cfg_insts,
+            cfg_inst_content,
+            staging_dir,
+            target_dir,
+            _temp_dir: temp_dir,
+        }
     }
 
-    #[tokio::test]
-    async fn deploy_1() {
-        let cfg_inst = ConfigInstance {
-            filepath: "/test/filepath".to_string(),
-            ..Default::default()
-        };
-
-        let temp_dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let staging_dir = Dir::create_temp_dir("deploy_staging").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
-
-        let (deployment_cache, _) =
-            Deployments::spawn(16, cache_dir.file("deployments.json"), 1000)
-                .await
-                .unwrap();
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
-                .await
-                .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
-                .await
-                .unwrap();
-
-        ci_meta_cache
+    async fn seed_cfg_inst(&self, cfg_inst: &ConfigInstance, content: String) {
+        self.cfg_insts
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -104,23 +58,14 @@ pub mod apply_func {
             )
             .await
             .unwrap();
-        content_cache
-            .write(
-                cfg_inst.id.clone(),
-                json!({"speed": 4}),
-                |_, _| false,
-                Overwrite::Allow,
-            )
+        self.cfg_inst_content
+            .write(cfg_inst.id.clone(), content, |_, _| false, Overwrite::Allow)
             .await
             .unwrap();
+    }
 
-        let deployment = Deployment {
-            target_status: DplTarget::Deployed,
-            activity_status: DplActivity::Queued,
-            config_instance_ids: vec![cfg_inst.id.clone()],
-            ..Default::default()
-        };
-        deployment_cache
+    async fn seed_deployment(&self, deployment: &Deployment) {
+        self.deployments
             .write(
                 deployment.id.clone(),
                 deployment.clone(),
@@ -129,21 +74,64 @@ pub mod apply_func {
             )
             .await
             .unwrap();
+    }
 
-        let target_dir = temp_dir.subdir("target");
+    fn new_deployment(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
+        Deployment {
+            target_status: DplTarget::Deployed,
+            activity_status: DplActivity::Queued,
+            config_instance_ids: cfg_insts.iter().map(|c| c.id.clone()).collect(),
+            ..Default::default()
+        }
+    }
+
+    async fn apply(&self) -> Result<Vec<Outcome>, DeployErr> {
         let retry_policy = RetryPolicy::default();
         let args = Args {
-            deployments: &deployment_cache,
-            cfg_insts: &ci_meta_cache,
-            contents: &content_cache,
-            target_dir: &target_dir,
-            staging_dir: &staging_dir,
+            deployments: &self.deployments,
+            cfg_insts: &self.cfg_insts,
+            contents: &self.cfg_inst_content,
+            target_dir: &self.target_dir,
+            staging_dir: &self.staging_dir,
             retry_policy: &retry_policy,
         };
-
         let mut observer = HistoryObserver::new();
         let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = apply(&args, &mut observers).await.unwrap();
+        apply(&args, &mut observers).await
+    }
+}
+
+pub mod apply_func {
+    use super::*;
+
+    #[tokio::test]
+    async fn no_config_instances() {
+        let f = Fixture::new().await;
+
+        let deployment = f.new_deployment(&[]);
+        f.seed_deployment(&deployment).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert!(outcomes[0].error.is_some());
+    }
+
+    #[tokio::test]
+    async fn deploy_1() {
+        let f = Fixture::new().await;
+
+        let cfg_inst = ConfigInstance {
+            filepath: "/test/filepath".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_inst, "{\"speed\": 4}".to_string())
+            .await;
+
+        let deployment = f.new_deployment(&[cfg_inst]);
+        f.seed_deployment(&deployment).await;
+
+        let outcomes = f.apply().await.unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert!(outcomes[0].error.is_none());
@@ -156,30 +144,14 @@ pub mod apply_func {
 
     #[tokio::test]
     async fn deploy_missing_content_causes_error_state() {
+        let f = Fixture::new().await;
+
         let cfg_inst = ConfigInstance {
             filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
-
-        let temp_dir = Dir::create_temp_dir("deploy").await.unwrap();
-        let staging_dir = Dir::create_temp_dir("deploy_staging").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
-
-        let (deployment_cache, _) =
-            Deployments::spawn(16, cache_dir.file("deployments.json"), 1000)
-                .await
-                .unwrap();
-        // metadata present but NO content
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
-                .await
-                .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
-                .await
-                .unwrap();
-
-        ci_meta_cache
+        // seed metadata but NOT content
+        f.cfg_insts
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -189,35 +161,10 @@ pub mod apply_func {
             .await
             .unwrap();
 
-        let deployment = Deployment {
-            target_status: DplTarget::Deployed,
-            activity_status: DplActivity::Queued,
-            config_instance_ids: vec![cfg_inst.id.clone()],
-            ..Default::default()
-        };
-        deployment_cache
-            .write(
-                deployment.id.clone(),
-                deployment.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
+        let deployment = f.new_deployment(&[cfg_inst]);
+        f.seed_deployment(&deployment).await;
 
-        let retry_policy = RetryPolicy::default();
-        let args = Args {
-            deployments: &deployment_cache,
-            cfg_insts: &ci_meta_cache,
-            contents: &content_cache,
-            target_dir: &temp_dir,
-            staging_dir: &staging_dir,
-            retry_policy: &retry_policy,
-        };
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = apply(&args, &mut observers).await.unwrap();
+        let outcomes = f.apply().await.unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert!(outcomes[0].error.is_some());
@@ -227,54 +174,18 @@ pub mod apply_func {
 
     #[tokio::test]
     async fn remove_deployment() {
-        let temp_dir = Dir::create_temp_dir("remove").await.unwrap();
-        let staging_dir = Dir::create_temp_dir("remove_staging").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
+        let f = Fixture::new().await;
 
-        let (deployment_cache, _) =
-            Deployments::spawn(16, cache_dir.file("deployments.json"), 1000)
-                .await
-                .unwrap();
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
-                .await
-                .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
-                .await
-                .unwrap();
-
-        // deployment targeting removal (currently deployed, target archived)
-        // FSM: target=Archived, activity=Deployed -> Remove
+        // target=Archived, activity=Deployed -> Remove
         let deployment = Deployment {
             target_status: DplTarget::Archived,
             activity_status: DplActivity::Deployed,
             config_instance_ids: vec![],
             ..Default::default()
         };
-        deployment_cache
-            .write(
-                deployment.id.clone(),
-                deployment.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
+        f.seed_deployment(&deployment).await;
 
-        let retry_policy = RetryPolicy::default();
-        let args = Args {
-            deployments: &deployment_cache,
-            cfg_insts: &ci_meta_cache,
-            contents: &content_cache,
-            target_dir: &temp_dir,
-            staging_dir: &staging_dir,
-            retry_policy: &retry_policy,
-        };
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = apply(&args, &mut observers).await.unwrap();
+        let outcomes = f.apply().await.unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert!(outcomes[0].error.is_none());
@@ -287,53 +198,18 @@ pub mod apply_func {
 
     #[tokio::test]
     async fn archive_deployment() {
-        let temp_dir = Dir::create_temp_dir("archive").await.unwrap();
-        let staging_dir = Dir::create_temp_dir("archive_staging").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
+        let f = Fixture::new().await;
 
-        let (deployment_cache, _) =
-            Deployments::spawn(16, cache_dir.file("deployments.json"), 1000)
-                .await
-                .unwrap();
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
-                .await
-                .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
-                .await
-                .unwrap();
-
-        // FSM: target=Staged, activity=Queued -> Archive
+        // target=Staged, activity=Queued -> Archive
         let deployment = Deployment {
             target_status: DplTarget::Staged,
             activity_status: DplActivity::Queued,
             config_instance_ids: vec![],
             ..Default::default()
         };
-        deployment_cache
-            .write(
-                deployment.id.clone(),
-                deployment.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
+        f.seed_deployment(&deployment).await;
 
-        let retry_policy = RetryPolicy::default();
-        let args = Args {
-            deployments: &deployment_cache,
-            cfg_insts: &ci_meta_cache,
-            contents: &content_cache,
-            target_dir: &temp_dir,
-            staging_dir: &staging_dir,
-            retry_policy: &retry_policy,
-        };
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = apply(&args, &mut observers).await.unwrap();
+        let outcomes = f.apply().await.unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert!(outcomes[0].error.is_none());
@@ -346,46 +222,16 @@ pub mod apply_func {
 
     #[tokio::test]
     async fn stale_deployments_are_removed() {
-        let temp_dir = Dir::create_temp_dir("stale").await.unwrap();
-        let staging_dir = Dir::create_temp_dir("stale_staging").await.unwrap();
-        let cache_dir = temp_dir.subdir("caches");
+        let f = Fixture::new().await;
 
-        let (deployment_cache, _) =
-            Deployments::spawn(16, cache_dir.file("deployments.json"), 1000)
-                .await
-                .unwrap();
-        let (ci_meta_cache, _) =
-            FileCache::<String, ConfigInstance>::spawn(16, cache_dir.file("ci_meta.json"), 1000)
-                .await
-                .unwrap();
-        let (content_cache, _) =
-            FileCache::<String, serde_json::Value>::spawn(16, cache_dir.file("content.json"), 1000)
-                .await
-                .unwrap();
-
-        // Active deployment: target=Deployed, activity=Queued -> Deploy
+        // Active deployment with content
         let cfg_inst = ConfigInstance {
             filepath: "/test/filepath".to_string(),
             ..Default::default()
         };
-        ci_meta_cache
-            .write(
-                cfg_inst.id.clone(),
-                cfg_inst.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
-        content_cache
-            .write(
-                cfg_inst.id.clone(),
-                serde_json::json!({"key": "value"}),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
+        f.seed_cfg_inst(&cfg_inst, "{\"key\": \"value\"}".to_string())
+            .await;
+
         let active = Deployment {
             id: "active".to_string(),
             target_status: DplTarget::Deployed,
@@ -407,33 +253,15 @@ pub mod apply_func {
             ..Default::default()
         };
 
-        // Write all deployments to cache
         for d in [&active, &stale1, &stale2] {
-            deployment_cache
-                .write(d.id.clone(), d.clone(), |_, _| false, Overwrite::Allow)
-                .await
-                .unwrap();
+            f.seed_deployment(d).await;
         }
 
-        let target_dir = temp_dir.subdir("target");
-        let retry_policy = RetryPolicy::default();
-        let args = Args {
-            deployments: &deployment_cache,
-            cfg_insts: &ci_meta_cache,
-            contents: &content_cache,
-            target_dir: &target_dir,
-            staging_dir: &staging_dir,
-            retry_policy: &retry_policy,
-        };
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = apply(&args, &mut observers).await.unwrap();
+        let outcomes = f.apply().await.unwrap();
 
         // All 3 deployments should be processed
         assert_eq!(outcomes.len(), 3);
 
-        // Find outcomes by id
         let active_outcome = outcomes
             .iter()
             .find(|o| o.deployment.id == "active")

@@ -47,6 +47,7 @@ pub async fn install<HTTPClientT: http::ClientI>(
     .await;
 
     if let Err(e) = temp_dir.delete().await {
+        debug_assert!(false, "failed to clean up temp dir: {e}");
         warn!("failed to clean up temp dir: {e}");
     }
     result
