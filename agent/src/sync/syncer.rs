@@ -384,72 +384,47 @@ impl Syncer {
     pub fn new(sender: mpsc::Sender<WorkerCommand>) -> Self {
         Self { sender }
     }
-}
 
-impl Syncer {
-    #[cfg(feature = "test")]
-    pub async fn set_sync_state(&self, state: SyncState) -> Result<(), SyncErr> {
+    async fn send_command<R>(
+        &self,
+        cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand,
+    ) -> Result<R, SyncErr> {
         let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::SetSyncState {
-                state,
-                respond_to: send,
+        self.sender.send(cmd(send)).await.map_err(|e| {
+            SyncErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
             })
-            .await
-            .map_err(|e| {
-                SyncErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
+        })?;
         recv.await.map_err(|e| {
             SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
-        })?
+        })
+    }
+
+    #[cfg(feature = "test")]
+    pub async fn set_sync_state(&self, state: SyncState) -> Result<(), SyncErr> {
+        self.send_command(|tx| WorkerCommand::SetSyncState {
+            state,
+            respond_to: tx,
+        })
+        .await?
     }
 }
 
 impl SyncerExt for Syncer {
     async fn shutdown(&self) -> Result<(), SyncErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Shutdown { respond_to: send })
-            .await
-            .map_err(|e| {
-                SyncErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })??;
+        self.send_command(|tx| WorkerCommand::Shutdown { respond_to: tx })
+            .await??;
         info!("Syncer shutdown complete");
         Ok(())
     }
 
     async fn get_sync_state(&self) -> Result<SyncState, SyncErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::GetSyncState { respond_to: send })
-            .await
-            .map_err(|e| {
-                SyncErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::GetSyncState { respond_to: tx })
+            .await?
     }
 
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr> {
@@ -468,60 +443,17 @@ impl SyncerExt for Syncer {
     }
 
     async fn sync_if_not_in_cooldown(&self) -> Result<(), SyncErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::SyncIfNotInCooldown { respond_to: send })
-            .await
-            .map_err(|e| {
-                SyncErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })??;
-        Ok(())
+        self.send_command(|tx| WorkerCommand::SyncIfNotInCooldown { respond_to: tx })
+            .await?
     }
 
     async fn sync(&self) -> Result<(), SyncErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Sync { respond_to: send })
-            .await
-            .map_err(|e| {
-                SyncErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Sync { respond_to: tx })
+            .await?
     }
 
     async fn subscribe(&self) -> Result<watch::Receiver<SyncEvent>, SyncErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender
-            .send(WorkerCommand::Subscribe { respond_to: send })
-            .await
-            .map_err(|e| {
-                SyncErr::SendActorMessageErr(SendActorMessageErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })?;
-        recv.await.map_err(|e| {
-            SyncErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?
+        self.send_command(|tx| WorkerCommand::Subscribe { respond_to: tx })
+            .await?
     }
 }
