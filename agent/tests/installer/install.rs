@@ -72,7 +72,7 @@ pub mod install_fn {
         assert_eq!(device.name, device_name);
 
         // device file was written
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         assert!(device_file.exists(), "device.json missing");
         // device file contains the correct device ID
         let device_json: serde_json::Value =
@@ -81,11 +81,11 @@ pub mod install_fn {
         assert_eq!(device_json["name"], device_name);
 
         // settings file was written
-        let settings_file = layout.settings_file();
+        let settings_file = layout.settings();
         assert!(settings_file.exists(), "settings missing");
 
         // auth directory was created with keys and token
-        let auth_layout = layout.auth_dir();
+        let auth_layout = layout.auth();
         assert!(auth_layout.private_key().exists(), "private key missing");
         assert!(auth_layout.public_key().exists(), "public key missing");
         assert!(auth_layout.token().exists(), "token missing");
@@ -121,7 +121,7 @@ pub mod install_fn {
 
         assert!(matches!(result, Err(InstallErr::HTTPErr(_))));
 
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         assert!(
             !device_file.exists(),
             "device.json should not exist after failed install"

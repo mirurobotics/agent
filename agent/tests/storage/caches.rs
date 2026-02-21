@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::filesys::dir::Dir;
-use miru_agent::storage::{Caches, Capacities, Layout};
+use miru_agent::storage::{Capacities, Layout, Storage};
 
 pub mod default_capacities {
     use super::*;
@@ -8,9 +8,9 @@ pub mod default_capacities {
     #[test]
     fn default() {
         let capacities = Capacities::default();
-        assert_eq!(capacities.cfg_inst, 100);
+        assert_eq!(capacities.cfg_insts, 100);
         assert_eq!(capacities.cfg_inst_content, 100);
-        assert_eq!(capacities.deployment, 100);
+        assert_eq!(capacities.deployments, 100);
     }
 }
 
@@ -22,9 +22,11 @@ pub mod init {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
-        let (caches, _) = Caches::init(&layout, capacities).await.unwrap();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
 
-        // shutdown the caches
-        caches.shutdown().await.unwrap();
+        // shutdown storage
+        storage.shutdown().await.unwrap();
     }
 }

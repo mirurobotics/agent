@@ -37,7 +37,7 @@ pub async fn version() -> impl IntoResponse {
 // ================================= DEVICE ======================================== //
 pub async fn get_device(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let service = async move {
-        let device = get::get_device(&state.device_stor).await?;
+        let device = get::get_device(&state.storage.device).await?;
         Ok::<openapi_server::models::Device, ServerErr>(openapi_server::models::Device {
             object: openapi_server::models::device::Object::Device,
             id: device.id.clone(),

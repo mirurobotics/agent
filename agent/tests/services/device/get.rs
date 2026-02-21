@@ -14,7 +14,7 @@ pub mod errors {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
         device_file.shutdown().await.unwrap();
@@ -33,11 +33,11 @@ pub mod success {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
-        layout.device_file().delete().await.unwrap();
+        layout.device().delete().await.unwrap();
 
         let device = get::get_device(&device_file).await.unwrap();
         assert_eq!(device, Device::default());
@@ -49,7 +49,7 @@ pub mod success {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 

@@ -55,13 +55,13 @@ pub mod sync_tests {
     async fn pull_and_push_empty() {
         let dir = Dir::create_temp_dir("sync_empty").await.unwrap();
 
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+        let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployment_stor.json"), 1000)
             .await
             .unwrap();
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+        let (cfg_inst_stor, _) = CfgInsts::spawn(16, dir.file("cfg_inst_stor.json"), 1000)
             .await
             .unwrap();
-        let (cfg_inst_content_cache, _) =
+        let (cfg_inst_content_stor, _) =
             CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
@@ -72,9 +72,9 @@ pub mod sync_tests {
         let target_dir = dir.subdir("deployments");
 
         let result = sync(
-            &deployment_cache,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
+            &deployment_stor,
+            &cfg_inst_stor,
+            &cfg_inst_content_stor,
             &http_client,
             &staging_dir,
             &target_dir,
@@ -90,13 +90,13 @@ pub mod sync_tests {
     async fn pull_stores_deployments_and_config_instances() {
         let dir = Dir::create_temp_dir("sync_pull").await.unwrap();
 
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+        let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployment_stor.json"), 1000)
             .await
             .unwrap();
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+        let (cfg_inst_stor, _) = CfgInsts::spawn(16, dir.file("cfg_inst_stor.json"), 1000)
             .await
             .unwrap();
-        let (cfg_inst_content_cache, _) =
+        let (cfg_inst_content_stor, _) =
             CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
@@ -110,9 +110,9 @@ pub mod sync_tests {
         let target_dir = dir.subdir("deployments");
 
         let _result = sync(
-            &deployment_cache,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
+            &deployment_stor,
+            &cfg_inst_stor,
+            &cfg_inst_content_stor,
             &http_client,
             &staging_dir,
             &target_dir,
@@ -121,26 +121,26 @@ pub mod sync_tests {
         )
         .await;
 
-        // Check that the deployment was cached (apply runs, so status changes)
-        let cached = deployment_cache
+        // Check that the deployment was stored (apply runs, so status changes)
+        let cached = deployment_stor
             .read_optional("dpl_1".to_string())
             .await
             .unwrap();
-        assert!(cached.is_some(), "deployment should be cached");
+        assert!(cached.is_some(), "deployment should be stored");
         let cached = cached.unwrap();
         assert_eq!(cached.id, "dpl_1");
         // After sync (pull + apply + push), the deployment should be deployed
-        // because FSM: target=Deployed, activity=Queued → Deploy → Deployed
+        // because FSM: target=Deployed, activity=Queued -> Deploy -> Deployed
         assert_eq!(cached.activity_status, DplActivity::Deployed);
         assert_eq!(cached.target_status, DplTarget::Deployed);
         assert_eq!(cached.config_instance_ids, vec!["dpl_1_ci_1"]);
 
-        // Check that config instance was cached
-        let ci = cfg_inst_cache
+        // Check that config instance was stored
+        let ci = cfg_inst_stor
             .read_optional("dpl_1_ci_1".to_string())
             .await
             .unwrap();
-        assert!(ci.is_some(), "config instance should be cached");
+        assert!(ci.is_some(), "config instance should be stored");
         let ci = ci.unwrap();
         assert_eq!(ci.filepath, "test/config.json");
     }
@@ -149,13 +149,13 @@ pub mod sync_tests {
     async fn pull_failure_returns_error() {
         let dir = Dir::create_temp_dir("sync_fail").await.unwrap();
 
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+        let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployment_stor.json"), 1000)
             .await
             .unwrap();
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+        let (cfg_inst_stor, _) = CfgInsts::spawn(16, dir.file("cfg_inst_stor.json"), 1000)
             .await
             .unwrap();
-        let (cfg_inst_content_cache, _) =
+        let (cfg_inst_content_stor, _) =
             CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
@@ -172,9 +172,9 @@ pub mod sync_tests {
         let target_dir = dir.subdir("deployments");
 
         let result = sync(
-            &deployment_cache,
-            &cfg_inst_cache,
-            &cfg_inst_content_cache,
+            &deployment_stor,
+            &cfg_inst_stor,
+            &cfg_inst_content_stor,
             &http_client,
             &staging_dir,
             &target_dir,

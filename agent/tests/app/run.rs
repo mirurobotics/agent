@@ -16,14 +16,14 @@ async fn prepare_valid_server_storage(dir: Dir) {
     let layout = Layout::new(dir);
 
     // create a private key file
-    let private_key_file = layout.auth_dir().private_key();
+    let private_key_file = layout.auth().private_key();
     private_key_file
         .write_string("test", WriteOptions::default())
         .await
         .unwrap();
 
     // create the device file
-    let device_file = layout.device_file();
+    let device_file = layout.device();
     let device = Device::default();
     device_file
         .write_json(&device, WriteOptions::default())

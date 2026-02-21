@@ -14,7 +14,7 @@ use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::device::Device;
-use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments};
+use miru_agent::storage::{self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, Storage};
 use miru_agent::sync::{
     errors::SyncErr,
     syncer::{
@@ -51,6 +51,32 @@ pub async fn create_token_manager(
         private_key_file,
     )
     .unwrap()
+}
+
+pub async fn create_storage(dir: &Dir) -> Storage {
+    let (cfg_inst_stor, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
+        .await
+        .unwrap();
+    let (cfg_inst_content_stor, _) =
+        CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
+            .await
+            .unwrap();
+    let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
+        .await
+        .unwrap();
+    let (device_stor, _) =
+        storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
+            .await
+            .unwrap();
+
+    Storage {
+        device: Arc::new(device_stor),
+        cfg_insts: CfgInstStor {
+            metadata: Arc::new(cfg_inst_stor),
+            content: Arc::new(cfg_inst_content_stor),
+        },
+        deployments: Arc::new(deployment_stor),
+    }
 }
 
 pub fn spawn(
@@ -97,34 +123,17 @@ pub mod shutdown {
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let http_client = Arc::new(http::Client::new("doesntmatter").unwrap());
         let (syncer, worker_handler) = Syncer::spawn(
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff: cooldown::Backoff {
@@ -152,21 +161,7 @@ pub mod subscribe {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let http_client = Arc::new(MockClient::default());
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 1,
@@ -177,13 +172,10 @@ pub mod subscribe {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -247,21 +239,7 @@ pub mod subscribe {
             }))
         });
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 1,
@@ -272,13 +250,10 @@ pub mod subscribe {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -376,24 +351,7 @@ pub mod sync {
         let backend_dep_cloned = backend_dep.clone();
         http_client.set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let cfg_inst_cache = Arc::new(cfg_inst_cache);
-        let cfg_inst_content_cache = Arc::new(cfg_inst_content_cache);
-        let deployment_cache = Arc::new(deployment_cache);
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 10,
@@ -404,13 +362,10 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: cfg_inst_cache.clone(),
-                cfg_inst_content_cache: cfg_inst_content_cache.clone(),
-                deployment_cache: deployment_cache.clone(),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -423,28 +378,33 @@ pub mod sync {
         syncer.sync().await.unwrap();
         let after = Utc::now();
 
-        // check the deployment cache has the new deployment
-        let cached_dep = deployment_cache
+        // check the deployment storage has the new deployment
+        let cached_dep = storage
+            .deployments
             .read_optional("dpl_1".to_string())
             .await
             .unwrap();
-        assert!(cached_dep.is_some(), "deployment should be cached");
+        assert!(cached_dep.is_some(), "deployment should be stored");
 
-        // check the config instance metadata cache
-        let ci = cfg_inst_cache
+        // check the config instance metadata storage
+        let ci = storage
+            .cfg_insts
+            .metadata
             .read_optional("ci_1".to_string())
             .await
             .unwrap();
-        assert!(ci.is_some(), "config instance should be cached");
+        assert!(ci.is_some(), "config instance should be stored");
 
-        // check the content cache has the config instance content
-        let content = cfg_inst_content_cache
+        // check the content storage has the config instance content
+        let content = storage
+            .cfg_insts
+            .content
             .read_optional("ci_1".to_string())
             .await
             .unwrap();
         assert!(
             content.is_some(),
-            "config instance content should be cached"
+            "config instance content should be stored"
         );
 
         // check the sync state
@@ -471,24 +431,7 @@ pub mod sync {
 
         let http_client = Arc::new(MockClient::default());
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let cfg_inst_cache = Arc::new(cfg_inst_cache);
-        let cfg_inst_content_cache = Arc::new(cfg_inst_content_cache);
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
-        let device_file = Arc::new(device_file);
+        let storage = Arc::new(create_storage(&dir).await);
 
         let new_agent_version = "v1.0.1".to_string();
         let backoff = cooldown::Backoff {
@@ -500,13 +443,10 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: device_file.clone(),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: cfg_inst_cache.clone(),
-                cfg_inst_content_cache: cfg_inst_content_cache.clone(),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -520,7 +460,7 @@ pub mod sync {
         let after = Utc::now();
 
         // check the device file has the correct version
-        let device = device_file.read().await.unwrap();
+        let device = storage.device.read().await.unwrap();
         assert_eq!(device.agent_version, new_agent_version);
 
         // check the sync state
@@ -557,21 +497,7 @@ pub mod sync {
             }))
         });
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 10,
@@ -582,13 +508,10 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -654,21 +577,7 @@ pub mod sync {
             }))
         });
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 10,
@@ -679,13 +588,10 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -750,21 +656,7 @@ pub mod sync {
             }))
         });
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 10,
@@ -775,13 +667,10 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -921,21 +810,7 @@ pub mod sync {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let http_client = Arc::new(MockClient::default());
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 10,
@@ -946,13 +821,10 @@ pub mod sync {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,
@@ -988,21 +860,7 @@ pub mod sync_if_not_in_cooldown {
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let http_client = Arc::new(MockClient::default());
 
-        // create the caches
-        let (cfg_inst_cache, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (cfg_inst_content_cache, _) =
-            CfgInstContent::spawn(16, dir.subdir("cfg_inst_content_cache"), 1000)
-                .await
-                .unwrap();
-        let (deployment_cache, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
-            .await
-            .unwrap();
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-                .await
-                .unwrap();
+        let storage = Arc::new(create_storage(&dir).await);
 
         let backoff = cooldown::Backoff {
             base_secs: 10,
@@ -1013,13 +871,10 @@ pub mod sync_if_not_in_cooldown {
             32,
             SyncerArgs {
                 device_id: "device_id".to_string(),
-                device_stor: Arc::new(device_file),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                cfg_inst_cache: Arc::new(cfg_inst_cache),
-                cfg_inst_content_cache: Arc::new(cfg_inst_content_cache),
-                deployment_cache: Arc::new(deployment_cache),
-                deployment_dir: dir.subdir("deployments"),
+                customer_configs_dir: dir.subdir("deployments"),
                 staging_dir: dir.subdir("staging"),
                 dpl_retry_policy: fsm::RetryPolicy::default(),
                 backoff,

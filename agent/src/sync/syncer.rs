@@ -9,7 +9,7 @@ use crate::deploy::fsm;
 use crate::errors::*;
 use crate::filesys::dir::Dir;
 use crate::http;
-use crate::storage::{CfgInstContent, CfgInsts, Deployments, Device};
+use crate::storage;
 use crate::sync::errors::*;
 use crate::sync::{agent_version, deployments};
 use crate::trace;
@@ -42,13 +42,10 @@ pub enum SyncEvent {
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub device_id: String,
-    pub device_stor: Arc<Device>,
+    pub storage: Arc<storage::Storage>,
     pub http_client: Arc<HTTPClientT>,
     pub token_mngr: Arc<TokenManagerT>,
-    pub cfg_inst_cache: Arc<CfgInsts>,
-    pub cfg_inst_content_cache: Arc<CfgInstContent>,
-    pub deployment_cache: Arc<Deployments>,
-    pub deployment_dir: Dir,
+    pub customer_configs_dir: Dir,
     pub staging_dir: Dir,
     pub dpl_retry_policy: fsm::RetryPolicy,
     pub backoff: cooldown::Backoff,
@@ -82,13 +79,10 @@ impl SyncState {
 
 pub struct SingleThreadSyncer<HTTPClientT> {
     _device_id: String,
-    device_stor: Arc<Device>,
+    storage: Arc<storage::Storage>,
     http_client: Arc<HTTPClientT>,
     token_mngr: Arc<TokenManager>,
-    cfg_inst_cache: Arc<CfgInsts>,
-    cfg_inst_content_cache: Arc<CfgInstContent>,
-    deployment_cache: Arc<Deployments>,
-    deployment_dir: Dir,
+    customer_configs_dir: Dir,
     staging_dir: Dir,
     dpl_retry_policy: fsm::RetryPolicy,
     agent_version: String,
@@ -107,13 +101,10 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
             _device_id: args.device_id,
-            device_stor: args.device_stor,
+            storage: args.storage,
             http_client: args.http_client,
             token_mngr: args.token_mngr,
-            cfg_inst_cache: args.cfg_inst_cache,
-            cfg_inst_content_cache: args.cfg_inst_content_cache,
-            deployment_cache: args.deployment_cache,
-            deployment_dir: args.deployment_dir,
+            customer_configs_dir: args.customer_configs_dir,
             staging_dir: args.staging_dir,
             dpl_retry_policy: args.dpl_retry_policy,
             backoff: args.backoff,
@@ -247,7 +238,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         let token = self.token_mngr.get_token().await?;
 
         if let Err(e) = agent_version::push(
-            self.device_stor.as_ref(),
+            self.storage.device.as_ref(),
             self.http_client.as_ref(),
             &token.token,
             self.agent_version.clone(),
@@ -259,12 +250,12 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         }
 
         deployments::sync(
-            self.deployment_cache.as_ref(),
-            self.cfg_inst_cache.as_ref(),
-            self.cfg_inst_content_cache.as_ref(),
+            self.storage.deployments.as_ref(),
+            self.storage.cfg_insts.metadata.as_ref(),
+            self.storage.cfg_insts.content.as_ref(),
             self.http_client.as_ref(),
             &self.staging_dir,
-            &self.deployment_dir,
+            &self.customer_configs_dir,
             &self.dpl_retry_policy,
             &token.token,
         )

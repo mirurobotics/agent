@@ -53,7 +53,7 @@ pub mod init {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key();
+        let private_key_file = layout.auth().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
@@ -77,14 +77,14 @@ pub mod init {
         let layout = Layout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key();
+        let private_key_file = layout.auth().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the token file with a token containing a device id
-        let token_file = layout.auth_dir().token();
+        let token_file = layout.auth().token();
         let token = Token {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY".to_string(),
                 expires_at: Utc::now(),
@@ -109,7 +109,7 @@ pub mod init {
         assert!(state.activity_tracker.last_touched() >= begin_test as u64);
 
         // the device file should now exist with some reasonable defaults
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let expected_device = Device {
             id: "cli_123".to_string(),
             activated: true,
@@ -127,14 +127,14 @@ pub mod init {
         let layout = Layout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key();
+        let private_key_file = layout.auth().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device = Device::default();
         device_file
             .write_json(&device, WriteOptions::default())
@@ -152,7 +152,7 @@ pub mod init {
         .unwrap();
 
         // the token file should now have the default token
-        let token_file = layout.auth_dir().token();
+        let token_file = layout.auth().token();
         let token = token_file.read_json::<Token>().await.unwrap();
         assert_eq!(token.token, Token::default().token);
 
@@ -167,14 +167,14 @@ pub mod init {
         let layout = Layout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key();
+        let private_key_file = layout.auth().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device = Device {
             id: "dvc_123".to_string(),
             activated: true,
@@ -197,7 +197,7 @@ pub mod init {
         .unwrap();
 
         // the device file should now have the device set to offline
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device = device_file.read_json::<Device>().await.unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
     }
@@ -212,14 +212,14 @@ pub mod shutdown {
         let layout = Layout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key();
+        let private_key_file = layout.auth().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device = Device::default();
         device_file
             .write_json(&device, WriteOptions::default())
@@ -251,14 +251,14 @@ pub mod shutdown {
         let layout = Layout::new(dir);
 
         // create a private key file
-        let private_key_file = layout.auth_dir().private_key();
+        let private_key_file = layout.auth().private_key();
         private_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device = Device::default();
         device_file
             .write_json(&device, WriteOptions::OVERWRITE)
@@ -278,7 +278,8 @@ pub mod shutdown {
 
         // set the device to be online
         state
-            .device_stor
+            .storage
+            .device
             .patch(device::Updates::connected())
             .await
             .unwrap();
@@ -287,7 +288,7 @@ pub mod shutdown {
         state_handle.await;
 
         // the device file should now have the device set to offline
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device = device_file.read_json::<Device>().await.unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);

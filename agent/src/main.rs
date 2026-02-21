@@ -83,14 +83,14 @@ fn handle_install_result(result: Result<backend_client::Device, InstallErr>) {
 async fn run_agent() {
     // check the agent has been activated
     let layout = storage::Layout::default();
-    let device_file = layout.device_file();
+    let device_file = layout.device();
     if let Err(e) = storage::assert_activated(&device_file).await {
         error!("Device is not yet activated: {}", e);
         return;
     }
 
     // retrieve the settings files
-    let settings_file = layout.settings_file();
+    let settings_file = layout.settings();
     let settings = match settings_file.read_json::<storage::Settings>().await {
         Ok(settings) => settings,
         Err(e) => {

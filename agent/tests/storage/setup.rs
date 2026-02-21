@@ -8,17 +8,17 @@ pub mod bootstrap {
 
     async fn validate_storage(layout: &Layout) {
         // agent file
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         let device_file_content = device_file.read_json::<Device>().await.unwrap();
         assert_eq!(device_file_content, Device::default());
 
         // settings file
-        let settings_file = layout.settings_file();
+        let settings_file = layout.settings();
         let settings_file_content = settings_file.read_json::<Settings>().await.unwrap();
         assert_eq!(settings_file_content, Settings::default());
 
         // token file
-        let auth_layout = layout.auth_dir();
+        let auth_layout = layout.auth();
         let token_file = auth_layout.token();
         assert!(token_file.exists());
 
@@ -35,7 +35,7 @@ pub mod bootstrap {
         assert!(!public_key_contents.is_empty());
 
         // config instance deployment directory
-        let config_instance_deployment_dir = layout.config_instance_deployment_dir();
+        let config_instance_deployment_dir = layout.customer_configs();
         assert!(config_instance_deployment_dir.exists());
     }
 
@@ -136,7 +136,7 @@ pub mod bootstrap {
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
 
         // create the agent file
-        let device_file = layout.device_file();
+        let device_file = layout.device();
         device_file
             .write_json(&Device::default(), WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -167,7 +167,7 @@ pub mod bootstrap {
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
 
         // create the auth directory
-        let auth_dir = layout.auth_dir();
+        let auth_dir = layout.auth();
         auth_dir.root.create().await.unwrap();
 
         // setup the storage
@@ -238,7 +238,7 @@ pub mod bootstrap {
     }
 
     #[tokio::test]
-    async fn caches_directory_already_exists() {
+    async fn storage_directory_already_exists() {
         let dir = Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
@@ -246,9 +246,9 @@ pub mod bootstrap {
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
 
-        // create the caches directory
-        let caches_dir = layout.caches_dir();
-        let subfile = caches_dir.file("test");
+        // create the storage directory
+        let resources_dir = layout.resources();
+        let subfile = resources_dir.file("test");
         subfile
             .write_string("test", WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -284,7 +284,7 @@ pub mod bootstrap {
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
 
         // create the config instance deployment directory
-        let config_instance_deployment_dir = layout.config_instance_deployment_dir();
+        let config_instance_deployment_dir = layout.customer_configs();
         let subfile = config_instance_deployment_dir.file("test");
         subfile
             .write_string("test", WriteOptions::OVERWRITE_ATOMIC)

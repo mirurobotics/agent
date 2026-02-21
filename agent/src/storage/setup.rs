@@ -15,19 +15,19 @@ pub async fn bootstrap(
     public_key_file: &File,
 ) -> Result<(), StorageErr> {
     // overwrite the device file
-    let device_file = layout.device_file();
+    let device_file = layout.device();
     device_file
         .write_json(&device, WriteOptions::OVERWRITE_ATOMIC)
         .await?;
 
     // overwrite the settings file
-    let settings_file = layout.settings_file();
+    let settings_file = layout.settings();
     settings_file
         .write_json(&settings, WriteOptions::OVERWRITE_ATOMIC)
         .await?;
 
     // create the auth directory
-    let auth_dir = layout.auth_dir();
+    let auth_dir = layout.auth();
     auth_dir.root.create_if_absent().await?;
 
     // overwrite the auth file
@@ -45,15 +45,14 @@ pub async fn bootstrap(
         .move_to(&auth_dir.public_key(), Overwrite::Allow)
         .await?;
 
-    // wipe the config instance deployment directory
-    let config_instance_deployment_dir = layout.config_instance_deployment_dir();
-    config_instance_deployment_dir.delete().await?;
-    let config_instance_deployment_dir = layout.config_instance_deployment_dir();
-    config_instance_deployment_dir.create_if_absent().await?;
+    // wipe the customer configs directory
+    let customer_configs_dir = layout.customer_configs();
+    customer_configs_dir.delete().await?;
+    customer_configs_dir.create_if_absent().await?;
 
-    // wipe the cache
-    let caches_dir = layout.caches_dir();
-    caches_dir.delete().await?;
+    // wipe resources directory
+    let resources_dir = layout.resources();
+    resources_dir.delete().await?;
 
     Ok(())
 }

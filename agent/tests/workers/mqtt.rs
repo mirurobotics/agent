@@ -66,7 +66,7 @@ pub mod handle_connection_events {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -90,7 +90,7 @@ pub mod handle_connection_events {
 
         let (device_file, _) = storage::Device::spawn_with_default(
             64,
-            layout.device_file(),
+            layout.device(),
             Device {
                 status: DeviceStatus::Offline,
                 last_connected_at: Utc::now(),
@@ -124,7 +124,7 @@ pub mod handle_connection_events {
 
         let (device_file, _) = storage::Device::spawn_with_default(
             64,
-            layout.device_file(),
+            layout.device(),
             Device {
                 status: DeviceStatus::Online,
                 last_disconnected_at: Utc::now(),
@@ -159,7 +159,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -184,7 +184,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -211,7 +211,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -238,7 +238,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -274,7 +274,7 @@ pub mod handle_ping_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -302,7 +302,7 @@ pub mod handle_ping_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -344,7 +344,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -403,7 +403,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device.clone())
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 

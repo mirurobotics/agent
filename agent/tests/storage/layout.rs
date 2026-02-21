@@ -6,22 +6,25 @@ pub mod storage_layout {
     use super::*;
 
     #[test]
-    fn default_uses_root() {
+    fn default_uses_filesystem_root() {
         let layout = Layout::default();
-        assert_eq!(layout.root.path(), &std::path::PathBuf::from("/"));
+        assert_eq!(
+            layout.filesystem_root.path(),
+            &std::path::PathBuf::from("/")
+        );
     }
 
     #[test]
-    fn internal_dir() {
+    fn root_dir() {
         let layout = Layout::new(Dir::new("/"));
-        let dir = layout.internal_dir();
+        let dir = layout.root();
         assert_eq!(dir.to_string(), "/var/lib/miru");
     }
 
     #[test]
-    fn internal_dir_custom_root() {
+    fn root_dir_custom_filesystem_root() {
         let layout = Layout::new(Dir::new("/custom"));
-        let dir = layout.internal_dir();
+        let dir = layout.root();
         assert_eq!(dir.to_string(), "/custom/var/lib/miru");
     }
 
@@ -33,81 +36,64 @@ pub mod storage_layout {
     }
 
     #[test]
-    fn device_file() {
+    fn settings() {
         let layout = Layout::default();
-        let file = layout.device_file();
-        assert_eq!(file.to_string(), "/var/lib/miru/device.json");
-    }
-
-    #[test]
-    fn settings_file() {
-        let layout = Layout::default();
-        let file = layout.settings_file();
+        let file = layout.settings();
         assert_eq!(file.to_string(), "/var/lib/miru/settings.json");
     }
 
     #[test]
-    fn caches_dir() {
+    fn device() {
         let layout = Layout::default();
-        let dir = layout.caches_dir();
-        assert_eq!(dir.to_string(), "/var/lib/miru/cache");
+        let file = layout.device();
+        assert_eq!(file.to_string(), "/var/lib/miru/device.json");
     }
 
     #[test]
-    fn config_instance_caches() {
+    fn resources() {
         let layout = Layout::default();
-        let dir = layout.config_instance_caches();
-        assert_eq!(dir.to_string(), "/var/lib/miru/cache/config_instances");
+        let dir = layout.resources();
+        assert_eq!(dir.to_string(), "/var/lib/miru/resources");
     }
 
     #[test]
-    fn config_instance_cache() {
+    fn config_instance_meta() {
         let layout = Layout::default();
-        let file = layout.config_instance_cache();
+        let file = layout.config_instance_meta();
         assert_eq!(
             file.to_string(),
-            "/var/lib/miru/cache/config_instances/metadata.json"
+            "/var/lib/miru/resources/config_instances/metadata.json"
         );
     }
 
     #[test]
-    fn config_instance_content_cache() {
+    fn config_instance_content() {
         let layout = Layout::default();
-        let dir = layout.config_instance_content_cache();
+        let dir = layout.config_instance_content();
         assert_eq!(
             dir.to_string(),
-            "/var/lib/miru/cache/config_instances/contents"
+            "/var/lib/miru/resources/config_instances/contents"
         );
     }
 
     #[test]
-    fn deployment_caches() {
+    fn deployments() {
         let layout = Layout::default();
-        let dir = layout.deployment_caches();
-        assert_eq!(dir.to_string(), "/var/lib/miru/cache/deployments");
+        let file = layout.deployments();
+        assert_eq!(file.to_string(), "/var/lib/miru/resources/deployments.json");
     }
 
     #[test]
-    fn deployment_cache() {
+    fn customer_configs() {
         let layout = Layout::default();
-        let file = layout.deployment_cache();
-        assert_eq!(
-            file.to_string(),
-            "/var/lib/miru/cache/deployments/metadata.json"
-        );
-    }
-
-    #[test]
-    fn config_instance_deployment_dir() {
-        let layout = Layout::default();
-        let dir = layout.config_instance_deployment_dir();
+        let dir = layout.customer_configs();
         assert_eq!(dir.to_string(), "/srv/miru/config_instances");
     }
 
     #[test]
-    fn config_instance_deployment_dir_custom_root() {
+    fn customer_configs_custom_filesystem_root() {
         let layout = Layout::new(Dir::new("/opt"));
-        let dir = layout.config_instance_deployment_dir();
+        let dir = layout.customer_configs();
         assert_eq!(dir.to_string(), "/opt/srv/miru/config_instances");
     }
 }
@@ -118,14 +104,14 @@ pub mod auth_layout {
     #[test]
     fn auth_dir_path() {
         let layout = Layout::default();
-        let auth = layout.auth_dir();
+        let auth = layout.auth();
         assert_eq!(auth.root.to_string(), "/var/lib/miru/auth");
     }
 
     #[test]
     fn private_key_file() {
         let layout = Layout::default();
-        let auth = layout.auth_dir();
+        let auth = layout.auth();
         let file = auth.private_key();
         assert_eq!(file.to_string(), "/var/lib/miru/auth/private_key.pem");
     }
@@ -133,7 +119,7 @@ pub mod auth_layout {
     #[test]
     fn public_key_file() {
         let layout = Layout::default();
-        let auth = layout.auth_dir();
+        let auth = layout.auth();
         let file = auth.public_key();
         assert_eq!(file.to_string(), "/var/lib/miru/auth/public_key.pem");
     }
@@ -141,7 +127,7 @@ pub mod auth_layout {
     #[test]
     fn token_file() {
         let layout = Layout::default();
-        let auth = layout.auth_dir();
+        let auth = layout.auth();
         let file = auth.token();
         assert_eq!(file.to_string(), "/var/lib/miru/auth/token.json");
     }

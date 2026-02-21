@@ -172,7 +172,7 @@ async fn init_app_state(
     let (app_state, app_state_handle) = AppState::init(
         agent_version,
         &options.storage.layout,
-        options.storage.cache_capacities,
+        options.storage.capacities,
         Arc::new(http::Client::new(&options.backend_base_url)?),
         options.dpl_retry_policy,
     )
@@ -229,7 +229,7 @@ async fn init_poller_worker(
     info!("Initializing poller worker...");
 
     let syncer = app_state.syncer.clone();
-    let device_stor = app_state.device_stor.clone();
+    let device_stor = app_state.storage.device.clone();
 
     let poller_handle = tokio::spawn(async move {
         poller::run(
@@ -257,7 +257,7 @@ async fn init_mqtt_worker(
 
     let token_mngr = app_state.token_mngr.clone();
     let syncer = app_state.syncer.clone();
-    let device_stor = app_state.device_stor.clone();
+    let device_stor = app_state.storage.device.clone();
 
     let mqtt_handle = tokio::spawn(async move {
         mqtt::run(
@@ -286,10 +286,9 @@ async fn init_socket_server(
 
     // run the axum server with graceful shutdown
     let server_state = ServerState::new(
-        app_state.device_stor.clone(),
+        app_state.storage.clone(),
         app_state.http_client.clone(),
         app_state.syncer.clone(),
-        app_state.caches.clone(),
         app_state.token_mngr.clone(),
         app_state.activity_tracker.clone(),
     );

@@ -20,10 +20,9 @@ pub mod push {
             ..Device::default()
         };
 
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device)
-                .await
-                .unwrap();
+        let (device_file, _) = storage::Device::spawn_with_default(64, layout.device(), device)
+            .await
+            .unwrap();
         let http_client = MockClient::default();
 
         push(&device_file, &http_client, "token", agent_version.clone())
@@ -50,10 +49,9 @@ pub mod push {
             ..Device::default()
         };
 
-        let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), device)
-                .await
-                .unwrap();
+        let (device_file, _) = storage::Device::spawn_with_default(64, layout.device(), device)
+            .await
+            .unwrap();
         let http_client = MockClient::default();
 
         push(

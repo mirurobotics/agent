@@ -31,7 +31,7 @@ impl Default for LifecycleOptions {
 #[derive(Debug, Default)]
 pub struct StorageOptions {
     pub layout: Layout,
-    pub cache_capacities: Capacities,
+    pub capacities: Capacities,
 }
 
 #[derive(Debug)]

@@ -13,24 +13,20 @@ use crate::crypt::jwt;
 use crate::deploy::fsm;
 use crate::filesys::path::PathExt;
 use crate::http;
-use crate::models::device::{self, Device, DeviceStatus};
+use crate::models::device::Device;
+
 use crate::server::errors::*;
 use crate::storage;
 use crate::sync::syncer::{Syncer, SyncerArgs, SyncerExt};
 use crate::trace;
 
-// external crates
-use tokio::task::JoinHandle;
-use tracing::info;
-
 pub type DeviceID = String;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
-    pub device_stor: Arc<storage::Device>,
+    pub storage: Arc<storage::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<Syncer>,
-    pub caches: Arc<storage::Caches>,
     pub token_mngr: Arc<TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
 }
@@ -39,12 +35,12 @@ impl AppState {
     pub async fn init(
         agent_version: String,
         layout: &storage::Layout,
-        cache_capacities: storage::Capacities,
+        capacities: storage::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), ServerErr> {
         // storage layout stuff
-        let auth_dir = layout.auth_dir();
+        let auth_dir = layout.auth();
         let private_key_file = auth_dir.private_key();
         private_key_file.assert_exists()?;
 
@@ -53,13 +49,10 @@ impl AppState {
         // get the device id
         let device_id = Self::init_device_id(layout, &token_file).await?;
 
-        let (device_storage, device_storage_handle) =
-            Self::init_device_storage(layout, device_id.clone()).await?;
-        let device_stor = Arc::new(device_storage);
-
-        // initialize the caches
-        let (caches, caches_handle) = storage::Caches::init(layout, cache_capacities).await?;
-        let caches = Arc::new(caches);
+        // initialize storage
+        let (stor, storage_handle) =
+            storage::Storage::init(layout, capacities, device_id.clone()).await?;
+        let storage = Arc::new(stor);
 
         // initialize the token manager
         let (token_mngr, token_mngr_handle) = TokenManager::spawn(
@@ -76,13 +69,10 @@ impl AppState {
             64,
             SyncerArgs {
                 device_id: device_id.clone(),
-                device_stor: device_stor.clone(),
+                storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: token_mngr.clone(),
-                cfg_inst_cache: caches.cfg_inst.clone(),
-                cfg_inst_content_cache: caches.cfg_inst_content.clone(),
-                deployment_cache: caches.deployment.clone(),
-                deployment_dir: layout.config_instance_deployment_dir(),
+                customer_configs_dir: layout.customer_configs(),
                 staging_dir: layout.temp_dir(),
                 dpl_retry_policy,
                 agent_version,
@@ -99,17 +89,16 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         let shutdown_handle = async move {
-            let handles = vec![token_mngr_handle, syncer_handle, device_storage_handle];
+            let handles = vec![token_mngr_handle, syncer_handle];
 
-            futures::future::join(futures::future::join_all(handles), caches_handle).await;
+            futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
 
         Ok((
             AppState {
-                device_stor,
+                storage,
                 http_client,
                 syncer,
-                caches,
                 token_mngr,
                 activity_tracker,
             },
@@ -122,7 +111,7 @@ impl AppState {
         token_file: &TokenFile,
     ) -> Result<DeviceID, ServerErr> {
         // attempt to get the device id from the agent file
-        let device_file_err = match layout.device_file().read_json::<Device>().await {
+        let device_file_err = match layout.device().read_json::<Device>().await {
             Ok(device) => {
                 return Ok(device.id.clone());
             }
@@ -147,62 +136,16 @@ impl AppState {
         Ok(device_id)
     }
 
-    async fn init_device_storage(
-        layout: &storage::Layout,
-        device_id: String,
-    ) -> Result<(storage::Device, JoinHandle<()>), ServerErr> {
-        // initialize the device file with some reasonable defaults
-        let (device_storage, device_file_handle) = storage::Device::spawn_with_default(
-            64,
-            layout.device_file(),
-            Device {
-                id: device_id.clone(),
-                activated: true,
-                status: DeviceStatus::Offline,
-                ..Device::default()
-            },
-        )
-        .await?;
-
-        device_storage
-            .patch(device::Updates {
-                status: Some(DeviceStatus::Offline),
-                ..device::Updates::empty()
-            })
-            .await?;
-        Ok((device_storage, device_file_handle))
-    }
-
     pub async fn shutdown(&self) -> Result<(), ServerErr> {
-        self.shutdown_device_storage().await?;
-
-        // shutdown the syncer
+        // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
 
-        // shutdown the caches
-        self.caches.shutdown().await?;
+        // shutdown storage (sets device offline + shuts down all stores)
+        self.storage.shutdown().await?;
 
         // shutdown the token manager
         self.token_mngr.shutdown().await?;
 
         Ok(())
-    }
-
-    async fn shutdown_device_storage(&self) -> Result<(), ServerErr> {
-        let device = self.device_stor.read().await?;
-
-        // if the last known device status was online, we'll set it to be offline
-        match device.status {
-            device::DeviceStatus::Online => {
-                info!("Shutting down device file, setting device to offline");
-                self.device_stor
-                    .patch(device::Updates::disconnected())
-                    .await?;
-            }
-            device::DeviceStatus::Offline => {
-                info!("Shutting down device file, device is already offline");
-            }
-        }
-        self.device_stor.shutdown().await.map_err(ServerErr::from)
     }
 }

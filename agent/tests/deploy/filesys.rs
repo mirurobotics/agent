@@ -14,8 +14,7 @@ struct Fixture {
     content_cache: FileCache<String, serde_json::Value>,
     staging_dir: Dir,
     deployment_dir: Dir,
-    #[allow(dead_code)]
-    temp_dir: Dir,
+    _temp_dir: Dir,
 }
 
 impl Fixture {
@@ -41,7 +40,7 @@ impl Fixture {
             content_cache,
             staging_dir,
             deployment_dir,
-            temp_dir,
+            _temp_dir: temp_dir,
         }
     }
 

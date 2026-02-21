@@ -126,7 +126,7 @@ async fn pull<HTTPClientT: http::ClientI>(
             .clone()
             .unwrap_or_default();
 
-        // Store config instances in the cache
+        // Store config instances in storage
         for backend_ci in &backend_config_instances {
             let ci = ConfigInstance::from_backend(backend_ci.clone());
             let ci_id = ci.id.clone();
@@ -143,7 +143,7 @@ async fn pull<HTTPClientT: http::ClientI>(
                     .await
                 {
                     error!(
-                        "Failed to write config instance '{}' content to cache: {}",
+                        "Failed to write config instance '{}' content to storage: {}",
                         ci_id, e
                     );
                     continue;
@@ -156,7 +156,7 @@ async fn pull<HTTPClientT: http::ClientI>(
                 .await
             {
                 error!(
-                    "Failed to write config instance '{}' to cache: {}",
+                    "Failed to write config instance '{}' to storage: {}",
                     ci_id, e
                 );
             }
@@ -165,10 +165,10 @@ async fn pull<HTTPClientT: http::ClientI>(
         // Convert to internal deployment model
         let new_deployment = Deployment::from_backend(backend_deployment);
 
-        // Check if we already have this deployment cached
+        // Check if we already have this deployment stored
         let existing = deployment_stor.read_optional(deployment_id.clone()).await?;
 
-        // Merge: preserve agent-side fields (attempts, cooldown) from cached version
+        // Merge: preserve agent-side fields (attempts, cooldown) from stored version
         let merged = match existing {
             Some(cached) => Deployment {
                 // Update from backend
@@ -186,7 +186,7 @@ async fn pull<HTTPClientT: http::ClientI>(
             None => new_deployment,
         };
 
-        // Write to cache
+        // Write to storage
         if let Err(e) = deployment_stor
             .write(
                 deployment_id.clone(),
@@ -197,7 +197,7 @@ async fn pull<HTTPClientT: http::ClientI>(
             .await
         {
             error!(
-                "Failed to write deployment '{}' to cache: {}",
+                "Failed to write deployment '{}' to storage: {}",
                 deployment_id, e
             );
         }
@@ -281,7 +281,7 @@ async fn push<HTTPClientT: http::ClientI>(
             continue;
         }
 
-        // update the cache to mark as clean
+        // update storage to mark as clean
         let deployment_id = deployment.id.clone();
         if let Err(e) = deployment_stor
             .write(
@@ -294,7 +294,7 @@ async fn push<HTTPClientT: http::ClientI>(
             .map_err(SyncErr::from)
         {
             error!(
-                "Failed to update cache for deployment {} after push: {}",
+                "Failed to update storage for deployment {} after push: {}",
                 deployment_id, e
             );
             errors.push(e);

@@ -26,7 +26,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -109,7 +109,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -193,7 +193,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -255,7 +255,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device_file(), Device::default())
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
