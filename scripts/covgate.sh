@@ -68,8 +68,8 @@ while read -r covgate_file; do
         [.data[0].files[] | select(.filename | startswith($mod))] |
         if length == 0 then "no_files"
         else
-            (map(.summary.lines.count) | add) as $total |
-            (map(.summary.lines.covered) | add) as $covered |
+            (map(.summary.regions.count) | add) as $total |
+            (map(.summary.regions.covered) | add) as $covered |
             if $total == 0 then "0.0"
             else (($covered / $total) * 10000 | floor) / 100 | tostring
             end
