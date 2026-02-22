@@ -1,13 +1,13 @@
 // internal crates
 use crate::crud::prelude::{Find, Read};
-use crate::deploy::errors::{ConflictingDeploymentsErr, DeployErr, EmptyConfigInstancesErr};
+use crate::deploy::errors::{ConflictingDeploymentsErr, DeployErr};
 use crate::deploy::{
     filesys, fsm,
     observer::{on_update, Observer},
 };
 use crate::filesys::dir::Dir;
 use crate::models::config_instance::{CfgInstID, ConfigInstance};
-use crate::models::deployment::{Deployment, DeploymentID, DplTarget};
+use crate::models::deployment::{Deployment, DeploymentID, DplErrStatus, DplTarget};
 
 // external crates
 use tracing::{error, info, warn};
@@ -19,6 +19,12 @@ pub struct Args<'a, DR, CIR, CR> {
     pub staging_dir: &'a Dir,
     pub target_dir: &'a Dir,
     pub retry_policy: &'a fsm::RetryPolicy,
+}
+
+pub struct Outcome {
+    pub deployment: Deployment,
+    pub wait: Option<chrono::TimeDelta>,
+    pub error: Option<DeployErr>,
 }
 
 pub async fn apply<DR, CIR, CR>(
@@ -40,7 +46,7 @@ where
         Some(deployment) => {
             let deployed_id = deployment.id.clone();
             let mut outcomes = vec![apply_one(deployment, args, observers).await];
-            outcomes.extend(apply_actionables(args, observers, Some(&deployed_id)).await?);
+            outcomes.extend(apply_actionables(args, observers, Some(deployed_id)).await?);
             Ok(outcomes)
         }
         // if there is no deployment which wishes to be deployed, we need to delete the
@@ -61,7 +67,9 @@ where
     DR: Find<DeploymentID, Deployment>,
 {
     let target_deployed = deployments
-        .find_where(|d| d.target_status == DplTarget::Deployed)
+        .find_where(|d| {
+            d.target_status == DplTarget::Deployed && d.error_status != DplErrStatus::Failed
+        })
         .await?;
     if target_deployed.len() > 1 {
         return Err(ConflictingDeploymentsErr {
@@ -75,7 +83,7 @@ where
 async fn apply_actionables<DR, CIR, CR>(
     args: &Args<'_, DR, CIR, CR>,
     observers: &mut [&mut dyn Observer],
-    exclude_id: Option<&DeploymentID>,
+    exclude_id: Option<DeploymentID>,
 ) -> Result<Vec<Outcome>, DeployErr>
 where
     DR: Find<DeploymentID, Deployment>,
@@ -85,22 +93,15 @@ where
     let mut outcomes = Vec::new();
     let actionable = args
         .deployments
-        .find_where(|d| fsm::next_action(d) != fsm::NextAction::None)
+        .find_where(move |d| {
+            fsm::next_action(d) != fsm::NextAction::None && Some(&d.id) != exclude_id.as_ref()
+        })
         .await?;
     for deployment in actionable {
-        if exclude_id == Some(&deployment.id) {
-            continue;
-        }
         let outcome = apply_one(deployment, args, observers).await;
         outcomes.push(outcome);
     }
     Ok(outcomes)
-}
-
-pub struct Outcome {
-    pub deployment: Deployment,
-    pub wait: Option<chrono::TimeDelta>,
-    pub error: Option<DeployErr>,
 }
 
 async fn apply_one<DR, CIR, CR>(
@@ -169,17 +170,6 @@ where
     CR: Read<CfgInstID, String>,
 {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
-
-    if deployment.config_instance_ids.is_empty() {
-        let err = EmptyConfigInstancesErr {
-            deployment_id: deployment.id.clone(),
-        };
-        return Outcome {
-            deployment,
-            wait: None,
-            error: Some(err.into()),
-        };
-    }
 
     match filesys::deploy(cfg_insts, contents, staging_dir, target_dir, &deployment).await {
         Ok(()) => {
