@@ -97,8 +97,9 @@ where
 
     async fn delete_entry_impl(&mut self, key: &K) -> Result<(), CacheErr> {
         let mut cache = self.read_cache().await?;
-        cache.remove(key);
-        self.write_cache(&cache).await?;
+        if cache.remove(key).is_some() {
+            self.write_cache(&cache).await?;
+        }
         Ok(())
     }
 
@@ -126,8 +127,7 @@ where
     }
 
     async fn entry_map(&self) -> Result<HashMap<K, CacheEntry<K, V>>, CacheErr> {
-        let cache = self.read_cache().await?;
-        Ok(cache)
+        self.read_cache().await
     }
 
     async fn value_map(&self) -> Result<HashMap<K, V>, CacheErr> {
