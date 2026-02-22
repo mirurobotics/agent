@@ -10,6 +10,7 @@ use crate::models::config_instance::{CfgInstID, ConfigInstance};
 use crate::models::deployment::{Deployment, DeploymentID, DplErrStatus, DplTarget};
 
 // external crates
+use chrono::Utc;
 use tracing::{error, info, warn};
 
 pub struct Args<'a, DR, CIR, CR> {
@@ -195,12 +196,25 @@ where
                     deployment.id
                 );
             }
+            let wait = remaining_cooldown(&deployment);
             Outcome {
                 deployment,
-                wait: None,
+                wait,
                 error: Some(e),
             }
         }
+    }
+}
+
+fn remaining_cooldown(deployment: &Deployment) -> Option<chrono::TimeDelta> {
+    if deployment.is_in_cooldown() {
+        Some(
+            deployment
+                .cooldown_ends_at
+                .signed_duration_since(Utc::now()),
+        )
+    } else {
+        None
     }
 }
 

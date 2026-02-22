@@ -456,7 +456,7 @@ mod deploy_errors {
                 error_status: DplErrStatus::Retrying,
                 attempts: 1,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
@@ -489,7 +489,7 @@ mod deploy_errors {
                 error_status: DplErrStatus::Retrying,
                 attempts: 1,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
@@ -522,7 +522,7 @@ mod deploy_errors {
                 error_status: DplErrStatus::Retrying,
                 attempts: 1,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
@@ -552,7 +552,7 @@ mod deploy_errors {
                 error_status: DplErrStatus::Retrying,
                 attempts: 4,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
@@ -589,7 +589,7 @@ mod deploy_errors {
                 error_status: DplErrStatus::Failed,
                 attempts: 1,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
@@ -1122,7 +1122,7 @@ mod observer_notifications {
                 error_status: DplErrStatus::Retrying,
                 attempts: 1,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
@@ -1235,7 +1235,7 @@ mod observer_errors {
                 error_status: DplErrStatus::Retrying,
                 attempts: 1,
                 has_error: true,
-                has_wait: false,
+                has_wait: true,
                 in_cooldown: true,
             }
         );
