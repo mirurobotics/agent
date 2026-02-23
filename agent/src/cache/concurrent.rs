@@ -9,7 +9,6 @@ use crate::cache::{
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
     Overwrite,
 };
-use crate::crud::{errors::CrudErr, prelude::*};
 use crate::trace;
 
 // external crates
@@ -524,57 +523,37 @@ where
         self.send_command(|tx| WorkerCommand::GetDirtyEntries { respond_to: tx })
             .await?
     }
-}
 
-// ==================================== FIND ======================================= //
-impl<SingleThreadCacheT, K, V> Find<K, V> for ConcurrentCache<SingleThreadCacheT, K, V>
-where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
-{
-    async fn find_where<F>(&self, filter: F) -> Result<Vec<V>, CrudErr>
+    pub async fn read(&self, key: K) -> Result<V, CacheErr> {
+        self.read_impl(key).await
+    }
+
+    pub async fn read_optional(&self, key: K) -> Result<Option<V>, CacheErr> {
+        self.read_optional_impl(key).await
+    }
+
+    pub async fn find_where<F>(&self, filter: F) -> Result<Vec<V>, CacheErr>
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        self.find_where_impl(filter).await.map_err(CrudErr::from)
+        self.find_where_impl(filter).await
     }
 
-    async fn find_one_optional<F>(
+    pub async fn find_one_optional<F>(
         &self,
         filter_name: &'static str,
         filter: F,
-    ) -> Result<Option<V>, CrudErr>
+    ) -> Result<Option<V>, CacheErr>
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        self.find_one_optional_impl(filter_name, filter)
-            .await
-            .map_err(CrudErr::from)
+        self.find_one_optional_impl(filter_name, filter).await
     }
 
-    async fn find_one<F>(&self, filter_name: &'static str, filter: F) -> Result<V, CrudErr>
+    pub async fn find_one<F>(&self, filter_name: &'static str, filter: F) -> Result<V, CacheErr>
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        self.find_one_impl(filter_name, filter)
-            .await
-            .map_err(CrudErr::from)
-    }
-}
-
-// ==================================== READ ======================================= //
-impl<SingleThreadCacheT, K, V> Read<K, V> for ConcurrentCache<SingleThreadCacheT, K, V>
-where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
-{
-    async fn read(&self, key: K) -> Result<V, CrudErr> {
-        self.read_impl(key).await.map_err(CrudErr::from)
-    }
-
-    async fn read_optional(&self, key: K) -> Result<Option<V>, CrudErr> {
-        self.read_optional_impl(key).await.map_err(CrudErr::from)
+        self.find_one_impl(filter_name, filter).await
     }
 }

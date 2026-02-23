@@ -3,8 +3,6 @@ use miru_agent::cache::{
     concurrent::ConcurrentCache, entry::CacheEntry, errors::CacheErr,
     single_thread::SingleThreadCache,
 };
-use miru_agent::crud::errors::CrudErr;
-use miru_agent::crud::prelude::*;
 use miru_agent::filesys::Overwrite;
 
 // external crates
@@ -716,12 +714,8 @@ pub mod read {
     {
         let (cache, _) = spawn_cache().await;
         assert!(matches!(
-            cache
-                .read("1234567890".to_string())
-                .await
-                .unwrap_err(),
-            CrudErr::CacheErr(ref e)
-                if matches!(e, CacheErr::CacheElementNotFound { .. })
+            cache.read("1234567890".to_string()).await.unwrap_err(),
+            CacheErr::CacheElementNotFound(_)
         ));
     }
 
@@ -972,11 +966,7 @@ pub mod delete {
         // should not throw an error since it exists
         cache.delete(key.clone()).await.unwrap();
         let error = cache.read(key.clone()).await.unwrap_err();
-        assert!(matches!(
-            error,
-            CrudErr::CacheErr(ref e)
-                if matches!(e, CacheErr::CacheElementNotFound { .. })
-        ));
+        assert!(matches!(error, CacheErr::CacheElementNotFound(_)));
     }
 }
 
@@ -1284,11 +1274,7 @@ pub mod find_one_optional {
             .find_one_optional("not value5", |value| value != "value5")
             .await
             .unwrap_err();
-        assert!(matches!(
-            err,
-            CrudErr::CacheErr(ref e)
-                if matches!(e, CacheErr::FoundTooManyCacheElements{ .. })
-        ));
+        assert!(matches!(err, CacheErr::FoundTooManyCacheElements(_)));
     }
 }
 
@@ -1379,9 +1365,7 @@ pub mod find_one {
             .find_one("value10", |value| value == "value10")
             .await
             .unwrap_err();
-        assert!(
-            matches!(error, CrudErr::CacheErr(ref e) if matches!(e, CacheErr::CacheElementNotFound { .. }))
-        );
+        assert!(matches!(error, CacheErr::CacheElementNotFound(_)));
 
         // one entry found
         let found = cache
@@ -1400,9 +1384,7 @@ pub mod find_one {
             .find_one("not value5", |value| value != "value5")
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, CrudErr::CacheErr(ref e) if matches!(e, CacheErr::FoundTooManyCacheElements{ .. }))
-        );
+        assert!(matches!(err, CacheErr::FoundTooManyCacheElements(_)));
     }
 }
 
