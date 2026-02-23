@@ -1,5 +1,4 @@
 use miru_agent::cache::errors::{CacheElementNotFound, CacheErr};
-use miru_agent::crud::errors::CrudErr;
 use miru_agent::filesys::errors::{FileSysErr, InvalidDirNameErr};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::errors::{DateTimeParseErr, ModelsErr};
@@ -12,10 +11,6 @@ fn cache_err() -> CacheErr {
         msg: "cache miss".to_string(),
         trace: miru_agent::trace!(),
     })
-}
-
-fn crud_err() -> CrudErr {
-    CrudErr::CacheErr(cache_err())
 }
 
 fn filesys_err() -> FileSysErr {
@@ -56,12 +51,6 @@ mod from_conversions {
     fn cache_err_maps_to_service_cache_err() {
         let err: ServiceErr = cache_err().into();
         assert!(matches!(err, ServiceErr::CacheErr(_)));
-    }
-
-    #[test]
-    fn crud_err_maps_to_service_crud_err() {
-        let err: ServiceErr = crud_err().into();
-        assert!(matches!(err, ServiceErr::CrudErr(_)));
     }
 
     #[test]
