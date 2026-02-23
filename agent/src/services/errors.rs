@@ -1,5 +1,4 @@
 use crate::cache::errors::CacheErr;
-use crate::crud::errors::CrudErr;
 use crate::filesys::errors::FileSysErr;
 use crate::http::errors::HTTPErr;
 use crate::models::errors::ModelsErr;
@@ -10,8 +9,6 @@ use crate::sync::errors::SyncErr;
 pub enum ServiceErr {
     #[error(transparent)]
     CacheErr(CacheErr),
-    #[error(transparent)]
-    CrudErr(CrudErr),
     #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
@@ -27,12 +24,6 @@ pub enum ServiceErr {
 impl From<CacheErr> for ServiceErr {
     fn from(e: CacheErr) -> Self {
         Self::CacheErr(e)
-    }
-}
-
-impl From<CrudErr> for ServiceErr {
-    fn from(e: CrudErr) -> Self {
-        Self::CrudErr(e)
     }
 }
 
@@ -68,7 +59,6 @@ impl From<SyncErr> for ServiceErr {
 
 crate::impl_error!(ServiceErr {
     CacheErr,
-    CrudErr,
     FileSysErr,
     ModelsErr,
     StorageErr,

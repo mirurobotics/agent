@@ -4,7 +4,6 @@ pub mod authn;
 pub mod cache;
 pub mod cli;
 pub mod cooldown;
-pub mod crud;
 pub mod crypt;
 pub mod deploy;
 pub mod errors;
