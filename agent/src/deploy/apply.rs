@@ -1,25 +1,29 @@
 // internal crates
-use crate::crud::prelude::{Find, Read};
 use crate::deploy::errors::{ConflictingDeploymentsErr, DeployErr};
-use crate::deploy::{
-    filesys, fsm,
-    observer::{on_update, Observer},
-};
+use crate::deploy::{filesys, fsm};
 use crate::filesys::dir::Dir;
-use crate::models::config_instance::{CfgInstID, ConfigInstance};
-use crate::models::deployment::{Deployment, DeploymentID, DplErrStatus, DplTarget};
+use crate::filesys::Overwrite;
+use crate::models::deployment::{Deployment, DplErrStatus, DplTarget};
+use crate::storage;
 
 // external crates
 use chrono::Utc;
 use tracing::{error, info, warn};
 
-pub struct Args<'a, DR, CIR, CR> {
-    pub deployments: &'a DR,
-    pub cfg_insts: &'a CIR,
-    pub contents: &'a CR,
-    pub staging_dir: &'a Dir,
-    pub target_dir: &'a Dir,
-    pub retry_policy: &'a fsm::RetryPolicy,
+pub struct DeployOpts {
+    pub staging_dir: Dir,
+    pub target_dir: Dir,
+    pub retry_policy: fsm::RetryPolicy,
+}
+
+pub struct Args<'a> {
+    pub storage: &'a Storage<'a>,
+    pub opts: &'a DeployOpts,
+}
+
+pub struct Storage<'a> {
+    pub deployments: &'a storage::Deployments,
+    pub cfg_insts: storage::CfgInstRef<'a>,
 }
 
 pub struct Outcome {
@@ -28,16 +32,10 @@ pub struct Outcome {
     pub error: Option<DeployErr>,
 }
 
-pub async fn apply<DR, CIR, CR>(
-    args: &Args<'_, DR, CIR, CR>,
-    observers: &mut [&mut dyn Observer],
-) -> Result<Vec<Outcome>, DeployErr>
-where
-    DR: Find<DeploymentID, Deployment>,
-    CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, String>,
-{
-    let target_deployed = find_target_deployed(args.deployments).await?;
+type DeploymentID = String;
+
+pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
+    let target_deployed = find_target_deployed(args.storage.deployments).await?;
 
     match target_deployed {
         // if there is a deployment which wishes to be deployed, we apply it first
@@ -46,15 +44,15 @@ where
         // for cooldown to end
         Some(deployment) => {
             let deployed_id = deployment.id.clone();
-            let mut outcomes = vec![apply_one(deployment, args, observers).await];
-            outcomes.extend(apply_actionables(args, observers, Some(deployed_id)).await?);
+            let mut outcomes = vec![apply_one(args, deployment).await];
+            outcomes.extend(apply_actionables(args, Some(deployed_id)).await?);
             Ok(outcomes)
         }
         // if there is no deployment which wishes to be deployed, we need to delete the
         // target directory so that stale deployments are removed
         None => {
-            let outcomes = apply_actionables(args, observers, None).await?;
-            if let Err(e) = args.target_dir.delete().await {
+            let outcomes = apply_actionables(args, None).await?;
+            if let Err(e) = args.opts.target_dir.delete().await {
                 debug_assert!(false, "failed to delete target directory: {e}");
                 warn!("failed to delete target directory: {e}");
             }
@@ -63,11 +61,10 @@ where
     }
 }
 
-async fn find_target_deployed<DR>(deployments: &DR) -> Result<Option<Deployment>, DeployErr>
-where
-    DR: Find<DeploymentID, Deployment>,
-{
-    let target_deployed = deployments
+async fn find_target_deployed(
+    storage: &storage::Deployments,
+) -> Result<Option<Deployment>, DeployErr> {
+    let target_deployed = storage
         .find_where(|d| {
             d.target_status == DplTarget::Deployed && d.error_status != DplErrStatus::Failed
         })
@@ -81,39 +78,26 @@ where
     Ok(target_deployed.into_iter().next())
 }
 
-async fn apply_actionables<DR, CIR, CR>(
-    args: &Args<'_, DR, CIR, CR>,
-    observers: &mut [&mut dyn Observer],
+async fn apply_actionables(
+    args: &Args<'_>,
     exclude_id: Option<DeploymentID>,
-) -> Result<Vec<Outcome>, DeployErr>
-where
-    DR: Find<DeploymentID, Deployment>,
-    CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, String>,
-{
+) -> Result<Vec<Outcome>, DeployErr> {
     let mut outcomes = Vec::new();
     let actionable = args
+        .storage
         .deployments
         .find_where(move |d| {
             fsm::next_action(d) != fsm::NextAction::None && Some(&d.id) != exclude_id.as_ref()
         })
         .await?;
     for deployment in actionable {
-        let outcome = apply_one(deployment, args, observers).await;
+        let outcome = apply_one(args, deployment).await;
         outcomes.push(outcome);
     }
     Ok(outcomes)
 }
 
-async fn apply_one<DR, CIR, CR>(
-    deployment: Deployment,
-    args: &Args<'_, DR, CIR, CR>,
-    observers: &mut [&mut dyn Observer],
-) -> Outcome
-where
-    CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, String>,
-{
+async fn apply_one(args: &Args<'_>, deployment: Deployment) -> Outcome {
     match fsm::next_action(&deployment) {
         fsm::NextAction::None => {
             info!("'{}' has no next action", deployment.id);
@@ -137,62 +121,44 @@ where
         }
         fsm::NextAction::Deploy => {
             info!("deploying '{}'", deployment.id);
-            deploy(
-                args.cfg_insts,
-                args.contents,
-                args.staging_dir,
-                args.target_dir,
-                deployment,
-                args.retry_policy,
-                observers,
-            )
-            .await
+            deploy(args.storage, args.opts, deployment).await
         }
         fsm::NextAction::Remove | fsm::NextAction::Archive => {
             info!("removing '{}'", deployment.id);
-            remove(deployment, observers).await
+            remove(args.storage.deployments, deployment).await
         }
     }
 }
 
 // ================================= DEPLOY ======================================== //
 
-async fn deploy<CIR, CR>(
-    cfg_insts: &CIR,
-    contents: &CR,
-    staging_dir: &Dir,
-    target_dir: &Dir,
-    deployment: Deployment,
-    retry_policy: &fsm::RetryPolicy,
-    observers: &mut [&mut dyn Observer],
-) -> Outcome
-where
-    CIR: Read<CfgInstID, ConfigInstance>,
-    CR: Read<CfgInstID, String>,
-{
+async fn deploy(storage: &Storage<'_>, opts: &DeployOpts, deployment: Deployment) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
 
-    match filesys::deploy(cfg_insts, contents, staging_dir, target_dir, &deployment).await {
+    match filesys::deploy(
+        &storage.cfg_insts,
+        &opts.staging_dir,
+        &opts.target_dir,
+        &deployment,
+    )
+    .await
+    {
         Ok(()) => {
             let deployment = fsm::deploy(deployment);
-            match on_update(observers, &deployment).await {
-                Ok(_) => Outcome {
-                    deployment,
-                    wait: None,
-                    error: None,
-                },
-                Err(e) => Outcome {
-                    deployment,
-                    wait: None,
-                    error: Some(e),
-                },
+            let error = write_deployment(storage.deployments, &deployment)
+                .await
+                .err();
+            Outcome {
+                deployment,
+                wait: None,
+                error,
             }
         }
         Err(e) => {
-            let deployment = fsm::error(deployment, retry_policy, &e, true);
-            if let Err(obs_e) = on_update(observers, &deployment).await {
+            let deployment = fsm::error(deployment, &opts.retry_policy, &e, true);
+            if let Err(write_e) = write_deployment(storage.deployments, &deployment).await {
                 error!(
-                    "failed to update deployment {} after error: {obs_e}",
+                    "failed to update deployment {} after error: {write_e}",
                     deployment.id
                 );
             }
@@ -220,12 +186,29 @@ fn remaining_cooldown(deployment: &Deployment) -> Option<chrono::TimeDelta> {
 
 // ================================= REMOVE ======================================== //
 
-async fn remove(deployment: Deployment, observers: &mut [&mut dyn Observer]) -> Outcome {
+async fn remove(deployments: &storage::Deployments, deployment: Deployment) -> Outcome {
     let deployment = fsm::remove(deployment);
-    let error = on_update(observers, &deployment).await.err();
+    let error = write_deployment(deployments, &deployment).await.err();
     Outcome {
         deployment,
         wait: None,
         error,
     }
+}
+
+// ================================= HELPERS ======================================= //
+
+async fn write_deployment(
+    storage: &storage::Deployments,
+    deployment: &Deployment,
+) -> Result<(), DeployErr> {
+    storage
+        .write(
+            deployment.id.clone(),
+            deployment.clone(),
+            storage::deployments::is_dirty,
+            Overwrite::Allow,
+        )
+        .await
+        .map_err(DeployErr::from)
 }

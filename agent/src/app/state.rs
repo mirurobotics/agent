@@ -10,7 +10,7 @@ use crate::authn::{
 };
 use crate::cooldown;
 use crate::crypt::jwt;
-use crate::deploy::fsm;
+use crate::deploy::{apply, fsm};
 use crate::filesys::path::PathExt;
 use crate::http;
 use crate::models::device::Device;
@@ -68,13 +68,14 @@ impl AppState {
         let (syncer, syncer_handle) = Syncer::spawn(
             64,
             SyncerArgs {
-                device_id: device_id.clone(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: token_mngr.clone(),
-                customer_configs_dir: layout.customer_configs(),
-                staging_dir: layout.temp_dir(),
-                dpl_retry_policy,
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: layout.temp_dir(),
+                    target_dir: layout.customer_configs(),
+                    retry_policy: dpl_retry_policy,
+                },
                 agent_version,
                 backoff: cooldown::Backoff {
                     base_secs: 1,

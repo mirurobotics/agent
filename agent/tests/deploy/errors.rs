@@ -1,5 +1,4 @@
 use miru_agent::cache::errors::{CacheElementNotFound, CacheErr};
-use miru_agent::crud::errors::CrudErr;
 use miru_agent::deploy::errors::{
     ConflictingDeploymentsErr, DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr,
 };
@@ -12,10 +11,6 @@ fn cache_err() -> CacheErr {
         msg: "cache miss".to_string(),
         trace: miru_agent::trace!(),
     })
-}
-
-fn crud_err() -> CrudErr {
-    CrudErr::CacheErr(cache_err())
 }
 
 fn filesys_err() -> FileSysErr {
@@ -55,12 +50,6 @@ mod from_conversions {
     fn cache_err_maps_to_deploy_cache_err() {
         let err: DeployErr = cache_err().into();
         assert!(matches!(err, DeployErr::CacheErr(_)));
-    }
-
-    #[test]
-    fn crud_err_maps_to_deploy_crud_err() {
-        let err: DeployErr = crud_err().into();
-        assert!(matches!(err, DeployErr::CrudErr(_)));
     }
 
     #[test]

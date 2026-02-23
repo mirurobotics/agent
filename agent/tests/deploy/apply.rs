@@ -1,9 +1,7 @@
 // internal crates
-use crate::deploy::observer::{FailingObserver, HistoryObserver};
-use miru_agent::deploy::apply::{apply, Args, Outcome};
+use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::errors::DeployErr;
 use miru_agent::deploy::fsm::RetryPolicy;
-use miru_agent::deploy::observer::Observer;
 use miru_agent::filesys::{dir::Dir, path::PathExt, Overwrite};
 use miru_agent::models::config_instance::ConfigInstance;
 use miru_agent::models::deployment::{Deployment, DplActivity, DplErrStatus, DplTarget};
@@ -93,45 +91,45 @@ impl Fixture {
             .unwrap();
     }
 
-    fn args<'a>(
-        &'a self,
-        retry_policy: &'a RetryPolicy,
-    ) -> Args<'a, storage::Deployments, storage::CfgInsts, storage::CfgInstContent> {
-        Args {
+    fn storage(&self) -> apply::Storage<'_> {
+        apply::Storage {
             deployments: &self.deployments,
-            cfg_insts: &self.cfg_insts,
-            contents: &self.cfg_inst_content,
-            target_dir: &self.target_dir,
-            staging_dir: &self.staging_dir,
-            retry_policy,
+            cfg_insts: storage::CfgInstRef {
+                meta: &self.cfg_insts,
+                content: &self.cfg_inst_content,
+            },
         }
     }
 
     async fn apply(&self) -> Result<Vec<Outcome>, DeployErr> {
-        let retry_policy = RetryPolicy::default();
-        let args = self.args(&retry_policy);
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        apply(&args, &mut observers).await
-    }
-
-    async fn apply_with_observer(
-        &self,
-        observers: &mut [&mut dyn Observer],
-    ) -> Result<Vec<Outcome>, DeployErr> {
-        let retry_policy = RetryPolicy::default();
-        let args = self.args(&retry_policy);
-        apply(&args, observers).await
+        let storage = self.storage();
+        let opts = apply::DeployOpts {
+            staging_dir: self.staging_dir.clone(),
+            target_dir: self.target_dir.clone(),
+            retry_policy: RetryPolicy::default(),
+        };
+        let args = apply::Args {
+            storage: &storage,
+            opts: &opts,
+        };
+        apply(&args).await
     }
 
     async fn apply_with_retry_policy(
         &self,
-        retry_policy: &RetryPolicy,
+        retry_policy: RetryPolicy,
     ) -> Result<Vec<Outcome>, DeployErr> {
-        let args = self.args(retry_policy);
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        apply(&args, &mut observers).await
+        let storage = self.storage();
+        let opts = apply::DeployOpts {
+            staging_dir: self.staging_dir.clone(),
+            target_dir: self.target_dir.clone(),
+            retry_policy,
+        };
+        let args = apply::Args {
+            storage: &storage,
+            opts: &opts,
+        };
+        apply(&args).await
     }
 }
 
@@ -493,7 +491,7 @@ mod deploy_errors {
                 in_cooldown: true,
             }
         );
-        assert!(matches!(outcomes[0].error, Some(DeployErr::CrudErr(_))));
+        assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
     }
 
     #[tokio::test]
@@ -526,7 +524,7 @@ mod deploy_errors {
                 in_cooldown: true,
             }
         );
-        assert!(matches!(outcomes[0].error, Some(DeployErr::CrudErr(_))));
+        assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
     }
 
     #[tokio::test]
@@ -579,7 +577,7 @@ mod deploy_errors {
             ..RetryPolicy::default()
         };
 
-        let outcomes = f.apply_with_retry_policy(&policy).await.unwrap();
+        let outcomes = f.apply_with_retry_policy(policy).await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
             ComparableOutcome::from_outcome(&outcomes[0]),
@@ -1031,217 +1029,5 @@ mod ordering_and_composition {
             !f.target_dir.exists(),
             "target_dir should be deleted when no deployment targets Deployed"
         );
-    }
-}
-
-mod observer_notifications {
-    use super::*;
-
-    #[tokio::test]
-    async fn notified_on_deploy() {
-        let f = Fixture::new().await;
-
-        let ci = make_cfg_inst("/obs.json");
-        f.seed_cfg_inst(&ci, "obs-content".into()).await;
-        let dpl = make_deployment(
-            "dpl-obs",
-            DplTarget::Deployed,
-            DplActivity::Queued,
-            vec![ci.id.clone()],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(observer.history.len(), 1);
-        assert_eq!(observer.history[0].id, "dpl-obs");
-        assert_eq!(observer.history[0].activity_status, DplActivity::Deployed);
-    }
-
-    #[tokio::test]
-    async fn notified_on_remove() {
-        let f = Fixture::new().await;
-
-        let dpl = make_deployment(
-            "dpl-obs-rm",
-            DplTarget::Archived,
-            DplActivity::Deployed,
-            vec![],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let _outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert_eq!(observer.history.len(), 1);
-        assert_eq!(observer.history[0].activity_status, DplActivity::Archived);
-    }
-
-    #[tokio::test]
-    async fn not_notified_for_no_action() {
-        let f = Fixture::new().await;
-
-        // target=Staged, activity=Staged -> no action, filtered out by apply_actionables
-        let dpl = make_deployment("dpl-noop", DplTarget::Staged, DplActivity::Staged, vec![]);
-        f.seed_deployment(&dpl).await;
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let _outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert!(observer.history.is_empty());
-    }
-
-    #[tokio::test]
-    async fn notified_on_deploy_error() {
-        let f = Fixture::new().await;
-
-        // Will fail with EmptyConfigInstances
-        let dpl = make_deployment(
-            "dpl-obs-err",
-            DplTarget::Deployed,
-            DplActivity::Queued,
-            vec![],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let mut observer = HistoryObserver::new();
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut observer];
-        let outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-obs-err".into(),
-                activity: DplActivity::Queued,
-                error_status: DplErrStatus::Retrying,
-                attempts: 1,
-                has_error: true,
-                has_wait: true,
-                in_cooldown: true,
-            }
-        );
-        assert!(matches!(
-            outcomes[0].error,
-            Some(DeployErr::EmptyConfigInstances(_))
-        ));
-        // Observer IS notified even on failure (line 190 in apply.rs)
-        assert_eq!(observer.history.len(), 1);
-        assert_eq!(observer.history[0].error_status, DplErrStatus::Retrying);
-    }
-}
-
-mod observer_errors {
-    use super::*;
-
-    #[tokio::test]
-    async fn deploy_success_observer_error() {
-        let f = Fixture::new().await;
-
-        let ci = make_cfg_inst("/obs-fail.json");
-        f.seed_cfg_inst(&ci, "content".into()).await;
-        let dpl = make_deployment(
-            "dpl-obs-fail",
-            DplTarget::Deployed,
-            DplActivity::Queued,
-            vec![ci.id.clone()],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let mut failing = FailingObserver;
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut failing];
-        let outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-obs-fail".into(),
-                // Deploy succeeded (fsm::deploy ran), so activity transitioned
-                activity: DplActivity::Deployed,
-                error_status: DplErrStatus::None,
-                attempts: 0,
-                // But observer error is reported
-                has_error: true,
-                has_wait: false,
-                in_cooldown: false,
-            }
-        );
-        assert!(matches!(outcomes[0].error, Some(DeployErr::StorageErr(_))));
-    }
-
-    #[tokio::test]
-    async fn remove_observer_error() {
-        let f = Fixture::new().await;
-
-        let dpl = make_deployment(
-            "dpl-rm-obs-fail",
-            DplTarget::Archived,
-            DplActivity::Deployed,
-            vec![],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let mut failing = FailingObserver;
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut failing];
-        let outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-rm-obs-fail".into(),
-                // Remove succeeded (fsm::remove ran), so activity transitioned
-                activity: DplActivity::Archived,
-                error_status: DplErrStatus::None,
-                attempts: 0,
-                // But observer error is reported
-                has_error: true,
-                has_wait: false,
-                in_cooldown: false,
-            }
-        );
-        assert!(matches!(outcomes[0].error, Some(DeployErr::StorageErr(_))));
-    }
-
-    #[tokio::test]
-    async fn deploy_error_observer_error() {
-        let f = Fixture::new().await;
-
-        // Will fail with EmptyConfigInstances
-        let dpl = make_deployment(
-            "dpl-both-fail",
-            DplTarget::Deployed,
-            DplActivity::Queued,
-            vec![],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let mut failing = FailingObserver;
-        let mut observers: Vec<&mut dyn Observer> = vec![&mut failing];
-        let outcomes = f.apply_with_observer(&mut observers).await.unwrap();
-
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-both-fail".into(),
-                activity: DplActivity::Queued,
-                error_status: DplErrStatus::Retrying,
-                attempts: 1,
-                has_error: true,
-                has_wait: true,
-                in_cooldown: true,
-            }
-        );
-        assert!(matches!(
-            outcomes[0].error,
-            Some(DeployErr::EmptyConfigInstances(_))
-        ));
     }
 }

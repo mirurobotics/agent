@@ -1,5 +1,4 @@
 use crate::cache::errors::CacheErr;
-use crate::crud::errors::CrudErr;
 use crate::filesys::errors::FileSysErr;
 use crate::models::deployment::DplTarget;
 use crate::storage::StorageErr;
@@ -42,8 +41,6 @@ pub enum DeployErr {
     #[error(transparent)]
     CacheErr(CacheErr),
     #[error(transparent)]
-    CrudErr(CrudErr),
-    #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
     StorageErr(StorageErr),
@@ -52,12 +49,6 @@ pub enum DeployErr {
 impl From<CacheErr> for DeployErr {
     fn from(e: CacheErr) -> Self {
         Self::CacheErr(e)
-    }
-}
-
-impl From<CrudErr> for DeployErr {
-    fn from(e: CrudErr) -> Self {
-        Self::CrudErr(e)
     }
 }
 
@@ -96,7 +87,6 @@ crate::impl_error!(DeployErr {
     EmptyConfigInstances,
     InvalidDeploymentTarget,
     CacheErr,
-    CrudErr,
     FileSysErr,
     StorageErr,
 });

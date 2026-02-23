@@ -43,8 +43,22 @@ impl Default for Capacities {
 
 #[derive(Clone, Debug)]
 pub struct CfgInstStor {
-    pub metadata: Arc<CfgInsts>,
+    pub meta: Arc<CfgInsts>,
     pub content: Arc<CfgInstContent>,
+}
+
+pub struct CfgInstRef<'a> {
+    pub meta: &'a CfgInsts,
+    pub content: &'a CfgInstContent,
+}
+
+impl CfgInstStor {
+    pub fn as_ref(&self) -> CfgInstRef<'_> {
+        CfgInstRef {
+            meta: &self.meta,
+            content: &self.content,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -116,7 +130,7 @@ impl Storage {
             Storage {
                 device,
                 cfg_insts: CfgInstStor {
-                    metadata: cfg_inst_metadata,
+                    meta: cfg_inst_metadata,
                     content: cfg_inst_content,
                 },
                 deployments,
@@ -141,7 +155,7 @@ impl Storage {
         }
 
         self.device.shutdown().await?;
-        self.cfg_insts.metadata.shutdown().await?;
+        self.cfg_insts.meta.shutdown().await?;
         self.cfg_insts.content.shutdown().await?;
         self.deployments.shutdown().await?;
 

@@ -80,14 +80,11 @@ impl Fixture {
         &self,
         deployment: &Deployment,
     ) -> Result<(), miru_agent::deploy::errors::DeployErr> {
-        deploy(
-            &self.cfg_inst_meta,
-            &self.cfg_inst_content,
-            &self.staging_dir,
-            &self.target_dir,
-            deployment,
-        )
-        .await
+        let stor = storage::CfgInstRef {
+            meta: &self.cfg_inst_meta,
+            content: &self.cfg_inst_content,
+        };
+        deploy(&stor, &self.staging_dir, &self.target_dir, deployment).await
     }
 }
 
