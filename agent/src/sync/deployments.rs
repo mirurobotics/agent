@@ -1,12 +1,7 @@
-use crate::crud::prelude::*;
-use crate::deploy::{
-    apply::{self, apply},
-    fsm,
-    observer::{self, Observer},
-};
-use crate::filesys::dir::Dir;
+use crate::deploy::apply::{self, apply};
 use crate::filesys::Overwrite;
 use crate::http;
+use crate::http::config_instances;
 use crate::http::deployments;
 use crate::models::config_instance::ConfigInstance;
 use crate::models::deployment::Deployment;
@@ -22,29 +17,23 @@ use openapi_client::models::{
 use tracing::{debug, error};
 
 // =================================== SYNC ======================================== //
-#[allow(clippy::too_many_arguments)]
+pub struct SyncArgs<'a, HTTPClientT> {
+    pub http_client: &'a HTTPClientT,
+    pub storage: &'a Storage<'a>,
+    pub opts: &'a apply::DeployOpts,
+    pub token: &'a str,
+}
+
+pub type Storage<'a> = apply::Storage<'a>;
+
 pub async fn sync<HTTPClientT: http::ClientI>(
-    deployment_stor: &storage::Deployments,
-    cfg_inst_stor: &storage::CfgInsts,
-    cfg_inst_content_stor: &storage::CfgInstContent,
-    http_client: &HTTPClientT,
-    staging_dir: &Dir,
-    target_dir: &Dir,
-    retry_policy: &fsm::RetryPolicy,
-    token: &str,
+    args: &SyncArgs<'_, HTTPClientT>,
 ) -> Result<(), SyncErr> {
     let mut errors = Vec::new();
 
     // pull deployments from server
     debug!("Pulling deployments from server");
-    let result = pull(
-        deployment_stor,
-        cfg_inst_stor,
-        cfg_inst_content_stor,
-        http_client,
-        token,
-    )
-    .await;
+    let result = pull(args.http_client, args.storage, args.token).await;
     match result {
         Ok(_) => (),
         Err(e) => {
@@ -54,17 +43,11 @@ pub async fn sync<HTTPClientT: http::ClientI>(
 
     // apply deployments
     debug!("Applying deployments");
-    let args = apply::Args {
-        deployments: deployment_stor,
-        cfg_insts: cfg_inst_stor,
-        contents: cfg_inst_content_stor,
-        target_dir,
-        staging_dir,
-        retry_policy,
+    let apply_args = apply::Args {
+        storage: args.storage,
+        opts: args.opts,
     };
-    let mut storage_observer = observer::Storage { deployment_stor };
-    let mut observers: Vec<&mut dyn Observer> = vec![&mut storage_observer];
-    let outcomes = match apply(&args, &mut observers).await {
+    let outcomes = match apply(&apply_args).await {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to apply deployments: {e}");
@@ -86,7 +69,7 @@ pub async fn sync<HTTPClientT: http::ClientI>(
 
     // push deployment status updates to server
     debug!("Pushing deployment status updates to server");
-    let result = push(deployment_stor, http_client, token).await;
+    let result = push(args.http_client, args.storage.deployments, args.token).await;
     match result {
         Ok(_) => (),
         Err(e) => {
@@ -105,89 +88,39 @@ pub async fn sync<HTTPClientT: http::ClientI>(
 }
 
 // =================================== PULL ======================================== //
-async fn pull<HTTPClientT: http::ClientI>(
-    deployment_stor: &storage::Deployments,
-    cfg_inst_stor: &storage::CfgInsts,
-    cfg_inst_content_stor: &storage::CfgInstContent,
+async fn pull<'a, HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
+    storage: &Storage<'a>,
     token: &str,
 ) -> Result<(), SyncErr> {
-    // Fetch active deployments (queued + deployed) with config_instances expanded
     let active_deployments = fetch_active_deployments(http_client, token).await?;
-    debug!("Found {} active deployments", active_deployments.len(),);
+    debug!("Found {} active deployments", active_deployments.len());
 
-    // Process each deployment
     for backend_deployment in active_deployments {
         let deployment_id = backend_deployment.id.clone();
-
-        // Extract config instances from the expansion
         let backend_config_instances = backend_deployment
             .config_instances
             .clone()
             .unwrap_or_default();
 
-        // Store config instances in storage
-        for backend_ci in &backend_config_instances {
-            let ci = ConfigInstance::from_backend(backend_ci.clone());
-            let ci_id = ci.id.clone();
-
-            // Store config instance content if expanded
-            if let Some(ref content) = backend_ci.content {
-                if let Err(e) = cfg_inst_content_stor
-                    .write(
-                        ci_id.clone(),
-                        content.data.clone(),
-                        |_, _| false,
-                        Overwrite::Allow,
-                    )
-                    .await
-                {
-                    error!(
-                        "Failed to write config instance '{}' content to storage: {}",
-                        ci_id, e
-                    );
-                    continue;
-                }
-            }
-
-            // Store config instance metadata
-            if let Err(e) = cfg_inst_stor
-                .write(ci_id.clone(), ci, |_, _| false, Overwrite::Allow)
-                .await
-            {
-                error!(
-                    "Failed to write config instance '{}' to storage: {}",
-                    ci_id, e
-                );
-            }
+        // Fetch and store each config instance's content + metadata individually.
+        // Failures are non-fatal: a failed config instance is skipped and retried
+        // on the next sync cycle. Both content and metadata are skipped together
+        // to avoid half-written state.
+        for backend_cfg_inst in &backend_config_instances {
+            let cfg_inst = ConfigInstance::from_backend(backend_cfg_inst.clone());
+            let _ = store_config_instance(http_client, &storage.cfg_insts, cfg_inst, token).await;
         }
 
-        // Convert to internal deployment model
         let new_deployment = Deployment::from_backend(backend_deployment);
+        let existing = storage
+            .deployments
+            .read_optional(deployment_id.clone())
+            .await?;
+        let merged = merge_deployment(new_deployment, existing);
 
-        // Check if we already have this deployment stored
-        let existing = deployment_stor.read_optional(deployment_id.clone()).await?;
-
-        // Merge: preserve agent-side fields (attempts, cooldown) from stored version
-        let merged = match existing {
-            Some(cached) => Deployment {
-                // Update from backend
-                description: new_deployment.description,
-                activity_status: new_deployment.activity_status,
-                error_status: new_deployment.error_status,
-                target_status: new_deployment.target_status,
-                config_instance_ids: new_deployment.config_instance_ids,
-                updated_at: new_deployment.updated_at,
-                // Preserve agent-side fields
-                attempts: cached.attempts,
-                cooldown_ends_at: cached.cooldown_ends_at,
-                ..cached
-            },
-            None => new_deployment,
-        };
-
-        // Write to storage
-        if let Err(e) = deployment_stor
+        if let Err(e) = storage
+            .deployments
             .write(
                 deployment_id.clone(),
                 merged,
@@ -204,6 +137,78 @@ async fn pull<HTTPClientT: http::ClientI>(
     }
 
     Ok(())
+}
+
+async fn store_config_instance<HTTPClientT: http::ClientI>(
+    http_client: &HTTPClientT,
+    storage: &storage::CfgInstRef<'_>,
+    cfg_inst: ConfigInstance,
+    token: &str,
+) -> Result<(), ()> {
+    let cfg_inst_id = cfg_inst.id.clone();
+
+    let content = config_instances::get_content(
+        http_client,
+        config_instances::GetContentParams {
+            id: &cfg_inst_id,
+            token,
+        },
+    )
+    .await
+    .map_err(|e| {
+        error!(
+            "Failed to fetch content for config instance '{}': {}",
+            cfg_inst_id, e
+        );
+    })?;
+
+    storage
+        .content
+        .write(cfg_inst_id.clone(), content, |_, _| false, Overwrite::Allow)
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to write config instance '{}' content to storage: {}",
+                cfg_inst_id, e
+            );
+        })?;
+
+    storage
+        .meta
+        .write(
+            cfg_inst_id.clone(),
+            cfg_inst,
+            |_, _| false,
+            Overwrite::Allow,
+        )
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to write config instance '{}' to storage: {}",
+                cfg_inst_id, e
+            );
+        })?;
+
+    Ok(())
+}
+
+/// Merges a deployment from the backend with the cached version (if any),
+/// preserving agent-side fields (attempts, cooldown_ends_at).
+fn merge_deployment(new: Deployment, cached: Option<Deployment>) -> Deployment {
+    match cached {
+        Some(cached) => Deployment {
+            description: new.description,
+            activity_status: new.activity_status,
+            error_status: new.error_status,
+            target_status: new.target_status,
+            config_instance_ids: new.config_instance_ids,
+            updated_at: new.updated_at,
+            attempts: cached.attempts,
+            cooldown_ends_at: cached.cooldown_ends_at,
+            ..cached
+        },
+        None => new,
+    }
 }
 
 async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
@@ -229,30 +234,27 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
 
 // =================================== PUSH ======================================== //
 async fn push<HTTPClientT: http::ClientI>(
-    deployment_stor: &storage::Deployments,
     http_client: &HTTPClientT,
+    storage: &storage::Deployments,
     token: &str,
 ) -> Result<(), SyncErr> {
     // get all dirty (unsynced) deployments
-    let dirty_deployments = deployment_stor.get_dirty_entries().await?;
-    debug!(
-        "Found {} dirty deployments to push",
-        dirty_deployments.len(),
-    );
+    let dirty_dpls = storage.get_dirty_entries().await?;
+    debug!("Found {} dirty deployments to push", dirty_dpls.len(),);
 
     let mut errors = Vec::new();
 
-    for dirty_entry in dirty_deployments {
+    for dirty_entry in dirty_dpls {
         let deployment = dirty_entry.value;
 
-        let activity_status = Some(crate::models::deployment::DplActivity::to_backend(
+        let activity = Some(crate::models::deployment::DplActivity::to_backend(
             &deployment.activity_status,
         ));
         let error_status = Some(crate::models::deployment::DplErrStatus::to_backend(
             &deployment.error_status,
         ));
         let updates = UpdateDeploymentRequest {
-            activity_status,
+            activity_status: activity,
             error_status,
         };
 
@@ -261,17 +263,15 @@ async fn push<HTTPClientT: http::ClientI>(
             deployment.id, updates
         );
 
-        if let Err(e) = deployments::update(
-            http_client,
-            deployments::UpdateParams {
-                id: &deployment.id,
-                updates: &updates,
-                expansions: &[],
-                token,
-            },
-        )
-        .await
-        .map_err(SyncErr::from)
+        let params = deployments::UpdateParams {
+            id: &deployment.id,
+            updates: &updates,
+            expansions: &[],
+            token,
+        };
+        if let Err(e) = deployments::update(http_client, params)
+            .await
+            .map_err(SyncErr::from)
         {
             error!(
                 "Failed to push deployment {} to backend: {}",
@@ -283,7 +283,7 @@ async fn push<HTTPClientT: http::ClientI>(
 
         // update storage to mark as clean
         let deployment_id = deployment.id.clone();
-        if let Err(e) = deployment_stor
+        if let Err(e) = storage
             .write(
                 deployment.id.clone(),
                 deployment,

@@ -1,6 +1,5 @@
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::cache::errors::{CacheElementNotFound, CacheErr};
-use miru_agent::crud::errors::CrudErr;
 use miru_agent::deploy::errors::{DeployErr, EmptyConfigInstancesErr};
 use miru_agent::filesys::errors::{FileSysErr, InvalidDirNameErr};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
@@ -19,10 +18,6 @@ fn cache_err() -> CacheErr {
         msg: "cache miss".to_string(),
         trace: miru_agent::trace!(),
     })
-}
-
-fn crud_err() -> CrudErr {
-    CrudErr::CacheErr(cache_err())
 }
 
 fn deploy_err() -> DeployErr {
@@ -61,12 +56,6 @@ mod from_conversions {
     fn cache_err_maps_to_sync_cache_err() {
         let err: SyncErr = cache_err().into();
         assert!(matches!(err, SyncErr::CacheErr(_)));
-    }
-
-    #[test]
-    fn crud_err_maps_to_sync_crud_err() {
-        let err: SyncErr = crud_err().into();
-        assert!(matches!(err, SyncErr::CrudErr(_)));
     }
 
     #[test]

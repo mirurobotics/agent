@@ -1,6 +1,5 @@
 use crate::authn::errors::AuthnErr;
 use crate::cache::errors::CacheErr;
-use crate::crud::errors::CrudErr;
 use crate::deploy::errors::DeployErr;
 use crate::errors::Trace;
 use crate::filesys::errors::FileSysErr;
@@ -8,18 +7,6 @@ use crate::http::errors::HTTPErr;
 use crate::storage::StorageErr;
 
 use chrono::{DateTime, Utc};
-
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "Missing expanded config instances: expected ids: {expected_ids:?}, actual ids: {actual_ids:?}"
-)]
-pub struct MissingExpandedInstancesErr {
-    pub expected_ids: Vec<String>,
-    pub actual_ids: Vec<String>,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for MissingExpandedInstancesErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("Sync error: {errors:?}")]
@@ -35,15 +22,6 @@ impl crate::errors::Error for SyncErrors {
         !self.errors.is_empty() && self.errors.iter().all(|e| e.is_network_conn_err())
     }
 }
-
-#[derive(Debug, thiserror::Error)]
-#[error("Config instance content not found for config instance '{cfg_inst_id}'")]
-pub struct ConfigInstanceContentNotFoundErr {
-    pub cfg_inst_id: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for ConfigInstanceContentNotFoundErr {}
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -89,8 +67,6 @@ pub enum SyncErr {
     #[error(transparent)]
     CacheErr(CacheErr),
     #[error(transparent)]
-    CrudErr(CrudErr),
-    #[error(transparent)]
     DeployErr(Box<DeployErr>),
     #[error(transparent)]
     FileSysErr(FileSysErr),
@@ -101,11 +77,7 @@ pub enum SyncErr {
     #[error(transparent)]
     SyncErrors(SyncErrors),
     #[error(transparent)]
-    MissingExpandedInstancesErr(MissingExpandedInstancesErr),
-    #[error(transparent)]
     InCooldownErr(SyncerInCooldownErr),
-    #[error(transparent)]
-    ConfigInstanceContentNotFound(ConfigInstanceContentNotFoundErr),
     #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
@@ -123,12 +95,6 @@ impl From<AuthnErr> for SyncErr {
 impl From<CacheErr> for SyncErr {
     fn from(e: CacheErr) -> Self {
         Self::CacheErr(e)
-    }
-}
-
-impl From<CrudErr> for SyncErr {
-    fn from(e: CrudErr) -> Self {
-        Self::CrudErr(e)
     }
 }
 
@@ -159,15 +125,12 @@ impl From<StorageErr> for SyncErr {
 crate::impl_error!(SyncErr {
     AuthnErr,
     CacheErr,
-    CrudErr,
     DeployErr,
     FileSysErr,
     HTTPClientErr,
     StorageErr,
     SyncErrors,
-    MissingExpandedInstancesErr,
     InCooldownErr,
-    ConfigInstanceContentNotFound,
     SendActorMessageErr,
     ReceiveActorMessageErr,
     MockErr,

@@ -7,8 +7,7 @@ use miru_agent::authn::{
     token_mngr::{TokenFile, TokenManager},
 };
 use miru_agent::cooldown;
-use miru_agent::crud::prelude::*;
-use miru_agent::deploy::fsm;
+use miru_agent::deploy::{apply, fsm};
 use miru_agent::errors::*;
 use miru_agent::filesys::{dir::Dir, WriteOptions};
 use miru_agent::http;
@@ -72,7 +71,7 @@ pub async fn create_storage(dir: &Dir) -> Storage {
     Storage {
         device: Arc::new(device_stor),
         cfg_insts: CfgInstStor {
-            metadata: Arc::new(cfg_inst_stor),
+            meta: Arc::new(cfg_inst_stor),
             content: Arc::new(cfg_inst_content_stor),
         },
         deployments: Arc::new(deployment_stor),
@@ -94,7 +93,7 @@ pub mod sync_state {
 
     #[tokio::test]
     async fn is_in_cooldown() {
-        // not in cooldown
+        // in cooldown (cooldown_ends_at is in the future)
         let state = SyncState {
             last_attempted_sync_at: Utc::now(),
             last_synced_at: Utc::now(),
@@ -103,7 +102,7 @@ pub mod sync_state {
         };
         assert!(state.is_in_cooldown());
 
-        // in cooldown
+        // not in cooldown (cooldown_ends_at is in the past)
         let state = SyncState {
             last_attempted_sync_at: Utc::now(),
             last_synced_at: Utc::now(),
@@ -129,13 +128,14 @@ pub mod shutdown {
         let (syncer, worker_handler) = Syncer::spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff: cooldown::Backoff {
                     base_secs: 15,
                     growth_factor: 2,
@@ -171,13 +171,14 @@ pub mod subscribe {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -249,13 +250,14 @@ pub mod subscribe {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -364,13 +366,14 @@ pub mod sync {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -392,7 +395,7 @@ pub mod sync {
         // check the config instance metadata storage
         let ci = storage
             .cfg_insts
-            .metadata
+            .meta
             .read_optional("ci_1".to_string())
             .await
             .unwrap();
@@ -445,13 +448,14 @@ pub mod sync {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: new_agent_version.clone(),
             },
@@ -510,13 +514,14 @@ pub mod sync {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -590,13 +595,14 @@ pub mod sync {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -669,13 +675,14 @@ pub mod sync {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -823,13 +830,14 @@ pub mod sync {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },
@@ -873,13 +881,14 @@ pub mod sync_if_not_in_cooldown {
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
-                device_id: "device_id".to_string(),
                 storage: storage.clone(),
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
-                customer_configs_dir: dir.subdir("deployments"),
-                staging_dir: dir.subdir("staging"),
-                dpl_retry_policy: fsm::RetryPolicy::default(),
+                deploy_opts: apply::DeployOpts {
+                    staging_dir: dir.subdir("staging"),
+                    target_dir: dir.subdir("deployments"),
+                    retry_policy: fsm::RetryPolicy::default(),
+                },
                 backoff,
                 agent_version: Device::default().agent_version,
             },

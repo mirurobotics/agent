@@ -5,9 +5,8 @@ use std::time::Duration;
 // internal crates
 use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
 use crate::cooldown;
-use crate::deploy::fsm;
+use crate::deploy::apply;
 use crate::errors::*;
-use crate::filesys::dir::Dir;
 use crate::http;
 use crate::storage;
 use crate::sync::errors::*;
@@ -41,13 +40,10 @@ pub enum SyncEvent {
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
-    pub device_id: String,
     pub storage: Arc<storage::Storage>,
     pub http_client: Arc<HTTPClientT>,
     pub token_mngr: Arc<TokenManagerT>,
-    pub customer_configs_dir: Dir,
-    pub staging_dir: Dir,
-    pub dpl_retry_policy: fsm::RetryPolicy,
+    pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub agent_version: String,
 }
@@ -78,13 +74,10 @@ impl SyncState {
 }
 
 pub struct SingleThreadSyncer<HTTPClientT> {
-    _device_id: String,
-    storage: Arc<storage::Storage>,
     http_client: Arc<HTTPClientT>,
+    storage: Arc<storage::Storage>,
     token_mngr: Arc<TokenManager>,
-    customer_configs_dir: Dir,
-    staging_dir: Dir,
-    dpl_retry_policy: fsm::RetryPolicy,
+    deploy_opts: apply::DeployOpts,
     agent_version: String,
 
     // subscribers
@@ -100,21 +93,13 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
     pub fn new(args: SyncerArgs<HTTPClientT, TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
-            _device_id: args.device_id,
             storage: args.storage,
             http_client: args.http_client,
             token_mngr: args.token_mngr,
-            customer_configs_dir: args.customer_configs_dir,
-            staging_dir: args.staging_dir,
-            dpl_retry_policy: args.dpl_retry_policy,
+            deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             agent_version: args.agent_version,
-            state: SyncState {
-                last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
-                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-                cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
-                err_streak: 0,
-            },
+            state: SyncState::default(),
             subscriber_tx,
             subscriber_rx,
         }
@@ -129,10 +114,12 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             return;
         }
         // add 1 second to the cooldown period to ensure that the cooldown period is
-        // cleared when sending the cooldown end event
+        // cleared when sending the cooldown end event. Clamp to 0 so an already-elapsed
+        // cooldown doesn't produce a negative duration (which would panic on the u64 cast).
         let cooldown_secs = cooldown_end_at
             .signed_duration_since(Utc::now())
             .num_seconds()
+            .max(0)
             + 1;
         let tx = self.subscriber_tx.clone();
         tokio::spawn(async move {
@@ -249,16 +236,17 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             return Err(e);
         }
 
-        deployments::sync(
-            self.storage.deployments.as_ref(),
-            self.storage.cfg_insts.metadata.as_ref(),
-            self.storage.cfg_insts.content.as_ref(),
-            self.http_client.as_ref(),
-            &self.staging_dir,
-            &self.customer_configs_dir,
-            &self.dpl_retry_policy,
-            &token.token,
-        )
+        let storage_ref = self.storage.as_ref();
+        let apply_storage = apply::Storage {
+            deployments: storage_ref.deployments.as_ref(),
+            cfg_insts: storage_ref.cfg_insts.as_ref(),
+        };
+        deployments::sync(&deployments::SyncArgs {
+            http_client: self.http_client.as_ref(),
+            storage: &apply_storage,
+            opts: &self.deploy_opts,
+            token: &token.token,
+        })
         .await
     }
 }
