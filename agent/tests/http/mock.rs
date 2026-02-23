@@ -26,6 +26,7 @@ pub enum Call {
     ListDeployments,
     GetDeployment,
     UpdateDeployment,
+    GetConfigInstanceContent,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -43,6 +44,7 @@ pub struct CapturedRequest {
 
 type ListDeploymentsFn = Mutex<Box<dyn Fn() -> Result<DeploymentList, HTTPErr> + Send + Sync>>;
 type SingleDeploymentFn = Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync>>;
+type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub activate_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
@@ -51,6 +53,7 @@ pub struct MockClient {
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
     pub update_deployment_fn: SingleDeploymentFn,
+    pub get_cfg_inst_content_fn: GetCfgInstContentFn,
     pub calls: Arc<Mutex<Vec<Call>>>,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
@@ -64,6 +67,7 @@ impl Default for MockClient {
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
             get_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             update_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
+            get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
             calls: Arc::new(Mutex::new(Vec::new())),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
@@ -106,6 +110,13 @@ impl MockClient {
         *self.update_deployment_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_get_config_instance_content<F>(&self, f: F)
+    where
+        F: Fn(&str) -> Result<String, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_cfg_inst_content_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn call_count(&self, target: Call) -> usize {
         self.calls
             .lock()
@@ -130,6 +141,13 @@ impl MockClient {
             (m, p) if *m == Method::POST && p.ends_with("/issue_token") => Call::IssueDeviceToken,
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
             (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
+            (m, p)
+                if *m == Method::GET
+                    && p.starts_with("/config_instances/")
+                    && p.ends_with("/content") =>
+            {
+                Call::GetConfigInstanceContent
+            }
             (m, p) if *m == Method::GET && p.starts_with("/deployments/") => Call::GetDeployment,
             (m, p) if *m == Method::PATCH && p.starts_with("/deployments/") => {
                 Call::UpdateDeployment
@@ -138,7 +156,7 @@ impl MockClient {
         }
     }
 
-    fn handle_route(&self, call: &Call) -> Result<String, HTTPErr> {
+    fn handle_route(&self, call: &Call, path: &str) -> Result<String, HTTPErr> {
         match call {
             Call::ActivateDevice => json(&(self.activate_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
@@ -149,6 +167,14 @@ impl MockClient {
             }
             Call::GetDeployment => json(&(self.get_deployment_fn.lock().unwrap())()?),
             Call::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
+            Call::GetConfigInstanceContent => {
+                // Extract ID from /config_instances/{id}/content
+                let id = path
+                    .strip_prefix("/config_instances/")
+                    .and_then(|s| s.strip_suffix("/content"))
+                    .unwrap_or("");
+                (self.get_cfg_inst_content_fn.lock().unwrap())(id)
+            }
         }
     }
 
@@ -159,7 +185,7 @@ impl MockClient {
         let path = path.split('?').next().unwrap_or(path);
         let call = Self::match_route(method, path);
         self.calls.lock().unwrap().push(call.clone());
-        self.handle_route(&call)
+        self.handle_route(&call, path)
     }
 }
 
