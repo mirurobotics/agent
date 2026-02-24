@@ -49,15 +49,15 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub agent_version: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct SyncState {
+#[derive(Debug, Clone, PartialEq)]
+pub struct State {
     pub last_attempted_sync_at: DateTime<Utc>,
     pub last_synced_at: DateTime<Utc>,
     pub cooldown_ends_at: DateTime<Utc>,
     pub err_streak: u32,
 }
 
-impl Default for SyncState {
+impl Default for State {
     fn default() -> Self {
         Self {
             last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -68,7 +68,7 @@ impl Default for SyncState {
     }
 }
 
-impl SyncState {
+impl State {
     pub fn is_in_cooldown(&self) -> bool {
         Utc::now() < self.cooldown_ends_at
     }
@@ -87,7 +87,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
 
     // syncer state
     backoff: cooldown::Backoff,
-    state: SyncState,
+    state: State,
 }
 
 impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
@@ -100,7 +100,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             agent_version: args.agent_version,
-            state: SyncState::default(),
+            state: State::default(),
             subscriber_tx,
             subscriber_rx,
         }
@@ -126,12 +126,12 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         });
     }
 
-    async fn get_sync_state(&self) -> Result<SyncState, SyncErr> {
+    async fn get_sync_state(&self) -> Result<State, SyncErr> {
         Ok(self.state.clone())
     }
 
     #[cfg(feature = "test")]
-    fn set_sync_state(&mut self, state: SyncState) {
+    fn set_sync_state(&mut self, state: State) {
         self.state = state;
     }
 
@@ -162,10 +162,10 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             Ok(None) => (CooldownEnd::SyncSuccess, self.handle_sync_success()),
             Ok(Some(deployment_wait)) => {
                 let success_wait = self.handle_sync_success();
-                if success_wait <= *deployment_wait {
-                    (CooldownEnd::SyncSuccess, success_wait)
-                } else {
+                if *deployment_wait >= success_wait {
                     (CooldownEnd::DeploymentWait, *deployment_wait)
+                } else {
+                    (CooldownEnd::SyncSuccess, success_wait)
                 }
             }
             Err(e) => (CooldownEnd::SyncFailure, self.handle_sync_failure(e)),
@@ -233,8 +233,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         )
         .await
         {
-            error!("Failed to push agent version to backend: {:?}", e);
-            return Err(e);
+            error!("failed to push agent version to backend: {:?}", e);
         }
 
         let storage_ref = self.storage.as_ref();
@@ -256,7 +255,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
 #[allow(async_fn_in_trait)]
 pub trait SyncerExt {
     async fn shutdown(&self) -> Result<(), SyncErr>;
-    async fn get_sync_state(&self) -> Result<SyncState, SyncErr>;
+    async fn get_sync_state(&self) -> Result<State, SyncErr>;
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr>;
     async fn get_cooldown_ends_at(&self) -> Result<DateTime<Utc>, SyncErr>;
     async fn get_last_attempted_sync_at(&self) -> Result<DateTime<Utc>, SyncErr>;
@@ -270,11 +269,11 @@ pub enum WorkerCommand {
         respond_to: oneshot::Sender<Result<(), SyncErr>>,
     },
     GetSyncState {
-        respond_to: oneshot::Sender<Result<SyncState, SyncErr>>,
+        respond_to: oneshot::Sender<Result<State, SyncErr>>,
     },
     #[cfg(feature = "test")]
     SetSyncState {
-        state: SyncState,
+        state: State,
         respond_to: oneshot::Sender<Result<(), SyncErr>>,
     },
     SyncIfNotInCooldown {
@@ -394,7 +393,7 @@ impl Syncer {
     }
 
     #[cfg(feature = "test")]
-    pub async fn set_sync_state(&self, state: SyncState) -> Result<(), SyncErr> {
+    pub async fn set_sync_state(&self, state: State) -> Result<(), SyncErr> {
         self.send_command(|tx| WorkerCommand::SetSyncState {
             state,
             respond_to: tx,
@@ -411,7 +410,7 @@ impl SyncerExt for Syncer {
         Ok(())
     }
 
-    async fn get_sync_state(&self) -> Result<SyncState, SyncErr> {
+    async fn get_sync_state(&self) -> Result<State, SyncErr> {
         self.send_command(|tx| WorkerCommand::GetSyncState { respond_to: tx })
             .await?
     }

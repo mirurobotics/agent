@@ -5,14 +5,14 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use miru_agent::sync::{
     errors::SyncErr,
-    syncer::{SyncEvent, SyncState, SyncerExt},
+    syncer::{State, SyncEvent, SyncerExt},
 };
 
 // external crates
 use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
-type GetSyncStateFn = Box<dyn Fn() -> SyncState + Send + Sync>;
+type GetSyncStateFn = Box<dyn Fn() -> State + Send + Sync>;
 type SyncFn = Box<dyn Fn() -> Result<(), SyncErr> + Send + Sync>;
 
 pub struct MockSyncer {
@@ -39,7 +39,7 @@ impl MockSyncer {
         Self {
             last_attempted_sync_at: Arc::new(Mutex::new(DateTime::<Utc>::UNIX_EPOCH)),
             num_sync_calls: AtomicUsize::new(0),
-            get_sync_state_fn: Arc::new(Mutex::new(Box::new(|| SyncState {
+            get_sync_state_fn: Arc::new(Mutex::new(Box::new(|| State {
                 last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
                 last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -53,7 +53,7 @@ impl MockSyncer {
         }
     }
 
-    pub fn set_state(&self, state: SyncState) {
+    pub fn set_state(&self, state: State) {
         *self.get_sync_state_fn.lock().unwrap() = Box::new(move || state.clone());
     }
 
@@ -78,7 +78,7 @@ impl SyncerExt for MockSyncer {
         Ok(())
     }
 
-    async fn get_sync_state(&self) -> Result<SyncState, SyncErr> {
+    async fn get_sync_state(&self) -> Result<State, SyncErr> {
         Ok((*self.get_sync_state_fn.lock().unwrap())())
     }
 

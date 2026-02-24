@@ -3,7 +3,7 @@ use crate::sync::mock::MockSyncer;
 use miru_agent::trace;
 use miru_agent::{
     services::device::sync,
-    sync::{errors::*, syncer::SyncState},
+    sync::{errors::*, syncer::State},
 };
 use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
 
@@ -16,9 +16,9 @@ pub mod errors {
     #[tokio::test]
     async fn device_in_cooldown() {
         let syncer = MockSyncer::default();
-        let sync_state = SyncState {
+        let sync_state = State {
             cooldown_ends_at: Utc::now() + Duration::days(1),
-            ..SyncState::default()
+            ..State::default()
         };
         syncer.set_state(sync_state.clone());
 
@@ -46,7 +46,7 @@ pub mod errors {
     #[tokio::test]
     async fn network_connection_error() {
         let syncer = MockSyncer::default();
-        let sync_state = SyncState::default();
+        let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
         syncer.set_sync(move || {
@@ -71,7 +71,7 @@ pub mod errors {
     #[tokio::test]
     async fn internal_server_error() {
         let syncer = MockSyncer::default();
-        let sync_state = SyncState::default();
+        let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
         syncer.set_sync(move || {
@@ -90,7 +90,7 @@ pub mod success {
     #[tokio::test]
     async fn success() {
         let syncer = MockSyncer::default();
-        let sync_state = SyncState::default();
+        let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
         let resp = sync::sync_device(&syncer).await.unwrap();

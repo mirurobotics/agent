@@ -20,12 +20,13 @@ use miru_agent::storage::{self, CfgInstContent, CfgInstStor, CfgInsts, Deploymen
 use miru_agent::sync::{
     errors::SyncErr,
     syncer::{
-        CooldownEnd, SingleThreadSyncer, SyncEvent, SyncFailure, SyncState, Syncer, SyncerArgs,
+        CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, Syncer, SyncerArgs,
         SyncerExt, Worker,
     },
 };
 
 use crate::http::mock::{Call, MockClient};
+use crate::sync::helpers::*;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -107,7 +108,7 @@ impl Fixture {
         Self::new_with_backoff(
             name,
             cooldown::Backoff {
-                base_secs: 10,
+                base_secs: 1,
                 growth_factor: 2,
                 max_secs: 12 * 60 * 60,
             },
@@ -160,7 +161,7 @@ impl Fixture {
         let state = self.syncer.get_sync_state().await.unwrap();
         #[cfg(feature = "test")]
         self.syncer
-            .set_sync_state(SyncState {
+            .set_sync_state(State {
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
                 ..state
             })
@@ -169,22 +170,25 @@ impl Fixture {
     }
 }
 
-pub mod sync_state {
+pub mod state {
     use super::*;
 
     #[test]
     fn default_values() {
-        let state = SyncState::default();
-        assert_eq!(state.last_attempted_sync_at, DateTime::<Utc>::UNIX_EPOCH);
-        assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-        assert_eq!(state.cooldown_ends_at, DateTime::<Utc>::UNIX_EPOCH);
-        assert_eq!(state.err_streak, 0);
+        let state = State::default();
+        let expected = State {
+            last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
+            last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+            err_streak: 0,
+        };
+        assert_eq!(state, expected);
     }
 
     #[tokio::test]
     async fn is_in_cooldown() {
         // in cooldown (cooldown_ends_at is in the future)
-        let state = SyncState {
+        let state = State {
             last_attempted_sync_at: Utc::now(),
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
@@ -193,7 +197,7 @@ pub mod sync_state {
         assert!(state.is_in_cooldown());
 
         // not in cooldown (cooldown_ends_at is in the past)
-        let state = SyncState {
+        let state = State {
             last_attempted_sync_at: Utc::now(),
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
@@ -241,382 +245,18 @@ pub mod shutdown {
     }
 }
 
-pub mod subscribe {
-    use super::*;
-
-    #[tokio::test(start_paused = true)]
-    async fn sync_success() {
-        let f = Fixture::new_with_backoff(
-            "subscribe_sync_success",
-            cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-        )
-        .await;
-
-        let mut subscriber = f.syncer.subscribe().await.unwrap();
-        let events = Arc::new(Mutex::new(vec![]));
-
-        let mut subscriber_for_spawn = subscriber.clone();
-        let events_for_spawn = events.clone();
-        let handle = tokio::spawn(async move {
-            // expect two events: 1. not synced and then 2. cooldown ended
-            for _ in 0..2 {
-                subscriber_for_spawn.changed().await.unwrap();
-                events_for_spawn
-                    .lock()
-                    .unwrap()
-                    .push(subscriber_for_spawn.borrow().clone());
-            }
-        });
-
-        f.syncer.sync().await.unwrap();
-        // Wait for the cooldown to end
-        loop {
-            subscriber.changed().await.unwrap();
-            let event = subscriber.borrow().clone();
-            if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess)) {
-                break;
-            }
-        }
-
-        let events = events.lock().unwrap().clone();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0], SyncEvent::SyncSuccess);
-        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
-
-        handle.await.unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn sync_failure() {
-        let f = Fixture::new_with_backoff(
-            "subscribe_sync_failure",
-            cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-        )
-        .await;
-
-        f.http_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: true,
-            }))
-        });
-        f.http_client.set_update_deployment(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: true,
-            }))
-        });
-
-        let mut subscriber = f.syncer.subscribe().await.unwrap();
-        let events = Arc::new(Mutex::new(vec![]));
-
-        let mut subscriber_for_spawn = subscriber.clone();
-        let events_for_spawn = events.clone();
-        let handle = tokio::spawn(async move {
-            // expect two events: 1. not synced and then 2. cooldown ended
-            for _ in 0..2 {
-                subscriber_for_spawn.changed().await.unwrap();
-                events_for_spawn
-                    .lock()
-                    .unwrap()
-                    .push(subscriber_for_spawn.borrow().clone());
-            }
-        });
-
-        f.syncer.sync().await.unwrap_err();
-        // Wait for the cooldown to end
-        loop {
-            subscriber.changed().await.unwrap();
-            let event = subscriber.borrow().clone();
-            if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncFailure)) {
-                break;
-            }
-        }
-
-        let events = events.lock().unwrap().clone();
-        assert_eq!(events.len(), 2);
-        assert_eq!(
-            events[0],
-            SyncEvent::SyncFailed(SyncFailure {
-                is_network_conn_err: true,
-            })
-        );
-        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncFailure));
-
-        handle.await.unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn non_network_sync_failure() {
-        let f = Fixture::new_with_backoff(
-            "subscribe_non_network_failure",
-            cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-        )
-        .await;
-
-        f.http_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: false,
-            }))
-        });
-
-        let mut subscriber = f.syncer.subscribe().await.unwrap();
-        let events = Arc::new(Mutex::new(vec![]));
-
-        let mut subscriber_for_spawn = subscriber.clone();
-        let events_for_spawn = events.clone();
-        let handle = tokio::spawn(async move {
-            for _ in 0..2 {
-                subscriber_for_spawn.changed().await.unwrap();
-                events_for_spawn
-                    .lock()
-                    .unwrap()
-                    .push(subscriber_for_spawn.borrow().clone());
-            }
-        });
-
-        f.syncer.sync().await.unwrap_err();
-        // Wait for the cooldown to end
-        loop {
-            subscriber.changed().await.unwrap();
-            let event = subscriber.borrow().clone();
-            if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncFailure)) {
-                break;
-            }
-        }
-
-        let events = events.lock().unwrap().clone();
-        assert_eq!(events.len(), 2);
-        assert_eq!(
-            events[0],
-            SyncEvent::SyncFailed(SyncFailure {
-                is_network_conn_err: false,
-            })
-        );
-        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncFailure));
-
-        handle.await.unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn deployment_wait_event() {
-        let f = Fixture::new_with_backoff(
-            "subscribe_deployment_wait",
-            // backoff.base_secs = 10 → success_wait = 10s > deployment_wait ~5s
-            // → emits CooldownEnd::DeploymentWait
-            cooldown::Backoff {
-                base_secs: 10,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-        )
-        .await;
-
-        // Pre-seed deployment with future cooldown (5s)
-        let seeded = miru_agent::models::deployment::Deployment {
-            id: "dpl_1".to_string(),
-            description: "test".to_string(),
-            activity_status: DplActivity::Queued,
-            error_status: DplErrStatus::Retrying,
-            target_status: DplTarget::Deployed,
-            device_id: "dvc_1".to_string(),
-            release_id: "rls_1".to_string(),
-            created_at: DateTime::<Utc>::UNIX_EPOCH,
-            config_instance_ids: vec!["cfg_inst_1".to_string()],
-            attempts: 1,
-            cooldown_ends_at: Utc::now() + TimeDelta::seconds(5),
-        };
-        f.storage
-            .deployments
-            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
-            .await
-            .unwrap();
-
-        // Pre-cache content so content pull doesn't fail
-        f.storage
-            .cfg_insts
-            .content
-            .write(
-                "cfg_inst_1".to_string(),
-                "{}".to_string(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
-
-        // Backend returns matching deployment with expanded CIs
-        let backend_dep = openapi_client::models::Deployment {
-            object: openapi_client::models::deployment::Object::Deployment,
-            id: "dpl_1".to_string(),
-            description: "test".to_string(),
-            status: openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            activity_status:
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-            error_status:
-                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-            target_status:
-                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-            device_id: "dvc_1".to_string(),
-            release_id: "rls_1".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            updated_at: "2024-01-01T00:00:00Z".to_string(),
-            release: None,
-            config_instances: Some(vec![openapi_client::models::ConfigInstance {
-                object: openapi_client::models::config_instance::Object::ConfigInstance,
-                id: "cfg_inst_1".to_string(),
-                config_type_name: "test_type".to_string(),
-                filepath: "test/config.json".to_string(),
-                created_at: "2024-01-01T00:00:00Z".to_string(),
-                config_schema_id: "schema_1".to_string(),
-                config_type_id: "ct_1".to_string(),
-                config_type: None,
-                content: None,
-            }]),
-        };
-        let backend_dep_cloned = backend_dep.clone();
-        f.http_client
-            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
-
-        let mut subscriber = f.syncer.subscribe().await.unwrap();
-
-        f.syncer.sync().await.unwrap();
-
-        // Wait for the CooldownEnd::DeploymentWait event
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                subscriber.changed().await.unwrap();
-                let event = subscriber.borrow().clone();
-                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::DeploymentWait)) {
-                    break;
-                }
-            }
-        })
-        .await
-        .expect("timed out waiting for CooldownEnd::DeploymentWait");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn success_cooldown_over_deployment_wait() {
-        let f = Fixture::new_with_backoff(
-            "subscribe_success_over_dpl",
-            // backoff.base_secs = 1 → success_wait = 1s < deployment_wait ~5s
-            // → emits CooldownEnd::SyncSuccess
-            cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-        )
-        .await;
-
-        // Pre-seed deployment with short cooldown (5s < base_secs)
-        let seeded = miru_agent::models::deployment::Deployment {
-            id: "dpl_1".to_string(),
-            description: "test".to_string(),
-            activity_status: DplActivity::Queued,
-            error_status: DplErrStatus::Retrying,
-            target_status: DplTarget::Deployed,
-            device_id: "dvc_1".to_string(),
-            release_id: "rls_1".to_string(),
-            created_at: DateTime::<Utc>::UNIX_EPOCH,
-            config_instance_ids: vec!["cfg_inst_1".to_string()],
-            attempts: 1,
-            cooldown_ends_at: Utc::now() + TimeDelta::seconds(5),
-        };
-        f.storage
-            .deployments
-            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
-            .await
-            .unwrap();
-
-        // Pre-cache content so content pull doesn't fail
-        f.storage
-            .cfg_insts
-            .content
-            .write(
-                "cfg_inst_1".to_string(),
-                "{}".to_string(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
-
-        // Backend returns matching deployment with expanded CIs
-        let backend_dep = openapi_client::models::Deployment {
-            object: openapi_client::models::deployment::Object::Deployment,
-            id: "dpl_1".to_string(),
-            description: "test".to_string(),
-            status: openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            activity_status:
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-            error_status:
-                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-            target_status:
-                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-            device_id: "dvc_1".to_string(),
-            release_id: "rls_1".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            updated_at: "2024-01-01T00:00:00Z".to_string(),
-            release: None,
-            config_instances: Some(vec![openapi_client::models::ConfigInstance {
-                object: openapi_client::models::config_instance::Object::ConfigInstance,
-                id: "cfg_inst_1".to_string(),
-                config_type_name: "test_type".to_string(),
-                filepath: "test/config.json".to_string(),
-                created_at: "2024-01-01T00:00:00Z".to_string(),
-                config_schema_id: "schema_1".to_string(),
-                config_type_id: "ct_1".to_string(),
-                config_type: None,
-                content: None,
-            }]),
-        };
-        let backend_dep_cloned = backend_dep.clone();
-        f.http_client
-            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
-
-        let mut subscriber = f.syncer.subscribe().await.unwrap();
-
-        f.syncer.sync().await.unwrap();
-
-        // Wait for the CooldownEnd::SyncSuccess event
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                subscriber.changed().await.unwrap();
-                let event = subscriber.borrow().clone();
-                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess)) {
-                    break;
-                }
-            }
-        })
-        .await
-        .expect("timed out waiting for CooldownEnd::SyncSuccess");
-    }
-}
-
-pub mod syncer_ext {
+pub mod is_in_cooldown {
     use super::*;
 
     #[tokio::test]
-    async fn is_in_cooldown_true() {
+    async fn true_when_in_cooldown() {
         let f = Fixture::new("syncer_ext_cooldown_true").await;
 
         #[cfg(feature = "test")]
         f.syncer
-            .set_sync_state(SyncState {
+            .set_sync_state(State {
                 cooldown_ends_at: Utc::now() + TimeDelta::seconds(60),
-                ..SyncState::default()
+                ..State::default()
             })
             .await
             .unwrap();
@@ -625,11 +265,15 @@ pub mod syncer_ext {
     }
 
     #[tokio::test]
-    async fn is_in_cooldown_false() {
+    async fn false_when_not_in_cooldown() {
         let f = Fixture::new("syncer_ext_cooldown_false").await;
         // Default state has cooldown_ends_at = UNIX_EPOCH → not in cooldown
         assert!(!f.syncer.is_in_cooldown().await.unwrap());
     }
+}
+
+pub mod get_cooldown_ends_at {
+    use super::*;
 
     #[tokio::test]
     async fn get_cooldown_ends_at() {
@@ -638,15 +282,19 @@ pub mod syncer_ext {
 
         #[cfg(feature = "test")]
         f.syncer
-            .set_sync_state(SyncState {
+            .set_sync_state(State {
                 cooldown_ends_at: target,
-                ..SyncState::default()
+                ..State::default()
             })
             .await
             .unwrap();
 
         assert_eq!(f.syncer.get_cooldown_ends_at().await.unwrap(), target);
     }
+}
+
+pub mod get_last_attempted_sync_at {
+    use super::*;
 
     #[tokio::test]
     async fn get_last_attempted_sync_at() {
@@ -662,101 +310,8 @@ pub mod syncer_ext {
     }
 }
 
-pub mod sync {
+pub mod sync_success {
     use super::*;
-
-    #[tokio::test]
-    async fn deployments() {
-        let f = Fixture::new("sync_deployments").await;
-
-        // define a backend deployment with an embedded config instance
-        let backend_dep = openapi_client::models::Deployment {
-            object: openapi_client::models::deployment::Object::Deployment,
-            id: "dpl_1".to_string(),
-            description: "test".to_string(),
-            status: openapi_client::models::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            activity_status:
-                openapi_client::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-            error_status:
-                openapi_client::models::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-            target_status:
-                openapi_client::models::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-            device_id: "dvc_1".to_string(),
-            release_id: "rls_1".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            updated_at: "2024-01-01T00:00:00Z".to_string(),
-            release: None,
-            config_instances: Some(vec![openapi_client::models::ConfigInstance {
-                object: openapi_client::models::config_instance::Object::ConfigInstance,
-                id: "cfg_inst_1".to_string(),
-                config_type_name: "test_type".to_string(),
-                filepath: "test/config.json".to_string(),
-                created_at: "2024-01-01T00:00:00Z".to_string(),
-                config_schema_id: "schema_1".to_string(),
-                config_type_id: "ct_1".to_string(),
-                config_type: None,
-                content: Some(Box::new(openapi_client::models::InstanceContent {
-                    format: openapi_client::models::InstanceFormat::INSTANCE_FORMAT_JSON,
-                    data: "{\"key\": \"value\"}".to_string(),
-                })),
-            }]),
-        };
-
-        let backend_dep_cloned = backend_dep.clone();
-        f.http_client
-            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
-
-        let before = Utc::now();
-        f.syncer.sync().await.unwrap();
-        let after = Utc::now();
-
-        // check the deployment storage has the new deployment
-        let cached_dep = f
-            .storage
-            .deployments
-            .read_optional("dpl_1".to_string())
-            .await
-            .unwrap();
-        assert!(cached_dep.is_some(), "deployment should be stored");
-
-        // check the config instance metadata storage
-        let ci = f
-            .storage
-            .cfg_insts
-            .meta
-            .read_optional("cfg_inst_1".to_string())
-            .await
-            .unwrap();
-        assert!(ci.is_some(), "config instance should be stored");
-
-        // check the content storage has the config instance content
-        let content = f
-            .storage
-            .cfg_insts
-            .content
-            .read_optional("cfg_inst_1".to_string())
-            .await
-            .unwrap();
-        assert!(
-            content.is_some(),
-            "config instance content should be stored"
-        );
-
-        // check the sync state
-        let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(
-            f.syncer.get_cooldown_ends_at().await.unwrap(),
-            state.cooldown_ends_at
-        );
-        assert!(state.last_attempted_sync_at > before);
-        assert!(state.last_attempted_sync_at < after);
-        assert!(state.last_synced_at > before);
-        assert!(state.last_synced_at < after);
-        let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
-        assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-        assert!(state.cooldown_ends_at < after + base_cooldown_duration);
-        assert_eq!(state.err_streak, 0);
-    }
 
     #[tokio::test]
     async fn agent_version() {
@@ -786,14 +341,107 @@ pub mod sync {
             f.syncer.get_cooldown_ends_at().await.unwrap(),
             state.cooldown_ends_at
         );
-        assert!(state.last_attempted_sync_at > before);
-        assert!(state.last_attempted_sync_at < after);
-        assert!(state.last_synced_at > before);
-        assert!(state.last_synced_at < after);
-        let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
-        assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-        assert!(state.cooldown_ends_at < after + base_cooldown_duration);
-        assert_eq!(state.err_streak, 0);
+        let window = StateAssert::new(before, after);
+        let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+        window.assert_success(&state, base_cooldown, 0);
+    }
+
+    #[tokio::test]
+    async fn deployments() {
+        let f = Fixture::new("sync_deployments").await;
+
+        // define a backend deployment with an embedded config instance
+        let backend_dep = openapi_client::models::Deployment {
+            id: "dpl_1".to_string(),
+            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+                id: "cfg_inst_1".to_string(),
+                content: Some(Box::new(openapi_client::models::InstanceContent {
+                    data: "{\"key\": \"value\"}".to_string(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+
+        let backend_dep_cloned = backend_dep.clone();
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
+
+        let before = Utc::now();
+        f.syncer.sync().await.unwrap();
+        let after = Utc::now();
+
+        assert_deployment_stored(&f.storage.deployments, "dpl_1").await;
+        assert_cfg_inst_stored(&f.storage.cfg_insts.meta, "cfg_inst_1").await;
+        let _content = read_content(&f.storage.cfg_insts.content, "cfg_inst_1").await;
+
+        // check the sync state
+        let state = f.syncer.get_sync_state().await.unwrap();
+        assert_eq!(
+            f.syncer.get_cooldown_ends_at().await.unwrap(),
+            state.cooldown_ends_at
+        );
+        let window = StateAssert::new(before, after);
+        let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+        window.assert_success(&state, base_cooldown, 0);
+    }
+
+    #[tokio::test]
+    async fn success_resets_err_streak() {
+        let f = Fixture::new("sync_success_resets_streak").await;
+
+        f.http_client.set_list_all_deployments(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        // cause 3 non-network failures
+        for _ in 0..3 {
+            f.syncer.sync().await.unwrap_err();
+            f.reset_cooldown().await;
+        }
+
+        let state = f.syncer.get_sync_state().await.unwrap();
+        assert_eq!(state.err_streak, 3);
+
+        // fix the mock to succeed
+        f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+        // sync successfully
+        let before = Utc::now();
+        f.syncer.sync().await.unwrap();
+        let after = Utc::now();
+
+        let state = f.syncer.get_sync_state().await.unwrap();
+        let window = StateAssert::new(before, after);
+        let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+        window.assert_success(&state, base_cooldown, 0);
+    }
+}
+
+pub mod sync_failure {
+    use super::*;
+
+    #[tokio::test]
+    async fn in_cooldown_error() {
+        let f = Fixture::new("sync_in_cooldown_error").await;
+
+        // set the syncer state to be in cooldown
+        #[cfg(feature = "test")]
+        f.syncer
+            .set_sync_state(State {
+                last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
+                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+                cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
+                err_streak: 0,
+            })
+            .await
+            .unwrap();
+
+        let error = f.syncer.sync().await.unwrap_err();
+        assert!(matches!(error, SyncErr::InCooldownErr(_)));
     }
 
     #[tokio::test]
@@ -820,7 +468,7 @@ pub mod sync {
     }
 
     #[tokio::test]
-    async fn agent_version_push_failure() {
+    async fn agent_version_push_failure_does_not_block_sync() {
         let f = Fixture::new_with_opts(
             "sync_agent_ver_push_fail",
             cooldown::Backoff {
@@ -839,18 +487,20 @@ pub mod sync {
             }))
         });
 
-        let error = f.syncer.sync().await.unwrap_err();
+        // sync should succeed despite agent version push failure
+        f.syncer.sync().await.unwrap();
 
-        // sync_impl should have returned an error
-        assert!(!error.is_network_conn_err());
-
-        // err_streak should be incremented
-        let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(state.err_streak, 1);
-
-        // update_device was called (and failed), but no deployment calls were made
+        // update_device was called (and failed), but deployment sync continued
         assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
-        assert_eq!(f.http_client.call_count(Call::ListDeployments), 0);
+        assert_eq!(
+            f.http_client.call_count(Call::ListDeployments),
+            1,
+            "deployment sync should proceed despite agent version push failure"
+        );
+
+        // err_streak should be 0 (sync succeeded overall)
+        let state = f.syncer.get_sync_state().await.unwrap();
+        assert_eq!(state.err_streak, 0);
     }
 
     #[tokio::test]
@@ -883,12 +533,8 @@ pub mod sync {
                 f.syncer.get_cooldown_ends_at().await.unwrap(),
                 state.cooldown_ends_at
             );
-            assert!(state.last_attempted_sync_at > before);
-            assert!(state.last_attempted_sync_at < after);
-            assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-            assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-            assert!(state.cooldown_ends_at < after + base_cooldown_duration);
-            assert_eq!(state.err_streak, 0);
+            let window = StateAssert::new(before, after);
+            window.assert_failed(&state, base_cooldown_duration, 0);
 
             // double check sync state functions
             assert!(f.syncer.is_in_cooldown().await.unwrap());
@@ -896,7 +542,7 @@ pub mod sync {
             // reset the syncer state
             #[cfg(feature = "test")]
             f.syncer
-                .set_sync_state(SyncState {
+                .set_sync_state(State {
                     cooldown_ends_at: before,
                     ..state
                 })
@@ -918,7 +564,7 @@ pub mod sync {
         });
         f.http_client.set_update_deployment(|| {
             Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: false,
+                is_network_conn_err: true,
             }))
         });
 
@@ -936,14 +582,10 @@ pub mod sync {
                 f.syncer.get_cooldown_ends_at().await.unwrap(),
                 state.cooldown_ends_at
             );
-            assert!(state.last_attempted_sync_at > before);
-            assert!(state.last_attempted_sync_at < after);
-            assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
             let cooldown_secs = cooldown::calc(&f.backoff, i + 1);
             let cooldown_duration = TimeDelta::seconds(cooldown_secs);
-            assert!(state.cooldown_ends_at > before + cooldown_duration);
-            assert!(state.cooldown_ends_at < after + cooldown_duration);
-            assert_eq!(state.err_streak, i + 1);
+            let window = StateAssert::new(before, after);
+            window.assert_failed(&state, cooldown_duration, i + 1);
 
             // double check sync state functions
             assert!(f.syncer.is_in_cooldown().await.unwrap());
@@ -951,7 +593,7 @@ pub mod sync {
             // reset the syncer state
             #[cfg(feature = "test")]
             f.syncer
-                .set_sync_state(SyncState {
+                .set_sync_state(State {
                     cooldown_ends_at: before,
                     ..state
                 })
@@ -990,14 +632,10 @@ pub mod sync {
                 f.syncer.get_cooldown_ends_at().await.unwrap(),
                 state.cooldown_ends_at
             );
-            assert!(state.last_attempted_sync_at > before);
-            assert!(state.last_attempted_sync_at < after);
-            assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
             let cooldown_secs = cooldown::calc(&f.backoff, i + 1);
             let cooldown_duration = TimeDelta::seconds(cooldown_secs);
-            assert!(state.cooldown_ends_at > before + cooldown_duration);
-            assert!(state.cooldown_ends_at < after + cooldown_duration);
-            assert_eq!(state.err_streak, i + 1);
+            let window = StateAssert::new(before, after);
+            window.assert_failed(&state, cooldown_duration, i + 1);
 
             // double check sync state functions
             assert!(f.syncer.is_in_cooldown().await.unwrap());
@@ -1005,7 +643,7 @@ pub mod sync {
             // reset the syncer state
             #[cfg(feature = "test")]
             f.syncer
-                .set_sync_state(SyncState {
+                .set_sync_state(State {
                     cooldown_ends_at: before,
                     ..state
                 })
@@ -1038,12 +676,8 @@ pub mod sync {
 
             // check the sync state
             let state = f.syncer.get_sync_state().await.unwrap();
-            assert!(state.last_attempted_sync_at > before);
-            assert!(state.last_attempted_sync_at < after);
-            assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-            assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-            assert!(state.cooldown_ends_at < after + base_cooldown_duration);
-            assert_eq!(state.err_streak, cur_err_streak);
+            let window = StateAssert::new(before, after);
+            window.assert_failed(&state, base_cooldown_duration, cur_err_streak);
 
             // double check sync state functions
             assert!(f.syncer.is_in_cooldown().await.unwrap());
@@ -1051,7 +685,7 @@ pub mod sync {
             // reset the syncer state
             #[cfg(feature = "test")]
             f.syncer
-                .set_sync_state(SyncState {
+                .set_sync_state(State {
                     cooldown_ends_at: before,
                     ..state
                 })
@@ -1077,13 +711,8 @@ pub mod sync {
                 f.syncer.get_cooldown_ends_at().await.unwrap(),
                 state.cooldown_ends_at
             );
-            assert!(state.last_attempted_sync_at > before);
-            assert!(state.last_attempted_sync_at < after);
-            assert!(state.last_synced_at > before);
-            assert!(state.last_synced_at < after);
-            assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-            assert!(state.cooldown_ends_at < after + base_cooldown_duration);
-            assert_eq!(state.err_streak, 0);
+            let window = StateAssert::new(before, after);
+            window.assert_success(&state, base_cooldown_duration, 0);
 
             // double check sync state functions
             assert!(f.syncer.is_in_cooldown().await.unwrap());
@@ -1091,51 +720,13 @@ pub mod sync {
             // reset the syncer state
             #[cfg(feature = "test")]
             f.syncer
-                .set_sync_state(SyncState {
+                .set_sync_state(State {
                     cooldown_ends_at: before,
                     ..state
                 })
                 .await
                 .unwrap();
         }
-    }
-
-    #[tokio::test]
-    async fn success_resets_err_streak() {
-        let f = Fixture::new("sync_success_resets_streak").await;
-
-        f.http_client.set_list_all_deployments(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: false,
-            }))
-        });
-
-        // Cause 3 non-network failures
-        for _ in 0..3 {
-            f.syncer.sync().await.unwrap_err();
-            f.reset_cooldown().await;
-        }
-
-        let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(state.err_streak, 3);
-
-        // Fix the mock to succeed
-        f.http_client.set_list_all_deployments(|| Ok(vec![]));
-
-        // Sync successfully
-        let before = Utc::now();
-        f.syncer.sync().await.unwrap();
-        let after = Utc::now();
-
-        let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(state.err_streak, 0);
-        assert!(state.last_synced_at > before);
-        assert!(state.last_synced_at < after);
-
-        // cooldown should be base_secs (not exponential)
-        let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
-        assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-        assert!(state.cooldown_ends_at < after + base_cooldown_duration);
     }
 
     #[tokio::test]
@@ -1176,32 +767,9 @@ pub mod sync {
 
         // err_streak should be unchanged (not incremented, not reset)
         let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(state.err_streak, 3);
-
-        // cooldown should be base_secs (not exponential)
-        let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
-        assert!(state.cooldown_ends_at > before + base_cooldown_duration);
-        assert!(state.cooldown_ends_at < after + base_cooldown_duration);
-    }
-
-    #[tokio::test]
-    async fn in_cooldown_error() {
-        let f = Fixture::new("sync_in_cooldown_error").await;
-
-        // set the syncer state to be in cooldown
-        #[cfg(feature = "test")]
-        f.syncer
-            .set_sync_state(SyncState {
-                last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
-                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-                cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-                err_streak: 0,
-            })
-            .await
-            .unwrap();
-
-        let error = f.syncer.sync().await.unwrap_err();
-        assert!(matches!(error, SyncErr::InCooldownErr(_)));
+        let window = StateAssert::new(before, after);
+        let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+        window.assert_failed(&state, base_cooldown, 3);
     }
 }
 
@@ -1209,61 +777,332 @@ pub mod sync_if_not_in_cooldown {
     use super::*;
 
     #[tokio::test]
-    async fn sync_if_not_in_cooldown() {
-        let f = Fixture::new("sync_if_not_in_cooldown").await;
+    async fn skips_when_in_cooldown() {
+        let f = Fixture::new("sync_if_not_in_cooldown_skip").await;
 
-        // set the syncer state to be in cooldown
         #[cfg(feature = "test")]
         f.syncer
-            .set_sync_state(SyncState {
-                last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
-                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+            .set_sync_state(State {
                 cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-                err_streak: 0,
+                ..State::default()
             })
             .await
             .unwrap();
 
         f.syncer.sync_if_not_in_cooldown().await.unwrap();
-        assert_eq!(
-            f.syncer
-                .get_sync_state()
-                .await
-                .unwrap()
-                .last_attempted_sync_at,
-            DateTime::<Utc>::UNIX_EPOCH
-        );
+        let state = f.syncer.get_sync_state().await.unwrap();
+        assert_eq!(state.last_attempted_sync_at, DateTime::<Utc>::UNIX_EPOCH);
+    }
 
-        // set the syncer state to not be in cooldown
-        #[cfg(feature = "test")]
-        f.syncer
-            .set_sync_state(SyncState {
-                last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
-                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-                cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
-                err_streak: 0,
-            })
-            .await
-            .unwrap();
+    #[tokio::test]
+    async fn syncs_when_not_in_cooldown() {
+        let f = Fixture::new("sync_if_not_in_cooldown_run").await;
 
         let before = Utc::now();
         f.syncer.sync_if_not_in_cooldown().await.unwrap();
         let after = Utc::now();
-        assert!(
-            f.syncer
-                .get_sync_state()
-                .await
-                .unwrap()
-                .last_attempted_sync_at
-                > before
+
+        let state = f.syncer.get_sync_state().await.unwrap();
+        let window = StateAssert::new(before, after);
+        window.assert_between(state.last_attempted_sync_at, TimeDelta::zero());
+    }
+}
+
+pub mod subscribe {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn sync_success() {
+        let f = Fixture::new("subscribe_sync_success").await;
+
+        let mut subscriber = f.syncer.subscribe().await.unwrap();
+        let events = Arc::new(Mutex::new(vec![]));
+
+        let mut subscriber_for_spawn = subscriber.clone();
+        let events_for_spawn = events.clone();
+        let handle = tokio::spawn(async move {
+            // expect two events: 1. sync success -> 2. cooldown ended
+            for _ in 0..2 {
+                subscriber_for_spawn.changed().await.unwrap();
+                events_for_spawn
+                    .lock()
+                    .unwrap()
+                    .push(subscriber_for_spawn.borrow().clone());
+            }
+        });
+
+        f.syncer.sync().await.unwrap();
+        // wait for the cooldown end event
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                subscriber.changed().await.unwrap();
+                let event = subscriber.borrow().clone();
+                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess)) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for CooldownEnd::SyncSuccess");
+
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], SyncEvent::SyncSuccess);
+        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
+
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn network_sync_failure() {
+        let f = Fixture::new("subscribe_sync_failure").await;
+
+        f.http_client.set_list_all_deployments(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        });
+        f.http_client.set_update_deployment(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let mut subscriber = f.syncer.subscribe().await.unwrap();
+        let events = Arc::new(Mutex::new(vec![]));
+
+        let mut subscriber_for_spawn = subscriber.clone();
+        let events_for_spawn = events.clone();
+        let handle = tokio::spawn(async move {
+            // expect two events: 1. sync failure -> 2. cooldown ended
+            for _ in 0..2 {
+                subscriber_for_spawn.changed().await.unwrap();
+                events_for_spawn
+                    .lock()
+                    .unwrap()
+                    .push(subscriber_for_spawn.borrow().clone());
+            }
+        });
+
+        f.syncer.sync().await.unwrap_err();
+        // wait for the cooldown to end
+        loop {
+            subscriber.changed().await.unwrap();
+            let event = subscriber.borrow().clone();
+            if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncFailure)) {
+                break;
+            }
+        }
+
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0],
+            SyncEvent::SyncFailed(SyncFailure {
+                is_network_conn_err: true,
+            })
         );
-        assert!(
-            f.syncer
-                .get_sync_state()
-                .await
-                .unwrap()
-                .last_attempted_sync_at
-                < after
+        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncFailure));
+
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn non_network_sync_failure() {
+        let f = Fixture::new("subscribe_non_network_failure").await;
+
+        f.http_client.set_list_all_deployments(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        let mut subscriber = f.syncer.subscribe().await.unwrap();
+        let events = Arc::new(Mutex::new(vec![]));
+
+        let mut subscriber_for_spawn = subscriber.clone();
+        let events_for_spawn = events.clone();
+        let handle = tokio::spawn(async move {
+            for _ in 0..2 {
+                subscriber_for_spawn.changed().await.unwrap();
+                events_for_spawn
+                    .lock()
+                    .unwrap()
+                    .push(subscriber_for_spawn.borrow().clone());
+            }
+        });
+
+        f.syncer.sync().await.unwrap_err();
+        // wait for the cooldown to end
+        loop {
+            subscriber.changed().await.unwrap();
+            let event = subscriber.borrow().clone();
+            if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncFailure)) {
+                break;
+            }
+        }
+
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0],
+            SyncEvent::SyncFailed(SyncFailure {
+                is_network_conn_err: false,
+            })
         );
+        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncFailure));
+
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn deployment_wait_event() {
+        let f = Fixture::new_with_backoff(
+            "subscribe_deployment_wait",
+            // backoff.base_secs = 1 → success_wait = 1s < deployment_wait ~5s
+            // → min picks deployment_wait → emits CooldownEnd::DeploymentWait
+            cooldown::Backoff {
+                base_secs: 1,
+                growth_factor: 2,
+                max_secs: 12 * 60 * 60,
+            },
+        )
+        .await;
+
+        // Pre-seed deployment with future cooldown (5s)
+        let seeded = miru_agent::models::deployment::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::Retrying,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            attempts: 1,
+            cooldown_ends_at: Utc::now() + TimeDelta::seconds(5),
+            ..Default::default()
+        };
+        f.storage
+            .deployments
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        // Pre-cache content so content pull doesn't fail
+        f.storage
+            .cfg_insts
+            .content
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // Backend returns matching deployment with expanded CIs
+        let backend_dep = openapi_client::models::Deployment {
+            id: "dpl_1".to_string(),
+            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+                id: "cfg_inst_1".to_string(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let backend_dep_cloned = backend_dep.clone();
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
+
+        let mut subscriber = f.syncer.subscribe().await.unwrap();
+
+        f.syncer.sync().await.unwrap();
+
+        // Wait for the CooldownEnd::DeploymentWait event
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                subscriber.changed().await.unwrap();
+                let event = subscriber.borrow().clone();
+                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::DeploymentWait)) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for CooldownEnd::DeploymentWait");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn success_cooldown_over_deployment_wait() {
+        let f = Fixture::new_with_backoff(
+            "subscribe_success_over_dpl",
+            // backoff.base_secs = 10 → success_wait = 10s > deployment_wait ~5s
+            // → min picks success_wait → emits CooldownEnd::SyncSuccess
+            cooldown::Backoff {
+                base_secs: 10,
+                growth_factor: 2,
+                max_secs: 12 * 60 * 60,
+            },
+        )
+        .await;
+
+        // Pre-seed deployment with short cooldown (5s < base_secs)
+        let seeded = miru_agent::models::deployment::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::Retrying,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            attempts: 1,
+            cooldown_ends_at: Utc::now() + TimeDelta::seconds(5),
+            ..Default::default()
+        };
+        f.storage
+            .deployments
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        // Pre-cache content so content pull doesn't fail
+        f.storage
+            .cfg_insts
+            .content
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // Backend returns matching deployment with expanded CIs
+        let backend_dep = openapi_client::models::Deployment {
+            id: "dpl_1".to_string(),
+            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+                id: "cfg_inst_1".to_string(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let backend_dep_cloned = backend_dep.clone();
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
+
+        let mut subscriber = f.syncer.subscribe().await.unwrap();
+
+        f.syncer.sync().await.unwrap();
+
+        // Wait for the CooldownEnd::SyncSuccess event
+        // cooldown notification fires at base_secs + 1 = 11s
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                subscriber.changed().await.unwrap();
+                let event = subscriber.borrow().clone();
+                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess)) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for CooldownEnd::SyncSuccess");
     }
 }

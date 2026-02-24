@@ -7,7 +7,7 @@ use miru_agent::models::device::Device;
 use miru_agent::storage::{self, Layout};
 use miru_agent::sync::{
     errors::{MockErr as SyncMockErr, SyncErr},
-    syncer::{CooldownEnd, SyncEvent, SyncFailure, SyncState},
+    syncer::{CooldownEnd, State, SyncEvent, SyncFailure},
 };
 use miru_agent::workers::poller;
 
@@ -52,7 +52,7 @@ pub mod run {
         });
 
         let secs_since_last_sync = 30;
-        let state = SyncState {
+        let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now(),
@@ -137,7 +137,7 @@ pub mod run {
         });
 
         let secs_until_cooldown_ends = 120;
-        let state = SyncState {
+        let state = State {
             last_attempted_sync_at: Utc::now(),
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() + TimeDelta::seconds(secs_until_cooldown_ends),
@@ -219,7 +219,7 @@ pub mod run {
         });
 
         let secs_since_last_sync = 30;
-        let state = SyncState {
+        let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now(),
@@ -281,7 +281,7 @@ pub mod run {
         });
 
         let secs_since_last_sync = 45;
-        let state = SyncState {
+        let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
