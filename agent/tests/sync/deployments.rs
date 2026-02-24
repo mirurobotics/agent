@@ -15,11 +15,12 @@ use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::errors::SyncErr;
 
 // test crates
-use crate::http::mock::{Call, MockClient};
+use crate::http::mock::{Call, CapturedRequest, MockClient};
+use crate::sync::helpers::*;
 use openapi_client::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
-    DeploymentErrorStatus as BackendErrorStatus, DeploymentStatus as BackendStatus,
-    DeploymentTargetStatus as BackendTargetStatus,
+    DeploymentErrorStatus as BackendErrorStatus, DeploymentTargetStatus as BackendTargetStatus,
+    UpdateDeploymentRequest,
 };
 
 // external crates
@@ -85,121 +86,15 @@ impl Fixture {
     }
 }
 
-// ========================= FACTORIES ========================= //
-
-fn make_cfg_inst(id: &str) -> openapi_client::models::ConfigInstance {
-    openapi_client::models::ConfigInstance {
-        object: openapi_client::models::config_instance::Object::ConfigInstance,
-        id: id.to_string(),
-        config_type_name: "test_type".to_string(),
-        filepath: format!("{id}.json"),
-        created_at: "2024-01-01T00:00:00Z".to_string(),
-        config_schema_id: "schema_1".to_string(),
-        config_type_id: "ct_1".to_string(),
-        config_type: None,
-        content: None,
-    }
-}
-
-fn make_deployment(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
-    let cfg_insts: Vec<_> = cfg_inst_ids
+fn push_bodies(requests: &[CapturedRequest]) -> Vec<UpdateDeploymentRequest> {
+    requests
         .iter()
-        .map(|cfg_inst_id| make_cfg_inst(cfg_inst_id))
-        .collect();
-    BackendDeployment {
-        object: openapi_client::models::deployment::Object::Deployment,
-        id: id.to_string(),
-        description: "backend description".to_string(),
-        status: BackendStatus::DEPLOYMENT_STATUS_QUEUED,
-        activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-        error_status: BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-        target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-        device_id: "dvc_999".to_string(),
-        release_id: "rls_999".to_string(),
-        created_at: "2024-01-01T00:00:00Z".to_string(),
-        updated_at: "2024-01-01T00:00:00Z".to_string(),
-        release: None,
-        config_instances: Some(cfg_insts),
-    }
-}
-
-fn make_archived_dpl(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
-    let cfg_insts: Vec<_> = cfg_inst_ids
-        .iter()
-        .map(|cfg_inst_id| make_cfg_inst(cfg_inst_id))
-        .collect();
-    BackendDeployment {
-        object: openapi_client::models::deployment::Object::Deployment,
-        id: id.to_string(),
-        description: "backend description".to_string(),
-        status: BackendStatus::DEPLOYMENT_STATUS_QUEUED,
-        activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-        error_status: BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-        target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
-        device_id: "dvc_999".to_string(),
-        release_id: "rls_999".to_string(),
-        created_at: "2024-01-01T00:00:00Z".to_string(),
-        updated_at: "2024-01-01T00:00:00Z".to_string(),
-        release: None,
-        config_instances: Some(cfg_insts),
-    }
-}
-
-async fn read_deployment(deployment_stor: &Deployments, id: &str) -> models::Deployment {
-    let cached = deployment_stor
-        .read_optional(id.to_string())
-        .await
-        .unwrap()
-        .expect("deployment should be stored");
-    cached
-}
-
-async fn assert_deployment_stored(deployment_stor: &Deployments, id: &str) {
-    read_deployment(deployment_stor, id).await;
-}
-
-async fn assert_deployment_not_stored(deployment_stor: &Deployments, id: &str) {
-    assert!(
-        deployment_stor
-            .read_optional(id.to_string())
-            .await
-            .unwrap()
-            .is_none(),
-        "deployment should not be stored"
-    );
-}
-
-async fn read_cfg_inst(cfg_inst_stor: &CfgInsts, id: &str) -> models::ConfigInstance {
-    let cached = cfg_inst_stor
-        .read_optional(id.to_string())
-        .await
-        .unwrap()
-        .expect("config instance should be stored");
-    cached
-}
-
-async fn read_content(cfg_inst_content_stor: &CfgInstContent, id: &str) -> String {
-    let cached = cfg_inst_content_stor
-        .read_optional(id.to_string())
-        .await
-        .unwrap()
-        .expect("config instance content should be stored");
-    cached
-}
-
-async fn assert_cfg_inst_stored(cfg_inst_stor: &CfgInsts, id: &str) {
-    read_cfg_inst(cfg_inst_stor, id).await;
-}
-
-async fn assert_content_not_stored(cfg_inst_content_stor: &CfgInstContent, id: &str) {
-    assert!(
-        cfg_inst_content_stor
-            .read_optional(id.to_string())
-            .await
-            .unwrap()
-            .is_none(),
-        "config instance content should not be stored"
-    );
+        .filter(|r| r.call == Call::UpdateDeployment)
+        .map(|r| {
+            serde_json::from_str(r.body.as_deref().expect("push should have a body"))
+                .expect("push body should deserialize as UpdateDeploymentRequest")
+        })
+        .collect()
 }
 
 // ========================= TESTS ========================= //
@@ -780,6 +675,93 @@ pub mod apply_success {
         );
         assert!(wait.unwrap() > TimeDelta::zero(), "wait should be positive");
     }
+
+    #[tokio::test]
+    async fn multiple_deployments_min_wait_returned() {
+        let f = Fixture::new("sync_min_wait").await;
+
+        // Deployment A: target=Deployed, error=Retrying, cooldown=30s
+        let cooldown_a = Utc::now() + TimeDelta::seconds(30);
+        let seeded_a = models::Deployment {
+            id: "dpl_a".to_string(),
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::Retrying,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_a".to_string()],
+            cooldown_ends_at: cooldown_a,
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write(
+                "dpl_a".to_string(),
+                seeded_a,
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // Deployment B: target=Archived, error=Retrying, cooldown=120s
+        let cooldown_b = Utc::now() + TimeDelta::seconds(120);
+        let seeded_b = models::Deployment {
+            id: "dpl_b".to_string(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::Retrying,
+            target_status: DplTarget::Archived,
+            config_instance_ids: vec!["cfg_inst_b".to_string()],
+            cooldown_ends_at: cooldown_b,
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write(
+                "dpl_b".to_string(),
+                seeded_b,
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // pre-cache content so content pull doesn't fail
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_a".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_b".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // backend returns both deployments (different targets to avoid ConflictingDeployments)
+        let backend_a = make_deployment("dpl_a", &["cfg_inst_a"]);
+        let backend_b = make_archived_dpl("dpl_b", &["cfg_inst_b"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_a.clone(), backend_b.clone()]));
+
+        let result = f.sync().await;
+        let wait = result.unwrap();
+        assert!(
+            wait.is_some(),
+            "should return Some(wait) when deployments are in cooldown"
+        );
+        let wait = wait.unwrap();
+        // The smaller cooldown (~30s) should be returned, not the larger (~120s)
+        assert!(
+            wait <= TimeDelta::seconds(31),
+            "wait should be ~30s (the minimum), got: {wait}"
+        );
+        assert!(wait > TimeDelta::zero(), "wait should be positive");
+    }
 }
 
 pub mod apply_failure {
@@ -1011,6 +993,224 @@ mod push_failure {
             f.http_client.call_count(Call::UpdateDeployment),
             3,
             "should make 3 total attempts before giving up"
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_deployments_push_partial_failure() {
+        let f = Fixture::new("push_partial_multi").await;
+
+        // backend returns 2 deployments: one to deploy, one to archive
+        let dpl_deploy = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let dpl_archive = make_archived_dpl("dpl_2", &["cfg_inst_2"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl_deploy.clone(), dpl_archive.clone()]));
+        f.http_client
+            .set_get_config_instance_content(|_id| Ok("{}".to_string()));
+
+        // push: fail first call, succeed second (non-network so no retry)
+        let push_count = AtomicUsize::new(0);
+        f.http_client.set_update_deployment(move || {
+            let n = push_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                Err(HTTPErr::MockErr(MockErr {
+                    is_network_conn_err: false,
+                }))
+            } else {
+                Ok(BackendDeployment::default())
+            }
+        });
+
+        // first sync: one push fails, one succeeds
+        f.sync().await.unwrap_err();
+        assert_eq!(
+            f.http_client.call_count(Call::UpdateDeployment),
+            2,
+            "both deployments should attempt push"
+        );
+
+        // one deployment should still be dirty (the one whose push failed)
+        let dirty = f.deployment_stor.get_dirty_entries().await.unwrap();
+        assert_eq!(
+            dirty.len(),
+            1,
+            "exactly one deployment should remain dirty after partial push failure"
+        );
+
+        // second sync: only the previously-failed dirty entry re-pushed
+        let result2 = f.sync().await;
+        assert!(result2.is_ok(), "second sync should succeed");
+        assert_eq!(
+            f.http_client.call_count(Call::UpdateDeployment),
+            3,
+            "second sync should push only the previously-failed deployment (2 + 1 = 3 total)"
+        );
+
+        let dirty2 = f.deployment_stor.get_dirty_entries().await.unwrap();
+        assert!(
+            dirty2.is_empty(),
+            "all deployments should be clean after successful retry"
+        );
+    }
+}
+
+mod cross_phase {
+    use super::*;
+
+    #[tokio::test]
+    async fn target_status_change_triggers_archive() {
+        let f = Fixture::new("cross_target_archive").await;
+
+        // seed a deployed deployment (activity=Deployed, target=Deployed)
+        let seeded = models::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        // seed config instance content so content pull doesn't fail
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // backend returns the same deployment but with target=Archived
+        let backend_dep = make_archived_dpl("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        f.sync().await.unwrap();
+
+        // storage: deployment should be archived with no error
+        let cached = read_deployment(&f.deployment_stor, "dpl_1").await;
+        assert_eq!(cached.activity_status, DplActivity::Archived);
+        assert_eq!(cached.target_status, DplTarget::Archived);
+        assert_eq!(cached.error_status, DplErrStatus::None);
+
+        // push: exactly one UpdateDeployment call
+        assert_eq!(f.http_client.call_count(Call::UpdateDeployment), 1);
+
+        // push body: activity=ARCHIVED, error=NONE
+        let bodies = push_bodies(&f.http_client.requests());
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0].activity_status,
+            Some(BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED)
+        );
+        assert_eq!(
+            bodies[0].error_status,
+            Some(BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE)
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_clears_error_status_and_pushes() {
+        let f = Fixture::new("cross_recovery_push").await;
+
+        // seed a retrying deployment (will recover on next deploy)
+        let seeded = models::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::Retrying,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            attempts: 3,
+            // no cooldown (UNIX_EPOCH is in the past)
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        // seed config instance content so deploy succeeds
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // backend returns same deployment
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        f.sync().await.unwrap();
+
+        // storage: recovered — activity=Deployed, error=None, attempts=0
+        let cached = read_deployment(&f.deployment_stor, "dpl_1").await;
+        assert_eq!(cached.activity_status, DplActivity::Deployed);
+        assert_eq!(cached.error_status, DplErrStatus::None);
+        assert_eq!(cached.attempts, 0);
+
+        // push: exactly one UpdateDeployment call
+        assert_eq!(f.http_client.call_count(Call::UpdateDeployment), 1);
+
+        // push body: activity=DEPLOYED, error=NONE
+        let bodies = push_bodies(&f.http_client.requests());
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0].activity_status,
+            Some(BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED)
+        );
+        assert_eq!(
+            bodies[0].error_status,
+            Some(BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE)
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_error_pushes_retrying_status() {
+        let f = Fixture::new("cross_error_retrying_push").await;
+
+        // backend returns a deployment with 1 config instance
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        // content fetch fails (non-network error, so no retry)
+        f.http_client.set_get_config_instance_content(|_id| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        f.sync().await.unwrap_err();
+
+        // storage: error=Retrying, attempts > 0
+        let cached = read_deployment(&f.deployment_stor, "dpl_1").await;
+        assert_eq!(cached.error_status, DplErrStatus::Retrying);
+        assert!(cached.attempts > 0, "attempts should be bumped");
+
+        // push: exactly one UpdateDeployment call
+        assert_eq!(f.http_client.call_count(Call::UpdateDeployment), 1);
+
+        // push body: activity=QUEUED (unchanged), error=RETRYING
+        let bodies = push_bodies(&f.http_client.requests());
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0].activity_status,
+            Some(BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED)
+        );
+        assert_eq!(
+            bodies[0].error_status,
+            Some(BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING)
         );
     }
 }
