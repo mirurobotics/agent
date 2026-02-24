@@ -1,5 +1,8 @@
 use miru_agent::errors::Error;
-use miru_agent::http::errors::{MockErr, RequestFailed, ReqwestErr, ReqwestErrKind, TimeoutErr};
+use miru_agent::http::errors::{
+    reqwest_err_to_http_client_err, HTTPErr, MockErr, RequestFailed, ReqwestErr, ReqwestErrKind,
+    TimeoutErr,
+};
 use miru_agent::http::request::{Meta, Params};
 use openapi_client::models::{Error as ApiError, ErrorResponse};
 
@@ -186,6 +189,42 @@ pub mod reqwest_err_kind {
         };
         assert!(!reqwest_err.is_network_conn_err());
     }
+
+    #[tokio::test]
+    async fn decode_body_display() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .unwrap_err();
+
+        let reqwest_err = ReqwestErr {
+            kind: ReqwestErrKind::DecodeBody,
+            request: meta(),
+            source: err,
+            trace: trace(),
+        };
+        let display = format!("{reqwest_err}");
+        assert!(display.contains("decode response body"));
+    }
+
+    #[tokio::test]
+    async fn other_display() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .unwrap_err();
+
+        let reqwest_err = ReqwestErr {
+            kind: ReqwestErrKind::Other,
+            request: meta(),
+            source: err,
+            trace: trace(),
+        };
+        let display = format!("{reqwest_err}");
+        assert!(display.contains("reqwest crate error"));
+    }
 }
 
 pub mod mock_err {
@@ -214,5 +253,102 @@ pub mod mock_err {
         };
         let display = format!("{err}");
         assert!(display.contains("true"));
+    }
+}
+
+pub mod reqwest_err_to_http_client_err_fn {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn connection_error_maps_to_connection() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_connect());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            HTTPErr::ReqwestErr(e) => assert_eq!(e.kind, ReqwestErrKind::Connection),
+            other => panic!("expected ReqwestErr(Connection), got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_error_maps_to_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept the connection but never respond so the client times out.
+        tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(50))
+            .build()
+            .unwrap();
+        let err = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_timeout());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            // Variant match is the primary assertion; msg is reqwest's Display
+            // which may not contain "timed out" on all platforms.
+            HTTPErr::TimeoutErr(e) => assert!(!e.msg.is_empty()),
+            other => panic!("expected TimeoutErr, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn decode_error_maps_to_decode_body() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\nnot json!!!")
+                .await
+                .unwrap();
+        });
+
+        let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
+        let err = resp.json::<serde_json::Value>().await.unwrap_err();
+        assert!(err.is_decode());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            HTTPErr::ReqwestErr(e) => assert_eq!(e.kind, ReqwestErrKind::DecodeBody),
+            other => panic!("expected ReqwestErr(DecodeBody), got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn status_error_maps_to_other() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n")
+                .await
+                .unwrap();
+        });
+
+        let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
+        let err = resp.error_for_status().unwrap_err();
+        assert!(!err.is_connect() && !err.is_timeout() && !err.is_decode());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            HTTPErr::ReqwestErr(e) => assert_eq!(e.kind, ReqwestErrKind::Other),
+            other => panic!("expected ReqwestErr(Other), got: {other}"),
+        }
     }
 }
