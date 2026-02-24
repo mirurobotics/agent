@@ -44,8 +44,8 @@ pub mod handle_syncer_event {
             SyncEvent::SyncFailed(SyncFailure {
                 is_network_conn_err: true,
             }),
-            SyncEvent::CooldownEnd(CooldownEnd::FromSyncSuccess),
-            SyncEvent::CooldownEnd(CooldownEnd::FromSyncFailure),
+            SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess),
+            SyncEvent::CooldownEnd(CooldownEnd::SyncFailure),
         ] {
             let mqtt_client = MockClient::default();
             handle_syncer_event(&event, "device_id", &mqtt_client).await;

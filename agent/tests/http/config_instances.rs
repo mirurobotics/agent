@@ -34,7 +34,9 @@ pub mod get_content {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::GetConfigInstanceContent,
                 method: reqwest::Method::GET,
+                path: "/config_instances/ci_42/content".into(),
                 url: "http://mock/config_instances/ci_42/content".into(),
                 query: vec![],
                 body: None,

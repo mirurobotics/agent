@@ -110,7 +110,9 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
                 let syncer_event = syncer_subscriber.borrow().clone();
 
                 match &syncer_event {
-                    SyncEvent::CooldownEnd(CooldownEnd::FromSyncFailure) => {
+                    SyncEvent::CooldownEnd(
+                        CooldownEnd::SyncFailure | CooldownEnd::DeploymentWait,
+                    ) => {
                         let _ = syncer.sync_if_not_in_cooldown().await;
                     }
                     SyncEvent::SyncSuccess => {

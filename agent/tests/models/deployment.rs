@@ -63,11 +63,6 @@ impl ModelFixture for Deployment {
                 default_value: json!("1970-01-01T00:00:00Z"),
             },
             OptionalField {
-                key: "updated_at",
-                value: json!("2023-11-14T22:15:00Z"),
-                default_value: json!("1970-01-01T00:00:00Z"),
-            },
-            OptionalField {
                 key: "attempts",
                 value: json!(3),
                 default_value: json!(0),
@@ -161,7 +156,6 @@ fn defaults() {
         device_id,
         release_id,
         created_at: DateTime::<Utc>::UNIX_EPOCH,
-        updated_at: DateTime::<Utc>::UNIX_EPOCH,
         attempts: 0,
         cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         config_instance_ids: Vec::new(),
@@ -654,7 +648,14 @@ fn from_backend() {
         ]),
     };
 
-    let actual = Deployment::from_backend(backend_deployment);
+    let config_instance_ids: Vec<String> = backend_deployment
+        .config_instances
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|ci| ci.id.clone())
+        .collect();
+    let actual = Deployment::from_backend(backend_deployment, config_instance_ids);
 
     let expected = Deployment {
         id: "dpl_123".to_string(),
@@ -665,7 +666,6 @@ fn from_backend() {
         device_id: "device_123".to_string(),
         release_id: "rel_123".to_string(),
         created_at: now,
-        updated_at: now,
         attempts: 0,
         cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         config_instance_ids: vec!["cfg_1".to_string(), "cfg_2".to_string()],
@@ -687,12 +687,11 @@ fn from_backend_invalid_dates() {
         device_id: "device_123".to_string(),
         release_id: "rel_123".to_string(),
         created_at: "not-a-date".to_string(),
-        updated_at: "also-not-a-date".to_string(),
+        updated_at: "not-a-date".to_string(),
         release: None,
-        config_instances: None,
+        config_instances: Some(vec![]),
     };
 
-    let deployment = Deployment::from_backend(backend_deployment);
+    let deployment = Deployment::from_backend(backend_deployment, vec![]);
     assert_eq!(deployment.created_at, DateTime::<Utc>::UNIX_EPOCH);
-    assert_eq!(deployment.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }

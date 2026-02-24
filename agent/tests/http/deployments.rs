@@ -53,7 +53,9 @@ pub mod list {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::ListDeployments,
                 method: reqwest::Method::GET,
+                path: "/deployments".into(),
                 url: "http://mock/deployments".into(),
                 query: vec![("limit".into(), "10".into()), ("offset".into(), "0".into()),],
                 body: None,
@@ -84,7 +86,9 @@ pub mod list {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::ListDeployments,
                 method: reqwest::Method::GET,
+                path: "/deployments".into(),
                 url: "http://mock/deployments".into(),
                 query: vec![
                     ("limit".into(), "10".into()),
@@ -119,7 +123,9 @@ pub mod list {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::ListDeployments,
                 method: reqwest::Method::GET,
+                path: "/deployments".into(),
                 url: "http://mock/deployments".into(),
                 query: vec![
                     ("limit".into(), "10".into()),
@@ -186,7 +192,9 @@ pub mod list_all {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::ListDeployments,
                 method: reqwest::Method::GET,
+                path: "/deployments".into(),
                 url: "http://mock/deployments".into(),
                 query: vec![
                     ("limit".into(), "100".into()),
@@ -250,7 +258,9 @@ pub mod list_all {
         assert_eq!(mock.call_count(Call::ListDeployments), 2);
 
         let base_req = CapturedRequest {
+            call: Call::ListDeployments,
             method: reqwest::Method::GET,
+            path: "/deployments".into(),
             url: "http://mock/deployments".into(),
             query: vec![
                 ("limit".into(), "100".into()),
@@ -337,7 +347,6 @@ pub mod update {
             UpdateParams {
                 id: "dep_1",
                 updates: &updates,
-                expansions: &[],
                 token: "test-token",
             },
         )
@@ -353,40 +362,11 @@ pub mod update {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::UpdateDeployment,
                 method: reqwest::Method::PATCH,
+                path: "/deployments/dep_1".into(),
                 url: "http://mock/deployments/dep_1".into(),
                 query: vec![],
-                body: Some(expected_body),
-                token: Some("test-token".into()),
-            }]
-        );
-    }
-
-    #[tokio::test]
-    async fn with_expansions() {
-        let mock = MockClient::default();
-
-        let updates = UpdateDeploymentRequest::default();
-        let expected_body = serde_json::to_string(&updates).unwrap();
-
-        deployments::update(
-            &mock,
-            UpdateParams {
-                id: "dep_1",
-                updates: &updates,
-                expansions: &[DeploymentListExpansion::DEPLOYMENT_LIST_EXPAND_RELEASE],
-                token: "test-token",
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            mock.requests(),
-            vec![CapturedRequest {
-                method: reqwest::Method::PATCH,
-                url: "http://mock/deployments/dep_1".into(),
-                query: vec![("expand".into(), "release".into())],
                 body: Some(expected_body),
                 token: Some("test-token".into()),
             }]
@@ -404,7 +384,6 @@ pub mod update {
             UpdateParams {
                 id: "dep_1",
                 updates: &updates,
-                expansions: &[],
                 token: "test-token",
             },
         )

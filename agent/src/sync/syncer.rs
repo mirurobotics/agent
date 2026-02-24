@@ -27,8 +27,9 @@ pub struct SyncFailure {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CooldownEnd {
-    FromSyncSuccess,
-    FromSyncFailure,
+    SyncSuccess,
+    SyncFailure,
+    DeploymentWait,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,27 +110,17 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         Ok(self.subscriber_rx.clone())
     }
 
-    fn schedule_cooldown_end_notification(&self, cooldown_end_at: DateTime<Utc>, is_success: bool) {
-        if cooldown_end_at <= Utc::now() {
+    fn schedule_cooldown_end_notification(&self, wait: TimeDelta, source: CooldownEnd) {
+        if wait <= TimeDelta::zero() {
             return;
         }
         // add 1 second to the cooldown period to ensure that the cooldown period is
-        // cleared when sending the cooldown end event. Clamp to 0 so an already-elapsed
-        // cooldown doesn't produce a negative duration (which would panic on the u64 cast).
-        let cooldown_secs = cooldown_end_at
-            .signed_duration_since(Utc::now())
-            .num_seconds()
-            .max(0)
-            + 1;
+        // cleared when sending the cooldown end event.
+        let cooldown_secs = wait.num_seconds().max(0) + 1;
         let tx = self.subscriber_tx.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(cooldown_secs as u64)).await;
-            let event = if is_success {
-                SyncEvent::CooldownEnd(CooldownEnd::FromSyncSuccess)
-            } else {
-                SyncEvent::CooldownEnd(CooldownEnd::FromSyncFailure)
-            };
-            if let Err(e) = tx.send(event) {
+            if let Err(e) = tx.send(SyncEvent::CooldownEnd(source)) {
                 error!("failed to send cooldown ended event: {:?}", e);
             }
         });
@@ -167,61 +158,71 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
 
         self.state.last_attempted_sync_at = Utc::now();
         let result = self.sync_impl().await;
-        let (success, cooldown_secs) = match &result {
-            Ok(_) => {
-                if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncSuccess) {
-                    error!("failed to send sync success event: {:?}", e);
-                }
-                if self.state.err_streak > 0 {
-                    info!(
-                        "successfully synced with backend after an error streak of {}",
-                        self.state.err_streak
-                    );
+        let (event, wait) = match &result {
+            Ok(None) => (CooldownEnd::SyncSuccess, self.handle_sync_success()),
+            Ok(Some(deployment_wait)) => {
+                let success_wait = self.handle_sync_success();
+                if success_wait <= *deployment_wait {
+                    (CooldownEnd::SyncSuccess, success_wait)
                 } else {
-                    info!("successfully synced with backend");
-                }
-                self.state.last_synced_at = Utc::now();
-                self.state.cooldown_ends_at = Utc::now();
-                self.state.err_streak = 0;
-                (true, self.backoff.base_secs)
-            }
-            Err(e) => {
-                if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncFailed(SyncFailure {
-                    is_network_conn_err: e.is_network_conn_err(),
-                })) {
-                    error!("failed to send sync failed event: {:?}", e);
-                }
-                // network connection errors are expected to happen and do not count
-                // toward the error streak. We want to be able to retry syncing from
-                // network connection errors even if the previous errors were not
-                // network connection errors so we use an error streak of 0 when
-                // calculating the cooldown period
-                if e.is_network_conn_err() {
-                    debug!(
-                        "unable to sync with backend due to a network connection error: {:?}",
-                        e
-                    );
-                    (false, self.backoff.base_secs)
-                } else {
-                    error!("unable to sync with backend: {:?}", e);
-                    self.state.err_streak += 1;
-                    (false, cooldown::calc(&self.backoff, self.state.err_streak))
+                    (CooldownEnd::DeploymentWait, *deployment_wait)
                 }
             }
+            Err(e) => (CooldownEnd::SyncFailure, self.handle_sync_failure(e)),
         };
 
-        // schedule the cooldown end notification
-        self.state.cooldown_ends_at = Utc::now() + TimeDelta::seconds(cooldown_secs);
-        self.schedule_cooldown_end_notification(self.state.cooldown_ends_at, success);
+        self.state.cooldown_ends_at = Utc::now() + wait;
+        self.schedule_cooldown_end_notification(wait, event);
         debug!(
-            "backend syncer cooling down for {cooldown_secs} seconds (until {:?})",
+            "backend syncer cooling down for {wait} (until {:?})",
             self.state.cooldown_ends_at
         );
 
-        result
+        result.map(|_| ())
     }
 
-    async fn sync_impl(&mut self) -> Result<(), SyncErr> {
+    fn handle_sync_success(&mut self) -> TimeDelta {
+        if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncSuccess) {
+            error!("failed to send sync success event: {:?}", e);
+        }
+        if self.state.err_streak > 0 {
+            info!(
+                "successfully synced with backend after an error streak of {}",
+                self.state.err_streak
+            );
+        } else {
+            info!("successfully synced with backend");
+        }
+        self.state.last_synced_at = Utc::now();
+        self.state.err_streak = 0;
+        TimeDelta::seconds(self.backoff.base_secs)
+    }
+
+    fn handle_sync_failure(&mut self, e: &SyncErr) -> TimeDelta {
+        if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncFailed(SyncFailure {
+            is_network_conn_err: e.is_network_conn_err(),
+        })) {
+            error!("failed to send sync failed event: {:?}", e);
+        }
+        // network connection errors are expected to happen and do not count
+        // toward the error streak. We want to be able to retry syncing from
+        // network connection errors even if the previous errors were not
+        // network connection errors so we use an error streak of 0 when
+        // calculating the cooldown period
+        if e.is_network_conn_err() {
+            debug!(
+                "unable to sync with backend due to a network connection error: {:?}",
+                e
+            );
+            TimeDelta::seconds(self.backoff.base_secs)
+        } else {
+            error!("unable to sync with backend: {:?}", e);
+            self.state.err_streak += 1;
+            TimeDelta::seconds(cooldown::calc(&self.backoff, self.state.err_streak))
+        }
+    }
+
+    async fn sync_impl(&mut self) -> Result<Option<chrono::TimeDelta>, SyncErr> {
         let token = self.token_mngr.get_token().await?;
 
         if let Err(e) = agent_version::push(

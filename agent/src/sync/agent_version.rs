@@ -17,30 +17,30 @@ pub async fn push<HTTPClientT: http::ClientI>(
     }
 
     info!(
-        "Detected new agent version: {} -> {}",
+        "detected new agent version: {} -> {}",
         device.agent_version, agent_version
     );
 
-    // update the device file
-    let updates = models::device::Updates {
-        agent_version: Some(agent_version.clone()),
-        ..models::device::Updates::empty()
-    };
-
-    device_stor.patch(updates).await?;
-
-    // update the backend
+    // update the backend with the new agent version first so that if it fails, we don't
+    // patch the device file and try again later
     http::devices::update(
         http_client,
         http::devices::UpdateParams {
             id: &device.id,
             payload: &openapi_client::models::UpdateDeviceFromAgentRequest {
-                agent_version: Some(agent_version),
+                agent_version: Some(agent_version.clone()),
             },
             token,
         },
     )
     .await?;
+
+    // update the device file
+    let updates = models::device::Updates {
+        agent_version: Some(agent_version),
+        ..models::device::Updates::empty()
+    };
+    device_stor.patch(updates).await?;
 
     Ok(())
 }

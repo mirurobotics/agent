@@ -4,6 +4,7 @@ pub mod device;
 pub mod errors;
 pub mod release;
 
+pub use self::config_instance::ConfigInstance;
 pub use self::deployment::Deployment;
 pub use self::deployment::DplActivity;
 pub use self::deployment::DplErrStatus;

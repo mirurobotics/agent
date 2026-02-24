@@ -33,7 +33,9 @@ pub enum Call {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapturedRequest {
+    pub call: Call,
     pub method: reqwest::Method,
+    pub path: String,
     pub url: String,
     pub query: Vec<(String, String)>,
     pub body: Option<String>,
@@ -45,16 +47,16 @@ pub struct CapturedRequest {
 type ListDeploymentsFn = Mutex<Box<dyn Fn() -> Result<DeploymentList, HTTPErr> + Send + Sync>>;
 type SingleDeploymentFn = Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync>>;
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
+type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub activate_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
     pub issue_device_token_fn: Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>,
-    pub update_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
+    pub update_device_fn: UpdateDeviceFn,
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
     pub update_deployment_fn: SingleDeploymentFn,
     pub get_cfg_inst_content_fn: GetCfgInstContentFn,
-    pub calls: Arc<Mutex<Vec<Call>>>,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -63,18 +65,24 @@ impl Default for MockClient {
         Self {
             activate_device_fn: Box::new(|| Ok(Device::default())),
             issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
-            update_device_fn: Box::new(|| Ok(Device::default())),
+            update_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
             get_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             update_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
-            calls: Arc::new(Mutex::new(Vec::new())),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
 
 impl MockClient {
+    pub fn set_update_device<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Device, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.update_device_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn set_list_all_deployments<F>(&self, f: F)
     where
         F: Fn() -> Result<Vec<BackendDeployment>, HTTPErr> + Send + Sync + 'static,
@@ -118,11 +126,11 @@ impl MockClient {
     }
 
     pub fn call_count(&self, target: Call) -> usize {
-        self.calls
+        self.requests
             .lock()
             .unwrap()
             .iter()
-            .filter(|call| **call == target)
+            .filter(|r| r.call == target)
             .count()
     }
 
@@ -132,6 +140,16 @@ impl MockClient {
 
     pub fn requests(&self) -> Vec<CapturedRequest> {
         self.requests.lock().unwrap().clone()
+    }
+
+    pub fn paths_for(&self, target: Call) -> Vec<String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.call == target)
+            .map(|r| r.path.clone())
+            .collect()
     }
 
     fn match_route(method: &reqwest::Method, path: &str) -> Call {
@@ -160,7 +178,7 @@ impl MockClient {
         match call {
             Call::ActivateDevice => json(&(self.activate_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
-            Call::UpdateDevice => json(&(self.update_device_fn)()?),
+            Call::UpdateDevice => json(&(self.update_device_fn.lock().unwrap())()?),
             Call::ListDeployments => {
                 let list = (self.list_deployments_fn.lock().unwrap())()?;
                 json(&list)
@@ -176,16 +194,6 @@ impl MockClient {
                 (self.get_cfg_inst_content_fn.lock().unwrap())(id)
             }
         }
-    }
-
-    fn dispatch(&self, method: &reqwest::Method, url: &str) -> Result<String, HTTPErr> {
-        let path = url
-            .strip_prefix(http::ClientI::base_url(self))
-            .unwrap_or(url);
-        let path = path.split('?').next().unwrap_or(path);
-        let call = Self::match_route(method, path);
-        self.calls.lock().unwrap().push(call.clone());
-        self.handle_route(&call, path)
     }
 }
 
@@ -203,14 +211,22 @@ impl http::ClientI for MockClient {
         params: Params<'_>,
     ) -> Result<(String, miru_agent::http::request::Meta), HTTPErr> {
         let meta = params.meta()?;
+        let url_str = params.url;
+        let path = url_str
+            .strip_prefix(http::ClientI::base_url(self))
+            .unwrap_or(url_str);
+        let path = path.split('?').next().unwrap_or(path);
+        let call = Self::match_route(&params.method, path);
         self.requests.lock().unwrap().push(CapturedRequest {
+            call: call.clone(),
             method: params.method.clone(),
-            url: params.url.to_string(),
+            path: path.to_string(),
+            url: url_str.to_string(),
             query: params.query.clone(),
             body: params.body.clone(),
             token: params.token.map(|t| t.to_string()),
         });
-        let text = self.dispatch(&params.method, params.url)?;
+        let text = self.handle_route(&call, path)?;
         Ok((text, meta))
     }
 }

@@ -41,7 +41,9 @@ pub mod activate {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::ActivateDevice,
                 method: reqwest::Method::POST,
+                path: "/devices/dvc_1/activate".into(),
                 url: "http://mock/devices/dvc_1/activate".into(),
                 query: vec![],
                 body: Some(expected_body),
@@ -97,7 +99,9 @@ pub mod issue_token {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::IssueDeviceToken,
                 method: reqwest::Method::POST,
+                path: "/devices/dvc_1/issue_token".into(),
                 url: "http://mock/devices/dvc_1/issue_token".into(),
                 query: vec![],
                 body: Some(expected_body),
@@ -155,7 +159,9 @@ pub mod update {
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
+                call: Call::UpdateDevice,
                 method: reqwest::Method::PATCH,
+                path: "/devices/dvc_1".into(),
                 url: "http://mock/devices/dvc_1".into(),
                 query: vec![],
                 body: Some(expected_body),
@@ -167,7 +173,7 @@ pub mod update {
     #[tokio::test]
     async fn error_propagates() {
         let mock = MockClient {
-            update_device_fn: Box::new(|| Err(mock_err())),
+            update_device_fn: std::sync::Mutex::new(Box::new(|| Err(mock_err()))),
             ..MockClient::default()
         };
 

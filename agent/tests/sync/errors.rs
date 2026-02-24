@@ -1,10 +1,11 @@
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::cache::errors::{CacheElementNotFound, CacheErr};
 use miru_agent::deploy::errors::{DeployErr, EmptyConfigInstancesErr};
+use miru_agent::errors::Error;
 use miru_agent::filesys::errors::{FileSysErr, InvalidDirNameErr};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::storage::StorageErr;
-use miru_agent::sync::errors::SyncErr;
+use miru_agent::sync::errors::{CfgInstsNotExpandedErr, SyncErr, SyncErrors, SyncerInCooldownErr};
 
 fn authn_err() -> AuthnErr {
     AuthnErr::MockError(AuthnMockError {
@@ -80,5 +81,79 @@ mod from_conversions {
     fn storage_err_maps_to_sync_storage_err() {
         let err: SyncErr = storage_err().into();
         assert!(matches!(err, SyncErr::StorageErr(_)));
+    }
+
+    #[test]
+    fn cfg_insts_not_expanded_err_maps() {
+        let err: SyncErr = CfgInstsNotExpandedErr {
+            deployment_id: "dpl_1".to_string(),
+        }
+        .into();
+        assert!(matches!(err, SyncErr::CfgInstsNotExpanded(_)));
+    }
+}
+
+mod is_network_conn_err {
+    use super::*;
+
+    fn network_sync_err() -> SyncErr {
+        SyncErr::HTTPClientErr(HTTPErr::MockErr(HTTPMockErr {
+            is_network_conn_err: true,
+        }))
+    }
+
+    fn non_network_sync_err() -> SyncErr {
+        SyncErr::HTTPClientErr(HTTPErr::MockErr(HTTPMockErr {
+            is_network_conn_err: false,
+        }))
+    }
+
+    #[test]
+    fn all_network_errors_returns_true() {
+        let errs = SyncErrors {
+            errors: vec![network_sync_err(), network_sync_err()],
+            trace: miru_agent::trace!(),
+        };
+        assert!(errs.is_network_conn_err());
+    }
+
+    #[test]
+    fn any_non_network_error_returns_false() {
+        let errs = SyncErrors {
+            errors: vec![network_sync_err(), non_network_sync_err()],
+            trace: miru_agent::trace!(),
+        };
+        assert!(!errs.is_network_conn_err());
+    }
+
+    #[test]
+    fn empty_errors_returns_false() {
+        let errs = SyncErrors {
+            errors: vec![],
+            trace: miru_agent::trace!(),
+        };
+        assert!(!errs.is_network_conn_err());
+    }
+}
+
+mod display {
+    use super::*;
+
+    #[test]
+    fn syncer_in_cooldown_err_display() {
+        let err = SyncerInCooldownErr {
+            err_streak: 3,
+            cooldown_ends_at: chrono::Utc::now() + chrono::TimeDelta::seconds(60),
+            trace: miru_agent::trace!(),
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("syncer is in cooldown"),
+            "display should mention cooldown, got: {msg}"
+        );
+        assert!(
+            msg.contains("err streak of 3"),
+            "display should mention err streak, got: {msg}"
+        );
     }
 }

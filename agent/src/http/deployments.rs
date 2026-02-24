@@ -27,7 +27,6 @@ pub struct ListAllParams<'a> {
 pub struct UpdateParams<'a> {
     pub id: &'a str,
     pub updates: &'a UpdateDeploymentRequest,
-    pub expansions: &'a [DeploymentListExpansion],
     pub token: &'a str,
 }
 
@@ -90,11 +89,8 @@ pub async fn update(
     client: &impl ClientI,
     params: UpdateParams<'_>,
 ) -> Result<Deployment, HTTPErr> {
-    let qp = QueryParams::new().expand(params.expansions);
-
     let url = format!("{}/deployments/{}", client.base_url(), params.id,);
     let request = request::Params::patch(&url, request::marshal_json(params.updates)?)
-        .with_query(qp)
         .with_token(params.token);
     http::client::fetch(client, request).await
 }

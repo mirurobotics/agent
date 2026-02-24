@@ -344,7 +344,6 @@ pub struct Deployment {
     pub device_id: String,
     pub release_id: String,
     pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
     pub config_instance_ids: Vec<CfgInstID>,
     // Agent-side fields for retry logic (not from backend)
     pub attempts: u32,
@@ -362,7 +361,6 @@ impl Default for Deployment {
             device_id: format!("unknown-{}", Uuid::new_v4()),
             release_id: format!("unknown-{}", Uuid::new_v4()),
             created_at: DateTime::<Utc>::UNIX_EPOCH,
-            updated_at: DateTime::<Utc>::UNIX_EPOCH,
             attempts: 0,
             cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             config_instance_ids: Vec::new(),
@@ -371,7 +369,10 @@ impl Default for Deployment {
 }
 
 impl Deployment {
-    pub fn from_backend(deployment: backend_client::Deployment) -> Deployment {
+    pub fn from_backend(
+        deployment: backend_client::Deployment,
+        config_instance_ids: Vec<String>,
+    ) -> Deployment {
         Deployment {
             id: deployment.id,
             description: deployment.description,
@@ -384,16 +385,9 @@ impl Deployment {
                 .created_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
-            updated_at: deployment
-                .updated_at
-                .parse::<DateTime<Utc>>()
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             attempts: 0,
             cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
-            config_instance_ids: deployment
-                .config_instances
-                .map(|instances| instances.into_iter().map(|inst| inst.id).collect())
-                .unwrap_or_default(),
+            config_instance_ids,
         }
     }
 
@@ -429,7 +423,6 @@ impl<'de> Deserialize<'de> for Deployment {
             device_id: String,
             release_id: String,
             created_at: Option<DateTime<Utc>>,
-            updated_at: Option<DateTime<Utc>>,
             attempts: Option<u32>,
             cooldown_ends_at: Option<DateTime<Utc>>,
             config_instance_ids: Vec<CfgInstID>,
@@ -448,9 +441,6 @@ impl<'de> Deserialize<'de> for Deployment {
             release_id: result.release_id,
             created_at: result.created_at.unwrap_or_else(|| {
                 deserialize_error!("deployment", "created_at", default.created_at)
-            }),
-            updated_at: result.updated_at.unwrap_or_else(|| {
-                deserialize_error!("deployment", "updated_at", default.updated_at)
             }),
             attempts: result
                 .attempts

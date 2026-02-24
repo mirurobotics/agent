@@ -61,6 +61,14 @@ impl crate::errors::Error for MockErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("deployment '{deployment_id}' did not have config_instances expansion (backend did not expand config instances)")]
+pub struct CfgInstsNotExpandedErr {
+    pub deployment_id: String,
+}
+
+impl crate::errors::Error for CfgInstsNotExpandedErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum SyncErr {
     #[error(transparent)]
     AuthnErr(AuthnErr),
@@ -84,6 +92,8 @@ pub enum SyncErr {
     ReceiveActorMessageErr(ReceiveActorMessageErr),
     #[error(transparent)]
     MockErr(MockErr),
+    #[error(transparent)]
+    CfgInstsNotExpanded(CfgInstsNotExpandedErr),
 }
 
 impl From<AuthnErr> for SyncErr {
@@ -122,6 +132,12 @@ impl From<StorageErr> for SyncErr {
     }
 }
 
+impl From<CfgInstsNotExpandedErr> for SyncErr {
+    fn from(e: CfgInstsNotExpandedErr) -> Self {
+        Self::CfgInstsNotExpanded(e)
+    }
+}
+
 crate::impl_error!(SyncErr {
     AuthnErr,
     CacheErr,
@@ -134,4 +150,5 @@ crate::impl_error!(SyncErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
     MockErr,
+    CfgInstsNotExpanded,
 });

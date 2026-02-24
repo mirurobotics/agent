@@ -236,7 +236,7 @@ pub mod run {
             SyncEvent::SyncFailed(SyncFailure {
                 is_network_conn_err: true,
             }),
-            SyncEvent::CooldownEnd(CooldownEnd::FromSyncSuccess),
+            SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess),
         ] {
             for _ in 0..10 {
                 sleep_ctrl.await_sleep().await;
@@ -301,7 +301,7 @@ pub mod run {
             assert!(last_attempted_sleep.as_secs() >= expected_sleep_secs as u64 - 1);
             assert_eq!(syncer.num_sync_calls(), expected_num_sync_calls);
             syncer_tx
-                .send(SyncEvent::CooldownEnd(CooldownEnd::FromSyncFailure))
+                .send(SyncEvent::CooldownEnd(CooldownEnd::SyncFailure))
                 .unwrap();
         }
     }
