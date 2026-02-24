@@ -6,5 +6,7 @@ pub mod errors;
 pub mod query;
 pub mod request;
 pub mod response;
+pub mod retry;
 
 pub use client::{Client, ClientI};
+pub use retry::with_retry;

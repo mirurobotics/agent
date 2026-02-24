@@ -40,3 +40,4 @@ tower-http = { workspace = true }
 [dev-dependencies]
 rumqttd = { workspace = true }
 serial_test = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
