@@ -1,9 +1,12 @@
 // internal crates
 use miru_agent::filesys::dir::Dir;
-use miru_agent::models::device::Device;
+use miru_agent::models::device::{Device, DeviceStatus};
 use miru_agent::services::device::get;
 use miru_agent::services::errors::*;
 use miru_agent::storage::{self, Layout};
+
+// external crates
+use chrono::{DateTime, Utc};
 
 pub mod errors {
     use super::*;
@@ -55,5 +58,31 @@ pub mod success {
 
         let result = get::get_device(&device_file).await.unwrap();
         assert_eq!(result, Device::default());
+    }
+
+    #[tokio::test]
+    async fn returns_custom_device_data() {
+        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let custom_device = Device {
+            id: "dev-42".to_string(),
+            session_id: "sess-99".to_string(),
+            name: "test-robot".to_string(),
+            agent_version: "1.2.3".to_string(),
+            activated: true,
+            status: DeviceStatus::Online,
+            last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+            last_connected_at: DateTime::<Utc>::UNIX_EPOCH,
+            last_disconnected_at: DateTime::<Utc>::UNIX_EPOCH,
+        };
+
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), custom_device.clone())
+                .await
+                .unwrap();
+
+        let result = get::get_device(&device_file).await.unwrap();
+        assert_eq!(result, custom_device);
     }
 }

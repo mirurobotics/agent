@@ -87,22 +87,42 @@ pub mod errors {
 pub mod success {
     use super::*;
 
+    fn expected_response(sync_state: &State) -> SyncDeviceResponse {
+        SyncDeviceResponse {
+            code: SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
+            message: "successfully synced".to_string(),
+            last_synced_at: sync_state.last_synced_at.to_rfc3339(),
+            last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
+            in_cooldown: sync_state.is_in_cooldown(),
+            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+        }
+    }
+
     #[tokio::test]
-    async fn success() {
+    async fn default_state() {
         let syncer = MockSyncer::default();
         let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
         let resp = sync::sync_device(&syncer).await.unwrap();
-        let expected = SyncDeviceResponse {
-            code: SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
-            message: resp.message.clone(),
-            last_synced_at: sync_state.last_synced_at.to_rfc3339(),
-            last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
-            in_cooldown: sync_state.is_in_cooldown(),
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
-        };
 
-        assert_eq!(resp, expected);
+        assert_eq!(resp, expected_response(&sync_state));
+    }
+
+    #[tokio::test]
+    async fn non_default_state() {
+        let syncer = MockSyncer::default();
+        let now = Utc::now();
+        let sync_state = State {
+            last_synced_at: now - Duration::minutes(5),
+            last_attempted_sync_at: now - Duration::minutes(1),
+            cooldown_ends_at: now - Duration::hours(1),
+            ..State::default()
+        };
+        syncer.set_state(sync_state.clone());
+
+        let resp = sync::sync_device(&syncer).await.unwrap();
+
+        assert_eq!(resp, expected_response(&sync_state));
     }
 }
