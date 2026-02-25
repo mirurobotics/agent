@@ -18,7 +18,6 @@ pub enum DplTarget {
     #[default]
     Staged,
     Deployed,
-    #[serde(other)]
     Archived,
 }
 
