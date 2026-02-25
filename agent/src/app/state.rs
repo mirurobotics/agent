@@ -65,6 +65,8 @@ impl AppState {
         let token_mngr = Arc::new(token_mngr);
 
         // initialize the syncer
+        let deploy_target_dir = layout.customer_configs();
+        let deploy_staging_dir = layout.srv_temp_dir();
         let (syncer, syncer_handle) = Syncer::spawn(
             64,
             SyncerArgs {
@@ -72,8 +74,8 @@ impl AppState {
                 http_client: http_client.clone(),
                 token_mngr: token_mngr.clone(),
                 deploy_opts: apply::DeployOpts {
-                    staging_dir: layout.temp_dir(),
-                    target_dir: layout.customer_configs(),
+                    staging_dir: deploy_staging_dir,
+                    target_dir: deploy_target_dir,
                     retry_policy: dpl_retry_policy,
                 },
                 agent_version,
