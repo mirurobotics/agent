@@ -174,11 +174,11 @@ async fn deploy(storage: &Storage<'_>, opts: &DeployOpts, deployment: Deployment
 
 fn remaining_cooldown(deployment: &Deployment) -> Option<chrono::TimeDelta> {
     if deployment.is_in_cooldown() {
-        Some(
-            deployment
-                .cooldown_ends_at
-                .signed_duration_since(Utc::now()),
-        )
+        let remaining = deployment
+            .cooldown_ends_at
+            .signed_duration_since(Utc::now())
+            .max(chrono::TimeDelta::zero());
+        Some(remaining)
     } else {
         None
     }

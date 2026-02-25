@@ -116,10 +116,10 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         }
         // add 1 second to the cooldown period to ensure that the cooldown period is
         // cleared when sending the cooldown end event.
-        let cooldown_secs = wait.num_seconds().max(0) + 1;
+        let cooldown_secs = (wait.num_seconds().max(0) + 1) as u64;
         let tx = self.subscriber_tx.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(cooldown_secs as u64)).await;
+            tokio::time::sleep(Duration::from_secs(cooldown_secs)).await;
             if let Err(e) = tx.send(SyncEvent::CooldownEnd(source)) {
                 error!("failed to send cooldown ended event: {:?}", e);
             }
