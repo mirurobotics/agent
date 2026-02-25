@@ -189,7 +189,7 @@ async fn pull_cfg_inst_content<HTTPClientT: http::ClientI>(
 }
 
 /// Converts a backend deployment into an agent-side model, merges it with any
-/// cached version (preserving agent-side retry state), and writes it to storage.
+/// cached version, and writes it to storage.
 ///
 /// The dirty-flag closure keeps the entry dirty if a prior push attempt failed,
 /// ensuring the next push phase retries the update even though the pull just
@@ -216,8 +216,12 @@ async fn store_deployment(
         .map_err(SyncErr::from)
 }
 
-// Merges a deployment from the backend with the cached version (if any), preserving
-// agent-side fields (attempts, cooldown_ends_at).
+// Cached deployment entries are intentionally authoritative for all fields except
+// `target_status`, which is always taken from the backend payload.
+//
+// This preserves locally derived state (activity/error transitions, attempts,
+// cooldown metadata, and dirty-retry context) while still reacting to backend
+// target changes.
 fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> models::Deployment {
     match cached {
         Some(cached) => models::Deployment {
