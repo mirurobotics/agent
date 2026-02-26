@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentActivityStatus : Last known activity state of the deployment. - Drifted: device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed - Staged: is ready to be deployed - Queued: the deployment's config instances are waiting to be received by the device; will be deployed as soon as the device is online - Deployed: the deployment's config instances are currently available for consumption on the device - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
-/// Last known activity state of the deployment. - Drifted: device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed - Staged: is ready to be deployed - Queued: the deployment's config instances are waiting to be received by the device; will be deployed as soon as the device is online - Deployed: the deployment's config instances are currently available for consumption on the device - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
+/// DeploymentActivityStatus : Last known activity state of the deployment. - Drifted: device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed - Staged: is ready to be deployed - Queued: the deployment's config instances are waiting to be received by the device; will be deployed as soon as the device is online - Deployed: the deployment's config instances are currently available for consumption on the device - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device 
+/// Last known activity state of the deployment. - Drifted: device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed - Staged: is ready to be deployed - Queued: the deployment's config instances are waiting to be received by the device; will be deployed as soon as the device is online - Deployed: the deployment's config instances are currently available for consumption on the device - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentActivityStatus {
     #[serde(rename = "drifted")]
@@ -23,6 +23,7 @@ pub enum DeploymentActivityStatus {
     DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
     #[serde(rename = "archived")]
     DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+
 }
 
 impl std::fmt::Display for DeploymentActivityStatus {
@@ -42,3 +43,4 @@ impl Default for DeploymentActivityStatus {
         Self::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
     }
 }
+

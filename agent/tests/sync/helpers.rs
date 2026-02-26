@@ -1,10 +1,11 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use miru_agent::models;
-use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments};
+use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
 use miru_agent::sync::syncer::State;
 use openapi_client::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
-    DeploymentTargetStatus as BackendTargetStatus,
+    DeploymentTargetStatus as BackendTargetStatus, GitCommit as BackendGitCommit,
+    GitRepositoryType, Release as BackendRelease,
 };
 
 // ========================= FACTORIES ========================= //
@@ -33,6 +34,46 @@ pub fn make_archived_dpl(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
         target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
         ..make_deployment(id, cfg_inst_ids)
     }
+}
+
+pub fn make_backend_git_commit(id: &str) -> BackendGitCommit {
+    BackendGitCommit {
+        object: openapi_client::models::git_commit::Object::GitCommit,
+        id: id.to_string(),
+        sha: format!("sha-{id}"),
+        message: format!("commit {id}"),
+        repository_owner: "miru-hq".to_string(),
+        repository_name: "miru".to_string(),
+        repository_type: GitRepositoryType::GIT_REPO_TYPE_GITHUB,
+        repository_url: "https://github.com/miru-hq/miru".to_string(),
+        commit_url: format!("https://github.com/miru-hq/miru/commit/sha-{id}"),
+        created_at: Utc::now().to_rfc3339(),
+    }
+}
+
+pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
+    let git_commit = gc_id.map(|gid| Some(Box::new(make_backend_git_commit(gid))));
+    BackendRelease {
+        object: openapi_client::models::release::Object::Release,
+        id: id.to_string(),
+        version: format!("1.0.0-{id}"),
+        git_commit_id: gc_id.map(|s| s.to_string()),
+        created_at: Utc::now().to_rfc3339(),
+        updated_at: Utc::now().to_rfc3339(),
+        git_commit,
+    }
+}
+
+pub fn make_deployment_with_release(
+    id: &str,
+    cfg_inst_ids: &[&str],
+    release_id: &str,
+    gc_id: Option<&str>,
+) -> BackendDeployment {
+    let mut dpl = make_deployment(id, cfg_inst_ids);
+    dpl.release_id = release_id.to_string();
+    dpl.release = Some(Box::new(make_backend_release(release_id, gc_id)));
+    dpl
 }
 
 // ========================= ASSERTIONS ========================= //
@@ -92,6 +133,16 @@ pub async fn assert_content_not_stored(cfg_inst_content_stor: &CfgInstContent, i
             .is_none(),
         "config instance content should not be stored"
     );
+}
+
+pub async fn assert_release_stored(release_stor: &Releases, id: &str) {
+    let cached = release_stor.read_optional(id.to_string()).await.unwrap();
+    assert!(cached.is_some(), "release {id} should be stored");
+}
+
+pub async fn assert_git_commit_stored(git_commit_stor: &GitCommits, id: &str) {
+    let cached = git_commit_stor.read_optional(id.to_string()).await.unwrap();
+    assert!(cached.is_some(), "git commit {id} should be stored");
 }
 
 // ========================= STATE ASSERTIONS ========================= //

@@ -161,12 +161,12 @@ impl Default for Headers {
 impl Headers {
     pub fn to_map(&self) -> Result<HeaderMap, HTTPErr> {
         let mut headers = HeaderMap::new();
-        insert_header(&mut headers, "X-Miru-Agent-Version", &self.agent_version)?;
-        insert_header(&mut headers, "X-Miru-API-Version", &self.api_version)?;
-        insert_header(&mut headers, "X-Host-Name", &self.host_name)?;
-        insert_header(&mut headers, "X-Arch", &self.arch)?;
-        insert_header(&mut headers, "X-Language", &self.language)?;
-        insert_header(&mut headers, "X-OS", &self.os)?;
+        insert_header(&mut headers, "Miru-Version", &self.api_version)?;
+        insert_header(&mut headers, "Miru-Agent-Version", &self.agent_version)?;
+        insert_header(&mut headers, "Miru-Agent-Host-Name", &self.host_name)?;
+        insert_header(&mut headers, "Miru-Agent-Arch", &self.arch)?;
+        insert_header(&mut headers, "Miru-Agent-Language", &self.language)?;
+        insert_header(&mut headers, "Miru-Agent-OS", &self.os)?;
         Ok(headers)
     }
 }

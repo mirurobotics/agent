@@ -16,7 +16,9 @@ use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::deployment::{DplActivity, DplErrStatus, DplTarget};
 use miru_agent::models::device::Device;
-use miru_agent::storage::{self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, Storage};
+use miru_agent::storage::{
+    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
+};
 use miru_agent::sync::{
     errors::SyncErr,
     syncer::{
@@ -71,6 +73,12 @@ pub async fn create_storage(dir: &Dir) -> Storage {
         storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
             .await
             .unwrap();
+    let (release_stor, _) = Releases::spawn(16, dir.file("releases_cache.json"), 1000)
+        .await
+        .unwrap();
+    let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits_cache.json"), 1000)
+        .await
+        .unwrap();
 
     Storage {
         device: Arc::new(device_stor),
@@ -79,6 +87,8 @@ pub async fn create_storage(dir: &Dir) -> Storage {
             content: Arc::new(cfg_inst_content_stor),
         },
         deployments: Arc::new(deployment_stor),
+        releases: Arc::new(release_stor),
+        git_commits: Arc::new(git_commit_stor),
     }
 }
 

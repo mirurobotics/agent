@@ -30,14 +30,7 @@ pub struct DeploymentList {
 }
 
 impl DeploymentList {
-    pub fn new(
-        object: Object,
-        total_count: i64,
-        limit: i32,
-        offset: i32,
-        has_more: bool,
-        data: Vec<models::Deployment>,
-    ) -> DeploymentList {
+    pub fn new(object: Object, total_count: i64, limit: i32, offset: i32, has_more: bool, data: Vec<models::Deployment>) -> DeploymentList {
         DeploymentList {
             object,
             total_count,
@@ -48,7 +41,7 @@ impl DeploymentList {
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "list")]
@@ -60,3 +53,4 @@ impl Default for Object {
         Self::List
     }
 }
+

@@ -6,7 +6,7 @@ use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::http::query::Page;
 use openapi_client::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus, DeploymentList,
-    DeploymentListExpansion, UpdateDeploymentRequest,
+    UpdateDeploymentRequest,
 };
 
 fn mock_err() -> HTTPErr {
@@ -109,10 +109,7 @@ pub mod list {
             &mock,
             ListParams {
                 activity_status: &[],
-                expansions: &[
-                    DeploymentListExpansion::DEPLOYMENT_LIST_EXPAND_RELEASE,
-                    DeploymentListExpansion::DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES,
-                ],
+                expansions: &["release", "config_instances"],
                 pagination: &Page::default(),
                 token: "test-token",
             },

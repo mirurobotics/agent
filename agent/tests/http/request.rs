@@ -180,13 +180,33 @@ pub mod headers {
     fn to_map_returns_all_expected_keys() {
         let headers = Headers::default();
         let map = headers.to_map().unwrap();
-        assert!(map.contains_key("X-Miru-Agent-Version"));
-        assert!(map.contains_key("X-Miru-API-Version"));
-        assert!(map.contains_key("X-Host-Name"));
-        assert!(map.contains_key("X-Arch"));
-        assert!(map.contains_key("X-Language"));
-        assert!(map.contains_key("X-OS"));
+        assert!(map.contains_key("Miru-Version"));
+        assert!(map.contains_key("Miru-Agent-Version"));
+        assert!(map.contains_key("Miru-Agent-Host-Name"));
+        assert!(map.contains_key("Miru-Agent-Arch"));
+        assert!(map.contains_key("Miru-Agent-Language"));
+        assert!(map.contains_key("Miru-Agent-OS"));
         assert_eq!(map.len(), 6);
+    }
+
+    #[test]
+    fn miru_version_contains_api_version() {
+        let headers = Headers::default();
+        let map = headers.to_map().unwrap();
+        let api_version = map.get("Miru-Version").unwrap().to_str().unwrap();
+        assert_eq!(api_version, &headers.api_version);
+        assert_ne!(
+            api_version, &headers.agent_version,
+            "Miru-Version must be the API version, not the agent version"
+        );
+    }
+
+    #[test]
+    fn miru_agent_version_contains_agent_version() {
+        let headers = Headers::default();
+        let map = headers.to_map().unwrap();
+        let agent_version = map.get("Miru-Agent-Version").unwrap().to_str().unwrap();
+        assert_eq!(agent_version, &headers.agent_version);
     }
 }
 
@@ -274,11 +294,11 @@ pub mod build {
         let params = Params::get("https://example.com/test");
         let req = request::build(&client, &headers, params).unwrap();
         let h = req.reqwest.headers();
-        assert!(h.contains_key("X-Miru-Agent-Version"));
-        assert!(h.contains_key("X-Miru-API-Version"));
-        assert!(h.contains_key("X-Host-Name"));
-        assert!(h.contains_key("X-Arch"));
-        assert!(h.contains_key("X-Language"));
-        assert!(h.contains_key("X-OS"));
+        assert!(h.contains_key("Miru-Version"));
+        assert!(h.contains_key("Miru-Agent-Version"));
+        assert!(h.contains_key("Miru-Agent-Host-Name"));
+        assert!(h.contains_key("Miru-Agent-Arch"));
+        assert!(h.contains_key("Miru-Agent-Language"));
+        assert!(h.contains_key("Miru-Agent-OS"));
     }
 }

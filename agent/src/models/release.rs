@@ -15,6 +15,7 @@ pub type ReleaseID = String;
 pub struct Release {
     pub id: String,
     pub version: String,
+    pub git_commit_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -24,6 +25,7 @@ impl Default for Release {
         Self {
             id: format!("unknown-{}", Uuid::new_v4()),
             version: String::new(),
+            git_commit_id: None,
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
         }
@@ -35,6 +37,7 @@ impl Release {
         Release {
             id: release.id,
             version: release.version,
+            git_commit_id: release.git_commit_id,
             created_at: release
                 .created_at
                 .parse::<DateTime<Utc>>()
@@ -56,6 +59,7 @@ impl<'de> Deserialize<'de> for Release {
         pub struct DeserializeRelease {
             id: String,
             version: String,
+            git_commit_id: Option<String>,
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
         }
@@ -66,6 +70,7 @@ impl<'de> Deserialize<'de> for Release {
         Ok(Release {
             id: result.id,
             version: result.version,
+            git_commit_id: result.git_commit_id,
             created_at: result
                 .created_at
                 .unwrap_or_else(|| deserialize_error!("release", "created_at", default.created_at)),

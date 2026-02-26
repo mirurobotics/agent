@@ -34,15 +34,7 @@ pub struct BaseConfigInstance {
 }
 
 impl BaseConfigInstance {
-    pub fn new(
-        object: Object,
-        id: String,
-        config_type_name: String,
-        filepath: String,
-        created_at: String,
-        config_schema_id: String,
-        config_type_id: String,
-    ) -> BaseConfigInstance {
+    pub fn new(object: Object, id: String, config_type_name: String, filepath: String, created_at: String, config_schema_id: String, config_type_id: String) -> BaseConfigInstance {
         BaseConfigInstance {
             object,
             id,
@@ -54,7 +46,7 @@ impl BaseConfigInstance {
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "config_instance")]
@@ -66,3 +58,4 @@ impl Default for Object {
         Self::ConfigInstance
     }
 }
+

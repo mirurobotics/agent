@@ -40,20 +40,64 @@ impl Default for ServerOptions {
     }
 }
 
+const API_VERSION: &str = "v0.2";
+
+/// Build the application router with all routes and shared state, without middleware.
+pub fn routes(state: Arc<ServerState>) -> Router {
+    Router::new()
+        // =============================== AGENT INFO ============================== //
+        .route(
+            format!("/{API_VERSION}/health").as_str(),
+            get(handlers::health),
+        )
+        .route(
+            format!("/{API_VERSION}/version").as_str(),
+            get(handlers::version),
+        )
+        // ============================= DEVICE ==================================== //
+        .route(
+            format!("/{API_VERSION}/device").as_str(),
+            get(handlers::get_device),
+        )
+        .route(
+            format!("/{API_VERSION}/device/sync").as_str(),
+            post(handlers::sync_device),
+        )
+        // ============================= DEPLOYMENTS =============================== //
+        // /current before /{id} so "current" isn't captured as a deployment_id
+        .route(
+            format!("/{API_VERSION}/deployments/current").as_str(),
+            get(handlers::get_current_deployment),
+        )
+        .route(
+            format!("/{API_VERSION}/deployments/{{deployment_id}}").as_str(),
+            get(handlers::get_deployment),
+        )
+        // ============================= RELEASES ================================== //
+        // /current before /{id} so "current" isn't captured as a release_id
+        .route(
+            format!("/{API_VERSION}/releases/current").as_str(),
+            get(handlers::get_current_release),
+        )
+        .route(
+            format!("/{API_VERSION}/releases/{{release_id}}").as_str(),
+            get(handlers::get_release),
+        )
+        // ============================= GIT COMMITS =============================== //
+        .route(
+            format!("/{API_VERSION}/git_commits/{{git_commit_id}}").as_str(),
+            get(handlers::get_git_commit),
+        )
+        .with_state(state)
+}
+
 pub(crate) async fn serve(
     options: &ServerOptions,
     state: Arc<ServerState>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<JoinHandle<Result<(), ServerErr>>, ServerErr> {
-    // build the app with the test route
     let state_for_middleware = state.clone();
-    let app = Router::new()
-        // =============================== AGENT INFO ============================== //
-        .route("/v1/health", get(handlers::health))
-        .route("/v1/version", get(handlers::version))
-        // ============================= DEVICE ==================================== //
-        .route("/v1/device", get(handlers::get_device))
-        .route("/v1/device/sync", post(handlers::sync_device))
+    let app = routes(state)
         // ============================= LAYERS ===================================== //
         .layer(
             ServiceBuilder::new()
@@ -78,8 +122,7 @@ pub(crate) async fn serve(
                                 .latency_unit(LatencyUnit::Micros),
                         ),
                 ),
-        )
-        .with_state(state);
+        );
 
     // obtain the unix socket file listener
     let listener = acquire_unix_socket_listener(&options.socket_file, async move {

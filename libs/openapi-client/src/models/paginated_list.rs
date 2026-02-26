@@ -28,13 +28,7 @@ pub struct PaginatedList {
 }
 
 impl PaginatedList {
-    pub fn new(
-        object: Object,
-        total_count: i64,
-        limit: i32,
-        offset: i32,
-        has_more: bool,
-    ) -> PaginatedList {
+    pub fn new(object: Object, total_count: i64, limit: i32, offset: i32, has_more: bool) -> PaginatedList {
         PaginatedList {
             object,
             total_count,
@@ -44,7 +38,7 @@ impl PaginatedList {
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "list")]
@@ -56,3 +50,4 @@ impl Default for Object {
         Self::List
     }
 }
+

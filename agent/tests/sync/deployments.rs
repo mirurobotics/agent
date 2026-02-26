@@ -10,7 +10,7 @@ use miru_agent::models::{
     self,
     deployment::{DplActivity, DplErrStatus, DplTarget},
 };
-use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments};
+use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
 use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::errors::SyncErr;
 
@@ -32,6 +32,8 @@ struct Fixture {
     deployment_stor: Deployments,
     cfg_inst_stor: CfgInsts,
     cfg_inst_content_stor: CfgInstContent,
+    release_stor: Releases,
+    git_commit_stor: GitCommits,
     http_client: MockClient,
     staging_dir: Dir,
     target_dir: Dir,
@@ -52,10 +54,18 @@ impl Fixture {
             CfgInstContent::spawn(16, dir.subdir("cfg_inst_content"), 1000)
                 .await
                 .unwrap();
+        let (release_stor, _) = Releases::spawn(16, dir.file("releases.json"), 1000)
+            .await
+            .unwrap();
+        let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
+            .await
+            .unwrap();
         Self {
             deployment_stor,
             cfg_inst_stor,
             cfg_inst_content_stor,
+            release_stor,
+            git_commit_stor,
             http_client: MockClient::default(),
             staging_dir: dir.subdir("staging"),
             target_dir: dir.subdir("deployments"),
@@ -77,6 +87,8 @@ impl Fixture {
                     meta: &self.cfg_inst_stor,
                     content: &self.cfg_inst_content_stor,
                 },
+                releases: &self.release_stor,
+                git_commits: &self.git_commit_stor,
             },
             http_client: &self.http_client,
             opts: &opts,
@@ -140,6 +152,37 @@ mod pull_success {
         assert_cfg_inst_stored(&f.cfg_inst_stor, "cfg_inst_b").await;
         assert_cfg_inst_stored(&f.cfg_inst_stor, "cfg_inst_c").await;
         assert_cfg_inst_stored(&f.cfg_inst_stor, "cfg_inst_d").await;
+    }
+
+    #[tokio::test]
+    async fn stores_release_and_git_commit_from_expanded_deployment() {
+        let f = Fixture::new("sync_release_gc").await;
+        let dpl = make_deployment_with_release("dpl_1", &["cfg_inst_1"], "rel_1", Some("gc_1"));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        f.sync().await.unwrap();
+
+        assert_deployment_stored(&f.deployment_stor, "dpl_1").await;
+        assert_release_stored(&f.release_stor, "rel_1").await;
+        assert_git_commit_stored(&f.git_commit_stor, "gc_1").await;
+    }
+
+    #[tokio::test]
+    async fn stores_release_without_git_commit() {
+        let f = Fixture::new("sync_release_no_gc").await;
+        let dpl = make_deployment_with_release("dpl_1", &["cfg_inst_1"], "rel_2", None);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        f.sync().await.unwrap();
+
+        assert_deployment_stored(&f.deployment_stor, "dpl_1").await;
+        assert_release_stored(&f.release_stor, "rel_2").await;
+
+        // git commit should not be stored when release has no git_commit
+        let gc = f.git_commit_stor.values().await.unwrap();
+        assert!(gc.is_empty(), "no git commit should be stored");
     }
 
     #[tokio::test]
@@ -1212,5 +1255,42 @@ mod cross_phase {
             bodies[0].error_status,
             Some(BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING)
         );
+    }
+}
+
+mod idempotency {
+    use super::*;
+
+    #[tokio::test]
+    async fn double_sync_does_not_duplicate_stores() {
+        let f = Fixture::new("sync_idempotent").await;
+        let dpl = make_deployment_with_release("dpl_1", &["cfg_inst_1"], "rel_1", Some("gc_1"));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+        f.http_client
+            .set_get_config_instance_content(|_id| Ok("content".to_string()));
+
+        // first sync
+        f.sync().await.unwrap();
+        assert_deployment_stored(&f.deployment_stor, "dpl_1").await;
+        assert_cfg_inst_stored(&f.cfg_inst_stor, "cfg_inst_1").await;
+        assert_release_stored(&f.release_stor, "rel_1").await;
+        assert_git_commit_stored(&f.git_commit_stor, "gc_1").await;
+
+        // second sync — same data
+        f.sync().await.unwrap();
+
+        // exactly one entry per store (no duplicates)
+        let dpls = f.deployment_stor.values().await.unwrap();
+        assert_eq!(dpls.len(), 1, "deployments should not duplicate");
+
+        let cis = f.cfg_inst_stor.values().await.unwrap();
+        assert_eq!(cis.len(), 1, "config instances should not duplicate");
+
+        let rls = f.release_stor.values().await.unwrap();
+        assert_eq!(rls.len(), 1, "releases should not duplicate");
+
+        let gcs = f.git_commit_stor.values().await.unwrap();
+        assert_eq!(gcs.len(), 1, "git commits should not duplicate");
     }
 }

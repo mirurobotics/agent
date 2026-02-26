@@ -19,6 +19,9 @@ pub struct BaseRelease {
     /// The version of the release.
     #[serde(rename = "version")]
     pub version: String,
+    /// The ID of the git commit associated with this release.
+    #[serde(rename = "git_commit_id", deserialize_with = "Option::deserialize")]
+    pub git_commit_id: Option<String>,
     /// Timestamp of when the release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
@@ -28,23 +31,18 @@ pub struct BaseRelease {
 }
 
 impl BaseRelease {
-    pub fn new(
-        object: Object,
-        id: String,
-        version: String,
-        created_at: String,
-        updated_at: String,
-    ) -> BaseRelease {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String, updated_at: String) -> BaseRelease {
         BaseRelease {
             object,
             id,
             version,
+            git_commit_id,
             created_at,
             updated_at,
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "release")]
@@ -56,3 +54,4 @@ impl Default for Object {
         Self::Release
     }
 }
+

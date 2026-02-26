@@ -84,6 +84,20 @@ pub mod storage_layout {
     }
 
     #[test]
+    fn releases() {
+        let layout = Layout::default();
+        let file = layout.releases();
+        assert_eq!(file.to_string(), "/var/lib/miru/resources/releases.json");
+    }
+
+    #[test]
+    fn git_commits() {
+        let layout = Layout::default();
+        let file = layout.git_commits();
+        assert_eq!(file.to_string(), "/var/lib/miru/resources/git_commits.json");
+    }
+
+    #[test]
     fn customer_configs() {
         let layout = Layout::default();
         let dir = layout.customer_configs();

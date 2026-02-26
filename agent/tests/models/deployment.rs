@@ -4,6 +4,7 @@ use miru_agent::models::deployment::{
 };
 use miru_agent::models::Patch;
 use openapi_client::models as backend_client;
+use openapi_server::models as agent_server;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -60,6 +61,11 @@ impl ModelFixture for Deployment {
             OptionalField {
                 key: "created_at",
                 value: json!("2023-11-14T22:13:20Z"),
+                default_value: json!("1970-01-01T00:00:00Z"),
+            },
+            OptionalField {
+                key: "updated_at",
+                value: json!("2023-11-14T22:15:00Z"),
                 default_value: json!("1970-01-01T00:00:00Z"),
             },
             OptionalField {
@@ -156,6 +162,7 @@ fn defaults() {
         device_id,
         release_id,
         created_at: DateTime::<Utc>::UNIX_EPOCH,
+        updated_at: DateTime::<Utc>::UNIX_EPOCH,
         attempts: 0,
         cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         config_instance_ids: Vec::new(),
@@ -229,6 +236,33 @@ fn target_status_backend_conversions() {
             test_case.storage
         );
         assert_eq!(DplTarget::to_backend(&test_case.storage), test_case.backend);
+    }
+}
+
+#[test]
+fn target_status_sdk_conversions() {
+    struct TestCase {
+        storage: DplTarget,
+        sdk: agent_server::DeploymentTargetStatus,
+    }
+
+    let test_cases = vec![
+        TestCase {
+            storage: DplTarget::Staged,
+            sdk: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+        },
+        TestCase {
+            storage: DplTarget::Deployed,
+            sdk: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+        },
+        TestCase {
+            storage: DplTarget::Archived,
+            sdk: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+        },
+    ];
+
+    for test_case in test_cases {
+        assert_eq!(DplTarget::to_sdk(&test_case.storage), test_case.sdk);
     }
 }
 
@@ -320,6 +354,41 @@ fn activity_status_backend_conversions() {
     }
 }
 
+#[test]
+fn activity_status_sdk_conversions() {
+    struct TestCase {
+        storage: DplActivity,
+        sdk: agent_server::DeploymentActivityStatus,
+    }
+
+    let test_cases = vec![
+        TestCase {
+            storage: DplActivity::Drifted,
+            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
+        },
+        TestCase {
+            storage: DplActivity::Staged,
+            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+        },
+        TestCase {
+            storage: DplActivity::Queued,
+            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
+        },
+        TestCase {
+            storage: DplActivity::Deployed,
+            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+        },
+        TestCase {
+            storage: DplActivity::Archived,
+            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+        },
+    ];
+
+    for test_case in test_cases {
+        assert_eq!(DplActivity::to_sdk(&test_case.storage), test_case.sdk);
+    }
+}
+
 // ─── error status enum tests ──────────────────────────────────────────────
 impl StatusFixture for DplErrStatus {
     fn variants() -> Vec<Self> {
@@ -387,6 +456,33 @@ fn error_status_backend_conversions() {
             DplErrStatus::to_backend(&test_case.storage),
             test_case.backend
         );
+    }
+}
+
+#[test]
+fn error_status_sdk_conversions() {
+    struct TestCase {
+        storage: DplErrStatus,
+        sdk: agent_server::DeploymentErrorStatus,
+    }
+
+    let test_cases = vec![
+        TestCase {
+            storage: DplErrStatus::None,
+            sdk: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+        },
+        TestCase {
+            storage: DplErrStatus::Failed,
+            sdk: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
+        },
+        TestCase {
+            storage: DplErrStatus::Retrying,
+            sdk: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
+        },
+    ];
+
+    for test_case in test_cases {
+        assert_eq!(DplErrStatus::to_sdk(&test_case.storage), test_case.sdk);
     }
 }
 
@@ -489,6 +585,49 @@ fn status_backend_conversion() {
             test_case.storage
         );
         assert_eq!(DplStatus::to_backend(&test_case.storage), test_case.backend);
+    }
+}
+
+#[test]
+fn status_sdk_conversion() {
+    struct TestCase {
+        storage: DplStatus,
+        sdk: agent_server::DeploymentStatus,
+    }
+
+    let test_cases = vec![
+        TestCase {
+            storage: DplStatus::Drifted,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+        },
+        TestCase {
+            storage: DplStatus::Staged,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+        },
+        TestCase {
+            storage: DplStatus::Queued,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+        },
+        TestCase {
+            storage: DplStatus::Deployed,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+        },
+        TestCase {
+            storage: DplStatus::Archived,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+        },
+        TestCase {
+            storage: DplStatus::Failed,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+        },
+        TestCase {
+            storage: DplStatus::Retrying,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+        },
+    ];
+
+    for test_case in test_cases {
+        assert_eq!(DplStatus::to_sdk(&test_case.storage), test_case.sdk);
     }
 }
 
@@ -666,6 +805,7 @@ fn from_backend() {
         device_id: "device_123".to_string(),
         release_id: "rel_123".to_string(),
         created_at: now,
+        updated_at: now,
         attempts: 0,
         cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         config_instance_ids: vec!["cfg_1".to_string(), "cfg_2".to_string()],
@@ -694,4 +834,5 @@ fn from_backend_invalid_dates() {
 
     let deployment = Deployment::from_backend(backend_deployment, vec![]);
     assert_eq!(deployment.created_at, DateTime::<Utc>::UNIX_EPOCH);
+    assert_eq!(deployment.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }

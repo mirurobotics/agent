@@ -7,7 +7,7 @@ use crate::sync::errors::*;
 use crate::trace;
 use openapi_client::models::{
     self as backend_client, DeploymentActivityStatus as BackendActivityStatus,
-    DeploymentListExpansion, UpdateDeploymentRequest,
+    UpdateDeploymentRequest,
 };
 
 // external crates
@@ -21,7 +21,24 @@ pub struct SyncArgs<'a, HTTPClientT> {
     pub token: &'a str,
 }
 
-pub type Storage<'a> = apply::Storage<'a>;
+pub struct Storage<'a> {
+    pub deployments: &'a storage::Deployments,
+    pub cfg_insts: storage::CfgInstRef<'a>,
+    pub releases: &'a storage::Releases,
+    pub git_commits: &'a storage::GitCommits,
+}
+
+impl<'a> Storage<'a> {
+    pub fn apply_storage(&self) -> apply::Storage<'a> {
+        apply::Storage {
+            deployments: self.deployments,
+            cfg_insts: storage::CfgInstRef {
+                meta: self.cfg_insts.meta,
+                content: self.cfg_insts.content,
+            },
+        }
+    }
+}
 
 pub async fn sync<HTTPClientT: http::ClientI>(
     args: &SyncArgs<'_, HTTPClientT>,
@@ -74,24 +91,16 @@ async fn pull_deployments<'a, HTTPClientT: http::ClientI>(
         })?;
         let cfg_inst_ids = cfg_insts.iter().map(|inst| inst.id.clone()).collect();
 
+        store_expanded_release(storage, &backend_dpl).await?;
         store_deployment(storage.deployments, backend_dpl, cfg_inst_ids).await?;
 
         for backend_cfg_inst in &cfg_insts {
-            let existing = storage
-                .cfg_insts
-                .meta
-                .read_optional(backend_cfg_inst.id.clone())
-                .await?;
-            if existing.is_some() {
-                continue;
-            }
-
             let cfg_inst = models::ConfigInstance::from_backend(backend_cfg_inst.clone());
             let cfg_inst_id = cfg_inst.id.clone();
             storage
                 .cfg_insts
                 .meta
-                .write(cfg_inst_id, cfg_inst, |_, _| false, Overwrite::Allow)
+                .write_if_absent(cfg_inst_id, cfg_inst, |_, _| false)
                 .await?;
         }
     }
@@ -107,7 +116,7 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
     ];
-    let expansions = &[DeploymentListExpansion::DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES];
+    let expansions: &[&str] = &["config_instances", "release.git_commit"];
     http::with_retry(|| {
         http::deployments::list_all(
             http_client,
@@ -216,6 +225,42 @@ async fn store_deployment(
         .map_err(SyncErr::from)
 }
 
+/// Extracts and caches the expanded release and git_commit from a backend
+/// deployment before the deployment itself is stored (which only keeps the
+/// release_id reference).
+///
+/// Uses `write_if_absent` because releases and git_commits are immutable on the
+/// backend — once created, their fields never change. Skipping writes for
+/// already-cached entries avoids unnecessary I/O on every sync cycle.
+async fn store_expanded_release(
+    storage: &Storage<'_>,
+    backend_dpl: &backend_client::Deployment,
+) -> Result<(), SyncErr> {
+    let Some(backend_release) = backend_dpl.release.as_deref() else {
+        return Ok(());
+    };
+
+    let release = models::Release::from_backend(backend_release.clone());
+    let release_id = release.id.clone();
+    storage
+        .releases
+        .write_if_absent(release_id, release, |_, _| false)
+        .await?;
+
+    let Some(Some(backend_gc)) = &backend_release.git_commit else {
+        return Ok(());
+    };
+
+    let gc = models::GitCommit::from_backend(*backend_gc.clone());
+    let gc_id = gc.id.clone();
+    storage
+        .git_commits
+        .write_if_absent(gc_id, gc, |_, _| false)
+        .await?;
+
+    Ok(())
+}
+
 // Cached deployment entries are intentionally authoritative for all fields except
 // `target_status`, which is always taken from the backend payload.
 //
@@ -226,6 +271,7 @@ fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> m
     match cached {
         Some(cached) => models::Deployment {
             target_status: new.target_status,
+            updated_at: new.updated_at,
             ..cached
         },
         None => new,
@@ -239,7 +285,11 @@ async fn apply_deployments<'a>(
     errors: &mut Vec<SyncErr>,
 ) -> chrono::TimeDelta {
     debug!("applying deployments");
-    let apply_args = apply::Args { storage, opts };
+    let apply_stor = storage.apply_storage();
+    let apply_args = apply::Args {
+        storage: &apply_stor,
+        opts,
+    };
     let outcomes = match apply(&apply_args).await {
         Ok(v) => v,
         Err(e) => {

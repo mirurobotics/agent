@@ -237,13 +237,15 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         }
 
         let storage_ref = self.storage.as_ref();
-        let apply_storage = apply::Storage {
+        let sync_storage = deployments::Storage {
             deployments: storage_ref.deployments.as_ref(),
             cfg_insts: storage_ref.cfg_insts.as_ref(),
+            releases: storage_ref.releases.as_ref(),
+            git_commits: storage_ref.git_commits.as_ref(),
         };
         deployments::sync(&deployments::SyncArgs {
             http_client: self.http_client.as_ref(),
-            storage: &apply_storage,
+            storage: &sync_storage,
             opts: &self.deploy_opts,
             token: &token.token,
         })

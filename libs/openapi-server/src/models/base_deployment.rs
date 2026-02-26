@@ -30,7 +30,7 @@ pub struct BaseDeployment {
     /// ID of the device.
     #[serde(rename = "device_id")]
     pub device_id: String,
-    /// The version of the release.
+    /// ID of the release.
     #[serde(rename = "release_id")]
     pub release_id: String,
     /// Timestamp of when the device release was created.
@@ -42,19 +42,7 @@ pub struct BaseDeployment {
 }
 
 impl BaseDeployment {
-    pub fn new(
-        object: Object,
-        id: String,
-        description: String,
-        status: models::DeploymentStatus,
-        activity_status: models::DeploymentActivityStatus,
-        error_status: models::DeploymentErrorStatus,
-        target_status: models::DeploymentTargetStatus,
-        device_id: String,
-        release_id: String,
-        created_at: String,
-        updated_at: String,
-    ) -> BaseDeployment {
+    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String, updated_at: String) -> BaseDeployment {
         BaseDeployment {
             object,
             id,
@@ -70,7 +58,7 @@ impl BaseDeployment {
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "deployment")]
@@ -82,3 +70,4 @@ impl Default for Object {
         Self::Deployment
     }
 }
+

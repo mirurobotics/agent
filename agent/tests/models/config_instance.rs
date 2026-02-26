@@ -85,7 +85,6 @@ fn from_backend() {
         created_at: now.to_rfc3339(),
         config_schema_id: "schema_123".to_string(),
         config_type_id: "type_123".to_string(),
-        config_type: None,
         content: None,
     };
 
@@ -111,7 +110,6 @@ fn from_backend_invalid_date() {
         created_at: "not-a-date".to_string(),
         config_schema_id: "schema_789".to_string(),
         config_type_id: "type_789".to_string(),
-        config_type: None,
         content: None,
     };
 

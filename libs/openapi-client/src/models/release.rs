@@ -19,32 +19,33 @@ pub struct Release {
     /// The version of the release.
     #[serde(rename = "version")]
     pub version: String,
+    /// The ID of the git commit associated with this release.
+    #[serde(rename = "git_commit_id", deserialize_with = "Option::deserialize")]
+    pub git_commit_id: Option<String>,
     /// Timestamp of when the release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
     /// Timestamp of when the release was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
+    #[serde(rename = "git_commit", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<Option<Box<models::GitCommit>>>,
 }
 
 impl Release {
-    pub fn new(
-        object: Object,
-        id: String,
-        version: String,
-        created_at: String,
-        updated_at: String,
-    ) -> Release {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String, updated_at: String) -> Release {
         Release {
             object,
             id,
             version,
+            git_commit_id,
             created_at,
             updated_at,
+            git_commit: None,
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "release")]
@@ -56,3 +57,4 @@ impl Default for Object {
         Self::Release
     }
 }
+

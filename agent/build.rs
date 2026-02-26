@@ -2,11 +2,21 @@
 use std::process::Command;
 
 const GIT_COMMIT_HASH_KEY: &str = "MIRU_AGENT_GIT_COMMIT_HASH";
+const BUILD_DATE_KEY: &str = "MIRU_AGENT_BUILD_DATE";
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/");
+
+    // Set build date (UTC, date only)
+    let build_date = Command::new("date")
+        .args(["-u", "+%Y-%m-%d"])
+        .output()
+        .expect("Failed to execute date")
+        .stdout;
+    let build_date = String::from_utf8(build_date).expect("Invalid UTF-8 in date output");
+    println!("cargo:rustc-env={BUILD_DATE_KEY}={}", build_date.trim());
 
     // Get the latest git commit hash
     let commit_hash = Command::new("git")

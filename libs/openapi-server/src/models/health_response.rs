@@ -18,6 +18,9 @@ pub struct HealthResponse {
 
 impl HealthResponse {
     pub fn new(status: String) -> HealthResponse {
-        HealthResponse { status }
+        HealthResponse {
+            status,
+        }
     }
 }
+

@@ -1,6 +1,6 @@
-BACKEND_CLIENT_FILE:= specs/backend-client/v01.yaml
+BACKEND_CLIENT_FILE:= specs/backend-client/v02.yaml
 BACKEND_CLIENT_CODEGEN_DIR := codegen/backend-client
-AGENT_SERVER_FILE := specs/agent-server/v01.yaml
+AGENT_SERVER_FILE := specs/agent-server/v02.yaml
 AGENT_SERVER_CODEGEN_DIR := codegen/agent-server
 RUST_TEMPLATES_DIR := templates/rust
 

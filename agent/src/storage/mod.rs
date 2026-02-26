@@ -6,7 +6,9 @@ pub mod config_instances;
 pub mod deployments;
 pub mod device;
 pub mod errors;
+pub mod git_commits;
 pub mod layout;
+pub mod releases;
 pub mod settings;
 pub mod setup;
 
@@ -14,7 +16,9 @@ pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{assert_activated, Device};
 pub use self::errors::{DeviceNotActivatedErr, StorageErr};
+pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
+pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings};
 
 use self::device::Device as DeviceStorage;
@@ -29,14 +33,18 @@ pub struct Capacities {
     pub cfg_insts: usize,
     pub cfg_inst_content: usize,
     pub deployments: usize,
+    pub releases: usize,
+    pub git_commits: usize,
 }
 
 impl Default for Capacities {
     fn default() -> Self {
         Self {
-            cfg_insts: 100,
-            cfg_inst_content: 100,
+            cfg_insts: 1000,
+            cfg_inst_content: 1000,
             deployments: 100,
+            releases: 1000,
+            git_commits: 100,
         }
     }
 }
@@ -66,6 +74,8 @@ pub struct Storage {
     pub device: Arc<DeviceStorage>,
     pub cfg_insts: CfgInstStor,
     pub deployments: Arc<Deployments>,
+    pub releases: Arc<Releases>,
+    pub git_commits: Arc<GitCommits>,
 }
 
 impl Storage {
@@ -115,12 +125,24 @@ impl Storage {
             Deployments::spawn(64, layout.deployments(), capacities.deployments).await?;
         let deployments = Arc::new(deployment_stor);
 
+        // releases
+        let (release_stor, release_stor_handle) =
+            Releases::spawn(64, layout.releases(), capacities.releases).await?;
+        let releases = Arc::new(release_stor);
+
+        // git commits
+        let (git_commit_stor, git_commit_stor_handle) =
+            GitCommits::spawn(64, layout.git_commits(), capacities.git_commits).await?;
+        let git_commits = Arc::new(git_commit_stor);
+
         let shutdown_handle = async move {
             let handles = vec![
                 device_storage_handle,
                 cfg_inst_stor_handle,
                 cfg_inst_content_stor_handle,
                 deployment_stor_handle,
+                release_stor_handle,
+                git_commit_stor_handle,
             ];
 
             futures::future::join_all(handles).await;
@@ -134,6 +156,8 @@ impl Storage {
                     content: cfg_inst_content,
                 },
                 deployments,
+                releases,
+                git_commits,
             },
             shutdown_handle,
         ))
@@ -158,6 +182,8 @@ impl Storage {
         self.cfg_insts.meta.shutdown().await?;
         self.cfg_insts.content.shutdown().await?;
         self.deployments.shutdown().await?;
+        self.releases.shutdown().await?;
+        self.git_commits.shutdown().await?;
 
         Ok(())
     }

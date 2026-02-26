@@ -2,7 +2,7 @@
 use crate::sync::mock::MockSyncer;
 use miru_agent::trace;
 use miru_agent::{
-    services::device::sync,
+    services::device as dvc_svc,
     sync::{errors::*, syncer::State},
 };
 use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
@@ -30,7 +30,7 @@ pub mod errors {
             }))
         });
 
-        let resp = sync::sync_device(&syncer).await.unwrap();
+        let resp = dvc_svc::sync(&syncer).await.unwrap();
         let expected = SyncDeviceResponse {
             code: SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
             message: resp.message.clone(),
@@ -55,7 +55,7 @@ pub mod errors {
             }))
         });
 
-        let resp = sync::sync_device(&syncer).await.unwrap();
+        let resp = dvc_svc::sync(&syncer).await.unwrap();
         let expected = SyncDeviceResponse {
             code: SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
             message: resp.message.clone(),
@@ -80,7 +80,7 @@ pub mod errors {
             }))
         });
 
-        sync::sync_device(&syncer).await.unwrap_err();
+        dvc_svc::sync(&syncer).await.unwrap_err();
     }
 }
 
@@ -104,7 +104,7 @@ pub mod success {
         let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
-        let resp = sync::sync_device(&syncer).await.unwrap();
+        let resp = dvc_svc::sync(&syncer).await.unwrap();
 
         assert_eq!(resp, expected_response(&sync_state));
     }
@@ -121,7 +121,7 @@ pub mod success {
         };
         syncer.set_state(sync_state.clone());
 
-        let resp = sync::sync_device(&syncer).await.unwrap();
+        let resp = dvc_svc::sync(&syncer).await.unwrap();
 
         assert_eq!(resp, expected_response(&sync_state));
     }

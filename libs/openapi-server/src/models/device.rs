@@ -33,15 +33,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(
-        object: Object,
-        id: String,
-        name: String,
-        status: models::DeviceStatus,
-        last_synced_at: String,
-        last_connected_at: String,
-        last_disconnected_at: String,
-    ) -> Device {
+    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_synced_at: String, last_connected_at: String, last_disconnected_at: String) -> Device {
         Device {
             object,
             id,
@@ -53,7 +45,7 @@ impl Device {
         }
     }
 }
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "device")]
@@ -65,3 +57,4 @@ impl Default for Object {
         Self::Device
     }
 }
+

@@ -59,6 +59,14 @@ impl Layout {
         self.resources().file("deployments.json")
     }
 
+    pub fn releases(&self) -> File {
+        self.resources().file("releases.json")
+    }
+
+    pub fn git_commits(&self) -> File {
+        self.resources().file("git_commits.json")
+    }
+
     pub fn customer_configs(&self) -> Dir {
         self.filesystem_root
             .subdir("srv")

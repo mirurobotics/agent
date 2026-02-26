@@ -8,9 +8,11 @@ pub mod default_capacities {
     #[test]
     fn default() {
         let capacities = Capacities::default();
-        assert_eq!(capacities.cfg_insts, 100);
-        assert_eq!(capacities.cfg_inst_content, 100);
+        assert_eq!(capacities.cfg_insts, 1000);
+        assert_eq!(capacities.cfg_inst_content, 1000);
         assert_eq!(capacities.deployments, 100);
+        assert_eq!(capacities.releases, 1000);
+        assert_eq!(capacities.git_commits, 100);
     }
 }
 

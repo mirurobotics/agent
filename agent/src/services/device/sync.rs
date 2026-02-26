@@ -3,9 +3,7 @@ use crate::sync::{errors::*, syncer::SyncerExt};
 use crate::{errors::Error, services::errors::*};
 use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
 
-pub async fn sync_device<SyncerT: SyncerExt>(
-    syncer: &SyncerT,
-) -> Result<SyncDeviceResponse, ServiceErr> {
+pub async fn sync<SyncerT: SyncerExt>(syncer: &SyncerT) -> Result<SyncDeviceResponse, ServiceErr> {
     match syncer.sync().await {
         Ok(()) => {
             let sync_state = syncer.get_sync_state().await?;

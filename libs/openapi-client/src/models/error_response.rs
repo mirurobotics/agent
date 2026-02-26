@@ -22,3 +22,4 @@ impl ErrorResponse {
         }
     }
 }
+

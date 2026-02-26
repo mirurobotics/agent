@@ -30,3 +30,4 @@ impl ActivateDeviceRequest {
         }
     }
 }
+

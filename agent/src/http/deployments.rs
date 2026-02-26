@@ -5,22 +5,21 @@ use crate::http::query::{Page, QueryParams, MAX_PAGE_LIMIT};
 use crate::http::request;
 use crate::http::ClientI;
 use openapi_client::models::{
-    Deployment, DeploymentActivityStatus, DeploymentList, DeploymentListExpansion,
-    UpdateDeploymentRequest,
+    Deployment, DeploymentActivityStatus, DeploymentList, UpdateDeploymentRequest,
 };
 
 // ================================ PARAM STRUCTS ================================== //
 
 pub struct ListParams<'a> {
     pub activity_status: &'a [DeploymentActivityStatus],
-    pub expansions: &'a [DeploymentListExpansion],
+    pub expansions: &'a [&'a str],
     pub pagination: &'a Page,
     pub token: &'a str,
 }
 
 pub struct ListAllParams<'a> {
     pub activity_status: &'a [DeploymentActivityStatus],
-    pub expansions: &'a [DeploymentListExpansion],
+    pub expansions: &'a [&'a str],
     pub token: &'a str,
 }
 

@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::filesys::dir::Dir;
 use miru_agent::models::device::{Device, DeviceStatus};
-use miru_agent::services::device::get;
+use miru_agent::services::device as dvc_svc;
 use miru_agent::services::errors::*;
 use miru_agent::storage::{self, Layout};
 
@@ -22,7 +22,7 @@ pub mod errors {
                 .unwrap();
         device_file.shutdown().await.unwrap();
 
-        let result = get::get_device(&device_file).await;
+        let result = dvc_svc::get(&device_file).await;
         assert!(matches!(result, Err(ServiceErr::FileSysErr(_))));
     }
 }
@@ -42,7 +42,7 @@ pub mod success {
 
         layout.device().delete().await.unwrap();
 
-        let device = get::get_device(&device_file).await.unwrap();
+        let device = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(device, Device::default());
     }
 
@@ -56,7 +56,7 @@ pub mod success {
                 .await
                 .unwrap();
 
-        let result = get::get_device(&device_file).await.unwrap();
+        let result = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(result, Device::default());
     }
 
@@ -82,7 +82,7 @@ pub mod success {
                 .await
                 .unwrap();
 
-        let result = get::get_device(&device_file).await.unwrap();
+        let result = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(result, custom_device);
     }
 }

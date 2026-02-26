@@ -9,17 +9,18 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiGitCommit {
-    #[serde(rename = "197a9adec105d516879f656b83b3a85d3c5a25b6")]
+    #[serde(rename = "dirty-efdbdd66d318e9be84838e866838f15e9e0fe6c7")]
     API_GIT_COMMIT,
+
 }
 
 impl std::fmt::Display for ApiGitCommit {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_GIT_COMMIT => write!(f, "197a9adec105d516879f656b83b3a85d3c5a25b6"),
+            Self::API_GIT_COMMIT => write!(f, "dirty-efdbdd66d318e9be84838e866838f15e9e0fe6c7"),
         }
     }
 }
@@ -29,3 +30,4 @@ impl Default for ApiGitCommit {
         Self::API_GIT_COMMIT
     }
 }
+

@@ -9,11 +9,12 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum InstanceFormat {
     #[serde(rename = "json")]
     INSTANCE_FORMAT_JSON,
+
 }
 
 impl std::fmt::Display for InstanceFormat {
@@ -29,3 +30,4 @@ impl Default for InstanceFormat {
         Self::INSTANCE_FORMAT_JSON
     }
 }
+
