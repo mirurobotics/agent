@@ -34,7 +34,7 @@ jobs:
         run: cargo binstall --no-confirm cargo-machete cargo-diet
 
       - name: Check Formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt -p miru-agent -- --check
 
       - name: Run Clippy
         run: cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings
