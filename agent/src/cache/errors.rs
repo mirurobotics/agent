@@ -8,7 +8,14 @@ pub struct CacheElementNotFound {
     pub trace: Box<Trace>,
 }
 
-impl crate::errors::Error for CacheElementNotFound {}
+impl crate::errors::Error for CacheElementNotFound {
+    fn code(&self) -> crate::errors::Code {
+        crate::errors::Code::ResourceNotFound
+    }
+    fn http_status(&self) -> crate::errors::HTTPCode {
+        crate::errors::HTTPCode::NOT_FOUND
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("expected to find {expected_count} elements when filtering by '{filter_name}' but found {actual_count}")]

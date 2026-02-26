@@ -147,6 +147,16 @@ where
         Ok(())
     }
 
+    async fn write_if_absent<F>(&mut self, key: K, value: V, is_dirty: F) -> Result<(), CacheErr>
+    where
+        F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync,
+    {
+        if self.read_entry_optional(&key).await?.is_some() {
+            return Ok(());
+        }
+        self.write(key, value, is_dirty, Overwrite::Allow).await
+    }
+
     async fn delete(&mut self, key: &K) -> Result<(), CacheErr> {
         self.delete_entry_impl(key).await?;
         Ok(())

@@ -140,6 +140,20 @@ macro_rules! single_thread_cache_tests {
             }
         }
 
+        pub mod write_if_absent {
+            use super::*;
+
+            #[tokio::test]
+            async fn inserts_when_absent() {
+                $crate::cache::single_thread::write_if_absent::inserts_when_absent_impl($spawn_cache).await;
+            }
+
+            #[tokio::test]
+            async fn noop_when_present() {
+                $crate::cache::single_thread::write_if_absent::noop_when_present_impl($spawn_cache).await;
+            }
+        }
+
         pub mod delete {
             use super::*;
 
@@ -774,6 +788,57 @@ pub mod write {
                 .unwrap();
             assert_eq!(cache.size().await.unwrap(), 11);
         }
+    }
+}
+
+pub mod write_if_absent {
+    use super::*;
+
+    pub async fn inserts_when_absent_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    where
+        F: Fn() -> Fut + Clone,
+        Fut: Future<Output = SingleThreadCacheT>,
+        SingleThreadCacheT: SingleThreadCache<String, String>,
+    {
+        let mut cache = new_cache().await;
+        let key = "key1".to_string();
+        let value = "value1".to_string();
+        cache
+            .write_if_absent(key.clone(), value.clone(), |_, _| false)
+            .await
+            .unwrap();
+
+        let entries = cache.entry_map().await.unwrap();
+        let entry = entries.get(&key).unwrap();
+        assert_eq!(entry.value, value);
+    }
+
+    pub async fn noop_when_present_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    where
+        F: Fn() -> Fut + Clone,
+        Fut: Future<Output = SingleThreadCacheT>,
+        SingleThreadCacheT: SingleThreadCache<String, String>,
+    {
+        let mut cache = new_cache().await;
+        let key = "key1".to_string();
+        cache
+            .write(
+                key.clone(),
+                "original".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        cache
+            .write_if_absent(key.clone(), "replacement".to_string(), |_, _| false)
+            .await
+            .unwrap();
+
+        let entries = cache.entry_map().await.unwrap();
+        let entry = entries.get(&key).unwrap();
+        assert_eq!(entry.value, "original");
     }
 }
 

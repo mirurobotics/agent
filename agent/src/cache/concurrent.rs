@@ -63,6 +63,12 @@ where
         overwrite: Overwrite,
         respond_to: oneshot::Sender<Result<(), CacheErr>>,
     },
+    WriteIfAbsent {
+        key: K,
+        value: V,
+        is_dirty: IsDirty<K, V>,
+        respond_to: oneshot::Sender<Result<(), CacheErr>>,
+    },
     Delete {
         key: K,
         respond_to: oneshot::Sender<Result<(), CacheErr>>,
@@ -178,6 +184,17 @@ where
                     let result = self.cache.write(key, value, is_dirty, overwrite).await;
                     if respond_to.send(result).is_err() {
                         error!("Actor failed to write cache entry");
+                    }
+                }
+                WorkerCommand::WriteIfAbsent {
+                    key,
+                    value,
+                    is_dirty,
+                    respond_to,
+                } => {
+                    let result = self.cache.write_if_absent(key, value, is_dirty).await;
+                    if respond_to.send(result).is_err() {
+                        error!("Actor failed to write_if_absent cache entry");
                     }
                 }
                 WorkerCommand::Delete { key, respond_to } => {
@@ -394,6 +411,19 @@ where
             value,
             is_dirty: Box::new(is_dirty),
             overwrite,
+            respond_to: tx,
+        })
+        .await?
+    }
+
+    pub async fn write_if_absent<F>(&self, key: K, value: V, is_dirty: F) -> Result<(), CacheErr>
+    where
+        F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync + 'static,
+    {
+        self.send_command(|tx| WorkerCommand::WriteIfAbsent {
+            key,
+            value,
+            is_dirty: Box::new(is_dirty),
             respond_to: tx,
         })
         .await?
