@@ -277,11 +277,7 @@ async fn handle_sync_event<SyncerT: SyncerExt>(publish: &Publish, syncer: &Synce
     }
 }
 
-async fn handle_ping_event<ClientT: ClientI>(
-    publish: &Publish,
-    client: &ClientT,
-    device_id: &str,
-) {
+async fn handle_ping_event<ClientT: ClientI>(publish: &Publish, client: &ClientT, device_id: &str) {
     let message_id = match serde_json::from_slice::<Ping>(&publish.payload) {
         Ok(ping) => {
             info!(
