@@ -2,22 +2,19 @@ openapi: 3.0.3
 info:
   title: Miru Backend-Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.1.0-next
+  version: v0.2.0-beta.3
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   x-git-commit:
-    sha: efdbdd66d318e9be84838e866838f15e9e0fe6c7
-    url: https://github.com/mirurobotics/openapi/commit/efdbdd66d318e9be84838e866838f15e9e0fe6c7
-    message: 'feat(release): migrate contract-revision versioning to API semver
-
-
-      Co-authored-by: Cursor <cursoragent@cursor.com>'
+    sha: 906c0503b2ff19a7c018288356f89b2881374061
+    url: https://github.com/mirurobotics/openapi/commit/906c0503b2ff19a7c018288356f89b2881374061
+    message: 'chore: add agent-backend lint ignore rule to distributed openapi files'
     author: Benjamin Smidt
-    branch: main
-    dirty: true
+    branch: HEAD
+    dirty: false
   x-build:
-    built_at: '2026-02-25T21:10:40.346874+00:00'
+    built_at: '2026-02-27T18:51:17.484872+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/{audience}/{version}
   description: Staging
@@ -56,6 +53,8 @@ security:
 - ClerkAuth: []
 paths:
   /version:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
       - Version
@@ -70,6 +69,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Version'
   /config_instances/{config_instance_id}/content:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
       - Config Instances
@@ -101,6 +102,8 @@ paths:
                 format: binary
                 description: The raw config instance content.
   /deployments:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
       - Deployments
@@ -119,6 +122,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/DeploymentList'
   /deployments/{deployment_id}:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     patch:
       tags:
       - Deployments
@@ -141,6 +146,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Deployment'
   /devices/{device_id}:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     patch:
       tags:
       - Devices
@@ -162,6 +169,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Device'
   /devices/{device_id}/activate:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     post:
       tags:
       - Devices
@@ -182,6 +191,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Device'
   /devices/{device_id}/issue_token:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     post:
       tags:
       - Devices
@@ -202,6 +213,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
   /cmd/devices/{device_id}/sync:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
       - MQTT
@@ -222,6 +235,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/SyncDevice'
   /cmd/devices/{device_id}/ping:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
       - MQTT
@@ -242,6 +257,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ping'
   /resp/devices/{device_id}/pong:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
       - MQTT
@@ -271,14 +288,14 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.1.0-next
+      - v0.2.0-beta.3
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - dirty-efdbdd66d318e9be84838e866838f15e9e0fe6c7
+      - 906c0503b2ff19a7c018288356f89b2881374061
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -624,7 +641,7 @@ components:
           example: git_commit_123
         sha:
           type: string
-          example: '1234567890'
+          example: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
         message:
           type: string
           example: Add basic motion configurations
@@ -641,7 +658,7 @@ components:
           example: https://github.com/user/repo
         commit_url:
           type: string
-          example: https://github.com/user/repo/commit/1234567890
+          example: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
         created_at:
           type: string
           format: date-time
@@ -804,6 +821,20 @@ components:
         error_status:
           allOf:
           - $ref: '#/components/schemas/DeploymentErrorStatus'
+        deployed_at:
+          type: string
+          format: date-time
+          description: >-
+            Independent historical watermark recording the last time the agent
+            transitioned this deployment to Deployed. The current state is determined by
+            activity_status, not by which timestamp is present. Set by the agent.
+        archived_at:
+          type: string
+          format: date-time
+          description: >-
+            Independent historical watermark recording the last time the agent
+            transitioned this deployment to Archived. The current state is determined by
+            activity_status, not by which timestamp is present. Set by the agent.
     UpdateDeviceFromAgentRequest:
       title: Update Device From Agent Request
       type: object
@@ -1026,6 +1057,13 @@ components:
           type: string
           example: This is a message for a user
   parameters:
+    MiruVersion:
+      name: Miru-Version
+      in: header
+      required: true
+      schema:
+        type: string
+      description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id
       in: path

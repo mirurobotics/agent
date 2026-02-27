@@ -15,6 +15,12 @@ pub struct UpdateDeploymentRequest {
     pub activity_status: Option<models::DeploymentActivityStatus>,
     #[serde(rename = "error_status", skip_serializing_if = "Option::is_none")]
     pub error_status: Option<models::DeploymentErrorStatus>,
+    /// Timestamp of when the deployment was deployed. Set by the agent.
+    #[serde(rename = "deployed_at", skip_serializing_if = "Option::is_none")]
+    pub deployed_at: Option<String>,
+    /// Timestamp of when the deployment was archived. Set by the agent.
+    #[serde(rename = "archived_at", skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
 }
 
 impl UpdateDeploymentRequest {
@@ -22,6 +28,8 @@ impl UpdateDeploymentRequest {
         UpdateDeploymentRequest {
             activity_status: None,
             error_status: None,
+            deployed_at: None,
+            archived_at: None,
         }
     }
 }
