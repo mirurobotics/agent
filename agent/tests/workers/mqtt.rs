@@ -1,19 +1,16 @@
 // internal crates
-use miru_agent::authn::token::Token;
-use miru_agent::filesys::dir::Dir;
-use miru_agent::models::device::{Device, DeviceStatus};
-use miru_agent::mqtt::{
-    client::MQTTClient,
-    device::{Ping, SyncDevice},
-    errors::*,
-    options::Options,
-    topics,
-};
+use miru_agent::authn::Token;
+use miru_agent::filesys;
+use miru_agent::models::{Device, DeviceStatus};
+use miru_agent::mqtt::client::Client;
+use miru_agent::mqtt::device::{Ping, SyncDevice};
+use miru_agent::mqtt::errors::MockErr;
+use miru_agent::mqtt::options::Options;
+use miru_agent::mqtt::{topics, MQTTError};
 use miru_agent::storage::{self, Layout};
-use miru_agent::sync::{
-    errors::{MockErr as SyncMockErr, SyncErr},
-    syncer::{CooldownEnd, SyncEvent, SyncFailure},
-};
+use miru_agent::sync::errors::MockErr as SyncMockErr;
+use miru_agent::sync::syncer::{CooldownEnd, SyncEvent, SyncFailure};
+use miru_agent::sync::SyncErr;
 use miru_agent::workers::mqtt::{self, handle_error, handle_event, handle_syncer_event};
 
 use crate::authn::mock::MockTokenManager;
@@ -62,7 +59,7 @@ pub mod handle_connection_events {
 
     #[tokio::test]
     async fn unsuccessful_connack_event_is_ignored() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -85,7 +82,7 @@ pub mod handle_connection_events {
 
     #[tokio::test]
     async fn successful_connack_event() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) = storage::Device::spawn_with_default(
@@ -119,7 +116,7 @@ pub mod handle_connection_events {
 
     #[tokio::test]
     async fn disconnect_event() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) = storage::Device::spawn_with_default(
@@ -154,7 +151,7 @@ pub mod handle_sync_events {
 
     #[tokio::test]
     async fn sync_request_unserializable() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device::default();
@@ -179,7 +176,7 @@ pub mod handle_sync_events {
 
     #[tokio::test]
     async fn sync_request_is_synced() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device::default();
@@ -206,7 +203,7 @@ pub mod handle_sync_events {
 
     #[tokio::test]
     async fn sync_request_is_not_synced() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device::default();
@@ -233,7 +230,7 @@ pub mod handle_sync_events {
 
     #[tokio::test]
     async fn sync_error() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device::default();
@@ -269,7 +266,7 @@ pub mod handle_ping_events {
 
     #[tokio::test]
     async fn ping_request_unserializable() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device::default();
@@ -297,7 +294,7 @@ pub mod handle_ping_events {
 
     #[tokio::test]
     async fn pong_success() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device::default();
@@ -334,7 +331,7 @@ pub mod handle_mqtt_error {
 
     #[tokio::test]
     async fn authentication_error_triggers_token_refresh() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device {
@@ -359,7 +356,7 @@ pub mod handle_mqtt_error {
         });
 
         let options = Options::default();
-        let (client, eventloop) = MQTTClient::new(&options).await;
+        let (client, eventloop) = Client::new(&options).await;
         let created_at = client.created_at;
 
         let before_patch = Utc::now();
@@ -393,7 +390,7 @@ pub mod handle_mqtt_error {
 
     #[tokio::test]
     async fn other_errors_are_ignored() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device {
@@ -418,7 +415,7 @@ pub mod handle_mqtt_error {
         });
 
         let options = Options::default();
-        let (client, eventloop) = MQTTClient::new(&options).await;
+        let (client, eventloop) = Client::new(&options).await;
         let created_at = client.created_at;
 
         let before_patch = Utc::now();

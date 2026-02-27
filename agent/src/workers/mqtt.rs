@@ -5,20 +5,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal modules
-use crate::authn::{token::Token, token_mngr::TokenManagerExt};
+use crate::authn;
+use crate::authn::TokenManagerExt;
 use crate::cooldown;
 use crate::errors::*;
-use crate::models::device::{self, Device, DeviceStatus};
+use crate::models;
+use crate::models::device;
 use crate::mqtt;
 use crate::mqtt::{
-    client::{poll, ClientI, MQTTClient},
+    client::{poll, ClientI},
     device::{Ping, SyncDevice},
     errors::*,
     options::{ConnectAddress, Credentials, Options as MqttOptions},
     topics,
 };
 use crate::storage;
-use crate::sync::syncer::{SyncEvent, SyncerExt};
+use crate::sync::syncer::SyncEvent;
+use crate::sync::SyncerExt;
 
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};
@@ -93,7 +96,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
     let device = device_stor
         .read()
         .await
-        .unwrap_or_else(|_| Arc::new(device::Device::default()));
+        .unwrap_or_else(|_| Arc::new(models::Device::default()));
 
     // create the mqtt client
     let (mqtt_client, eventloop) = init_client(
@@ -160,11 +163,11 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
     device_session_id: &str,
     token_mngr: &TokenManagerT,
     broker_address: ConnectAddress,
-) -> (MQTTClient, EventLoop) {
+) -> (mqtt::Client, EventLoop) {
     // update the mqtt password
     let token = match token_mngr.get_token().await {
         Ok(token) => token.token.clone(),
-        Err(_) => Token::default().token,
+        Err(_) => authn::Token::default().token,
     };
 
     // initialize the mqtt client
@@ -175,7 +178,7 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
     let options = MqttOptions::new(credentials)
         .with_connect_address(broker_address)
         .with_client_id(device_id.to_string());
-    let (mqtt_client, eventloop) = MQTTClient::new(&options).await;
+    let (mqtt_client, eventloop) = mqtt::Client::new(&options).await;
 
     // subscribe to device synchronization updates
     if let Err(e) = mqtt::device::subscribe_sync(&mqtt_client, device_id).await {
@@ -188,10 +191,10 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
     (mqtt_client, eventloop)
 }
 
-pub async fn handle_syncer_event<MQTTClientT: ClientI>(
+pub async fn handle_syncer_event<ClientT: ClientI>(
     event: &SyncEvent,
     device_id: &str,
-    mqtt_client: &MQTTClientT,
+    mqtt_client: &ClientT,
 ) {
     if !matches!(event, SyncEvent::SyncSuccess) {
         return;
@@ -211,9 +214,9 @@ pub async fn handle_syncer_event<MQTTClientT: ClientI>(
 
 type ErrStreak = u32;
 
-pub async fn handle_event<MQTTClientT: ClientI, SyncerT: SyncerExt>(
+pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
     event: &Event,
-    mqtt_client: &MQTTClientT,
+    mqtt_client: &ClientT,
     syncer: &SyncerT,
     device_id: &str,
     device_stor: &storage::Device,
@@ -274,9 +277,9 @@ async fn handle_sync_event<SyncerT: SyncerExt>(publish: &Publish, syncer: &Synce
     }
 }
 
-async fn handle_ping_event<MQTTClientT: ClientI>(
+async fn handle_ping_event<ClientT: ClientI>(
     publish: &Publish,
-    client: &MQTTClientT,
+    client: &ClientT,
     device_id: &str,
 ) {
     let message_id = match serde_json::from_slice::<Ping>(&publish.payload) {
@@ -300,7 +303,7 @@ async fn handle_ping_event<MQTTClientT: ClientI>(
 }
 
 pub struct State {
-    pub client: MQTTClient,
+    pub client: mqtt::Client,
     pub eventloop: EventLoop,
     pub err_streak: ErrStreak,
 }
@@ -308,7 +311,7 @@ pub struct State {
 pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     mut state: State,
     e: MQTTError,
-    device: &Device,
+    device: &models::Device,
     token_mngr: &TokenManagerT,
     broker_address: &ConnectAddress,
     device_stor: &storage::Device,
@@ -323,7 +326,7 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     // update the device to be offline
     match device_stor.read().await {
         Ok(device) => {
-            if device.status == DeviceStatus::Online {
+            if device.status == models::DeviceStatus::Online {
                 let _ = device_stor.patch(device::Updates::disconnected()).await;
             }
         }

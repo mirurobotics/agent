@@ -1,4 +1,4 @@
-use crate::cache::file::FileCache;
-use crate::models::git_commit::{GitCommit, GitCommitID};
+use crate::cache;
+use crate::models;
 
-pub type GitCommits = FileCache<GitCommitID, GitCommit>;
+pub type GitCommits = cache::FileCache<models::GitCommitID, models::GitCommit>;

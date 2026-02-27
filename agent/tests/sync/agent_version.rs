@@ -1,7 +1,7 @@
 // internal crates
-use miru_agent::filesys::dir::Dir;
+use miru_agent::filesys;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
-use miru_agent::models::device::Device;
+use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout};
 use miru_agent::sync::agent_version::push;
 
@@ -12,7 +12,7 @@ pub mod push {
 
     #[tokio::test]
     async fn same_version() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let agent_version = Device::default().agent_version;
@@ -40,7 +40,7 @@ pub mod push {
 
     #[tokio::test]
     async fn different_version() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let old_agent_version = Device::default().agent_version;
@@ -74,7 +74,7 @@ pub mod push {
 
     #[tokio::test]
     async fn http_update_failure() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let old_agent_version = Device::default().agent_version;

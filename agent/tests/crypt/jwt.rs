@@ -1,8 +1,5 @@
 // internal crates
-use miru_agent::crypt::base64;
-use miru_agent::crypt::errors::CryptErr;
-use miru_agent::crypt::jwt;
-use miru_agent::crypt::jwt::Claims;
+use miru_agent::crypt::{base64, jwt, jwt::Claims, CryptErr};
 
 // external crates
 use chrono::Utc;

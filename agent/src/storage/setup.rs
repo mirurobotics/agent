@@ -2,17 +2,17 @@
 use super::errors::*;
 use super::layout::Layout;
 use super::settings::Settings;
-use crate::authn::token::Token;
-use crate::filesys::file::File;
+use crate::authn;
+use crate::filesys;
 use crate::filesys::{Overwrite, WriteOptions};
-use crate::models::device::Device;
+use crate::models;
 
 pub async fn bootstrap(
     layout: &Layout,
-    device: &Device,
+    device: &models::Device,
     settings: &Settings,
-    private_key_file: &File,
-    public_key_file: &File,
+    private_key_file: &filesys::File,
+    public_key_file: &filesys::File,
 ) -> Result<(), StorageErr> {
     // overwrite the device file
     let device_file = layout.device();
@@ -31,7 +31,7 @@ pub async fn bootstrap(
     auth_dir.root.create_if_absent().await?;
 
     // overwrite the auth file
-    let token = Token::default();
+    let token = authn::Token::default();
     let auth_file = auth_dir.token();
     auth_file
         .write_json(&token, WriteOptions::OVERWRITE_ATOMIC)

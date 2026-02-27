@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 // internal crates
-use crate::authn::token_mngr::TokenManagerExt;
+use crate::authn::TokenManagerExt;
 use crate::cooldown;
 use crate::errors::*;
 

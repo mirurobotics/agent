@@ -1,8 +1,8 @@
-use crate::authn::errors::AuthnErr;
-use crate::crypt::errors::CryptErr;
+use crate::authn;
+use crate::crypt;
 use crate::errors::Trace;
-use crate::filesys::errors::FileSysErr;
-use crate::http::errors::HTTPErr;
+use crate::filesys;
+use crate::http;
 use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
@@ -19,37 +19,37 @@ pub enum InstallErr {
     #[error(transparent)]
     MissingEnvVarErr(MissingEnvVarErr),
     #[error(transparent)]
-    AuthnErr(AuthnErr),
+    AuthnErr(authn::AuthnErr),
     #[error(transparent)]
-    CryptErr(CryptErr),
+    CryptErr(crypt::CryptErr),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
-    HTTPErr(HTTPErr),
+    HTTPErr(http::HTTPErr),
     #[error(transparent)]
     StorageErr(StorageErr),
 }
 
-impl From<AuthnErr> for InstallErr {
-    fn from(e: AuthnErr) -> Self {
+impl From<authn::AuthnErr> for InstallErr {
+    fn from(e: authn::AuthnErr) -> Self {
         Self::AuthnErr(e)
     }
 }
 
-impl From<CryptErr> for InstallErr {
-    fn from(e: CryptErr) -> Self {
+impl From<crypt::CryptErr> for InstallErr {
+    fn from(e: crypt::CryptErr) -> Self {
         Self::CryptErr(e)
     }
 }
 
-impl From<FileSysErr> for InstallErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for InstallErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-impl From<HTTPErr> for InstallErr {
-    fn from(e: HTTPErr) -> Self {
+impl From<http::HTTPErr> for InstallErr {
+    fn from(e: http::HTTPErr) -> Self {
         Self::HTTPErr(e)
     }
 }
@@ -78,18 +78,19 @@ mod tests {
 
         #[test]
         fn from_authn_err() {
-            let err =
-                AuthnErr::TimestampConversionErr(crate::authn::errors::TimestampConversionErr {
+            let err = authn::AuthnErr::TimestampConversionErr(
+                crate::authn::errors::TimestampConversionErr {
                     msg: "test".to_string(),
                     trace: crate::trace!(),
-                });
+                },
+            );
             let install_err = InstallErr::from(err);
             assert!(matches!(install_err, InstallErr::AuthnErr(_)));
         }
 
         #[test]
         fn from_crypt_err() {
-            let err = CryptErr::InvalidJWTErr(crate::crypt::errors::InvalidJWTErr {
+            let err = crypt::CryptErr::InvalidJWTErr(crate::crypt::errors::InvalidJWTErr {
                 msg: "test".to_string(),
                 trace: crate::trace!(),
             });
@@ -99,17 +100,18 @@ mod tests {
 
         #[test]
         fn from_filesys_err() {
-            let err = FileSysErr::InvalidDirNameErr(crate::filesys::errors::InvalidDirNameErr {
-                name: "test".to_string(),
-                trace: crate::trace!(),
-            });
+            let err =
+                filesys::FileSysErr::InvalidDirNameErr(crate::filesys::errors::InvalidDirNameErr {
+                    name: "test".to_string(),
+                    trace: crate::trace!(),
+                });
             let install_err = InstallErr::from(err);
             assert!(matches!(install_err, InstallErr::FileSysErr(_)));
         }
 
         #[test]
         fn from_http_err() {
-            let err = HTTPErr::MockErr(crate::http::errors::MockErr {
+            let err = http::HTTPErr::MockErr(crate::http::errors::MockErr {
                 is_network_conn_err: false,
             });
             let install_err = InstallErr::from(err);

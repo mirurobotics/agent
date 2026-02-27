@@ -2,8 +2,9 @@
 use std::collections::HashSet;
 
 // internal crates
-use miru_agent::models::device::{Device, DeviceStatus, Updates};
+use miru_agent::models::device::Updates;
 use miru_agent::models::Patch;
+use miru_agent::models::{Device, DeviceStatus};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};

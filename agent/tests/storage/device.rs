@@ -1,6 +1,6 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, WriteOptions};
-use miru_agent::models::device::Device;
+use miru_agent::filesys::{self, WriteOptions};
+use miru_agent::models::Device;
 use miru_agent::storage::{assert_activated, StorageErr};
 
 pub mod assert_activated {
@@ -8,7 +8,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn file_does_not_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let device_file = dir.file("device.json");
 
         let result = assert_activated(&device_file).await.unwrap_err();
@@ -17,7 +17,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn invalid_file_contents() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let device_file = dir.file("device.json");
         device_file
             .write_string("not a valid device", WriteOptions::OVERWRITE_ATOMIC)
@@ -30,7 +30,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn device_not_activated() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let device_file = dir.file("device.json");
         let device = Device {
             activated: false,
@@ -47,7 +47,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn device_activated() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let device_file = dir.file("device.json");
         let device = Device {
             activated: true,

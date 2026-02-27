@@ -5,10 +5,8 @@ use std::time::Duration;
 // internal crates
 use crate::http::mock;
 use miru_agent::errors::Error;
-use miru_agent::http;
-use miru_agent::http::errors::HTTPErr;
 use miru_agent::http::request::Params;
-use miru_agent::http::ClientI;
+use miru_agent::http::{self, ClientI, HTTPErr};
 
 // external crates
 use axum::routing::{get, post};

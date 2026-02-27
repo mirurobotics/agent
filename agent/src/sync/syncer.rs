@@ -3,14 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
+use super::errors::*;
+use super::{agent_version, deployments};
+use crate::authn;
+use crate::authn::TokenManagerExt;
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::errors::*;
 use crate::http;
 use crate::storage;
-use crate::sync::errors::*;
-use crate::sync::{agent_version, deployments};
 use crate::trace;
 
 // external crates
@@ -77,7 +78,7 @@ impl State {
 pub struct SingleThreadSyncer<HTTPClientT> {
     http_client: Arc<HTTPClientT>,
     storage: Arc<storage::Storage>,
-    token_mngr: Arc<TokenManager>,
+    token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     agent_version: String,
 
@@ -91,7 +92,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
 }
 
 impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
-    pub fn new(args: SyncerArgs<HTTPClientT, TokenManager>) -> Self {
+    pub fn new(args: SyncerArgs<HTTPClientT, authn::TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
             storage: args.storage,
@@ -360,7 +361,7 @@ pub struct Syncer {
 impl Syncer {
     pub fn spawn(
         buffer_size: usize,
-        args: SyncerArgs<http::Client, TokenManager>,
+        args: SyncerArgs<http::Client, authn::TokenManager>,
     ) -> Result<(Self, JoinHandle<()>), SyncErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {

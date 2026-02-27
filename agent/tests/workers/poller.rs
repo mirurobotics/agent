@@ -2,13 +2,12 @@
 use std::sync::Arc;
 
 // internal crates
-use miru_agent::filesys::dir::Dir;
-use miru_agent::models::device::Device;
+use miru_agent::filesys;
+use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout};
-use miru_agent::sync::{
-    errors::{MockErr as SyncMockErr, SyncErr},
-    syncer::{CooldownEnd, State, SyncEvent, SyncFailure},
-};
+use miru_agent::sync::errors::MockErr as SyncMockErr;
+use miru_agent::sync::syncer::{CooldownEnd, State, SyncEvent, SyncFailure};
+use miru_agent::sync::SyncErr;
 use miru_agent::workers::poller;
 
 use crate::mock::SleepController;
@@ -22,7 +21,7 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_not_in_cooldown() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -105,7 +104,7 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_in_cooldown() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -189,7 +188,7 @@ pub mod run {
 
     #[tokio::test]
     async fn ignored_syncer_events() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -251,7 +250,7 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_cooldown_end_from_sync_failure_event() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =

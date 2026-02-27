@@ -1,6 +1,6 @@
-use crate::cache::errors::CacheErr;
-use crate::filesys::errors::FileSysErr;
-use crate::models::deployment::DplTarget;
+use crate::cache;
+use crate::filesys;
+use crate::models;
 use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
@@ -17,7 +17,7 @@ impl crate::errors::Error for EmptyConfigInstancesErr {}
 )]
 pub struct InvalidDeploymentTargetErr {
     pub deployment_id: String,
-    pub target_status: DplTarget,
+    pub target_status: models::DplTarget,
 }
 
 impl crate::errors::Error for InvalidDeploymentTargetErr {}
@@ -39,21 +39,21 @@ pub enum DeployErr {
     #[error(transparent)]
     InvalidDeploymentTarget(InvalidDeploymentTargetErr),
     #[error(transparent)]
-    CacheErr(CacheErr),
+    CacheErr(cache::CacheErr),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
     StorageErr(StorageErr),
 }
 
-impl From<CacheErr> for DeployErr {
-    fn from(e: CacheErr) -> Self {
+impl From<cache::CacheErr> for DeployErr {
+    fn from(e: cache::CacheErr) -> Self {
         Self::CacheErr(e)
     }
 }
 
-impl From<FileSysErr> for DeployErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for DeployErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }

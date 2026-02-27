@@ -4,6 +4,11 @@ pub mod errors;
 pub mod file;
 pub mod path;
 
+pub use self::dir::Dir;
+pub use self::errors::FileSysErr;
+pub use self::file::File;
+pub use self::path::PathExt;
+
 /// Whether an operation is allowed to overwrite an existing file or directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Overwrite {

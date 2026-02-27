@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, errors::FileSysErr, path::PathExt, Overwrite, WriteOptions};
+use miru_agent::filesys::{self, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 // external crates
 use std::{env, path::PathBuf};
@@ -11,13 +11,13 @@ pub mod display {
 
     #[test]
     fn absolute_path() {
-        let dir = Dir::new(PathBuf::from("/tmp").join("test-dir"));
+        let dir = filesys::Dir::new(PathBuf::from("/tmp").join("test-dir"));
         assert_eq!(dir.path(), &PathBuf::from("/tmp").join("test-dir"));
     }
 
     #[test]
     fn relative_path() {
-        let dir = Dir::new(PathBuf::from("relative").join("dir"));
+        let dir = filesys::Dir::new(PathBuf::from("relative").join("dir"));
         assert_eq!(dir.path(), &PathBuf::from("relative").join("dir"));
     }
 }
@@ -27,13 +27,13 @@ pub mod assert_exists {
 
     #[tokio::test]
     async fn success() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         dir.assert_exists().unwrap();
     }
 
     #[test]
     fn failure() {
-        let dir = Dir::new(PathBuf::from("nonexistent").join("path"));
+        let dir = filesys::Dir::new(PathBuf::from("nonexistent").join("path"));
         assert!(matches!(
             dir.assert_exists().unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
@@ -46,13 +46,13 @@ pub mod assert_doesnt_exist {
 
     #[test]
     fn success() {
-        let dir = Dir::new(PathBuf::from("nonexistent").join("path"));
+        let dir = filesys::Dir::new(PathBuf::from("nonexistent").join("path"));
         dir.assert_doesnt_exist().unwrap();
     }
 
     #[tokio::test]
     async fn failure() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert!(matches!(
             dir.assert_doesnt_exist().unwrap_err(),
             FileSysErr::PathExistsErr { .. }
@@ -65,7 +65,7 @@ pub mod delete {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert!(dir.exists());
         dir.delete().await.unwrap();
         assert!(!dir.exists());
@@ -73,7 +73,7 @@ pub mod delete {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = Dir::new(PathBuf::from("doesnt_exist"));
+        let dir = filesys::Dir::new(PathBuf::from("doesnt_exist"));
         assert!(!dir.exists());
         dir.delete().await.unwrap();
         assert!(!dir.exists());
@@ -85,7 +85,7 @@ pub mod new_home_dir {
 
     #[test]
     fn success() {
-        let dir = Dir::new_home_dir().unwrap();
+        let dir = filesys::Dir::new_home_dir().unwrap();
         assert!(dir.exists());
         assert!(dir.path().to_str().unwrap().contains("home"));
     }
@@ -96,7 +96,7 @@ pub mod new_current_dir {
 
     #[test]
     fn success() {
-        let dir = Dir::new_current_dir().unwrap();
+        let dir = filesys::Dir::new_current_dir().unwrap();
         assert!(dir.exists());
         assert_eq!(dir.path(), &env::current_dir().unwrap());
     }
@@ -107,7 +107,7 @@ pub mod create_temp_dir {
 
     #[tokio::test]
     async fn success() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert!(dir.exists());
         assert!(dir.path().to_str().unwrap().contains("testing"));
     }
@@ -121,34 +121,34 @@ pub mod name {
 
         #[test]
         fn basic_names() {
-            let dir = Dir::new(PathBuf::from("lebron").join("james"));
+            let dir = filesys::Dir::new(PathBuf::from("lebron").join("james"));
             assert_eq!(dir.name().unwrap(), "james");
 
-            let dir = Dir::new(PathBuf::from("lebron").join("james").join(""));
+            let dir = filesys::Dir::new(PathBuf::from("lebron").join("james").join(""));
             assert_eq!(dir.name().unwrap(), "james");
         }
 
         #[test]
         fn with_special_characters() {
-            let dir = Dir::new(PathBuf::from("path").join("my-dir_123"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("my-dir_123"));
             assert_eq!(dir.name().unwrap(), "my-dir_123");
 
-            let dir = Dir::new(PathBuf::from("path").join("dir.with.dots"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("dir.with.dots"));
             assert_eq!(dir.name().unwrap(), "dir.with.dots");
 
-            let dir = Dir::new(PathBuf::from("path").join("dir with spaces"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("dir with spaces"));
             assert_eq!(dir.name().unwrap(), "dir with spaces");
         }
 
         #[test]
         fn with_unicode() {
-            let dir = Dir::new(PathBuf::from("path").join("目录"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("目录"));
             assert_eq!(dir.name().unwrap(), "目录");
 
-            let dir = Dir::new(PathBuf::from("path").join("привет"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("привет"));
             assert_eq!(dir.name().unwrap(), "привет");
 
-            let dir = Dir::new(PathBuf::from("path").join("🦀"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("🦀"));
             assert_eq!(dir.name().unwrap(), "🦀");
         }
     }
@@ -158,7 +158,7 @@ pub mod name {
 
         #[test]
         fn root_directory() {
-            let dir = Dir::new(PathBuf::from("/"));
+            let dir = filesys::Dir::new(PathBuf::from("/"));
             assert!(matches!(
                 dir.name().unwrap_err(),
                 FileSysErr::UnknownDirNameErr { .. }
@@ -167,7 +167,7 @@ pub mod name {
 
         #[test]
         fn empty_path() {
-            let dir = Dir::new("");
+            let dir = filesys::Dir::new("");
             assert!(matches!(
                 dir.name().unwrap_err(),
                 FileSysErr::UnknownDirNameErr { .. }
@@ -184,31 +184,32 @@ pub mod parent {
 
         #[test]
         fn simple() {
-            let dir = Dir::new(PathBuf::from("path").join("dir"));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("dir"));
             assert_eq!(dir.parent().unwrap().name().unwrap(), "path");
         }
 
         #[test]
         fn with_trailing_separator() {
-            let dir = Dir::new(PathBuf::from("path").join("dir").join(""));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("dir").join(""));
             assert_eq!(dir.parent().unwrap().name().unwrap(), "path");
         }
 
         #[test]
         fn with_trailing_separator_and_dot() {
-            let dir = Dir::new(PathBuf::from("path").join("dir").join("."));
+            let dir = filesys::Dir::new(PathBuf::from("path").join("dir").join("."));
             assert_eq!(dir.parent().unwrap().name().unwrap(), "path");
         }
 
         #[test]
         fn with_trailing_separator_and_dot_dot() {
-            let dir = Dir::new(PathBuf::from("bronny").join("james").join("jr").join(".."));
+            let dir =
+                filesys::Dir::new(PathBuf::from("bronny").join("james").join("jr").join(".."));
             assert_eq!(dir.parent().unwrap().name().unwrap(), "bronny");
         }
 
         #[test]
         fn empty_path() {
-            let dir = Dir::new("");
+            let dir = filesys::Dir::new("");
 
             let current_dir_path = env::current_dir().unwrap();
             let expected = current_dir_path.parent().unwrap();
@@ -221,7 +222,7 @@ pub mod parent {
 
         #[test]
         fn root_directory() {
-            let dir = Dir::new(PathBuf::from("/"));
+            let dir = filesys::Dir::new(PathBuf::from("/"));
             assert!(matches!(
                 dir.parent().unwrap_err(),
                 FileSysErr::UnknownParentDirForDirErr { .. }
@@ -239,15 +240,15 @@ pub mod valid_dir_name {
         #[test]
         fn basic() {
             let dir_name = "is_valid_dir_name";
-            assert!(Dir::is_valid_dir_name(dir_name));
-            Dir::assert_valid_dir_name(dir_name).unwrap();
+            assert!(filesys::Dir::is_valid_dir_name(dir_name));
+            filesys::Dir::assert_valid_dir_name(dir_name).unwrap();
         }
 
         #[test]
         fn exact_max_length() {
             let dir_name = "a".repeat(255); // A string with 255 characters
-            assert!(Dir::is_valid_dir_name(&dir_name));
-            Dir::assert_valid_dir_name(&dir_name).unwrap();
+            assert!(filesys::Dir::is_valid_dir_name(&dir_name));
+            filesys::Dir::assert_valid_dir_name(&dir_name).unwrap();
         }
 
         #[test]
@@ -255,16 +256,16 @@ pub mod valid_dir_name {
             let special_chars = "!@#$%^&*()";
             for special_char in special_chars.chars() {
                 let dir_name = format!("is_valid_dir_name{special_char}");
-                assert!(Dir::is_valid_dir_name(&dir_name));
-                Dir::assert_valid_dir_name(&dir_name).unwrap();
+                assert!(filesys::Dir::is_valid_dir_name(&dir_name));
+                filesys::Dir::assert_valid_dir_name(&dir_name).unwrap();
             }
         }
 
         #[test]
         fn contains_leading_trailing_spaces() {
             let dir_name = "  is_valid_dir_name  ";
-            assert!(Dir::is_valid_dir_name(dir_name));
-            Dir::assert_valid_dir_name(dir_name).unwrap();
+            assert!(filesys::Dir::is_valid_dir_name(dir_name));
+            filesys::Dir::assert_valid_dir_name(dir_name).unwrap();
         }
     }
 
@@ -274,9 +275,9 @@ pub mod valid_dir_name {
         #[test]
         fn empty_string() {
             let dir_name = "";
-            assert!(!Dir::is_valid_dir_name(dir_name));
+            assert!(!filesys::Dir::is_valid_dir_name(dir_name));
             assert!(matches!(
-                Dir::assert_valid_dir_name(dir_name).unwrap_err(),
+                filesys::Dir::assert_valid_dir_name(dir_name).unwrap_err(),
                 FileSysErr::InvalidDirNameErr { .. }
             ));
         }
@@ -284,9 +285,9 @@ pub mod valid_dir_name {
         #[test]
         fn contains_slash() {
             let dir_name = "invalid/dir_name";
-            assert!(!Dir::is_valid_dir_name(dir_name));
+            assert!(!filesys::Dir::is_valid_dir_name(dir_name));
             assert!(matches!(
-                Dir::assert_valid_dir_name(dir_name).unwrap_err(),
+                filesys::Dir::assert_valid_dir_name(dir_name).unwrap_err(),
                 FileSysErr::InvalidDirNameErr { .. }
             ));
         }
@@ -294,9 +295,9 @@ pub mod valid_dir_name {
         #[test]
         fn contains_null_byte() {
             let dir_name = "invalid\0dir_name";
-            assert!(!Dir::is_valid_dir_name(dir_name));
+            assert!(!filesys::Dir::is_valid_dir_name(dir_name));
             assert!(matches!(
-                Dir::assert_valid_dir_name(dir_name).unwrap_err(),
+                filesys::Dir::assert_valid_dir_name(dir_name).unwrap_err(),
                 FileSysErr::InvalidDirNameErr { .. }
             ));
         }
@@ -304,9 +305,9 @@ pub mod valid_dir_name {
         #[test]
         fn exceeds_max_length() {
             let dir_name = "a".repeat(256); // A string with 256 characters
-            assert!(!Dir::is_valid_dir_name(&dir_name));
+            assert!(!filesys::Dir::is_valid_dir_name(&dir_name));
             assert!(matches!(
-                Dir::assert_valid_dir_name(&dir_name).unwrap_err(),
+                filesys::Dir::assert_valid_dir_name(&dir_name).unwrap_err(),
                 FileSysErr::InvalidDirNameErr { .. }
             ));
         }
@@ -318,7 +319,7 @@ mod subdir {
 
     #[test]
     fn basic() {
-        let dir = Dir::new(PathBuf::from("path").join("dir"));
+        let dir = filesys::Dir::new(PathBuf::from("path").join("dir"));
         let subdir = dir.subdir(PathBuf::from("subdir"));
         assert_eq!(subdir.path(), &dir.path().join("subdir"));
         assert_eq!(subdir.name().unwrap(), "subdir");
@@ -327,7 +328,7 @@ mod subdir {
     #[test]
     fn nested_subdir_leading_slash() {
         let base_path = PathBuf::from("base").join("path");
-        let base_dir = Dir::new(base_path);
+        let base_dir = filesys::Dir::new(base_path);
         let nested_path = PathBuf::from("root").join("subdir");
         let nested = base_dir.subdir(nested_path);
 
@@ -342,7 +343,7 @@ mod subdir {
     #[test]
     fn nested_subdirs() {
         let base_path = PathBuf::from("base").join("path");
-        let base_dir = Dir::new(base_path);
+        let base_dir = filesys::Dir::new(base_path);
         let nested = base_dir.subdir("level1").subdir("level2").subdir("level3");
 
         let expected_path = PathBuf::from("base")
@@ -356,7 +357,7 @@ mod subdir {
 
     #[test]
     fn with_spaces() {
-        let dir = Dir::new(PathBuf::from("test"));
+        let dir = filesys::Dir::new(PathBuf::from("test"));
         let subdir = dir.subdir("space folder");
         assert_eq!(subdir.path(), &PathBuf::from("test").join("space folder"));
         assert_eq!(subdir.name().unwrap(), "space folder");
@@ -368,14 +369,14 @@ mod subdir {
 
     #[test]
     fn with_empty_path() {
-        let dir = Dir::new(PathBuf::from("test"));
+        let dir = filesys::Dir::new(PathBuf::from("test"));
         let subdir = dir.subdir("");
         assert_eq!(subdir.path(), &PathBuf::from("test").join(""));
     }
 
     #[test]
     fn with_absolute_path_component() {
-        let dir = Dir::new(PathBuf::from("test"));
+        let dir = filesys::Dir::new(PathBuf::from("test"));
         let path_component = PathBuf::from("absolute").join("path");
         let subdir = dir.subdir(path_component);
         assert_eq!(
@@ -386,7 +387,7 @@ mod subdir {
 
     #[test]
     fn with_dot_paths() {
-        let dir = Dir::new(PathBuf::from("test"));
+        let dir = filesys::Dir::new(PathBuf::from("test"));
         let subdir = dir.subdir(".");
         assert_eq!(subdir.path(), &PathBuf::from("test").join("."));
 
@@ -403,7 +404,7 @@ mod create {
 
         #[tokio::test]
         async fn doesnt_exist() {
-            let temp_dir = Dir::create_temp_dir("testing").await.unwrap();
+            let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
             let subdir = temp_dir.subdir(PathBuf::from("subdir"));
             subdir.create().await.unwrap();
@@ -412,7 +413,7 @@ mod create {
 
         #[tokio::test]
         async fn parent_doesnt_exist() {
-            let temp_dir = Dir::create_temp_dir("testing").await.unwrap();
+            let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
             let subdir = temp_dir.subdir(PathBuf::from("does/not/exist"));
             subdir.create().await.unwrap();
@@ -421,7 +422,7 @@ mod create {
 
         #[tokio::test]
         async fn already_exists() {
-            let dir = Dir::create_temp_dir("testing").await.unwrap();
+            let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
             dir.create().await.unwrap();
             assert!(dir.exists());
         }
@@ -433,7 +434,7 @@ mod create_if_absent {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let temp_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         let subdir = temp_dir.subdir(PathBuf::from("subdir"));
         subdir.create_if_absent().await.unwrap();
@@ -442,7 +443,7 @@ mod create_if_absent {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // create some files in the directory to check if they exist afterward
         let file = dir.file("test-file");
@@ -463,7 +464,7 @@ mod file {
     #[test]
     fn filename_with_leading_slash() {
         let dir_path = PathBuf::from("tmp").join("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
         let file = dir.file("/root/test.txt");
         assert_eq!(file.path(), &dir_path.join("root").join("test.txt"));
     }
@@ -471,7 +472,7 @@ mod file {
     #[test]
     fn abs_dir() {
         let dir_path = PathBuf::from("tmp").join("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
         let file = dir.file("test.txt");
         assert_eq!(file.path(), &dir_path.join("test.txt"));
     }
@@ -479,7 +480,7 @@ mod file {
     #[test]
     fn nested_file_path() {
         let dir_path = PathBuf::from("base").join("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
         let file = dir.file("nested/folder/test.txt");
         assert_eq!(
             file.path(),
@@ -490,7 +491,7 @@ mod file {
     #[test]
     fn special_characters() {
         let dir_path = PathBuf::from("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
 
         // Test spaces in filename
         let file = dir.file("my file.txt");
@@ -508,7 +509,7 @@ mod file {
     #[test]
     fn empty_filename() {
         let dir_path = PathBuf::from("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
         let file = dir.file("");
         assert_eq!(file.path(), &dir_path.join(""));
     }
@@ -516,7 +517,7 @@ mod file {
     #[test]
     fn with_different_extensions() {
         let dir_path = PathBuf::from("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
 
         // No extension
         let file = dir.file("filename");
@@ -534,7 +535,7 @@ mod file {
     #[test]
     fn with_unicode_filename() {
         let dir_path = PathBuf::from("test_dir");
-        let dir = Dir::new(dir_path.clone());
+        let dir = filesys::Dir::new(dir_path.clone());
 
         let file = dir.file("文件.txt");
         assert_eq!(file.path(), &dir_path.join("文件.txt"));
@@ -549,13 +550,13 @@ mod subdirs {
 
     #[tokio::test]
     async fn empty() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert_eq!(dir.subdirs().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn success() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // create some subdirs
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
@@ -578,13 +579,13 @@ mod files {
 
     #[tokio::test]
     async fn empty() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert_eq!(dir.files().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn success() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // create some files
         let file1 = dir.file("file1.txt");
@@ -611,13 +612,13 @@ mod is_empty {
 
     #[tokio::test]
     async fn success() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert!(dir.is_empty().await.unwrap());
     }
 
     #[tokio::test]
     async fn has_files() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test");
         file.write_string("arglechargle", WriteOptions::default())
             .await
@@ -627,7 +628,7 @@ mod is_empty {
 
     #[tokio::test]
     async fn has_subdirs() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
         subdir.create().await.unwrap();
         assert!(!dir.is_empty().await.unwrap());
@@ -639,14 +640,14 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn success_empty() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert!(dir.delete_if_empty_recursive().await.is_ok());
         assert!(!dir.exists());
     }
 
     #[tokio::test]
     async fn has_files() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test");
         file.write_string("arglechargle", WriteOptions::default())
             .await
@@ -657,7 +658,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn has_a_non_empty_subdir() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
         subdir.create().await.unwrap();
         let file = subdir.file("test");
@@ -670,7 +671,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn has_empty_subdir() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
         subdir.create().await.unwrap();
         assert!(dir.delete_if_empty_recursive().await.is_ok());
@@ -679,7 +680,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn complex_nested_structure_all_empty() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create nested structure: dir/subdir1/subdir2/subdir3
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
@@ -697,7 +698,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn complex_nested_structure_mixed_content() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create nested structure with some files
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
@@ -724,7 +725,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn multiple_empty_subdirs_at_same_level() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create multiple empty subdirs at the same level
         let subdir1 = dir.subdir(PathBuf::from("empty1"));
@@ -742,7 +743,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn mixed_empty_and_non_empty_subdirs() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create empty subdir
         let empty_subdir = dir.subdir(PathBuf::from("empty"));
@@ -764,7 +765,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn deeply_nested_with_files_at_different_levels() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create structure: dir/level1/level2/level3/level4
         let level1 = dir.subdir(PathBuf::from("level1"));
@@ -803,7 +804,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn empty_subdirs_with_hidden_files() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         let subdir = dir.subdir(PathBuf::from("subdir"));
         subdir.create().await.unwrap();
@@ -822,7 +823,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn stress_test_many_nested_directories() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create many nested directories
         let mut current_dir = dir.clone();
@@ -838,7 +839,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn partial_cleanup_with_remaining_structure() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // Create structure: dir/branch1/empty1, dir/branch1/empty2, dir/branch2/file
         let branch1 = dir.subdir(PathBuf::from("branch1"));
@@ -869,7 +870,7 @@ mod move_to {
     use super::*;
 
     /// Asserts that no leftover `.rename_trash_*` directories exist under `dir`.
-    async fn assert_no_trash_dirs(dir: &Dir) {
+    async fn assert_no_trash_dirs(dir: &filesys::Dir) {
         let siblings = dir.subdirs().await.unwrap();
         for sibling in &siblings {
             let name = sibling.name().unwrap();
@@ -882,7 +883,7 @@ mod move_to {
 
     #[tokio::test]
     async fn src_doesnt_exist() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let src = base_dir.subdir("src-dir");
         let dest = base_dir.subdir("dest-dir");
 
@@ -903,7 +904,7 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_doesnt_exist() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -932,7 +933,7 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_exists_deny_overwrite() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -953,7 +954,7 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_exists_allow_overwrite() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -989,7 +990,7 @@ mod move_to {
 
     #[tokio::test]
     async fn src_and_dest_are_same_dir() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src_dir = base_dir.subdir("test-dir");
@@ -1021,7 +1022,7 @@ mod move_to {
 
     #[tokio::test]
     async fn moves_nested_structure() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -1088,7 +1089,7 @@ mod move_to {
 
     #[tokio::test]
     async fn creates_missing_parent_directory() {
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -1116,7 +1117,7 @@ mod move_to {
         //   step 1: rename dest -> trash  (succeeds)
         //   step 2: rename src  -> dest   (fails — src missing)
         //   rollback: rename trash -> dest (restores original dest)
-        let base_dir = Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");

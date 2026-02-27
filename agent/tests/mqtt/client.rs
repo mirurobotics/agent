@@ -5,9 +5,9 @@ use std::time::Duration;
 // internal crates
 use crate::mqtt::mock;
 use miru_agent::errors::Error;
-use miru_agent::mqtt::client::{poll, ClientI, MQTTClient, Publish};
-use miru_agent::mqtt::errors::MQTTError;
+use miru_agent::mqtt::client::{poll, Publish};
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
+use miru_agent::mqtt::{Client, ClientI, MQTTError};
 
 // external crates
 use rumqttc::QoS;
@@ -29,7 +29,7 @@ async fn test_mqtt_client() {
     });
 
     // create the client and subscribe to the device sync topic
-    let (client, mut eventloop) = MQTTClient::new(&options).await;
+    let (client, mut eventloop) = Client::new(&options).await;
 
     let topic = "a/unique/topic/string/for/miru";
 
@@ -67,7 +67,7 @@ async fn invalid_broker_url() {
     });
 
     // create the client and subscribe to the device sync topic
-    let (_, mut eventloop) = MQTTClient::new(&options).await;
+    let (_, mut eventloop) = Client::new(&options).await;
 
     let err = poll(&mut eventloop).await.unwrap_err();
     assert!(matches!(err, MQTTError::NetworkConnectionErr(_)));
@@ -91,7 +91,7 @@ async fn invalid_username_or_password() {
         port: 18832,
     });
 
-    let (_, mut eventloop) = MQTTClient::new(&options).await;
+    let (_, mut eventloop) = Client::new(&options).await;
 
     let err = poll(&mut eventloop).await.unwrap_err();
     assert!(matches!(err, MQTTError::AuthenticationErr(_)));
@@ -113,7 +113,7 @@ fn mqtt_options() -> Options {
 
 #[tokio::test]
 async fn publish_err() {
-    let (client, eventloop) = MQTTClient::new(&mqtt_options()).await;
+    let (client, eventloop) = Client::new(&mqtt_options()).await;
     drop(eventloop);
 
     let err = client
@@ -131,7 +131,7 @@ async fn publish_err() {
 
 #[tokio::test]
 async fn subscribe_err() {
-    let (client, eventloop) = MQTTClient::new(&mqtt_options()).await;
+    let (client, eventloop) = Client::new(&mqtt_options()).await;
     drop(eventloop);
 
     let err = client
@@ -144,7 +144,7 @@ async fn subscribe_err() {
 
 #[tokio::test]
 async fn unsubscribe_err() {
-    let (client, eventloop) = MQTTClient::new(&mqtt_options()).await;
+    let (client, eventloop) = Client::new(&mqtt_options()).await;
     drop(eventloop);
 
     let err = client.unsubscribe("test").await.unwrap_err();
@@ -154,7 +154,7 @@ async fn unsubscribe_err() {
 
 #[tokio::test]
 async fn disconnect_err() {
-    let (client, eventloop) = MQTTClient::new(&mqtt_options()).await;
+    let (client, eventloop) = Client::new(&mqtt_options()).await;
     drop(eventloop);
 
     let err = client.disconnect().await.unwrap_err();
@@ -170,7 +170,7 @@ async fn publish_timeout() {
     });
     options.capacity = 1;
 
-    let (client, _eventloop) = MQTTClient::new(&options).await;
+    let (client, _eventloop) = Client::new(&options).await;
 
     // First publish fills the capacity-1 channel
     client

@@ -1,8 +1,11 @@
-use crate::models::git_commit::GitCommit;
+use crate::models;
 use crate::services::errors::ServiceErr;
-use crate::storage::GitCommits;
+use crate::storage;
 
-pub async fn get(git_commits: &GitCommits, id: String) -> Result<GitCommit, ServiceErr> {
+pub async fn get(
+    git_commits: &storage::GitCommits,
+    id: String,
+) -> Result<models::GitCommit, ServiceErr> {
     let gc = git_commits.read(id).await?;
     Ok(gc)
 }

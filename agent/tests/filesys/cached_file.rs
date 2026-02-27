@@ -1,11 +1,9 @@
 // internal crates
 use miru_agent::authn::token::{Token, Updates};
 use miru_agent::filesys::{
+    self,
     cached_file::{ConcurrentCachedFile, SingleThreadCachedFile},
-    dir::Dir,
-    errors::FileSysErr,
-    path::PathExt,
-    Overwrite, WriteOptions,
+    FileSysErr, Overwrite, PathExt, WriteOptions,
 };
 
 // external crates
@@ -21,7 +19,7 @@ pub mod new {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
         let result = SingleThreadTokenFile::new(file).await;
         assert!(matches!(result, Err(FileSysErr::PathDoesNotExistErr(_))));
@@ -29,7 +27,7 @@ pub mod new {
 
     #[tokio::test]
     async fn exists_invalid_data() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -44,7 +42,7 @@ pub mod new {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -67,7 +65,7 @@ pub mod new_with_default {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
@@ -78,7 +76,7 @@ pub mod new_with_default {
 
     #[tokio::test]
     async fn exists_invalid_data() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -94,7 +92,7 @@ pub mod new_with_default {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -117,7 +115,7 @@ pub mod create {
 
     #[tokio::test]
     async fn doesnt_exist_overwrite_false() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
@@ -128,7 +126,7 @@ pub mod create {
 
     #[tokio::test]
     async fn doesnt_exist_overwrite_true() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
@@ -139,7 +137,7 @@ pub mod create {
 
     #[tokio::test]
     async fn exists_overwrite_false() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -157,7 +155,7 @@ pub mod create {
 
     #[tokio::test]
     async fn exists_overwrite_true() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -178,7 +176,7 @@ pub mod read {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
@@ -189,7 +187,7 @@ pub mod read {
 
     #[tokio::test]
     async fn file_deleted() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -212,7 +210,7 @@ pub mod write {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -233,7 +231,7 @@ pub mod write {
 
     #[tokio::test]
     async fn file_deleted() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -262,7 +260,7 @@ pub mod patch {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let mut cached_file =
@@ -286,7 +284,7 @@ pub mod patch {
 
     #[tokio::test]
     async fn no_op_skips_write() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let token = Token {
@@ -311,7 +309,7 @@ pub mod patch {
 
     #[tokio::test]
     async fn file_deleted() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let mut cached_file =
@@ -346,7 +344,7 @@ pub mod spawn {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
         let result = ConcurrentTokenFile::spawn(64, file).await;
         assert!(matches!(result, Err(FileSysErr::PathDoesNotExistErr(_))));
@@ -354,7 +352,7 @@ pub mod spawn {
 
     #[tokio::test]
     async fn exists_invalid_data() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -368,7 +366,7 @@ pub mod spawn {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -390,7 +388,7 @@ pub mod spawn_with_default {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
@@ -404,7 +402,7 @@ pub mod spawn_with_default {
 
     #[tokio::test]
     async fn exists_invalid_data() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         // create the file
@@ -423,7 +421,7 @@ pub mod spawn_with_default {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let token = Token {
@@ -446,7 +444,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let token = Token {
@@ -474,7 +472,7 @@ pub mod after_shutdown {
 
     #[tokio::test]
     async fn read_fails() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, handle) =
@@ -493,7 +491,7 @@ pub mod after_shutdown {
 
     #[tokio::test]
     async fn write_fails() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, handle) =
@@ -512,7 +510,7 @@ pub mod after_shutdown {
 
     #[tokio::test]
     async fn patch_fails() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, handle) =
@@ -535,7 +533,7 @@ pub mod after_shutdown {
 
     #[tokio::test]
     async fn double_shutdown_fails() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, handle) =
@@ -558,7 +556,7 @@ pub mod concurrent_read {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
@@ -572,7 +570,7 @@ pub mod concurrent_read {
 
     #[tokio::test]
     async fn file_deleted() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) =
@@ -597,7 +595,7 @@ pub mod concurrent_write {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) =
@@ -620,7 +618,7 @@ pub mod concurrent_write {
 
     #[tokio::test]
     async fn file_deleted() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) =
@@ -651,7 +649,7 @@ pub mod concurrent_patch {
 
     #[tokio::test]
     async fn exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) =
@@ -679,7 +677,7 @@ pub mod concurrent_patch {
 
     #[tokio::test]
     async fn no_op_skips_write() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let token = Token {
@@ -706,7 +704,7 @@ pub mod concurrent_patch {
 
     #[tokio::test]
     async fn file_deleted() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
 
         let (cached_file, _) =

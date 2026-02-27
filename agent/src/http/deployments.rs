@@ -1,9 +1,8 @@
 // internal crates
-use crate::http;
-use crate::http::errors::HTTPErr;
-use crate::http::query::{Page, QueryParams, MAX_PAGE_LIMIT};
-use crate::http::request;
-use crate::http::ClientI;
+use super::errors::HTTPErr;
+use super::query::{Page, QueryParams, MAX_PAGE_LIMIT};
+use super::request;
+use super::ClientI;
 use openapi_client::models::{
     Deployment, DeploymentActivityStatus, DeploymentList, UpdateDeploymentRequest,
 };
@@ -50,7 +49,7 @@ pub async fn list(
     let request = request::Params::get(&url)
         .with_query(qp)
         .with_token(params.token);
-    http::client::fetch(client, request).await
+    super::client::fetch(client, request).await
 }
 
 pub async fn list_all(
@@ -91,5 +90,5 @@ pub async fn update(
     let url = format!("{}/deployments/{}", client.base_url(), params.id,);
     let request = request::Params::patch(&url, request::marshal_json(params.updates)?)
         .with_token(params.token);
-    http::client::fetch(client, request).await
+    super::client::fetch(client, request).await
 }

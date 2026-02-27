@@ -7,8 +7,8 @@ use crate::cache::{
     entry::CacheEntry,
     errors::{CacheErr, ReceiveActorMessageErr, SendActorMessageErr},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
-    Overwrite,
 };
+use crate::filesys::Overwrite;
 use crate::trace;
 
 // external crates

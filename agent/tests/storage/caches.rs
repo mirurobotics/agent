@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::dir::Dir;
+use miru_agent::filesys;
 use miru_agent::storage::{Capacities, Layout, Storage};
 
 pub mod default_capacities {
@@ -21,7 +21,7 @@ pub mod init {
 
     #[tokio::test]
     async fn init_and_shutdown() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())

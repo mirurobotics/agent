@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::models::config_instance::ConfigInstance;
+use miru_agent::models::ConfigInstance;
 use openapi_client::models as backend_client;
 
 // external crates

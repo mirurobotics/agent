@@ -58,13 +58,12 @@ pub mod routes {
     use tower::ServiceExt;
 
     use miru_agent::activity;
-    use miru_agent::filesys::dir::Dir;
-    use miru_agent::filesys::Overwrite;
-    use miru_agent::models::deployment::{DplActivity, DplErrStatus, DplTarget};
-    use miru_agent::models::{Deployment, GitCommit, Release};
-    use miru_agent::server::serve;
-    use miru_agent::server::state::ServerState;
-    use miru_agent::sync::syncer::Syncer;
+    use miru_agent::filesys::{self, Overwrite};
+    use miru_agent::models::{
+        Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
+    };
+    use miru_agent::server::{serve, State};
+    use miru_agent::sync::Syncer;
     use openapi_server::models as openapi;
 
     use crate::http::mock::MockClient;
@@ -78,14 +77,14 @@ pub mod routes {
     }
 
     struct Fixture {
-        state: Arc<ServerState>,
+        state: Arc<State>,
         app: Router,
-        _dir: Dir,
+        _dir: filesys::Dir,
     }
 
     impl Fixture {
         async fn new(name: &str) -> Self {
-            let dir = Dir::create_temp_dir(name).await.unwrap();
+            let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
             let storage = Arc::new(create_storage(&dir).await);
             let http_client = Arc::new(MockClient::default());
             let (token_mngr, _handle) = create_token_manager(&dir, http_client.clone()).await;
@@ -93,12 +92,12 @@ pub mod routes {
             let syncer = Arc::new(Syncer::new(sender));
             let activity_tracker = Arc::new(activity::Tracker::new());
 
-            // ServerState expects Arc<http::Client>, but we only need it to exist;
+            // State expects Arc<http::Client>, but we only need it to exist;
             // the handlers under test don't use it. Use a real client at a dummy URL.
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
 
-            let state = Arc::new(ServerState::new(
+            let state = Arc::new(State::new(
                 storage,
                 real_http_client,
                 syncer,

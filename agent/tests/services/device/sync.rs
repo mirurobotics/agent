@@ -1,10 +1,10 @@
 // internal crates
 use crate::sync::mock::MockSyncer;
+use miru_agent::services::device as dvc_svc;
+use miru_agent::sync::errors::{MockErr, SyncerInCooldownErr};
+use miru_agent::sync::syncer::State;
+use miru_agent::sync::SyncErr;
 use miru_agent::trace;
-use miru_agent::{
-    services::device as dvc_svc,
-    sync::{errors::*, syncer::State},
-};
 use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
 
 // external crates

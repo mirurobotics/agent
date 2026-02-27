@@ -2,10 +2,10 @@
 use std::fmt;
 
 // internal crates
-use crate::http::errors::{
+use super::errors::{
     BuildReqwestErr, HTTPErr, InvalidHeaderValueErr, InvalidURLErr, MarshalJSONErr,
 };
-use crate::http::query::QueryParams;
+use super::query::QueryParams;
 use crate::telemetry::SystemInfo;
 use crate::trace;
 use crate::version;

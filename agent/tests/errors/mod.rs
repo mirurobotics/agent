@@ -1,7 +1,8 @@
 // internal crates
 use miru_agent::errors::{self, Error};
-use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed};
+use miru_agent::http::errors::{MockErr, RequestFailed};
 use miru_agent::http::request;
+use miru_agent::http::HTTPErr;
 
 // external crates
 use std::fmt;

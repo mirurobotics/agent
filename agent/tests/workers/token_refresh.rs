@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use miru_agent::authn::{errors::*, token::Token};
+use miru_agent::authn::errors::MockError;
+use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::cooldown;
 use miru_agent::trace;
 use miru_agent::workers::token_refresh::{

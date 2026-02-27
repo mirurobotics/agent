@@ -10,8 +10,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 // internal crates
-use miru_agent::mqtt::client::{ClientI, Publish};
-use miru_agent::mqtt::errors::MQTTError;
+use miru_agent::mqtt::client::Publish;
+use miru_agent::mqtt::{ClientI, MQTTError};
 
 // external crates
 use rumqttc::QoS;

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use miru_agent::http::errors::HTTPErr;
 use miru_agent::http::request::{self, Headers, Params};
+use miru_agent::http::HTTPErr;
 
 pub mod params {
     use super::*;

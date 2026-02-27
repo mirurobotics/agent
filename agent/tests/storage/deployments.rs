@@ -1,5 +1,5 @@
-use miru_agent::cache::entry::CacheEntry;
-use miru_agent::models::deployment::{Deployment, DplActivity, DplErrStatus};
+use miru_agent::cache::CacheEntry;
+use miru_agent::models::{Deployment, DplActivity, DplErrStatus};
 use miru_agent::storage::deployments::is_dirty;
 
 use chrono::Utc;

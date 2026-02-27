@@ -2,7 +2,7 @@
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::authn::{errors::*, token::Token, token_mngr::TokenManagerExt};
+use miru_agent::authn::{AuthnErr, Token, TokenManagerExt};
 
 type GetTokenFn = Box<dyn Fn() -> Result<Arc<Token>, AuthnErr> + Send + Sync>;
 type RefreshTokenFn = Box<dyn Fn() -> Result<(), AuthnErr> + Send + Sync>;

@@ -3,8 +3,8 @@ use std::future::Future;
 use std::time::Duration;
 
 // internal crates
-use crate::mqtt::errors::*;
-use crate::mqtt::options::{Options, Protocol, Timeouts};
+use super::errors::*;
+use super::options::{Options, Protocol, Timeouts};
 use crate::trace;
 
 // external crates
@@ -32,13 +32,13 @@ pub trait ClientI: Send + Sync {
     fn disconnect(&self) -> impl Future<Output = Result<(), MQTTError>> + Send;
 }
 
-pub struct MQTTClient {
+pub struct Client {
     pub created_at: DateTime<Utc>,
     pub(crate) client: AsyncClient,
     pub(crate) timeouts: Timeouts,
 }
 
-impl MQTTClient {
+impl Client {
     pub async fn new(options: &Options) -> (Self, EventLoop) {
         let mut mqtt_options = MqttOptions::new(
             &options.client_id,
@@ -71,7 +71,7 @@ impl MQTTClient {
     }
 }
 
-impl ClientI for MQTTClient {
+impl ClientI for Client {
     async fn publish(&self, msg: Publish<'_>) -> Result<(), MQTTError> {
         with_timeout(
             self.timeouts.publish,

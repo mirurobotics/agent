@@ -7,10 +7,11 @@ use std::{
 };
 
 // internal crates
-use crate::filesys::{file::File, path::PathExt};
-use crate::server::errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr};
-use crate::server::handlers;
-use crate::server::state::ServerState;
+use super::errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr};
+use super::handlers;
+use super::state::State;
+use crate::filesys;
+use crate::filesys::PathExt;
 use crate::trace;
 
 // external
@@ -28,14 +29,14 @@ use tower_http::{
 use tracing::Level;
 
 #[derive(Debug)]
-pub struct ServerOptions {
-    pub socket_file: File,
+pub struct Options {
+    pub socket_file: filesys::File,
 }
 
-impl Default for ServerOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
-            socket_file: File::new("/run/miru/miru.sock"),
+            socket_file: filesys::File::new("/run/miru/miru.sock"),
         }
     }
 }
@@ -43,7 +44,7 @@ impl Default for ServerOptions {
 const API_VERSION: &str = "v0.2";
 
 /// Build the application router with all routes and shared state, without middleware.
-pub fn routes(state: Arc<ServerState>) -> Router {
+pub fn routes(state: Arc<State>) -> Router {
     Router::new()
         // =============================== AGENT INFO ============================== //
         .route(
@@ -92,8 +93,8 @@ pub fn routes(state: Arc<ServerState>) -> Router {
 }
 
 pub(crate) async fn serve(
-    options: &ServerOptions,
-    state: Arc<ServerState>,
+    options: &Options,
+    state: Arc<State>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<JoinHandle<Result<(), ServerErr>>, ServerErr> {
     let state_for_middleware = state.clone();
@@ -147,7 +148,7 @@ pub(crate) async fn serve(
 }
 
 async fn acquire_unix_socket_listener(
-    socket_file: &File,
+    socket_file: &filesys::File,
     fallback: impl Future<Output = Result<UnixListener, ServerErr>>,
 ) -> Result<UnixListener, ServerErr> {
     let listener = if let Ok(listen_fds) = env::var("LISTEN_FDS") {
@@ -189,7 +190,9 @@ async fn acquire_unix_socket_listener(
     Ok(listener)
 }
 
-async fn create_unix_socket_listener(socket_file: &File) -> Result<UnixListener, ServerErr> {
+async fn create_unix_socket_listener(
+    socket_file: &filesys::File,
+) -> Result<UnixListener, ServerErr> {
     socket_file.delete().await?;
     let socket_path = socket_file.path();
     tokio::net::UnixListener::bind(socket_path).map_err(|e| {

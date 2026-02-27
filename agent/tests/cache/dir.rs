@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::{concurrent_cache_tests, single_thread_cache_tests};
-use miru_agent::cache::dir::{DirCache, SingleThreadDirCache};
-use miru_agent::filesys::{dir::Dir, path::PathExt, Overwrite, WriteOptions};
+use miru_agent::cache::{DirCache, SingleThreadDirCache};
+use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 
 // external crates
 use tokio::task::JoinHandle;
@@ -17,7 +17,7 @@ pub mod concurrent {
     type TestCache = DirCache<String, String>;
 
     async fn spawn_cache_with_capacity(capacity: usize) -> (TestCache, JoinHandle<()>) {
-        let dir = Dir::create_temp_dir("testing")
+        let dir = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -32,7 +32,7 @@ pub mod concurrent {
 
     #[tokio::test]
     async fn spawn() {
-        let dir = Dir::create_temp_dir("testing")
+        let dir = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -46,7 +46,7 @@ pub mod concurrent {
 
     #[tokio::test]
     async fn prune_invalid_entries() {
-        let dir = Dir::create_temp_dir("testing")
+        let dir = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -90,7 +90,7 @@ pub mod single_thread {
     type TestCache = SingleThreadDirCache<String, String>;
 
     async fn new_cache_with_capacity(capacity: usize) -> TestCache {
-        let dir = Dir::create_temp_dir("testing")
+        let dir = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -103,7 +103,7 @@ pub mod single_thread {
 
     #[tokio::test]
     async fn new() {
-        let dir = Dir::create_temp_dir("testing")
+        let dir = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));

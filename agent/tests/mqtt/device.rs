@@ -1,6 +1,7 @@
 // internal crates
 use miru_agent::mqtt::device;
-use miru_agent::mqtt::errors::{MQTTError, MockErr};
+use miru_agent::mqtt::errors::MockErr;
+use miru_agent::mqtt::MQTTError;
 
 // test helpers
 use super::mock::{MockCall, MockClient};

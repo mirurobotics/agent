@@ -1,7 +1,7 @@
 use chrono::{DateTime, TimeZone, Utc};
-use miru_agent::models::deployment::{DplActivity, DplErrStatus, DplTarget};
-use miru_agent::models::device::DeviceStatus;
-use miru_agent::models::{Deployment, Device, GitCommit, Release};
+use miru_agent::models::{
+    Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
+};
 use openapi_server::models as openapi;
 
 fn fixed_time() -> DateTime<Utc> {

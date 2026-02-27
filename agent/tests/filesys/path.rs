@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, path, path::PathExt, Atomic, Overwrite, WriteOptions};
+use miru_agent::filesys::{self, path, Atomic, Overwrite, PathExt, WriteOptions};
 // external crates
 use std::path::PathBuf;
 #[allow(unused_imports)]
@@ -10,13 +10,13 @@ pub mod exists {
 
     #[tokio::test]
     async fn existing_path() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         assert!(dir.exists());
     }
 
     #[test]
     fn nonexistent_path() {
-        let dir = Dir::new(PathBuf::from("/nonexistent/path/abc123"));
+        let dir = filesys::Dir::new(PathBuf::from("/nonexistent/path/abc123"));
         assert!(!dir.exists());
     }
 }
@@ -50,8 +50,8 @@ pub mod abs_path {
 
     #[test]
     fn empty_path_is_current_dir() {
-        let dir = Dir::new(PathBuf::from(""));
-        let expected_dir = Dir::new_current_dir().unwrap();
+        let dir = filesys::Dir::new(PathBuf::from(""));
+        let expected_dir = filesys::Dir::new_current_dir().unwrap();
         assert_eq!(&dir.abs_path().unwrap(), expected_dir.path());
     }
 
@@ -64,14 +64,14 @@ pub mod abs_path {
         ];
 
         for test in tests {
-            let dir = Dir::new(PathBuf::from(test.0));
+            let dir = filesys::Dir::new(PathBuf::from(test.0));
             assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
         }
     }
 
     #[test]
     fn replace_multiple_slashes() {
-        let current_dir = Dir::new_current_dir().unwrap();
+        let current_dir = filesys::Dir::new_current_dir().unwrap();
         let current_dir_path_buf = current_dir.path();
         let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
         let parent_dir_path = path::clean(current_dir.parent().unwrap().path())
@@ -98,14 +98,14 @@ pub mod abs_path {
         ];
 
         for test in tests {
-            let dir = Dir::new(PathBuf::from(test.0));
+            let dir = filesys::Dir::new(PathBuf::from(test.0));
             assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
         }
     }
 
     #[test]
     fn eliminate_current_dir() {
-        let current_dir = Dir::new_current_dir().unwrap();
+        let current_dir = filesys::Dir::new_current_dir().unwrap();
         let current_dir_path_buf = current_dir.path();
         let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
 
@@ -129,7 +129,7 @@ pub mod abs_path {
 
         for test in tests {
             assert_eq!(
-                Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
+                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
                 PathBuf::from(test.1)
             );
         }
@@ -137,7 +137,7 @@ pub mod abs_path {
 
     #[test]
     fn eliminate_parent_dir() {
-        let current_dir = Dir::new_current_dir().unwrap();
+        let current_dir = filesys::Dir::new_current_dir().unwrap();
         let current_dir_path_buf = current_dir.path();
         let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
         let parent_dir = current_dir.parent().unwrap();
@@ -197,7 +197,7 @@ pub mod abs_path {
 
         for test in tests {
             assert_eq!(
-                Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
+                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
                 PathBuf::from(test.1)
             );
         }

@@ -1,7 +1,8 @@
 // internal crates
 use crate::cooldown;
 use crate::errors::Error;
-use crate::models::deployment::{Deployment, DplActivity, DplErrStatus, DplTarget, Updates};
+use crate::models;
+use crate::models::deployment::Updates;
 use crate::models::Patch;
 
 // external crates
@@ -17,9 +18,9 @@ pub enum NextAction {
     Wait(TimeDelta),
 }
 
-pub fn next_action(deployment: &Deployment) -> NextAction {
+pub fn next_action(deployment: &models::Deployment) -> NextAction {
     // do nothing if the status is failed
-    if deployment.error_status == DplErrStatus::Failed {
+    if deployment.error_status == models::DplErrStatus::Failed {
         return NextAction::None;
     }
 
@@ -34,26 +35,26 @@ pub fn next_action(deployment: &Deployment) -> NextAction {
 
     // determine the next action
     match deployment.target_status {
-        DplTarget::Staged => match deployment.activity_status {
-            DplActivity::Drifted => NextAction::None,
-            DplActivity::Staged => NextAction::None,
-            DplActivity::Queued => NextAction::Archive,
-            DplActivity::Deployed => NextAction::Remove,
-            DplActivity::Archived => NextAction::None,
+        models::DplTarget::Staged => match deployment.activity_status {
+            models::DplActivity::Drifted => NextAction::None,
+            models::DplActivity::Staged => NextAction::None,
+            models::DplActivity::Queued => NextAction::Archive,
+            models::DplActivity::Deployed => NextAction::Remove,
+            models::DplActivity::Archived => NextAction::None,
         },
-        DplTarget::Deployed => match deployment.activity_status {
-            DplActivity::Drifted => NextAction::None,
-            DplActivity::Staged => NextAction::None,
-            DplActivity::Queued => NextAction::Deploy,
-            DplActivity::Deployed => NextAction::None,
-            DplActivity::Archived => NextAction::Deploy,
+        models::DplTarget::Deployed => match deployment.activity_status {
+            models::DplActivity::Drifted => NextAction::None,
+            models::DplActivity::Staged => NextAction::None,
+            models::DplActivity::Queued => NextAction::Deploy,
+            models::DplActivity::Deployed => NextAction::None,
+            models::DplActivity::Archived => NextAction::Deploy,
         },
-        DplTarget::Archived => match deployment.activity_status {
-            DplActivity::Drifted => NextAction::Archive,
-            DplActivity::Staged => NextAction::Archive,
-            DplActivity::Queued => NextAction::Archive,
-            DplActivity::Deployed => NextAction::Remove,
-            DplActivity::Archived => NextAction::None,
+        models::DplTarget::Archived => match deployment.activity_status {
+            models::DplActivity::Drifted => NextAction::Archive,
+            models::DplActivity::Staged => NextAction::Archive,
+            models::DplActivity::Queued => NextAction::Archive,
+            models::DplActivity::Deployed => NextAction::Remove,
+            models::DplActivity::Archived => NextAction::None,
         },
     }
 }
@@ -80,25 +81,28 @@ impl Default for RetryPolicy {
 // ================================== TRANSITIONS ================================== //
 
 // ---------------------------- successful transitions ----------------------------= //
-pub fn deploy(mut deployment: Deployment) -> Deployment {
-    let new_activity = DplActivity::Deployed;
+pub fn deploy(mut deployment: models::Deployment) -> models::Deployment {
+    let new_activity = models::DplActivity::Deployed;
     let patch = get_success_updates(&deployment, new_activity);
     deployment.patch(patch);
     deployment
 }
 
-pub fn remove(mut deployment: Deployment) -> Deployment {
-    let new_activity = DplActivity::Archived;
+pub fn remove(mut deployment: models::Deployment) -> models::Deployment {
+    let new_activity = models::DplActivity::Archived;
     let patch = get_success_updates(&deployment, new_activity);
     deployment.patch(patch);
     deployment
 }
 
-fn get_success_updates(deployment: &Deployment, new_activity: DplActivity) -> Updates {
+fn get_success_updates(
+    deployment: &models::Deployment,
+    new_activity: models::DplActivity,
+) -> Updates {
     Updates {
         activity_status: Some(new_activity),
         error_status: if has_recovered(deployment, new_activity) {
-            Some(DplErrStatus::None)
+            Some(models::DplErrStatus::None)
         } else {
             None
         },
@@ -115,50 +119,50 @@ fn get_success_updates(deployment: &Deployment, new_activity: DplActivity) -> Up
     }
 }
 
-fn has_recovered(deployment: &Deployment, new_activity: DplActivity) -> bool {
+fn has_recovered(deployment: &models::Deployment, new_activity: models::DplActivity) -> bool {
     // the error status only needs to be updated if it is currently retrying. If is
     // failed then it can never exit failed and if it is None then it is already correct
-    if deployment.error_status != DplErrStatus::Retrying {
+    if deployment.error_status != models::DplErrStatus::Retrying {
         return false;
     }
 
     // check if the new activity status matches the deployment's target status
     match deployment.target_status {
-        DplTarget::Staged => {
+        models::DplTarget::Staged => {
             // for staged, we're satisfied with the deployment being in other states as
             // long as it is not deployed.
             match new_activity {
-                DplActivity::Drifted => true,
-                DplActivity::Staged => true,
-                DplActivity::Queued => true,
-                DplActivity::Deployed => false,
-                DplActivity::Archived => true,
+                models::DplActivity::Drifted => true,
+                models::DplActivity::Staged => true,
+                models::DplActivity::Queued => true,
+                models::DplActivity::Deployed => false,
+                models::DplActivity::Archived => true,
             }
         }
-        DplTarget::Deployed => match new_activity {
-            DplActivity::Drifted => false,
-            DplActivity::Staged => false,
-            DplActivity::Queued => false,
-            DplActivity::Deployed => true,
-            DplActivity::Archived => false,
+        models::DplTarget::Deployed => match new_activity {
+            models::DplActivity::Drifted => false,
+            models::DplActivity::Staged => false,
+            models::DplActivity::Queued => false,
+            models::DplActivity::Deployed => true,
+            models::DplActivity::Archived => false,
         },
-        DplTarget::Archived => match new_activity {
-            DplActivity::Drifted => false,
-            DplActivity::Staged => false,
-            DplActivity::Queued => false,
-            DplActivity::Deployed => false,
-            DplActivity::Archived => true,
+        models::DplTarget::Archived => match new_activity {
+            models::DplActivity::Drifted => false,
+            models::DplActivity::Staged => false,
+            models::DplActivity::Queued => false,
+            models::DplActivity::Deployed => false,
+            models::DplActivity::Archived => true,
         },
     }
 }
 
 // ----------------------------- error transitions --------------------------------- //
 pub fn error(
-    mut deployment: Deployment,
+    mut deployment: models::Deployment,
     retry_policy: &RetryPolicy,
     e: &impl Error,
     bump_attempts: bool,
-) -> Deployment {
+) -> models::Deployment {
     let patch = get_error_updates(
         &deployment,
         bump_attempts && should_bump_attempts(e),
@@ -173,7 +177,7 @@ fn should_bump_attempts(e: &impl Error) -> bool {
 }
 
 fn get_error_updates(
-    deployment: &Deployment,
+    deployment: &models::Deployment,
     bump_attempts: bool,
     retry_policy: &RetryPolicy,
 ) -> Updates {
@@ -183,9 +187,11 @@ fn get_error_updates(
         deployment.attempts
     };
 
-    let mut new_error_status = Some(DplErrStatus::Retrying);
-    if attempts >= retry_policy.max_attempts || deployment.error_status == DplErrStatus::Failed {
-        new_error_status = Some(DplErrStatus::Failed);
+    let mut new_error_status = Some(models::DplErrStatus::Retrying);
+    if attempts >= retry_policy.max_attempts
+        || deployment.error_status == models::DplErrStatus::Failed
+    {
+        new_error_status = Some(models::DplErrStatus::Failed);
     }
 
     let cooldown = cooldown::calc(&retry_policy.backoff, attempts);
@@ -202,6 +208,7 @@ fn get_error_updates(
 mod tests {
     use super::*;
     use crate::cooldown;
+    use models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 
     // ================================ MOCK ERROR ================================= //
 

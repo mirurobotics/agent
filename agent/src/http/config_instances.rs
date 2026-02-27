@@ -1,6 +1,6 @@
-use crate::http::errors::HTTPErr;
-use crate::http::request;
-use crate::http::ClientI;
+use super::errors::HTTPErr;
+use super::request;
+use super::ClientI;
 
 pub struct GetContentParams<'a> {
     pub id: &'a str,

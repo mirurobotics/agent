@@ -1,40 +1,40 @@
-use crate::cache::errors::CacheErr;
-use crate::filesys::errors::FileSysErr;
-use crate::http::errors::HTTPErr;
-use crate::models::errors::ModelsErr;
+use crate::cache;
+use crate::filesys;
+use crate::http;
+use crate::models;
 use crate::storage::StorageErr;
-use crate::sync::errors::SyncErr;
+use crate::sync;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceErr {
     #[error(transparent)]
-    CacheErr(CacheErr),
+    CacheErr(cache::CacheErr),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
-    ModelsErr(ModelsErr),
+    ModelsErr(models::ModelsErr),
     #[error(transparent)]
     StorageErr(StorageErr),
     #[error(transparent)]
-    HTTPErr(HTTPErr),
+    HTTPErr(http::HTTPErr),
     #[error(transparent)]
-    SyncErr(SyncErr),
+    SyncErr(sync::SyncErr),
 }
 
-impl From<CacheErr> for ServiceErr {
-    fn from(e: CacheErr) -> Self {
+impl From<cache::CacheErr> for ServiceErr {
+    fn from(e: cache::CacheErr) -> Self {
         Self::CacheErr(e)
     }
 }
 
-impl From<FileSysErr> for ServiceErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for ServiceErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-impl From<ModelsErr> for ServiceErr {
-    fn from(e: ModelsErr) -> Self {
+impl From<models::ModelsErr> for ServiceErr {
+    fn from(e: models::ModelsErr) -> Self {
         Self::ModelsErr(e)
     }
 }
@@ -45,14 +45,14 @@ impl From<StorageErr> for ServiceErr {
     }
 }
 
-impl From<HTTPErr> for ServiceErr {
-    fn from(e: HTTPErr) -> Self {
+impl From<http::HTTPErr> for ServiceErr {
+    fn from(e: http::HTTPErr) -> Self {
         Self::HTTPErr(e)
     }
 }
 
-impl From<SyncErr> for ServiceErr {
-    fn from(e: SyncErr) -> Self {
+impl From<sync::SyncErr> for ServiceErr {
+    fn from(e: sync::SyncErr) -> Self {
         Self::SyncErr(e)
     }
 }

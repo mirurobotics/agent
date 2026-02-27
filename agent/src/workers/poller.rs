@@ -6,8 +6,9 @@ use std::time::Duration;
 
 // internal modules
 use crate::models::device;
-use crate::storage::Device;
-use crate::sync::syncer::{CooldownEnd, SyncEvent, SyncerExt};
+use crate::storage;
+use crate::sync::syncer::{CooldownEnd, SyncEvent};
+use crate::sync::SyncerExt;
 
 // external crates
 use chrono::{TimeDelta, Utc};
@@ -31,7 +32,7 @@ impl Default for Options {
 pub async fn run<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
-    device_stor: &Device,
+    device_stor: &storage::Device,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -55,7 +56,7 @@ pub async fn run<F, Fut, SyncerT: SyncerExt>(
 async fn run_impl<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
-    device_stor: &Device,
+    device_stor: &storage::Device,
     sleep_fn: F, // for testing purposes
 ) where
     F: Fn(Duration) -> Fut,

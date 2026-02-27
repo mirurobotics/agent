@@ -1,6 +1,6 @@
 // internal crates
-use crate::crypt::base64;
-use crate::crypt::errors::{CryptErr, InvalidJWTErr, InvalidJWTPayloadFormatErr};
+use super::base64;
+use super::errors::{CryptErr, InvalidJWTErr, InvalidJWTPayloadFormatErr};
 use crate::trace;
 
 // external crates

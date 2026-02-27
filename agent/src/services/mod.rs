@@ -3,3 +3,5 @@ pub mod device;
 pub mod errors;
 pub mod git_commit;
 pub mod release;
+
+pub use self::errors::ServiceErr;

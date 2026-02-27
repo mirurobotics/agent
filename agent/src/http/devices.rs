@@ -1,8 +1,7 @@
 // internal crates
-use crate::http;
-use crate::http::errors::HTTPErr;
-use crate::http::request;
-use crate::http::ClientI;
+use super::errors::HTTPErr;
+use super::request;
+use super::ClientI;
 use openapi_client::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
@@ -36,7 +35,7 @@ pub async fn activate(
     let url = format!("{}/devices/{}/activate", client.base_url(), params.id);
     let request = request::Params::post(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
-    http::client::fetch(client, request).await
+    super::client::fetch(client, request).await
 }
 
 pub async fn issue_token(
@@ -45,12 +44,12 @@ pub async fn issue_token(
 ) -> Result<TokenResponse, HTTPErr> {
     let url = format!("{}/devices/{}/issue_token", client.base_url(), params.id);
     let request = request::Params::post(&url, request::marshal_json(params.payload)?);
-    http::client::fetch(client, request).await
+    super::client::fetch(client, request).await
 }
 
 pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<Device, HTTPErr> {
     let url = format!("{}/devices/{}", client.base_url(), params.id);
     let request = request::Params::patch(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
-    http::client::fetch(client, request).await
+    super::client::fetch(client, request).await
 }

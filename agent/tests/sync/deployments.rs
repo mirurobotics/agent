@@ -3,16 +3,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
 use miru_agent::deploy::{apply, fsm};
-use miru_agent::filesys::dir::Dir;
-use miru_agent::filesys::Overwrite;
+use miru_agent::filesys::{self, Overwrite};
 use miru_agent::http::errors::*;
-use miru_agent::models::{
-    self,
-    deployment::{DplActivity, DplErrStatus, DplTarget},
-};
+use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
 use miru_agent::sync::deployments::{sync, SyncArgs};
-use miru_agent::sync::errors::SyncErr;
+use miru_agent::sync::SyncErr;
 
 // test crates
 use crate::http::mock::{Call, CapturedRequest, MockClient};
@@ -35,15 +31,15 @@ struct Fixture {
     release_stor: Releases,
     git_commit_stor: GitCommits,
     http_client: MockClient,
-    staging_dir: Dir,
-    target_dir: Dir,
+    staging_dir: filesys::Dir,
+    target_dir: filesys::Dir,
     retry_policy: fsm::RetryPolicy,
-    _dir: Dir,
+    _dir: filesys::Dir,
 }
 
 impl Fixture {
     async fn new(name: &str) -> Self {
-        let dir = Dir::create_temp_dir(name).await.unwrap();
+        let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
         let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
             .await
             .unwrap();

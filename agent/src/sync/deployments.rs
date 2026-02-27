@@ -1,9 +1,9 @@
-use crate::deploy::apply::{self, apply};
+use super::errors::*;
+use crate::deploy::apply;
 use crate::filesys::Overwrite;
 use crate::http;
 use crate::models;
 use crate::storage;
-use crate::sync::errors::*;
 use crate::trace;
 use openapi_client::models::{
     self as backend_client, DeploymentActivityStatus as BackendActivityStatus,
@@ -290,7 +290,7 @@ async fn apply_deployments<'a>(
         storage: &apply_stor,
         opts,
     };
-    let outcomes = match apply(&apply_args).await {
+    let outcomes = match apply::apply(&apply_args).await {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to apply deployments: {e}");

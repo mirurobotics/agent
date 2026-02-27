@@ -1,5 +1,5 @@
 use crate::errors::Trace;
-use crate::filesys::errors::FileSysErr;
+use crate::filesys;
 
 #[derive(Debug, thiserror::Error)]
 #[error("unable to find cache element: {msg}")]
@@ -64,7 +64,7 @@ pub enum CacheErr {
     #[error(transparent)]
     CannotOverwriteCacheElement(CannotOverwriteCacheElement),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
     FoundTooManyCacheElements(FoundTooManyCacheElements),
     #[error(transparent)]
@@ -73,8 +73,8 @@ pub enum CacheErr {
     ReceiveActorMessageErr(ReceiveActorMessageErr),
 }
 
-impl From<FileSysErr> for CacheErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for CacheErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }

@@ -1,7 +1,7 @@
-use crate::crypt::errors::CryptErr;
+use crate::crypt;
 use crate::errors::Trace;
-use crate::filesys::errors::FileSysErr;
-use crate::http::errors::HTTPErr;
+use crate::filesys;
+use crate::http;
 
 #[derive(Debug, thiserror::Error)]
 #[error("timestamp conversion error: {msg}")]
@@ -59,11 +59,11 @@ pub enum AuthnErr {
     #[error(transparent)]
     TimestampConversionErr(TimestampConversionErr),
     #[error(transparent)]
-    CryptErr(CryptErr),
+    CryptErr(crypt::CryptErr),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
-    HTTPErr(HTTPErr),
+    HTTPErr(http::HTTPErr),
     #[error(transparent)]
     SerdeErr(SerdeErr),
     #[error(transparent)]
@@ -74,20 +74,20 @@ pub enum AuthnErr {
     MockError(MockError),
 }
 
-impl From<CryptErr> for AuthnErr {
-    fn from(e: CryptErr) -> Self {
+impl From<crypt::CryptErr> for AuthnErr {
+    fn from(e: crypt::CryptErr) -> Self {
         Self::CryptErr(e)
     }
 }
 
-impl From<FileSysErr> for AuthnErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for AuthnErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-impl From<HTTPErr> for AuthnErr {
-    fn from(e: HTTPErr) -> Self {
+impl From<http::HTTPErr> for AuthnErr {
+    fn from(e: http::HTTPErr) -> Self {
         Self::HTTPErr(e)
     }
 }

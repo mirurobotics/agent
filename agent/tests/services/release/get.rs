@@ -1,15 +1,13 @@
-use miru_agent::filesys::dir::Dir;
-use miru_agent::filesys::Overwrite;
-use miru_agent::models::deployment::{DplActivity, DplErrStatus, DplTarget};
-use miru_agent::models::{Deployment, Release};
-use miru_agent::services::errors::ServiceErr;
+use miru_agent::filesys::{self, Overwrite};
+use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget, Release};
 use miru_agent::services::release as rls_svc;
+use miru_agent::services::ServiceErr;
 use miru_agent::storage::{Deployments, Releases};
 
 use chrono::{DateTime, Utc};
 
-async fn setup(name: &str) -> (Dir, Deployments, Releases) {
-    let dir = Dir::create_temp_dir(name).await.unwrap();
+async fn setup(name: &str) -> (filesys::Dir, Deployments, Releases) {
+    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
     let (dpl_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
         .await
         .unwrap();

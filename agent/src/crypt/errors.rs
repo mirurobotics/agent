@@ -1,5 +1,5 @@
 use crate::errors::Trace;
-use crate::filesys::errors::FileSysErr;
+use crate::filesys;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Invalid JWT: {msg}")]
@@ -107,7 +107,7 @@ pub enum CryptErr {
     #[error(transparent)]
     InvalidJWTPayloadErr(InvalidJWTPayloadFormatErr),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
     Base64DecodeErr(Base64DecodeErr),
     #[error(transparent)]
@@ -128,8 +128,8 @@ pub enum CryptErr {
     VerifyDataErr(VerifyDataErr),
 }
 
-impl From<FileSysErr> for CryptErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for CryptErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }

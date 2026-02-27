@@ -1,6 +1,6 @@
 // internal crates
-use crate::mqtt::client::{ClientI, Publish};
-use crate::mqtt::{
+use super::client::{ClientI, Publish};
+use super::{
     errors::*,
     topics::{device_ping, device_pong, device_sync},
 };

@@ -1,11 +1,8 @@
 // internal crates
-use miru_agent::deploy::errors::DeployErr;
 use miru_agent::deploy::filesys::deploy;
-use miru_agent::filesys::{dir::Dir, Overwrite, WriteOptions};
-use miru_agent::models::{
-    config_instance::ConfigInstance,
-    deployment::{Deployment, DplActivity, DplTarget},
-};
+use miru_agent::deploy::DeployErr;
+use miru_agent::filesys::{self, Overwrite, WriteOptions};
+use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
 use miru_agent::storage;
 
 // external crates
@@ -14,14 +11,16 @@ use serde_json::json;
 struct Fixture {
     cfg_inst_meta: storage::CfgInsts,
     cfg_inst_content: storage::CfgInstContent,
-    staging_dir: Dir,
-    target_dir: Dir,
-    _temp_dir: Dir,
+    staging_dir: filesys::Dir,
+    target_dir: filesys::Dir,
+    _temp_dir: filesys::Dir,
 }
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = Dir::create_temp_dir("deploy-filesys-test").await.unwrap();
+        let temp_dir = filesys::Dir::create_temp_dir("deploy-filesys-test")
+            .await
+            .unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
         let (cfg_inst_meta, _) =
@@ -76,10 +75,7 @@ impl Fixture {
         }
     }
 
-    async fn deploy(
-        &self,
-        deployment: &Deployment,
-    ) -> Result<(), miru_agent::deploy::errors::DeployErr> {
+    async fn deploy(&self, deployment: &Deployment) -> Result<(), DeployErr> {
         let stor = storage::CfgInstRef {
             meta: &self.cfg_inst_meta,
             content: &self.cfg_inst_content,
@@ -90,7 +86,7 @@ impl Fixture {
 
 pub mod deploy_func {
     use super::*;
-    use miru_agent::filesys::path::PathExt;
+    use miru_agent::filesys::PathExt;
 
     #[tokio::test]
     async fn creates_new_file() {

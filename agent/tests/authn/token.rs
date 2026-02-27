@@ -1,5 +1,6 @@
 // internal crates
-use miru_agent::authn::token::{Token, Updates};
+use miru_agent::authn::token::Updates;
+use miru_agent::authn::Token;
 use miru_agent::models::Patch;
 
 // external crates

@@ -5,4 +5,7 @@ pub mod errors;
 pub mod file;
 pub mod single_thread;
 
-pub use crate::filesys::Overwrite;
+pub use self::dir::{DirCache, SingleThreadDirCache};
+pub use self::entry::CacheEntry;
+pub use self::errors::CacheErr;
+pub use self::file::{FileCache, SingleThreadFileCache};

@@ -4,20 +4,21 @@ use std::sync::Arc;
 
 // internal crates
 use crate::activity;
-use crate::authn::{
-    token::Token,
-    token_mngr::{TokenFile, TokenManager, TokenManagerExt},
-};
+use crate::authn;
+use crate::authn::token_mngr::TokenFile;
+use crate::authn::TokenManagerExt;
 use crate::cooldown;
 use crate::crypt::jwt;
 use crate::deploy::{apply, fsm};
-use crate::filesys::path::PathExt;
+use crate::filesys::PathExt;
 use crate::http;
-use crate::models::device::Device;
-
-use crate::server::errors::*;
+use crate::models;
+use crate::server;
+use crate::server::errors::MissingDeviceIDErr;
 use crate::storage;
-use crate::sync::syncer::{Syncer, SyncerArgs, SyncerExt};
+use crate::sync;
+use crate::sync::syncer::SyncerArgs;
+use crate::sync::SyncerExt;
 use crate::trace;
 
 pub type DeviceID = String;
@@ -26,8 +27,8 @@ pub type DeviceID = String;
 pub struct AppState {
     pub storage: Arc<storage::Storage>,
     pub http_client: Arc<http::Client>,
-    pub syncer: Arc<Syncer>,
-    pub token_mngr: Arc<TokenManager>,
+    pub syncer: Arc<sync::Syncer>,
+    pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
 }
 
@@ -38,13 +39,14 @@ impl AppState {
         capacities: storage::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
-    ) -> Result<(Self, impl Future<Output = ()>), ServerErr> {
+    ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
         let private_key_file = auth_dir.private_key();
         private_key_file.assert_exists()?;
 
-        let token_file = TokenFile::new_with_default(auth_dir.token(), Token::default()).await?;
+        let token_file =
+            TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
 
         // get the device id
         let device_id = Self::init_device_id(layout, &token_file).await?;
@@ -55,7 +57,7 @@ impl AppState {
         let storage = Arc::new(stor);
 
         // initialize the token manager
-        let (token_mngr, token_mngr_handle) = TokenManager::spawn(
+        let (token_mngr, token_mngr_handle) = authn::TokenManager::spawn(
             64,
             device_id.clone(),
             http_client.clone(),
@@ -67,7 +69,7 @@ impl AppState {
         // initialize the syncer
         let deploy_target_dir = layout.customer_configs();
         let deploy_staging_dir = layout.srv_temp_dir();
-        let (syncer, syncer_handle) = Syncer::spawn(
+        let (syncer, syncer_handle) = sync::Syncer::spawn(
             64,
             SyncerArgs {
                 storage: storage.clone(),
@@ -112,9 +114,9 @@ impl AppState {
     async fn init_device_id(
         layout: &storage::Layout,
         token_file: &TokenFile,
-    ) -> Result<DeviceID, ServerErr> {
+    ) -> Result<DeviceID, server::ServerErr> {
         // attempt to get the device id from the agent file
-        let device_file_err = match layout.device().read_json::<Device>().await {
+        let device_file_err = match layout.device().read_json::<models::Device>().await {
             Ok(device) => {
                 return Ok(device.id.clone());
             }
@@ -126,7 +128,7 @@ impl AppState {
         let device_id = match jwt::extract_device_id(&token.token) {
             Ok(device_id) => device_id,
             Err(e) => {
-                return Err(ServerErr::MissingDeviceIDErr(Box::new(
+                return Err(server::ServerErr::MissingDeviceIDErr(Box::new(
                     MissingDeviceIDErr {
                         device_file_err,
                         jwt_err: e,
@@ -139,7 +141,7 @@ impl AppState {
         Ok(device_id)
     }
 
-    pub async fn shutdown(&self) -> Result<(), ServerErr> {
+    pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
 

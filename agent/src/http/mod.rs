@@ -8,5 +8,7 @@ pub mod request;
 pub mod response;
 pub mod retry;
 
+pub use self::errors::HTTPErr;
+pub use self::query::QueryParams;
 pub use client::{Client, ClientI};
 pub use retry::with_retry;

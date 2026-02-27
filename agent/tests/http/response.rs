@@ -1,10 +1,9 @@
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
-use miru_agent::http;
-use miru_agent::http::errors::HTTPErr;
 use miru_agent::http::request::Params;
 use miru_agent::http::response;
+use miru_agent::http::{self, HTTPErr};
 use serde::Deserialize;
 
 use crate::http::mock;

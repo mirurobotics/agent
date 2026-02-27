@@ -1,8 +1,7 @@
 // internal crates
-use miru_agent::models::deployment::{
-    Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget, Updates,
-};
+use miru_agent::models::deployment::Updates;
 use miru_agent::models::Patch;
+use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget};
 use openapi_client::models as backend_client;
 use openapi_server::models as agent_server;
 
@@ -231,7 +230,10 @@ fn target_status_backend_conversions() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(Into::<DplTarget>::into(&test_case.backend), test_case.storage);
+        assert_eq!(
+            Into::<DplTarget>::into(&test_case.backend),
+            test_case.storage
+        );
         assert_eq!(
             Into::<backend_client::DeploymentTargetStatus>::into(&test_case.storage),
             test_case.backend
@@ -346,7 +348,10 @@ fn activity_status_backend_conversions() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(Into::<DplActivity>::into(&test_case.backend), test_case.storage);
+        assert_eq!(
+            Into::<DplActivity>::into(&test_case.backend),
+            test_case.storage
+        );
         assert_eq!(
             Into::<backend_client::DeploymentActivityStatus>::into(&test_case.storage),
             test_case.backend
@@ -451,7 +456,10 @@ fn error_status_backend_conversions() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(Into::<DplErrStatus>::into(&test_case.backend), test_case.storage);
+        assert_eq!(
+            Into::<DplErrStatus>::into(&test_case.backend),
+            test_case.storage
+        );
         assert_eq!(
             Into::<backend_client::DeploymentErrorStatus>::into(&test_case.storage),
             test_case.backend
@@ -583,7 +591,10 @@ fn status_backend_conversion() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(Into::<DplStatus>::into(&test_case.backend), test_case.storage);
+        assert_eq!(
+            Into::<DplStatus>::into(&test_case.backend),
+            test_case.storage
+        );
         assert_eq!(
             Into::<backend_client::DeploymentStatus>::into(&test_case.storage),
             test_case.backend

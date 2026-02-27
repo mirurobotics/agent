@@ -1,8 +1,8 @@
 // internal crates
-use miru_agent::filesys::dir::Dir;
-use miru_agent::models::device::{Device, DeviceStatus};
+use miru_agent::filesys;
+use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::services::device as dvc_svc;
-use miru_agent::services::errors::*;
+use miru_agent::services::ServiceErr;
 use miru_agent::storage::{self, Layout};
 
 // external crates
@@ -13,7 +13,7 @@ pub mod errors {
 
     #[tokio::test]
     async fn device_file_shutdown() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -32,7 +32,7 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_does_not_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -48,7 +48,7 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -62,7 +62,7 @@ pub mod success {
 
     #[tokio::test]
     async fn returns_custom_device_data() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let custom_device = Device {

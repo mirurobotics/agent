@@ -2,10 +2,9 @@
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
-use crate::crypt::errors::*;
-use crate::filesys::file::File;
-use crate::filesys::path::PathExt;
-use crate::filesys::{Atomic, Overwrite, WriteOptions};
+use super::errors::*;
+use crate::filesys;
+use crate::filesys::{Atomic, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
 // external libraries
@@ -40,8 +39,8 @@ macro_rules! ssl_err {
 /// group (640). https://www.redhat.com/sysadmin/linux-file-permissions-explained
 pub async fn gen_key_pair(
     num_bits: u32,
-    private_key_file: &File,
-    public_key_file: &File,
+    private_key_file: &filesys::File,
+    public_key_file: &filesys::File,
     overwrite: Overwrite,
 ) -> Result<(), CryptErr> {
     // Generate the RSA key pair
@@ -83,7 +82,7 @@ pub async fn gen_key_pair(
 }
 
 /// Read an RSA private key from the specified file.
-pub async fn read_private_key(private_key_file: &File) -> Result<Rsa<Private>, CryptErr> {
+pub async fn read_private_key(private_key_file: &filesys::File) -> Result<Rsa<Private>, CryptErr> {
     private_key_file.assert_exists()?;
     let private_key_pem = private_key_file.read_secret_bytes().await?;
     ssl_err!(
@@ -93,7 +92,7 @@ pub async fn read_private_key(private_key_file: &File) -> Result<Rsa<Private>, C
 }
 
 /// Read an RSA public key from the specified file.
-pub async fn read_public_key(public_key_file: &File) -> Result<Rsa<Public>, CryptErr> {
+pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Public>, CryptErr> {
     public_key_file.assert_exists()?;
     let public_key_pem = public_key_file.read_secret_bytes().await?;
     ssl_err!(
@@ -104,7 +103,7 @@ pub async fn read_public_key(public_key_file: &File) -> Result<Rsa<Public>, Cryp
 
 /// Create a signature from the provided data using the private key stored in the
 /// specified file
-pub async fn sign(private_key_file: &File, data: &[u8]) -> Result<Vec<u8>, CryptErr> {
+pub async fn sign(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr> {
     let rsa_private_key = read_private_key(private_key_file).await?;
     let private_key = ssl_err!(RSAToPKeyErr, PKey::from_rsa(rsa_private_key))?;
 
@@ -119,7 +118,7 @@ pub async fn sign(private_key_file: &File, data: &[u8]) -> Result<Vec<u8>, Crypt
 
 /// Verify a signature using the public key stored in the specified file
 pub async fn verify(
-    public_key_file: &File,
+    public_key_file: &filesys::File,
     data: &[u8],
     signature: &[u8],
 ) -> Result<bool, CryptErr> {

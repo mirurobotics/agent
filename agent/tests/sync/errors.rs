@@ -1,11 +1,16 @@
-use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
-use miru_agent::cache::errors::{CacheElementNotFound, CacheErr};
-use miru_agent::deploy::errors::{DeployErr, EmptyConfigInstancesErr};
+use miru_agent::authn::errors::MockError as AuthnMockError;
+use miru_agent::authn::AuthnErr;
+use miru_agent::cache::errors::CacheElementNotFound;
+use miru_agent::cache::CacheErr;
+use miru_agent::deploy::errors::EmptyConfigInstancesErr;
+use miru_agent::deploy::DeployErr;
 use miru_agent::errors::Error;
-use miru_agent::filesys::errors::{FileSysErr, InvalidDirNameErr};
+use miru_agent::filesys::errors::InvalidDirNameErr;
+use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::storage::StorageErr;
-use miru_agent::sync::errors::{CfgInstsNotExpandedErr, SyncErr, SyncErrors, SyncerInCooldownErr};
+use miru_agent::sync::errors::{CfgInstsNotExpandedErr, SyncErrors, SyncerInCooldownErr};
+use miru_agent::sync::SyncErr;
 
 fn authn_err() -> AuthnErr {
     AuthnErr::MockError(AuthnMockError {

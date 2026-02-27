@@ -1,4 +1,4 @@
-use crate::cache::file::FileCache;
-use crate::models::release::{Release, ReleaseID};
+use crate::cache;
+use crate::models;
 
-pub type Releases = FileCache<ReleaseID, Release>;
+pub type Releases = cache::FileCache<models::ReleaseID, models::Release>;

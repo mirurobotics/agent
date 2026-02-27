@@ -323,7 +323,7 @@ mod poll_error_classification {
             port: 1, // unlikely to have anything listening
         });
 
-        let (_, mut eventloop) = miru_agent::mqtt::client::MQTTClient::new(&opts).await;
+        let (_, mut eventloop) = miru_agent::mqtt::Client::new(&opts).await;
 
         let err = poll(&mut eventloop).await.unwrap_err();
         assert!(err.is_network_conn_err());
@@ -331,8 +331,8 @@ mod poll_error_classification {
 }
 
 mod mqtt_client_new {
-    use miru_agent::mqtt::client::MQTTClient;
     use miru_agent::mqtt::options::{Credentials, Options};
+    use miru_agent::mqtt::Client;
 
     #[tokio::test]
     async fn created_at_is_recent() {
@@ -341,7 +341,7 @@ mod mqtt_client_new {
             username: "test".to_string(),
             password: "test".to_string(),
         });
-        let (client, _eventloop) = MQTTClient::new(&opts).await;
+        let (client, _eventloop) = Client::new(&opts).await;
         let after = chrono::Utc::now();
 
         assert!(client.created_at >= before);

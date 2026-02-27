@@ -2,7 +2,7 @@
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::http::{self, errors::HTTPErr, request::Params};
+use miru_agent::http::{self, request::Params, HTTPErr};
 use openapi_client::models::{
     Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError, ErrorResponse,
     TokenResponse,

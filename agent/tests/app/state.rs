@@ -4,17 +4,13 @@ use std::sync::Arc;
 
 // internal crates
 use miru_agent::app::state::AppState;
-use miru_agent::authn::token::Token;
+use miru_agent::authn::Token;
 use miru_agent::deploy::fsm;
-use miru_agent::filesys::errors::FileSysErr;
-use miru_agent::filesys::{dir::Dir, WriteOptions};
+use miru_agent::filesys::{self, FileSysErr, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
-use miru_agent::models::{
-    device,
-    device::{Device, DeviceStatus},
-};
-use miru_agent::server::errors::ServerErr;
+use miru_agent::models::{self, Device, DeviceStatus};
+use miru_agent::server::ServerErr;
 use miru_agent::storage::{Capacities, Layout};
 
 // external crates
@@ -25,7 +21,7 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_private_key_file() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let result = AppState::init(
             Device::default().agent_version,
@@ -50,7 +46,7 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_device_id() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         // create a private key file
         let private_key_file = layout.auth().private_key();
@@ -73,7 +69,7 @@ pub mod init {
     #[tokio::test]
     async fn success_missing_device_file_but_valid_token() {
         let begin_test = Utc::now().timestamp();
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
@@ -123,7 +119,7 @@ pub mod init {
     #[tokio::test]
     async fn success_missing_token_file() {
         let begin_test = Utc::now().timestamp();
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
@@ -163,7 +159,7 @@ pub mod init {
 
     #[tokio::test]
     async fn success_set_device_to_offline_on_boot() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
@@ -208,7 +204,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn success_device_offline() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
@@ -247,7 +243,7 @@ pub mod shutdown {
             log_dir: PathBuf::from("/tmp/miru"),
         });
 
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
@@ -280,7 +276,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(device::Updates::connected())
+            .patch(models::device::Updates::connected())
             .await
             .unwrap();
 

@@ -1,9 +1,9 @@
 use miru_agent::errors::Error;
 use miru_agent::http::errors::{
-    reqwest_err_to_http_client_err, HTTPErr, MockErr, RequestFailed, ReqwestErr, ReqwestErrKind,
-    TimeoutErr,
+    reqwest_err_to_http_client_err, MockErr, RequestFailed, ReqwestErr, ReqwestErrKind, TimeoutErr,
 };
 use miru_agent::http::request::{Meta, Params};
+use miru_agent::http::HTTPErr;
 use openapi_client::models::{Error as ApiError, ErrorResponse};
 
 fn meta() -> Meta {

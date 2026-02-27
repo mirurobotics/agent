@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::cache::{entry::CacheEntry, errors::CacheErr, single_thread::SingleThreadCache};
+use miru_agent::cache::{single_thread::SingleThreadCache, CacheEntry, CacheErr};
 use miru_agent::filesys::Overwrite;
 
 // external crates

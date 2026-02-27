@@ -1,17 +1,17 @@
-use crate::models::release::Release;
+use crate::models;
 use crate::services::deployment as dpl_svc;
 use crate::services::errors::ServiceErr;
-use crate::storage::{Deployments, Releases};
+use crate::storage;
 
-pub async fn get(releases: &Releases, id: String) -> Result<Release, ServiceErr> {
+pub async fn get(releases: &storage::Releases, id: String) -> Result<models::Release, ServiceErr> {
     let release = releases.read(id).await?;
     Ok(release)
 }
 
 pub async fn get_current(
-    deployments: &Deployments,
-    releases: &Releases,
-) -> Result<Release, ServiceErr> {
+    deployments: &storage::Deployments,
+    releases: &storage::Releases,
+) -> Result<models::Release, ServiceErr> {
     let dpl = dpl_svc::get_current(deployments).await?;
     let release = releases.read(dpl.release_id).await?;
     Ok(release)

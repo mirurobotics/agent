@@ -10,9 +10,12 @@ use crate::app::{
     options::{AppOptions, LifecycleOptions},
     state::AppState,
 };
-use crate::authn::token_mngr::{TokenManager, TokenManagerExt};
+use crate::authn;
+use crate::authn::TokenManagerExt;
 use crate::http;
-use crate::server::{errors::*, serve::serve, state::ServerState};
+use crate::server;
+use crate::server::errors::*;
+use crate::server::serve::serve;
 use crate::trace;
 use crate::workers::{
     mqtt, poller,
@@ -184,7 +187,7 @@ async fn init_app_state(
 }
 
 async fn init_token_refresh_worker(
-    token_mngr: Arc<TokenManager>,
+    token_mngr: Arc<authn::TokenManager>,
     options: TokenRefreshWorkerOptions,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -212,7 +215,7 @@ async fn init_token_refresh_worker(
     Ok(())
 }
 
-async fn refresh_if_expired(token_mngr: &TokenManager) -> Result<(), ServerErr> {
+async fn refresh_if_expired(token_mngr: &authn::TokenManager) -> Result<(), ServerErr> {
     let token = token_mngr.get_token().await?;
     if token.is_expired() {
         token_mngr.refresh_token().await?;
@@ -285,7 +288,7 @@ async fn init_socket_server(
     info!("Initializing socket server...");
 
     // run the axum server with graceful shutdown
-    let server_state = ServerState::new(
+    let server_state = server::State::new(
         app_state.storage.clone(),
         app_state.http_client.clone(),
         app_state.syncer.clone(),

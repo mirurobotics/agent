@@ -1,9 +1,9 @@
-use crate::authn::errors::AuthnErr;
-use crate::cache::errors::CacheErr;
-use crate::deploy::errors::DeployErr;
+use crate::authn;
+use crate::cache;
+use crate::deploy;
 use crate::errors::Trace;
-use crate::filesys::errors::FileSysErr;
-use crate::http::errors::HTTPErr;
+use crate::filesys;
+use crate::http;
 use crate::storage::StorageErr;
 
 use chrono::{DateTime, Utc};
@@ -71,15 +71,15 @@ impl crate::errors::Error for CfgInstsNotExpandedErr {}
 #[derive(Debug, thiserror::Error)]
 pub enum SyncErr {
     #[error(transparent)]
-    AuthnErr(AuthnErr),
+    AuthnErr(authn::AuthnErr),
     #[error(transparent)]
-    CacheErr(CacheErr),
+    CacheErr(cache::CacheErr),
     #[error(transparent)]
-    DeployErr(Box<DeployErr>),
+    DeployErr(Box<deploy::DeployErr>),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
-    HTTPClientErr(HTTPErr),
+    HTTPClientErr(http::HTTPErr),
     #[error(transparent)]
     StorageErr(StorageErr),
     #[error(transparent)]
@@ -96,32 +96,32 @@ pub enum SyncErr {
     CfgInstsNotExpanded(CfgInstsNotExpandedErr),
 }
 
-impl From<AuthnErr> for SyncErr {
-    fn from(e: AuthnErr) -> Self {
+impl From<authn::AuthnErr> for SyncErr {
+    fn from(e: authn::AuthnErr) -> Self {
         Self::AuthnErr(e)
     }
 }
 
-impl From<CacheErr> for SyncErr {
-    fn from(e: CacheErr) -> Self {
+impl From<cache::CacheErr> for SyncErr {
+    fn from(e: cache::CacheErr) -> Self {
         Self::CacheErr(e)
     }
 }
 
-impl From<DeployErr> for SyncErr {
-    fn from(e: DeployErr) -> Self {
+impl From<deploy::DeployErr> for SyncErr {
+    fn from(e: deploy::DeployErr) -> Self {
         Self::DeployErr(Box::new(e))
     }
 }
 
-impl From<FileSysErr> for SyncErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for SyncErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-impl From<HTTPErr> for SyncErr {
-    fn from(e: HTTPErr) -> Self {
+impl From<http::HTTPErr> for SyncErr {
+    fn from(e: http::HTTPErr) -> Self {
         Self::HTTPClientErr(e)
     }
 }

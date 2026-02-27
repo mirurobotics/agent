@@ -1,4 +1,5 @@
-use miru_agent::http::query::{Page, QueryParams};
+use miru_agent::http::query::Page;
+use miru_agent::http::QueryParams;
 
 pub mod query_params {
     use super::*;

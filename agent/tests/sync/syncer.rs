@@ -3,29 +3,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use miru_agent::authn::{
-    token::Token,
-    token_mngr::{TokenFile, TokenManager, TokenManagerExt},
-};
+use miru_agent::authn::token_mngr::TokenFile;
+use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::errors::*;
-use miru_agent::filesys::Overwrite;
-use miru_agent::filesys::{dir::Dir, WriteOptions};
+use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
-use miru_agent::models::deployment::{DplActivity, DplErrStatus, DplTarget};
-use miru_agent::models::device::Device;
+use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{
     self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
 };
-use miru_agent::sync::{
-    errors::SyncErr,
-    syncer::{
-        CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, Syncer, SyncerArgs,
-        SyncerExt, Worker,
-    },
+use miru_agent::sync::syncer::{
+    CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
 };
+use miru_agent::sync::{SyncErr, Syncer, SyncerExt};
 
 use crate::http::mock::{Call, MockClient};
 use crate::sync::helpers::*;
@@ -36,7 +29,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 pub async fn create_token_manager(
-    dir: &Dir,
+    dir: &filesys::Dir,
     http_client: Arc<MockClient>,
 ) -> (TokenManager, JoinHandle<()>) {
     let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
@@ -58,7 +51,7 @@ pub async fn create_token_manager(
     .unwrap()
 }
 
-pub async fn create_storage(dir: &Dir) -> Storage {
+pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     let (cfg_inst_stor, _) = CfgInsts::spawn(16, dir.file("cfg_inst_cache.json"), 1000)
         .await
         .unwrap();
@@ -105,7 +98,7 @@ pub fn spawn(
 // ========================= FIXTURE ========================= //
 
 struct Fixture {
-    _dir: Dir,
+    _dir: filesys::Dir,
     http_client: Arc<MockClient>,
     storage: Arc<Storage>,
     syncer: Syncer,
@@ -131,7 +124,7 @@ impl Fixture {
     }
 
     async fn new_with_opts(name: &str, backoff: cooldown::Backoff, agent_version: String) -> Self {
-        let dir = Dir::create_temp_dir(name).await.unwrap();
+        let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let token_mngr = Arc::new(token_mngr);
@@ -222,7 +215,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn shutdown() {
-        let dir = Dir::create_temp_dir("spawn").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("spawn").await.unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 

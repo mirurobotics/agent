@@ -1,10 +1,9 @@
 // internal crates
 use miru_agent::crypt::base64;
-use miru_agent::filesys::dir::Dir;
-use miru_agent::filesys::path::PathExt;
-use miru_agent::http::errors::HTTPErr;
-use miru_agent::installer::errors::InstallErr;
+use miru_agent::filesys::{self, PathExt};
+use miru_agent::http::HTTPErr;
 use miru_agent::installer::install;
+use miru_agent::installer::InstallErr;
 use miru_agent::storage::{Layout, Settings};
 use openapi_client::models::Device;
 
@@ -49,7 +48,7 @@ pub mod install_fn {
         let token = new_jwt(DEVICE_ID);
         let device_name = "test-device";
 
-        let root = Dir::create_temp_dir("install-test").await.unwrap();
+        let root = filesys::Dir::create_temp_dir("install-test").await.unwrap();
         let layout = Layout::new(root.clone());
         let settings = Settings::default();
 
@@ -104,7 +103,7 @@ pub mod install_fn {
     async fn http_error_stops_install() {
         let token = new_jwt(DEVICE_ID);
 
-        let root = Dir::create_temp_dir("install-test").await.unwrap();
+        let root = filesys::Dir::create_temp_dir("install-test").await.unwrap();
         let layout = Layout::new(root.clone());
         let settings = Settings::default();
 
@@ -136,7 +135,7 @@ pub mod install_fn {
 
     #[tokio::test]
     async fn invalid_jwt_returns_error() {
-        let root = Dir::create_temp_dir("install-test").await.unwrap();
+        let root = filesys::Dir::create_temp_dir("install-test").await.unwrap();
         let layout = Layout::new(root.clone());
         let settings = Settings::default();
         let mock = MockClient::default();

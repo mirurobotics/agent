@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 // internal crates
+use super::errors::*;
+use super::state::State;
 use crate::errors::Error;
-use crate::server::errors::*;
-use crate::server::state::ServerState;
 use crate::services::deployment as dpl_svc;
 use crate::services::device as dvc_svc;
 use crate::services::git_commit as git_cmt_svc;
@@ -13,7 +13,7 @@ use openapi_server::models as openapi;
 
 // external
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State as AxumState},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -50,7 +50,7 @@ pub async fn version() -> impl IntoResponse {
 }
 
 // ================================= DEVICE ======================================== //
-pub async fn get_device(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
         async move {
             let device = dvc_svc::get(&state.storage.device).await?;
@@ -61,7 +61,7 @@ pub async fn get_device(State(state): State<Arc<ServerState>>) -> impl IntoRespo
     .await
 }
 
-pub async fn sync_device(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+pub async fn sync_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
         async move { dvc_svc::sync(state.syncer.as_ref()).await },
         "Error syncing device",
@@ -71,7 +71,7 @@ pub async fn sync_device(State(state): State<Arc<ServerState>>) -> impl IntoResp
 
 // ================================ DEPLOYMENTS ==================================== //
 pub async fn get_deployment(
-    State(state): State<Arc<ServerState>>,
+    AxumState(state): AxumState<Arc<State>>,
     Path(deployment_id): Path<String>,
 ) -> impl IntoResponse {
     handle(
@@ -84,7 +84,7 @@ pub async fn get_deployment(
     .await
 }
 
-pub async fn get_current_deployment(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+pub async fn get_current_deployment(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
         async {
             let dpl = dpl_svc::get_current(&state.storage.deployments).await?;
@@ -97,7 +97,7 @@ pub async fn get_current_deployment(State(state): State<Arc<ServerState>>) -> im
 
 // ================================= RELEASES ====================================== //
 pub async fn get_release(
-    State(state): State<Arc<ServerState>>,
+    AxumState(state): AxumState<Arc<State>>,
     Path(release_id): Path<String>,
 ) -> impl IntoResponse {
     handle(
@@ -110,7 +110,7 @@ pub async fn get_release(
     .await
 }
 
-pub async fn get_current_release(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+pub async fn get_current_release(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
         async {
             let release =
@@ -124,7 +124,7 @@ pub async fn get_current_release(State(state): State<Arc<ServerState>>) -> impl 
 
 // ================================ GIT COMMITS ==================================== //
 pub async fn get_git_commit(
-    State(state): State<Arc<ServerState>>,
+    AxumState(state): AxumState<Arc<State>>,
     Path(git_commit_id): Path<String>,
 ) -> impl IntoResponse {
     handle(

@@ -1,7 +1,7 @@
 // internal crates
 use crate::{concurrent_cache_tests, single_thread_cache_tests};
-use miru_agent::cache::file::{FileCache, SingleThreadFileCache};
-use miru_agent::filesys::{dir::Dir, path::PathExt};
+use miru_agent::cache::{FileCache, SingleThreadFileCache};
+use miru_agent::filesys::{self, PathExt};
 
 // external crates
 use tokio::task::JoinHandle;
@@ -14,7 +14,7 @@ pub mod concurrent {
     type TestCache = FileCache<String, String>;
 
     async fn spawn_cache_with_capacity(capacity: usize) -> (TestCache, JoinHandle<()>) {
-        let file = Dir::create_temp_dir("testing")
+        let file = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .file("cache.json");
@@ -30,7 +30,7 @@ pub mod concurrent {
 
         #[tokio::test]
         async fn spawn() {
-            let file = Dir::create_temp_dir("testing")
+            let file = filesys::Dir::create_temp_dir("testing")
                 .await
                 .unwrap()
                 .file("cache.json");
@@ -51,7 +51,7 @@ pub mod single_thread {
     type TestCache = SingleThreadFileCache<String, String>;
 
     async fn new_cache_with_capacity(capacity: usize) -> TestCache {
-        let file = Dir::create_temp_dir("testing")
+        let file = filesys::Dir::create_temp_dir("testing")
             .await
             .unwrap()
             .file("cache.json");
@@ -67,7 +67,7 @@ pub mod single_thread {
 
         #[tokio::test]
         async fn new() {
-            let file = Dir::create_temp_dir("testing")
+            let file = filesys::Dir::create_temp_dir("testing")
                 .await
                 .unwrap()
                 .file("cache.json");

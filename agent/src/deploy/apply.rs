@@ -1,9 +1,9 @@
 // internal crates
-use crate::deploy::errors::{ConflictingDeploymentsErr, DeployErr};
-use crate::deploy::{filesys, fsm};
-use crate::filesys::dir::Dir;
+use super::errors::{ConflictingDeploymentsErr, DeployErr};
+use super::{filesys as dpl_filesys, fsm};
+use crate::filesys;
 use crate::filesys::Overwrite;
-use crate::models::deployment::{Deployment, DplErrStatus, DplTarget};
+use crate::models;
 use crate::storage;
 
 // external crates
@@ -11,8 +11,8 @@ use chrono::Utc;
 use tracing::{error, info, warn};
 
 pub struct DeployOpts {
-    pub staging_dir: Dir,
-    pub target_dir: Dir,
+    pub staging_dir: filesys::Dir,
+    pub target_dir: filesys::Dir,
     pub retry_policy: fsm::RetryPolicy,
 }
 
@@ -27,7 +27,7 @@ pub struct Storage<'a> {
 }
 
 pub struct Outcome {
-    pub deployment: Deployment,
+    pub deployment: models::Deployment,
     pub wait: Option<chrono::TimeDelta>,
     pub error: Option<DeployErr>,
 }
@@ -63,10 +63,11 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
 
 async fn find_target_deployed(
     storage: &storage::Deployments,
-) -> Result<Option<Deployment>, DeployErr> {
+) -> Result<Option<models::Deployment>, DeployErr> {
     let target_deployed = storage
         .find_where(|d| {
-            d.target_status == DplTarget::Deployed && d.error_status != DplErrStatus::Failed
+            d.target_status == models::DplTarget::Deployed
+                && d.error_status != models::DplErrStatus::Failed
         })
         .await?;
     if target_deployed.len() > 1 {
@@ -97,7 +98,7 @@ async fn apply_actionables(
     Ok(outcomes)
 }
 
-async fn apply_one(args: &Args<'_>, deployment: Deployment) -> Outcome {
+async fn apply_one(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
     match fsm::next_action(&deployment) {
         fsm::NextAction::None => {
             info!("'{}' has no next action", deployment.id);
@@ -132,10 +133,14 @@ async fn apply_one(args: &Args<'_>, deployment: Deployment) -> Outcome {
 
 // ================================= DEPLOY ======================================== //
 
-async fn deploy(storage: &Storage<'_>, opts: &DeployOpts, deployment: Deployment) -> Outcome {
+async fn deploy(
+    storage: &Storage<'_>,
+    opts: &DeployOpts,
+    deployment: models::Deployment,
+) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
 
-    match filesys::deploy(
+    match dpl_filesys::deploy(
         &storage.cfg_insts,
         &opts.staging_dir,
         &opts.target_dir,
@@ -172,7 +177,7 @@ async fn deploy(storage: &Storage<'_>, opts: &DeployOpts, deployment: Deployment
     }
 }
 
-fn remaining_cooldown(deployment: &Deployment) -> Option<chrono::TimeDelta> {
+fn remaining_cooldown(deployment: &models::Deployment) -> Option<chrono::TimeDelta> {
     if deployment.is_in_cooldown() {
         let remaining = deployment
             .cooldown_ends_at
@@ -186,7 +191,7 @@ fn remaining_cooldown(deployment: &Deployment) -> Option<chrono::TimeDelta> {
 
 // ================================= REMOVE ======================================== //
 
-async fn remove(deployments: &storage::Deployments, deployment: Deployment) -> Outcome {
+async fn remove(deployments: &storage::Deployments, deployment: models::Deployment) -> Outcome {
     let deployment = fsm::remove(deployment);
     let error = write_deployment(deployments, &deployment).await.err();
     Outcome {
@@ -200,7 +205,7 @@ async fn remove(deployments: &storage::Deployments, deployment: Deployment) -> O
 
 async fn write_deployment(
     storage: &storage::Deployments,
-    deployment: &Deployment,
+    deployment: &models::Deployment,
 ) -> Result<(), DeployErr> {
     storage
         .write(

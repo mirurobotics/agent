@@ -1,18 +1,17 @@
-use crate::authn::errors::AuthnErr;
-use crate::cache::errors::CacheErr;
-use crate::crypt::errors::CryptErr;
+use crate::authn;
+use crate::cache;
+use crate::crypt;
 use crate::errors::Trace;
-use crate::filesys::errors::FileSysErr;
-use crate::filesys::file::File;
-use crate::http::errors::HTTPErr;
-use crate::services::errors::ServiceErr;
+use crate::filesys;
+use crate::http;
+use crate::services;
 use crate::storage::StorageErr;
-use crate::sync::errors::SyncErr;
+use crate::sync;
 
 #[derive(Debug, thiserror::Error)]
 pub struct MissingDeviceIDErr {
-    pub device_file_err: FileSysErr,
-    pub jwt_err: CryptErr,
+    pub device_file_err: filesys::FileSysErr,
+    pub jwt_err: crypt::CryptErr,
     pub trace: Box<Trace>,
 }
 
@@ -36,7 +35,7 @@ impl crate::errors::Error for ShutdownMngrDuplicateArgErr {}
 #[derive(Debug, thiserror::Error)]
 #[error("failed to bind unix socket '{socket_file}': {source}")]
 pub struct BindUnixSocketErr {
-    pub socket_file: File,
+    pub socket_file: filesys::File,
     pub source: std::io::Error,
     pub trace: Box<Trace>,
 }
@@ -92,21 +91,21 @@ pub enum ServerErr {
 
     // internal crate errors
     #[error(transparent)]
-    AuthnErr(AuthnErr),
+    AuthnErr(authn::AuthnErr),
     #[error(transparent)]
-    CacheErr(CacheErr),
+    CacheErr(cache::CacheErr),
     #[error(transparent)]
-    CryptErr(CryptErr),
+    CryptErr(crypt::CryptErr),
     #[error(transparent)]
-    FileSysErr(FileSysErr),
+    FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
-    HTTPErr(HTTPErr),
+    HTTPErr(http::HTTPErr),
     #[error(transparent)]
-    ServiceErr(ServiceErr),
+    ServiceErr(services::ServiceErr),
     #[error(transparent)]
     StorageErr(StorageErr),
     #[error(transparent)]
-    SyncErr(Box<SyncErr>),
+    SyncErr(Box<sync::SyncErr>),
 
     // external crate errors
     #[error(transparent)]
@@ -119,38 +118,38 @@ pub enum ServerErr {
     JoinHandleErr(JoinHandleErr),
 }
 
-impl From<AuthnErr> for ServerErr {
-    fn from(e: AuthnErr) -> Self {
+impl From<authn::AuthnErr> for ServerErr {
+    fn from(e: authn::AuthnErr) -> Self {
         Self::AuthnErr(e)
     }
 }
 
-impl From<CacheErr> for ServerErr {
-    fn from(e: CacheErr) -> Self {
+impl From<cache::CacheErr> for ServerErr {
+    fn from(e: cache::CacheErr) -> Self {
         Self::CacheErr(e)
     }
 }
 
-impl From<CryptErr> for ServerErr {
-    fn from(e: CryptErr) -> Self {
+impl From<crypt::CryptErr> for ServerErr {
+    fn from(e: crypt::CryptErr) -> Self {
         Self::CryptErr(e)
     }
 }
 
-impl From<FileSysErr> for ServerErr {
-    fn from(e: FileSysErr) -> Self {
+impl From<filesys::FileSysErr> for ServerErr {
+    fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-impl From<HTTPErr> for ServerErr {
-    fn from(e: HTTPErr) -> Self {
+impl From<http::HTTPErr> for ServerErr {
+    fn from(e: http::HTTPErr) -> Self {
         Self::HTTPErr(e)
     }
 }
 
-impl From<ServiceErr> for ServerErr {
-    fn from(e: ServiceErr) -> Self {
+impl From<services::ServiceErr> for ServerErr {
+    fn from(e: services::ServiceErr) -> Self {
         Self::ServiceErr(e)
     }
 }
@@ -161,8 +160,8 @@ impl From<StorageErr> for ServerErr {
     }
 }
 
-impl From<SyncErr> for ServerErr {
-    fn from(e: SyncErr) -> Self {
+impl From<sync::SyncErr> for ServerErr {
+    fn from(e: sync::SyncErr) -> Self {
         Self::SyncErr(Box::new(e))
     }
 }

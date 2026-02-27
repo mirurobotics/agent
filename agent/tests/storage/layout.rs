@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, path::PathExt};
+use miru_agent::filesys::{self, PathExt};
 use miru_agent::storage::Layout;
 
 pub mod storage_layout {
@@ -16,14 +16,14 @@ pub mod storage_layout {
 
     #[test]
     fn root_dir() {
-        let layout = Layout::new(Dir::new("/"));
+        let layout = Layout::new(filesys::Dir::new("/"));
         let dir = layout.root();
         assert_eq!(dir.to_string(), "/var/lib/miru");
     }
 
     #[test]
     fn root_dir_custom_filesystem_root() {
-        let layout = Layout::new(Dir::new("/custom"));
+        let layout = Layout::new(filesys::Dir::new("/custom"));
         let dir = layout.root();
         assert_eq!(dir.to_string(), "/custom/var/lib/miru");
     }
@@ -106,7 +106,7 @@ pub mod storage_layout {
 
     #[test]
     fn customer_configs_custom_filesystem_root() {
-        let layout = Layout::new(Dir::new("/opt"));
+        let layout = Layout::new(filesys::Dir::new("/opt"));
         let dir = layout.customer_configs();
         assert_eq!(dir.to_string(), "/opt/srv/miru/config_instances");
     }
@@ -120,7 +120,7 @@ pub mod storage_layout {
 
     #[test]
     fn srv_temp_dir_custom_filesystem_root() {
-        let layout = Layout::new(Dir::new("/opt"));
+        let layout = Layout::new(filesys::Dir::new("/opt"));
         let dir = layout.srv_temp_dir();
         assert_eq!(dir.to_string(), "/opt/srv/miru/.temp");
     }

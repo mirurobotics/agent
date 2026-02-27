@@ -4,15 +4,15 @@ use std::path::PathBuf;
 // internal crates
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
-use miru_agent::filesys::{dir::Dir, file::File, WriteOptions};
-use miru_agent::models::device::Device;
-use miru_agent::server::serve::ServerOptions;
+use miru_agent::filesys::{self, WriteOptions};
+use miru_agent::models::Device;
+use miru_agent::server::Options;
 use miru_agent::storage::Layout;
 
 // external crates
 use tokio::time::Duration;
 
-async fn prepare_valid_server_storage(dir: Dir) {
+async fn prepare_valid_server_storage(dir: filesys::Dir) {
     let layout = Layout::new(dir);
 
     // create a private key file
@@ -33,7 +33,7 @@ async fn prepare_valid_server_storage(dir: Dir) {
 
 #[tokio::test]
 async fn invalid_app_state_initialization() {
-    let dir = Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let options = AppOptions {
         storage: StorageOptions {
             layout: Layout::new(dir),
@@ -54,7 +54,7 @@ async fn invalid_app_state_initialization() {
 
 #[tokio::test]
 async fn max_runtime_reached() {
-    let dir = Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
@@ -66,8 +66,8 @@ async fn max_runtime_reached() {
             max_runtime: Duration::from_millis(100),
             ..Default::default()
         },
-        server: ServerOptions {
-            socket_file: File::new(PathBuf::from("/tmp").join("miru.sock")),
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
         ..Default::default()
     };
@@ -86,7 +86,7 @@ async fn max_runtime_reached() {
 
 #[tokio::test]
 async fn is_persistent() {
-    let dir = Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let max_runtime = Duration::from_millis(100);
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
@@ -99,8 +99,8 @@ async fn is_persistent() {
             max_runtime,
             ..Default::default()
         },
-        server: ServerOptions {
-            socket_file: File::new(PathBuf::from("/tmp").join("miru.sock")),
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
         ..Default::default()
     };
@@ -119,7 +119,7 @@ async fn is_persistent() {
 
 #[tokio::test]
 async fn idle_timeout_reached() {
-    let dir = Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
@@ -133,8 +133,8 @@ async fn idle_timeout_reached() {
             max_shutdown_delay: Duration::from_secs(5),
             ..Default::default()
         },
-        server: ServerOptions {
-            socket_file: File::new(PathBuf::from("/tmp").join("miru.sock")),
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
         ..Default::default()
     };
@@ -153,7 +153,7 @@ async fn idle_timeout_reached() {
 
 #[tokio::test]
 async fn shutdown_signal_received() {
-    let dir = Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         lifecycle: LifecycleOptions {
@@ -164,8 +164,8 @@ async fn shutdown_signal_received() {
             layout: Layout::new(dir),
             ..Default::default()
         },
-        server: ServerOptions {
-            socket_file: File::new(PathBuf::from("/tmp").join("miru.sock")),
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
         ..Default::default()
     };

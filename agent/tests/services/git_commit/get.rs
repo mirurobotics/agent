@@ -1,12 +1,11 @@
-use miru_agent::filesys::dir::Dir;
-use miru_agent::filesys::Overwrite;
+use miru_agent::filesys::{self, Overwrite};
 use miru_agent::models::GitCommit;
-use miru_agent::services::errors::ServiceErr;
 use miru_agent::services::git_commit as git_cmt_svc;
+use miru_agent::services::ServiceErr;
 use miru_agent::storage::GitCommits;
 
-async fn setup(name: &str) -> (Dir, GitCommits) {
-    let dir = Dir::create_temp_dir(name).await.unwrap();
+async fn setup(name: &str) -> (filesys::Dir, GitCommits) {
+    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
     let (stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
         .await
         .unwrap();

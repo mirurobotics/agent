@@ -7,8 +7,8 @@ use std::hash::Hash;
 use crate::cache::{
     entry::CacheEntry,
     errors::{CacheElementNotFound, CacheErr, FoundTooManyCacheElements},
-    Overwrite,
 };
+use crate::filesys::Overwrite;
 use crate::trace;
 
 // external crates

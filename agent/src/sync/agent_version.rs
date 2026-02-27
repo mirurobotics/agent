@@ -1,7 +1,7 @@
+use super::errors::*;
 use crate::http;
 use crate::models;
 use crate::storage;
-use crate::sync::errors::*;
 
 use tracing::info;
 

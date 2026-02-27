@@ -1,6 +1,7 @@
 use crate::http::mock::{Call, CapturedRequest, MockClient};
 use miru_agent::http::config_instances::{self, GetContentParams};
-use miru_agent::http::errors::{HTTPErr, MockErr};
+use miru_agent::http::errors::MockErr;
+use miru_agent::http::HTTPErr;
 
 fn mock_err() -> HTTPErr {
     HTTPErr::MockErr(MockErr {

@@ -1,6 +1,5 @@
 // internal crates
-use miru_agent::crypt::base64;
-use miru_agent::crypt::errors::CryptErr;
+use miru_agent::crypt::{base64, CryptErr};
 
 pub mod encode_bytes_standard {
     use super::*;

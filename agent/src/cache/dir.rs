@@ -10,9 +10,8 @@ use crate::cache::{
     entry::CacheEntry,
     errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
-    Overwrite,
 };
-use crate::filesys::{dir::Dir, file, file::File, path::PathExt, Atomic, WriteOptions};
+use crate::filesys::{dir::Dir, file, file::File, path::PathExt, Atomic, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates

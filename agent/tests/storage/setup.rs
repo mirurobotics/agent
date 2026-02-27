@@ -1,6 +1,6 @@
 // internal crates
-use miru_agent::filesys::{dir::Dir, file::File, path::PathExt, WriteOptions};
-use miru_agent::models::device::Device;
+use miru_agent::filesys::{self, PathExt, WriteOptions};
+use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout, Settings};
 
 pub mod bootstrap {
@@ -39,7 +39,7 @@ pub mod bootstrap {
         assert!(config_instance_deployment_dir.exists());
     }
 
-    async fn create_temp_key_files(layout: &Layout) -> (File, File) {
+    async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
         let temp_dir = layout.temp_dir();
         let private_key_file = temp_dir.file("private_key.pem");
         private_key_file
@@ -57,7 +57,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_public_key_file_doesnt_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -80,7 +80,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_private_key_file_doesnt_exist() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -103,7 +103,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn clean_install() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -128,7 +128,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn device_file_already_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -160,7 +160,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn auth_directory_already_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create the public / private key files
@@ -189,7 +189,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn private_key_file_already_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create the public / private key files
@@ -214,7 +214,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn public_key_file_already_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create the public / private key files
@@ -239,7 +239,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn storage_directory_already_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -276,7 +276,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn config_instance_deployment_directory_already_exists() {
-        let dir = Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 

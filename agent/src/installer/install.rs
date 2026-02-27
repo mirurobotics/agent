@@ -2,11 +2,12 @@
 use std::env;
 
 // internal crates
+use super::errors::*;
 use crate::cli;
 use crate::crypt::{jwt, rsa};
-use crate::filesys::{file::File, Overwrite};
+use crate::filesys;
+use crate::filesys::Overwrite;
 use crate::http;
-use crate::installer::errors::*;
 use crate::storage::{self, settings};
 use crate::version;
 use openapi_client::models as backend_client;
@@ -69,7 +70,7 @@ pub fn read_token_from_env() -> Result<String, InstallErr> {
 
 async fn register_with_backend<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    public_key_file: &File,
+    public_key_file: &filesys::File,
     token: &str,
     device_name: Option<String>,
 ) -> Result<backend_client::Device, InstallErr> {

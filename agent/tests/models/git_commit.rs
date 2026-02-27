@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::models::git_commit::GitCommit;
+use miru_agent::models::GitCommit;
 use openapi_client::models::{self as backend_client, GitCommit as BackendGitCommit};
 
 // external crates

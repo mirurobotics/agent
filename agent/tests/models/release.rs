@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::models::release::Release;
+use miru_agent::models::Release;
 use openapi_client::models::Release as BackendRelease;
 
 // external crates

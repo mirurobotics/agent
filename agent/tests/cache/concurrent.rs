@@ -1,7 +1,6 @@
 // internal crates
 use miru_agent::cache::{
-    concurrent::ConcurrentCache, entry::CacheEntry, errors::CacheErr,
-    single_thread::SingleThreadCache,
+    concurrent::ConcurrentCache, single_thread::SingleThreadCache, CacheEntry, CacheErr,
 };
 use miru_agent::filesys::Overwrite;
 

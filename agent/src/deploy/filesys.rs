@@ -1,9 +1,8 @@
 // internal crates
-use crate::deploy::errors::{DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr};
-use crate::filesys::dir::Dir;
+use super::errors::{DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr};
+use crate::filesys;
 use crate::filesys::{Overwrite, WriteOptions};
-use crate::models::config_instance::ConfigInstance;
-use crate::models::deployment::{Deployment, DplTarget};
+use crate::models;
 use crate::storage;
 
 // external crates
@@ -13,9 +12,9 @@ use tracing::{info, warn};
 /// via an atomic staging-directory swap.
 pub async fn deploy(
     storage: &storage::CfgInstRef<'_>,
-    staging_dir: &Dir,
-    target_dir: &Dir,
-    deployment: &Deployment,
+    staging_dir: &filesys::Dir,
+    target_dir: &filesys::Dir,
+    deployment: &models::Deployment,
 ) -> Result<(), DeployErr> {
     validate_deployment(deployment)?;
     let cfg_insts = read_config_instances(storage.meta, &deployment.config_instance_ids).await?;
@@ -31,7 +30,7 @@ pub async fn deploy(
     Ok(())
 }
 
-fn validate_deployment(deployment: &Deployment) -> Result<(), DeployErr> {
+fn validate_deployment(deployment: &models::Deployment) -> Result<(), DeployErr> {
     if deployment.config_instance_ids.is_empty() {
         return Err(EmptyConfigInstancesErr {
             deployment_id: deployment.id.clone(),
@@ -39,7 +38,7 @@ fn validate_deployment(deployment: &Deployment) -> Result<(), DeployErr> {
         .into());
     }
 
-    if deployment.target_status != DplTarget::Deployed {
+    if deployment.target_status != models::DplTarget::Deployed {
         return Err(InvalidDeploymentTargetErr {
             deployment_id: deployment.id.clone(),
             target_status: deployment.target_status,
@@ -53,7 +52,7 @@ fn validate_deployment(deployment: &Deployment) -> Result<(), DeployErr> {
 async fn read_config_instances(
     storage: &storage::CfgInsts,
     ids: &[String],
-) -> Result<Vec<ConfigInstance>, DeployErr> {
+) -> Result<Vec<models::ConfigInstance>, DeployErr> {
     let mut cfg_insts = Vec::with_capacity(ids.len());
     for id in ids {
         let cfg_inst = storage.read(id.clone()).await.map_err(DeployErr::from)?;
@@ -63,10 +62,10 @@ async fn read_config_instances(
 }
 
 async fn write_files(
-    cfg_insts: &[ConfigInstance],
+    cfg_insts: &[models::ConfigInstance],
     content_stor: &storage::CfgInstContent,
-    staging_dir: &Dir,
-    target_dir: &Dir,
+    staging_dir: &filesys::Dir,
+    target_dir: &filesys::Dir,
 ) -> Result<(), DeployErr> {
     let temp_dir = create_temp_dir(staging_dir).await?;
 
@@ -89,16 +88,16 @@ async fn write_files(
     result
 }
 
-async fn create_temp_dir(staging_dir: &Dir) -> Result<Dir, DeployErr> {
+async fn create_temp_dir(staging_dir: &filesys::Dir) -> Result<filesys::Dir, DeployErr> {
     let temp_dir = staging_dir.subdir(uuid::Uuid::new_v4().to_string());
     temp_dir.create_if_absent().await?;
     Ok(temp_dir)
 }
 
 async fn write_file(
-    cfg_inst: &ConfigInstance,
+    cfg_inst: &models::ConfigInstance,
     content_stor: &storage::CfgInstContent,
-    dest_dir: &Dir,
+    dest_dir: &filesys::Dir,
 ) -> Result<(), DeployErr> {
     let content = content_stor.read(cfg_inst.id.clone()).await?;
     let dest = dest_dir.file(&cfg_inst.filepath);
