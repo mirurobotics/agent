@@ -431,6 +431,13 @@ pub struct Deployment {
     // Agent-side fields for retry logic (not from backend)
     pub attempts: u32,
     pub cooldown_ends_at: DateTime<Utc>,
+    // Agent-side timestamps pushed to backend.
+    // These are independent historical watermarks: each records the last time the
+    // deployment entered that state. Both may be set simultaneously after a
+    // deploy→archive→redeploy cycle; the current state is always determined by
+    // `activity_status`, not by which timestamp is present.
+    pub deployed_at: Option<DateTime<Utc>>,
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl Default for Deployment {
@@ -447,6 +454,8 @@ impl Default for Deployment {
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
             attempts: 0,
             cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+            deployed_at: None,
+            archived_at: None,
             config_instance_ids: Vec::new(),
         }
     }
@@ -475,6 +484,8 @@ impl Deployment {
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             attempts: 0,
             cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+            deployed_at: None,
+            archived_at: None,
             config_instance_ids,
         }
     }
@@ -514,6 +525,8 @@ impl<'de> Deserialize<'de> for Deployment {
             updated_at: Option<DateTime<Utc>>,
             attempts: Option<u32>,
             cooldown_ends_at: Option<DateTime<Utc>>,
+            deployed_at: Option<DateTime<Utc>>,
+            archived_at: Option<DateTime<Utc>>,
             config_instance_ids: Vec<CfgInstID>,
         }
 
@@ -540,6 +553,8 @@ impl<'de> Deserialize<'de> for Deployment {
             cooldown_ends_at: result
                 .cooldown_ends_at
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+            deployed_at: result.deployed_at,
+            archived_at: result.archived_at,
             config_instance_ids: result.config_instance_ids,
         })
     }
@@ -551,6 +566,8 @@ pub struct Updates {
     pub error_status: Option<DplErrStatus>,
     pub attempts: Option<u32>,
     pub cooldown: Option<TimeDelta>,
+    pub deployed_at: Option<DateTime<Utc>>,
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl Updates {
@@ -560,6 +577,8 @@ impl Updates {
             error_status: None,
             attempts: None,
             cooldown: None,
+            deployed_at: None,
+            archived_at: None,
         }
     }
 }
@@ -577,6 +596,12 @@ impl Patch<Updates> for Deployment {
         }
         if let Some(cooldown) = patch.cooldown {
             self.set_cooldown(cooldown);
+        }
+        if let Some(deployed_at) = patch.deployed_at {
+            self.deployed_at = Some(deployed_at);
+        }
+        if let Some(archived_at) = patch.archived_at {
+            self.archived_at = Some(archived_at);
         }
     }
 }

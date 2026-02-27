@@ -13,4 +13,6 @@ pub fn is_dirty(old: Option<&DplEntry>, new: &models::Deployment) -> bool {
     old.is_dirty
         || old.value.activity_status != new.activity_status
         || old.value.error_status != new.error_status
+        || old.value.deployed_at != new.deployed_at
+        || old.value.archived_at != new.archived_at
 }

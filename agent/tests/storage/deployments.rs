@@ -90,4 +90,46 @@ pub mod is_dirty_func {
         let old = Some(&entry);
         assert!(is_dirty(old, &new_deployment));
     }
+
+    #[tokio::test]
+    async fn deployed_at_changed() {
+        let old_deployment = Deployment {
+            ..Default::default()
+        };
+        let new_deployment = Deployment {
+            id: old_deployment.id.clone(),
+            deployed_at: Some(Utc::now()),
+            ..Default::default()
+        };
+        let entry = CacheEntry {
+            key: old_deployment.id.clone(),
+            value: old_deployment.clone(),
+            is_dirty: false,
+            created_at: Utc::now(),
+            last_accessed: Utc::now(),
+        };
+        let old = Some(&entry);
+        assert!(is_dirty(old, &new_deployment));
+    }
+
+    #[tokio::test]
+    async fn archived_at_changed() {
+        let old_deployment = Deployment {
+            ..Default::default()
+        };
+        let new_deployment = Deployment {
+            id: old_deployment.id.clone(),
+            archived_at: Some(Utc::now()),
+            ..Default::default()
+        };
+        let entry = CacheEntry {
+            key: old_deployment.id.clone(),
+            value: old_deployment.clone(),
+            is_dirty: false,
+            created_at: Utc::now(),
+            last_accessed: Utc::now(),
+        };
+        let old = Some(&entry);
+        assert!(is_dirty(old, &new_deployment));
+    }
 }

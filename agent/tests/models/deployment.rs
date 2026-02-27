@@ -164,6 +164,8 @@ fn defaults() {
         updated_at: DateTime::<Utc>::UNIX_EPOCH,
         attempts: 0,
         cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+        deployed_at: None,
+        archived_at: None,
         config_instance_ids: Vec::new(),
     };
 
@@ -715,11 +717,14 @@ fn update_empty() {
 #[test]
 fn update_all() {
     let initial = Deployment::default();
+    let now = Utc::now();
     let updates = Updates {
         activity_status: Some(DplActivity::Deployed),
         error_status: Some(DplErrStatus::Retrying),
         attempts: Some(5),
         cooldown: Some(TimeDelta::seconds(120)),
+        deployed_at: Some(now),
+        archived_at: Some(now),
     };
     let mut actual = initial.clone();
     actual.patch(updates);
@@ -732,6 +737,8 @@ fn update_all() {
         error_status: DplErrStatus::Retrying,
         attempts: 5,
         cooldown_ends_at: actual.cooldown_ends_at,
+        deployed_at: Some(now),
+        archived_at: Some(now),
         ..initial
     };
     assert_eq!(actual, expected);
@@ -767,6 +774,8 @@ fn updates_empty() {
         error_status: None,
         attempts: None,
         cooldown: None,
+        deployed_at: None,
+        archived_at: None,
     };
     assert_eq!(actual, expected);
 }
@@ -825,6 +834,8 @@ fn from_backend() {
         updated_at: now,
         attempts: 0,
         cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+        deployed_at: None,
+        archived_at: None,
         config_instance_ids: vec!["cfg_1".to_string(), "cfg_2".to_string()],
     };
     assert_eq!(actual, expected);

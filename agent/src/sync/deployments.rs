@@ -362,6 +362,8 @@ async fn push_deployment<HTTPClientT: http::ClientI>(
     let payload = UpdateDeploymentRequest {
         activity_status: activity,
         error_status,
+        deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
+        archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
     };
 
     debug!(

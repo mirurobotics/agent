@@ -116,6 +116,16 @@ fn get_success_updates(
         } else {
             None
         },
+        deployed_at: if new_activity == models::DplActivity::Deployed {
+            Some(Utc::now())
+        } else {
+            None
+        },
+        archived_at: if new_activity == models::DplActivity::Archived {
+            Some(Utc::now())
+        } else {
+            None
+        },
     }
 }
 
@@ -201,6 +211,8 @@ fn get_error_updates(
         error_status: new_error_status,
         attempts: Some(attempts),
         cooldown: Some(TimeDelta::seconds(cooldown)),
+        deployed_at: None,
+        archived_at: None,
     }
 }
 
@@ -435,7 +447,9 @@ mod tests {
         use super::*;
 
         fn validate_deploy_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
+            let before = Utc::now();
             let actual = deploy(deployment.clone());
+            let after = Utc::now();
 
             let recovered = deployment.error_status == DplErrStatus::Retrying
                 && expected_error_status == DplErrStatus::None;
@@ -453,11 +467,24 @@ mod tests {
                 );
             }
 
+            // verify timestamps: deployed_at is always freshly set; archived_at is
+            // an independent watermark preserved from the input (never cleared).
+            let deployed_at = actual.deployed_at.expect("deployed_at should be set");
+            assert!(
+                deployed_at >= before && deployed_at <= after,
+                "deployed_at should be approximately now",
+            );
+            assert_eq!(
+                actual.archived_at, deployment.archived_at,
+                "archived_at should be preserved from input",
+            );
+
             let expected = Deployment {
                 activity_status: DplActivity::Deployed,
                 error_status: expected_error_status,
                 attempts: if recovered { 0 } else { deployment.attempts },
                 cooldown_ends_at: actual.cooldown_ends_at,
+                deployed_at: actual.deployed_at,
                 ..deployment.clone()
             };
             assert!(
@@ -493,7 +520,9 @@ mod tests {
         }
 
         fn validate_remove_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
+            let before = Utc::now();
             let actual = remove(deployment.clone());
+            let after = Utc::now();
 
             let recovered = deployment.error_status == DplErrStatus::Retrying
                 && expected_error_status == DplErrStatus::None;
@@ -511,11 +540,24 @@ mod tests {
                 );
             }
 
+            // verify timestamps: archived_at is always freshly set; deployed_at is
+            // an independent watermark preserved from the input (never cleared).
+            let archived_at = actual.archived_at.expect("archived_at should be set");
+            assert!(
+                archived_at >= before && archived_at <= after,
+                "archived_at should be approximately now",
+            );
+            assert_eq!(
+                actual.deployed_at, deployment.deployed_at,
+                "deployed_at should be preserved from input",
+            );
+
             let expected = Deployment {
                 activity_status: DplActivity::Archived,
                 error_status: expected_error_status,
                 attempts: if recovered { 0 } else { deployment.attempts },
                 cooldown_ends_at: actual.cooldown_ends_at,
+                archived_at: actual.archived_at,
                 ..deployment.clone()
             };
             assert!(
@@ -651,6 +693,26 @@ mod tests {
                         validate_remove_transition(deployment, DplErrStatus::Retrying)
                     }
                 }
+            }
+        }
+
+        // --- pre-existing opposite timestamps: verify watermarks are independent ---
+
+        #[test]
+        fn deploy_preserves_pre_existing_archived_at() {
+            let past = Utc::now() - TimeDelta::hours(1);
+            for mut deployment in with_error_status(DplErrStatus::None) {
+                deployment.archived_at = Some(past);
+                validate_deploy_transition(deployment, DplErrStatus::None);
+            }
+        }
+
+        #[test]
+        fn remove_preserves_pre_existing_deployed_at() {
+            let past = Utc::now() - TimeDelta::hours(1);
+            for mut deployment in with_error_status(DplErrStatus::None) {
+                deployment.deployed_at = Some(past);
+                validate_remove_transition(deployment, DplErrStatus::None);
             }
         }
     }
