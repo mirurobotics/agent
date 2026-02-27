@@ -7,7 +7,6 @@ use crate::crypt::{jwt, rsa};
 use crate::filesys::{file::File, Overwrite};
 use crate::http;
 use crate::installer::errors::*;
-use crate::models::device::Device;
 use crate::storage::{self, settings};
 use crate::version;
 use openapi_client::models as backend_client;
@@ -36,7 +35,7 @@ pub async fn install<HTTPClientT: http::ClientI>(
             register_with_backend(http_client, &public_key_file, token, device_name).await?;
         storage::setup::bootstrap(
             layout,
-            &Device::from_activation(&device),
+            &(&device).into(),
             settings,
             &private_key_file,
             &public_key_file,

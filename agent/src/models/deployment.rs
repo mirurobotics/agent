@@ -48,22 +48,10 @@ impl DplTarget {
     pub fn variants() -> Vec<DplTarget> {
         vec![DplTarget::Staged, DplTarget::Deployed, DplTarget::Archived]
     }
+}
 
-    pub fn from_backend(target_status: &backend_client::DeploymentTargetStatus) -> DplTarget {
-        match target_status {
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED => {
-                DplTarget::Staged
-            }
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED => {
-                DplTarget::Deployed
-            }
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED => {
-                DplTarget::Archived
-            }
-        }
-    }
-
-    pub fn to_sdk(target_status: &DplTarget) -> agent_server::DeploymentTargetStatus {
+impl From<&DplTarget> for agent_server::DeploymentTargetStatus {
+    fn from(target_status: &DplTarget) -> Self {
         match target_status {
             DplTarget::Staged => {
                 agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
@@ -76,8 +64,10 @@ impl DplTarget {
             }
         }
     }
+}
 
-    pub fn to_backend(target_status: &DplTarget) -> backend_client::DeploymentTargetStatus {
+impl From<&DplTarget> for backend_client::DeploymentTargetStatus {
+    fn from(target_status: &DplTarget) -> Self {
         match target_status {
             DplTarget::Staged => {
                 backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
@@ -87,6 +77,22 @@ impl DplTarget {
             }
             DplTarget::Archived => {
                 backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED
+            }
+        }
+    }
+}
+
+impl From<&backend_client::DeploymentTargetStatus> for DplTarget {
+    fn from(target_status: &backend_client::DeploymentTargetStatus) -> DplTarget {
+        match target_status {
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED => {
+                DplTarget::Staged
+            }
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED => {
+                DplTarget::Deployed
+            }
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED => {
+                DplTarget::Archived
             }
         }
     }
@@ -138,28 +144,10 @@ impl DplActivity {
             DplActivity::Archived,
         ]
     }
+}
 
-    pub fn from_backend(activity_status: &backend_client::DeploymentActivityStatus) -> DplActivity {
-        match activity_status {
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED => {
-                DplActivity::Drifted
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED => {
-                DplActivity::Staged
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => {
-                DplActivity::Queued
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => {
-                DplActivity::Deployed
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => {
-                DplActivity::Archived
-            }
-        }
-    }
-
-    pub fn to_sdk(activity_status: &DplActivity) -> agent_server::DeploymentActivityStatus {
+impl From<&DplActivity> for agent_server::DeploymentActivityStatus {
+    fn from(activity_status: &DplActivity) -> Self {
         match activity_status {
             DplActivity::Drifted => {
                 agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
@@ -178,8 +166,10 @@ impl DplActivity {
             }
         }
     }
+}
 
-    pub fn to_backend(activity_status: &DplActivity) -> backend_client::DeploymentActivityStatus {
+impl From<&DplActivity> for backend_client::DeploymentActivityStatus {
+    fn from(activity_status: &DplActivity) -> Self {
         match activity_status {
             DplActivity::Drifted => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
@@ -195,6 +185,28 @@ impl DplActivity {
             }
             DplActivity::Archived => {
                 backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
+            }
+        }
+    }
+}
+
+impl From<&backend_client::DeploymentActivityStatus> for DplActivity {
+    fn from(activity_status: &backend_client::DeploymentActivityStatus) -> DplActivity {
+        match activity_status {
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED => {
+                DplActivity::Drifted
+            }
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED => {
+                DplActivity::Staged
+            }
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => {
+                DplActivity::Queued
+            }
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => {
+                DplActivity::Deployed
+            }
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => {
+                DplActivity::Archived
             }
         }
     }
@@ -240,22 +252,10 @@ impl DplErrStatus {
             DplErrStatus::Retrying,
         ]
     }
+}
 
-    pub fn from_backend(error_status: &backend_client::DeploymentErrorStatus) -> DplErrStatus {
-        match error_status {
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE => {
-                DplErrStatus::None
-            }
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED => {
-                DplErrStatus::Failed
-            }
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING => {
-                DplErrStatus::Retrying
-            }
-        }
-    }
-
-    pub fn to_sdk(error_status: &DplErrStatus) -> agent_server::DeploymentErrorStatus {
+impl From<&DplErrStatus> for agent_server::DeploymentErrorStatus {
+    fn from(error_status: &DplErrStatus) -> Self {
         match error_status {
             DplErrStatus::None => agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
             DplErrStatus::Failed => {
@@ -266,8 +266,10 @@ impl DplErrStatus {
             }
         }
     }
+}
 
-    pub fn to_backend(error_status: &DplErrStatus) -> backend_client::DeploymentErrorStatus {
+impl From<&DplErrStatus> for backend_client::DeploymentErrorStatus {
+    fn from(error_status: &DplErrStatus) -> Self {
         match error_status {
             DplErrStatus::None => {
                 backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE
@@ -277,6 +279,22 @@ impl DplErrStatus {
             }
             DplErrStatus::Retrying => {
                 backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING
+            }
+        }
+    }
+}
+
+impl From<&backend_client::DeploymentErrorStatus> for DplErrStatus {
+    fn from(error_status: &backend_client::DeploymentErrorStatus) -> DplErrStatus {
+        match error_status {
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE => {
+                DplErrStatus::None
+            }
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED => {
+                DplErrStatus::Failed
+            }
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING => {
+                DplErrStatus::Retrying
             }
         }
     }
@@ -335,42 +353,6 @@ impl DplStatus {
         ]
     }
 
-    pub fn from_backend(status: &backend_client::DeploymentStatus) -> DplStatus {
-        match status {
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => DplStatus::Drifted,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => DplStatus::Staged,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => DplStatus::Queued,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => DplStatus::Deployed,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => DplStatus::Archived,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => DplStatus::Failed,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => DplStatus::Retrying,
-        }
-    }
-
-    pub fn to_sdk(status: &DplStatus) -> agent_server::DeploymentStatus {
-        match status {
-            DplStatus::Drifted => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-            DplStatus::Staged => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-            DplStatus::Queued => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            DplStatus::Deployed => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-            DplStatus::Archived => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-            DplStatus::Failed => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-            DplStatus::Retrying => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-        }
-    }
-
-    pub fn to_backend(status: &DplStatus) -> backend_client::DeploymentStatus {
-        match status {
-            DplStatus::Drifted => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-            DplStatus::Staged => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-            DplStatus::Queued => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            DplStatus::Deployed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-            DplStatus::Archived => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-            DplStatus::Failed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-            DplStatus::Retrying => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-        }
-    }
-
     pub fn from_activity_and_error(
         activity_status: &DplActivity,
         error_status: &DplErrStatus,
@@ -385,6 +367,48 @@ impl DplStatus {
             },
             DplErrStatus::Retrying => DplStatus::Retrying,
             DplErrStatus::Failed => DplStatus::Failed,
+        }
+    }
+}
+
+impl From<&DplStatus> for agent_server::DeploymentStatus {
+    fn from(status: &DplStatus) -> Self {
+        match status {
+            DplStatus::Drifted => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+            DplStatus::Staged => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+            DplStatus::Queued => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+            DplStatus::Deployed => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            DplStatus::Archived => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+            DplStatus::Failed => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+            DplStatus::Retrying => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+        }
+    }
+}
+
+impl From<&DplStatus> for backend_client::DeploymentStatus {
+    fn from(status: &DplStatus) -> Self {
+        match status {
+            DplStatus::Drifted => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+            DplStatus::Staged => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+            DplStatus::Queued => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+            DplStatus::Deployed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            DplStatus::Archived => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+            DplStatus::Failed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+            DplStatus::Retrying => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+        }
+    }
+}
+
+impl From<&backend_client::DeploymentStatus> for DplStatus {
+    fn from(status: &backend_client::DeploymentStatus) -> DplStatus {
+        match status {
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => DplStatus::Drifted,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => DplStatus::Staged,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => DplStatus::Queued,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => DplStatus::Deployed,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => DplStatus::Archived,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => DplStatus::Failed,
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => DplStatus::Retrying,
         }
     }
 }
@@ -436,9 +460,9 @@ impl Deployment {
         Deployment {
             id: deployment.id,
             description: deployment.description,
-            activity_status: DplActivity::from_backend(&deployment.activity_status),
-            error_status: DplErrStatus::from_backend(&deployment.error_status),
-            target_status: DplTarget::from_backend(&deployment.target_status),
+            activity_status: (&deployment.activity_status).into(),
+            error_status: (&deployment.error_status).into(),
+            target_status: (&deployment.target_status).into(),
             device_id: deployment.device_id,
             release_id: deployment.release_id,
             created_at: deployment

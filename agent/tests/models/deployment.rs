@@ -231,11 +231,11 @@ fn target_status_backend_conversions() {
     ];
 
     for test_case in test_cases {
+        assert_eq!(Into::<DplTarget>::into(&test_case.backend), test_case.storage);
         assert_eq!(
-            DplTarget::from_backend(&test_case.backend),
-            test_case.storage
+            Into::<backend_client::DeploymentTargetStatus>::into(&test_case.storage),
+            test_case.backend
         );
-        assert_eq!(DplTarget::to_backend(&test_case.storage), test_case.backend);
     }
 }
 
@@ -262,7 +262,10 @@ fn target_status_sdk_conversions() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(DplTarget::to_sdk(&test_case.storage), test_case.sdk);
+        assert_eq!(
+            Into::<agent_server::DeploymentTargetStatus>::into(&test_case.storage),
+            test_case.sdk
+        );
     }
 }
 
@@ -343,12 +346,9 @@ fn activity_status_backend_conversions() {
     ];
 
     for test_case in test_cases {
+        assert_eq!(Into::<DplActivity>::into(&test_case.backend), test_case.storage);
         assert_eq!(
-            DplActivity::from_backend(&test_case.backend),
-            test_case.storage
-        );
-        assert_eq!(
-            DplActivity::to_backend(&test_case.storage),
+            Into::<backend_client::DeploymentActivityStatus>::into(&test_case.storage),
             test_case.backend
         );
     }
@@ -385,7 +385,10 @@ fn activity_status_sdk_conversions() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(DplActivity::to_sdk(&test_case.storage), test_case.sdk);
+        assert_eq!(
+            Into::<agent_server::DeploymentActivityStatus>::into(&test_case.storage),
+            test_case.sdk
+        );
     }
 }
 
@@ -448,12 +451,9 @@ fn error_status_backend_conversions() {
     ];
 
     for test_case in test_cases {
+        assert_eq!(Into::<DplErrStatus>::into(&test_case.backend), test_case.storage);
         assert_eq!(
-            DplErrStatus::from_backend(&test_case.backend),
-            test_case.storage
-        );
-        assert_eq!(
-            DplErrStatus::to_backend(&test_case.storage),
+            Into::<backend_client::DeploymentErrorStatus>::into(&test_case.storage),
             test_case.backend
         );
     }
@@ -482,7 +482,10 @@ fn error_status_sdk_conversions() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(DplErrStatus::to_sdk(&test_case.storage), test_case.sdk);
+        assert_eq!(
+            Into::<agent_server::DeploymentErrorStatus>::into(&test_case.storage),
+            test_case.sdk
+        );
     }
 }
 
@@ -580,11 +583,11 @@ fn status_backend_conversion() {
     ];
 
     for test_case in test_cases {
+        assert_eq!(Into::<DplStatus>::into(&test_case.backend), test_case.storage);
         assert_eq!(
-            DplStatus::from_backend(&test_case.backend),
-            test_case.storage
+            Into::<backend_client::DeploymentStatus>::into(&test_case.storage),
+            test_case.backend
         );
-        assert_eq!(DplStatus::to_backend(&test_case.storage), test_case.backend);
     }
 }
 
@@ -627,7 +630,10 @@ fn status_sdk_conversion() {
     ];
 
     for test_case in test_cases {
-        assert_eq!(DplStatus::to_sdk(&test_case.storage), test_case.sdk);
+        assert_eq!(
+            Into::<agent_server::DeploymentStatus>::into(&test_case.storage),
+            test_case.sdk
+        );
     }
 }
 

@@ -103,7 +103,7 @@ fn from_backend() {
         created_at: now.to_rfc3339(),
     };
 
-    let gc = GitCommit::from_backend(backend_gc);
+    let gc: GitCommit = backend_gc.into();
 
     assert!(gc.created_at > DateTime::<Utc>::UNIX_EPOCH);
     let expected = GitCommit {
@@ -135,7 +135,7 @@ fn from_backend_invalid_date() {
         created_at: "not-a-date".to_string(),
     };
 
-    let gc = GitCommit::from_backend(backend_gc);
+    let gc: GitCommit = backend_gc.into();
     assert_eq!(gc.id, "gc_bad");
     assert_eq!(gc.repository_type, "gitlab");
     assert_eq!(gc.created_at, DateTime::<Utc>::UNIX_EPOCH);

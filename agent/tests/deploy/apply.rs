@@ -171,8 +171,8 @@ struct ComparableOutcome {
     in_cooldown: bool,
 }
 
-impl ComparableOutcome {
-    fn from_outcome(o: &Outcome) -> Self {
+impl From<&Outcome> for ComparableOutcome {
+    fn from(o: &Outcome) -> Self {
         Self {
             id: o.deployment.id.clone(),
             activity: o.deployment.activity_status,
@@ -283,7 +283,7 @@ mod find_target_deployed {
         // The failed one is skipped by apply_actionables (FSM next_action == None).
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-healthy".into(),
                 activity: DplActivity::Deployed,
@@ -325,7 +325,7 @@ mod deploy_success {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-1".into(),
                 activity: DplActivity::Deployed,
@@ -366,7 +366,7 @@ mod deploy_success {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-multi".into(),
                 activity: DplActivity::Deployed,
@@ -415,7 +415,7 @@ mod deploy_success {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-redeploy".into(),
                 activity: DplActivity::Deployed,
@@ -447,7 +447,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-empty".into(),
                 activity: DplActivity::Queued,
@@ -480,7 +480,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-missing-meta".into(),
                 activity: DplActivity::Queued,
@@ -513,7 +513,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-no-content".into(),
                 activity: DplActivity::Queued,
@@ -543,7 +543,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-attempts".into(),
                 activity: DplActivity::Queued,
@@ -580,7 +580,7 @@ mod deploy_errors {
         let outcomes = f.apply_with_retry_policy(policy).await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-maxed".into(),
                 activity: DplActivity::Queued,
@@ -617,7 +617,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-remove".into(),
                 activity: DplActivity::Archived,
@@ -646,7 +646,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-staged-remove".into(),
                 activity: DplActivity::Archived,
@@ -678,7 +678,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-1".into(),
                 activity: DplActivity::Archived,
@@ -706,7 +706,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-2".into(),
                 activity: DplActivity::Archived,
@@ -734,7 +734,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-3".into(),
                 activity: DplActivity::Archived,
@@ -762,7 +762,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-4".into(),
                 activity: DplActivity::Archived,
@@ -810,7 +810,7 @@ mod wait_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-wait".into(),
                 activity: DplActivity::Queued,
@@ -848,7 +848,7 @@ mod wait_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-wait-act".into(),
                 activity: DplActivity::Deployed,
@@ -899,7 +899,7 @@ mod ordering_and_composition {
         assert_eq!(outcomes.len(), 2);
         // Ordering guarantee: deployed target always first
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-active".into(),
                 activity: DplActivity::Deployed,
@@ -911,7 +911,7 @@ mod ordering_and_composition {
             }
         );
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[1]),
+            ComparableOutcome::from(&outcomes[1]),
             ComparableOutcome {
                 id: "dpl-stale".into(),
                 activity: DplActivity::Archived,
@@ -959,7 +959,7 @@ mod ordering_and_composition {
 
         // Active is always first
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "active".into(),
                 activity: DplActivity::Deployed,
@@ -986,7 +986,7 @@ mod ordering_and_composition {
             .collect();
         assert_eq!(stale_outcomes.len(), 2);
         for o in stale_outcomes {
-            let mut actual = ComparableOutcome::from_outcome(o);
+            let mut actual = ComparableOutcome::from(o);
             actual.id = String::new(); // normalize for comparison
             assert_eq!(actual, stale_expected);
         }
@@ -1012,7 +1012,7 @@ mod ordering_and_composition {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from_outcome(&outcomes[0]),
+            ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-stale-only".into(),
                 activity: DplActivity::Archived,

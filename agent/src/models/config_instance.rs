@@ -35,8 +35,8 @@ impl Default for ConfigInstance {
     }
 }
 
-impl ConfigInstance {
-    pub fn from_backend(cfg_inst: backend_client::ConfigInstance) -> ConfigInstance {
+impl From<backend_client::ConfigInstance> for ConfigInstance {
+    fn from(cfg_inst: backend_client::ConfigInstance) -> ConfigInstance {
         ConfigInstance {
             id: cfg_inst.id,
             config_type_name: cfg_inst.config_type_name,

@@ -152,7 +152,8 @@ fn status_sdk_conversion() {
 
     for test_case in test_cases {
         variants.remove(&test_case.storage);
-        assert_eq!(test_case.sdk, DeviceStatus::to_sdk(&test_case.storage));
+        let actual: openapi_server::models::DeviceStatus = (&test_case.storage).into();
+        assert_eq!(test_case.sdk, actual);
     }
 
     assert!(variants.is_empty(), "variants: {variants:?}");

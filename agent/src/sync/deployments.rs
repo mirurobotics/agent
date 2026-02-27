@@ -95,7 +95,7 @@ async fn pull_deployments<'a, HTTPClientT: http::ClientI>(
         store_deployment(storage.deployments, backend_dpl, cfg_inst_ids).await?;
 
         for backend_cfg_inst in &cfg_insts {
-            let cfg_inst = models::ConfigInstance::from_backend(backend_cfg_inst.clone());
+            let cfg_inst: models::ConfigInstance = backend_cfg_inst.clone().into();
             let cfg_inst_id = cfg_inst.id.clone();
             storage
                 .cfg_insts
@@ -240,7 +240,7 @@ async fn store_expanded_release(
         return Ok(());
     };
 
-    let release = models::Release::from_backend(backend_release.clone());
+    let release: models::Release = backend_release.clone().into();
     let release_id = release.id.clone();
     storage
         .releases
@@ -251,7 +251,7 @@ async fn store_expanded_release(
         return Ok(());
     };
 
-    let gc = models::GitCommit::from_backend(*backend_gc.clone());
+    let gc: models::GitCommit = (*backend_gc.clone()).into();
     let gc_id = gc.id.clone();
     storage
         .git_commits
@@ -357,8 +357,8 @@ async fn push_deployment<HTTPClientT: http::ClientI>(
     deployment: models::Deployment,
     token: &str,
 ) -> Result<(), SyncErr> {
-    let activity = Some(models::DplActivity::to_backend(&deployment.activity_status));
-    let error_status = Some(models::DplErrStatus::to_backend(&deployment.error_status));
+    let activity = Some((&deployment.activity_status).into());
+    let error_status = Some((&deployment.error_status).into());
     let payload = UpdateDeploymentRequest {
         activity_status: activity,
         error_status,

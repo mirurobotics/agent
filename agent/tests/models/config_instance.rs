@@ -88,7 +88,7 @@ fn from_backend() {
         content: None,
     };
 
-    let actual = ConfigInstance::from_backend(backend_instance);
+    let actual: ConfigInstance = backend_instance.into();
     let expected = ConfigInstance {
         id: "cfg_inst_123".to_string(),
         config_type_name: "motion-control".to_string(),
@@ -113,7 +113,7 @@ fn from_backend_invalid_date() {
         content: None,
     };
 
-    let instance = ConfigInstance::from_backend(backend_instance);
+    let instance: ConfigInstance = backend_instance.into();
     assert_eq!(instance.id, "cfg_inst_789");
     assert_eq!(instance.created_at, DateTime::<Utc>::UNIX_EPOCH);
 }

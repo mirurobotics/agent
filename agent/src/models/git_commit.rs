@@ -40,8 +40,8 @@ impl Default for GitCommit {
     }
 }
 
-impl GitCommit {
-    pub fn from_backend(gc: backend_client::GitCommit) -> GitCommit {
+impl From<backend_client::GitCommit> for GitCommit {
+    fn from(gc: backend_client::GitCommit) -> GitCommit {
         GitCommit {
             id: gc.id,
             sha: gc.sha,

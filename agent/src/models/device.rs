@@ -21,8 +21,10 @@ impl DeviceStatus {
     pub fn variants() -> Vec<DeviceStatus> {
         vec![DeviceStatus::Online, DeviceStatus::Offline]
     }
+}
 
-    pub fn to_sdk(device_status: &DeviceStatus) -> agent_server::DeviceStatus {
+impl From<&DeviceStatus> for agent_server::DeviceStatus {
+    fn from(device_status: &DeviceStatus) -> Self {
         match device_status {
             DeviceStatus::Online => agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
             DeviceStatus::Offline => agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
@@ -143,8 +145,8 @@ impl<'de> Deserialize<'de> for Device {
     }
 }
 
-impl Device {
-    pub fn from_activation(api_device: &openapi_client::models::Device) -> Device {
+impl From<&openapi_client::models::Device> for Device {
+    fn from(api_device: &openapi_client::models::Device) -> Device {
         Device {
             id: api_device.id.clone(),
             name: api_device.name.clone(),
@@ -243,7 +245,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_activation_maps_fields() {
+    fn from_openapi_device_maps_fields() {
         let api_device = openapi_client::models::Device {
             id: "dev-123".to_string(),
             name: "my-robot".to_string(),
@@ -251,7 +253,7 @@ mod tests {
             ..Default::default()
         };
 
-        let device = Device::from_activation(&api_device);
+        let device: Device = (&api_device).into();
 
         assert_eq!(device.id, "dev-123");
         assert_eq!(device.name, "my-robot");

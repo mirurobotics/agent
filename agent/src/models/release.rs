@@ -32,8 +32,8 @@ impl Default for Release {
     }
 }
 
-impl Release {
-    pub fn from_backend(release: backend_client::Release) -> Release {
+impl From<backend_client::Release> for Release {
+    fn from(release: backend_client::Release) -> Release {
         Release {
             id: release.id,
             version: release.version,

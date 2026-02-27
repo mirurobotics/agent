@@ -73,7 +73,7 @@ fn from_backend() {
         git_commit: None,
     };
 
-    let release = Release::from_backend(backend_release);
+    let release: Release = backend_release.into();
 
     assert_eq!(release.id, "rel_123");
     assert_eq!(release.version, "1.0.0");
@@ -94,7 +94,7 @@ fn from_backend_invalid_dates() {
         git_commit: None,
     };
 
-    let release = Release::from_backend(backend_release);
+    let release: Release = backend_release.into();
     assert_eq!(release.id, "rel_789");
     assert_eq!(release.created_at, DateTime::<Utc>::UNIX_EPOCH);
     assert_eq!(release.updated_at, DateTime::<Utc>::UNIX_EPOCH);

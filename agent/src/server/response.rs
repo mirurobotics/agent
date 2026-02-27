@@ -1,6 +1,4 @@
 use crate::models;
-use crate::models::deployment::{DplActivity, DplErrStatus, DplStatus, DplTarget};
-use crate::models::device::DeviceStatus;
 use openapi_server::models as openapi;
 
 impl From<&models::Device> for openapi::Device {
@@ -9,7 +7,7 @@ impl From<&models::Device> for openapi::Device {
             object: openapi::device::Object::Device,
             id: device.id.clone(),
             name: device.name.clone(),
-            status: DeviceStatus::to_sdk(&device.status),
+            status: (&device.status).into(),
             last_synced_at: device.last_synced_at.to_rfc3339(),
             last_connected_at: device.last_connected_at.to_rfc3339(),
             last_disconnected_at: device.last_disconnected_at.to_rfc3339(),
@@ -19,14 +17,15 @@ impl From<&models::Device> for openapi::Device {
 
 impl From<&models::Deployment> for openapi::Deployment {
     fn from(dpl: &models::Deployment) -> Self {
+        let status = dpl.status();
         openapi::Deployment {
             object: openapi::deployment::Object::Deployment,
             id: dpl.id.clone(),
             description: dpl.description.clone(),
-            status: DplStatus::to_sdk(&dpl.status()),
-            activity_status: DplActivity::to_sdk(&dpl.activity_status),
-            error_status: DplErrStatus::to_sdk(&dpl.error_status),
-            target_status: DplTarget::to_sdk(&dpl.target_status),
+            status: (&status).into(),
+            activity_status: (&dpl.activity_status).into(),
+            error_status: (&dpl.error_status).into(),
+            target_status: (&dpl.target_status).into(),
             device_id: dpl.device_id.clone(),
             release_id: dpl.release_id.clone(),
             created_at: dpl.created_at.to_rfc3339(),
