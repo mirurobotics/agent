@@ -42,7 +42,7 @@ pub mod list {
         .unwrap();
 
         let expected = DeploymentList {
-            total_count: 1,
+            total_count: Some(1),
             data: vec![BackendDeployment {
                 id: "dep_1".to_string(),
                 ..BackendDeployment::default()

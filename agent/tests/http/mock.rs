@@ -90,7 +90,7 @@ impl MockClient {
         *self.list_deployments_fn.lock().unwrap() = Box::new(move || {
             let data = f()?;
             Ok(DeploymentList {
-                total_count: data.len() as i64,
+                total_count: Some(data.len() as i64),
                 data,
                 ..DeploymentList::default()
             })
