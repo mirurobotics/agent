@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SyncDevice {
+    /// Whether the device is synced.
     #[serde(rename = "is_synced")]
     pub is_synced: bool,
 }

@@ -11,13 +11,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IssueDeviceClaims {
-    /// The device ID
+    /// The device ID.
     #[serde(rename = "device_id")]
     pub device_id: String,
-    /// The nonce
+    /// The nonce value for the token request.
     #[serde(rename = "nonce")]
     pub nonce: String,
-    /// The expiration
+    /// The expiration timestamp for the token.
     #[serde(rename = "expiration")]
     pub expiration: String,
 }

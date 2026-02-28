@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Device {
+    /// The object type, which is always `device`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the device.
@@ -33,7 +34,7 @@ pub struct Device {
     /// Timestamp of when the device was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
-    /// Session ID of the device
+    /// Session ID of the device.
     #[serde(rename = "session_id")]
     pub session_id: String,
 }
@@ -53,7 +54,7 @@ impl Device {
         }
     }
 }
-/// 
+/// The object type, which is always `device`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "device")]

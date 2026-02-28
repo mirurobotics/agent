@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigInstance {
+    /// The object type, which is always `config_instance`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the config instance.
@@ -50,7 +51,7 @@ impl ConfigInstance {
         }
     }
 }
-/// 
+/// The object type, which is always `config_instance`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "config_instance")]

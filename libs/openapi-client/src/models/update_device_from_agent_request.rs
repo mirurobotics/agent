@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateDeviceFromAgentRequest {
-    /// The version of the agent the device is running
+    /// The version of the agent the device is running.
     #[serde(rename = "agent_version", skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
 }

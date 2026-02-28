@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiVersion {
-    #[serde(rename = "v0.2.0-beta.3")]
+    #[serde(rename = "v0.2.0-beta.4")]
     API_VERSION,
 
 }
@@ -20,7 +20,7 @@ pub enum ApiVersion {
 impl std::fmt::Display for ApiVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_VERSION => write!(f, "v0.2.0-beta.3"),
+            Self::API_VERSION => write!(f, "v0.2.0-beta.4"),
         }
     }
 }

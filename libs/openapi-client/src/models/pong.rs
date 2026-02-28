@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pong {
+    /// The unique identifier of the pong message.
     #[serde(rename = "message_id")]
     pub message_id: String,
+    /// The timestamp of when the pong was received.
     #[serde(rename = "timestamp")]
     pub timestamp: String,
 }

@@ -11,24 +11,33 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GitCommit {
+    /// The object type, which is always `git_commit`.
     #[serde(rename = "object")]
     pub object: Object,
+    /// ID of the git commit.
     #[serde(rename = "id")]
     pub id: String,
+    /// The SHA hash of the git commit.
     #[serde(rename = "sha")]
     pub sha: String,
+    /// The commit message.
     #[serde(rename = "message")]
     pub message: String,
+    /// The owner of the git repository.
     #[serde(rename = "repository_owner")]
     pub repository_owner: String,
+    /// The name of the git repository.
     #[serde(rename = "repository_name")]
     pub repository_name: String,
     #[serde(rename = "repository_type")]
     pub repository_type: models::GitRepositoryType,
+    /// The URL of the git repository.
     #[serde(rename = "repository_url")]
     pub repository_url: String,
+    /// The URL of the git commit.
     #[serde(rename = "commit_url")]
     pub commit_url: String,
+    /// Timestamp of when the git commit was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
 }
@@ -49,7 +58,7 @@ impl GitCommit {
         }
     }
 }
-/// 
+/// The object type, which is always `git_commit`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "git_commit")]

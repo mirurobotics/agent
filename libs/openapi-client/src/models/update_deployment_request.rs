@@ -11,14 +11,16 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateDeploymentRequest {
+    /// The updated activity status of the deployment.
     #[serde(rename = "activity_status", skip_serializing_if = "Option::is_none")]
     pub activity_status: Option<models::DeploymentActivityStatus>,
+    /// The updated error status of the deployment.
     #[serde(rename = "error_status", skip_serializing_if = "Option::is_none")]
     pub error_status: Option<models::DeploymentErrorStatus>,
-    /// Timestamp of when the deployment was deployed. Set by the agent.
+    /// Independent historical watermark recording the last time the agent transitioned this deployment to Deployed. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
     #[serde(rename = "deployed_at", skip_serializing_if = "Option::is_none")]
     pub deployed_at: Option<String>,
-    /// Timestamp of when the deployment was archived. Set by the agent.
+    /// Independent historical watermark recording the last time the agent transitioned this deployment to Archived. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
     #[serde(rename = "archived_at", skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
 }

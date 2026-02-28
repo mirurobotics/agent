@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BaseDeployment {
+    /// The object type, which is always `deployment`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the deployment.
@@ -58,7 +59,7 @@ impl BaseDeployment {
         }
     }
 }
-/// 
+/// The object type, which is always `deployment`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "deployment")]

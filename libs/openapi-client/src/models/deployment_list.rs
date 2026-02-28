@@ -11,11 +11,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeploymentList {
+    /// The object type, which is always `list`.
     #[serde(rename = "object")]
     pub object: Object,
     /// The total number of items in the list. By default the total count is not returned. The total count must be expanded (using expand=total_count) to get the total number of items in the list.
-    #[serde(rename = "total_count")]
-    pub total_count: i64,
+    #[serde(rename = "total_count", skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<i64>,
     /// The maximum number of items to return. A limit of 15 with an offset of 0 returns items 1-15.
     #[serde(rename = "limit")]
     pub limit: i32,
@@ -25,15 +26,16 @@ pub struct DeploymentList {
     /// True if there are more items in the list to return. False if there are no more items to return.
     #[serde(rename = "has_more")]
     pub has_more: bool,
+    /// The list of deployments.
     #[serde(rename = "data")]
     pub data: Vec<models::Deployment>,
 }
 
 impl DeploymentList {
-    pub fn new(object: Object, total_count: i64, limit: i32, offset: i32, has_more: bool, data: Vec<models::Deployment>) -> DeploymentList {
+    pub fn new(object: Object, limit: i32, offset: i32, has_more: bool, data: Vec<models::Deployment>) -> DeploymentList {
         DeploymentList {
             object,
-            total_count,
+            total_count: None,
             limit,
             offset,
             has_more,
@@ -41,7 +43,7 @@ impl DeploymentList {
         }
     }
 }
-/// 
+/// The object type, which is always `list`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "list")]

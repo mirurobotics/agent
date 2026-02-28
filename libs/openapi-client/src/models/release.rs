@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Release {
+    /// The object type, which is always `release`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the release.
@@ -28,6 +29,7 @@ pub struct Release {
     /// Timestamp of when the release was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
+    /// The git commit associated with this release.
     #[serde(rename = "git_commit", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub git_commit: Option<Option<Box<models::GitCommit>>>,
 }
@@ -45,7 +47,7 @@ impl Release {
         }
     }
 }
-/// 
+/// The object type, which is always `release`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "release")]

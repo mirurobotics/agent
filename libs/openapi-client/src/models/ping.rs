@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ping {
+    /// The unique identifier of the ping message.
     #[serde(rename = "message_id")]
     pub message_id: String,
+    /// The timestamp of when the ping was sent.
     #[serde(rename = "timestamp")]
     pub timestamp: String,
 }

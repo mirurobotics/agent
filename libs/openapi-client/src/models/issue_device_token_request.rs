@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct IssueDeviceTokenRequest {
     #[serde(rename = "claims")]
     pub claims: Box<models::IssueDeviceClaims>,
-    /// The signature
+    /// The cryptographic signature of the claims.
     #[serde(rename = "signature")]
     pub signature: String,
 }

@@ -2,19 +2,27 @@ openapi: 3.0.3
 info:
   title: Miru Backend-Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.2.0-beta.3
+  version: v0.2.0-beta.4
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   x-git-commit:
-    sha: 906c0503b2ff19a7c018288356f89b2881374061
-    url: https://github.com/mirurobotics/openapi/commit/906c0503b2ff19a7c018288356f89b2881374061
-    message: 'chore: add agent-backend lint ignore rule to distributed openapi files'
+    sha: b8db8c8d2695e32d324e4b5ef043275fa755f40c
+    url: https://github.com/mirurobotics/openapi/commit/b8db8c8d2695e32d324e4b5ef043275fa755f40c
+    message: 'feat(lint): add MIRU015 requestBody required rule
+
+
+      Enforces that every requestBody sets required: true, since the Miru API
+
+      has no use case for optional request bodies.
+
+
+      Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
     author: Benjamin Smidt
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-02-27T18:51:17.484872+00:00'
+    built_at: '2026-02-27T23:40:02.681699+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/{audience}/{version}
   description: Staging
@@ -74,7 +82,8 @@ paths:
     get:
       tags:
       - Config Instances
-      summary: Download config instance content
+      summary: Download Content
+      description: Download the content of a config instance.
       operationId: getConfigInstanceContent
       parameters:
       - $ref: '#/components/parameters/config_instance_id'
@@ -107,8 +116,9 @@ paths:
     get:
       tags:
       - Deployments
-      summary: List deployments
+      summary: List
       operationId: listDeployments
+      description: List all deployments.
       parameters:
       - $ref: '#/components/parameters/offset'
       - $ref: '#/components/parameters/limit'
@@ -127,8 +137,9 @@ paths:
     patch:
       tags:
       - Deployments
-      summary: Update a deployment
+      summary: Update
       operationId: updateDeployment
+      description: Update a deployment.
       parameters:
       - $ref: '#/components/parameters/deployment_id'
       - $ref: '#/components/parameters/deployment_expansions'
@@ -151,8 +162,9 @@ paths:
     patch:
       tags:
       - Devices
-      summary: Update a device by agent
+      summary: Update
       operationId: updateDeviceByAgent
+      description: Update a device from the agent.
       parameters:
       - $ref: '#/components/parameters/device_id'
       requestBody:
@@ -174,11 +186,13 @@ paths:
     post:
       tags:
       - Devices
-      summary: Activate a device
+      summary: Activate
       operationId: activateDevice
+      description: Activate a device.
       parameters:
       - $ref: '#/components/parameters/device_id'
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -196,11 +210,13 @@ paths:
     post:
       tags:
       - Devices
-      summary: Issue a device token
+      summary: Issue Token
       operationId: issueDeviceToken
+      description: Issue a device authentication token.
       parameters:
       - $ref: '#/components/parameters/device_id'
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -225,8 +241,9 @@ paths:
         schema:
           type: string
           example: dvc_123
-      summary: Trigger a device sync
+      summary: Sync
       operationId: syncDevice
+      description: Send a sync command to a device.
       responses:
         '200':
           description: Triggered a device sync.
@@ -247,8 +264,9 @@ paths:
         schema:
           type: string
           example: dvc_123
-      summary: Ping a device
-      operationId: devicePing
+      summary: Ping
+      operationId: pingDevice
+      description: Send a ping command to a device.
       responses:
         '200':
           description: Ping a device.
@@ -269,8 +287,9 @@ paths:
         schema:
           type: string
           example: dvc_123
-      summary: Ping device response
+      summary: Pong
       operationId: devicePong
+      description: Receive a pong response from a device.
       responses:
         '200':
           description: Ping response.
@@ -288,14 +307,14 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.2.0-beta.3
+      - v0.2.0-beta.4
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 906c0503b2ff19a7c018288356f89b2881374061
+      - b8db8c8d2695e32d324e4b5ef043275fa755f40c
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -407,7 +426,6 @@ components:
       type: object
       required:
       - object
-      - total_count
       - limit
       - offset
       - has_more
@@ -418,6 +436,7 @@ components:
           - list
           example: list
           x-stainless-const: true
+          description: The object type, which is always `list`.
         total_count:
           type: integer
           format: int64
@@ -531,6 +550,7 @@ components:
           - deployment
           example: deployment
           x-stainless-const: true
+          description: The object type, which is always `deployment`.
         id:
           type: string
           example: dpl_123
@@ -582,6 +602,7 @@ components:
           - release
           example: release
           x-stainless-const: true
+          description: The object type, which is always `release`.
         id:
           type: string
           example: rls_123
@@ -636,33 +657,42 @@ components:
           - git_commit
           example: git_commit
           x-stainless-const: true
+          description: The object type, which is always `git_commit`.
         id:
           type: string
           example: git_commit_123
+          description: ID of the git commit.
         sha:
           type: string
           example: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+          description: The SHA hash of the git commit.
         message:
           type: string
           example: Add basic motion configurations
+          description: The commit message.
         repository_owner:
           type: string
           example: user
+          description: The owner of the git repository.
         repository_name:
           type: string
           example: repo
+          description: The name of the git repository.
         repository_type:
           $ref: '#/components/schemas/GitRepositoryType'
         repository_url:
           type: string
           example: https://github.com/user/repo
+          description: The URL of the git repository.
         commit_url:
           type: string
           example: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+          description: The URL of the git commit.
         created_at:
           type: string
           format: date-time
           example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the git commit was created.
     GitCommit:
       title: Git Commit
       allOf:
@@ -674,6 +704,7 @@ components:
       - type: object
         properties:
           git_commit:
+            description: The git commit associated with this release.
             nullable: true
             allOf:
             - $ref: '#/components/schemas/GitCommit'
@@ -695,6 +726,7 @@ components:
           - config_instance
           example: config_instance
           x-stainless-const: true
+          description: The object type, which is always `config_instance`.
         id:
           type: string
           example: cfg_inst_123
@@ -800,6 +832,7 @@ components:
         - data
         properties:
           data:
+            description: The list of deployments.
             type: array
             items:
               $ref: '#/components/schemas/Deployment'
@@ -818,30 +851,30 @@ components:
         activity_status:
           allOf:
           - $ref: '#/components/schemas/DeploymentActivityStatus'
+          description: The updated activity status of the deployment.
         error_status:
           allOf:
           - $ref: '#/components/schemas/DeploymentErrorStatus'
+          description: The updated error status of the deployment.
         deployed_at:
           type: string
           format: date-time
-          description: >-
-            Independent historical watermark recording the last time the agent
-            transitioned this deployment to Deployed. The current state is determined by
-            activity_status, not by which timestamp is present. Set by the agent.
+          description: Independent historical watermark recording the last time the
+            agent transitioned this deployment to Deployed. The current state is determined
+            by activity_status, not by which timestamp is present. Set by the agent.
         archived_at:
           type: string
           format: date-time
-          description: >-
-            Independent historical watermark recording the last time the agent
-            transitioned this deployment to Archived. The current state is determined by
-            activity_status, not by which timestamp is present. Set by the agent.
+          description: Independent historical watermark recording the last time the
+            agent transitioned this deployment to Archived. The current state is determined
+            by activity_status, not by which timestamp is present. Set by the agent.
     UpdateDeviceFromAgentRequest:
       title: Update Device From Agent Request
       type: object
       properties:
         agent_version:
           type: string
-          description: The version of the agent the device is running
+          description: The version of the agent the device is running.
           example: v1.0.0
     DeviceStatus:
       type: string
@@ -888,6 +921,7 @@ components:
           - device
           example: device
           x-stainless-const: true
+          description: The object type, which is always `device`.
         id:
           type: string
           example: dvc_123
@@ -933,7 +967,7 @@ components:
           session_id:
             type: string
             example: dvc_sess_123
-            description: Session ID of the device
+            description: Session ID of the device.
     ActivateDeviceRequest:
       title: Activate Device Request
       type: object
@@ -942,7 +976,7 @@ components:
       properties:
         public_key_pem:
           type: string
-          description: The public key in PEM format
+          description: The public key in PEM format.
           example: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END
             PUBLIC KEY-----
 
@@ -950,9 +984,10 @@ components:
         name:
           type: string
           example: Robot 1
+          description: The name to assign to the device.
         agent_version:
           type: string
-          description: The version of the agent the device is running
+          description: The version of the agent the device is running.
           example: v1.0.0
     IssueDeviceClaims:
       title: Issue Device Claims
@@ -964,15 +999,15 @@ components:
       properties:
         device_id:
           type: string
-          description: The device ID
+          description: The device ID.
           example: dvc_123
         nonce:
           type: string
-          description: The nonce
+          description: The nonce value for the token request.
         expiration:
           type: string
           format: date-time
-          description: The expiration
+          description: The expiration timestamp for the token.
           example: '2021-01-01T00:00:00Z'
     IssueDeviceTokenRequest:
       title: Issue Device Token Request
@@ -985,7 +1020,7 @@ components:
           $ref: '#/components/schemas/IssueDeviceClaims'
         signature:
           type: string
-          description: The signature
+          description: The cryptographic signature of the claims.
           example: MEUCIQDxCBtmFsd4Qohw+V6viyF8IpIjxA5oXNd64IUunURTTQIgcG80h+xGhY6kqtv9wHvU8M5aHfhXHwjiLB0OVZTPJSQ=
     TokenResponse:
       title: Token Response
@@ -1011,6 +1046,7 @@ components:
         is_synced:
           type: boolean
           example: true
+          description: Whether the device is synced.
     Ping:
       type: object
       required:
@@ -1020,10 +1056,12 @@ components:
         message_id:
           type: string
           example: 123e4567-e89b-12d3-a456-426614174000
+          description: The unique identifier of the ping message.
         timestamp:
           type: string
           format: date-time
           example: '2025-08-27T12:00:00Z'
+          description: The timestamp of when the ping was sent.
     Pong:
       type: object
       required:
@@ -1033,10 +1071,12 @@ components:
         message_id:
           type: string
           example: 123e4567-e89b-12d3-a456-426614174000
+          description: The unique identifier of the pong message.
         timestamp:
           type: string
           format: date-time
           example: '2025-08-27T12:00:00Z'
+          description: The timestamp of when the pong was received.
     Error:
       type: object
       required:
@@ -1047,15 +1087,18 @@ components:
         code:
           type: string
           example: invalid_request
+          description: The error code identifying the type of error.
         params:
           type: object
           additionalProperties: true
           example:
             param1: value1
             param2: value2
+          description: Additional parameters providing context about the error.
         message:
           type: string
           example: This is a message for a user
+          description: A human-readable message describing the error.
   parameters:
     MiruVersion:
       name: Miru-Version
@@ -1109,11 +1152,11 @@ components:
       name: expand
       in: query
       required: false
+      description: Fields to expand on each deployment in the list.
       schema:
         type: array
         items:
           $ref: '#/components/schemas/DeploymentListExpansion'
-        description: The fields to expand in the deployments list.
     deployment_search_activity_status:
       name: activity_status
       in: query
@@ -1137,11 +1180,11 @@ components:
       name: expand
       in: query
       required: false
+      description: Fields to expand on the deployment resource.
       schema:
         type: array
         items:
           $ref: '#/components/schemas/DeploymentExpansion'
-        description: The fields to expand in the deployment.
     device_id:
       name: device_id
       in: path

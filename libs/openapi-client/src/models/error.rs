@@ -11,10 +11,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Error {
+    /// The error code identifying the type of error.
     #[serde(rename = "code")]
     pub code: String,
+    /// Additional parameters providing context about the error.
     #[serde(rename = "params")]
     pub params: std::collections::HashMap<String, serde_json::Value>,
+    /// A human-readable message describing the error.
     #[serde(rename = "message")]
     pub message: String,
 }

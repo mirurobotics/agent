@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BaseRelease {
+    /// The object type, which is always `release`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the release.
@@ -42,7 +43,7 @@ impl BaseRelease {
         }
     }
 }
-/// 
+/// The object type, which is always `release`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "release")]
