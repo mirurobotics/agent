@@ -5,7 +5,7 @@ use crate::http;
 use crate::models;
 use crate::storage;
 use crate::trace;
-use openapi_client::models::{
+use backend_api::models::{
     self as backend_client, DeploymentActivityStatus as BackendActivityStatus,
     UpdateDeploymentRequest,
 };
@@ -111,7 +111,7 @@ async fn pull_deployments<'a, HTTPClientT: http::ClientI>(
 async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     token: &str,
-) -> Result<Vec<openapi_client::models::Deployment>, SyncErr> {
+) -> Result<Vec<backend_api::models::Deployment>, SyncErr> {
     let activity_status_filter = &[
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,

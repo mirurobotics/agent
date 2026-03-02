@@ -1,14 +1,14 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::http::mock::{Call, CapturedRequest, MockClient};
+use backend_api::models::{
+    Deployment as BackendDeployment, DeploymentActivityStatus, DeploymentList,
+    UpdateDeploymentRequest,
+};
 use miru_agent::http::deployments::{self, ListAllParams, ListParams, UpdateParams};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::query::Page;
 use miru_agent::http::HTTPErr;
-use openapi_client::models::{
-    Deployment as BackendDeployment, DeploymentActivityStatus, DeploymentList,
-    UpdateDeploymentRequest,
-};
 
 fn mock_err() -> HTTPErr {
     HTTPErr::MockErr(MockErr {

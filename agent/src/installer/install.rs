@@ -10,7 +10,7 @@ use crate::filesys::Overwrite;
 use crate::http;
 use crate::storage::{self, settings};
 use crate::version;
-use openapi_client::models as backend_client;
+use backend_api::models as backend_client;
 
 // external crates
 #[allow(unused_imports)]

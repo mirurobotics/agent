@@ -135,17 +135,17 @@ fn status_default() {
 fn status_sdk_conversion() {
     struct TestCase {
         storage: DeviceStatus,
-        sdk: openapi_server::models::DeviceStatus,
+        sdk: device_api::models::DeviceStatus,
     }
 
     let test_cases = vec![
         TestCase {
             storage: DeviceStatus::Online,
-            sdk: openapi_server::models::DeviceStatus::DEVICE_STATUS_ONLINE,
+            sdk: device_api::models::DeviceStatus::DEVICE_STATUS_ONLINE,
         },
         TestCase {
             storage: DeviceStatus::Offline,
-            sdk: openapi_server::models::DeviceStatus::DEVICE_STATUS_OFFLINE,
+            sdk: device_api::models::DeviceStatus::DEVICE_STATUS_OFFLINE,
         },
     ];
 
@@ -153,7 +153,7 @@ fn status_sdk_conversion() {
 
     for test_case in test_cases {
         variants.remove(&test_case.storage);
-        let actual: openapi_server::models::DeviceStatus = (&test_case.storage).into();
+        let actual: device_api::models::DeviceStatus = (&test_case.storage).into();
         assert_eq!(test_case.sdk, actual);
     }
 

@@ -6,7 +6,7 @@ use miru_agent::version::{self, COMMIT, VERSION};
 use axum::body;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use openapi_server::models::{HealthResponse, VersionResponse};
+use device_api::models::{HealthResponse, VersionResponse};
 
 pub mod health {
     use super::*;
@@ -57,6 +57,7 @@ pub mod routes {
     use axum::Router;
     use tower::ServiceExt;
 
+    use device_api::models as openapi;
     use miru_agent::activity;
     use miru_agent::filesys::{self, Overwrite};
     use miru_agent::models::{
@@ -64,7 +65,6 @@ pub mod routes {
     };
     use miru_agent::server::{serve, State};
     use miru_agent::sync::Syncer;
-    use openapi_server::models as openapi;
 
     use crate::http::mock::MockClient;
     use crate::sync::syncer::{create_storage, create_token_manager};

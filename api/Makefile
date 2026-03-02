@@ -1,33 +1,33 @@
-BACKEND_CLIENT_FILE:= specs/backend-client/v02.yaml
-BACKEND_CLIENT_CODEGEN_DIR := codegen/backend-client
-AGENT_SERVER_FILE := specs/agent-server/v02.yaml
-AGENT_SERVER_CODEGEN_DIR := codegen/agent-server
+BACKEND_FILE := specs/backend/v02.yaml
+BACKEND_CODEGEN_DIR := codegen/backend
+DEVICE_FILE := specs/device/v02.yaml
+DEVICE_CODEGEN_DIR := codegen/device
 RUST_TEMPLATES_DIR := templates/rust
 
 gen: clean
-	make gen-backend-client
-	make gen-agent-server
+	make gen-backend
+	make gen-device
 
-gen-backend-client: clean-backend-client
+gen-backend: clean-backend
 	openapi-generator-cli generate \
-	-i ${BACKEND_CLIENT_FILE} \
+	-i ${BACKEND_FILE} \
 	-g rust \
 	-t ${RUST_TEMPLATES_DIR} \
-	-o ${BACKEND_CLIENT_CODEGEN_DIR} \
-	--additional-properties=packageName=openapi-client
+	-o ${BACKEND_CODEGEN_DIR} \
+	--additional-properties=packageName=backend-api
 
-gen-agent-server: clean-agent-server
+gen-device: clean-device
 	openapi-generator-cli generate \
-	-i ${AGENT_SERVER_FILE} \
+	-i ${DEVICE_FILE} \
 	-g rust \
 	-t ${RUST_TEMPLATES_DIR} \
-	-o ${AGENT_SERVER_CODEGEN_DIR} \
-	--additional-properties=packageName=openapi-server
+	-o ${DEVICE_CODEGEN_DIR} \
+	--additional-properties=packageName=device-api
 
-clean: clean-backend-client clean-agent-server 
+clean: clean-backend clean-device
 
-clean-backend-client:
-	rm -rf ${BACKEND_CLIENT_CODEGEN_DIR}
+clean-backend:
+	rm -rf ${BACKEND_CODEGEN_DIR}
 
-clean-agent-server:
-	rm -rf ${AGENT_SERVER_CODEGEN_DIR}
+clean-device:
+	rm -rf ${DEVICE_CODEGEN_DIR}

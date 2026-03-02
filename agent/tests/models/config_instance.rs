@@ -1,6 +1,6 @@
 // internal crates
+use backend_api::models as backend_client;
 use miru_agent::models::ConfigInstance;
-use openapi_client::models as backend_client;
 
 // external crates
 use chrono::{DateTime, Utc};

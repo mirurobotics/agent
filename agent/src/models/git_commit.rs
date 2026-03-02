@@ -1,6 +1,6 @@
 // internal crates
 use crate::deserialize_error;
-use openapi_client::models as backend_client;
+use backend_api::models as backend_client;
 
 // external crates
 use chrono::{DateTime, Utc};

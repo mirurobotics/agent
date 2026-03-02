@@ -9,7 +9,7 @@ use crate::services::device as dvc_svc;
 use crate::services::git_commit as git_cmt_svc;
 use crate::services::release as rls_svc;
 use crate::version;
-use openapi_server::models as openapi;
+use device_api::models as device_server;
 
 // external
 use axum::{
@@ -27,7 +27,7 @@ use tracing::error;
 pub async fn health() -> impl IntoResponse {
     (
         StatusCode::OK,
-        Json(openapi::HealthResponse {
+        Json(device_server::HealthResponse {
             status: "ok".to_string(),
         }),
     )
@@ -36,7 +36,7 @@ pub async fn health() -> impl IntoResponse {
 pub async fn version() -> impl IntoResponse {
     (
         StatusCode::OK,
-        Json(openapi::VersionResponse {
+        Json(device_server::VersionResponse {
             version: version::VERSION.to_string(),
             git_commit: version::COMMIT.to_string(),
             api_version: version::api_version(),
@@ -54,7 +54,7 @@ pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoRes
     handle(
         async move {
             let device = dvc_svc::get(&state.storage.device).await?;
-            Ok::<_, ServerErr>(openapi::Device::from(&device))
+            Ok::<_, ServerErr>(device_server::Device::from(&device))
         },
         "Error getting device",
     )
@@ -77,7 +77,7 @@ pub async fn get_deployment(
     handle(
         async {
             let dpl = dpl_svc::get(&state.storage.deployments, deployment_id).await?;
-            Ok::<_, ServerErr>(openapi::Deployment::from(&dpl))
+            Ok::<_, ServerErr>(device_server::Deployment::from(&dpl))
         },
         "Error getting deployment",
     )
@@ -88,7 +88,7 @@ pub async fn get_current_deployment(AxumState(state): AxumState<Arc<State>>) -> 
     handle(
         async {
             let dpl = dpl_svc::get_current(&state.storage.deployments).await?;
-            Ok::<_, ServerErr>(openapi::Deployment::from(&dpl))
+            Ok::<_, ServerErr>(device_server::Deployment::from(&dpl))
         },
         "Error getting current deployment",
     )
@@ -103,7 +103,7 @@ pub async fn get_release(
     handle(
         async {
             let release = rls_svc::get(&state.storage.releases, release_id).await?;
-            Ok::<_, ServerErr>(openapi::Release::from(&release))
+            Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting release",
     )
@@ -115,7 +115,7 @@ pub async fn get_current_release(AxumState(state): AxumState<Arc<State>>) -> imp
         async {
             let release =
                 rls_svc::get_current(&state.storage.deployments, &state.storage.releases).await?;
-            Ok::<_, ServerErr>(openapi::Release::from(&release))
+            Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting current release",
     )
@@ -130,7 +130,7 @@ pub async fn get_git_commit(
     handle(
         async {
             let gc = git_cmt_svc::get(&state.storage.git_commits, git_commit_id).await?;
-            Ok::<_, ServerErr>(openapi::GitCommit::from(&gc))
+            Ok::<_, ServerErr>(device_server::GitCommit::from(&gc))
         },
         "Error getting git commit",
     )
@@ -154,13 +154,13 @@ where
     }
 }
 
-fn to_error_response(e: impl Error) -> openapi::ErrorResponse {
+fn to_error_response(e: impl Error) -> device_server::ErrorResponse {
     let params = e
         .params()
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
-    openapi::ErrorResponse {
-        error: Box::new(openapi::Error {
+    device_server::ErrorResponse {
+        error: Box::new(device_server::Error {
             code: e.code().as_str().to_string(),
             params,
             message: e.to_string(),

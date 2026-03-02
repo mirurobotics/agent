@@ -10,9 +10,9 @@ use crate::trace;
 use chrono::Utc;
 use rumqttc::QoS;
 
-pub type SyncDevice = openapi_client::models::SyncDevice;
-pub type Ping = openapi_client::models::Ping;
-pub type Pong = openapi_client::models::Pong;
+pub type SyncDevice = backend_api::models::SyncDevice;
+pub type Ping = backend_api::models::Ping;
+pub type Pong = backend_api::models::Pong;
 
 pub async fn subscribe_sync(client: &impl ClientI, device_id: &str) -> Result<(), MQTTError> {
     let topic = device_sync(device_id);

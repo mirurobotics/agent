@@ -27,7 +27,7 @@ pub async fn push<HTTPClientT: http::ClientI>(
         http_client,
         http::devices::UpdateParams {
             id: &device.id,
-            payload: &openapi_client::models::UpdateDeviceFromAgentRequest {
+            payload: &backend_api::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(agent_version.clone()),
             },
             token,

@@ -1,6 +1,6 @@
 // internal crates
+use backend_api::models::{self as backend_client, GitCommit as BackendGitCommit};
 use miru_agent::models::GitCommit;
-use openapi_client::models::{self as backend_client, GitCommit as BackendGitCommit};
 
 // external crates
 use chrono::{DateTime, Utc};

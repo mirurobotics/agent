@@ -1,7 +1,7 @@
 // internal crates
 use crate::sync::{errors::*, syncer::SyncerExt};
 use crate::{errors::Error, services::errors::*};
-use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
+use device_api::models::{SyncDeviceResponse, SyncDeviceResult};
 
 pub async fn sync<SyncerT: SyncerExt>(syncer: &SyncerT) -> Result<SyncDeviceResponse, ServiceErr> {
     match syncer.sync().await {

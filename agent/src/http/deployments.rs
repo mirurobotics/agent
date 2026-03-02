@@ -3,7 +3,7 @@ use super::errors::HTTPErr;
 use super::query::{Page, QueryParams, MAX_PAGE_LIMIT};
 use super::request;
 use super::ClientI;
-use openapi_client::models::{
+use backend_api::models::{
     Deployment, DeploymentActivityStatus, DeploymentList, UpdateDeploymentRequest,
 };
 

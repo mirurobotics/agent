@@ -1,11 +1,11 @@
 // internal crates
 use crate::sync::mock::MockSyncer;
+use device_api::models::{SyncDeviceResponse, SyncDeviceResult};
 use miru_agent::services::device as dvc_svc;
 use miru_agent::sync::errors::{MockErr, SyncerInCooldownErr};
 use miru_agent::sync::syncer::State;
 use miru_agent::sync::SyncErr;
 use miru_agent::trace;
-use openapi_server::models::{SyncDeviceResponse, SyncDeviceResult};
 
 // external crates
 use chrono::{Duration, Utc};

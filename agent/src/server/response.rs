@@ -1,10 +1,10 @@
 use crate::models;
-use openapi_server::models as openapi;
+use device_api::models as device_server;
 
-impl From<&models::Device> for openapi::Device {
+impl From<&models::Device> for device_server::Device {
     fn from(device: &models::Device) -> Self {
-        openapi::Device {
-            object: openapi::device::Object::Device,
+        device_server::Device {
+            object: device_server::device::Object::Device,
             id: device.id.clone(),
             name: device.name.clone(),
             status: (&device.status).into(),
@@ -15,11 +15,11 @@ impl From<&models::Device> for openapi::Device {
     }
 }
 
-impl From<&models::Deployment> for openapi::Deployment {
+impl From<&models::Deployment> for device_server::Deployment {
     fn from(dpl: &models::Deployment) -> Self {
         let status = dpl.status();
-        openapi::Deployment {
-            object: openapi::deployment::Object::Deployment,
+        device_server::Deployment {
+            object: device_server::deployment::Object::Deployment,
             id: dpl.id.clone(),
             description: dpl.description.clone(),
             status: (&status).into(),
@@ -35,10 +35,10 @@ impl From<&models::Deployment> for openapi::Deployment {
     }
 }
 
-impl From<&models::Release> for openapi::Release {
+impl From<&models::Release> for device_server::Release {
     fn from(release: &models::Release) -> Self {
-        openapi::Release {
-            object: openapi::release::Object::Release,
+        device_server::Release {
+            object: device_server::release::Object::Release,
             id: release.id.clone(),
             version: release.version.clone(),
             git_commit_id: release.git_commit_id.clone(),
@@ -48,10 +48,10 @@ impl From<&models::Release> for openapi::Release {
     }
 }
 
-impl From<&models::GitCommit> for openapi::GitCommit {
+impl From<&models::GitCommit> for device_server::GitCommit {
     fn from(gc: &models::GitCommit) -> Self {
-        openapi::GitCommit {
-            object: openapi::git_commit::Object::GitCommit,
+        device_server::GitCommit {
+            object: device_server::git_commit::Object::GitCommit,
             id: gc.id.clone(),
             sha: gc.sha.clone(),
             message: gc.message.clone(),

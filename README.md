@@ -21,8 +21,8 @@ agent/
 ├── api/                    # OpenAPI specs and codegen config
 ├── build/                  # Docker, GoReleaser, release scripts
 ├── libs/                   # Generated libraries (do not edit)
-│   ├── openapi-client/     #   Backend API client
-│   └── openapi-server/     #   Agent server API
+│   ├── backend-api/        #   Backend API client
+│   └── device-api/         #   Device API server
 ├── scripts/                # Dev tooling (test, lint, coverage, etc.)
 └── testdata/               # Test fixtures
 ```

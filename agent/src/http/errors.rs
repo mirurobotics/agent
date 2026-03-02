@@ -1,6 +1,6 @@
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::http::request;
-use openapi_client::models::ErrorResponse;
+use backend_api::models::ErrorResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailed {

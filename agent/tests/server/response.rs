@@ -1,8 +1,8 @@
 use chrono::{DateTime, TimeZone, Utc};
+use device_api::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
 };
-use openapi_server::models as openapi;
 
 fn fixed_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()

@@ -2,6 +2,7 @@
 use std::env;
 
 // internal
+use backend_api::models as backend_client;
 use miru_agent::app::options::{AppOptions, LifecycleOptions};
 use miru_agent::app::run::run;
 use miru_agent::cli;
@@ -13,7 +14,6 @@ use miru_agent::mqtt::options::ConnectAddress;
 use miru_agent::storage;
 use miru_agent::version;
 use miru_agent::workers::mqtt;
-use openapi_client::models as backend_client;
 
 // external
 use tokio::signal::unix::signal;

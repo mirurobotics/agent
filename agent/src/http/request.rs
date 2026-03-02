@@ -147,7 +147,7 @@ impl Default for Headers {
         Self {
             // build information
             agent_version: version::VERSION.to_string(),
-            api_version: openapi_client::models::ApiVersion::API_VERSION.to_string(),
+            api_version: backend_api::models::ApiVersion::API_VERSION.to_string(),
 
             // host information
             host_name: SystemInfo::host_name(),

@@ -1,7 +1,7 @@
 // internal crates
 use crate::deserialize_error;
 use crate::models::Patch;
-use openapi_server::models as agent_server;
+use device_api::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -145,8 +145,8 @@ impl<'de> Deserialize<'de> for Device {
     }
 }
 
-impl From<&openapi_client::models::Device> for Device {
-    fn from(api_device: &openapi_client::models::Device) -> Device {
+impl From<&backend_api::models::Device> for Device {
+    fn from(api_device: &backend_api::models::Device) -> Device {
         Device {
             id: api_device.id.clone(),
             name: api_device.name.clone(),
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn from_openapi_device_maps_fields() {
-        let api_device = openapi_client::models::Device {
+        let api_device = backend_api::models::Device {
             id: "dev-123".to_string(),
             name: "my-robot".to_string(),
             session_id: "sess-456".to_string(),

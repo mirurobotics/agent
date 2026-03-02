@@ -1,6 +1,6 @@
 // internal crates
+use backend_api::models::Release as BackendRelease;
 use miru_agent::models::Release;
-use openapi_client::models::Release as BackendRelease;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -64,7 +64,7 @@ fn defaults() {
 fn from_backend() {
     let now = Utc::now();
     let backend_release = BackendRelease {
-        object: openapi_client::models::release::Object::Release,
+        object: backend_api::models::release::Object::Release,
         id: "rel_123".to_string(),
         version: "1.0.0".to_string(),
         git_commit_id: Some("gc_123".to_string()),
@@ -85,7 +85,7 @@ fn from_backend() {
 #[test]
 fn from_backend_invalid_dates() {
     let backend_release = BackendRelease {
-        object: openapi_client::models::release::Object::Release,
+        object: backend_api::models::release::Object::Release,
         id: "rel_789".to_string(),
         version: "3.0.0".to_string(),
         git_commit_id: None,

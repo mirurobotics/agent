@@ -2,8 +2,8 @@
 use crate::deserialize_error;
 use crate::models::config_instance::CfgInstID;
 use crate::models::Patch;
-use openapi_client::models as backend_client;
-use openapi_server::models as agent_server;
+use backend_api::models as backend_client;
+use device_api::models as agent_server;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

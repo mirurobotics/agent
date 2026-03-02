@@ -2,7 +2,7 @@
 use super::errors::HTTPErr;
 use super::request;
 use super::ClientI;
-use openapi_client::models::{
+use backend_api::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };

@@ -12,11 +12,11 @@ pub const OS: &str = std::env::consts::OS;
 pub const ARCH: &str = std::env::consts::ARCH;
 
 pub fn api_version() -> String {
-    openapi_server::models::ApiVersion::API_VERSION.to_string()
+    device_api::models::ApiVersion::API_VERSION.to_string()
 }
 
 pub fn api_git_commit() -> String {
-    openapi_server::models::ApiGitCommit::API_GIT_COMMIT.to_string()
+    device_api::models::ApiGitCommit::API_GIT_COMMIT.to_string()
 }
 
 pub fn format() -> String {

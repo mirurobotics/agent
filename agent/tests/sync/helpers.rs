@@ -1,17 +1,17 @@
-use chrono::{DateTime, TimeDelta, Utc};
-use miru_agent::models;
-use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
-use miru_agent::sync::syncer::State;
-use openapi_client::models::{
+use backend_api::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
     DeploymentTargetStatus as BackendTargetStatus, GitCommit as BackendGitCommit,
     GitRepositoryType, Release as BackendRelease,
 };
+use chrono::{DateTime, TimeDelta, Utc};
+use miru_agent::models;
+use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
+use miru_agent::sync::syncer::State;
 
 // ========================= FACTORIES ========================= //
 
-pub fn make_cfg_inst(id: &str) -> openapi_client::models::ConfigInstance {
-    openapi_client::models::ConfigInstance {
+pub fn make_cfg_inst(id: &str) -> backend_api::models::ConfigInstance {
+    backend_api::models::ConfigInstance {
         id: id.to_string(),
         filepath: format!("{id}.json"),
         ..Default::default()
@@ -38,7 +38,7 @@ pub fn make_archived_dpl(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
 
 pub fn make_backend_git_commit(id: &str) -> BackendGitCommit {
     BackendGitCommit {
-        object: openapi_client::models::git_commit::Object::GitCommit,
+        object: backend_api::models::git_commit::Object::GitCommit,
         id: id.to_string(),
         sha: format!("sha-{id}"),
         message: format!("commit {id}"),
@@ -54,7 +54,7 @@ pub fn make_backend_git_commit(id: &str) -> BackendGitCommit {
 pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
     let git_commit = gc_id.map(|gid| Some(Box::new(make_backend_git_commit(gid))));
     BackendRelease {
-        object: openapi_client::models::release::Object::Release,
+        object: backend_api::models::release::Object::Release,
         id: id.to_string(),
         version: format!("1.0.0-{id}"),
         git_commit_id: gc_id.map(|s| s.to_string()),

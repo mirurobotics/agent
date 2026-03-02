@@ -82,14 +82,14 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ### Generated code (workspace siblings)
 
-`libs/openapi-client` and `libs/openapi-server` are auto-generated from OpenAPI specs in `api/`. Never edit these by hand. Regenerate with `make -C api` or `api/regen.sh`.
+`libs/backend-api` and `libs/device-api` are auto-generated from OpenAPI specs in `api/`. Never edit these by hand. Regenerate with `make -C api` or `api/regen.sh`.
 
 ## Architectural Invariants
 
 - **Installer and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; installer writes the files that runtime later reads.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
-- **Generated code is never hand-edited.** `libs/openapi-client` and `libs/openapi-server` are overwritten on regeneration.
+- **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
 - **Tests require `--features test` and `--test-threads=1`.** This is a hard constraint. Many test helpers are behind `#[cfg(feature = "test")]` and tests share `/tmp/miru.sock`.
 - **The agent has no direct database.** All persistence is file-based via `storage::Layout`. The backend owns the database.
 

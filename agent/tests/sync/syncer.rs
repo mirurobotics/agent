@@ -354,11 +354,11 @@ pub mod sync_success {
         let f = Fixture::new("sync_deployments").await;
 
         // define a backend deployment with an embedded config instance
-        let backend_dep = openapi_client::models::Deployment {
+        let backend_dep = backend_api::models::Deployment {
             id: "dpl_1".to_string(),
-            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+            config_instances: Some(vec![backend_api::models::ConfigInstance {
                 id: "cfg_inst_1".to_string(),
-                content: Some(Box::new(openapi_client::models::InstanceContent {
+                content: Some(Box::new(backend_api::models::InstanceContent {
                     data: "{\"key\": \"value\"}".to_string(),
                     ..Default::default()
                 })),
@@ -699,7 +699,7 @@ pub mod sync_failure {
         // set the http client to not return an error
         f.http_client.set_list_all_deployments(|| Ok(vec![]));
         f.http_client
-            .set_update_deployment(|| Ok(openapi_client::models::Deployment::default()));
+            .set_update_deployment(|| Ok(backend_api::models::Deployment::default()));
 
         // recovery
         let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
@@ -1003,9 +1003,9 @@ pub mod subscribe {
             .unwrap();
 
         // Backend returns matching deployment with expanded CIs
-        let backend_dep = openapi_client::models::Deployment {
+        let backend_dep = backend_api::models::Deployment {
             id: "dpl_1".to_string(),
-            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+            config_instances: Some(vec![backend_api::models::ConfigInstance {
                 id: "cfg_inst_1".to_string(),
                 ..Default::default()
             }]),
@@ -1078,9 +1078,9 @@ pub mod subscribe {
             .unwrap();
 
         // Backend returns matching deployment with expanded CIs
-        let backend_dep = openapi_client::models::Deployment {
+        let backend_dep = backend_api::models::Deployment {
             id: "dpl_1".to_string(),
-            config_instances: Some(vec![openapi_client::models::ConfigInstance {
+            config_instances: Some(vec![backend_api::models::ConfigInstance {
                 id: "cfg_inst_1".to_string(),
                 ..Default::default()
             }]),

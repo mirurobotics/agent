@@ -1,11 +1,11 @@
 use crate::http::mock::{Call, CapturedRequest, MockClient};
-use miru_agent::http::devices::{self, ActivateParams, IssueTokenParams, UpdateParams};
-use miru_agent::http::errors::MockErr;
-use miru_agent::http::HTTPErr;
-use openapi_client::models::{
+use backend_api::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };
+use miru_agent::http::devices::{self, ActivateParams, IssueTokenParams, UpdateParams};
+use miru_agent::http::errors::MockErr;
+use miru_agent::http::HTTPErr;
 
 fn mock_err() -> HTTPErr {
     HTTPErr::MockErr(MockErr {

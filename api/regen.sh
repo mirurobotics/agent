@@ -9,29 +9,29 @@ codegen_dir=$this_dir/codegen
 cd "$this_dir"
 make gen
 
-# client
-codegen_backend_client_models_dir=$codegen_dir/backend-client/src/models
-backend_client_models_target_dir=$git_repo_root_dir/libs/openapi-client/src/models
+# backend
+codegen_backend_models_dir=$codegen_dir/backend/src/models
+backend_models_target_dir=$git_repo_root_dir/libs/backend-api/src/models
 
 # replace the target model directories with the generated ones
-rm -rf "${backend_client_models_target_dir:?}"/*
+rm -rf "${backend_models_target_dir:?}"/*
 
 # copy all the files in the generated models dirs to the target models dirs
-if [ ! -d "$backend_client_models_target_dir" ]; then
-    mkdir "$backend_client_models_target_dir"
+if [ ! -d "$backend_models_target_dir" ]; then
+    mkdir "$backend_models_target_dir"
 fi
-cp -r "$codegen_backend_client_models_dir"/* "$backend_client_models_target_dir"
+cp -r "$codegen_backend_models_dir"/* "$backend_models_target_dir"
 
 
-# server
-codegen_agent_server_models_dir=$codegen_dir/agent-server/src/models
-agent_server_models_target_dir=$git_repo_root_dir/libs/openapi-server/src/models
+# device
+codegen_device_models_dir=$codegen_dir/device/src/models
+device_models_target_dir=$git_repo_root_dir/libs/device-api/src/models
 
 # replace the target model directories with the generated ones
-rm -rf "${agent_server_models_target_dir:?}"/*
+rm -rf "${device_models_target_dir:?}"/*
 
 # copy all the files in the generated models dirs to the target models dirs
-if [ ! -d "$agent_server_models_target_dir" ]; then
-    mkdir "$agent_server_models_target_dir"
+if [ ! -d "$device_models_target_dir" ]; then
+    mkdir "$device_models_target_dir"
 fi
-cp -r "$codegen_agent_server_models_dir"/* "$agent_server_models_target_dir"
+cp -r "$codegen_device_models_dir"/* "$device_models_target_dir"

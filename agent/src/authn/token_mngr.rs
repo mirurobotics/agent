@@ -8,7 +8,7 @@ use crate::filesys::{cached_file::SingleThreadCachedFile, file::File, path::Path
 use crate::http;
 use crate::http::devices;
 use crate::trace;
-use openapi_client::models::{IssueDeviceClaims, IssueDeviceTokenRequest};
+use backend_api::models::{IssueDeviceClaims, IssueDeviceTokenRequest};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};

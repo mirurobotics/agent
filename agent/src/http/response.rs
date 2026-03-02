@@ -4,7 +4,7 @@ use crate::http::{
     request,
 };
 use crate::trace;
-use openapi_client::models::ErrorResponse;
+use backend_api::models::ErrorResponse;
 
 // external crates
 use serde::de::DeserializeOwned;

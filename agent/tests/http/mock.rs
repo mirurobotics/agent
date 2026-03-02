@@ -2,11 +2,11 @@
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::http::{self, request::Params, HTTPErr};
-use openapi_client::models::{
+use backend_api::models::{
     Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError, ErrorResponse,
     TokenResponse,
 };
+use miru_agent::http::{self, request::Params, HTTPErr};
 
 // external crates
 use axum::http::StatusCode;

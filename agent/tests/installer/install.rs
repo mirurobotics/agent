@@ -1,11 +1,11 @@
 // internal crates
+use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::HTTPErr;
 use miru_agent::installer::install;
 use miru_agent::installer::InstallErr;
 use miru_agent::storage::{Layout, Settings};
-use openapi_client::models::Device;
 
 use crate::http::mock;
 
