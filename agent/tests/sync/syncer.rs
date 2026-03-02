@@ -8,7 +8,8 @@ use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::errors::*;
-use miru_agent::filesys::{self, Overwrite, WriteOptions};
+use miru_agent::events;
+use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
@@ -131,6 +132,14 @@ impl Fixture {
         let http_client = Arc::new(MockClient::default());
         let storage = Arc::new(create_storage(&dir).await);
 
+        let events_dir = dir.subdir("events");
+        let event_hub = Arc::new(
+            events::EventHub::init(
+                events_dir.file("events.ndjson").path(),
+                events_dir.file("events.meta.json").path(),
+            )
+            .unwrap(),
+        );
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
@@ -144,6 +153,8 @@ impl Fixture {
                 },
                 backoff,
                 agent_version,
+                event_hub,
+                device_id: "test_device".to_string(),
             },
         )
         .unwrap();
@@ -222,6 +233,14 @@ pub mod shutdown {
         let storage = Arc::new(create_storage(&dir).await);
 
         let http_client = Arc::new(http::Client::new("doesntmatter").unwrap());
+        let events_dir = dir.subdir("events");
+        let event_hub = Arc::new(
+            events::EventHub::init(
+                events_dir.file("events.ndjson").path(),
+                events_dir.file("events.meta.json").path(),
+            )
+            .unwrap(),
+        );
         let (syncer, worker_handler) = Syncer::spawn(
             32,
             SyncerArgs {
@@ -239,6 +258,8 @@ pub mod shutdown {
                     max_secs: 12 * 60 * 60,
                 },
                 agent_version: Device::default().agent_version,
+                event_hub,
+                device_id: "test_device".to_string(),
             },
         )
         .unwrap();

@@ -38,6 +38,18 @@ impl Layout {
         self.root().subdir("resources")
     }
 
+    pub fn events_dir(&self) -> filesys::Dir {
+        self.root().subdir("events")
+    }
+
+    pub fn events_log_file(&self) -> filesys::File {
+        self.events_dir().file("events.ndjson")
+    }
+
+    pub fn events_meta_file(&self) -> filesys::File {
+        self.events_dir().file("events.meta.json")
+    }
+
     pub fn device(&self) -> filesys::File {
         self.root().file("device.json")
     }

@@ -10,6 +10,7 @@ use crate::authn::TokenManagerExt;
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::errors::*;
+use crate::events;
 use crate::http;
 use crate::storage;
 use crate::trace;
@@ -48,6 +49,8 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub agent_version: String,
+    pub event_hub: Arc<events::EventHub>,
+    pub device_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +84,8 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     agent_version: String,
+    event_hub: Arc<events::EventHub>,
+    device_id: String,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -101,6 +106,8 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             agent_version: args.agent_version,
+            event_hub: args.event_hub,
+            device_id: args.device_id,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -196,12 +203,19 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         }
         self.state.last_synced_at = Utc::now();
         self.state.err_streak = 0;
+
+        self.event_hub.try_publish(events::Envelope::sync_completed(
+            &self.device_id,
+            self.state.last_synced_at,
+        ));
+
         TimeDelta::seconds(self.backoff.base_secs)
     }
 
     fn handle_sync_failure(&mut self, e: &SyncErr) -> TimeDelta {
+        let is_network_conn_err = e.is_network_conn_err();
         if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncFailed(SyncFailure {
-            is_network_conn_err: e.is_network_conn_err(),
+            is_network_conn_err,
         })) {
             error!("failed to send sync failed event: {:?}", e);
         }
@@ -210,7 +224,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         // network connection errors even if the previous errors were not
         // network connection errors so we use an error streak of 0 when
         // calculating the cooldown period
-        if e.is_network_conn_err() {
+        let wait = if is_network_conn_err {
             debug!(
                 "unable to sync with backend due to a network connection error: {:?}",
                 e
@@ -220,7 +234,15 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             error!("unable to sync with backend: {:?}", e);
             self.state.err_streak += 1;
             TimeDelta::seconds(cooldown::calc(&self.backoff, self.state.err_streak))
-        }
+        };
+
+        self.event_hub.try_publish(events::Envelope::sync_failed(
+            &self.device_id,
+            is_network_conn_err,
+            self.state.err_streak,
+        ));
+
+        wait
     }
 
     async fn sync_impl(&mut self) -> Result<Option<chrono::TimeDelta>, SyncErr> {
@@ -249,6 +271,8 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             storage: &sync_storage,
             opts: &self.deploy_opts,
             token: &token.token,
+            event_hub: &self.event_hub,
+            device_id: &self.device_id,
         })
         .await
     }

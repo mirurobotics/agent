@@ -89,6 +89,11 @@ pub fn routes(state: Arc<State>) -> Router {
             format!("/{API_VERSION}/git_commits/{{git_commit_id}}").as_str(),
             get(handlers::get_git_commit),
         )
+        // =============================== EVENTS ================================== //
+        .route(
+            format!("/{API_VERSION}/events").as_str(),
+            get(super::sse::events),
+        )
         .with_state(state)
 }
 

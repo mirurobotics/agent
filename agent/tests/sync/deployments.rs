@@ -1,9 +1,11 @@
 // standard crates
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 // internal crates
 use miru_agent::deploy::{apply, fsm};
-use miru_agent::filesys::{self, Overwrite};
+use miru_agent::events;
+use miru_agent::filesys::{self, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
@@ -71,6 +73,14 @@ impl Fixture {
     }
 
     async fn sync(&self) -> Result<Option<TimeDelta>, SyncErr> {
+        let event_hub = self.new_event_hub();
+        self.sync_with_event_hub(event_hub.as_ref()).await
+    }
+
+    async fn sync_with_event_hub(
+        &self,
+        event_hub: &events::EventHub,
+    ) -> Result<Option<TimeDelta>, SyncErr> {
         let opts = apply::DeployOpts {
             staging_dir: self.staging_dir.clone(),
             target_dir: self.target_dir.clone(),
@@ -89,8 +99,21 @@ impl Fixture {
             http_client: &self.http_client,
             opts: &opts,
             token: "test_token",
+            event_hub,
+            device_id: "test_device",
         })
         .await
+    }
+
+    fn new_event_hub(&self) -> Arc<events::EventHub> {
+        let events_dir = self._dir.subdir("events");
+        Arc::new(
+            events::EventHub::init(
+                events_dir.file("events.ndjson").path(),
+                events_dir.file("events.meta.json").path(),
+            )
+            .unwrap(),
+        )
     }
 }
 
@@ -1251,6 +1274,29 @@ mod cross_phase {
             bodies[0].error_status,
             Some(BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING)
         );
+    }
+}
+
+mod event_emission {
+    use super::*;
+
+    #[tokio::test]
+    async fn no_op_sync_does_not_emit_duplicate_deployment_events() {
+        let f = Fixture::new("events_noop_no_duplicate").await;
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        let event_hub = f.new_event_hub();
+
+        f.sync_with_event_hub(event_hub.as_ref()).await.unwrap();
+        let first_events = event_hub.replay_after(0, 100).unwrap();
+        assert_eq!(first_events.len(), 1);
+        assert_eq!(first_events[0].event_type, "deployment.deployed");
+
+        f.sync_with_event_hub(event_hub.as_ref()).await.unwrap();
+        let second_events = event_hub.replay_after(0, 100).unwrap();
+        assert_eq!(second_events.len(), 1);
     }
 }
 

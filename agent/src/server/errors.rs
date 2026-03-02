@@ -2,6 +2,7 @@ use crate::authn;
 use crate::cache;
 use crate::crypt;
 use crate::errors::Trace;
+use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::services;
@@ -80,6 +81,16 @@ pub struct TimestampConversionErr {
 impl crate::errors::Error for TimestampConversionErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to initialize event hub: {source}")]
+pub struct EventHubInitErr {
+    #[source]
+    pub source: events::EventErr,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for EventHubInitErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum ServerErr {
     // server errors
     #[error(transparent)]
@@ -106,6 +117,10 @@ pub enum ServerErr {
     StorageErr(StorageErr),
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
+
+    // event hub errors
+    #[error(transparent)]
+    EventHubInitErr(EventHubInitErr),
 
     // external crate errors
     #[error(transparent)]
@@ -173,6 +188,7 @@ crate::impl_error!(ServerErr {
     AuthnErr,
     CacheErr,
     CryptErr,
+    EventHubInitErr,
     FileSysErr,
     HTTPErr,
     ServiceErr,

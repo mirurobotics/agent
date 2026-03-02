@@ -294,6 +294,7 @@ async fn init_socket_server(
         app_state.syncer.clone(),
         app_state.token_mngr.clone(),
         app_state.activity_tracker.clone(),
+        app_state.event_hub.clone(),
     );
     let server_handle = serve(&options.server, Arc::new(server_state), async move {
         let _ = shutdown_rx.recv().await;

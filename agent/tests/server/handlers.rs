@@ -58,7 +58,8 @@ pub mod routes {
     use tower::ServiceExt;
 
     use miru_agent::activity;
-    use miru_agent::filesys::{self, Overwrite};
+    use miru_agent::events;
+    use miru_agent::filesys::{self, Overwrite, PathExt};
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
     };
@@ -97,12 +98,21 @@ pub mod routes {
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
 
+            let events_dir = dir.subdir("events");
+            let event_hub = Arc::new(
+                events::EventHub::init(
+                    events_dir.file("events.ndjson").path(),
+                    events_dir.file("events.meta.json").path(),
+                )
+                .unwrap(),
+            );
             let state = Arc::new(State::new(
                 storage,
                 real_http_client,
                 syncer,
                 Arc::new(token_mngr),
                 activity_tracker,
+                event_hub,
             ));
 
             let app = serve::routes(state.clone());

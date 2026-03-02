@@ -1,5 +1,7 @@
+// internal crates
 use super::errors::*;
-use crate::deploy::apply;
+use crate::deploy::{apply, fsm};
+use crate::events;
 use crate::filesys::Overwrite;
 use crate::http;
 use crate::models;
@@ -19,6 +21,8 @@ pub struct SyncArgs<'a, HTTPClientT> {
     pub storage: &'a Storage<'a>,
     pub opts: &'a apply::DeployOpts,
     pub token: &'a str,
+    pub event_hub: &'a events::EventHub,
+    pub device_id: &'a str,
 }
 
 pub struct Storage<'a> {
@@ -57,7 +61,14 @@ pub async fn sync<HTTPClientT: http::ClientI>(
         errors.push(e);
     }
 
-    let wait = apply_deployments(args.storage, args.opts, &mut errors).await;
+    let wait = apply_deployments(
+        args.storage,
+        args.opts,
+        args.event_hub,
+        args.device_id,
+        &mut errors,
+    )
+    .await;
 
     debug!("pushing deployment status updates to server");
     if let Err(e) = push_deployments(args.http_client, args.storage.deployments, args.token).await {
@@ -282,9 +293,20 @@ fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> m
 async fn apply_deployments<'a>(
     storage: &'a Storage<'a>,
     opts: &'a apply::DeployOpts,
+    event_hub: &events::EventHub,
+    device_id: &str,
     errors: &mut Vec<SyncErr>,
 ) -> chrono::TimeDelta {
     debug!("applying deployments");
+    let actions = match collect_actions(storage).await {
+        Ok(actions) => actions,
+        Err(e) => {
+            error!("failed to collect deployment actions before apply: {e}");
+            errors.push(e);
+            std::collections::HashMap::new()
+        }
+    };
+
     let apply_stor = storage.apply_storage();
     let apply_args = apply::Args {
         storage: &apply_stor,
@@ -306,9 +328,14 @@ async fn apply_deployments<'a>(
                 outcome.deployment.id, e
             );
             errors.push(SyncErr::from(e));
-        } else {
+        } else if should_publish_deployment_event(
+            actions.get(&outcome.deployment.id),
+            &outcome.deployment,
+        ) {
             debug!("successfully applied deployment {}", outcome.deployment.id);
+            publish_deployment_event(event_hub, device_id, &outcome.deployment);
         }
+
         if let Some(w) = outcome.wait {
             if w <= chrono::TimeDelta::zero() {
                 continue;
@@ -320,6 +347,51 @@ async fn apply_deployments<'a>(
         }
     }
     wait.unwrap_or(chrono::TimeDelta::zero())
+}
+
+async fn collect_actions(
+    storage: &Storage<'_>,
+) -> Result<std::collections::HashMap<String, fsm::NextAction>, SyncErr> {
+    let entries = storage.deployments.entries().await?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| {
+            let deployment = entry.value;
+            let action = fsm::next_action(&deployment);
+            (deployment.id, action)
+        })
+        .collect())
+}
+
+fn should_publish_deployment_event(
+    action: Option<&fsm::NextAction>,
+    deployment: &models::Deployment,
+) -> bool {
+    match action {
+        Some(fsm::NextAction::Deploy) => {
+            deployment.activity_status == models::DplActivity::Deployed
+        }
+        Some(fsm::NextAction::Remove) | Some(fsm::NextAction::Archive) => {
+            deployment.activity_status == models::DplActivity::Archived
+        }
+        _ => false,
+    }
+}
+
+fn publish_deployment_event(
+    event_hub: &events::EventHub,
+    device_id: &str,
+    deployment: &models::Deployment,
+) {
+    match deployment.activity_status {
+        models::DplActivity::Deployed => {
+            event_hub.try_publish(events::Envelope::deployment_deployed(device_id, deployment));
+        }
+        models::DplActivity::Archived => {
+            event_hub.try_publish(events::Envelope::deployment_removed(device_id, deployment));
+        }
+        _ => {}
+    }
 }
 
 // =================================== PUSH ======================================== //

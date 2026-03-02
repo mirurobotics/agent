@@ -6,6 +6,7 @@ pub mod cooldown;
 pub mod crypt;
 pub mod deploy;
 pub mod errors;
+pub mod events;
 pub mod filesys;
 pub mod http;
 pub mod installer;

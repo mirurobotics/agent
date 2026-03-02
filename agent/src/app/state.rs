@@ -10,6 +10,7 @@ use crate::authn::TokenManagerExt;
 use crate::cooldown;
 use crate::crypt::jwt;
 use crate::deploy::{apply, fsm};
+use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
 use crate::models;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub syncer: Arc<sync::Syncer>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
+    pub event_hub: Arc<events::EventHub>,
 }
 
 impl AppState {
@@ -55,6 +57,9 @@ impl AppState {
         let (stor, storage_handle) =
             storage::Storage::init(layout, capacities, device_id.clone()).await?;
         let storage = Arc::new(stor);
+
+        // initialize the event hub
+        let event_hub = Self::init_event_hub(layout)?;
 
         // initialize the token manager
         let (token_mngr, token_mngr_handle) = authn::TokenManager::spawn(
@@ -86,6 +91,8 @@ impl AppState {
                     growth_factor: 2,
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
+                event_hub: event_hub.clone(),
+                device_id,
             },
         )?;
         let syncer = Arc::new(syncer);
@@ -106,9 +113,26 @@ impl AppState {
                 syncer,
                 token_mngr,
                 activity_tracker,
+                event_hub,
             },
             shutdown_handle,
         ))
+    }
+
+    fn init_event_hub(
+        layout: &storage::Layout,
+    ) -> Result<Arc<events::EventHub>, server::ServerErr> {
+        events::EventHub::init(
+            layout.events_log_file().path(),
+            layout.events_meta_file().path(),
+        )
+        .map(Arc::new)
+        .map_err(|source| {
+            server::ServerErr::EventHubInitErr(server::errors::EventHubInitErr {
+                source,
+                trace: trace!(),
+            })
+        })
     }
 
     async fn init_device_id(

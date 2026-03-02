@@ -2,6 +2,7 @@ pub mod errors;
 pub mod handlers;
 pub mod response;
 pub mod serve;
+pub mod sse;
 pub mod state;
 
 pub use self::errors::ServerErr;
