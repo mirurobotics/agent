@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -9,17 +9,18 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiVersion {
-    #[serde(rename = "v0.2.0-beta.4")]
+    #[serde(rename = "v0.2.0-beta.5-next")]
     API_VERSION,
+
 }
 
 impl std::fmt::Display for ApiVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_VERSION => write!(f, "v0.2.0-beta.4"),
+            Self::API_VERSION => write!(f, "v0.2.0-beta.5-next"),
         }
     }
 }
@@ -29,3 +30,4 @@ impl Default for ApiVersion {
         Self::API_VERSION
     }
 }
+

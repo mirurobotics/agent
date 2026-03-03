@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -26,3 +26,4 @@ impl IssueDeviceTokenRequest {
         }
     }
 }
+

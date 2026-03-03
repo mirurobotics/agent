@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -30,24 +30,12 @@ pub struct Release {
     #[serde(rename = "updated_at")]
     pub updated_at: String,
     /// The git commit associated with this release.
-    #[serde(
-        rename = "git_commit",
-        default,
-        with = "::serde_with::rust::double_option",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "git_commit", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub git_commit: Option<Option<Box<models::GitCommit>>>,
 }
 
 impl Release {
-    pub fn new(
-        object: Object,
-        id: String,
-        version: String,
-        git_commit_id: Option<String>,
-        created_at: String,
-        updated_at: String,
-    ) -> Release {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String, updated_at: String) -> Release {
         Release {
             object,
             id,
@@ -71,3 +59,4 @@ impl Default for Object {
         Self::Release
     }
 }
+

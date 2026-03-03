@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentStatus : This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'.
-/// This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'.
+/// DeploymentStatus : This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'. 
+/// This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentStatus {
     #[serde(rename = "drifted")]
@@ -27,6 +27,7 @@ pub enum DeploymentStatus {
     DEPLOYMENT_STATUS_FAILED,
     #[serde(rename = "retrying")]
     DEPLOYMENT_STATUS_RETRYING,
+
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -48,3 +49,4 @@ impl Default for DeploymentStatus {
         Self::DEPLOYMENT_STATUS_DRIFTED
     }
 }
+

@@ -11,29 +11,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GitCommit {
+    /// The object type, which is always `git_commit`.
     #[serde(rename = "object")]
     pub object: Object,
+    /// ID of the git commit.
     #[serde(rename = "id")]
     pub id: String,
+    /// The SHA hash of the git commit.
     #[serde(rename = "sha")]
     pub sha: String,
+    /// The commit message.
     #[serde(rename = "message")]
     pub message: String,
+    /// The URL of the git commit.
     #[serde(rename = "commit_url")]
     pub commit_url: String,
+    /// Timestamp of when the git commit was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
 }
 
 impl GitCommit {
-    pub fn new(
-        object: Object,
-        id: String,
-        sha: String,
-        message: String,
-        commit_url: String,
-        created_at: String,
-    ) -> GitCommit {
+    pub fn new(object: Object, id: String, sha: String, message: String, commit_url: String, created_at: String) -> GitCommit {
         GitCommit {
             object,
             id,
@@ -44,7 +43,7 @@ impl GitCommit {
         }
     }
 }
-///
+/// The object type, which is always `git_commit`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "git_commit")]
@@ -56,3 +55,4 @@ impl Default for Object {
         Self::GitCommit
     }
 }
+

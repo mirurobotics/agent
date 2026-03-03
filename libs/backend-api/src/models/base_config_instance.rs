@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -35,15 +35,7 @@ pub struct BaseConfigInstance {
 }
 
 impl BaseConfigInstance {
-    pub fn new(
-        object: Object,
-        id: String,
-        config_type_name: String,
-        filepath: String,
-        created_at: String,
-        config_schema_id: String,
-        config_type_id: String,
-    ) -> BaseConfigInstance {
+    pub fn new(object: Object, id: String, config_type_name: String, filepath: String, created_at: String, config_schema_id: String, config_type_id: String) -> BaseConfigInstance {
         BaseConfigInstance {
             object,
             id,
@@ -67,3 +59,4 @@ impl Default for Object {
         Self::ConfigInstance
     }
 }
+

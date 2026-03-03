@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Release {
+    /// The object type, which is always `release`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the release.
@@ -31,14 +32,7 @@ pub struct Release {
 }
 
 impl Release {
-    pub fn new(
-        object: Object,
-        id: String,
-        version: String,
-        git_commit_id: Option<String>,
-        created_at: String,
-        updated_at: String,
-    ) -> Release {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String, updated_at: String) -> Release {
         Release {
             object,
             id,
@@ -49,7 +43,7 @@ impl Release {
         }
     }
 }
-///
+/// The object type, which is always `release`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "release")]
@@ -61,3 +55,4 @@ impl Default for Object {
         Self::Release
     }
 }
+

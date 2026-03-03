@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -9,17 +9,18 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiGitCommit {
-    #[serde(rename = "b8db8c8d2695e32d324e4b5ef043275fa755f40c")]
+    #[serde(rename = "d1b587df0031fd091427a5e7cbc044a6bdffe64f")]
     API_GIT_COMMIT,
+
 }
 
 impl std::fmt::Display for ApiGitCommit {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_GIT_COMMIT => write!(f, "b8db8c8d2695e32d324e4b5ef043275fa755f40c"),
+            Self::API_GIT_COMMIT => write!(f, "d1b587df0031fd091427a5e7cbc044a6bdffe64f"),
         }
     }
 }
@@ -29,3 +30,4 @@ impl Default for ApiGitCommit {
         Self::API_GIT_COMMIT
     }
 }
+

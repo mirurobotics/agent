@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -18,6 +18,9 @@ pub struct SyncDevice {
 
 impl SyncDevice {
     pub fn new(is_synced: bool) -> SyncDevice {
-        SyncDevice { is_synced }
+        SyncDevice {
+            is_synced,
+        }
     }
 }
+

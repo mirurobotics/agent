@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -26,10 +26,7 @@ pub struct Device {
     #[serde(rename = "last_connected_at", deserialize_with = "Option::deserialize")]
     pub last_connected_at: Option<String>,
     /// Timestamp of when the device was last disconnected (this is not the same as the last time the device was seen).
-    #[serde(
-        rename = "last_disconnected_at",
-        deserialize_with = "Option::deserialize"
-    )]
+    #[serde(rename = "last_disconnected_at", deserialize_with = "Option::deserialize")]
     pub last_disconnected_at: Option<String>,
     /// Timestamp of when the device was created.
     #[serde(rename = "created_at")]
@@ -43,17 +40,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(
-        object: Object,
-        id: String,
-        name: String,
-        status: models::DeviceStatus,
-        last_connected_at: Option<String>,
-        last_disconnected_at: Option<String>,
-        created_at: String,
-        updated_at: String,
-        session_id: String,
-    ) -> Device {
+    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String, session_id: String) -> Device {
         Device {
             object,
             id,
@@ -79,3 +66,4 @@ impl Default for Object {
         Self::Device
     }
 }
+

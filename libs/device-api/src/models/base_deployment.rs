@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BaseDeployment {
+    /// The object type, which is always `deployment`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the deployment.
@@ -42,19 +43,7 @@ pub struct BaseDeployment {
 }
 
 impl BaseDeployment {
-    pub fn new(
-        object: Object,
-        id: String,
-        description: String,
-        status: models::DeploymentStatus,
-        activity_status: models::DeploymentActivityStatus,
-        error_status: models::DeploymentErrorStatus,
-        target_status: models::DeploymentTargetStatus,
-        device_id: String,
-        release_id: String,
-        created_at: String,
-        updated_at: String,
-    ) -> BaseDeployment {
+    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String, updated_at: String) -> BaseDeployment {
         BaseDeployment {
             object,
             id,
@@ -70,7 +59,7 @@ impl BaseDeployment {
         }
     }
 }
-///
+/// The object type, which is always `deployment`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "deployment")]
@@ -82,3 +71,4 @@ impl Default for Object {
         Self::Deployment
     }
 }
+

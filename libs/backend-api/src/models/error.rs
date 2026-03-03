@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -23,11 +23,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(
-        code: String,
-        params: std::collections::HashMap<String, serde_json::Value>,
-        message: String,
-    ) -> Error {
+    pub fn new(code: String, params: std::collections::HashMap<String, serde_json::Value>, message: String) -> Error {
         Error {
             code,
             params,
@@ -35,3 +31,4 @@ impl Error {
         }
     }
 }
+

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Deployment {
+    /// The object type, which is always `deployment`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the deployment.
@@ -39,24 +40,13 @@ pub struct Deployment {
     /// Timestamp of when the device release was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
+    /// The config instances associated with this deployment.
     #[serde(rename = "config_instances", skip_serializing_if = "Option::is_none")]
     pub config_instances: Option<Vec<models::ConfigInstance>>,
 }
 
 impl Deployment {
-    pub fn new(
-        object: Object,
-        id: String,
-        description: String,
-        status: models::DeploymentStatus,
-        activity_status: models::DeploymentActivityStatus,
-        error_status: models::DeploymentErrorStatus,
-        target_status: models::DeploymentTargetStatus,
-        device_id: String,
-        release_id: String,
-        created_at: String,
-        updated_at: String,
-    ) -> Deployment {
+    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String, updated_at: String) -> Deployment {
         Deployment {
             object,
             id,
@@ -73,7 +63,7 @@ impl Deployment {
         }
     }
 }
-///
+/// The object type, which is always `deployment`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "deployment")]
@@ -85,3 +75,4 @@ impl Default for Object {
         Self::Deployment
     }
 }
+

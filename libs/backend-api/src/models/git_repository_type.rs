@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum GitRepositoryType {
     #[serde(rename = "github")]
@@ -18,6 +18,7 @@ pub enum GitRepositoryType {
     GIT_REPO_TYPE_GITLAB,
     #[serde(rename = "bitbucket")]
     GIT_REPO_TYPE_BITBUCKET,
+
 }
 
 impl std::fmt::Display for GitRepositoryType {
@@ -35,3 +36,4 @@ impl Default for GitRepositoryType {
         Self::GIT_REPO_TYPE_GITHUB
     }
 }
+

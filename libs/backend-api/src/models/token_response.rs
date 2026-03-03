@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -21,6 +21,10 @@ pub struct TokenResponse {
 
 impl TokenResponse {
     pub fn new(token: String, expires_at: String) -> TokenResponse {
-        TokenResponse { token, expires_at }
+        TokenResponse {
+            token,
+            expires_at,
+        }
     }
 }
+

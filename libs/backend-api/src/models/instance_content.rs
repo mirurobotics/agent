@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -20,6 +20,10 @@ pub struct InstanceContent {
 
 impl InstanceContent {
     pub fn new(format: models::InstanceFormat, data: String) -> InstanceContent {
-        InstanceContent { format, data }
+        InstanceContent {
+            format,
+            data,
+        }
     }
 }
+

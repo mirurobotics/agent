@@ -1,5 +1,5 @@
 /*
- * Miru Backend-Agent API
+ * Miru Agent API
  *
  * The API between the Miru Backend and the Agent; for internal use only
  *
@@ -32,13 +32,7 @@ pub struct DeploymentList {
 }
 
 impl DeploymentList {
-    pub fn new(
-        object: Object,
-        limit: i32,
-        offset: i32,
-        has_more: bool,
-        data: Vec<models::Deployment>,
-    ) -> DeploymentList {
+    pub fn new(object: Object, limit: i32, offset: i32, has_more: bool, data: Vec<models::Deployment>) -> DeploymentList {
         DeploymentList {
             object,
             total_count: None,
@@ -61,3 +55,4 @@ impl Default for Object {
         Self::List
     }
 }
+

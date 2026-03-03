@@ -1,62 +1,37 @@
 openapi: 3.0.3
 info:
-  title: Miru Backend-Agent API
+  title: Miru Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.2.0-beta.4
+  version: v0.2.0-beta.5-next
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   x-git-commit:
-    sha: b8db8c8d2695e32d324e4b5ef043275fa755f40c
-    url: https://github.com/mirurobotics/openapi/commit/b8db8c8d2695e32d324e4b5ef043275fa755f40c
-    message: 'feat(lint): add MIRU015 requestBody required rule
+    sha: d1b587df0031fd091427a5e7cbc044a6bdffe64f
+    url: https://github.com/mirurobotics/openapi/commit/d1b587df0031fd091427a5e7cbc044a6bdffe64f
+    message: 'feat(lint): add MIRU017 x-scopes-format rule
 
 
-      Enforces that every requestBody sets required: true, since the Miru API
+      Enforce that every x-scopes entry is a struct with slug (str) and
 
-      has no use case for optional request bodies.
+      required (bool), with condition mandatory when required is false.
+
+      Update existing MIRU016 test fixtures to use the new struct format.
 
 
       Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
     author: Benjamin Smidt
-    branch: HEAD
+    branch: main
     dirty: false
   x-build:
-    built_at: '2026-02-27T23:40:02.681699+00:00'
+    built_at: '2026-03-03T02:24:26.091258+00:00'
 servers:
-- url: https://staging.api.mirurobotics.com/{audience}/{version}
+- url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
-  variables:
-    audience:
-      default: agent
-      enum:
-      - agent
-    version:
-      default: v1
-      enum:
-      - v1
-- url: https://uat.api.mirurobotics.com/{audience}/{version}
+- url: https://uat.api.mirurobotics.com/agent/v1
   description: UAT
-  variables:
-    audience:
-      default: agent
-      enum:
-      - agent
-    version:
-      default: v1
-      enum:
-      - v1
-- url: https://api.mirurobotics.com/{audience}/{version}
+- url: https://api.mirurobotics.com/agent/v1
   description: Production
-  variables:
-    audience:
-      default: agent
-      enum:
-      - agent
-    version:
-      default: v1
-      enum:
-      - v1
 security:
 - ClerkAuth: []
 paths:
@@ -307,14 +282,14 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.2.0-beta.4
+      - v0.2.0-beta.5-next
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - b8db8c8d2695e32d324e4b5ef043275fa755f40c
+      - d1b587df0031fd091427a5e7cbc044a6bdffe64f
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1106,6 +1081,8 @@ components:
       required: true
       schema:
         type: string
+        example: v0.2.0-beta.5-next
+        default: v0.2.0-beta.5-next
       description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id

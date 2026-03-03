@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigInstance {
+    /// The object type, which is always `config_instance`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the config instance.
@@ -31,22 +32,13 @@ pub struct ConfigInstance {
     /// ID of the config type which the config instance (and its schema) is a part of.
     #[serde(rename = "config_type_id")]
     pub config_type_id: String,
-    /// The configuration values associated with the config instance
+    /// The configuration values associated with the config instance.
     #[serde(rename = "content")]
     pub content: Box<models::InstanceContent>,
 }
 
 impl ConfigInstance {
-    pub fn new(
-        object: Object,
-        id: String,
-        config_type_name: String,
-        filepath: String,
-        created_at: String,
-        config_schema_id: String,
-        config_type_id: String,
-        content: models::InstanceContent,
-    ) -> ConfigInstance {
+    pub fn new(object: Object, id: String, config_type_name: String, filepath: String, created_at: String, config_schema_id: String, config_type_id: String, content: models::InstanceContent) -> ConfigInstance {
         ConfigInstance {
             object,
             id,
@@ -59,7 +51,7 @@ impl ConfigInstance {
         }
     }
 }
-///
+/// The object type, which is always `config_instance`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "config_instance")]
@@ -71,3 +63,4 @@ impl Default for Object {
         Self::ConfigInstance
     }
 }
+

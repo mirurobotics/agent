@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Device {
+    /// The object type, which is always `device`.
     #[serde(rename = "object")]
     pub object: Object,
     /// ID of the device.
@@ -33,15 +34,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(
-        object: Object,
-        id: String,
-        name: String,
-        status: models::DeviceStatus,
-        last_synced_at: String,
-        last_connected_at: String,
-        last_disconnected_at: String,
-    ) -> Device {
+    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_synced_at: String, last_connected_at: String, last_disconnected_at: String) -> Device {
         Device {
             object,
             id,
@@ -53,7 +46,7 @@ impl Device {
         }
     }
 }
-///
+/// The object type, which is always `device`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Object {
     #[serde(rename = "device")]
@@ -65,3 +58,4 @@ impl Default for Object {
         Self::Device
     }
 }
+
