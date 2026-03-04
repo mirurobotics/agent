@@ -1,1 +1,0 @@
-Execute the /redesign command
