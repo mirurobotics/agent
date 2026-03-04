@@ -1,10 +1,6 @@
 // internal crates
 use crate::filesys;
 
-// external crates
-#[allow(unused_imports)]
-use tracing::{debug, error, info, warn};
-
 #[derive(Clone, Debug)]
 pub struct Layout {
     pub filesystem_root: filesys::Dir,

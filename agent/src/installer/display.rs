@@ -1,7 +1,3 @@
-// external crates
-#[allow(unused_imports)]
-use tracing::{debug, error, info, warn};
-
 pub enum Colors {
     Red,
     Green,

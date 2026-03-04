@@ -1,6 +1,4 @@
 use sysinfo::System;
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
 
 #[derive(Debug)]
 pub struct SystemInfo {
