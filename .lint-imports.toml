@@ -1,0 +1,6 @@
+internal_crates = ["backend_api", "device_api", "miru_agent"]
+
+[labels]
+standard = "// standard crates"
+internal = "// internal crates"
+external = "// external crates"
