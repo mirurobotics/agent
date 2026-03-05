@@ -1,5 +1,7 @@
+// standard crates
 use std::time::Duration;
 
+// internal crates
 use miru_agent::http::request::{self, Headers, Params};
 use miru_agent::http::HTTPErr;
 

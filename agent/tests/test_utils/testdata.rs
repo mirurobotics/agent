@@ -1,5 +1,8 @@
-use miru_agent::filesys;
+// standard crates
 use std::path::PathBuf;
+
+// internal crates
+use miru_agent::filesys;
 
 // test file locations
 pub fn testdata_dir() -> filesys::Dir {

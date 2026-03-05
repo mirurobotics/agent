@@ -1,12 +1,15 @@
+// internal crates
 use backend_api::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
     DeploymentTargetStatus as BackendTargetStatus, GitCommit as BackendGitCommit,
     GitRepositoryType, Release as BackendRelease,
 };
-use chrono::{DateTime, TimeDelta, Utc};
 use miru_agent::models;
 use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
 use miru_agent::sync::syncer::State;
+
+// external crates
+use chrono::{DateTime, TimeDelta, Utc};
 
 // ========================= FACTORIES ========================= //
 

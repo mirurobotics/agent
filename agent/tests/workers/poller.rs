@@ -2,6 +2,8 @@
 use std::sync::Arc;
 
 // internal crates
+use crate::mock::SleepController;
+use crate::sync::mock::MockSyncer;
 use miru_agent::filesys;
 use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout};
@@ -9,9 +11,6 @@ use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, State, SyncEvent, SyncFailure};
 use miru_agent::sync::SyncErr;
 use miru_agent::workers::poller;
-
-use crate::mock::SleepController;
-use crate::sync::mock::MockSyncer;
 
 // external crates
 use chrono::{TimeDelta, Utc};

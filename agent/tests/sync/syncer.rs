@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
+use crate::http::mock::{Call, MockClient};
+use crate::sync::helpers::*;
 use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
@@ -19,9 +21,6 @@ use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
 };
 use miru_agent::sync::{SyncErr, Syncer, SyncerExt};
-
-use crate::http::mock::{Call, MockClient};
-use crate::sync::helpers::*;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

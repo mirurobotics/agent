@@ -90,6 +90,7 @@ echo ""
 echo "Checking import formatting"
 echo "--------------------------"
 cargo run --manifest-path "$git_repo_root_dir/tools/lint/Cargo.toml" -- --path "$git_repo_root_dir/agent/src" --fix --config "$git_repo_root_dir/.lint-imports.toml"
+cargo run --manifest-path "$git_repo_root_dir/tools/lint/Cargo.toml" -- --path "$git_repo_root_dir/agent/tests" --fix --config "$git_repo_root_dir/.lint-imports.toml"
 echo ""
 
 echo "Looking for unused external dependencies"

@@ -1,5 +1,7 @@
+// standard crates
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+// internal crates
 use miru_agent::errors::Error;
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::{with_retry, HTTPErr};

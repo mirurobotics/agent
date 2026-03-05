@@ -1,11 +1,10 @@
 // internal crates
+use crate::http::mock::MockClient;
 use miru_agent::filesys;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout};
 use miru_agent::sync::agent_version::push;
-
-use crate::http::mock::MockClient;
 
 pub mod push {
     use super::*;

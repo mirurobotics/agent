@@ -1,8 +1,11 @@
-use chrono::{DateTime, TimeZone, Utc};
+// internal crates
 use device_api::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
 };
+
+// external crates
+use chrono::{DateTime, TimeZone, Utc};
 
 fn fixed_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()

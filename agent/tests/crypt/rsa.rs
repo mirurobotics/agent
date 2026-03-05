@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates

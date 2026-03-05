@@ -1,4 +1,7 @@
 // internal crates
+use crate::authn::mock::MockTokenManager;
+use crate::mqtt::mock::MockClient;
+use crate::sync::mock::MockSyncer;
 use miru_agent::authn::Token;
 use miru_agent::filesys;
 use miru_agent::models::{Device, DeviceStatus};
@@ -12,10 +15,6 @@ use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent, SyncFailure};
 use miru_agent::sync::SyncErr;
 use miru_agent::workers::mqtt::{self, handle_error, handle_event, handle_syncer_event};
-
-use crate::authn::mock::MockTokenManager;
-use crate::mqtt::mock::MockClient;
-use crate::sync::mock::MockSyncer;
 
 // external crates
 use chrono::Utc;

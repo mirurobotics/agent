@@ -1,8 +1,10 @@
-// standard library
+// standard crates
 use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
+use crate::authn::mock::MockTokenManager;
+use crate::mock::SleepController;
 use miru_agent::authn::errors::MockError;
 use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::cooldown;
@@ -10,9 +12,6 @@ use miru_agent::trace;
 use miru_agent::workers::token_refresh::{
     calc_refresh_wait, run_token_refresh_worker, TokenRefreshWorkerOptions,
 };
-
-use crate::authn::mock::MockTokenManager;
-use crate::mock::SleepController;
 
 // external crates
 use chrono::{TimeDelta, Utc};

@@ -1,12 +1,14 @@
-use axum::http::StatusCode;
-use axum::routing::get;
-use axum::Router;
+// internal crates
+use crate::http::mock;
 use miru_agent::http::request::Params;
 use miru_agent::http::response;
 use miru_agent::http::{self, HTTPErr};
-use serde::Deserialize;
 
-use crate::http::mock;
+// external crates
+use axum::http::StatusCode;
+use axum::routing::get;
+use axum::Router;
+use serde::Deserialize;
 
 pub mod handle {
     use super::*;

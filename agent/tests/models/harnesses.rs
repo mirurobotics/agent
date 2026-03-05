@@ -1,8 +1,11 @@
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+// standard crates
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
+
+// external crates
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 // ─── field descriptors ───────────────────────────────────────────────────────
 

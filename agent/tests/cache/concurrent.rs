@@ -1,3 +1,6 @@
+// standard crates
+use std::future::Future;
+
 // internal crates
 use miru_agent::cache::{
     concurrent::ConcurrentCache, single_thread::SingleThreadCache, CacheEntry, CacheErr,
@@ -6,7 +9,6 @@ use miru_agent::filesys::Overwrite;
 
 // external crates
 use chrono::Utc;
-use std::future::Future;
 use tokio::task::JoinHandle;
 
 #[macro_export]

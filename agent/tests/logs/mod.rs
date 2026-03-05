@@ -1,8 +1,8 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
 use miru_agent::logs::{self, LogLevel, Options};
-
-// external crates
-use std::collections::HashSet;
 
 // ========================= deserialize ========================= //
 

@@ -1,12 +1,12 @@
+// standard crates
+use std::fmt;
+use std::time::Duration;
+
 // internal crates
 use miru_agent::errors::{self, Error};
 use miru_agent::http::errors::{MockErr, RequestFailed};
 use miru_agent::http::request;
 use miru_agent::http::HTTPErr;
-
-// external crates
-use std::fmt;
-use std::time::Duration;
 
 /// Number of variants in errors::Code; keep in sync so every arm has a test case.
 const EXPECTED_CODE_VARIANTS: usize = 3;

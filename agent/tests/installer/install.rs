@@ -1,4 +1,6 @@
 // internal crates
+use crate::http::mock;
+use crate::http::mock::MockClient;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};
@@ -7,12 +9,8 @@ use miru_agent::installer::install;
 use miru_agent::installer::InstallErr;
 use miru_agent::storage::{Layout, Settings};
 
-use crate::http::mock;
-
 // external crates
 use serde_json::json;
-
-use crate::http::mock::MockClient;
 
 const DEVICE_ID: &str = "75899aa4-b08a-4047-8526-880b1b832973";
 

@@ -1,4 +1,5 @@
 // internal crates
+use device_api::models::{HealthResponse, VersionResponse};
 use miru_agent::server::handlers;
 use miru_agent::version::{self, COMMIT, VERSION};
 
@@ -6,7 +7,6 @@ use miru_agent::version::{self, COMMIT, VERSION};
 use axum::body;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use device_api::models::{HealthResponse, VersionResponse};
 
 pub mod health {
     use super::*;
