@@ -5,9 +5,6 @@ Items are ordered by ID. Gaps in IDs are expected — never renumber.
 | ID | Title | Category | Scope |
 |----|-------|----------|-------|
 | TD-001 | Import comment labels inconsistent with AGENTS.md convention | `inconsistency` | `M` |
-| TD-002 | cli module uses file-based layout with inline tests | `structure` | `XS` |
-| TD-003 | Unused test utility functions in test_utils/testdata.rs | `dead-code` | `XS` |
-| TD-004 | Unnecessary #[allow(unused_imports)] on unused tracing imports | `dead-code` | `XS` |
 | TD-005 | Deployment and device model enum conversion boilerplate | `complexity` | `S` |
 | TD-006 | Cache actor worker dispatch boilerplate | `complexity` | `S` |
 | TD-007 | ShutdownManager repetitive with_*_handle methods | `complexity` | `XS` |
@@ -21,38 +18,6 @@ Items are ordered by ID. Gaps in IDs are expected — never renumber.
 **Current state:** AGENTS.md specifies import group comments as `// standard library`, `// internal`, `// external`. The vast majority of files use `// standard crates`, `// internal crates`, `// external crates` instead. Only `main.rs` and a handful of files (`http/client.rs`, `mqtt/client.rs`, `authn/token_mngr.rs`, `filesys/file.rs`) use the documented labels. Additionally, some files place `backend_api`/`device_api` imports under `// internal crates` while others place them under `// external crates`, creating ambiguity about where generated-code imports belong.
 
 **Desired state:** Either update AGENTS.md to match the `// xxx crates` labels the codebase actually uses, or normalize all files to match the current AGENTS.md convention. Clarify whether generated-lib imports (`backend_api`, `device_api`) belong in the internal or external group.
-
-### TD-002: cli module uses file-based layout with inline tests `structure` `XS`
-
-**Location:** `agent/src/cli.rs`
-
-**Current state:** The `cli` module is implemented as a single file (`cli.rs`) with inline `#[cfg(test)]` tests (7 tests, ~130 lines of test code). There is no `agent/tests/cli/` directory and no `.covgate` file. All other 21 modules use the directory-based layout (`<module>/mod.rs`) with external test files in `agent/tests/<module>/`.
-
-**Desired state:** Convert to directory layout (`cli/mod.rs`), move tests to `agent/tests/cli/mod.rs`, add a `.covgate` file. Follows the convention in AGENTS.md ("Create `agent/src/<module>/mod.rs`", "Create matching test file at `agent/tests/<module>/mod.rs`", "Add a `.covgate` file").
-
-### TD-003: Unused test utility functions in test_utils/testdata.rs `dead-code` `XS`
-
-**Location:** `agent/tests/test_utils/testdata.rs` (lines 11-21)
-
-**Current state:** Three public helper functions are defined but never called anywhere in the test suite:
-- `filesys_testdata_dir()` (line 11)
-- `sandbox_testdata_dir()` (line 15)
-- `crypt_testdata_dir()` (line 19)
-
-Only `testdata_dir()` (line 5) is used — by these three wrappers and by test files directly.
-
-**Desired state:** Remove the three unused functions. If tests need subdirectory helpers in the future, they can be re-added when there's an actual caller.
-
-### TD-004: Unnecessary #[allow(unused_imports)] on unused tracing imports `dead-code` `XS`
-
-**Location:**
-- `agent/src/installer/display.rs` (lines 2-3)
-- `agent/src/telemetry/mod.rs` (lines 2-3)
-- `agent/src/storage/layout.rs` (lines 5-6)
-
-**Current state:** These three files have `#[allow(unused_imports)]` on `use tracing::{debug, error, info, warn};` (or similar), but none of the tracing macros are actually used in any of these files. The annotation suppresses the compiler warning, hiding genuinely dead imports.
-
-**Desired state:** Remove the `#[allow(unused_imports)]` annotation and the unused `use tracing::...` line from each file. If tracing is added later, the import can be re-added at that point.
 
 ### TD-005: Deployment and device model enum conversion boilerplate `complexity` `S`
 
