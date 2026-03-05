@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::cmp::min;
 
 #[derive(Debug, Clone, Copy)]

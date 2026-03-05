@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::future::Future;
 use std::sync::Arc;
 use std::{
@@ -14,7 +14,7 @@ use crate::filesys;
 use crate::filesys::PathExt;
 use crate::trace;
 
-// external
+// external crates
 use axum::{
     routing::{get, post},
     Router,

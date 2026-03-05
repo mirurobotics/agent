@@ -4,7 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-// internal modules
+// internal crates
 use crate::models::device;
 use crate::storage;
 use crate::sync::syncer::{CooldownEnd, SyncEvent};

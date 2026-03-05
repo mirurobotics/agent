@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::sync::Arc;
 
 // internal crates
@@ -7,9 +7,9 @@ use crate::http::{
     request, response,
 };
 use crate::trace;
-use serde::de::DeserializeOwned;
 
 // external crates
+use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 
 #[derive(Debug)]

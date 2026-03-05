@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::fmt;
 
 // internal crates
@@ -9,6 +9,7 @@ use super::query::QueryParams;
 use crate::telemetry::SystemInfo;
 use crate::trace;
 use crate::version;
+
 // external crates
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Serialize;

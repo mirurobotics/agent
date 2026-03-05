@@ -1,5 +1,7 @@
-// external crates
+// internal crates
 use crate::models::Patch;
+
+// external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

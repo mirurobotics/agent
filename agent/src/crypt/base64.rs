@@ -1,6 +1,7 @@
 // internal crates
 use super::errors::{Base64DecodeErr, ConvertBytesToStringErr, CryptErr};
 use crate::trace;
+
 // external crates
 use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD},

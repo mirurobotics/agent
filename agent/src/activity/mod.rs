@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ use crate::workers::{
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
 };
 
-// external
+// external crates
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tracing::{error, info};

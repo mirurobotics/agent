@@ -1,4 +1,4 @@
-// standard library
+// standard crates
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
@@ -7,7 +7,7 @@ use crate::filesys;
 use crate::filesys::{Atomic, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
-// external libraries
+// external crates
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::Rsa;

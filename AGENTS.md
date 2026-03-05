@@ -17,13 +17,13 @@ Agent-specific conventions for AI coding agents. Read this before making changes
 Every source file follows this order, with groups separated by a blank line and a comment:
 
 ```rust
-// standard library
+// standard crates
 use std::sync::Arc;
 
-// internal
+// internal crates
 use crate::app::state::AppState;
 
-// external
+// external crates
 use tokio::sync::broadcast;
 ```
 

@@ -1,3 +1,5 @@
+// standard crates
+use std::future::Future;
 use std::sync::Arc;
 
 // internal crates
@@ -11,7 +13,7 @@ use crate::services::release as rls_svc;
 use crate::version;
 use device_api::models as device_server;
 
-// external
+// external crates
 use axum::{
     extract::{Path, State as AxumState},
     http::StatusCode,
@@ -20,7 +22,6 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::future::Future;
 use tracing::error;
 
 // ================================= AGENT INFO ==================================== //
