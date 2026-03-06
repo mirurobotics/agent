@@ -1,19 +1,11 @@
 #!/bin/sh
 set -e
+REPO_ROOT=$(git rev-parse --show-toplevel)
 
-git_repo_root_dir=$(git rev-parse --show-toplevel)
-cd "$git_repo_root_dir"
+export CRATE_DIR="$REPO_ROOT"
+export CARGO_PKG="--package miru-agent"
+export CARGO_FEATURES="--features test"
+export CARGO_TEST_ARGS="-- --test-threads=1"
+export RUST_LOG_OVERRIDE="off"
 
-# Install cargo-llvm-cov if not available
-if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
-    echo "Installing cargo-llvm-cov..."
-    cargo install cargo-llvm-cov
-fi
-
-echo "Generating HTML coverage report..."
-RUST_LOG=off cargo llvm-cov --html --output-dir target/coverage \
-    --package miru-agent --features test \
-    -- --test-threads=1
-
-echo ""
-echo "Report: target/coverage/html/index.html"
+exec "$REPO_ROOT/scripts/lib/coverage.sh"

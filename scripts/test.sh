@@ -1,10 +1,11 @@
 #!/bin/sh
 set -e
+REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Set the target directory, use the git repo root if no argument provided
-git_repo_root_dir=$(git rev-parse --show-toplevel)
+export CRATE_DIR="$REPO_ROOT"
+export CARGO_PKG="--package miru-agent"
+export CARGO_FEATURES="--features test"
+export CARGO_TEST_ARGS="-- --test-threads=1"
+export RUST_LOG_OVERRIDE="off"
 
-cd "$git_repo_root_dir"
-
-# Suppress log output during tests
-RUST_LOG=off cargo test --features test -- --test-threads=1
+exec "$REPO_ROOT/scripts/lib/test.sh"

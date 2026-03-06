@@ -1,10 +1,7 @@
 #!/bin/sh
-set -e 
+set -e
+REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Set the target directory, use the git repo root if no argument provided
-git_repo_root_dir=$(git rev-parse --show-toplevel)
-TARGET_DIR="${1:-$git_repo_root_dir}"
-cd "$TARGET_DIR"
+export CRATE_DIR="${1:-$REPO_ROOT}"
 
-cargo update --verbose
-echo ""
+exec "$REPO_ROOT/scripts/lib/dep-updates.sh"

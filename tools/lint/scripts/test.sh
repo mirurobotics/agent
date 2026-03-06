@@ -1,10 +1,7 @@
 #!/bin/sh
 set -e
+REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Set the target directory, use the git repo root if no argument provided
-git_repo_root_dir=$(git rev-parse --show-toplevel)
-LINT_DIR="$git_repo_root_dir/tools/lint"
+export CRATE_DIR="$REPO_ROOT/tools/lint"
 
-cd "$LINT_DIR"
-
-cargo test
+exec "$REPO_ROOT/scripts/lib/test.sh"
