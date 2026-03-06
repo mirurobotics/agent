@@ -28,7 +28,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install Linters
-        run: cargo binstall --no-confirm cargo-machete cargo-diet cargo-audit
+        run: |
+          cargo binstall --force --no-confirm cargo-machete cargo-audit cargo-diet
 
       - name: Run Linter
         run: LINT_FIX=0 ./scripts/lint.sh
@@ -75,7 +76,7 @@ jobs:
 
       - name: Install Tools
         run: |
-          cargo binstall --no-confirm cargo-machete cargo-audit
+          cargo binstall --force --no-confirm cargo-machete cargo-audit cargo-diet
           sudo apt-get install -y jq
 
       - name: Install cargo-llvm-cov
