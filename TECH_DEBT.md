@@ -7,7 +7,6 @@ Items are ordered by ID. Gaps in IDs are expected — never renumber.
 | TD-001 | Import comment labels inconsistent with AGENTS.md convention | `inconsistency` | `M` |
 | TD-005 | Deployment and device model enum conversion boilerplate | `complexity` | `S` |
 | TD-006 | Cache actor worker dispatch boilerplate | `complexity` | `S` |
-| TD-007 | ShutdownManager repetitive with_*_handle methods | `complexity` | `XS` |
 
 ---
 
@@ -50,13 +49,3 @@ WorkerCommand::Xxx { ..., respond_to } => {
 The only variation is the method name, parameters, and error message string. This is ~160 lines of code where a macro or generic dispatch helper could reduce it significantly.
 
 **Desired state:** Extract the response-send-or-log pattern into a helper (macro or function) so each arm reduces to one or two lines. The `Shutdown` arm remains special-cased since it breaks the loop.
-
-### TD-007: ShutdownManager repetitive with_*_handle methods `complexity` `XS`
-
-**Location:** `agent/src/app/run.rs` (lines 359-421)
-
-**Current state:** `ShutdownManager` has four nearly identical methods: `with_token_refresh_worker_handle()`, `with_poller_worker_handle()`, `with_mqtt_worker_handle()`, `with_socket_server_handle()`. Each checks if the corresponding `Option` field is already `Some`, returns a `ShutdownMngrDuplicateArgErr` if so, and sets it otherwise. The only differences are the field name and error arg_name string.
-
-**Desired state:** Replace the four methods with a single generic `register_handle()` method that takes a field selector and name string, or use a `Vec<(&str, JoinHandle<()>)>` instead of named Option fields. This would reduce ~60 lines to ~15 and eliminate the possibility of copy-paste errors.
-
-**Notes:** `with_app_state()` and `with_socket_server_handle()` have different parameter types (`Arc<AppState> + Pin<Box<...>>` and `JoinHandle<Result<(), ServerErr>>` respectively), so they may need to remain as separate methods. The three worker handle methods (`token_refresh`, `poller`, `mqtt`) are the strongest candidates for consolidation since they all take `JoinHandle<()>`.

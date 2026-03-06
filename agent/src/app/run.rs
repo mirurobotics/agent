@@ -211,7 +211,11 @@ async fn init_token_refresh_worker(
         )
         .await;
     });
-    shutdown_manager.with_token_refresh_worker_handle(token_refresh_handle)?;
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.token_refresh_worker_handle,
+        "token_refresh_handle",
+        token_refresh_handle,
+    )?;
     Ok(())
 }
 
@@ -246,7 +250,11 @@ async fn init_poller_worker(
         )
         .await;
     });
-    shutdown_manager.with_poller_worker_handle(poller_handle)?;
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.poller_worker_handle,
+        "poller_handle",
+        poller_handle,
+    )?;
     Ok(())
 }
 
@@ -275,7 +283,11 @@ async fn init_mqtt_worker(
         )
         .await;
     });
-    shutdown_manager.with_mqtt_worker_handle(mqtt_handle)?;
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.mqtt_worker_handle,
+        "mqtt_handle",
+        mqtt_handle,
+    )?;
     Ok(())
 }
 
@@ -356,50 +368,26 @@ impl ShutdownManager {
         Ok(())
     }
 
-    fn register_worker_handle(
-        slot: &mut Option<JoinHandle<()>>,
-        name: &str,
+    pub fn register_handle<Accessor>(
+        &mut self,
+        slot_for: Accessor,
+        handle_name: &str,
         handle: JoinHandle<()>,
-    ) -> Result<(), ServerErr> {
+    ) -> Result<(), ServerErr>
+    where
+        Accessor: FnOnce(&mut Self) -> &mut Option<JoinHandle<()>>,
+    {
+        let slot = slot_for(self);
         if slot.is_some() {
             return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
-                    arg_name: name.to_string(),
+                    arg_name: handle_name.to_string(),
                     trace: trace!(),
                 },
             ));
         }
         *slot = Some(handle);
         Ok(())
-    }
-
-    pub fn with_token_refresh_worker_handle(
-        &mut self,
-        token_refresh_handle: JoinHandle<()>,
-    ) -> Result<(), ServerErr> {
-        Self::register_worker_handle(
-            &mut self.token_refresh_worker_handle,
-            "token_refresh_handle",
-            token_refresh_handle,
-        )
-    }
-
-    pub fn with_poller_worker_handle(
-        &mut self,
-        poller_handle: JoinHandle<()>,
-    ) -> Result<(), ServerErr> {
-        Self::register_worker_handle(
-            &mut self.poller_worker_handle,
-            "poller_handle",
-            poller_handle,
-        )
-    }
-
-    pub fn with_mqtt_worker_handle(
-        &mut self,
-        mqtt_handle: JoinHandle<()>,
-    ) -> Result<(), ServerErr> {
-        Self::register_worker_handle(&mut self.mqtt_worker_handle, "mqtt_handle", mqtt_handle)
     }
 
     pub fn with_socket_server_handle(
@@ -521,15 +509,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn token_refresh_worker_handle_rejects_duplicates() {
+    async fn register_handle_rejects_token_refresh_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
-            .with_token_refresh_worker_handle(spawn_immediate_handle())
+            .register_handle(
+                |mgr| &mut mgr.token_refresh_worker_handle,
+                "token_refresh_handle",
+                spawn_immediate_handle(),
+            )
             .unwrap();
 
         let err = shutdown_manager
-            .with_token_refresh_worker_handle(spawn_immediate_handle())
+            .register_handle(
+                |mgr| &mut mgr.token_refresh_worker_handle,
+                "token_refresh_handle",
+                spawn_immediate_handle(),
+            )
             .expect_err("duplicate token refresh handle should error");
 
         match err {
@@ -541,15 +537,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn poller_worker_handle_rejects_duplicates() {
+    async fn register_handle_rejects_poller_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
-            .with_poller_worker_handle(spawn_immediate_handle())
+            .register_handle(
+                |mgr| &mut mgr.poller_worker_handle,
+                "poller_handle",
+                spawn_immediate_handle(),
+            )
             .unwrap();
 
         let err = shutdown_manager
-            .with_poller_worker_handle(spawn_immediate_handle())
+            .register_handle(
+                |mgr| &mut mgr.poller_worker_handle,
+                "poller_handle",
+                spawn_immediate_handle(),
+            )
             .expect_err("duplicate poller handle should error");
 
         match err {
@@ -561,15 +565,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mqtt_worker_handle_rejects_duplicates() {
+    async fn register_handle_rejects_mqtt_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
-            .with_mqtt_worker_handle(spawn_immediate_handle())
+            .register_handle(
+                |mgr| &mut mgr.mqtt_worker_handle,
+                "mqtt_handle",
+                spawn_immediate_handle(),
+            )
             .unwrap();
 
         let err = shutdown_manager
-            .with_mqtt_worker_handle(spawn_immediate_handle())
+            .register_handle(
+                |mgr| &mut mgr.mqtt_worker_handle,
+                "mqtt_handle",
+                spawn_immediate_handle(),
+            )
             .expect_err("duplicate mqtt handle should error");
 
         match err {
