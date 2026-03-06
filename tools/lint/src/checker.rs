@@ -1,5 +1,7 @@
+// standard crates
 use std::path::Path;
 
+// internal crates
 use crate::classifier::{Classifier, ImportGroup};
 use crate::config::Config;
 use crate::parser::{ImportBlock, ImportBlockItem};

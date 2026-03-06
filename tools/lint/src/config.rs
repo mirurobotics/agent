@@ -1,5 +1,8 @@
-use serde::Deserialize;
+// standard crates
 use std::path::{Path, PathBuf};
+
+// external crates
+use serde::Deserialize;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct Config {
