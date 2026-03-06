@@ -12,6 +12,82 @@ use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
+macro_rules! impl_status_enum_with_backend {
+    (
+        enum $name:ident,
+        default: $default:ident,
+        label: $label:expr,
+        log: $log_macro:ident,
+        agent_type: $agent_type:ty,
+        backend_type: $backend_type:ty,
+        mappings: [
+            $(
+                $variant:ident => $wire:literal =>
+                    $agent_value:expr =>
+                    $backend_value:path
+            ),+ $(,)?
+        ]
+    ) => {
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let s = String::deserialize(deserializer)?;
+                let default = $name::$default;
+                match s.as_str() {
+                    $(
+                        $wire => Ok($name::$variant),
+                    )+
+                    status => {
+                        $log_macro!(
+                            "{} '{}' is not valid, defaulting to {:?}",
+                            $label, status, default
+                        );
+                        Ok(default)
+                    }
+                }
+            }
+        }
+
+        impl $name {
+            pub fn variants() -> Vec<$name> {
+                vec![$($name::$variant),+]
+            }
+        }
+
+        impl From<&$name> for $agent_type {
+            fn from(status: &$name) -> Self {
+                match status {
+                    $(
+                        $name::$variant => $agent_value,
+                    )+
+                }
+            }
+        }
+
+        impl From<&$name> for $backend_type {
+            fn from(status: &$name) -> Self {
+                match status {
+                    $(
+                        $name::$variant => $backend_value,
+                    )+
+                }
+            }
+        }
+
+        impl From<&$backend_type> for $name {
+            fn from(status: &$backend_type) -> $name {
+                match status {
+                    $(
+                        $backend_value => $name::$variant,
+                    )+
+                }
+            }
+        }
+    };
+}
+
 // =========================== DEPLOYMENT TARGET STATUS ============================== //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -22,81 +98,25 @@ pub enum DplTarget {
     Archived,
 }
 
-impl<'de> Deserialize<'de> for DplTarget {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        let default = DplTarget::default();
-        match s.as_str() {
-            "staged" => Ok(DplTarget::Staged),
-            "deployed" => Ok(DplTarget::Deployed),
-            "archived" => Ok(DplTarget::Archived),
-            status => {
-                warn!(
-                    "deployment target status '{}' is not valid, defaulting to {:?}",
-                    status, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
-
-impl DplTarget {
-    pub fn variants() -> Vec<DplTarget> {
-        vec![DplTarget::Staged, DplTarget::Deployed, DplTarget::Archived]
-    }
-}
-
-impl From<&DplTarget> for agent_server::DeploymentTargetStatus {
-    fn from(target_status: &DplTarget) -> Self {
-        match target_status {
-            DplTarget::Staged => {
-                agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
-            }
-            DplTarget::Deployed => {
-                agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED
-            }
-            DplTarget::Archived => {
-                agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED
-            }
-        }
-    }
-}
-
-impl From<&DplTarget> for backend_client::DeploymentTargetStatus {
-    fn from(target_status: &DplTarget) -> Self {
-        match target_status {
-            DplTarget::Staged => {
-                backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED
-            }
-            DplTarget::Deployed => {
-                backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED
-            }
-            DplTarget::Archived => {
-                backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED
-            }
-        }
-    }
-}
-
-impl From<&backend_client::DeploymentTargetStatus> for DplTarget {
-    fn from(target_status: &backend_client::DeploymentTargetStatus) -> DplTarget {
-        match target_status {
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED => {
-                DplTarget::Staged
-            }
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED => {
-                DplTarget::Deployed
-            }
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED => {
-                DplTarget::Archived
-            }
-        }
-    }
-}
+impl_status_enum_with_backend!(
+    enum DplTarget,
+    default: Staged,
+    label: "deployment target status",
+    log: warn,
+    agent_type: agent_server::DeploymentTargetStatus,
+    backend_type: backend_client::DeploymentTargetStatus,
+    mappings: [
+        Staged => "staged" =>
+            agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED =>
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+        Deployed => "deployed" =>
+            agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED =>
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+        Archived => "archived" =>
+            agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED =>
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+    ]
+);
 
 // ========================= DEPLOYMENT ACTIVITY STATUS ============================= //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
@@ -110,107 +130,31 @@ pub enum DplActivity {
     Archived,
 }
 
-impl<'de> Deserialize<'de> for DplActivity {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        let default = DplActivity::default();
-        match s.as_str() {
-            "drifted" => Ok(DplActivity::Drifted),
-            "staged" => Ok(DplActivity::Staged),
-            "queued" => Ok(DplActivity::Queued),
-            "deployed" => Ok(DplActivity::Deployed),
-            "archived" => Ok(DplActivity::Archived),
-            status => {
-                warn!(
-                    "deployment activity status '{}' is not valid, defaulting to {:?}",
-                    status, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
-
-impl DplActivity {
-    pub fn variants() -> Vec<DplActivity> {
-        vec![
-            DplActivity::Drifted,
-            DplActivity::Staged,
-            DplActivity::Queued,
-            DplActivity::Deployed,
-            DplActivity::Archived,
-        ]
-    }
-}
-
-impl From<&DplActivity> for agent_server::DeploymentActivityStatus {
-    fn from(activity_status: &DplActivity) -> Self {
-        match activity_status {
-            DplActivity::Drifted => {
-                agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
-            }
-            DplActivity::Staged => {
-                agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED
-            }
-            DplActivity::Queued => {
-                agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
-            }
-            DplActivity::Deployed => {
-                agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
-            }
-            DplActivity::Archived => {
-                agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
-            }
-        }
-    }
-}
-
-impl From<&DplActivity> for backend_client::DeploymentActivityStatus {
-    fn from(activity_status: &DplActivity) -> Self {
-        match activity_status {
-            DplActivity::Drifted => {
-                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
-            }
-            DplActivity::Staged => {
-                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED
-            }
-            DplActivity::Queued => {
-                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
-            }
-            DplActivity::Deployed => {
-                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
-            }
-            DplActivity::Archived => {
-                backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
-            }
-        }
-    }
-}
-
-impl From<&backend_client::DeploymentActivityStatus> for DplActivity {
-    fn from(activity_status: &backend_client::DeploymentActivityStatus) -> DplActivity {
-        match activity_status {
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED => {
-                DplActivity::Drifted
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED => {
-                DplActivity::Staged
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => {
-                DplActivity::Queued
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => {
-                DplActivity::Deployed
-            }
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => {
-                DplActivity::Archived
-            }
-        }
-    }
-}
+impl_status_enum_with_backend!(
+    enum DplActivity,
+    default: Drifted,
+    label: "deployment activity status",
+    log: warn,
+    agent_type: agent_server::DeploymentActivityStatus,
+    backend_type: backend_client::DeploymentActivityStatus,
+    mappings: [
+        Drifted => "drifted" =>
+            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED =>
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
+        Staged => "staged" =>
+            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED =>
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+        Queued => "queued" =>
+            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED =>
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
+        Deployed => "deployed" =>
+            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED =>
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+        Archived => "archived" =>
+            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED =>
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+    ]
+);
 
 // =========================== DEPLOYMENT ERROR STATUS =============================== //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
@@ -222,83 +166,25 @@ pub enum DplErrStatus {
     Retrying,
 }
 
-impl<'de> Deserialize<'de> for DplErrStatus {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        let default = DplErrStatus::default();
-        match s.as_str() {
-            "none" => Ok(DplErrStatus::None),
-            "failed" => Ok(DplErrStatus::Failed),
-            "retrying" => Ok(DplErrStatus::Retrying),
-            status => {
-                warn!(
-                    "deployment error status '{}' is not valid, defaulting to {:?}",
-                    status, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
-
-impl DplErrStatus {
-    pub fn variants() -> Vec<DplErrStatus> {
-        vec![
-            DplErrStatus::None,
-            DplErrStatus::Failed,
-            DplErrStatus::Retrying,
-        ]
-    }
-}
-
-impl From<&DplErrStatus> for agent_server::DeploymentErrorStatus {
-    fn from(error_status: &DplErrStatus) -> Self {
-        match error_status {
-            DplErrStatus::None => agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-            DplErrStatus::Failed => {
-                agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED
-            }
-            DplErrStatus::Retrying => {
-                agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING
-            }
-        }
-    }
-}
-
-impl From<&DplErrStatus> for backend_client::DeploymentErrorStatus {
-    fn from(error_status: &DplErrStatus) -> Self {
-        match error_status {
-            DplErrStatus::None => {
-                backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE
-            }
-            DplErrStatus::Failed => {
-                backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED
-            }
-            DplErrStatus::Retrying => {
-                backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING
-            }
-        }
-    }
-}
-
-impl From<&backend_client::DeploymentErrorStatus> for DplErrStatus {
-    fn from(error_status: &backend_client::DeploymentErrorStatus) -> DplErrStatus {
-        match error_status {
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE => {
-                DplErrStatus::None
-            }
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED => {
-                DplErrStatus::Failed
-            }
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING => {
-                DplErrStatus::Retrying
-            }
-        }
-    }
-}
+impl_status_enum_with_backend!(
+    enum DplErrStatus,
+    default: None,
+    label: "deployment error status",
+    log: warn,
+    agent_type: agent_server::DeploymentErrorStatus,
+    backend_type: backend_client::DeploymentErrorStatus,
+    mappings: [
+        None => "none" =>
+            agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE =>
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+        Failed => "failed" =>
+            agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED =>
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
+        Retrying => "retrying" =>
+            agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING =>
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
+    ]
+);
 
 // =============================== DEPLOYMENT STATUS ================================ //
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
@@ -314,45 +200,7 @@ pub enum DplStatus {
     Retrying,
 }
 
-impl<'de> Deserialize<'de> for DplStatus {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        let default = DplStatus::default();
-        match s.as_str() {
-            "drifted" => Ok(DplStatus::Drifted),
-            "staged" => Ok(DplStatus::Staged),
-            "queued" => Ok(DplStatus::Queued),
-            "deployed" => Ok(DplStatus::Deployed),
-            "archived" => Ok(DplStatus::Archived),
-            "failed" => Ok(DplStatus::Failed),
-            "retrying" => Ok(DplStatus::Retrying),
-            status => {
-                warn!(
-                    "deployment status '{}' is not valid, defaulting to {:?}",
-                    status, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
-
 impl DplStatus {
-    pub fn variants() -> Vec<DplStatus> {
-        vec![
-            DplStatus::Drifted,
-            DplStatus::Staged,
-            DplStatus::Queued,
-            DplStatus::Deployed,
-            DplStatus::Archived,
-            DplStatus::Failed,
-            DplStatus::Retrying,
-        ]
-    }
-
     pub fn from_activity_and_error(
         activity_status: &DplActivity,
         error_status: &DplErrStatus,
@@ -371,47 +219,37 @@ impl DplStatus {
     }
 }
 
-impl From<&DplStatus> for agent_server::DeploymentStatus {
-    fn from(status: &DplStatus) -> Self {
-        match status {
-            DplStatus::Drifted => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-            DplStatus::Staged => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-            DplStatus::Queued => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            DplStatus::Deployed => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-            DplStatus::Archived => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-            DplStatus::Failed => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-            DplStatus::Retrying => agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-        }
-    }
-}
-
-impl From<&DplStatus> for backend_client::DeploymentStatus {
-    fn from(status: &DplStatus) -> Self {
-        match status {
-            DplStatus::Drifted => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-            DplStatus::Staged => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-            DplStatus::Queued => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-            DplStatus::Deployed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-            DplStatus::Archived => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-            DplStatus::Failed => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-            DplStatus::Retrying => backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-        }
-    }
-}
-
-impl From<&backend_client::DeploymentStatus> for DplStatus {
-    fn from(status: &backend_client::DeploymentStatus) -> DplStatus {
-        match status {
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED => DplStatus::Drifted,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED => DplStatus::Staged,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED => DplStatus::Queued,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED => DplStatus::Deployed,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED => DplStatus::Archived,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED => DplStatus::Failed,
-            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING => DplStatus::Retrying,
-        }
-    }
-}
+impl_status_enum_with_backend!(
+    enum DplStatus,
+    default: Drifted,
+    label: "deployment status",
+    log: warn,
+    agent_type: agent_server::DeploymentStatus,
+    backend_type: backend_client::DeploymentStatus,
+    mappings: [
+        Drifted => "drifted" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+        Staged => "staged" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+        Queued => "queued" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+        Deployed => "deployed" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+        Archived => "archived" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+        Failed => "failed" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+        Retrying => "retrying" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+    ]
+);
 
 // ================================ DEPLOYMENT ====================================== //
 pub type DeploymentID = String;

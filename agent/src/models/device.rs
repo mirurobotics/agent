@@ -8,6 +8,59 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+macro_rules! impl_status_enum {
+    (
+        enum $name:ident,
+        default: $default:ident,
+        label: $label:expr,
+        log: $log_macro:ident,
+        agent_type: $agent_type:ty,
+        mappings: [
+            $(
+                $variant:ident => $wire:literal => $agent_value:expr
+            ),+ $(,)?
+        ]
+    ) => {
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let s = String::deserialize(deserializer)?;
+                let default = $name::$default;
+                match s.as_str() {
+                    $(
+                        $wire => Ok($name::$variant),
+                    )+
+                    status => {
+                        $log_macro!(
+                            "{} '{}' is not valid, defaulting to {:?}",
+                            $label, status, default
+                        );
+                        Ok(default)
+                    }
+                }
+            }
+        }
+
+        impl $name {
+            pub fn variants() -> Vec<$name> {
+                vec![$($name::$variant),+]
+            }
+        }
+
+        impl From<&$name> for $agent_type {
+            fn from(status: &$name) -> Self {
+                match status {
+                    $(
+                        $name::$variant => $agent_value,
+                    )+
+                }
+            }
+        }
+    };
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq, Clone, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -17,41 +70,19 @@ pub enum DeviceStatus {
     Offline,
 }
 
-impl DeviceStatus {
-    pub fn variants() -> Vec<DeviceStatus> {
-        vec![DeviceStatus::Online, DeviceStatus::Offline]
-    }
-}
-
-impl From<&DeviceStatus> for agent_server::DeviceStatus {
-    fn from(device_status: &DeviceStatus) -> Self {
-        match device_status {
-            DeviceStatus::Online => agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
-            DeviceStatus::Offline => agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for DeviceStatus {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        let default = DeviceStatus::default();
-        match s.as_str() {
-            "online" => Ok(DeviceStatus::Online),
-            "offline" => Ok(DeviceStatus::Offline),
-            status => {
-                error!(
-                    "device status '{}' is not valid, defaulting to {:?}",
-                    status, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
+impl_status_enum!(
+    enum DeviceStatus,
+    default: Offline,
+    label: "device status",
+    log: error,
+    agent_type: agent_server::DeviceStatus,
+    mappings: [
+        Online => "online" =>
+            agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
+        Offline => "offline" =>
+            agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
+    ]
+);
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
 pub struct Device {
