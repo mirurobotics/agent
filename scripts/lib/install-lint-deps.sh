@@ -1,0 +1,56 @@
+#!/bin/sh
+# Shared lint dependency installer — idempotent, skips already-installed tools.
+#
+# Installs the common lint toolchain: rustup, rustfmt, clippy, cargo-machete, cargo-audit.
+# Per-crate lint scripts can install additional tools after sourcing this.
+#
+# Skips `rustup update` when CI=true (set automatically by GitHub Actions).
+set -e
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check if rustup is installed
+if ! command_exists rustup; then
+    echo "Installing Rustup"
+    echo "-----------------"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    . "$HOME"/.cargo/env
+fi
+
+# Update the rust toolchain (skip in CI — toolchain is pinned by GH Actions)
+if [ "$CI" != "true" ]; then
+    echo "Updating the Rust toolchain"
+    echo "---------------------------"
+    rustup update
+    echo ""
+fi
+
+# Check if cargo fmt is installed (part of rustfmt)
+if ! rustup component list --installed | grep -q 'rustfmt'; then
+    echo "Installing rustfmt (cargo fmt)"
+    echo "-----------------------------"
+    rustup component add rustfmt
+fi
+
+# Check if cargo clippy is installed
+if ! rustup component list --installed | grep -q 'clippy'; then
+    echo "Installing clippy"
+    echo "-----------------"
+    rustup component add clippy
+fi
+
+# Check if cargo machete is installed
+if ! command_exists cargo-machete; then
+    echo "Installing cargo-machete"
+    echo "------------------------"
+    cargo install cargo-machete
+fi
+
+# Check if cargo audit is installed
+if ! command_exists cargo-audit; then
+    echo "Installing cargo-audit"
+    echo "----------------------"
+    cargo install cargo-audit
+fi

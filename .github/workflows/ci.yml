@@ -13,9 +13,6 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    permissions:
-      checks: write
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -31,21 +28,10 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install Linters
-        run: cargo binstall --no-confirm cargo-machete cargo-diet
+        run: cargo binstall --no-confirm cargo-machete cargo-diet cargo-audit
 
-      - name: Check Formatting
-        run: cargo fmt -p miru-agent -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings
-
-      - name: Check for Unused Dependencies (Machete)
-        run: cargo machete
-
-      - name: Security Audit
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Linter
+        run: LINT_FIX=0 ./scripts/lint.sh
 
   test:
     name: Test
@@ -69,8 +55,8 @@ jobs:
       - name: Run Tests and Coverage
         run: ./scripts/covgate.sh
 
-  lint-tool:
-    name: Lint Tool
+  custom-linter:
+    name: Custom Linter
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -84,17 +70,19 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Cargo Tools (binstall)
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Tools
+        run: |
+          cargo binstall --no-confirm cargo-machete cargo-audit
+          sudo apt-get install -y jq
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
-      - name: Check Formatting
-        run: cargo fmt --manifest-path tools/lint/Cargo.toml -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --manifest-path tools/lint/Cargo.toml -- -D warnings
+      - name: Run Linter
+        run: LINT_FIX=0 ./tools/lint/scripts/lint.sh
 
       - name: Run Tests + Coverage Gate
         run: ./tools/lint/scripts/covgate.sh
