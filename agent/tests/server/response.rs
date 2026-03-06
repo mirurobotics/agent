@@ -104,7 +104,6 @@ pub mod deployment_response {
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
             updated_at: t.to_rfc3339(),
-            config_instances: None,
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -139,7 +138,6 @@ pub mod deployment_response {
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
             updated_at: t.to_rfc3339(),
-            config_instances: None,
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -174,7 +172,6 @@ pub mod deployment_response {
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
             updated_at: t.to_rfc3339(),
-            config_instances: None,
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -209,7 +206,6 @@ pub mod deployment_response {
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
             updated_at: t.to_rfc3339(),
-            config_instances: None,
         };
 
         let sdk: openapi::Deployment = (&dpl).into();

@@ -55,8 +55,8 @@ jobs:
       - name: Run Tests and Coverage
         run: ./scripts/covgate.sh
 
-  custom-linter:
-    name: Custom Linter
+  tools:
+    name: Tools
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

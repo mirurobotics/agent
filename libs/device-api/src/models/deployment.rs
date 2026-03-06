@@ -40,9 +40,6 @@ pub struct Deployment {
     /// Timestamp of when the device release was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
-    /// The config instances associated with this deployment.
-    #[serde(rename = "config_instances", skip_serializing_if = "Option::is_none")]
-    pub config_instances: Option<Vec<models::ConfigInstance>>,
 }
 
 impl Deployment {
@@ -59,7 +56,6 @@ impl Deployment {
             release_id,
             created_at,
             updated_at,
-            config_instances: None,
         }
     }
 }

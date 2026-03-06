@@ -73,10 +73,10 @@ echo "Clippy"
 echo "------"
 if [ "$LINT_FIX" = "1" ]; then
     # shellcheck disable=SC2086
-    cargo clippy $CARGO_PKG --fix --allow-dirty $CARGO_CLIPPY_EXTRA -- -D warnings
+    cargo clippy $CARGO_PKG --fix --allow-dirty --all-targets $CARGO_CLIPPY_EXTRA -- -D warnings
 fi
 # shellcheck disable=SC2086
-cargo clippy $CARGO_PKG --no-deps $CARGO_CLIPPY_EXTRA -- -D warnings
+cargo clippy $CARGO_PKG --no-deps --all-targets $CARGO_CLIPPY_EXTRA -- -D warnings
 echo ""
 
 echo "Lint complete"

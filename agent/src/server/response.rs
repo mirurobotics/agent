@@ -31,7 +31,6 @@ impl From<&models::Deployment> for device_server::Deployment {
             release_id: dpl.release_id.clone(),
             created_at: dpl.created_at.to_rfc3339(),
             updated_at: dpl.updated_at.to_rfc3339(),
-            config_instances: None,
         }
     }
 }

@@ -41,52 +41,51 @@ impl Default for Options {
     }
 }
 
-const API_VERSION: &str = "v0.2";
-
 /// Build the application router with all routes and shared state, without middleware.
 pub fn routes(state: Arc<State>) -> Router {
+    let api_version = device_api::models::ApiVersion::API_VERSION.to_string();
     Router::new()
         // =============================== AGENT INFO ============================== //
         .route(
-            format!("/{API_VERSION}/health").as_str(),
+            format!("/{api_version}/health").as_str(),
             get(handlers::health),
         )
         .route(
-            format!("/{API_VERSION}/version").as_str(),
+            format!("/{api_version}/version").as_str(),
             get(handlers::version),
         )
         // ============================= DEVICE ==================================== //
         .route(
-            format!("/{API_VERSION}/device").as_str(),
+            format!("/{api_version}/device").as_str(),
             get(handlers::get_device),
         )
         .route(
-            format!("/{API_VERSION}/device/sync").as_str(),
+            format!("/{api_version}/device/sync").as_str(),
             post(handlers::sync_device),
         )
         // ============================= DEPLOYMENTS =============================== //
         // /current before /{id} so "current" isn't captured as a deployment_id
         .route(
-            format!("/{API_VERSION}/deployments/current").as_str(),
+            format!("/{api_version}/deployments/current").as_str(),
             get(handlers::get_current_deployment),
         )
         .route(
-            format!("/{API_VERSION}/deployments/{{deployment_id}}").as_str(),
+            format!("/{api_version}/deployments/{{deployment_id}}").as_str(),
             get(handlers::get_deployment),
         )
         // ============================= RELEASES ================================== //
         // /current before /{id} so "current" isn't captured as a release_id
         .route(
-            format!("/{API_VERSION}/releases/current").as_str(),
+            format!("/{api_version}/releases/current").as_str(),
             get(handlers::get_current_release),
         )
         .route(
-            format!("/{API_VERSION}/releases/{{release_id}}").as_str(),
+            format!("/{api_version}/releases/{{release_id}}").as_str(),
             get(handlers::get_release),
         )
         // ============================= GIT COMMITS =============================== //
         .route(
-            format!("/{API_VERSION}/git_commits/{{git_commit_id}}").as_str(),
+            format!("/{api_version}/git_commits/{{git_commit_id}}").as_str(),
             get(handlers::get_git_commit),
         )
         .with_state(state)

@@ -22,6 +22,9 @@ pub struct BaseDevice {
     pub name: String,
     #[serde(rename = "status")]
     pub status: models::DeviceStatus,
+    /// The version of the agent the device is running.
+    #[serde(rename = "agent_version", deserialize_with = "Option::deserialize")]
+    pub agent_version: Option<String>,
     /// Timestamp of when the device was last made an initial connection (this is not the same as the last time the device was seen).
     #[serde(rename = "last_connected_at", deserialize_with = "Option::deserialize")]
     pub last_connected_at: Option<String>,
@@ -37,12 +40,13 @@ pub struct BaseDevice {
 }
 
 impl BaseDevice {
-    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String) -> BaseDevice {
+    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, agent_version: Option<String>, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String) -> BaseDevice {
         BaseDevice {
             object,
             id,
             name,
             status,
+            agent_version,
             last_connected_at,
             last_disconnected_at,
             created_at,

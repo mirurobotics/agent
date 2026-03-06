@@ -2,29 +2,20 @@ openapi: 3.0.3
 info:
   title: Miru Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.2.0-beta.5-next
+  version: v0.2
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
+  x-release-version: v0.2.0-beta.7
   x-git-commit:
-    sha: d1b587df0031fd091427a5e7cbc044a6bdffe64f
-    url: https://github.com/mirurobotics/openapi/commit/d1b587df0031fd091427a5e7cbc044a6bdffe64f
-    message: 'feat(lint): add MIRU017 x-scopes-format rule
-
-
-      Enforce that every x-scopes entry is a struct with slug (str) and
-
-      required (bool), with condition mandatory when required is false.
-
-      Update existing MIRU016 test fixtures to use the new struct format.
-
-
-      Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
+    sha: 87cd6f15cd01238e090e8409a5bc33544c95b458
+    url: https://github.com/mirurobotics/openapi/commit/87cd6f15cd01238e090e8409a5bc33544c95b458
+    message: 'feat(openapi): lint expanded array examples'
     author: Benjamin Smidt
-    branch: main
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-03-03T02:24:26.091258+00:00'
+    built_at: '2026-03-06T04:29:00.342641+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -282,14 +273,14 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.2.0-beta.5-next
+      - v0.2
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - d1b587df0031fd091427a5e7cbc044a6bdffe64f
+      - 87cd6f15cd01238e090e8409a5bc33544c95b458
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -355,6 +346,15 @@ components:
           type: string
           description: The architecture of the application.
           example: aarch64
+      example:
+        version: v1.0.0
+        git_commit: a1b2c3d4
+        api_version: 2026-02-24.zion
+        api_git_commit: a1b2c3d4
+        go_version: go1.20.0
+        build_date: '2025-01-01T00:00:00Z'
+        os: linux
+        arch: aarch64
     DeploymentListExpansion:
       type: string
       enum:
@@ -672,6 +672,17 @@ components:
       title: Git Commit
       allOf:
       - $ref: '#/components/schemas/BaseGitCommit'
+      example:
+        object: git_commit
+        id: git_commit_123
+        sha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+        message: Add basic motion configurations
+        repository_owner: user
+        repository_name: repo
+        repository_type: github
+        repository_url: https://github.com/user/repo
+        commit_url: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+        created_at: '2021-01-01T00:00:00Z'
     Release:
       title: Release
       allOf:
@@ -683,6 +694,13 @@ components:
             nullable: true
             allOf:
             - $ref: '#/components/schemas/GitCommit'
+      example:
+        object: release
+        id: rls_123
+        version: v1.0.0
+        git_commit_id: git_commit_123
+        created_at: '2024-01-01T00:00:00Z'
+        updated_at: '2024-01-01T00:00:00Z'
     BaseConfigInstance:
       title: Base Config Instance
       type: object
@@ -751,6 +769,10 @@ components:
           description: The configuration values associated with the config instance.
           example: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\":\
             \ true,\n  \"max_payload_kg\": 10.0\n}\n"
+      example:
+        format: json
+        data: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\": true,\n\
+          \  \"max_payload_kg\": 10.0\n}\n"
     ConfigInstance:
       title: Config Instance
       allOf:
@@ -786,6 +808,21 @@ components:
               $ref: '#/components/schemas/ConfigInstance'
             description: Expand the config instances using 'expand=config_instances'
               in the query string.
+            example:
+            - object: config_instance
+              id: cfg_inst_123
+              config_type_name: Motion Control
+              filepath: /v1/motion-control.json
+              created_at: '2021-01-01T00:00:00Z'
+              config_schema_id: cfg_sch_123
+              config_type_id: cfg_typ_123
+            - object: config_instance
+              id: cfg_inst_456
+              config_type_name: Localization
+              filepath: /v1/localization.json
+              created_at: '2021-01-02T00:00:00Z'
+              config_schema_id: cfg_sch_456
+              config_type_id: cfg_typ_456
       example:
         object: deployment
         id: dpl_123
@@ -885,6 +922,7 @@ components:
       - id
       - name
       - status
+      - agent_version
       - last_connected_at
       - last_disconnected_at
       - created_at
@@ -907,6 +945,11 @@ components:
           description: Name of the device.
         status:
           $ref: '#/components/schemas/DeviceStatus'
+        agent_version:
+          type: string
+          example: v1.0.0
+          description: The version of the agent the device is running.
+          nullable: true
         last_connected_at:
           type: string
           format: date-time
@@ -943,6 +986,17 @@ components:
             type: string
             example: dvc_sess_123
             description: Session ID of the device.
+      example:
+        object: device
+        id: dvc_123
+        name: My Device
+        status: online
+        agent_version: v1.0.0
+        last_connected_at: '2021-01-01T00:00:00Z'
+        last_disconnected_at: null
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
+        session_id: dvc_sess_123
     ActivateDeviceRequest:
       title: Activate Device Request
       type: object
@@ -1013,6 +1067,9 @@ components:
           format: date-time
           description: The expiration date and time of the token.
           example: '2025-01-01T00:00:00Z'
+      example:
+        token: eyJhbGciOiJ...
+        expires_at: '2025-01-01T00:00:00Z'
     SyncDevice:
       type: object
       required:
@@ -1022,6 +1079,8 @@ components:
           type: boolean
           example: true
           description: Whether the device is synced.
+      example:
+        is_synced: true
     Ping:
       type: object
       required:
@@ -1037,6 +1096,9 @@ components:
           format: date-time
           example: '2025-08-27T12:00:00Z'
           description: The timestamp of when the ping was sent.
+      example:
+        message_id: 123e4567-e89b-12d3-a456-426614174000
+        timestamp: '2025-08-27T12:00:00Z'
     Pong:
       type: object
       required:
@@ -1052,6 +1114,9 @@ components:
           format: date-time
           example: '2025-08-27T12:00:00Z'
           description: The timestamp of when the pong was received.
+      example:
+        message_id: 123e4567-e89b-12d3-a456-426614174000
+        timestamp: '2025-08-27T12:00:00Z'
     Error:
       type: object
       required:
@@ -1081,8 +1146,7 @@ components:
       required: true
       schema:
         type: string
-        example: v0.2.0-beta.5-next
-        default: v0.2.0-beta.5-next
+        example: v0.2
       description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id
@@ -1104,6 +1168,7 @@ components:
         - inline
         - attachment
         default: inline
+        example: inline
     offset:
       name: offset
       in: query
@@ -1114,6 +1179,7 @@ components:
         type: integer
         default: 0
         minimum: 0
+        example: 0
     limit:
       name: limit
       in: query
@@ -1125,6 +1191,7 @@ components:
         default: 10
         minimum: 1
         maximum: 100
+        example: 10
     deployment_list_expansions:
       name: expand
       in: query
@@ -1134,6 +1201,8 @@ components:
         type: array
         items:
           $ref: '#/components/schemas/DeploymentListExpansion'
+        example:
+        - release
     deployment_search_activity_status:
       name: activity_status
       in: query
@@ -1145,6 +1214,8 @@ components:
         type: array
         items:
           $ref: '#/components/schemas/DeploymentActivityStatus'
+        example:
+        - drifted
     deployment_id:
       name: deployment_id
       in: path
@@ -1162,6 +1233,8 @@ components:
         type: array
         items:
           $ref: '#/components/schemas/DeploymentExpansion'
+        example:
+        - release
     device_id:
       name: device_id
       in: path

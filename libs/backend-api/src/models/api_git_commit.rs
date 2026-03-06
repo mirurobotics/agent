@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiGitCommit {
-    #[serde(rename = "d1b587df0031fd091427a5e7cbc044a6bdffe64f")]
+    #[serde(rename = "87cd6f15cd01238e090e8409a5bc33544c95b458")]
     API_GIT_COMMIT,
 
 }
@@ -20,7 +20,7 @@ pub enum ApiGitCommit {
 impl std::fmt::Display for ApiGitCommit {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_GIT_COMMIT => write!(f, "d1b587df0031fd091427a5e7cbc044a6bdffe64f"),
+            Self::API_GIT_COMMIT => write!(f, "87cd6f15cd01238e090e8409a5bc33544c95b458"),
         }
     }
 }
