@@ -18,6 +18,15 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 use tracing::{error, info};
 
+macro_rules! dispatch {
+    ($self:expr, $method:ident ( $($arg:expr),* ), $respond_to:expr, $msg:expr) => {{
+        let result = $self.cache.$method($($arg),*).await;
+        if $respond_to.send(result).is_err() {
+            error!($msg);
+        }
+    }};
+}
+
 pub trait ConcurrentCacheKey: CacheKey + Send + Sync + 'static {}
 
 impl<K> ConcurrentCacheKey for K where K: CacheKey + Send + Sync + 'static {}
@@ -32,7 +41,7 @@ type QueryValueFilter<V> = Box<dyn Fn(&V) -> bool + Send + Sync>;
 type IsDirty<K, V> = Box<dyn Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync>;
 type CacheEntryMap<K, V> = HashMap<K, CacheEntry<K, V>>;
 
-pub enum WorkerCommand<K, V>
+pub enum Command<K, V>
 where
     K: Clone + Send + Sync + ToString + Serialize + DeserializeOwned,
     V: Clone + Send + Sync + Serialize + DeserializeOwned,
@@ -132,7 +141,7 @@ where
     V: ConcurrentCacheValue,
 {
     pub cache: SingleThreadCacheT,
-    pub receiver: Receiver<WorkerCommand<K, V>>,
+    pub receiver: Receiver<Command<K, V>>,
 }
 
 impl<SingleThreadCacheT, K, V> Worker<SingleThreadCacheT, K, V>
@@ -144,161 +153,188 @@ where
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
-                WorkerCommand::Shutdown { respond_to } => {
+                Command::Shutdown { respond_to } => {
                     if respond_to.send(Ok(())).is_err() {
                         error!("Actor failed to send shutdown response");
                     }
                     break;
                 }
-                WorkerCommand::ReadEntryOptional { key, respond_to } => {
-                    let result = self.cache.read_entry_optional(&key).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to read optional cache entry");
-                    }
+                Command::ReadEntryOptional { key, respond_to } => {
+                    dispatch!(
+                        self,
+                        read_entry_optional(&key),
+                        respond_to,
+                        "Actor failed to read optional cache entry"
+                    );
                 }
-                WorkerCommand::ReadEntry { key, respond_to } => {
-                    let result = self.cache.read_entry(&key).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to read cache entry");
-                    }
+                Command::ReadEntry { key, respond_to } => {
+                    dispatch!(
+                        self,
+                        read_entry(&key),
+                        respond_to,
+                        "Actor failed to read cache entry"
+                    );
                 }
-                WorkerCommand::ReadOptional { key, respond_to } => {
-                    let result = self.cache.read_optional(&key).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to read optional cache entry");
-                    }
+                Command::ReadOptional { key, respond_to } => {
+                    dispatch!(
+                        self,
+                        read_optional(&key),
+                        respond_to,
+                        "Actor failed to read optional cache entry"
+                    );
                 }
-                WorkerCommand::Read { key, respond_to } => {
-                    let result = self.cache.read(&key).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to read cache entry");
-                    }
+                Command::Read { key, respond_to } => {
+                    dispatch!(
+                        self,
+                        read(&key),
+                        respond_to,
+                        "Actor failed to read cache entry"
+                    );
                 }
-                WorkerCommand::Write {
+                Command::Write {
                     key,
                     value,
                     is_dirty,
                     overwrite,
                     respond_to,
                 } => {
-                    let result = self.cache.write(key, value, is_dirty, overwrite).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to write cache entry");
-                    }
+                    dispatch!(
+                        self,
+                        write(key, value, is_dirty, overwrite),
+                        respond_to,
+                        "Actor failed to write cache entry"
+                    );
                 }
-                WorkerCommand::WriteIfAbsent {
+                Command::WriteIfAbsent {
                     key,
                     value,
                     is_dirty,
                     respond_to,
                 } => {
-                    let result = self.cache.write_if_absent(key, value, is_dirty).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to write_if_absent cache entry");
-                    }
+                    dispatch!(
+                        self,
+                        write_if_absent(key, value, is_dirty),
+                        respond_to,
+                        "Actor failed to write_if_absent cache entry"
+                    );
                 }
-                WorkerCommand::Delete { key, respond_to } => {
-                    let result = self.cache.delete(&key).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to delete cache entry");
-                    }
+                Command::Delete { key, respond_to } => {
+                    dispatch!(
+                        self,
+                        delete(&key),
+                        respond_to,
+                        "Actor failed to delete cache entry"
+                    );
                 }
-                WorkerCommand::Prune { respond_to } => {
-                    let result = self.cache.prune().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to prune cache");
-                    }
+                Command::Prune { respond_to } => {
+                    dispatch!(self, prune(), respond_to, "Actor failed to prune cache");
                 }
-                WorkerCommand::Size { respond_to } => {
-                    let result = self.cache.size().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to get cache size");
-                    }
+                Command::Size { respond_to } => {
+                    dispatch!(self, size(), respond_to, "Actor failed to get cache size");
                 }
-                WorkerCommand::Entries { respond_to } => {
-                    let result = self.cache.entries().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to get cache entries");
-                    }
+                Command::Entries { respond_to } => {
+                    dispatch!(
+                        self,
+                        entries(),
+                        respond_to,
+                        "Actor failed to get cache entries"
+                    );
                 }
-                WorkerCommand::Values { respond_to } => {
-                    let result = self.cache.values().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to get cache values");
-                    }
+                Command::Values { respond_to } => {
+                    dispatch!(
+                        self,
+                        values(),
+                        respond_to,
+                        "Actor failed to get cache values"
+                    );
                 }
-                WorkerCommand::EntryMap { respond_to } => {
-                    let result = self.cache.entry_map().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to get cache entry map");
-                    }
+                Command::EntryMap { respond_to } => {
+                    dispatch!(
+                        self,
+                        entry_map(),
+                        respond_to,
+                        "Actor failed to get cache entry map"
+                    );
                 }
-                WorkerCommand::ValueMap { respond_to } => {
-                    let result = self.cache.value_map().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to get cache value map");
-                    }
+                Command::ValueMap { respond_to } => {
+                    dispatch!(
+                        self,
+                        value_map(),
+                        respond_to,
+                        "Actor failed to get cache value map"
+                    );
                 }
-                WorkerCommand::FindEntriesWhere { filter, respond_to } => {
-                    let result = self.cache.find_entries_where(filter).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to find all cache entries");
-                    }
+                Command::FindEntriesWhere { filter, respond_to } => {
+                    dispatch!(
+                        self,
+                        find_entries_where(filter),
+                        respond_to,
+                        "Actor failed to find all cache entries"
+                    );
                 }
-                WorkerCommand::FindWhere { filter, respond_to } => {
-                    let result = self.cache.find_where(filter).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to find all cache entries");
-                    }
+                Command::FindWhere { filter, respond_to } => {
+                    dispatch!(
+                        self,
+                        find_where(filter),
+                        respond_to,
+                        "Actor failed to find all cache entries"
+                    );
                 }
-                WorkerCommand::FindOneEntryOptional {
+                Command::FindOneEntryOptional {
                     filter_name,
                     filter,
                     respond_to,
                 } => {
-                    let result = self
-                        .cache
-                        .find_one_entry_optional(filter_name, filter)
-                        .await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to find one cache entry");
-                    }
+                    dispatch!(
+                        self,
+                        find_one_entry_optional(filter_name, filter),
+                        respond_to,
+                        "Actor failed to find one cache entry"
+                    );
                 }
-                WorkerCommand::FindOneOptional {
+                Command::FindOneOptional {
                     filter_name,
                     filter,
                     respond_to,
                 } => {
-                    let result = self.cache.find_one_optional(filter_name, filter).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to find one cache entry");
-                    }
+                    dispatch!(
+                        self,
+                        find_one_optional(filter_name, filter),
+                        respond_to,
+                        "Actor failed to find one cache entry"
+                    );
                 }
-                WorkerCommand::FindOneEntry {
+                Command::FindOneEntry {
                     filter_name,
                     filter,
                     respond_to,
                 } => {
-                    let result = self.cache.find_one_entry(filter_name, filter).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to find one cache entry");
-                    }
+                    dispatch!(
+                        self,
+                        find_one_entry(filter_name, filter),
+                        respond_to,
+                        "Actor failed to find one cache entry"
+                    );
                 }
-                WorkerCommand::FindOne {
+                Command::FindOne {
                     filter_name,
                     filter,
                     respond_to,
                 } => {
-                    let result = self.cache.find_one(filter_name, filter).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to find one cache entry");
-                    }
+                    dispatch!(
+                        self,
+                        find_one(filter_name, filter),
+                        respond_to,
+                        "Actor failed to find one cache entry"
+                    );
                 }
-                WorkerCommand::GetDirtyEntries { respond_to } => {
-                    let result = self.cache.get_dirty_entries().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to get dirty entries");
-                    }
+                Command::GetDirtyEntries { respond_to } => {
+                    dispatch!(
+                        self,
+                        get_dirty_entries(),
+                        respond_to,
+                        "Actor failed to get dirty entries"
+                    );
                 }
             }
         }
@@ -313,7 +349,7 @@ where
     K: ConcurrentCacheKey,
     V: ConcurrentCacheValue,
 {
-    sender: Sender<WorkerCommand<K, V>>,
+    sender: Sender<Command<K, V>>,
     _phantom: std::marker::PhantomData<SingleThreadCacheT>,
 }
 
@@ -323,7 +359,7 @@ where
     K: ConcurrentCacheKey,
     V: ConcurrentCacheValue,
 {
-    pub fn new(sender: Sender<WorkerCommand<K, V>>) -> Self {
+    pub fn new(sender: Sender<Command<K, V>>) -> Self {
         Self {
             sender,
             _phantom: std::marker::PhantomData,
@@ -339,7 +375,7 @@ where
 {
     async fn send_command<R>(
         &self,
-        cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand<K, V>,
+        cmd: impl FnOnce(oneshot::Sender<R>) -> Command<K, V>,
     ) -> Result<R, CacheErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(cmd(send)).await.map_err(|e| {
@@ -358,14 +394,14 @@ where
 
     pub async fn shutdown(&self) -> Result<(), CacheErr> {
         info!("Shutting down {} cache...", std::any::type_name::<V>());
-        self.send_command(|tx| WorkerCommand::Shutdown { respond_to: tx })
+        self.send_command(|tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!("{} cache shutdown complete", std::any::type_name::<V>());
         Ok(())
     }
 
     pub async fn read_entry_optional(&self, key: K) -> Result<Option<CacheEntry<K, V>>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::ReadEntryOptional {
+        self.send_command(|tx| Command::ReadEntryOptional {
             key,
             respond_to: tx,
         })
@@ -373,7 +409,7 @@ where
     }
 
     pub async fn read_entry(&self, key: K) -> Result<CacheEntry<K, V>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::ReadEntry {
+        self.send_command(|tx| Command::ReadEntry {
             key,
             respond_to: tx,
         })
@@ -381,7 +417,7 @@ where
     }
 
     async fn read_optional_impl(&self, key: K) -> Result<Option<V>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::ReadOptional {
+        self.send_command(|tx| Command::ReadOptional {
             key,
             respond_to: tx,
         })
@@ -389,7 +425,7 @@ where
     }
 
     async fn read_impl(&self, key: K) -> Result<V, CacheErr> {
-        self.send_command(|tx| WorkerCommand::Read {
+        self.send_command(|tx| Command::Read {
             key,
             respond_to: tx,
         })
@@ -406,7 +442,7 @@ where
     where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::Write {
+        self.send_command(|tx| Command::Write {
             key,
             value,
             is_dirty: Box::new(is_dirty),
@@ -420,7 +456,7 @@ where
     where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::WriteIfAbsent {
+        self.send_command(|tx| Command::WriteIfAbsent {
             key,
             value,
             is_dirty: Box::new(is_dirty),
@@ -430,7 +466,7 @@ where
     }
 
     pub async fn delete(&self, key: K) -> Result<(), CacheErr> {
-        self.send_command(|tx| WorkerCommand::Delete {
+        self.send_command(|tx| Command::Delete {
             key,
             respond_to: tx,
         })
@@ -438,32 +474,32 @@ where
     }
 
     pub async fn prune(&self) -> Result<(), CacheErr> {
-        self.send_command(|tx| WorkerCommand::Prune { respond_to: tx })
+        self.send_command(|tx| Command::Prune { respond_to: tx })
             .await?
     }
 
     pub async fn size(&self) -> Result<usize, CacheErr> {
-        self.send_command(|tx| WorkerCommand::Size { respond_to: tx })
+        self.send_command(|tx| Command::Size { respond_to: tx })
             .await?
     }
 
     pub async fn entries(&self) -> Result<Vec<CacheEntry<K, V>>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::Entries { respond_to: tx })
+        self.send_command(|tx| Command::Entries { respond_to: tx })
             .await?
     }
 
     pub async fn values(&self) -> Result<Vec<V>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::Values { respond_to: tx })
+        self.send_command(|tx| Command::Values { respond_to: tx })
             .await?
     }
 
     pub async fn entry_map(&self) -> Result<HashMap<K, CacheEntry<K, V>>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::EntryMap { respond_to: tx })
+        self.send_command(|tx| Command::EntryMap { respond_to: tx })
             .await?
     }
 
     pub async fn value_map(&self) -> Result<HashMap<K, V>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::ValueMap { respond_to: tx })
+        self.send_command(|tx| Command::ValueMap { respond_to: tx })
             .await?
     }
 
@@ -471,7 +507,7 @@ where
     where
         F: Fn(&CacheEntry<K, V>) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::FindEntriesWhere {
+        self.send_command(|tx| Command::FindEntriesWhere {
             filter: Box::new(filter),
             respond_to: tx,
         })
@@ -486,7 +522,7 @@ where
     where
         F: Fn(&CacheEntry<K, V>) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::FindOneEntryOptional {
+        self.send_command(|tx| Command::FindOneEntryOptional {
             filter_name,
             filter: Box::new(filter),
             respond_to: tx,
@@ -502,7 +538,7 @@ where
     where
         F: Fn(&CacheEntry<K, V>) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::FindOneEntry {
+        self.send_command(|tx| Command::FindOneEntry {
             filter_name,
             filter: Box::new(filter),
             respond_to: tx,
@@ -514,7 +550,7 @@ where
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::FindWhere {
+        self.send_command(|tx| Command::FindWhere {
             filter: Box::new(filter),
             respond_to: tx,
         })
@@ -529,7 +565,7 @@ where
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::FindOneOptional {
+        self.send_command(|tx| Command::FindOneOptional {
             filter_name,
             filter: Box::new(filter),
             respond_to: tx,
@@ -541,7 +577,7 @@ where
     where
         F: Fn(&V) -> bool + Send + Sync + 'static,
     {
-        self.send_command(|tx| WorkerCommand::FindOne {
+        self.send_command(|tx| Command::FindOne {
             filter_name,
             filter: Box::new(filter),
             respond_to: tx,
@@ -550,7 +586,7 @@ where
     }
 
     pub async fn get_dirty_entries(&self) -> Result<Vec<CacheEntry<K, V>>, CacheErr> {
-        self.send_command(|tx| WorkerCommand::GetDirtyEntries { respond_to: tx })
+        self.send_command(|tx| Command::GetDirtyEntries { respond_to: tx })
             .await?
     }
 

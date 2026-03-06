@@ -19,6 +19,15 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
 
+macro_rules! dispatch {
+    ($op:expr, $respond_to:expr, $msg:expr) => {{
+        let result = $op;
+        if $respond_to.send(result).is_err() {
+            error!($msg);
+        }
+    }};
+}
+
 pub type TokenFile = SingleThreadCachedFile<Token, token::Updates>;
 
 #[derive(Serialize)]
@@ -143,7 +152,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
 }
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
-pub(crate) enum WorkerCommand {
+pub(crate) enum Command {
     GetToken {
         respond_to: oneshot::Sender<Result<Arc<Token>, AuthnErr>>,
     },
@@ -157,30 +166,32 @@ pub(crate) enum WorkerCommand {
 
 pub(crate) struct Worker<HTTPClientT: http::ClientI> {
     token_mngr: SingleThreadTokenManager<HTTPClientT>,
-    receiver: Receiver<WorkerCommand>,
+    receiver: Receiver<Command>,
 }
 
 impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
     pub(crate) async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
-                WorkerCommand::Shutdown { respond_to } => {
+                Command::Shutdown { respond_to } => {
                     if respond_to.send(Ok(())).is_err() {
                         error!("Actor failed to send shutdown response");
                     }
                     break;
                 }
-                WorkerCommand::GetToken { respond_to } => {
-                    let token = self.token_mngr.get_token().await;
-                    if respond_to.send(Ok(token)).is_err() {
-                        error!("Actor failed to send token");
-                    }
+                Command::GetToken { respond_to } => {
+                    dispatch!(
+                        Ok(self.token_mngr.get_token().await),
+                        respond_to,
+                        "Actor failed to send token"
+                    );
                 }
-                WorkerCommand::RefreshToken { respond_to } => {
-                    let result = self.token_mngr.refresh_token().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to refresh token");
-                    }
+                Command::RefreshToken { respond_to } => {
+                    dispatch!(
+                        self.token_mngr.refresh_token().await,
+                        respond_to,
+                        "Actor failed to refresh token"
+                    );
                 }
             }
         }
@@ -189,7 +200,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
 
 #[derive(Debug)]
 pub struct TokenManager {
-    sender: Sender<WorkerCommand>,
+    sender: Sender<Command>,
 }
 
 impl TokenManager {
@@ -217,7 +228,7 @@ impl TokenManager {
     async fn send_command<R>(
         &self,
         op: &str,
-        make_cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand,
+        make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
     ) -> Result<R, AuthnErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(make_cmd(send)).await.map_err(|e| {
@@ -240,19 +251,19 @@ impl TokenManager {
 impl TokenManagerExt for TokenManager {
     async fn shutdown(&self) -> Result<(), AuthnErr> {
         info!("Shutting down token manager...");
-        self.send_command("shutdown", |tx| WorkerCommand::Shutdown { respond_to: tx })
+        self.send_command("shutdown", |tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!("Token manager shutdown complete");
         Ok(())
     }
 
     async fn get_token(&self) -> Result<Arc<Token>, AuthnErr> {
-        self.send_command("get_token", |tx| WorkerCommand::GetToken { respond_to: tx })
+        self.send_command("get_token", |tx| Command::GetToken { respond_to: tx })
             .await?
     }
 
     async fn refresh_token(&self) -> Result<(), AuthnErr> {
-        self.send_command("refresh_token", |tx| WorkerCommand::RefreshToken {
+        self.send_command("refresh_token", |tx| Command::RefreshToken {
             respond_to: tx,
         })
         .await?

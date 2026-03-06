@@ -17,6 +17,15 @@ use tokio::sync::{
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+macro_rules! dispatch {
+    ($op:expr, $respond_to:expr, $msg:expr) => {{
+        let result = $op;
+        if $respond_to.send(result).is_err() {
+            error!($msg);
+        }
+    }};
+}
+
 // ============================== SINGLE THREADED ================================== //
 #[derive(Debug)]
 pub struct SingleThreadCachedFile<ContentT, PatchT>
@@ -112,7 +121,7 @@ impl<T, U> ConcurrentContentT<U> for T where
 {
 }
 
-pub enum WorkerCommand<ContentT, PatchT>
+pub enum Command<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT>,
 {
@@ -137,7 +146,7 @@ where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub file: SingleThreadCachedFile<ContentT, PatchT>,
-    pub receiver: Receiver<WorkerCommand<ContentT, PatchT>>,
+    pub receiver: Receiver<Command<ContentT, PatchT>>,
 }
 
 impl<ContentT, PatchT> Worker<ContentT, PatchT>
@@ -147,29 +156,32 @@ where
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
-                WorkerCommand::Shutdown { respond_to } => {
+                Command::Shutdown { respond_to } => {
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send shutdown response: {:?}", e);
                     }
                     break;
                 }
-                WorkerCommand::Read { respond_to } => {
-                    let result = self.file.read().await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to read file");
-                    }
+                Command::Read { respond_to } => {
+                    dispatch!(
+                        self.file.read().await,
+                        respond_to,
+                        "Actor failed to read file"
+                    );
                 }
-                WorkerCommand::Write { data, respond_to } => {
-                    let result = self.file.write(data).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to write file");
-                    }
+                Command::Write { data, respond_to } => {
+                    dispatch!(
+                        self.file.write(data).await,
+                        respond_to,
+                        "Actor failed to write file"
+                    );
                 }
-                WorkerCommand::Patch { patch, respond_to } => {
-                    let result = self.file.patch(patch).await;
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to patch file");
-                    }
+                Command::Patch { patch, respond_to } => {
+                    dispatch!(
+                        self.file.patch(patch).await,
+                        respond_to,
+                        "Actor failed to patch file"
+                    );
                 }
             }
         }
@@ -182,7 +194,7 @@ where
     PatchT: ConcurrentPatchT,
     ContentT: ConcurrentContentT<PatchT>,
 {
-    sender: Sender<WorkerCommand<ContentT, PatchT>>,
+    sender: Sender<Command<ContentT, PatchT>>,
 }
 
 impl<ContentT, PatchT> ConcurrentCachedFile<ContentT, PatchT>
@@ -220,7 +232,7 @@ where
     async fn send_command<R>(
         &self,
         op: &str,
-        make_cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand<ContentT, PatchT>,
+        make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command<ContentT, PatchT>,
     ) -> Result<R, FileSysErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(make_cmd(send)).await.map_err(|e| {
@@ -240,7 +252,7 @@ where
     }
 
     pub async fn shutdown(&self) -> Result<(), FileSysErr> {
-        self.send_command("shutdown", |tx| WorkerCommand::Shutdown { respond_to: tx })
+        self.send_command("shutdown", |tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!(
             "{} cached file shutdown complete",
@@ -250,12 +262,12 @@ where
     }
 
     pub async fn read(&self) -> Result<Arc<ContentT>, FileSysErr> {
-        self.send_command("read", |tx| WorkerCommand::Read { respond_to: tx })
+        self.send_command("read", |tx| Command::Read { respond_to: tx })
             .await
     }
 
     pub async fn write(&self, data: ContentT) -> Result<(), FileSysErr> {
-        self.send_command("write", |tx| WorkerCommand::Write {
+        self.send_command("write", |tx| Command::Write {
             data,
             respond_to: tx,
         })
@@ -263,7 +275,7 @@ where
     }
 
     pub async fn patch(&self, patch: PatchT) -> Result<(), FileSysErr> {
-        self.send_command("patch", |tx| WorkerCommand::Patch {
+        self.send_command("patch", |tx| Command::Patch {
             patch,
             respond_to: tx,
         })

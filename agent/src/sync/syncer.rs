@@ -20,6 +20,15 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
+macro_rules! dispatch {
+    ($op:expr, $respond_to:expr, $msg:expr) => {{
+        let result = $op;
+        if $respond_to.send(result).is_err() {
+            error!($msg);
+        }
+    }};
+}
+
 // =============================== SYNCER EVENTS ================================== //
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncFailure {
@@ -267,7 +276,7 @@ pub trait SyncerExt {
     async fn subscribe(&self) -> Result<watch::Receiver<SyncEvent>, SyncErr>;
 }
 
-pub enum WorkerCommand {
+pub enum Command {
     Shutdown {
         respond_to: oneshot::Sender<Result<(), SyncErr>>,
     },
@@ -292,14 +301,11 @@ pub enum WorkerCommand {
 
 pub struct Worker<HTTPClientT: Send> {
     syncer: SingleThreadSyncer<HTTPClientT>,
-    receiver: mpsc::Receiver<WorkerCommand>,
+    receiver: mpsc::Receiver<Command>,
 }
 
 impl<HTTPClientT: Send> Worker<HTTPClientT> {
-    pub fn new(
-        syncer: SingleThreadSyncer<HTTPClientT>,
-        receiver: mpsc::Receiver<WorkerCommand>,
-    ) -> Self {
+    pub fn new(syncer: SingleThreadSyncer<HTTPClientT>, receiver: mpsc::Receiver<Command>) -> Self {
         Self { syncer, receiver }
     }
 }
@@ -308,45 +314,46 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
-                WorkerCommand::Shutdown { respond_to } => {
+                Command::Shutdown { respond_to } => {
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send shutdown response: {:?}", e);
                     }
                     break;
                 }
-                WorkerCommand::GetSyncState { respond_to } => {
-                    let result = self.syncer.get_sync_state().await;
-                    if let Err(e) = respond_to.send(result) {
-                        error!("Actor failed to send state response: {:?}", e);
-                    }
+                Command::GetSyncState { respond_to } => {
+                    dispatch!(
+                        self.syncer.get_sync_state().await,
+                        respond_to,
+                        "Actor failed to send state response"
+                    );
                 }
                 #[cfg(feature = "test")]
-                WorkerCommand::SetSyncState { state, respond_to } => {
+                Command::SetSyncState { state, respond_to } => {
                     self.syncer.set_sync_state(state);
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send set sync state response: {:?}", e);
                     }
                 }
-                WorkerCommand::SyncIfNotInCooldown { respond_to } => {
-                    let result = self.syncer.sync_if_not_in_cooldown().await;
-                    if let Err(e) = respond_to.send(result) {
-                        error!(
-                            "Actor failed to send sync if not in cooldown response: {:?}",
-                            e
-                        );
-                    }
+                Command::SyncIfNotInCooldown { respond_to } => {
+                    dispatch!(
+                        self.syncer.sync_if_not_in_cooldown().await,
+                        respond_to,
+                        "Actor failed to send sync if not in cooldown response"
+                    );
                 }
-                WorkerCommand::Sync { respond_to } => {
-                    let result = self.syncer.sync().await;
-                    if let Err(e) = respond_to.send(result) {
-                        error!("Actor failed to send sync response: {:?}", e);
-                    }
+                Command::Sync { respond_to } => {
+                    dispatch!(
+                        self.syncer.sync().await,
+                        respond_to,
+                        "Actor failed to send sync response"
+                    );
                 }
-                WorkerCommand::Subscribe { respond_to } => {
-                    let result = self.syncer.subscribe();
-                    if respond_to.send(result).is_err() {
-                        error!("Actor failed to send subscribe response");
-                    }
+                Command::Subscribe { respond_to } => {
+                    dispatch!(
+                        self.syncer.subscribe(),
+                        respond_to,
+                        "Actor failed to send subscribe response"
+                    );
                 }
             }
         }
@@ -355,7 +362,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
 
 #[derive(Debug)]
 pub struct Syncer {
-    sender: mpsc::Sender<WorkerCommand>,
+    sender: mpsc::Sender<Command>,
 }
 
 impl Syncer {
@@ -372,13 +379,13 @@ impl Syncer {
         Ok((Self { sender }, worker_handle))
     }
 
-    pub fn new(sender: mpsc::Sender<WorkerCommand>) -> Self {
+    pub fn new(sender: mpsc::Sender<Command>) -> Self {
         Self { sender }
     }
 
     async fn send_command<R>(
         &self,
-        cmd: impl FnOnce(oneshot::Sender<R>) -> WorkerCommand,
+        cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
     ) -> Result<R, SyncErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(cmd(send)).await.map_err(|e| {
@@ -397,7 +404,7 @@ impl Syncer {
 
     #[cfg(feature = "test")]
     pub async fn set_sync_state(&self, state: State) -> Result<(), SyncErr> {
-        self.send_command(|tx| WorkerCommand::SetSyncState {
+        self.send_command(|tx| Command::SetSyncState {
             state,
             respond_to: tx,
         })
@@ -407,14 +414,14 @@ impl Syncer {
 
 impl SyncerExt for Syncer {
     async fn shutdown(&self) -> Result<(), SyncErr> {
-        self.send_command(|tx| WorkerCommand::Shutdown { respond_to: tx })
+        self.send_command(|tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!("Syncer shutdown complete");
         Ok(())
     }
 
     async fn get_sync_state(&self) -> Result<State, SyncErr> {
-        self.send_command(|tx| WorkerCommand::GetSyncState { respond_to: tx })
+        self.send_command(|tx| Command::GetSyncState { respond_to: tx })
             .await?
     }
 
@@ -434,17 +441,17 @@ impl SyncerExt for Syncer {
     }
 
     async fn sync_if_not_in_cooldown(&self) -> Result<(), SyncErr> {
-        self.send_command(|tx| WorkerCommand::SyncIfNotInCooldown { respond_to: tx })
+        self.send_command(|tx| Command::SyncIfNotInCooldown { respond_to: tx })
             .await?
     }
 
     async fn sync(&self) -> Result<(), SyncErr> {
-        self.send_command(|tx| WorkerCommand::Sync { respond_to: tx })
+        self.send_command(|tx| Command::Sync { respond_to: tx })
             .await?
     }
 
     async fn subscribe(&self) -> Result<watch::Receiver<SyncEvent>, SyncErr> {
-        self.send_command(|tx| WorkerCommand::Subscribe { respond_to: tx })
+        self.send_command(|tx| Command::Subscribe { respond_to: tx })
             .await?
     }
 }

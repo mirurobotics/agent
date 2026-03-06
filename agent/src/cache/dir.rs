@@ -4,9 +4,7 @@ use std::fmt::Debug;
 
 // internal crates
 use crate::cache::{
-    concurrent::{
-        ConcurrentCache, ConcurrentCacheKey, ConcurrentCacheValue, Worker, WorkerCommand,
-    },
+    concurrent::{Command, ConcurrentCache, ConcurrentCacheKey, ConcurrentCacheValue, Worker},
     entry::CacheEntry,
     errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
@@ -165,7 +163,7 @@ where
         dir: Dir,
         capacity: usize,
     ) -> Result<(Self, JoinHandle<()>), CacheErr> {
-        let (sender, receiver) = mpsc::channel::<WorkerCommand<K, V>>(buffer_size);
+        let (sender, receiver) = mpsc::channel::<Command<K, V>>(buffer_size);
         let worker = Worker {
             cache: SingleThreadDirCache::new(dir, capacity).await?,
             receiver,
