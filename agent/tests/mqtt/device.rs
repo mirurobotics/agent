@@ -36,7 +36,7 @@ mod subscribe_sync {
     #[tokio::test]
     async fn error_propagation() {
         let client = MockClient {
-            subscribe_fn: Box::new(|| Err(mock_error())),
+            subscribe_fn: Box::new(|| Err(Box::new(mock_error()))),
             ..Default::default()
         };
         let result = device::subscribe_sync(&client, "dvc_123").await;
@@ -75,7 +75,7 @@ mod publish_sync {
     #[tokio::test]
     async fn error_propagation() {
         let client = MockClient {
-            publish_fn: Box::new(|| Err(mock_error())),
+            publish_fn: Box::new(|| Err(Box::new(mock_error()))),
             ..Default::default()
         };
         let result = device::publish_sync(&client, "dvc_123").await;
@@ -103,7 +103,7 @@ mod subscribe_ping {
     #[tokio::test]
     async fn error_propagation() {
         let client = MockClient {
-            subscribe_fn: Box::new(|| Err(mock_error())),
+            subscribe_fn: Box::new(|| Err(Box::new(mock_error()))),
             ..Default::default()
         };
         let result = device::subscribe_ping(&client, "dvc_123").await;
@@ -147,7 +147,7 @@ mod publish_pong {
     #[tokio::test]
     async fn error_propagation() {
         let client = MockClient {
-            publish_fn: Box::new(|| Err(mock_error())),
+            publish_fn: Box::new(|| Err(Box::new(mock_error()))),
             ..Default::default()
         };
         let result = device::publish_pong(&client, "dvc_123", "msg-456".to_string()).await;

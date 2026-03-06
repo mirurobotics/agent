@@ -36,10 +36,10 @@ pub enum MockCall {
 }
 
 pub struct MockClient {
-    pub publish_fn: Box<dyn Fn() -> Result<(), MQTTError> + Send + Sync>,
-    pub subscribe_fn: Box<dyn Fn() -> Result<(), MQTTError> + Send + Sync>,
-    pub unsubscribe_fn: Box<dyn Fn() -> Result<(), MQTTError> + Send + Sync>,
-    pub disconnect_fn: Box<dyn Fn() -> Result<(), MQTTError> + Send + Sync>,
+    pub publish_fn: Box<dyn Fn() -> Result<(), Box<MQTTError>> + Send + Sync>,
+    pub subscribe_fn: Box<dyn Fn() -> Result<(), Box<MQTTError>> + Send + Sync>,
+    pub unsubscribe_fn: Box<dyn Fn() -> Result<(), Box<MQTTError>> + Send + Sync>,
+    pub disconnect_fn: Box<dyn Fn() -> Result<(), Box<MQTTError>> + Send + Sync>,
     pub calls: Arc<Mutex<Vec<MockCall>>>,
 }
 
@@ -95,7 +95,7 @@ impl ClientI for MockClient {
             retained,
             payload: payload.to_vec(),
         });
-        (self.publish_fn)()
+        (self.publish_fn)().map_err(|err| *err)
     }
 
     async fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), MQTTError> {
@@ -103,19 +103,19 @@ impl ClientI for MockClient {
             topic: topic.to_string(),
             qos,
         });
-        (self.subscribe_fn)()
+        (self.subscribe_fn)().map_err(|err| *err)
     }
 
     async fn unsubscribe(&self, topic: &str) -> Result<(), MQTTError> {
         self.calls.lock().unwrap().push(MockCall::Unsubscribe {
             topic: topic.to_string(),
         });
-        (self.unsubscribe_fn)()
+        (self.unsubscribe_fn)().map_err(|err| *err)
     }
 
     async fn disconnect(&self) -> Result<(), MQTTError> {
         self.calls.lock().unwrap().push(MockCall::Disconnect);
-        (self.disconnect_fn)()
+        (self.disconnect_fn)().map_err(|err| *err)
     }
 }
 
