@@ -169,7 +169,11 @@ fn process_file(
     totals.diagnostics += diagnostics.len();
 }
 
-fn should_skip_reexport_shell(file_path: &Path, content: &str, block: &crate::parser::ImportBlock) -> bool {
+fn should_skip_reexport_shell(
+    file_path: &Path,
+    content: &str,
+    block: &crate::parser::ImportBlock,
+) -> bool {
     if file_path.file_name().and_then(|name| name.to_str()) != Some("mod.rs") {
         return false;
     }
