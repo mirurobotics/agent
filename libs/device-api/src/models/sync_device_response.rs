@@ -31,7 +31,14 @@ pub struct SyncDeviceResponse {
 }
 
 impl SyncDeviceResponse {
-    pub fn new(code: models::SyncDeviceResult, message: String, last_synced_at: String, last_attempted_sync_at: String, in_cooldown: bool, cooldown_ends_at: String) -> SyncDeviceResponse {
+    pub fn new(
+        code: models::SyncDeviceResult,
+        message: String,
+        last_synced_at: String,
+        last_attempted_sync_at: String,
+        in_cooldown: bool,
+        cooldown_ends_at: String,
+    ) -> SyncDeviceResponse {
         SyncDeviceResponse {
             code,
             message,
@@ -42,4 +49,3 @@ impl SyncDeviceResponse {
         }
     }
 }
-

@@ -20,10 +20,6 @@ pub struct InstanceContent {
 
 impl InstanceContent {
     pub fn new(format: models::InstanceFormat, data: String) -> InstanceContent {
-        InstanceContent {
-            format,
-            data,
-        }
+        InstanceContent { format, data }
     }
 }
-

@@ -32,7 +32,14 @@ pub struct Release {
 }
 
 impl Release {
-    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String, updated_at: String) -> Release {
+    pub fn new(
+        object: Object,
+        id: String,
+        version: String,
+        git_commit_id: Option<String>,
+        created_at: String,
+        updated_at: String,
+    ) -> Release {
         Release {
             object,
             id,
@@ -55,4 +62,3 @@ impl Default for Object {
         Self::Release
     }
 }
-

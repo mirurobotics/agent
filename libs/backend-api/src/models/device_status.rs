@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeviceStatus : The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.) 
-/// The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.) 
+/// DeviceStatus : The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.)
+/// The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.)
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeviceStatus {
     #[serde(rename = "inactive")]
@@ -21,7 +21,6 @@ pub enum DeviceStatus {
     DEVICE_STATUS_ONLINE,
     #[serde(rename = "offline")]
     DEVICE_STATUS_OFFLINE,
-
 }
 
 impl std::fmt::Display for DeviceStatus {
@@ -40,4 +39,3 @@ impl Default for DeviceStatus {
         Self::DEVICE_STATUS_INACTIVE
     }
 }
-

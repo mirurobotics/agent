@@ -38,7 +38,15 @@ pub struct ConfigInstance {
 }
 
 impl ConfigInstance {
-    pub fn new(object: Object, id: String, config_type_name: String, filepath: String, created_at: String, config_schema_id: String, config_type_id: String) -> ConfigInstance {
+    pub fn new(
+        object: Object,
+        id: String,
+        config_type_name: String,
+        filepath: String,
+        created_at: String,
+        config_schema_id: String,
+        config_type_id: String,
+    ) -> ConfigInstance {
         ConfigInstance {
             object,
             id,
@@ -63,4 +71,3 @@ impl Default for Object {
         Self::ConfigInstance
     }
 }
-

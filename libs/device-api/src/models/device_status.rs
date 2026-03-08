@@ -9,15 +9,14 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeviceStatus : The status of the device. - Online: The miru agent is connected - Offline: The miru agent is disconnected (e.g. network issues, device is powered off, etc.) 
-/// The status of the device. - Online: The miru agent is connected - Offline: The miru agent is disconnected (e.g. network issues, device is powered off, etc.) 
+/// DeviceStatus : The status of the device. - Online: The miru agent is connected - Offline: The miru agent is disconnected (e.g. network issues, device is powered off, etc.)
+/// The status of the device. - Online: The miru agent is connected - Offline: The miru agent is disconnected (e.g. network issues, device is powered off, etc.)
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeviceStatus {
     #[serde(rename = "online")]
     DEVICE_STATUS_ONLINE,
     #[serde(rename = "offline")]
     DEVICE_STATUS_OFFLINE,
-
 }
 
 impl std::fmt::Display for DeviceStatus {
@@ -34,4 +33,3 @@ impl Default for DeviceStatus {
         Self::DEVICE_STATUS_ONLINE
     }
 }
-

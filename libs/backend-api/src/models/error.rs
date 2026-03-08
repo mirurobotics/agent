@@ -23,7 +23,11 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(code: String, params: std::collections::HashMap<String, serde_json::Value>, message: String) -> Error {
+    pub fn new(
+        code: String,
+        params: std::collections::HashMap<String, serde_json::Value>,
+        message: String,
+    ) -> Error {
         Error {
             code,
             params,
@@ -31,4 +35,3 @@ impl Error {
         }
     }
 }
-

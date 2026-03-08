@@ -38,7 +38,16 @@ pub struct VersionResponse {
 }
 
 impl VersionResponse {
-    pub fn new(version: String, git_commit: String, api_version: String, api_git_commit: String, rust_version: String, build_date: String, os: String, arch: String) -> VersionResponse {
+    pub fn new(
+        version: String,
+        git_commit: String,
+        api_version: String,
+        api_git_commit: String,
+        rust_version: String,
+        build_date: String,
+        os: String,
+        arch: String,
+    ) -> VersionResponse {
         VersionResponse {
             version,
             git_commit,
@@ -51,4 +60,3 @@ impl VersionResponse {
         }
     }
 }
-
