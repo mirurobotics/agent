@@ -1,7 +1,7 @@
 #!/bin/sh
 # Shared linter — called by per-crate wrapper scripts.
 #
-# Runs: cargo fmt, import linter, machete, audit, clippy.
+# Runs: import linter, cargo fmt, machete, audit, clippy.
 # Optionally: cargo diet, cargo update.
 #
 # Required env:
@@ -30,17 +30,6 @@ if [ "$LINT_FIX" = "1" ]; then
     echo ""
 fi
 
-echo "Cargo fmt"
-echo "---------"
-if [ "$LINT_FIX" = "1" ]; then
-    # shellcheck disable=SC2086
-    cargo fmt $CARGO_PKG
-else
-    # shellcheck disable=SC2086
-    cargo fmt $CARGO_PKG -- --check
-fi
-echo ""
-
 echo "Custom Linter"
 echo "-------------"
 for lint_path in $IMPORT_LINT_PATHS; do
@@ -50,6 +39,17 @@ for lint_path in $IMPORT_LINT_PATHS; do
         cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --config "$IMPORT_LINT_CONFIG"
     fi
 done
+echo ""
+
+echo "Cargo fmt"
+echo "---------"
+if [ "$LINT_FIX" = "1" ]; then
+    # shellcheck disable=SC2086
+    cargo fmt $CARGO_PKG
+else
+    # shellcheck disable=SC2086
+    cargo fmt $CARGO_PKG -- --check
+fi
 echo ""
 
 echo "Unused external dependencies"

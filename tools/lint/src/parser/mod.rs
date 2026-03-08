@@ -32,6 +32,8 @@ pub enum ImportBlockItem {
 #[derive(Debug)]
 pub struct ImportBlock {
     pub items: Vec<ImportBlockItem>,
+    /// 1-based line number of the first line IN the import block
+    pub start_line: usize,
     /// 1-based line number of the first line AFTER the import block
     pub end_line: usize,
 }
@@ -52,8 +54,9 @@ impl ImportBlock {
 pub fn parse(content: &str) -> ImportBlock {
     let lines: Vec<&str> = content.lines().collect();
     let mut items = Vec::new();
-    let mut i = 0;
+    let mut i = skip_leading_prelude(&lines);
     let mut pending_attrs: Vec<String> = Vec::new();
+    let start_line = i + 1;
 
     while i < lines.len() {
         let line = lines[i];
@@ -175,7 +178,34 @@ pub fn parse(content: &str) -> ImportBlock {
 
     ImportBlock {
         items,
+        start_line,
         end_line: i + 1,
+    }
+}
+
+fn skip_leading_prelude(lines: &[&str]) -> usize {
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if trimmed.is_empty() || is_module_declaration(trimmed) {
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    i
+}
+
+fn is_module_declaration(trimmed: &str) -> bool {
+    let Some(stmt) = trimmed.strip_suffix(';') else {
+        return false;
+    };
+
+    let parts: Vec<&str> = stmt.split_whitespace().collect();
+    match parts.as_slice() {
+        ["mod", _] => true,
+        [visibility, "mod", _] => visibility.starts_with("pub"),
+        _ => false,
     }
 }
 
@@ -277,6 +307,7 @@ fn main() {}
         assert_eq!(uses[0].root_crate, "std");
         assert_eq!(uses[1].root_crate, "crate");
         assert_eq!(uses[2].root_crate, "tokio");
+        assert_eq!(block.start_line, 1);
     }
 
     #[test]
@@ -340,5 +371,24 @@ pub enum Foo { A, B }
         let block = parse(content);
         let uses = block.use_statements();
         assert_eq!(uses.len(), 1);
+    }
+
+    #[test]
+    fn parse_skips_leading_module_declarations() {
+        let content = "\
+mod context;
+pub(crate) mod render;
+
+// standard crates
+use std::sync::Arc;
+
+fn main() {}
+";
+        let block = parse(content);
+        let uses = block.use_statements();
+
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].root_crate, "std");
+        assert_eq!(block.start_line, 4);
     }
 }

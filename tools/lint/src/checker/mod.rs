@@ -4,6 +4,7 @@ use std::path::Path;
 // internal crates
 use crate::classifier::{Classifier, ImportGroup};
 use crate::config::Config;
+use crate::normalizer;
 use crate::parser::{ImportBlock, ImportBlockItem};
 
 #[derive(Debug)]
@@ -20,7 +21,6 @@ pub fn check(
     classifier: &Classifier,
     config: &Config,
 ) -> Vec<Diagnostic> {
-    let _ = file; // used by caller for display
     let uses = block.use_statements();
 
     if uses.is_empty() {
@@ -57,6 +57,17 @@ pub fn check(
     // Walk through items and verify each group has its header
     check_headers(block, &classified, config, &mut diagnostics);
 
+    diagnostics.extend(
+        normalizer::diagnostics(file, &uses)
+            .into_iter()
+            .map(|diagnostic| Diagnostic {
+                line: diagnostic.line,
+                kind: diagnostic.kind.to_string(),
+                message: diagnostic.message,
+            }),
+    );
+
+    diagnostics.sort_by_key(|diagnostic| diagnostic.line);
     diagnostics
 }
 
@@ -281,5 +292,58 @@ fn main() {}
         let content = "fn main() {}\n";
         let diags = check_content(content);
         assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+    }
+
+    #[test]
+    fn relative_super_import_is_reported() {
+        let content = "\
+// internal crates
+use super::errors::HTTPErr;
+
+fn main() {}
+";
+        let config = default_config();
+        let classifier = Classifier::new(&config);
+        let block = parse(content);
+
+        let diags = check(
+            Path::new("agent/src/http/deployments.rs"),
+            &block,
+            &classifier,
+            &config,
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "relative-super-import"),
+            "expected relative-super-import diagnostic, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn split_internal_imports_are_reported() {
+        let content = "\
+// internal crates
+use crate::filesys::dir::Dir;
+use crate::filesys::path::PathExt;
+
+fn main() {}
+";
+        let config = default_config();
+        let classifier = Classifier::new(&config);
+        let block = parse(content);
+
+        let diags = check(
+            Path::new("agent/src/filesys/file.rs"),
+            &block,
+            &classifier,
+            &config,
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "split-internal-imports"),
+            "expected split-internal-imports diagnostic, got: {diags:?}"
+        );
     }
 }

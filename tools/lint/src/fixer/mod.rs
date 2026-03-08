@@ -1,12 +1,17 @@
+// standard crates
+use std::path::Path;
+
 // internal crates
 use crate::classifier::{Classifier, ImportGroup};
 use crate::config::Config;
+use crate::normalizer;
 use crate::parser::ImportBlock;
 
 /// Given file content, its parsed import block, a classifier and config,
 /// produce the fixed file content with correctly grouped and labeled imports.
 /// Sorting within groups is left to `cargo fmt` (reorder_imports).
 pub fn fix_file(
+    file: &Path,
     content: &str,
     block: &ImportBlock,
     classifier: &Classifier,
@@ -35,11 +40,26 @@ pub fn fix_file(
     // `cargo fmt` handles sorting via reorder_imports.
 
     // Build the new import block text
-    let mut output = String::new();
-    let groups: &[(&[&crate::parser::UseStatement], &str)] = &[
-        (&standard, &config.labels.standard),
-        (&internal, &config.labels.internal),
-        (&external, &config.labels.external),
+    let mut import_block = String::new();
+    let groups = [
+        (
+            standard
+                .iter()
+                .map(|stmt| normalizer::render_original(stmt))
+                .collect::<Vec<_>>(),
+            &config.labels.standard,
+        ),
+        (
+            render_internal_group(file, &internal),
+            &config.labels.internal,
+        ),
+        (
+            external
+                .iter()
+                .map(|stmt| normalizer::render_original(stmt))
+                .collect::<Vec<_>>(),
+            &config.labels.external,
+        ),
     ];
 
     let mut first_group = true;
@@ -49,30 +69,30 @@ pub fn fix_file(
         }
 
         if !first_group {
-            output.push('\n');
+            import_block.push('\n');
         }
         first_group = false;
 
-        output.push_str(label);
-        output.push('\n');
+        import_block.push_str(label);
+        import_block.push('\n');
 
-        for stmt in *stmts {
-            // Write any attributes
-            for attr in &stmt.attrs {
-                output.push_str(attr);
-                output.push('\n');
-            }
-            output.push_str(&stmt.text);
+        for stmt in stmts {
+            import_block.push_str(&stmt);
         }
     }
 
     // Now splice: replace lines up to end_line with the new block
     let lines: Vec<&str> = content.lines().collect();
+    let block_start_line_idx = block.start_line.saturating_sub(1);
+    let block_end_line_idx = block.end_line.saturating_sub(1);
+    let mut output = String::new();
 
-    // Find where the import block ends in the original content.
-    // block.end_line is 1-based, pointing to the first line AFTER the block.
-    // We need to find the byte offset in the original content.
-    let block_end_line_idx = block.end_line - 1; // 0-based index
+    for line in lines.iter().take(block_start_line_idx.min(lines.len())) {
+        output.push_str(line);
+        output.push('\n');
+    }
+
+    output.push_str(&import_block);
 
     // Collect the rest of the file (everything after the import block)
     let rest_lines = if block_end_line_idx <= lines.len() {
@@ -108,6 +128,13 @@ pub fn fix_file(
     output
 }
 
+fn render_internal_group(file: &Path, uses: &[&crate::parser::UseStatement]) -> Vec<String> {
+    normalizer::normalize(file, uses)
+        .into_iter()
+        .map(|stmt| stmt.text)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,7 +153,13 @@ mod tests {
         let config = default_config();
         let classifier = Classifier::new(&config);
         let block = parse(content);
-        fix_file(content, &block, &classifier, &config)
+        fix_file(
+            Path::new("agent/src/test.rs"),
+            content,
+            &block,
+            &classifier,
+            &config,
+        )
     }
 
     #[test]
@@ -252,5 +285,74 @@ fn main() {}
         // Should not have other group headers
         assert!(!result.contains("// standard crates"));
         assert!(!result.contains("// external crates"));
+    }
+
+    #[test]
+    fn merges_split_internal_imports() {
+        let content = "\
+// internal crates
+use crate::filesys::dir::Dir;
+use crate::filesys::path::PathExt;
+use crate::filesys::{Overwrite, WriteOptions};
+
+fn main() {}
+";
+        let result = fix(content);
+        assert!(
+            result.contains(
+                "use crate::filesys::{Overwrite, WriteOptions, dir::Dir, path::PathExt};"
+            ),
+            "expected merged filesys import, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn rewrites_super_imports_to_absolute_crate_paths() {
+        let content = "\
+// internal crates
+use super::errors::HTTPErr;
+use super::{request, ClientI};
+
+fn main() {}
+";
+        let config = default_config();
+        let classifier = Classifier::new(&config);
+        let block = parse(content);
+        let result = fix_file(
+            Path::new("agent/src/http/deployments.rs"),
+            content,
+            &block,
+            &classifier,
+            &config,
+        );
+
+        assert!(
+            result.contains("use crate::http::{ClientI, errors::HTTPErr, request};"),
+            "expected absolute http import, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn preserves_leading_module_declarations() {
+        let content = "\
+mod context;
+mod render;
+
+use tokio::sync::broadcast;
+use std::sync::Arc;
+
+fn main() {}
+";
+        let result = fix_file(
+            Path::new("agent/src/main.rs"),
+            content,
+            &parse(content),
+            &Classifier::new(&default_config()),
+            &default_config(),
+        );
+
+        assert!(result.starts_with("mod context;\nmod render;\n\n// standard crates\n"));
+        assert!(result.contains("// external crates\nuse tokio::sync::broadcast;\n"));
+        assert!(result.contains("fn main() {}"));
     }
 }
