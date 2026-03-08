@@ -67,7 +67,7 @@ Each module has a `.covgate` file setting its minimum coverage threshold. The sc
 ./scripts/lint.sh
 ```
 
-Runs: `cargo update` (updates `Cargo.lock`), `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy with `-D warnings`.
+Runs: `cargo update` (updates `Cargo.lock`), the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy with `-D warnings`.
 
 ## CI/CD
 
