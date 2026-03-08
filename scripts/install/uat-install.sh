@@ -3,7 +3,7 @@ set -e
 
 # Script: uat-install.sh
 # Jinja Template: install.j2
-# Build Timestamp: 2026-01-07T13:37:16.792441
+# Build Timestamp: 2026-03-08T13:40:36.053310
 # Description: Install the Miru Agent in the UAT environment
 
 # DISPLAY #

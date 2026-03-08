@@ -7,6 +7,7 @@ response_body=$(curl --request POST \
   --url "$BACKEND_HOST"/v1/devices \
   --header 'Content-Type: application/json' \
   --header "X-API-Key: $MIRU_API_KEY" \
+  --header "Miru-Version: 2026-03-09.tetons" \
   --data "{
   \"name\": \"$DEVICE_NAME\"
 }" \
@@ -27,6 +28,7 @@ elif [ "$http_code" -eq 409 ]; then
     response_body=$(curl --request GET \
     --url "$BACKEND_HOST"/v1/devices?name="$DEVICE_NAME" \
     --header "X-API-Key: $MIRU_API_KEY" \
+    --header "Miru-Version: 2026-03-09.tetons" \
     --write-out "\n%{http_code}" \
     --silent)
 
@@ -56,6 +58,7 @@ log "Allow reactivation: $ALLOW_REACTIVATION (must be true if the device has bee
 response_body=$(curl --request POST \
   --url "$BACKEND_HOST"/v1/devices/"$device_id"/activation_token \
   --header "X-API-Key: $MIRU_API_KEY" \
+  --header "Miru-Version: 2026-03-09.tetons" \
   --data "{
   \"allow_reactivation\": $ALLOW_REACTIVATION
 }" \
