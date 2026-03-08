@@ -5,8 +5,7 @@ use std::sync::Arc;
 use crate::authn::{errors::*, token, token::Token};
 use crate::crypt::{base64, rsa};
 use crate::filesys::{cached_file::SingleThreadCachedFile, file::File, path::PathExt};
-use crate::http;
-use crate::http::devices;
+use crate::http::{self, devices};
 use crate::trace;
 use backend_api::models::{IssueDeviceClaims, IssueDeviceTokenRequest};
 

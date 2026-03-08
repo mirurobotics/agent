@@ -1,8 +1,9 @@
 // internal crates
-use super::errors::HTTPErr;
-use super::query::{Page, QueryParams, MAX_PAGE_LIMIT};
-use super::request;
-use super::ClientI;
+use crate::http::{
+    errors::HTTPErr,
+    query::{Page, QueryParams, MAX_PAGE_LIMIT},
+    request, ClientI,
+};
 use backend_api::models::{
     Deployment, DeploymentActivityStatus, DeploymentList, UpdateDeploymentRequest,
 };

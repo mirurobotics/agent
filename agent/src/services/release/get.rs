@@ -1,7 +1,6 @@
 // internal crates
 use crate::models;
-use crate::services::deployment as dpl_svc;
-use crate::services::errors::ServiceErr;
+use crate::services::{deployment as dpl_svc, errors::ServiceErr};
 use crate::storage;
 
 pub async fn get(releases: &storage::Releases, id: String) -> Result<models::Release, ServiceErr> {

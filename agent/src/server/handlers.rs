@@ -3,13 +3,11 @@ use std::future::Future;
 use std::sync::Arc;
 
 // internal crates
-use super::errors::*;
-use super::state::State;
 use crate::errors::Error;
-use crate::services::deployment as dpl_svc;
-use crate::services::device as dvc_svc;
-use crate::services::git_commit as git_cmt_svc;
-use crate::services::release as rls_svc;
+use crate::server::{errors::*, state::State};
+use crate::services::{
+    deployment as dpl_svc, device as dvc_svc, git_commit as git_cmt_svc, release as rls_svc,
+};
 use crate::version;
 use device_api::models as device_server;
 

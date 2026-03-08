@@ -1,8 +1,8 @@
 // internal crates
-use super::errors::*;
 use crate::http;
 use crate::models;
 use crate::storage;
+use crate::sync::errors::*;
 
 // external crates
 use tracing::info;

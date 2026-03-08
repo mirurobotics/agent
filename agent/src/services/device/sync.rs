@@ -1,6 +1,7 @@
 // internal crates
+use crate::errors::Error;
+use crate::services::errors::*;
 use crate::sync::{errors::*, syncer::SyncerExt};
-use crate::{errors::Error, services::errors::*};
 use device_api::models::{SyncDeviceResponse, SyncDeviceResult};
 
 pub async fn sync<SyncerT: SyncerExt>(syncer: &SyncerT) -> Result<SyncDeviceResponse, ServiceErr> {

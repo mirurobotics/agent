@@ -1,7 +1,5 @@
 // internal crates
-use super::errors::HTTPErr;
-use super::request;
-use super::ClientI;
+use crate::http::{errors::HTTPErr, request, ClientI};
 use backend_api::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,

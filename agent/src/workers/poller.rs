@@ -7,8 +7,10 @@ use std::time::Duration;
 // internal crates
 use crate::models::device;
 use crate::storage;
-use crate::sync::syncer::{CooldownEnd, SyncEvent};
-use crate::sync::SyncerExt;
+use crate::sync::{
+    syncer::{CooldownEnd, SyncEvent},
+    SyncerExt,
+};
 
 // external crates
 use chrono::{TimeDelta, Utc};

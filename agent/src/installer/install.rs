@@ -2,12 +2,11 @@
 use std::env;
 
 // internal crates
-use super::errors::*;
 use crate::cli;
 use crate::crypt::{jwt, rsa};
-use crate::filesys;
-use crate::filesys::Overwrite;
+use crate::filesys::{self, Overwrite};
 use crate::http;
+use crate::installer::errors::*;
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;

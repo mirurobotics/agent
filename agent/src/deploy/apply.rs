@@ -1,8 +1,9 @@
 // internal crates
-use super::errors::{ConflictingDeploymentsErr, DeployErr};
-use super::{filesys as dpl_filesys, fsm};
-use crate::filesys;
-use crate::filesys::Overwrite;
+use crate::deploy::{
+    errors::{ConflictingDeploymentsErr, DeployErr},
+    filesys as dpl_filesys, fsm,
+};
+use crate::filesys::{self, Overwrite};
 use crate::models;
 use crate::storage;
 

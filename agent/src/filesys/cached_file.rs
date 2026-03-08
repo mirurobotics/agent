@@ -2,11 +2,9 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::{
-    filesys::{errors::*, file::File, Atomic, Overwrite, WriteOptions},
-    models::Patch,
-    trace,
-};
+use crate::filesys::{errors::*, file::File, Atomic, Overwrite, WriteOptions};
+use crate::models::Patch;
+use crate::trace;
 
 // external crates
 use serde::{de::DeserializeOwned, Serialize};

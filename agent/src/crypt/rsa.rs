@@ -2,9 +2,8 @@
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
-use super::errors::*;
-use crate::filesys;
-use crate::filesys::{Atomic, Overwrite, PathExt, WriteOptions};
+use crate::crypt::errors::*;
+use crate::filesys::{self, Atomic, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
 // external crates

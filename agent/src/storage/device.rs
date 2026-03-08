@@ -1,9 +1,7 @@
 // internal crates
-use super::errors::{DeviceNotActivatedErr, StorageErr};
-use crate::filesys;
-use crate::filesys::cached_file::ConcurrentCachedFile;
-use crate::filesys::PathExt;
+use crate::filesys::{self, cached_file::ConcurrentCachedFile, PathExt};
 use crate::models::{self, device};
+use crate::storage::errors::{DeviceNotActivatedErr, StorageErr};
 use crate::trace;
 
 pub type Device = ConcurrentCachedFile<models::Device, device::Updates>;

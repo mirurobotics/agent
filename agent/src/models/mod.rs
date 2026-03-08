@@ -5,6 +5,7 @@ pub mod errors;
 pub mod git_commit;
 pub mod release;
 
+// internal crates
 pub use self::config_instance::CfgInstID;
 pub use self::config_instance::ConfigInstance;
 pub use self::deployment::Deployment;

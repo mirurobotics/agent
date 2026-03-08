@@ -4,21 +4,16 @@ use std::sync::Arc;
 
 // internal crates
 use crate::activity;
-use crate::authn;
-use crate::authn::token_mngr::TokenFile;
-use crate::authn::TokenManagerExt;
+use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
 use crate::crypt::jwt;
 use crate::deploy::{apply, fsm};
 use crate::filesys::PathExt;
 use crate::http;
 use crate::models;
-use crate::server;
-use crate::server::errors::MissingDeviceIDErr;
+use crate::server::{self, errors::MissingDeviceIDErr};
 use crate::storage;
-use crate::sync;
-use crate::sync::syncer::SyncerArgs;
-use crate::sync::SyncerExt;
+use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
 use crate::trace;
 
 pub type DeviceID = String;

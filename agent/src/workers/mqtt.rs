@@ -5,14 +5,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::authn;
-use crate::authn::TokenManagerExt;
+use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
 use crate::errors::*;
-use crate::models;
-use crate::models::device;
-use crate::mqtt;
+use crate::models::{self, device};
 use crate::mqtt::{
+    self,
     client::{poll, ClientI},
     device::{Ping, SyncDevice},
     errors::*,
@@ -20,8 +18,7 @@ use crate::mqtt::{
     topics,
 };
 use crate::storage;
-use crate::sync::syncer::SyncEvent;
-use crate::sync::SyncerExt;
+use crate::sync::{syncer::SyncEvent, SyncerExt};
 
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};

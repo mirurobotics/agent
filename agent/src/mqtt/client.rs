@@ -3,8 +3,10 @@ use std::future::Future;
 use std::time::Duration;
 
 // internal crates
-use super::errors::*;
-use super::options::{Options, Protocol, Timeouts};
+use crate::mqtt::{
+    errors::*,
+    options::{Options, Protocol, Timeouts},
+};
 use crate::trace;
 
 // external crates

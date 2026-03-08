@@ -1,9 +1,7 @@
 // internal crates
 use crate::cooldown;
 use crate::errors::Error;
-use crate::models;
-use crate::models::deployment::Updates;
-use crate::models::Patch;
+use crate::models::{self, deployment::Updates, Patch};
 
 // external crates
 use chrono::{TimeDelta, Utc};

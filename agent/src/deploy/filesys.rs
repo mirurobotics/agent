@@ -1,7 +1,6 @@
 // internal crates
-use super::errors::{DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr};
-use crate::filesys;
-use crate::filesys::{Overwrite, WriteOptions};
+use crate::deploy::errors::{DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr};
+use crate::filesys::{self, Overwrite, WriteOptions};
 use crate::models;
 use crate::storage;
 

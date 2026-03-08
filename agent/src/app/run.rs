@@ -10,12 +10,9 @@ use crate::app::{
     options::{AppOptions, LifecycleOptions},
     state::AppState,
 };
-use crate::authn;
-use crate::authn::TokenManagerExt;
+use crate::authn::{self, TokenManagerExt};
 use crate::http;
-use crate::server;
-use crate::server::errors::*;
-use crate::server::serve::serve;
+use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
     mqtt, poller,

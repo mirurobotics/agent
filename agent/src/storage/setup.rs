@@ -1,11 +1,8 @@
 // internal crates
-use super::errors::*;
-use super::layout::Layout;
-use super::settings::Settings;
 use crate::authn;
-use crate::filesys;
-use crate::filesys::{Overwrite, WriteOptions};
+use crate::filesys::{self, Overwrite, WriteOptions};
 use crate::models;
+use crate::storage::{errors::*, layout::Layout, settings::Settings};
 
 pub async fn bootstrap(
     layout: &Layout,

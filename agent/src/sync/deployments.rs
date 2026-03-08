@@ -1,10 +1,10 @@
 // internal crates
-use super::errors::*;
 use crate::deploy::apply;
 use crate::filesys::Overwrite;
 use crate::http;
 use crate::models;
 use crate::storage;
+use crate::sync::errors::*;
 use crate::trace;
 use backend_api::models::{
     self as backend_client, DeploymentActivityStatus as BackendActivityStatus,

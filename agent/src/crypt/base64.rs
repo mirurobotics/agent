@@ -1,5 +1,5 @@
 // internal crates
-use super::errors::{Base64DecodeErr, ConvertBytesToStringErr, CryptErr};
+use crate::crypt::errors::{Base64DecodeErr, ConvertBytesToStringErr, CryptErr};
 use crate::trace;
 
 // external crates

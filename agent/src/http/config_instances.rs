@@ -1,7 +1,5 @@
 // internal crates
-use super::errors::HTTPErr;
-use super::request;
-use super::ClientI;
+use crate::http::{errors::HTTPErr, request, ClientI};
 
 pub struct GetContentParams<'a> {
     pub id: &'a str,

@@ -3,15 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use super::errors::*;
-use super::{agent_version, deployments};
-use crate::authn;
-use crate::authn::TokenManagerExt;
+use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::errors::*;
 use crate::http;
 use crate::storage;
+use crate::sync::{agent_version, deployments, errors::*};
 use crate::trace;
 
 // external crates

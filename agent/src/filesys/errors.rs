@@ -3,8 +3,7 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::errors::Trace;
-use crate::filesys::Overwrite;
-use crate::filesys::{dir::Dir, file::File};
+use crate::filesys::{dir::Dir, file::File, Overwrite};
 
 #[derive(Debug, thiserror::Error)]
 #[error("unable to find home directory: {source}")]

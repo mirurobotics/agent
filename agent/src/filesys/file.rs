@@ -5,14 +5,17 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 // internal crates
-use crate::filesys::dir::Dir;
-use crate::filesys::errors::{
-    AtomicWriteFileErr, ConvertUTF8Err, CreateSymlinkErr, DeleteFileErr, FileMetadataErr,
-    FileSysErr, InvalidFileOverwriteErr, MoveFileErr, OpenFileErr, ParseJSONErr,
-    PathDoesNotExistErr, ReadFileErr, UnknownFileNameErr, UnknownParentDirForFileErr, WriteFileErr,
+use crate::filesys::{
+    dir::Dir,
+    errors::{
+        AtomicWriteFileErr, ConvertUTF8Err, CreateSymlinkErr, DeleteFileErr, FileMetadataErr,
+        FileSysErr, InvalidFileOverwriteErr, MoveFileErr, OpenFileErr, ParseJSONErr,
+        PathDoesNotExistErr, ReadFileErr, UnknownFileNameErr, UnknownParentDirForFileErr,
+        WriteFileErr,
+    },
+    path::PathExt,
+    Atomic, Overwrite, WriteOptions,
 };
-use crate::filesys::path::PathExt;
-use crate::filesys::{Atomic, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates
