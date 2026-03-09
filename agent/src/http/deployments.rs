@@ -42,7 +42,7 @@ pub async fn list(
             .iter()
             .map(|s| s.to_string())
             .collect();
-        qp = qp.add("activity_status", &values.join(","));
+        qp = qp.add("activity_status", &values.join("|"));
     }
     qp = qp.expand(params.expansions);
 

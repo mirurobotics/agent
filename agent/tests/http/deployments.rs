@@ -96,7 +96,7 @@ pub mod list {
                 query: vec![
                     ("limit".into(), "10".into()),
                     ("offset".into(), "0".into()),
-                    ("activity_status".into(), "queued,deployed".into()),
+                    ("activity_status".into(), "queued|deployed".into()),
                 ],
                 body: None,
                 token: Some("test-token".into()),
