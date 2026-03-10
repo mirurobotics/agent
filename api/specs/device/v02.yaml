@@ -7,16 +7,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0-beta.6
+  x-release-version: v0.2.0
   x-git-commit:
-    sha: 4489e6beb6e5e0c893a456fb346c2cbfe178b48f
-    url: https://github.com/mirurobotics/openapi/commit/4489e6beb6e5e0c893a456fb346c2cbfe178b48f
-    message: 'fix(openapi): rewrite deployment status descriptions'
+    sha: 5e98bcf13136459371f57ae422d353a1e7491b14
+    url: https://github.com/mirurobotics/openapi/commit/5e98bcf13136459371f57ae422d353a1e7491b14
+    message: 'chore: bump device api version'
     author: Benjamin Smidt
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-03-10T02:29:03.456352+00:00'
+    built_at: '2026-03-10T03:12:13.875623+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -173,7 +173,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 4489e6beb6e5e0c893a456fb346c2cbfe178b48f
+      - 5e98bcf13136459371f57ae422d353a1e7491b14
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true

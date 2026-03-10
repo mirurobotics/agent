@@ -6,16 +6,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0-beta.7
+  x-release-version: v0.2.0
   x-git-commit:
-    sha: 87cd6f15cd01238e090e8409a5bc33544c95b458
-    url: https://github.com/mirurobotics/openapi/commit/87cd6f15cd01238e090e8409a5bc33544c95b458
-    message: 'feat(openapi): lint expanded array examples'
+    sha: 5e98bcf13136459371f57ae422d353a1e7491b14
+    url: https://github.com/mirurobotics/openapi/commit/5e98bcf13136459371f57ae422d353a1e7491b14
+    message: 'chore: bump device api version'
     author: Benjamin Smidt
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-03-06T04:29:00.342641+00:00'
+    built_at: '2026-03-10T03:12:29.573456+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -280,7 +280,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 87cd6f15cd01238e090e8409a5bc33544c95b458
+      - 5e98bcf13136459371f57ae422d353a1e7491b14
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -369,19 +369,24 @@ components:
       type: string
       description: 'Last known activity state of the deployment.
 
-        - Drifted: device''s configurations have drifted since this deployment was
-        staged, and the deployment needs to be reviewed before it can be deployed
 
-        - Staged: is ready to be deployed
+        `drifted` means the device''s configurations have drifted since this deployment
+        was staged, and the deployment needs to be reviewed before it can be deployed.
 
-        - Queued: the deployment''s config instances are waiting to be received by
-        the device; will be deployed as soon as the device is online
 
-        - Deployed: the deployment''s config instances are currently available for
-        consumption on the device
+        `staged` means the deployment is ready to be deployed.
 
-        - Archived: the deployment is available for historical reference but cannot
-        be deployed and is not active on the device
+
+        `queued` means the deployment''s config instances are waiting to be received
+        by the device and will be deployed as soon as the device is online.
+
+
+        `deployed` means the deployment''s config instances are currently available
+        for consumption on the device.
+
+
+        `archived` means the deployment is available for historical reference but
+        cannot be deployed and is not active on the device.
 
         '
       enum:
@@ -465,13 +470,16 @@ components:
       type: string
       description: 'Last known error state of the deployment.
 
-        - None: no errors
 
-        - Retrying: an error has been encountered and the agent is retrying to reach
-        the target status
+        `none` means there are no errors.
 
-        - Failed: a fatal error has been encountered; the deployment is archived and
-        (if deployed) removed from the device
+
+        `retrying` means an error has been encountered and the agent is retrying to
+        reach the target status.
+
+
+        `failed` means a fatal error has been encountered; the deployment is archived
+        and, if deployed, removed from the device.
 
         '
       enum:
@@ -486,13 +494,16 @@ components:
       type: string
       description: 'Desired state of the deployment.
 
-        - Staged: is ready to be deployed
 
-        - Deployed: all config instances part of the deployment are available for
-        consumption on the device
+        `staged` means the deployment is ready to be deployed.
 
-        - Archived: the deployment is available for historical reference but cannot
-        be deployed and is not active on the device
+
+        `deployed` means all config instances in the deployment are available for
+        consumption on the device.
+
+
+        `archived` means the deployment is available for historical reference but
+        cannot be deployed and is not active on the device.
 
         '
       enum:
