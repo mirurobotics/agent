@@ -30,7 +30,6 @@ impl From<&models::Deployment> for device_server::Deployment {
             device_id: dpl.device_id.clone(),
             release_id: dpl.release_id.clone(),
             created_at: dpl.created_at.to_rfc3339(),
-            updated_at: dpl.updated_at.to_rfc3339(),
         }
     }
 }
@@ -43,7 +42,6 @@ impl From<&models::Release> for device_server::Release {
             version: release.version.clone(),
             git_commit_id: release.git_commit_id.clone(),
             created_at: release.created_at.to_rfc3339(),
-            updated_at: release.updated_at.to_rfc3339(),
         }
     }
 }

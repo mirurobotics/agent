@@ -9,12 +9,13 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DplSearch : **Internal server use only**: an enum of possible search fields.
-/// **Internal server use only**: an enum of possible search fields.
+/// DplSearch : **Internal server use only**: an enum of possible search fields. 
+/// **Internal server use only**: an enum of possible search fields. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DplSearch {
     #[serde(rename = "activity_status")]
     DPL_SEARCH_ACTIVITY_STATUS,
+
 }
 
 impl std::fmt::Display for DplSearch {
@@ -30,3 +31,4 @@ impl Default for DplSearch {
         Self::DPL_SEARCH_ACTIVITY_STATUS
     }
 }
+

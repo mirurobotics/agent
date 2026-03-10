@@ -37,25 +37,10 @@ pub struct Deployment {
     /// Timestamp of when the device release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
-    /// Timestamp of when the device release was last updated.
-    #[serde(rename = "updated_at")]
-    pub updated_at: String,
 }
 
 impl Deployment {
-    pub fn new(
-        object: Object,
-        id: String,
-        description: String,
-        status: models::DeploymentStatus,
-        activity_status: models::DeploymentActivityStatus,
-        error_status: models::DeploymentErrorStatus,
-        target_status: models::DeploymentTargetStatus,
-        device_id: String,
-        release_id: String,
-        created_at: String,
-        updated_at: String,
-    ) -> Deployment {
+    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String) -> Deployment {
         Deployment {
             object,
             id,
@@ -67,7 +52,6 @@ impl Deployment {
             device_id,
             release_id,
             created_at,
-            updated_at,
         }
     }
 }
@@ -83,3 +67,4 @@ impl Default for Object {
         Self::Deployment
     }
 }
+

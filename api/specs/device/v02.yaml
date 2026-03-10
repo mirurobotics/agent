@@ -7,16 +7,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0-beta.5
+  x-release-version: v0.2.0-beta.6
   x-git-commit:
-    sha: 87cd6f15cd01238e090e8409a5bc33544c95b458
-    url: https://github.com/mirurobotics/openapi/commit/87cd6f15cd01238e090e8409a5bc33544c95b458
-    message: 'feat(openapi): lint expanded array examples'
+    sha: 4489e6beb6e5e0c893a456fb346c2cbfe178b48f
+    url: https://github.com/mirurobotics/openapi/commit/4489e6beb6e5e0c893a456fb346c2cbfe178b48f
+    message: 'fix(openapi): rewrite deployment status descriptions'
     author: Benjamin Smidt
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-03-06T04:27:49.789496+00:00'
+    built_at: '2026-03-10T02:29:03.456352+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -173,7 +173,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 87cd6f15cd01238e090e8409a5bc33544c95b458
+      - 4489e6beb6e5e0c893a456fb346c2cbfe178b48f
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -271,19 +271,24 @@ components:
       type: string
       description: 'Last known activity state of the deployment.
 
-        - Drifted: device''s configurations have drifted since this deployment was
-        staged, and the deployment needs to be reviewed before it can be deployed
 
-        - Staged: is ready to be deployed
+        `drifted` means the device''s configurations have drifted since this deployment
+        was staged, and the deployment needs to be reviewed before it can be deployed.
 
-        - Queued: the deployment''s config instances are waiting to be received by
-        the device; will be deployed as soon as the device is online
 
-        - Deployed: the deployment''s config instances are currently available for
-        consumption on the device
+        `staged` means the deployment is ready to be deployed.
 
-        - Archived: the deployment is available for historical reference but cannot
-        be deployed and is not active on the device
+
+        `queued` means the deployment''s config instances are waiting to be received
+        by the device and will be deployed as soon as the device is online.
+
+
+        `deployed` means the deployment''s config instances are currently available
+        for consumption on the device.
+
+
+        `archived` means the deployment is available for historical reference but
+        cannot be deployed and is not active on the device.
 
         '
       enum:
@@ -302,13 +307,16 @@ components:
       type: string
       description: 'Last known error state of the deployment.
 
-        - None: no errors
 
-        - Retrying: an error has been encountered and the agent is retrying to reach
-        the target status
+        `none` means there are no errors.
 
-        - Failed: a fatal error has been encountered; the deployment is archived and
-        (if deployed) removed from the device
+
+        `retrying` means an error has been encountered and the agent is retrying to
+        reach the target status.
+
+
+        `failed` means a fatal error has been encountered; the deployment is archived
+        and, if deployed, removed from the device.
 
         '
       enum:
@@ -323,13 +331,16 @@ components:
       type: string
       description: 'Desired state of the deployment.
 
-        - Staged: is ready to be deployed
 
-        - Deployed: all config instances part of the deployment are available for
-        consumption on the device
+        `staged` means the deployment is ready to be deployed.
 
-        - Archived: the deployment is available for historical reference but cannot
-        be deployed and is not active on the device
+
+        `deployed` means all config instances in the deployment are available for
+        consumption on the device.
+
+
+        `archived` means the deployment is available for historical reference but
+        cannot be deployed and is not active on the device.
 
         '
       enum:
@@ -340,8 +351,8 @@ components:
       - DEPLOYMENT_TARGET_STATUS_STAGED
       - DEPLOYMENT_TARGET_STATUS_DEPLOYED
       - DEPLOYMENT_TARGET_STATUS_ARCHIVED
-    BaseDeployment:
-      title: Base Deployment
+    Deployment:
+      title: Deployment
       type: object
       required:
       - object
@@ -354,7 +365,6 @@ components:
       - device_id
       - release_id
       - created_at
-      - updated_at
       properties:
         object:
           type: string
@@ -392,14 +402,6 @@ components:
           format: date-time
           example: '2024-01-01T00:00:00Z'
           description: Timestamp of when the device release was created.
-        updated_at:
-          type: string
-          format: date-time
-          example: '2024-01-01T00:00:00Z'
-          description: Timestamp of when the device release was last updated.
-    Deployment:
-      allOf:
-      - $ref: '#/components/schemas/BaseDeployment'
       example:
         object: deployment
         id: dpl_123
@@ -411,7 +413,6 @@ components:
         device_id: dvc_123
         release_id: rls_123
         created_at: '2024-01-01T00:00:00Z'
-        updated_at: '2024-01-01T00:00:00Z'
     DeviceStatus:
       type: string
       description: 'The status of the device.
@@ -582,8 +583,8 @@ components:
         message: Add basic motion configurations
         commit_url: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
         created_at: '2021-01-01T00:00:00Z'
-    BaseRelease:
-      title: Base Release
+    Release:
+      title: Release
       type: object
       required:
       - object
@@ -591,7 +592,6 @@ components:
       - version
       - git_commit_id
       - created_at
-      - updated_at
       properties:
         object:
           type: string
@@ -618,21 +618,12 @@ components:
           format: date-time
           example: '2024-01-01T00:00:00Z'
           description: Timestamp of when the release was created.
-        updated_at:
-          type: string
-          format: date-time
-          example: '2024-01-01T00:00:00Z'
-          description: Timestamp of when the release was last updated.
-    Release:
-      allOf:
-      - $ref: '#/components/schemas/BaseRelease'
       example:
         object: release
         id: rls_123
         version: v1.0.0
         git_commit_id: git_commit_123
         created_at: '2024-01-01T00:00:00Z'
-        updated_at: '2024-01-01T00:00:00Z'
     Error:
       type: object
       required:

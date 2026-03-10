@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentTargetStatus : Desired state of the deployment. - Staged: is ready to be deployed - Deployed: all config instances part of the deployment are available for consumption on the device - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
-/// Desired state of the deployment. - Staged: is ready to be deployed - Deployed: all config instances part of the deployment are available for consumption on the device - Archived: the deployment is available for historical reference but cannot be deployed and is not active on the device
+/// DeploymentTargetStatus : Desired state of the deployment.  `staged` means the deployment is ready to be deployed.  `deployed` means all config instances in the deployment are available for consumption on the device.  `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device. 
+/// Desired state of the deployment.  `staged` means the deployment is ready to be deployed.  `deployed` means all config instances in the deployment are available for consumption on the device.  `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentTargetStatus {
     #[serde(rename = "staged")]
@@ -19,6 +19,7 @@ pub enum DeploymentTargetStatus {
     DEPLOYMENT_TARGET_STATUS_DEPLOYED,
     #[serde(rename = "archived")]
     DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+
 }
 
 impl std::fmt::Display for DeploymentTargetStatus {
@@ -36,3 +37,4 @@ impl Default for DeploymentTargetStatus {
         Self::DEPLOYMENT_TARGET_STATUS_STAGED
     }
 }
+

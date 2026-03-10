@@ -9,11 +9,12 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiGitCommit {
     #[serde(rename = "87cd6f15cd01238e090e8409a5bc33544c95b458")]
     API_GIT_COMMIT,
+
 }
 
 impl std::fmt::Display for ApiGitCommit {
@@ -29,3 +30,4 @@ impl Default for ApiGitCommit {
         Self::API_GIT_COMMIT
     }
 }
+

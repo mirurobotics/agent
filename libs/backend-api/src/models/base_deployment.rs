@@ -43,19 +43,7 @@ pub struct BaseDeployment {
 }
 
 impl BaseDeployment {
-    pub fn new(
-        object: Object,
-        id: String,
-        description: String,
-        status: models::DeploymentStatus,
-        activity_status: models::DeploymentActivityStatus,
-        error_status: models::DeploymentErrorStatus,
-        target_status: models::DeploymentTargetStatus,
-        device_id: String,
-        release_id: String,
-        created_at: String,
-        updated_at: String,
-    ) -> BaseDeployment {
+    pub fn new(object: Object, id: String, description: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus, device_id: String, release_id: String, created_at: String, updated_at: String) -> BaseDeployment {
         BaseDeployment {
             object,
             id,
@@ -83,3 +71,4 @@ impl Default for Object {
         Self::Deployment
     }
 }
+

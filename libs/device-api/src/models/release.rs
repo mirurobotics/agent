@@ -26,27 +26,16 @@ pub struct Release {
     /// Timestamp of when the release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
-    /// Timestamp of when the release was last updated.
-    #[serde(rename = "updated_at")]
-    pub updated_at: String,
 }
 
 impl Release {
-    pub fn new(
-        object: Object,
-        id: String,
-        version: String,
-        git_commit_id: Option<String>,
-        created_at: String,
-        updated_at: String,
-    ) -> Release {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String) -> Release {
         Release {
             object,
             id,
             version,
             git_commit_id,
             created_at,
-            updated_at,
         }
     }
 }
@@ -62,3 +51,4 @@ impl Default for Object {
         Self::Release
     }
 }
+

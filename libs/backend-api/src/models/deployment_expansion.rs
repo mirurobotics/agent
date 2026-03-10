@@ -9,13 +9,14 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentExpansion {
     #[serde(rename = "release")]
     DEPLOYMENT_EXPAND_RELEASE,
     #[serde(rename = "config_instances")]
     DEPLOYMENT_EXPAND_CONFIG_INSTANCES,
+
 }
 
 impl std::fmt::Display for DeploymentExpansion {
@@ -32,3 +33,4 @@ impl Default for DeploymentExpansion {
         Self::DEPLOYMENT_EXPAND_RELEASE
     }
 }
+

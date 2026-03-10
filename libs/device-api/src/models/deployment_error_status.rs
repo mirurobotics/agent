@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentErrorStatus : Last known error state of the deployment. - None: no errors - Retrying: an error has been encountered and the agent is retrying to reach the target status - Failed: a fatal error has been encountered; the deployment is archived and (if deployed) removed from the device
-/// Last known error state of the deployment. - None: no errors - Retrying: an error has been encountered and the agent is retrying to reach the target status - Failed: a fatal error has been encountered; the deployment is archived and (if deployed) removed from the device
+/// DeploymentErrorStatus : Last known error state of the deployment.  `none` means there are no errors.  `retrying` means an error has been encountered and the agent is retrying to reach the target status.  `failed` means a fatal error has been encountered; the deployment is archived and, if deployed, removed from the device. 
+/// Last known error state of the deployment.  `none` means there are no errors.  `retrying` means an error has been encountered and the agent is retrying to reach the target status.  `failed` means a fatal error has been encountered; the deployment is archived and, if deployed, removed from the device. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentErrorStatus {
     #[serde(rename = "none")]
@@ -19,6 +19,7 @@ pub enum DeploymentErrorStatus {
     DEPLOYMENT_ERROR_STATUS_FAILED,
     #[serde(rename = "retrying")]
     DEPLOYMENT_ERROR_STATUS_RETRYING,
+
 }
 
 impl std::fmt::Display for DeploymentErrorStatus {
@@ -36,3 +37,4 @@ impl Default for DeploymentErrorStatus {
         Self::DEPLOYMENT_ERROR_STATUS_NONE
     }
 }
+

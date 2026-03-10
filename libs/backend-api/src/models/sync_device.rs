@@ -18,6 +18,9 @@ pub struct SyncDevice {
 
 impl SyncDevice {
     pub fn new(is_synced: bool) -> SyncDevice {
-        SyncDevice { is_synced }
+        SyncDevice {
+            is_synced,
+        }
     }
 }
+

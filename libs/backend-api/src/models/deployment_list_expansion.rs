@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentListExpansion {
     #[serde(rename = "total_count")]
@@ -18,6 +18,7 @@ pub enum DeploymentListExpansion {
     DEPLOYMENT_LIST_EXPAND_RELEASE,
     #[serde(rename = "config_instances")]
     DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES,
+
 }
 
 impl std::fmt::Display for DeploymentListExpansion {
@@ -35,3 +36,4 @@ impl Default for DeploymentListExpansion {
         Self::DEPLOYMENT_LIST_EXPAND_TOTAL_COUNT
     }
 }
+

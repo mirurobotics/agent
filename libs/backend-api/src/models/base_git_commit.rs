@@ -43,18 +43,7 @@ pub struct BaseGitCommit {
 }
 
 impl BaseGitCommit {
-    pub fn new(
-        object: Object,
-        id: String,
-        sha: String,
-        message: String,
-        repository_owner: String,
-        repository_name: String,
-        repository_type: models::GitRepositoryType,
-        repository_url: String,
-        commit_url: String,
-        created_at: String,
-    ) -> BaseGitCommit {
+    pub fn new(object: Object, id: String, sha: String, message: String, repository_owner: String, repository_name: String, repository_type: models::GitRepositoryType, repository_url: String, commit_url: String, created_at: String) -> BaseGitCommit {
         BaseGitCommit {
             object,
             id,
@@ -81,3 +70,4 @@ impl Default for Object {
         Self::GitCommit
     }
 }
+

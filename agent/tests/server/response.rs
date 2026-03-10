@@ -103,7 +103,6 @@ pub mod deployment_response {
             device_id: "dev-1".into(),
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
-            updated_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -137,7 +136,6 @@ pub mod deployment_response {
             device_id: "dev-1".into(),
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
-            updated_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -171,7 +169,6 @@ pub mod deployment_response {
             device_id: "dev-1".into(),
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
-            updated_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -205,7 +202,6 @@ pub mod deployment_response {
             device_id: "dev-1".into(),
             release_id: "rls-1".into(),
             created_at: t.to_rfc3339(),
-            updated_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Deployment = (&dpl).into();
@@ -233,7 +229,6 @@ pub mod release_response {
             version: "1.0.0".into(),
             git_commit_id: None,
             created_at: t.to_rfc3339(),
-            updated_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Release = (&rls).into();
@@ -257,7 +252,6 @@ pub mod release_response {
             version: "2.0.0".into(),
             git_commit_id: Some("gc-1".into()),
             created_at: t.to_rfc3339(),
-            updated_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Release = (&rls).into();

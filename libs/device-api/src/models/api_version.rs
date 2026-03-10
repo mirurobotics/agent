@@ -9,11 +9,12 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-///
+/// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ApiVersion {
     #[serde(rename = "v0.2")]
     API_VERSION,
+
 }
 
 impl std::fmt::Display for ApiVersion {
@@ -29,3 +30,4 @@ impl Default for ApiVersion {
         Self::API_VERSION
     }
 }
+

@@ -38,16 +38,7 @@ pub struct Version {
 }
 
 impl Version {
-    pub fn new(
-        version: String,
-        git_commit: String,
-        api_version: String,
-        api_git_commit: String,
-        go_version: String,
-        build_date: String,
-        os: String,
-        arch: String,
-    ) -> Version {
+    pub fn new(version: String, git_commit: String, api_version: String, api_git_commit: String, go_version: String, build_date: String, os: String, arch: String) -> Version {
         Version {
             version,
             git_commit,
@@ -60,3 +51,4 @@ impl Version {
         }
     }
 }
+
