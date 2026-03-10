@@ -7,16 +7,19 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0
+  x-release-version: v0.2.0-next
   x-git-commit:
-    sha: 5e98bcf13136459371f57ae422d353a1e7491b14
-    url: https://github.com/mirurobotics/openapi/commit/5e98bcf13136459371f57ae422d353a1e7491b14
-    message: 'chore: bump device api version'
+    sha: 2154d100e3f29015c9eaf542e5fd18332f99ed5e
+    url: https://github.com/mirurobotics/openapi/commit/2154d100e3f29015c9eaf542e5fd18332f99ed5e
+    message: 'feat(device-server): add SSE events endpoint and event schemas
+
+
+      Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
     author: Benjamin Smidt
-    branch: HEAD
-    dirty: false
+    branch: feat/sse
+    dirty: true
   x-build:
-    built_at: '2026-03-10T03:12:13.875623+00:00'
+    built_at: '2026-03-10T21:09:52.802165+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -154,6 +157,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Release'
+  /events:
+    get:
+      tags:
+      - Events
+      summary: Stream Events
+      operationId: streamEvents
+      description: 'Subscribe to a Server-Sent Events (SSE) stream of agent lifecycle
+        events.
+
+
+        The stream replays retained historical events after the cursor, then
+
+        delivers live events as they occur. Events are delivered at-least-once;
+
+        clients should deduplicate by event `id`.
+
+
+        Use the `after` query parameter or `Last-Event-ID` header to resume
+
+        from a previous position. If the cursor is older than the earliest
+
+        retained event, the server returns `410 Gone`.
+
+        '
+      parameters:
+      - name: after
+        in: query
+        required: false
+        description: Event ID cursor. Only events with `id` greater than this value
+          are returned. Takes precedence over the `Last-Event-ID` header.
+        schema:
+          type: integer
+          format: int64
+        example: 42
+      - name: types
+        in: query
+        required: false
+        description: Event types to receive. If omitted, all event types are sent.
+        style: form
+        explode: false
+        schema:
+          type: array
+          items:
+            type: string
+        example:
+        - deployment.deployed.beta1
+        - deployment.removed.beta1
+      - name: Last-Event-ID
+        in: header
+        required: false
+        description: Standard SSE reconnection header. Used as the replay cursor if
+          `after` query parameter is not provided.
+        schema:
+          type: string
+        example: '42'
+      responses:
+        '200':
+          description: SSE event stream. Each event is delivered as an SSE frame with
+            `id`, `event`, and `data` fields.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          description: Malformed cursor value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Cursor expired — the requested event has been compacted from
+            the retention window. Client should re-fetch current state and reconnect
+            without a cursor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ErrorResponse:
@@ -173,10 +253,72 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 5e98bcf13136459371f57ae422d353a1e7491b14
+      - dirty-2154d100e3f29015c9eaf542e5fd18332f99ed5e
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
+    DeploymentDeployedBeta1Event:
+      title: DeploymentDeployedBeta1Event
+      type: object
+      description: Payload for `deployment.deployed.beta1` events.
+      required:
+      - deployment_id
+      - activity_status
+      - target_status
+      properties:
+        deployment_id:
+          type: string
+          description: ID of the deployment.
+          example: dpl_123
+        activity_status:
+          type: string
+          description: Activity status of the deployment after this event.
+          example: deployed
+        target_status:
+          type: string
+          description: Target status of the deployment after this event.
+          example: deployed
+        deployed_at:
+          type: string
+          format: date-time
+          description: Timestamp of when the deployment was deployed.
+          example: '2026-03-10T12:00:00Z'
+      example:
+        deployment_id: dpl_123
+        activity_status: deployed
+        target_status: deployed
+        deployed_at: '2026-03-10T12:00:00Z'
+    DeploymentRemovedBeta1Event:
+      title: DeploymentRemovedBeta1Event
+      type: object
+      description: Payload for `deployment.removed.beta1` events.
+      required:
+      - deployment_id
+      - activity_status
+      - target_status
+      properties:
+        deployment_id:
+          type: string
+          description: ID of the deployment.
+          example: dpl_123
+        activity_status:
+          type: string
+          description: Activity status of the deployment after this event.
+          example: archived
+        target_status:
+          type: string
+          description: Target status of the deployment after this event.
+          example: archived
+        archived_at:
+          type: string
+          format: date-time
+          description: Timestamp of when the deployment was archived.
+          example: '2026-03-10T12:00:00Z'
+      example:
+        deployment_id: dpl_123
+        activity_status: archived
+        target_status: archived
+        archived_at: '2026-03-10T12:00:00Z'
     HealthResponse:
       type: object
       required:
@@ -624,6 +766,52 @@ components:
         version: v1.0.0
         git_commit_id: git_commit_123
         created_at: '2024-01-01T00:00:00Z'
+    Event:
+      title: Event
+      type: object
+      required:
+      - object
+      - id
+      - type
+      - occurred_at
+      - data
+      properties:
+        object:
+          type: string
+          enum:
+          - event
+          x-stainless-const: true
+          description: The object type, which is always `event`.
+          example: event
+        id:
+          type: integer
+          format: int64
+          description: Monotonically increasing event ID. Used as the SSE `id` field
+            and for replay cursors.
+          example: 42
+        type:
+          type: string
+          description: Versioned event type string. The version suffix (e.g. `.beta1`)
+            indicates the shape of the `data` payload.
+          example: deployment.deployed.beta1
+        occurred_at:
+          type: string
+          format: date-time
+          description: Timestamp of when the event occurred.
+          example: '2026-03-10T12:00:00Z'
+        data:
+          type: object
+          description: Event-specific payload. Shape varies by event type.
+      example:
+        object: event
+        id: 42
+        type: deployment.deployed.beta1
+        occurred_at: '2026-03-10T12:00:00Z'
+        data:
+          deployment_id: dpl_123
+          activity_status: deployed
+          target_status: deployed
+          deployed_at: '2026-03-10T12:00:00Z'
     Error:
       type: object
       required:
