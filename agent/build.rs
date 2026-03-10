@@ -9,9 +9,9 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/");
 
-    // Set build date (UTC, date only)
+    // Set build date (UTC, with seconds precision)
     let build_date = Command::new("date")
-        .args(["-u", "+%Y-%m-%d"])
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()
         .expect("Failed to execute date")
         .stdout;

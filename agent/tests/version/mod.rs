@@ -16,12 +16,14 @@ fn test_commit_set_by_build_script() {
 
 #[test]
 fn test_build_date_set_by_build_script() {
-    // build.rs sets MIRU_AGENT_BUILD_DATE to YYYY-MM-DD
+    // build.rs sets MIRU_AGENT_BUILD_DATE to YYYY-MM-DDTHH:MM:SSZ
     assert_ne!(version::BUILD_DATE, "unknown");
-    assert_eq!(version::BUILD_DATE.len(), 10);
+    assert_eq!(version::BUILD_DATE.len(), 20);
     assert!(version::BUILD_DATE.starts_with("20"));
     assert_eq!(version::BUILD_DATE.as_bytes()[4], b'-');
     assert_eq!(version::BUILD_DATE.as_bytes()[7], b'-');
+    assert_eq!(version::BUILD_DATE.as_bytes()[10], b'T');
+    assert_eq!(version::BUILD_DATE.as_bytes()[19], b'Z');
 }
 
 #[test]
