@@ -89,6 +89,7 @@ impl Fixture {
             http_client: &self.http_client,
             opts: &opts,
             token: "test_token",
+            event_hub: None,
         })
         .await
     }

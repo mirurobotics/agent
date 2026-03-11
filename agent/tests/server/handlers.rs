@@ -103,6 +103,7 @@ pub mod routes {
                 syncer,
                 Arc::new(token_mngr),
                 activity_tracker,
+                None,
             ));
 
             let app = serve::routes(state.clone());

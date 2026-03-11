@@ -4,6 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::activity;
 use crate::authn;
+use crate::events;
 use crate::http;
 use crate::storage::Storage;
 use crate::sync;
@@ -15,6 +16,7 @@ pub struct State {
     pub syncer: Arc<sync::Syncer>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
+    pub event_hub: Option<events::EventHub>,
 }
 
 impl State {
@@ -24,6 +26,7 @@ impl State {
         syncer: Arc<sync::Syncer>,
         token_mngr: Arc<authn::TokenManager>,
         activity_tracker: Arc<activity::Tracker>,
+        event_hub: Option<events::EventHub>,
     ) -> Self {
         State {
             storage,
@@ -31,6 +34,7 @@ impl State {
             syncer,
             token_mngr,
             activity_tracker,
+            event_hub,
         }
     }
 }

@@ -143,6 +143,7 @@ impl Fixture {
                 },
                 backoff,
                 agent_version,
+                event_hub: None,
             },
         )
         .unwrap();
@@ -238,6 +239,7 @@ pub mod shutdown {
                     max_secs: 12 * 60 * 60,
                 },
                 agent_version: Device::default().agent_version,
+                event_hub: None,
             },
         )
         .unwrap();

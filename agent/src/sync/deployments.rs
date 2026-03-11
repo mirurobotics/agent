@@ -1,8 +1,9 @@
 // internal crates
 use crate::deploy::apply;
+use crate::events;
 use crate::filesys::Overwrite;
 use crate::http;
-use crate::models;
+use crate::models::{self, deployment::DplActivity};
 use crate::storage;
 use crate::sync::errors::*;
 use crate::trace;
@@ -20,6 +21,7 @@ pub struct SyncArgs<'a, HTTPClientT> {
     pub storage: &'a Storage<'a>,
     pub opts: &'a apply::DeployOpts,
     pub token: &'a str,
+    pub event_hub: Option<&'a events::EventHub>,
 }
 
 pub struct Storage<'a> {
@@ -58,7 +60,7 @@ pub async fn sync<HTTPClientT: http::ClientI>(
         errors.push(e);
     }
 
-    let wait = apply_deployments(args.storage, args.opts, &mut errors).await;
+    let wait = apply_deployments(args.storage, args.opts, args.event_hub, &mut errors).await;
 
     debug!("pushing deployment status updates to server");
     if let Err(e) = push_deployments(args.http_client, args.storage.deployments, args.token).await {
@@ -283,6 +285,7 @@ fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> m
 async fn apply_deployments<'a>(
     storage: &'a Storage<'a>,
     opts: &'a apply::DeployOpts,
+    event_hub: Option<&'a events::EventHub>,
     errors: &mut Vec<SyncErr>,
 ) -> chrono::TimeDelta {
     debug!("applying deployments");
@@ -309,6 +312,20 @@ async fn apply_deployments<'a>(
             errors.push(SyncErr::from(e));
         } else {
             debug!("successfully applied deployment {}", outcome.deployment.id);
+            // emit deployment events on success
+            if let Some(hub) = event_hub {
+                match outcome.deployment.activity_status {
+                    DplActivity::Deployed => {
+                        hub.try_publish(events::NewEvent::deployment_deployed(&outcome.deployment))
+                            .await;
+                    }
+                    DplActivity::Archived => {
+                        hub.try_publish(events::NewEvent::deployment_removed(&outcome.deployment))
+                            .await;
+                    }
+                    _ => {}
+                }
+            }
         }
         if let Some(w) = outcome.wait {
             if w <= chrono::TimeDelta::zero() {
