@@ -13,7 +13,6 @@ env:
 
 jobs:
   lint:
-    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -37,7 +36,6 @@ jobs:
         run: LINT_FIX=0 ./scripts/lint.sh
 
   test:
-    name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -59,7 +57,6 @@ jobs:
         run: ./scripts/covgate.sh
 
   tools:
-    name: Tools
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
