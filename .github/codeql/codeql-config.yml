@@ -1,0 +1,4 @@
+name: Rust CodeQL Configuration
+
+paths-ignore:
+  - target
