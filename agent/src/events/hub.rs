@@ -61,7 +61,7 @@ impl Worker {
                     break;
                 }
                 Command::Publish { event, respond_to } => {
-                    let result = self.store.append(event);
+                    let result = self.store.append(event).await;
                     if let Ok(ref envelope) = result {
                         // broadcast synchronously with append
                         let _ = self.broadcast_tx.send(envelope.clone());
@@ -88,11 +88,11 @@ pub struct EventHub {
 }
 
 impl EventHub {
-    pub fn spawn(
+    pub async fn spawn(
         log_file: filesys::File,
         opts: SpawnOptions,
     ) -> Result<(Self, JoinHandle<()>), EventsErr> {
-        let store = EventStore::init(log_file, opts.max_retained)?;
+        let store = EventStore::init(log_file, opts.max_retained).await?;
         let (broadcast_tx, _) = broadcast::channel(opts.broadcast_capacity);
         let (sender, receiver) = mpsc::channel(opts.buffer_size);
 

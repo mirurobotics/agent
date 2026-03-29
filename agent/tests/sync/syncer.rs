@@ -133,7 +133,7 @@ impl Fixture {
 
         let log_file = dir.file("events.jsonl");
         let (event_hub, _hub_handle) =
-            EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+            EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
 
         let (syncer, _) = spawn(
             32,
@@ -228,7 +228,7 @@ pub mod shutdown {
 
         let log_file = dir.file("events.jsonl");
         let (event_hub, _hub_handle) =
-            EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+            EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
 
         let http_client = Arc::new(http::Client::new("doesntmatter").unwrap());
         let (syncer, worker_handler) = Syncer::spawn(

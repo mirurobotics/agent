@@ -34,6 +34,8 @@ impl crate::errors::Error for MalformedCursorErr {
 pub enum EventsErr {
     #[error("event store I/O error: {0}")]
     IoErr(#[from] std::io::Error),
+    #[error("event store filesystem error: {0}")]
+    FileSysErr(#[from] crate::filesys::FileSysErr),
     #[error("event serialization error: {0}")]
     SerializationErr(#[from] serde_json::Error),
     #[error(transparent)]

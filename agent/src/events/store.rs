@@ -1,13 +1,9 @@
-// standard crates
-use std::fs;
-use std::io::{BufRead, BufWriter, Write};
-
 // internal crates
 use crate::events::{
     errors::{CursorExpiredErr, EventsErr},
     model::{Event, EventArgs},
 };
-use crate::filesys::{self, PathExt};
+use crate::filesys::{self, AppendOptions, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -28,9 +24,9 @@ impl EventStore {
     /// `next_event_id` is recovered from the highest ID found in the log.
     /// Malformed or empty lines are skipped so the store always comes up,
     /// even after a partial write or crash.
-    pub fn init(log_file: filesys::File, max_retained: usize) -> Result<Self, EventsErr> {
+    pub async fn init(log_file: filesys::File, max_retained: usize) -> Result<Self, EventsErr> {
         let (events, next_event_id) = if log_file.exists() {
-            Self::load_log(&log_file)?
+            Self::load_log(&log_file).await?
         } else {
             (Vec::new(), 1)
         };
@@ -43,25 +39,17 @@ impl EventStore {
         })
     }
 
-    pub fn append(&mut self, event: EventArgs) -> Result<Event, EventsErr> {
+    pub async fn append(&mut self, event: EventArgs) -> Result<Event, EventsErr> {
         let envelope = Event::new(self.next_event_id, event);
         self.next_event_id += 1;
 
         let json = serde_json::to_string(&envelope)?;
-
-        self.ensure_parent_dir()?;
-
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.log_file.path())?;
-        writeln!(file, "{json}")?;
-        file.flush()?;
+        self.log_file.append_bytes(format!("{json}\n").as_bytes(), AppendOptions::SYNC).await?;
 
         self.events.push(envelope.clone());
 
         if self.events.len() > self.max_retained {
-            if let Err(e) = self.compact() {
+            if let Err(e) = self.compact().await {
                 error!("event store compaction failed: {e}");
             }
         }
@@ -105,23 +93,24 @@ impl EventStore {
     /// Writes the compacted log to a temp file first, then atomically renames
     /// it over the original. The in-memory vec is only trimmed *after* the
     /// disk write succeeds, so a failed compaction never loses events.
-    fn compact(&mut self) -> Result<(), EventsErr> {
+    async fn compact(&mut self) -> Result<(), EventsErr> {
         let keep_count = self.max_retained / 2;
         if self.events.len() <= keep_count {
             return Ok(());
         }
         let drain_count = self.events.len() - keep_count;
 
-        // write compacted log to temp file before touching in-memory state
-        let tmp_path = self.log_file.path().with_extension("jsonl.tmp");
-        let file = fs::File::create(&tmp_path)?;
-        let mut writer = BufWriter::new(file);
+        // build compacted content in memory, then write atomically to temp file
+        let mut buf = String::new();
         for event in &self.events[drain_count..] {
             let json = serde_json::to_string(event)?;
-            writeln!(writer, "{json}")?;
+            buf.push_str(&json);
+            buf.push('\n');
         }
-        writer.flush()?;
-        fs::rename(&tmp_path, self.log_file.path())?;
+
+        let tmp_file = filesys::File::new(self.log_file.path().with_extension("jsonl.tmp"));
+        tmp_file.write_string(&buf, WriteOptions::OVERWRITE_ATOMIC).await?;
+        tmp_file.move_to(&self.log_file, Overwrite::Allow).await?;
 
         // only trim in-memory after disk write succeeded
         self.events.drain(..drain_count);
@@ -130,21 +119,16 @@ impl EventStore {
 
     /// Read a JSONL log file into `events`, advancing `next_event_id` past
     /// the highest ID found. Malformed or empty lines are skipped.
-    fn load_log(log_file: &filesys::File) -> Result<(Vec<Event>, u64), EventsErr> {
+    async fn load_log(log_file: &filesys::File) -> Result<(Vec<Event>, u64), EventsErr> {
         let mut events = Vec::new();
         let mut next_event_id: u64 = 1;
 
-        let file = fs::File::open(log_file.path())?;
-        for (line_num, line) in std::io::BufReader::new(file).lines().enumerate() {
-            let line = match line {
-                Ok(l) if l.trim().is_empty() => continue,
-                Ok(l) => l,
-                Err(e) => {
-                    warn!("skipping unreadable event at line {}: {e}", line_num + 1);
-                    continue;
-                }
-            };
-            match serde_json::from_str::<Event>(&line) {
+        let content = log_file.read_string().await?;
+        for (line_num, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<Event>(line) {
                 Ok(envelope) => {
                     if envelope.id >= next_event_id {
                         next_event_id = envelope.id + 1;
@@ -157,14 +141,5 @@ impl EventStore {
             }
         }
         Ok((events, next_event_id))
-    }
-
-    fn ensure_parent_dir(&self) -> Result<(), EventsErr> {
-        if let Some(parent) = self.log_file.path().parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-        Ok(())
     }
 }

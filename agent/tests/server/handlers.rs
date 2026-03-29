@@ -100,7 +100,7 @@ pub mod routes {
 
             let log_file = dir.file("events.jsonl");
             let (event_hub, _hub_handle) =
-                EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+                EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
 
             let state = Arc::new(State::new(
                 storage,

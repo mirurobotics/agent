@@ -17,7 +17,7 @@ fn make_event(event_type: &str) -> EventArgs {
 async fn make_hub(name: &str) -> (filesys::Dir, EventHub) {
     let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
     let log_file = dir.file("events.jsonl");
-    let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+    let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
     (dir, hub)
 }
 
@@ -160,7 +160,7 @@ mod persistence {
 
         // first hub: publish events
         {
-            let (hub, handle) = EventHub::spawn(log_file.clone(), SpawnOptions::default()).unwrap();
+            let (hub, handle) = EventHub::spawn(log_file.clone(), SpawnOptions::default()).await.unwrap();
             hub.publish(make_event("first")).await.unwrap();
             hub.publish(make_event("second")).await.unwrap();
             hub.shutdown().await.unwrap();
@@ -169,7 +169,7 @@ mod persistence {
 
         // second hub: should see persisted events
         {
-            let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+            let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
             let events = hub.replay_after(0).await.unwrap();
             assert_eq!(events.len(), 2);
             assert_eq!(events[0].event_type, "first");

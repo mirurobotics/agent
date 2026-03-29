@@ -65,7 +65,7 @@ impl AppState {
 
         // initialize the event hub
         let (event_hub, event_hub_handle) =
-            events::EventHub::spawn(layout.events_log_file(), Default::default())?;
+            events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
         // initialize the syncer
         let deploy_target_dir = layout.customer_configs();

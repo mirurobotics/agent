@@ -41,7 +41,7 @@ impl Fixture {
             Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
 
         let log_file = dir.file("events.jsonl");
-        let (event_hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+        let (event_hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
 
         let state = Arc::new(State::new(
             storage,
@@ -165,7 +165,7 @@ mod cursor {
             max_retained: 4,
             ..SpawnOptions::default()
         };
-        let (hub, _hub_handle) = EventHub::spawn(log_file, opts).unwrap();
+        let (hub, _hub_handle) = EventHub::spawn(log_file, opts).await.unwrap();
 
         // Publish enough events to trigger compaction
         for i in 0..6 {

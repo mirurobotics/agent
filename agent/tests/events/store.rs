@@ -18,9 +18,9 @@ fn make_event(event_type: &str) -> EventArgs {
     }
 }
 
-fn make_store(dir: &filesys::Dir, max_retained: usize) -> EventStore {
+async fn make_store(dir: &filesys::Dir, max_retained: usize) -> EventStore {
     let log_file = dir.file("events.jsonl");
-    EventStore::init(log_file, max_retained).unwrap()
+    EventStore::init(log_file, max_retained).await.unwrap()
 }
 
 // ========================= INIT ========================= //
@@ -33,7 +33,7 @@ mod init {
         let dir = filesys::Dir::create_temp_dir("ev_init_empty")
             .await
             .unwrap();
-        let store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
         assert_eq!(store.earliest_id(), None);
         assert_eq!(store.latest_id(), None);
     }
@@ -63,13 +63,13 @@ mod init {
             writeln!(f, "{}", serde_json::to_string(&e2).unwrap()).unwrap();
         }
 
-        let store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
         assert_eq!(store.earliest_id(), Some(5));
         assert_eq!(store.latest_id(), Some(10));
 
         // next append should get id 11
         let mut store = store;
-        let env = store.append(make_event("test.c")).unwrap();
+        let env = store.append(make_event("test.c")).await.unwrap();
         assert_eq!(env.id, 11);
     }
 
@@ -95,7 +95,7 @@ mod init {
             writeln!(f, "{{\"broken\": true}}").unwrap(); // missing required fields
         }
 
-        let store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
         assert_eq!(store.earliest_id(), Some(3));
         assert_eq!(store.latest_id(), Some(3));
     }
@@ -111,11 +111,11 @@ mod append {
         let dir = filesys::Dir::create_temp_dir("ev_append_mono")
             .await
             .unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
-        let e1 = store.append(make_event("test.a")).unwrap();
-        let e2 = store.append(make_event("test.b")).unwrap();
-        let e3 = store.append(make_event("test.c")).unwrap();
+        let e1 = store.append(make_event("test.a")).await.unwrap();
+        let e2 = store.append(make_event("test.b")).await.unwrap();
+        let e3 = store.append(make_event("test.c")).await.unwrap();
 
         assert_eq!(e1.id, 1);
         assert_eq!(e2.id, 2);
@@ -130,13 +130,13 @@ mod append {
         let log_file = dir.file("events.jsonl");
 
         {
-            let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
-            store.append(make_event("test.a")).unwrap();
-            store.append(make_event("test.b")).unwrap();
+            let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
+            store.append(make_event("test.a")).await.unwrap();
+            store.append(make_event("test.b")).await.unwrap();
         }
 
         // reload from disk
-        let store = EventStore::init(log_file, DEFAULT_MAX_RETAINED).unwrap();
+        let store = EventStore::init(log_file, DEFAULT_MAX_RETAINED).await.unwrap();
         assert_eq!(store.earliest_id(), Some(1));
         assert_eq!(store.latest_id(), Some(2));
     }
@@ -146,7 +146,7 @@ mod append {
         let dir = filesys::Dir::create_temp_dir("ev_append_data")
             .await
             .unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         let event = EventArgs {
             event_type: DEPLOYMENT_DEPLOYED.to_string(),
@@ -154,7 +154,7 @@ mod append {
             data: serde_json::json!({"deployment_id": "dpl-1", "activity_status": "deployed"}),
         };
 
-        let envelope = store.append(event).unwrap();
+        let envelope = store.append(event).await.unwrap();
         assert_eq!(envelope.event_type, DEPLOYMENT_DEPLOYED);
         assert_eq!(envelope.data["deployment_id"], "dpl-1");
         assert_eq!(envelope.data["activity_status"], "deployed");
@@ -171,11 +171,11 @@ mod replay {
         let dir = filesys::Dir::create_temp_dir("ev_replay_zero")
             .await
             .unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
-        store.append(make_event("a")).unwrap();
-        store.append(make_event("b")).unwrap();
-        store.append(make_event("c")).unwrap();
+        store.append(make_event("a")).await.unwrap();
+        store.append(make_event("b")).await.unwrap();
+        store.append(make_event("c")).await.unwrap();
 
         let events = store.replay_after(0).unwrap();
         assert_eq!(events.len(), 3);
@@ -188,11 +188,11 @@ mod replay {
         let dir = filesys::Dir::create_temp_dir("ev_replay_after")
             .await
             .unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
-        store.append(make_event("a")).unwrap();
-        store.append(make_event("b")).unwrap();
-        store.append(make_event("c")).unwrap();
+        store.append(make_event("a")).await.unwrap();
+        store.append(make_event("b")).await.unwrap();
+        store.append(make_event("c")).await.unwrap();
 
         let events = store.replay_after(1).unwrap();
         assert_eq!(events.len(), 2);
@@ -205,10 +205,10 @@ mod replay {
         let dir = filesys::Dir::create_temp_dir("ev_replay_latest")
             .await
             .unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
-        store.append(make_event("a")).unwrap();
-        store.append(make_event("b")).unwrap();
+        store.append(make_event("a")).await.unwrap();
+        store.append(make_event("b")).await.unwrap();
 
         let events = store.replay_after(2).unwrap();
         assert!(events.is_empty());
@@ -219,9 +219,9 @@ mod replay {
         let dir = filesys::Dir::create_temp_dir("ev_replay_beyond")
             .await
             .unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
+        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
-        store.append(make_event("a")).unwrap();
+        store.append(make_event("a")).await.unwrap();
 
         let events = store.replay_after(999).unwrap();
         assert!(events.is_empty());
@@ -233,11 +233,11 @@ mod replay {
             .await
             .unwrap();
         // small max_retained to force compaction
-        let mut store = make_store(&dir, 4);
+        let mut store = make_store(&dir, 4).await;
 
         // append enough to trigger compaction (> max_retained)
         for i in 0..5 {
-            store.append(make_event(&format!("evt-{i}"))).unwrap();
+            store.append(make_event(&format!("evt-{i}"))).await.unwrap();
         }
 
         // after compaction, earliest id should be > 1
@@ -265,11 +265,11 @@ mod compaction {
     async fn compacts_when_exceeding_max_retained() {
         let dir = filesys::Dir::create_temp_dir("ev_compact").await.unwrap();
         let max_retained = 10;
-        let mut store = make_store(&dir, max_retained);
+        let mut store = make_store(&dir, max_retained).await;
 
         // append max_retained + 1 events to trigger compaction
         for i in 0..=max_retained {
-            store.append(make_event(&format!("evt-{i}"))).unwrap();
+            store.append(make_event(&format!("evt-{i}"))).await.unwrap();
         }
 
         // compaction keeps max_retained/2 events
@@ -285,10 +285,10 @@ mod compaction {
             .await
             .unwrap();
         let max_retained = 6;
-        let mut store = make_store(&dir, max_retained);
+        let mut store = make_store(&dir, max_retained).await;
 
         for i in 0..8 {
-            store.append(make_event(&format!("evt-{i}"))).unwrap();
+            store.append(make_event(&format!("evt-{i}"))).await.unwrap();
         }
 
         let earliest_before = store.earliest_id().unwrap();
@@ -296,7 +296,7 @@ mod compaction {
 
         // reload from disk
         let log_file = dir.file("events.jsonl");
-        let reloaded = EventStore::init(log_file, max_retained).unwrap();
+        let reloaded = EventStore::init(log_file, max_retained).await.unwrap();
         assert_eq!(reloaded.earliest_id(), Some(earliest_before));
         assert_eq!(reloaded.latest_id(), Some(latest_before));
     }

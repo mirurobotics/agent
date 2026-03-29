@@ -60,7 +60,7 @@ impl Fixture {
             .unwrap();
         let log_file = dir.file("events.jsonl");
         let (event_hub, _hub_handle) =
-            EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+            EventHub::spawn(log_file, SpawnOptions::default()).await.unwrap();
         Self {
             deployment_stor,
             cfg_inst_stor,
