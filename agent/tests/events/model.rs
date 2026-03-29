@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::events::model::{
-    Event, EventArgs, DEPLOYMENT_DEPLOYED_BETA1, DEPLOYMENT_REMOVED_BETA1,
+    Event, EventArgs, DEPLOYMENT_DEPLOYED, DEPLOYMENT_REMOVED,
 };
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 
@@ -18,12 +18,12 @@ mod event_types {
 
     #[test]
     fn deployment_deployed_type_string() {
-        assert_eq!(DEPLOYMENT_DEPLOYED_BETA1, "deployment.deployed.beta1");
+        assert_eq!(DEPLOYMENT_DEPLOYED, "deployment.deployed.beta1");
     }
 
     #[test]
     fn deployment_removed_type_string() {
-        assert_eq!(DEPLOYMENT_REMOVED_BETA1, "deployment.removed.beta1");
+        assert_eq!(DEPLOYMENT_REMOVED, "deployment.removed.beta1");
     }
 }
 
@@ -45,7 +45,7 @@ mod deployment_deployed {
         };
 
         let event = EventArgs::deployed(&dpl).unwrap();
-        assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED_BETA1);
+        assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED);
     }
 
     #[test]
@@ -127,7 +127,7 @@ mod deployment_removed {
         };
 
         let event = EventArgs::removed(&dpl).unwrap();
-        assert_eq!(event.event_type, DEPLOYMENT_REMOVED_BETA1);
+        assert_eq!(event.event_type, DEPLOYMENT_REMOVED);
     }
 
     #[test]

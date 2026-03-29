@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::events::model::{EventArgs, DEPLOYMENT_DEPLOYED_BETA1};
+use miru_agent::events::model::{EventArgs, DEPLOYMENT_DEPLOYED};
 use miru_agent::filesys;
 
 // external crates
@@ -44,10 +44,10 @@ mod publish {
         let (_dir, hub) = make_hub("hub_publish_type").await;
 
         let env = hub
-            .publish(make_event(DEPLOYMENT_DEPLOYED_BETA1))
+            .publish(make_event(DEPLOYMENT_DEPLOYED))
             .await
             .unwrap();
-        assert_eq!(env.event_type, DEPLOYMENT_DEPLOYED_BETA1);
+        assert_eq!(env.event_type, DEPLOYMENT_DEPLOYED);
     }
 
     #[tokio::test]

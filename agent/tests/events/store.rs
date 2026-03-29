@@ -3,7 +3,7 @@ use std::io::Write;
 
 // internal crates
 use miru_agent::events::errors::EventsErr;
-use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED_BETA1};
+use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED};
 use miru_agent::events::store::{EventStore, DEFAULT_MAX_RETAINED};
 use miru_agent::filesys::{self, PathExt};
 
@@ -149,13 +149,13 @@ mod append {
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED);
 
         let event = EventArgs {
-            event_type: DEPLOYMENT_DEPLOYED_BETA1.to_string(),
+            event_type: DEPLOYMENT_DEPLOYED.to_string(),
             occurred_at: Utc::now(),
             data: serde_json::json!({"deployment_id": "dpl-1", "activity_status": "deployed"}),
         };
 
         let envelope = store.append(event).unwrap();
-        assert_eq!(envelope.event_type, DEPLOYMENT_DEPLOYED_BETA1);
+        assert_eq!(envelope.event_type, DEPLOYMENT_DEPLOYED);
         assert_eq!(envelope.data["deployment_id"], "dpl-1");
         assert_eq!(envelope.data["activity_status"], "deployed");
     }

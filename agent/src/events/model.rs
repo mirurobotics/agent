@@ -7,8 +7,11 @@ use device_api::models as device_server;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-pub const DEPLOYMENT_DEPLOYED_BETA1: &str = "deployment.deployed.beta1";
-pub const DEPLOYMENT_REMOVED_BETA1: &str = "deployment.removed.beta1";
+pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed.beta1";
+pub const DEPLOYMENT_REMOVED: &str = "deployment.removed.beta1";
+
+pub type DeploymentDeployedEvent = device_server::DeploymentDeployedBeta1Event;
+pub type DeploymentRemovedEvent = device_server::DeploymentRemovedBeta1Event;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -48,8 +51,8 @@ impl EventArgs {
 
     pub fn deployed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
         Self::new(
-            DEPLOYMENT_DEPLOYED_BETA1,
-            device_server::DeploymentDeployedBeta1Event {
+            DEPLOYMENT_DEPLOYED,
+            DeploymentDeployedEvent {
                 deployment_id: deployment.id.clone(),
                 activity_status: deployment.activity_status.as_str().to_owned(),
                 target_status: deployment.target_status.as_str().to_owned(),
@@ -60,8 +63,8 @@ impl EventArgs {
 
     pub fn removed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
         Self::new(
-            DEPLOYMENT_REMOVED_BETA1,
-            device_server::DeploymentRemovedBeta1Event {
+            DEPLOYMENT_REMOVED,
+            DeploymentRemovedEvent {
                 deployment_id: deployment.id.clone(),
                 activity_status: deployment.activity_status.as_str().to_owned(),
                 target_status: deployment.target_status.as_str().to_owned(),
