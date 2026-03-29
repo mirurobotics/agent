@@ -4,6 +4,7 @@ pub mod device;
 pub mod errors;
 pub mod git_commit;
 pub mod release;
+mod status;
 
 // internal crates
 pub use self::config_instance::CfgInstID;

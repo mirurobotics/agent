@@ -99,6 +99,9 @@ impl StatusFixture for DeviceStatus {
     fn variants() -> Vec<Self> {
         DeviceStatus::variants()
     }
+    fn wire_str(&self) -> &'static str {
+        self.as_str()
+    }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
