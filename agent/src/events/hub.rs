@@ -62,9 +62,9 @@ impl Worker {
                 }
                 Command::Publish { event, respond_to } => {
                     let result = self.store.append(event).await;
-                    if let Ok(ref envelope) = result {
+                    if let Ok(ref event) = result {
                         // broadcast synchronously with append
-                        let _ = self.broadcast_tx.send(envelope.clone());
+                        let _ = self.broadcast_tx.send(event.clone());
                     }
                     if respond_to.send(result).is_err() {
                         error!("EventHub worker failed to send publish response");

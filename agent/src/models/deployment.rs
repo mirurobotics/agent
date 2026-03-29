@@ -1,7 +1,6 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::{config_instance::CfgInstID, Patch};
-use crate::models::status::impl_status_enum;
+use crate::models::{config_instance::CfgInstID, status::impl_status_enum, Patch};
 use backend_api::models as backend_client;
 use device_api::models as agent_server;
 

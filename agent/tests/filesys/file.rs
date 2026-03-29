@@ -752,7 +752,9 @@ pub mod append_bytes {
     async fn creates_file_when_doesnt_exist() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
-        file.append_bytes(b"hello", filesys::AppendOptions::default()).await.unwrap();
+        file.append_bytes(b"hello", filesys::AppendOptions::default())
+            .await
+            .unwrap();
         assert_eq!(file.read_bytes().await.unwrap(), b"hello");
     }
 
@@ -761,7 +763,9 @@ pub mod append_bytes {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("nested").join("subdir"));
         let file = subdir.file("test-file");
-        file.append_bytes(b"hello", filesys::AppendOptions::default()).await.unwrap();
+        file.append_bytes(b"hello", filesys::AppendOptions::default())
+            .await
+            .unwrap();
         assert_eq!(file.read_bytes().await.unwrap(), b"hello");
     }
 
@@ -769,8 +773,12 @@ pub mod append_bytes {
     async fn appends_to_existing_content() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
-        file.append_bytes(b"hello ", filesys::AppendOptions::default()).await.unwrap();
-        file.append_bytes(b"world", filesys::AppendOptions::default()).await.unwrap();
+        file.append_bytes(b"hello ", filesys::AppendOptions::default())
+            .await
+            .unwrap();
+        file.append_bytes(b"world", filesys::AppendOptions::default())
+            .await
+            .unwrap();
         assert_eq!(file.read_string().await.unwrap(), "hello world");
     }
 
@@ -778,9 +786,15 @@ pub mod append_bytes {
     async fn appends_multiple_lines() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
-        file.append_bytes(b"line1\n", filesys::AppendOptions::default()).await.unwrap();
-        file.append_bytes(b"line2\n", filesys::AppendOptions::default()).await.unwrap();
-        file.append_bytes(b"line3\n", filesys::AppendOptions::default()).await.unwrap();
+        file.append_bytes(b"line1\n", filesys::AppendOptions::default())
+            .await
+            .unwrap();
+        file.append_bytes(b"line2\n", filesys::AppendOptions::default())
+            .await
+            .unwrap();
+        file.append_bytes(b"line3\n", filesys::AppendOptions::default())
+            .await
+            .unwrap();
         let content = file.read_string().await.unwrap();
         assert_eq!(content, "line1\nline2\nline3\n");
         assert_eq!(content.lines().count(), 3);
@@ -790,8 +804,12 @@ pub mod append_bytes {
     async fn sync_option_writes_and_persists() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
-        file.append_bytes(b"first\n", filesys::AppendOptions::SYNC).await.unwrap();
-        file.append_bytes(b"second\n", filesys::AppendOptions::SYNC).await.unwrap();
+        file.append_bytes(b"first\n", filesys::AppendOptions::SYNC)
+            .await
+            .unwrap();
+        file.append_bytes(b"second\n", filesys::AppendOptions::SYNC)
+            .await
+            .unwrap();
         assert_eq!(file.read_string().await.unwrap(), "first\nsecond\n");
     }
 
@@ -799,7 +817,9 @@ pub mod append_bytes {
     async fn empty_buffer_creates_file() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
-        file.append_bytes(b"", filesys::AppendOptions::default()).await.unwrap();
+        file.append_bytes(b"", filesys::AppendOptions::default())
+            .await
+            .unwrap();
         assert!(file.exists());
         assert_eq!(file.read_bytes().await.unwrap(), b"");
     }
@@ -808,8 +828,12 @@ pub mod append_bytes {
     async fn empty_buffer_preserves_existing_content() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let file = dir.file("test-file");
-        file.append_bytes(b"existing", filesys::AppendOptions::default()).await.unwrap();
-        file.append_bytes(b"", filesys::AppendOptions::default()).await.unwrap();
+        file.append_bytes(b"existing", filesys::AppendOptions::default())
+            .await
+            .unwrap();
+        file.append_bytes(b"", filesys::AppendOptions::default())
+            .await
+            .unwrap();
         assert_eq!(file.read_string().await.unwrap(), "existing");
     }
 }

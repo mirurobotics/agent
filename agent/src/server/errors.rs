@@ -3,11 +3,11 @@ use crate::authn;
 use crate::cache;
 use crate::crypt;
 use crate::errors::Trace;
+use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::services;
 use crate::storage::StorageErr;
-use crate::events;
 use crate::sync;
 
 #[derive(Debug, thiserror::Error)]

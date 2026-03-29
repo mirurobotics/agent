@@ -314,18 +314,14 @@ async fn apply_deployments<'a>(
             debug!("successfully applied deployment {}", outcome.deployment.id);
             // emit deployment events on success
             match outcome.deployment.activity_status {
-                DplActivity::Deployed => {
-                    match events::EventArgs::deployed(&outcome.deployment) {
-                        Ok(event) => event_hub.try_publish(event).await,
-                        Err(e) => error!("failed to build deployed event: {e}"),
-                    }
-                }
-                DplActivity::Archived => {
-                    match events::EventArgs::removed(&outcome.deployment) {
-                        Ok(event) => event_hub.try_publish(event).await,
-                        Err(e) => error!("failed to build removed event: {e}"),
-                    }
-                }
+                DplActivity::Deployed => match events::EventArgs::deployed(&outcome.deployment) {
+                    Ok(event) => event_hub.try_publish(event).await,
+                    Err(e) => error!("failed to build deployed event: {e}"),
+                },
+                DplActivity::Archived => match events::EventArgs::removed(&outcome.deployment) {
+                    Ok(event) => event_hub.try_publish(event).await,
+                    Err(e) => error!("failed to build removed event: {e}"),
+                },
                 _ => {}
             }
         }

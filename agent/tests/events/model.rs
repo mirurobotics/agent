@@ -1,7 +1,5 @@
 // internal crates
-use miru_agent::events::model::{
-    Event, EventArgs, DEPLOYMENT_DEPLOYED, DEPLOYMENT_REMOVED,
-};
+use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED, DEPLOYMENT_REMOVED};
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 
 // external crates

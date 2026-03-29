@@ -44,7 +44,9 @@ impl EventStore {
         self.next_event_id += 1;
 
         let json = serde_json::to_string(&envelope)?;
-        self.log_file.append_bytes(format!("{json}\n").as_bytes(), AppendOptions::SYNC).await?;
+        self.log_file
+            .append_bytes(format!("{json}\n").as_bytes(), AppendOptions::SYNC)
+            .await?;
 
         self.events.push(envelope.clone());
 
@@ -109,7 +111,9 @@ impl EventStore {
         }
 
         let tmp_file = filesys::File::new(self.log_file.path().with_extension("jsonl.tmp"));
-        tmp_file.write_string(&buf, WriteOptions::OVERWRITE_ATOMIC).await?;
+        tmp_file
+            .write_string(&buf, WriteOptions::OVERWRITE_ATOMIC)
+            .await?;
         tmp_file.move_to(&self.log_file, Overwrite::Allow).await?;
 
         // only trim in-memory after disk write succeeded

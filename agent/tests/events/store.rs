@@ -136,7 +136,9 @@ mod append {
         }
 
         // reload from disk
-        let store = EventStore::init(log_file, DEFAULT_MAX_RETAINED).await.unwrap();
+        let store = EventStore::init(log_file, DEFAULT_MAX_RETAINED)
+            .await
+            .unwrap();
         assert_eq!(store.earliest_id(), Some(1));
         assert_eq!(store.latest_id(), Some(2));
     }

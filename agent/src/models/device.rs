@@ -1,7 +1,6 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::Patch;
-use crate::models::status::impl_status_enum;
+use crate::models::{status::impl_status_enum, Patch};
 use device_api::models as agent_server;
 
 // external crates
