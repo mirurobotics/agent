@@ -29,7 +29,7 @@ mod publish {
     use super::*;
 
     #[tokio::test]
-    async fn returns_envelope_with_monotonic_ids() {
+    async fn returns_event_with_monotonic_ids() {
         let (_dir, hub) = make_hub("hub_publish_mono").await;
 
         let e1 = hub.publish(make_event("test.a")).await.unwrap();

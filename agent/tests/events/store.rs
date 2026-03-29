@@ -150,16 +150,16 @@ mod append {
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
-        let event = EventArgs {
+        let event_args = EventArgs {
             event_type: DEPLOYMENT_DEPLOYED.to_string(),
             occurred_at: Utc::now(),
             data: serde_json::json!({"deployment_id": "dpl-1", "activity_status": "deployed"}),
         };
 
-        let envelope = store.append(event).await.unwrap();
-        assert_eq!(envelope.event_type, DEPLOYMENT_DEPLOYED);
-        assert_eq!(envelope.data["deployment_id"], "dpl-1");
-        assert_eq!(envelope.data["activity_status"], "deployed");
+        let event = store.append(event_args).await.unwrap();
+        assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED);
+        assert_eq!(event.data["deployment_id"], "dpl-1");
+        assert_eq!(event.data["activity_status"], "deployed");
     }
 }
 
@@ -274,8 +274,8 @@ mod compaction {
             store.append(make_event(&format!("evt-{i}"))).await.unwrap();
         }
 
-        // compaction keeps max_retained/2 events
-        let keep_count = max_retained / 2;
+        // compaction keeps 80% of max_retained events
+        let keep_count = (max_retained * 80) / 100;
         let expected_earliest = (max_retained + 1) - keep_count + 1;
         assert_eq!(store.earliest_id(), Some(expected_earliest as u64));
         assert_eq!(store.latest_id(), Some((max_retained + 1) as u64));

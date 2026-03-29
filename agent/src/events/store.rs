@@ -39,24 +39,22 @@ impl EventStore {
         })
     }
 
-    pub async fn append(&mut self, event: EventArgs) -> Result<Event, EventsErr> {
-        let envelope = Event::new(self.next_event_id, event);
+    pub async fn append(&mut self, event_args: EventArgs) -> Result<Event, EventsErr> {
+        let event = Event::new(self.next_event_id, event_args);
         self.next_event_id += 1;
 
-        let json = serde_json::to_string(&envelope)?;
+        let json = serde_json::to_string(&event)?;
         self.log_file
             .append_bytes(format!("{json}\n").as_bytes(), AppendOptions::SYNC)
             .await?;
 
-        self.events.push(envelope.clone());
+        self.events.push(event.clone());
 
-        if self.events.len() > self.max_retained {
-            if let Err(e) = self.compact().await {
-                error!("event store compaction failed: {e}");
-            }
+        if self.needs_compaction() {
+            self.try_compact().await;
         }
 
-        Ok(envelope)
+        Ok(event)
     }
 
     /// Return all events with id > cursor, validating that the cursor has not
@@ -90,35 +88,60 @@ impl EventStore {
         self.events.last().map(|e| e.id)
     }
 
-    /// Compact the log to 90% of max_retained.
+    pub fn needs_compaction(&self) -> bool {
+        self.events.len() > self.max_retained
+    }
+
+    /// Compact the log to 80% of max_retained.
     ///
     /// Writes the compacted log to a temp file first, then atomically renames
     /// it over the original. The in-memory vec is only trimmed *after* the
     /// disk write succeeds, so a failed compaction never loses events.
     async fn compact(&mut self) -> Result<(), EventsErr> {
-        let keep_count = self.max_retained / 2;
+        let keep_count = (self.max_retained * 80) / 100;
         if self.events.len() <= keep_count {
             return Ok(());
         }
         let drain_count = self.events.len() - keep_count;
 
-        // build compacted content in memory, then write atomically to temp file
+        let content = self.get_compacted_content(drain_count)?;
+        self.write_compacted_content(&content).await?;
+
+        // only trim in-memory after disk write succeeded
+        self.events.drain(..drain_count);
+        Ok(())
+    }
+
+    fn get_compacted_content(
+        &self,
+        drain_count: usize,
+    ) -> Result<String, EventsErr> {
         let mut buf = String::new();
         for event in &self.events[drain_count..] {
             let json = serde_json::to_string(event)?;
             buf.push_str(&json);
             buf.push('\n');
         }
+        Ok(buf)
+    }
 
-        let tmp_file = filesys::File::new(self.log_file.path().with_extension("jsonl.tmp"));
+    async fn write_compacted_content(
+        &self,
+        content: &str,
+    ) -> Result<(), EventsErr> {
+        let tmp_file_path = self.log_file.path().with_extension("jsonl.tmp");
+        let tmp_file = filesys::File::new(tmp_file_path);
         tmp_file
-            .write_string(&buf, WriteOptions::OVERWRITE_ATOMIC)
+            .write_string(content, WriteOptions::OVERWRITE_ATOMIC)
             .await?;
         tmp_file.move_to(&self.log_file, Overwrite::Allow).await?;
-
-        // only trim in-memory after disk write succeeded
-        self.events.drain(..drain_count);
         Ok(())
+    }
+
+    async fn try_compact(&mut self) {
+        if let Err(e) = self.compact().await {
+            error!("event store compaction failed: {e}");
+        }
     }
 
     /// Read a JSONL log file into `events`, advancing `next_event_id` past
@@ -133,11 +156,11 @@ impl EventStore {
                 continue;
             }
             match serde_json::from_str::<Event>(line) {
-                Ok(envelope) => {
-                    if envelope.id >= next_event_id {
-                        next_event_id = envelope.id + 1;
+                Ok(event) => {
+                    if event.id >= next_event_id {
+                        next_event_id = event.id + 1;
                     }
-                    events.push(envelope);
+                    events.push(event);
                 }
                 Err(e) => {
                     warn!("skipping malformed event at line {}: {e}", line_num + 1);
