@@ -59,6 +59,7 @@ pub mod routes {
 
     use device_api::models as openapi;
     use miru_agent::activity;
+    use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::{self, Overwrite};
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
@@ -97,12 +98,17 @@ pub mod routes {
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
 
+            let log_file = dir.file("events.jsonl");
+            let (event_hub, _hub_handle) =
+                EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
+
             let state = Arc::new(State::new(
                 storage,
                 real_http_client,
                 syncer,
                 Arc::new(token_mngr),
                 activity_tracker,
+                event_hub,
             ));
 
             let app = serve::routes(state.clone());

@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
 use miru_agent::deploy::{apply, fsm};
+use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
@@ -34,6 +35,7 @@ struct Fixture {
     staging_dir: filesys::Dir,
     target_dir: filesys::Dir,
     retry_policy: fsm::RetryPolicy,
+    event_hub: EventHub,
     _dir: filesys::Dir,
 }
 
@@ -56,6 +58,9 @@ impl Fixture {
         let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
             .await
             .unwrap();
+        let log_file = dir.file("events.jsonl");
+        let (event_hub, _hub_handle) =
+            EventHub::spawn(log_file, SpawnOptions::default()).unwrap();
         Self {
             deployment_stor,
             cfg_inst_stor,
@@ -66,6 +71,7 @@ impl Fixture {
             staging_dir: dir.subdir("staging"),
             target_dir: dir.subdir("deployments"),
             retry_policy: fsm::RetryPolicy::default(),
+            event_hub,
             _dir: dir,
         }
     }
@@ -89,6 +95,7 @@ impl Fixture {
             http_client: &self.http_client,
             opts: &opts,
             token: "test_token",
+            event_hub: &self.event_hub,
         })
         .await
     }

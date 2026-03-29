@@ -62,6 +62,14 @@ impl Layout {
         self.resources().file("git_commits.json")
     }
 
+    pub fn events_dir(&self) -> filesys::Dir {
+        self.root().subdir("events")
+    }
+
+    pub fn events_log_file(&self) -> filesys::File {
+        self.events_dir().file("events.jsonl")
+    }
+
     pub fn customer_configs(&self) -> filesys::Dir {
         self.filesystem_root
             .subdir("srv")
