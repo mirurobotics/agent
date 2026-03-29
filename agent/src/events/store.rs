@@ -44,7 +44,7 @@ impl EventStore {
     }
 
     pub fn append(&mut self, event: EventArgs) -> Result<Event, EventsErr> {
-        let envelope = Event::from_new_event(self.next_event_id, event);
+        let envelope = Event::new(self.next_event_id, event);
         self.next_event_id += 1;
 
         let json = serde_json::to_string(&envelope)?;
@@ -73,7 +73,9 @@ impl EventStore {
     /// expired (i.e. been compacted away).
     ///
     /// IDs are monotonically increasing and sorted, so we binary-search for the
-    /// partition point rather than scanning linearly.
+    /// partition point rather than scanning linearly. We cannot index directly
+    /// from the cursor because `load_log()` tolerates malformed/partial lines,
+    /// which means persisted event IDs may be sparse after reload.
     pub fn replay_after(&self, cursor: u64) -> Result<Vec<Event>, EventsErr> {
         if cursor != 0 {
             if let Some(earliest) = self.earliest_id() {

@@ -20,12 +20,12 @@ pub struct Event {
 }
 
 impl Event {
-    pub(crate) fn from_new_event(id: u64, event: EventArgs) -> Self {
+    pub(crate) fn new(id: u64, args: EventArgs) -> Self {
         Self {
             id,
-            event_type: event.event_type,
-            occurred_at: event.occurred_at,
-            data: event.data,
+            event_type: args.event_type,
+            occurred_at: args.occurred_at,
+            data: args.data,
         }
     }
 }
@@ -46,35 +46,27 @@ impl EventArgs {
         })
     }
 
-    pub fn deployment_deployed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
+    pub fn deployed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
         Self::new(
             DEPLOYMENT_DEPLOYED_BETA1,
             device_server::DeploymentDeployedBeta1Event {
                 deployment_id: deployment.id.clone(),
-                activity_status: status_str(&deployment.activity_status),
-                target_status: status_str(&deployment.target_status),
+                activity_status: deployment.activity_status.as_str().to_owned(),
+                target_status: deployment.target_status.as_str().to_owned(),
                 deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
             },
         )
     }
 
-    pub fn deployment_removed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
+    pub fn removed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
         Self::new(
             DEPLOYMENT_REMOVED_BETA1,
             device_server::DeploymentRemovedBeta1Event {
                 deployment_id: deployment.id.clone(),
-                activity_status: status_str(&deployment.activity_status),
-                target_status: status_str(&deployment.target_status),
+                activity_status: deployment.activity_status.as_str().to_owned(),
+                target_status: deployment.target_status.as_str().to_owned(),
                 archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
             },
         )
     }
-}
-
-/// Serialize a serde-compatible enum variant to its wire-format string.
-fn status_str(status: &impl Serialize) -> String {
-    serde_json::to_value(status)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_default()
 }

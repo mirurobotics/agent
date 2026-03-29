@@ -44,7 +44,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED_BETA1);
     }
 
@@ -57,7 +57,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl).unwrap();
         assert_eq!(event.data["deployment_id"], "dpl-42");
     }
 
@@ -70,7 +70,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl).unwrap();
         assert_eq!(event.data["activity_status"], "deployed");
     }
 
@@ -82,7 +82,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl).unwrap();
         assert_eq!(event.data["target_status"], "deployed");
     }
 
@@ -95,7 +95,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl).unwrap();
         assert!(event.data["deployed_at"].is_string());
     }
 
@@ -107,7 +107,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl).unwrap();
         assert!(event.data["deployed_at"].is_null());
     }
 }
@@ -126,7 +126,7 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_removed(&dpl).unwrap();
+        let event = EventArgs::removed(&dpl).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_REMOVED_BETA1);
     }
 
@@ -139,7 +139,7 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_removed(&dpl).unwrap();
+        let event = EventArgs::removed(&dpl).unwrap();
         assert_eq!(event.data["deployment_id"], "dpl-99");
     }
 
@@ -152,7 +152,7 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_removed(&dpl).unwrap();
+        let event = EventArgs::removed(&dpl).unwrap();
         assert!(event.data["archived_at"].is_string());
     }
 
@@ -164,7 +164,7 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployment_removed(&dpl).unwrap();
+        let event = EventArgs::removed(&dpl).unwrap();
         assert!(event.data["archived_at"].is_null());
     }
 }
