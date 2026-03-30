@@ -112,10 +112,7 @@ impl EventStore {
         Ok(())
     }
 
-    fn get_compacted_content(
-        &self,
-        drain_count: usize,
-    ) -> Result<String, EventsErr> {
+    fn get_compacted_content(&self, drain_count: usize) -> Result<String, EventsErr> {
         let mut buf = String::new();
         for event in &self.events[drain_count..] {
             let json = serde_json::to_string(event)?;
@@ -125,10 +122,7 @@ impl EventStore {
         Ok(buf)
     }
 
-    async fn write_compacted_content(
-        &self,
-        content: &str,
-    ) -> Result<(), EventsErr> {
+    async fn write_compacted_content(&self, content: &str) -> Result<(), EventsErr> {
         let tmp_file_path = self.log_file.path().with_extension("jsonl.tmp");
         let tmp_file = filesys::File::new(tmp_file_path);
         tmp_file
