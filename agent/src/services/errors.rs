@@ -1,5 +1,6 @@
 // internal crates
 use crate::cache;
+use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::models;
@@ -18,6 +19,8 @@ pub enum ServiceErr {
     StorageErr(StorageErr),
     #[error(transparent)]
     HTTPErr(http::HTTPErr),
+    #[error(transparent)]
+    EventsErr(events::errors::EventsErr),
     #[error(transparent)]
     SyncErr(sync::SyncErr),
 }
@@ -52,6 +55,12 @@ impl From<http::HTTPErr> for ServiceErr {
     }
 }
 
+impl From<events::errors::EventsErr> for ServiceErr {
+    fn from(e: events::errors::EventsErr) -> Self {
+        Self::EventsErr(e)
+    }
+}
+
 impl From<sync::SyncErr> for ServiceErr {
     fn from(e: sync::SyncErr) -> Self {
         Self::SyncErr(e)
@@ -60,6 +69,7 @@ impl From<sync::SyncErr> for ServiceErr {
 
 crate::impl_error!(ServiceErr {
     CacheErr,
+    EventsErr,
     FileSysErr,
     ModelsErr,
     StorageErr,
