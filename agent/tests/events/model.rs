@@ -108,6 +108,22 @@ mod deployment_deployed {
         let event = EventArgs::deployed(&dpl).unwrap();
         assert!(event.data["deployed_at"].is_null());
     }
+
+    #[test]
+    fn serializes_non_deployed_activity_without_validation() {
+        // deployed() is a factory, not a validator — it serializes
+        // whatever activity_status is present without checking it
+        let dpl = Deployment {
+            id: "dpl-1".into(),
+            activity_status: DplActivity::Queued,
+            target_status: DplTarget::Deployed,
+            ..Default::default()
+        };
+
+        let event = EventArgs::deployed(&dpl).unwrap();
+        assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED);
+        assert_eq!(event.data["activity_status"], "queued");
+    }
 }
 
 // ========================= DEPLOYMENT REMOVED ========================= //
@@ -164,6 +180,20 @@ mod deployment_removed {
 
         let event = EventArgs::removed(&dpl).unwrap();
         assert!(event.data["archived_at"].is_null());
+    }
+
+    #[test]
+    fn serializes_non_archived_activity_without_validation() {
+        let dpl = Deployment {
+            id: "dpl-1".into(),
+            activity_status: DplActivity::Deployed,
+            target_status: DplTarget::Archived,
+            ..Default::default()
+        };
+
+        let event = EventArgs::removed(&dpl).unwrap();
+        assert_eq!(event.event_type, DEPLOYMENT_REMOVED);
+        assert_eq!(event.data["activity_status"], "deployed");
     }
 }
 

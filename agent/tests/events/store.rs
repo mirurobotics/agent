@@ -302,4 +302,67 @@ mod compaction {
         assert_eq!(reloaded.earliest_id(), Some(earliest_before));
         assert_eq!(reloaded.latest_id(), Some(latest_before));
     }
+
+    #[tokio::test]
+    async fn append_after_compaction_continues_ids() {
+        let dir = filesys::Dir::create_temp_dir("ev_compact_ids")
+            .await
+            .unwrap();
+        let mut store = make_store(&dir, 4).await;
+
+        // append 5 events (triggers compaction at > 4)
+        for i in 0..5 {
+            store.append(make_event(&format!("evt-{i}"))).await.unwrap();
+        }
+
+        // 6th event should get id=6, not restart
+        let e6 = store.append(make_event("after-compact")).await.unwrap();
+        assert_eq!(e6.id, 6, "IDs should continue monotonically after compaction");
+    }
+}
+
+// ========================= ADDITIONAL EDGE CASES ========================= //
+
+mod edge_cases {
+    use super::*;
+
+    #[tokio::test]
+    async fn cursor_zero_on_empty_store_returns_empty() {
+        let dir = filesys::Dir::create_temp_dir("ev_empty_replay")
+            .await
+            .unwrap();
+        let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
+
+        let result = store.replay_after(0);
+        assert!(result.is_ok(), "replay_after(0) on empty store should succeed");
+        assert!(
+            result.unwrap().is_empty(),
+            "empty store should return empty replay"
+        );
+    }
+
+    #[tokio::test]
+    async fn all_malformed_lines_produces_empty_store() {
+        let dir = filesys::Dir::create_temp_dir("ev_all_malformed")
+            .await
+            .unwrap();
+        let log_file = dir.file("events.jsonl");
+
+        {
+            let mut f = std::fs::File::create(log_file.path()).unwrap();
+            writeln!(f, "not json at all").unwrap();
+            writeln!(f, "{{\"broken\": true}}").unwrap();
+            writeln!(f, "also garbage").unwrap();
+        }
+
+        let mut store = EventStore::init(log_file, DEFAULT_MAX_RETAINED)
+            .await
+            .unwrap();
+        assert_eq!(store.earliest_id(), None);
+        assert_eq!(store.latest_id(), None);
+
+        // first append should get id=1
+        let e = store.append(make_event("first")).await.unwrap();
+        assert_eq!(e.id, 1, "next_event_id should start at 1 when all lines were malformed");
+    }
 }

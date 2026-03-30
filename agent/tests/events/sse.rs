@@ -378,4 +378,130 @@ mod type_filter {
         assert!(body.contains("event: type.c"), "expected type.c");
         assert!(!body.contains("event: type.b"), "should not contain type.b");
     }
+
+    #[tokio::test]
+    async fn empty_types_param_returns_no_events() {
+        let f = Fixture::new("sse_empty_types").await;
+
+        f.event_hub().publish(make_event("type.a")).await.unwrap();
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0&types=")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // empty types= produces an empty HashSet filter, which matches nothing
+        assert!(
+            !body.contains("event: type.a"),
+            "empty types param should filter out all events, body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn types_with_whitespace_are_trimmed() {
+        let f = Fixture::new("sse_types_ws").await;
+
+        f.event_hub().publish(make_event("type.a")).await.unwrap();
+        f.event_hub().publish(make_event("type.b")).await.unwrap();
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0&types=%20type.a%20,%20type.b%20")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        assert!(
+            body.contains("event: type.a"),
+            "type.a should match after trim, body: {body}"
+        );
+        assert!(
+            body.contains("event: type.b"),
+            "type.b should match after trim, body: {body}"
+        );
+    }
+}
+
+// ========================= ADDITIONAL EDGE CASES ========================= //
+
+mod edge_cases {
+    use super::*;
+
+    #[tokio::test]
+    async fn cursor_zero_replays_all_via_sse() {
+        let f = Fixture::new("sse_cursor_zero_all").await;
+
+        f.event_hub().publish(make_event("a")).await.unwrap();
+        f.event_hub().publish(make_event("b")).await.unwrap();
+        f.event_hub().publish(make_event("c")).await.unwrap();
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        assert!(body.contains("id: 1"), "expected event 1, body: {body}");
+        assert!(body.contains("id: 2"), "expected event 2, body: {body}");
+        assert!(body.contains("id: 3"), "expected event 3, body: {body}");
+    }
+
+    #[tokio::test]
+    async fn non_utf8_last_event_id_returns_400() {
+        let f = Fixture::new("sse_non_utf8").await;
+
+        let req = Request::builder()
+            .uri("/v0.2/events")
+            .header("Last-Event-ID", &b"\xff\xfe"[..])
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, _bytes) = f.request(req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn live_events_appear_after_replay() {
+        let f = Fixture::new("sse_replay_then_live").await;
+
+        // Publish 2 events before connecting
+        f.event_hub().publish(make_event("replay")).await.unwrap();
+        f.event_hub().publish(make_event("replay")).await.unwrap();
+
+        // Clone the hub for the spawned task
+        let hub = f.event_hub().clone();
+
+        // Spawn a task that publishes a live event after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            hub.publish(make_event("live")).await.unwrap();
+        });
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(300)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Should contain both replayed events and the live event
+        assert!(body.contains("id: 1"), "expected replayed event 1, body: {body}");
+        assert!(body.contains("id: 2"), "expected replayed event 2, body: {body}");
+        assert!(body.contains("id: 3"), "expected live event 3, body: {body}");
+        assert!(
+            body.contains("event: live"),
+            "expected live event type, body: {body}"
+        );
+    }
 }

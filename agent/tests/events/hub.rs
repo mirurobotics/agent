@@ -132,18 +132,67 @@ mod subscribe {
         assert_eq!(e2.event_type, "second");
         assert!(e2.id > e1.id);
     }
+
+    #[tokio::test]
+    async fn multiple_subscribers_receive_same_event() {
+        let (_dir, hub) = make_hub("hub_sub_multi").await;
+        let mut rx1 = hub.subscribe();
+        let mut rx2 = hub.subscribe();
+
+        let published = hub.publish(make_event("shared")).await.unwrap();
+
+        let e1 = rx1.recv().await.unwrap();
+        let e2 = rx2.recv().await.unwrap();
+
+        assert_eq!(e1.id, published.id);
+        assert_eq!(e2.id, published.id);
+        assert_eq!(e1.event_type, "shared");
+        assert_eq!(e2.event_type, "shared");
+    }
+
+    #[tokio::test]
+    async fn subscriber_before_any_events_receives_first_live() {
+        let (_dir, hub) = make_hub("hub_sub_fresh").await;
+        let mut rx = hub.subscribe();
+
+        // No events exist yet — subscribe on a fresh hub
+        let published = hub.publish(make_event("first.ever")).await.unwrap();
+        let received = rx.recv().await.unwrap();
+
+        assert_eq!(received.id, published.id);
+        assert_eq!(received.event_type, "first.ever");
+    }
 }
 
 // ========================= SHUTDOWN ========================= //
 
 mod shutdown {
     use super::*;
+    use miru_agent::events::errors::EventsErr;
 
     #[tokio::test]
     async fn shutdown_completes_without_error() {
         let (_dir, hub) = make_hub("hub_shutdown").await;
         hub.publish(make_event("before_shutdown")).await.unwrap();
         hub.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn publish_after_shutdown_returns_error() {
+        let (dir, _hub) = make_hub("hub_pub_after_shutdown").await;
+        let log_file = dir.file("events.jsonl");
+        let (hub, handle) = EventHub::spawn(log_file, SpawnOptions::default())
+            .await
+            .unwrap();
+
+        hub.shutdown().await.unwrap();
+        handle.await.unwrap();
+
+        let result = hub.publish(make_event("too.late")).await;
+        assert!(
+            matches!(result, Err(EventsErr::SendActorMessageErr(_))),
+            "publish after shutdown should return SendActorMessageErr, got: {result:?}"
+        );
     }
 }
 

@@ -1298,3 +1298,197 @@ mod idempotency {
         assert_eq!(gcs.len(), 1, "git commits should not duplicate");
     }
 }
+
+mod event_emission {
+    use super::*;
+    use miru_agent::events::model::{DEPLOYMENT_DEPLOYED, DEPLOYMENT_REMOVED};
+
+    #[tokio::test]
+    async fn deployed_deployment_emits_deployed_event() {
+        let f = Fixture::new("evt_deployed").await;
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        f.sync().await.unwrap();
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(events.len(), 1, "should emit exactly 1 event");
+        assert_eq!(events[0].event_type, DEPLOYMENT_DEPLOYED);
+        assert_eq!(events[0].data["deployment_id"], "dpl_1");
+        assert_eq!(events[0].data["activity_status"], "deployed");
+    }
+
+    #[tokio::test]
+    async fn archived_deployment_emits_removed_event() {
+        let f = Fixture::new("evt_archived").await;
+
+        // seed a deployed deployment so archiving is actionable
+        let seeded = models::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        let backend_dep = make_archived_dpl("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        f.sync().await.unwrap();
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(events.len(), 1, "should emit exactly 1 event");
+        assert_eq!(events[0].event_type, DEPLOYMENT_REMOVED);
+        assert_eq!(events[0].data["deployment_id"], "dpl_1");
+        assert_eq!(events[0].data["activity_status"], "archived");
+    }
+
+    #[tokio::test]
+    async fn non_actionable_deployment_emits_no_events() {
+        let f = Fixture::new("evt_non_actionable").await;
+
+        // seed a deployment in cooldown (not actionable)
+        let future_cooldown = Utc::now() + chrono::TimeDelta::seconds(3600);
+        let seeded = models::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::Retrying,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            cooldown_ends_at: future_cooldown,
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        // sync succeeds but deployment is skipped (in cooldown)
+        f.sync().await.unwrap();
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert!(
+            events.is_empty(),
+            "non-actionable deployment should emit no events"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_apply_emits_no_events() {
+        let f = Fixture::new("evt_failed_apply").await;
+
+        // two deployments both targeting deployed — will conflict
+        let dpl_1 = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let dpl_2 = make_deployment("dpl_2", &["cfg_inst_2"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl_1.clone(), dpl_2.clone()]));
+
+        let _ = f.sync().await;
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert!(
+            events.is_empty(),
+            "failed apply should emit no events, got {} events",
+            events.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn deployed_event_data_includes_timestamps() {
+        let f = Fixture::new("evt_timestamps").await;
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        f.sync().await.unwrap();
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(events.len(), 1);
+
+        // deployed_at should be set by the FSM as a non-null string
+        assert!(
+            events[0].data["deployed_at"].is_string(),
+            "deployed_at should be a string timestamp, got: {}",
+            events[0].data["deployed_at"]
+        );
+        assert_eq!(events[0].data["target_status"], "deployed");
+    }
+
+    #[tokio::test]
+    async fn multiple_deployments_emit_multiple_events() {
+        let f = Fixture::new("evt_multi").await;
+
+        // seed a deployed deployment for archiving
+        let seeded = models::Deployment {
+            id: "dpl_2".to_string(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_2".to_string()],
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write("dpl_2".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_2".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // dpl_1: queued -> deployed, dpl_2: deployed -> archived
+        let dpl_deploy = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let dpl_archive = make_archived_dpl("dpl_2", &["cfg_inst_2"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl_deploy.clone(), dpl_archive.clone()]));
+
+        f.sync().await.unwrap();
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(events.len(), 2, "should emit 2 events");
+
+        let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+        assert!(
+            types.contains(&DEPLOYMENT_DEPLOYED),
+            "should contain deployed event"
+        );
+        assert!(
+            types.contains(&DEPLOYMENT_REMOVED),
+            "should contain removed event"
+        );
+    }
+}
