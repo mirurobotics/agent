@@ -240,7 +240,7 @@ mod stream {
             .unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events")
+            .uri("/v0.2/events?after=0")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
@@ -288,6 +288,29 @@ mod stream {
     }
 
     #[tokio::test]
+    async fn no_cursor_skips_replay() {
+        let f = Fixture::new("sse_no_cursor_no_replay").await;
+
+        // publish events before connecting
+        f.event_hub().publish(make_event("old")).await.unwrap();
+        f.event_hub().publish(make_event("old")).await.unwrap();
+
+        // connect without cursor — should NOT replay historical events
+        let req = Request::builder()
+            .uri("/v0.2/events")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            !body.contains("event: old"),
+            "fresh connection should not replay historical events, body: {body}"
+        );
+    }
+
+    #[tokio::test]
     async fn empty_stream_returns_200() {
         let f = Fixture::new("sse_empty").await;
 
@@ -316,7 +339,7 @@ mod type_filter {
         f.event_hub().publish(make_event("type.a")).await.unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events?types=type.a")
+            .uri("/v0.2/events?after=0&types=type.a")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
@@ -343,7 +366,7 @@ mod type_filter {
         f.event_hub().publish(make_event("type.c")).await.unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events?types=type.a,type.c")
+            .uri("/v0.2/events?after=0&types=type.a,type.c")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
