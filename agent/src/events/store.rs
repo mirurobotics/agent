@@ -152,7 +152,8 @@ impl EventStore {
 
         let content = log_file.read_string().await?;
         for (line_num, line) in content.lines().enumerate() {
-            if line.trim().is_empty() {
+            let line = line.trim();
+            if line.is_empty() {
                 continue;
             }
             match serde_json::from_str::<Event>(line) {
