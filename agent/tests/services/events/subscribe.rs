@@ -41,7 +41,11 @@ async fn make_small_hub(name: &str, max_retained: usize) -> (filesys::Dir, Event
 }
 
 /// Collect up to `n` events from the stream within a timeout.
-async fn collect_n<S>(stream: &mut S, n: usize, timeout: Duration) -> Vec<miru_agent::events::model::Event>
+async fn collect_n<S>(
+    stream: &mut S,
+    n: usize,
+    timeout: Duration,
+) -> Vec<miru_agent::events::model::Event>
 where
     S: tokio_stream::Stream<Item = miru_agent::events::model::Event> + Unpin,
 {
@@ -169,7 +173,11 @@ mod live {
         let items = collect_n(&mut stream, 5, Duration::from_millis(500)).await;
 
         let ids: Vec<u64> = items.iter().map(|e| e.id).collect();
-        assert_eq!(ids, vec![1, 2, 3, 4], "expected no duplicates, got: {ids:?}");
+        assert_eq!(
+            ids,
+            vec![1, 2, 3, 4],
+            "expected no duplicates, got: {ids:?}"
+        );
     }
 
     #[tokio::test]
@@ -190,7 +198,11 @@ mod live {
         // replay yields [1, 2], live yields [3] (chain is deterministic)
         let items = collect_n(&mut stream, 4, Duration::from_millis(500)).await;
         let ids: Vec<u64> = items.iter().map(|e| e.id).collect();
-        assert_eq!(ids, vec![1, 2, 3], "expected replay + live event, got: {ids:?}");
+        assert_eq!(
+            ids,
+            vec![1, 2, 3],
+            "expected replay + live event, got: {ids:?}"
+        );
     }
 }
 

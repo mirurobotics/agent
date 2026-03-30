@@ -496,9 +496,18 @@ mod edge_cases {
         assert_eq!(status, StatusCode::OK);
 
         // Should contain both replayed events and the live event
-        assert!(body.contains("id: 1"), "expected replayed event 1, body: {body}");
-        assert!(body.contains("id: 2"), "expected replayed event 2, body: {body}");
-        assert!(body.contains("id: 3"), "expected live event 3, body: {body}");
+        assert!(
+            body.contains("id: 1"),
+            "expected replayed event 1, body: {body}"
+        );
+        assert!(
+            body.contains("id: 2"),
+            "expected replayed event 2, body: {body}"
+        );
+        assert!(
+            body.contains("id: 3"),
+            "expected live event 3, body: {body}"
+        );
         assert!(
             body.contains("event: live"),
             "expected live event type, body: {body}"

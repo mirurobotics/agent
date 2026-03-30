@@ -317,7 +317,10 @@ mod compaction {
 
         // 6th event should get id=6, not restart
         let e6 = store.append(make_event("after-compact")).await.unwrap();
-        assert_eq!(e6.id, 6, "IDs should continue monotonically after compaction");
+        assert_eq!(
+            e6.id, 6,
+            "IDs should continue monotonically after compaction"
+        );
     }
 }
 
@@ -334,7 +337,10 @@ mod edge_cases {
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         let result = store.replay_after(0);
-        assert!(result.is_ok(), "replay_after(0) on empty store should succeed");
+        assert!(
+            result.is_ok(),
+            "replay_after(0) on empty store should succeed"
+        );
         assert!(
             result.unwrap().is_empty(),
             "empty store should return empty replay"
@@ -363,6 +369,9 @@ mod edge_cases {
 
         // first append should get id=1
         let e = store.append(make_event("first")).await.unwrap();
-        assert_eq!(e.id, 1, "next_event_id should start at 1 when all lines were malformed");
+        assert_eq!(
+            e.id, 1,
+            "next_event_id should start at 1 when all lines were malformed"
+        );
     }
 }
