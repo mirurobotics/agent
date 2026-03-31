@@ -13,6 +13,9 @@ pub struct CursorExpiredErr {
 }
 
 impl crate::errors::Error for CursorExpiredErr {
+    fn code(&self) -> crate::errors::Code {
+        crate::errors::Code::CursorExpired
+    }
     fn http_status(&self) -> crate::errors::HTTPCode {
         crate::errors::HTTPCode::GONE
     }
@@ -25,6 +28,9 @@ pub struct MalformedCursorErr {
 }
 
 impl crate::errors::Error for MalformedCursorErr {
+    fn code(&self) -> crate::errors::Code {
+        crate::errors::Code::MalformedCursor
+    }
     fn http_status(&self) -> crate::errors::HTTPCode {
         crate::errors::HTTPCode::BAD_REQUEST
     }
@@ -49,6 +55,13 @@ pub enum EventsErr {
 }
 
 impl crate::errors::Error for EventsErr {
+    fn code(&self) -> crate::errors::Code {
+        match self {
+            Self::CursorExpiredErr(e) => e.code(),
+            Self::MalformedCursorErr(e) => e.code(),
+            _ => crate::errors::Code::InternalServerError,
+        }
+    }
     fn http_status(&self) -> crate::errors::HTTPCode {
         match self {
             Self::CursorExpiredErr(e) => e.http_status(),

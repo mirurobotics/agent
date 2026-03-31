@@ -9,6 +9,8 @@ pub type HTTPCode = StatusCode;
 pub enum Code {
     InternalServerError,
     ResourceNotFound,
+    CursorExpired,
+    MalformedCursor,
     BackendError(String),
 }
 
@@ -17,6 +19,8 @@ impl Code {
         match self {
             Self::InternalServerError => "internal_server_error",
             Self::ResourceNotFound => "resource_not_found",
+            Self::CursorExpired => "cursor_expired",
+            Self::MalformedCursor => "malformed_cursor",
             Self::BackendError(code) => code,
         }
     }
