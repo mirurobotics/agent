@@ -1,4 +1,5 @@
 // internal crates
+use device_api::models::{DeploymentActivityStatus, DeploymentTargetStatus};
 use miru_agent::events::model::{
     DeploymentDeployedEvent, DeploymentRemovedEvent, Event, EventArgs, DEPLOYMENT_DEPLOYED,
     DEPLOYMENT_REMOVED,
@@ -88,8 +89,8 @@ mod deployment_deployed {
             actual.data,
             serde_json::json!(DeploymentDeployedEvent {
                 deployment_id: "dpl-1".into(),
-                activity_status: "deployed".into(),
-                target_status: "deployed".into(),
+                activity_status: DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+                target_status: DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
                 deployed_at: Some(t.to_rfc3339()),
             })
         );
@@ -122,7 +123,10 @@ mod deployment_deployed {
         let event = EventArgs::deployed(&dpl).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED);
         let actual: DeploymentDeployedEvent = serde_json::from_value(event.data).unwrap();
-        assert_eq!(actual.activity_status, "queued");
+        assert_eq!(
+            actual.activity_status,
+            DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
+        );
     }
 }
 
@@ -148,8 +152,8 @@ mod deployment_removed {
             actual.data,
             serde_json::json!(DeploymentRemovedEvent {
                 deployment_id: "dpl-1".into(),
-                activity_status: "archived".into(),
-                target_status: "archived".into(),
+                activity_status: DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+                target_status: DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
                 archived_at: Some(t.to_rfc3339()),
             })
         );
@@ -182,6 +186,9 @@ mod deployment_removed {
         let event = EventArgs::removed(&dpl).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_REMOVED);
         let actual: DeploymentRemovedEvent = serde_json::from_value(event.data).unwrap();
-        assert_eq!(actual.activity_status, "deployed");
+        assert_eq!(
+            actual.activity_status,
+            DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+        );
     }
 }

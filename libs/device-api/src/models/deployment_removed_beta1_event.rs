@@ -15,12 +15,10 @@ pub struct DeploymentRemovedBeta1Event {
     /// ID of the deployment.
     #[serde(rename = "deployment_id")]
     pub deployment_id: String,
-    /// Activity status of the deployment after this event.
     #[serde(rename = "activity_status")]
-    pub activity_status: String,
-    /// Target status of the deployment after this event.
+    pub activity_status: models::DeploymentActivityStatus,
     #[serde(rename = "target_status")]
-    pub target_status: String,
+    pub target_status: models::DeploymentTargetStatus,
     /// Timestamp of when the deployment was archived.
     #[serde(rename = "archived_at", skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
@@ -28,7 +26,7 @@ pub struct DeploymentRemovedBeta1Event {
 
 impl DeploymentRemovedBeta1Event {
     /// Payload for `deployment.removed.beta1` events.
-    pub fn new(deployment_id: String, activity_status: String, target_status: String) -> DeploymentRemovedBeta1Event {
+    pub fn new(deployment_id: String, activity_status: models::DeploymentActivityStatus, target_status: models::DeploymentTargetStatus) -> DeploymentRemovedBeta1Event {
         DeploymentRemovedBeta1Event {
             deployment_id,
             activity_status,

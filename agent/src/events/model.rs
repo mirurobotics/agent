@@ -60,8 +60,8 @@ impl EventArgs {
             DEPLOYMENT_DEPLOYED,
             DeploymentDeployedEvent {
                 deployment_id: deployment.id.clone(),
-                activity_status: deployment.activity_status.as_str().to_owned(),
-                target_status: deployment.target_status.as_str().to_owned(),
+                activity_status: (&deployment.activity_status).into(),
+                target_status: (&deployment.target_status).into(),
                 deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
             },
         )
@@ -72,8 +72,8 @@ impl EventArgs {
             DEPLOYMENT_REMOVED,
             DeploymentRemovedEvent {
                 deployment_id: deployment.id.clone(),
-                activity_status: deployment.activity_status.as_str().to_owned(),
-                target_status: deployment.target_status.as_str().to_owned(),
+                activity_status: (&deployment.activity_status).into(),
+                target_status: (&deployment.target_status).into(),
                 archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
             },
         )
