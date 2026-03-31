@@ -1,9 +1,8 @@
 // standard crates
-use std::collections::HashSet;
 use std::pin::Pin;
 
 // internal crates
-use crate::events::{hub::EventHub, model::Event};
+use crate::events::{hub::EventHub, model::Event, model::EventTypeFilter};
 use crate::services::errors::ServiceErr;
 
 // external crates
@@ -14,7 +13,7 @@ use tokio_stream::StreamExt;
 pub async fn subscribe(
     event_hub: &EventHub,
     cursor: Option<u64>,
-    filter: Option<HashSet<String>>,
+    filter: Option<EventTypeFilter>,
 ) -> Result<Pin<Box<dyn Stream<Item = Event> + Send>>, ServiceErr> {
     // subscribe BEFORE replay to prevent gaps
     let broadcast_rx = event_hub.subscribe();

@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
 use crate::events::errors::EventsErr;
 use crate::models;
@@ -6,6 +9,8 @@ use device_api::models as device_server;
 // external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+pub type EventTypeFilter = HashSet<String>;
 
 pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed.beta1";
 pub const DEPLOYMENT_REMOVED: &str = "deployment.removed.beta1";
@@ -34,6 +39,7 @@ impl Event {
 }
 
 /// Input type for creating a new event. The store assigns `id`.
+#[derive(Debug, PartialEq)]
 pub struct EventArgs {
     pub event_type: String,
     pub occurred_at: DateTime<Utc>,

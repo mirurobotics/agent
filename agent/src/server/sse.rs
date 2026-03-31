@@ -1,12 +1,14 @@
 // standard crates
-use std::collections::HashSet;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
 use crate::errors::Error;
-use crate::events::errors::{EventsErr, MalformedCursorErr};
+use crate::events::{
+    errors::{EventsErr, MalformedCursorErr},
+    model::EventTypeFilter,
+};
 use crate::server::state::State;
 use crate::services::{events as events_svc, ServiceErr};
 use crate::trace;
@@ -96,7 +98,7 @@ fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<u6
     Ok(None)
 }
 
-fn parse_event_filter(types: Option<String>) -> Option<HashSet<String>> {
+fn parse_event_filter(types: Option<String>) -> Option<EventTypeFilter> {
     types.map(|t| {
         t.split(',')
             .map(|s| s.trim().to_string())
