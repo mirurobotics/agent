@@ -1297,6 +1297,33 @@ mod idempotency {
         let gcs = f.git_commit_stor.values().await.unwrap();
         assert_eq!(gcs.len(), 1, "git commits should not duplicate");
     }
+
+    #[tokio::test]
+    async fn double_sync_does_not_duplicate_events() {
+        let f = Fixture::new("sync_idempotent_events").await;
+        let dpl = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        // first sync — deploys and should emit exactly 1 event
+        f.sync().await.unwrap();
+        let events_after_first = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(
+            events_after_first.len(),
+            1,
+            "first sync should emit exactly 1 event"
+        );
+
+        // second sync — deployment is already deployed, no state change
+        f.sync().await.unwrap();
+        let events_after_second = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(
+            events_after_second.len(),
+            1,
+            "second sync should NOT emit another event, got {} total",
+            events_after_second.len()
+        );
+    }
 }
 
 mod event_emission {
@@ -1489,6 +1516,48 @@ mod event_emission {
         assert!(
             types.contains(&DEPLOYMENT_REMOVED),
             "should contain removed event"
+        );
+    }
+
+    #[tokio::test]
+    async fn steady_state_deployment_emits_no_events() {
+        let f = Fixture::new("evt_steady_state").await;
+
+        // seed a deployment that is already fully deployed (steady state)
+        let seeded = models::Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Deployed,
+            config_instance_ids: vec!["cfg_inst_1".to_string()],
+            ..Default::default()
+        };
+        f.deployment_stor
+            .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+        f.cfg_inst_content_stor
+            .write(
+                "cfg_inst_1".to_string(),
+                "{}".to_string(),
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        // backend returns the same deployment (no state change)
+        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+
+        f.sync().await.unwrap();
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert!(
+            events.is_empty(),
+            "steady-state deployment should emit no events, got {} events",
+            events.len()
         );
     }
 }

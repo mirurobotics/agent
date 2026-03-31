@@ -168,6 +168,7 @@ struct ComparableOutcome {
     has_error: bool,
     has_wait: bool,
     in_cooldown: bool,
+    transitioned: bool,
 }
 
 impl From<&Outcome> for ComparableOutcome {
@@ -180,6 +181,7 @@ impl From<&Outcome> for ComparableOutcome {
             has_error: o.error.is_some(),
             has_wait: o.wait.is_some(),
             in_cooldown: o.deployment.is_in_cooldown(),
+            transitioned: o.transitioned,
         }
     }
 }
@@ -291,6 +293,7 @@ mod find_target_deployed {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
 
@@ -333,6 +336,7 @@ mod deploy_success {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
 
@@ -374,6 +378,7 @@ mod deploy_success {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
 
@@ -423,6 +428,7 @@ mod deploy_success {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -455,6 +461,7 @@ mod deploy_errors {
                 has_error: true,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: true,
             }
         );
         assert!(matches!(
@@ -488,6 +495,7 @@ mod deploy_errors {
                 has_error: true,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: true,
             }
         );
         assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
@@ -521,6 +529,7 @@ mod deploy_errors {
                 has_error: true,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: true,
             }
         );
         assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
@@ -551,6 +560,7 @@ mod deploy_errors {
                 has_error: true,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: true,
             }
         );
         assert!(matches!(
@@ -588,6 +598,7 @@ mod deploy_errors {
                 has_error: true,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: true,
             }
         );
         assert!(matches!(
@@ -625,6 +636,7 @@ mod remove_action {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -654,6 +666,7 @@ mod remove_action {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -686,6 +699,7 @@ mod archive_action {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -714,6 +728,7 @@ mod archive_action {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -742,6 +757,7 @@ mod archive_action {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -770,6 +786,7 @@ mod archive_action {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -792,6 +809,41 @@ mod no_action {
         // Neither targets Deployed, so find_target_deployed returns None.
         // apply_actionables filters out NextAction::None deployments.
         assert!(outcomes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn steady_state_deployed_is_noop() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst("/already-deployed.json");
+        f.seed_cfg_inst(&ci, "content".into()).await;
+
+        // target=Deployed, activity=Deployed -> FSM: None (already at target)
+        let dpl = make_deployment(
+            "dpl-steady",
+            DplTarget::Deployed,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+        // find_target_deployed selects this deployment and passes it directly
+        // to apply_one, which returns a no-op outcome (transitioned: false).
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-steady".into(),
+                activity: DplActivity::Deployed,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: false,
+            }
+        );
     }
 }
 
@@ -818,6 +870,7 @@ mod wait_action {
                 has_error: false,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: false,
             }
         );
         let wait = outcomes[0].wait.unwrap();
@@ -856,6 +909,7 @@ mod wait_action {
                 has_error: false,
                 has_wait: true,
                 in_cooldown: true,
+                transitioned: false,
             }
         );
         let wait = outcomes[0].wait.unwrap();
@@ -907,6 +961,7 @@ mod ordering_and_composition {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
         assert_eq!(
@@ -919,6 +974,7 @@ mod ordering_and_composition {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
     }
@@ -967,6 +1023,7 @@ mod ordering_and_composition {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
 
@@ -978,6 +1035,7 @@ mod ordering_and_composition {
             has_error: false,
             has_wait: false,
             in_cooldown: false,
+            transitioned: true,
         };
         let stale_outcomes: Vec<_> = outcomes
             .iter()
@@ -1020,6 +1078,7 @@ mod ordering_and_composition {
                 has_error: false,
                 has_wait: false,
                 in_cooldown: false,
+                transitioned: true,
             }
         );
 

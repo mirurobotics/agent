@@ -310,7 +310,7 @@ async fn apply_deployments<'a>(
                 outcome.deployment.id, e
             );
             errors.push(SyncErr::from(e));
-        } else {
+        } else if outcome.transitioned {
             debug!("successfully applied deployment {}", outcome.deployment.id);
             // emit deployment events on success
             match outcome.deployment.activity_status {

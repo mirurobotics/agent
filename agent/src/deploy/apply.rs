@@ -31,6 +31,9 @@ pub struct Outcome {
     pub deployment: models::Deployment,
     pub wait: Option<chrono::TimeDelta>,
     pub error: Option<DeployErr>,
+    /// Whether the FSM actually transitioned the deployment state (deploy, remove, archive).
+    /// False for no-op and wait outcomes.
+    pub transitioned: bool,
 }
 
 type DeploymentID = String;
@@ -107,6 +110,7 @@ async fn apply_one(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
                 deployment,
                 wait: None,
                 error: None,
+                transitioned: false,
             }
         }
         fsm::NextAction::Wait(wait) => {
@@ -119,6 +123,7 @@ async fn apply_one(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
                 deployment,
                 wait: Some(wait),
                 error: None,
+                transitioned: false,
             }
         }
         fsm::NextAction::Deploy => {
@@ -158,6 +163,7 @@ async fn deploy(
                 deployment,
                 wait: None,
                 error,
+                transitioned: true,
             }
         }
         Err(e) => {
@@ -173,6 +179,7 @@ async fn deploy(
                 deployment,
                 wait,
                 error: Some(e),
+                transitioned: true,
             }
         }
     }
@@ -199,6 +206,7 @@ async fn remove(deployments: &storage::Deployments, deployment: models::Deployme
         deployment,
         wait: None,
         error,
+        transitioned: true,
     }
 }
 
