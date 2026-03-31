@@ -5,6 +5,16 @@ pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 
 #[derive(Debug, thiserror::Error)]
+#[error("event store I/O error: {0}")]
+pub struct IoErr(pub std::io::Error);
+impl crate::errors::Error for IoErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("event serialization error: {0}")]
+pub struct SerializationErr(pub serde_json::Error);
+impl crate::errors::Error for SerializationErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("cursor {requested} has expired; earliest available event is {earliest_available}")]
 pub struct CursorExpiredErr {
     pub earliest_available: u64,
@@ -38,12 +48,12 @@ impl crate::errors::Error for MalformedCursorErr {
 
 #[derive(Debug, thiserror::Error)]
 pub enum EventsErr {
-    #[error("event store I/O error: {0}")]
-    IoErr(#[from] std::io::Error),
-    #[error("event store filesystem error: {0}")]
+    #[error(transparent)]
+    IoErr(IoErr),
+    #[error(transparent)]
     FileSysErr(#[from] crate::filesys::FileSysErr),
-    #[error("event serialization error: {0}")]
-    SerializationErr(#[from] serde_json::Error),
+    #[error(transparent)]
+    SerializationErr(SerializationErr),
     #[error(transparent)]
     CursorExpiredErr(CursorExpiredErr),
     #[error(transparent)]
@@ -54,19 +64,24 @@ pub enum EventsErr {
     ReceiveActorMessageErr(ReceiveActorMessageErr),
 }
 
-impl crate::errors::Error for EventsErr {
-    fn code(&self) -> crate::errors::Code {
-        match self {
-            Self::CursorExpiredErr(e) => e.code(),
-            Self::MalformedCursorErr(e) => e.code(),
-            _ => crate::errors::Code::InternalServerError,
-        }
-    }
-    fn http_status(&self) -> crate::errors::HTTPCode {
-        match self {
-            Self::CursorExpiredErr(e) => e.http_status(),
-            Self::MalformedCursorErr(e) => e.http_status(),
-            _ => crate::errors::HTTPCode::INTERNAL_SERVER_ERROR,
-        }
+impl From<std::io::Error> for EventsErr {
+    fn from(e: std::io::Error) -> Self {
+        Self::IoErr(IoErr(e))
     }
 }
+
+impl From<serde_json::Error> for EventsErr {
+    fn from(e: serde_json::Error) -> Self {
+        Self::SerializationErr(SerializationErr(e))
+    }
+}
+
+crate::impl_error!(EventsErr {
+    IoErr,
+    FileSysErr,
+    SerializationErr,
+    CursorExpiredErr,
+    MalformedCursorErr,
+    SendActorMessageErr,
+    ReceiveActorMessageErr,
+});

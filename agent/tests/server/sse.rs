@@ -29,6 +29,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new(name: &str) -> Self {
+        Self::with_hub_opts(name, SpawnOptions::default()).await
+    }
+
+    async fn with_hub_opts(name: &str, opts: SpawnOptions) -> Self {
         let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
         let storage = Arc::new(create_storage(&dir).await);
         let http_client = Arc::new(MockClient::default());
@@ -41,9 +45,7 @@ impl Fixture {
             Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
 
         let log_file = dir.file("events.jsonl");
-        let (event_hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default())
-            .await
-            .unwrap();
+        let (event_hub, _handle) = EventHub::spawn(log_file, opts).await.unwrap();
 
         let state = Arc::new(State::new(
             storage,
@@ -118,6 +120,7 @@ fn make_event(event_type: &str) -> EventArgs {
 
 mod cursor {
     use super::*;
+    use device_api::models as openapi;
 
     #[tokio::test]
     async fn malformed_after_param_returns_400() {
@@ -131,11 +134,8 @@ mod cursor {
 
         let (status, bytes) = f.request(req).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        let body = String::from_utf8(bytes).unwrap();
-        assert!(
-            body.contains("malformed_cursor"),
-            "expected malformed_cursor error code, body: {body}"
-        );
+        let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(actual.error.code, "malformed_cursor");
     }
 
     #[tokio::test]
@@ -150,49 +150,25 @@ mod cursor {
 
         let (status, bytes) = f.request(req).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        let body = String::from_utf8(bytes).unwrap();
-        assert!(
-            body.contains("malformed_cursor"),
-            "expected malformed_cursor error code, body: {body}"
-        );
+        let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(actual.error.code, "malformed_cursor");
     }
 
     #[tokio::test]
     async fn expired_cursor_returns_410() {
-        let dir = filesys::Dir::create_temp_dir("sse_expired_cursor")
-            .await
-            .unwrap();
-        let storage = Arc::new(create_storage(&dir).await);
-        let http_client = Arc::new(MockClient::default());
-        let (token_mngr, _handle) = create_token_manager(&dir, http_client.clone()).await;
-        let (sender, _receiver) = mpsc::channel(1);
-        let syncer = Arc::new(Syncer::new(sender));
-        let activity_tracker = Arc::new(activity::Tracker::new());
-        let real_http_client =
-            Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
-
-        // Use a small max_retained to force compaction
-        let log_file = dir.file("events.jsonl");
         let opts = SpawnOptions {
             max_retained: 4,
             ..SpawnOptions::default()
         };
-        let (hub, _hub_handle) = EventHub::spawn(log_file, opts).await.unwrap();
+        let f = Fixture::with_hub_opts("sse_expired_cursor", opts).await;
 
         // Publish enough events to trigger compaction
         for i in 0..6 {
-            hub.publish(make_event(&format!("evt-{i}"))).await.unwrap();
+            f.event_hub()
+                .publish(make_event(&format!("evt-{i}")))
+                .await
+                .unwrap();
         }
-
-        let state = Arc::new(State::new(
-            storage,
-            real_http_client,
-            syncer,
-            Arc::new(token_mngr),
-            activity_tracker,
-            hub,
-        ));
-        let app = serve::routes(state.clone());
 
         // Cursor 1 should now be expired
         let req = Request::builder()
@@ -201,14 +177,10 @@ mod cursor {
             .body(Body::empty())
             .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::GONE);
-        let bytes = body::to_bytes(response.into_body(), 65536).await.unwrap();
-        let body = String::from_utf8(bytes.to_vec()).unwrap();
-        assert!(
-            body.contains("cursor_expired"),
-            "expected cursor_expired error code, body: {body}"
-        );
+        let (status, bytes) = f.request(req).await;
+        assert_eq!(status, StatusCode::GONE);
+        let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(actual.error.code, "cursor_expired");
     }
 
     #[tokio::test]
@@ -238,6 +210,22 @@ mod cursor {
         );
         assert!(!body.contains("\nid: 1\n"), "should not contain event 1");
         assert!(!body.contains("\nid: 2\n"), "should not contain event 2");
+    }
+
+    #[tokio::test]
+    async fn non_utf8_last_event_id_returns_400() {
+        let f = Fixture::new("sse_non_utf8").await;
+
+        let req = Request::builder()
+            .uri("/v0.2/events")
+            .header("Last-Event-ID", &b"\xff\xfe"[..])
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, bytes) = f.request(req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(actual.error.code, "malformed_cursor");
     }
 }
 
@@ -338,6 +326,73 @@ mod stream {
 
         let (status, _body) = f.request_sse(req, Duration::from_millis(200)).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn cursor_zero_replays_all() {
+        let f = Fixture::new("sse_cursor_zero_all").await;
+
+        f.event_hub().publish(make_event("a")).await.unwrap();
+        f.event_hub().publish(make_event("b")).await.unwrap();
+        f.event_hub().publish(make_event("c")).await.unwrap();
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        assert!(body.contains("id: 1"), "expected event 1, body: {body}");
+        assert!(body.contains("id: 2"), "expected event 2, body: {body}");
+        assert!(body.contains("id: 3"), "expected event 3, body: {body}");
+    }
+
+    #[tokio::test]
+    async fn live_events_appear_after_replay() {
+        let f = Fixture::new("sse_replay_then_live").await;
+
+        // Publish 2 events before connecting
+        f.event_hub().publish(make_event("replay")).await.unwrap();
+        f.event_hub().publish(make_event("replay")).await.unwrap();
+
+        // Clone the hub for the spawned task
+        let hub = f.event_hub().clone();
+
+        // Spawn a task that publishes a live event after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            hub.publish(make_event("live")).await.unwrap();
+        });
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(300)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Should contain both replayed events and the live event
+        assert!(
+            body.contains("id: 1"),
+            "expected replayed event 1, body: {body}"
+        );
+        assert!(
+            body.contains("id: 2"),
+            "expected replayed event 2, body: {body}"
+        );
+        assert!(
+            body.contains("id: 3"),
+            "expected live event 3, body: {body}"
+        );
+        assert!(
+            body.contains("event: live"),
+            "expected live event type, body: {body}"
+        );
     }
 }
 
@@ -440,93 +495,6 @@ mod filter {
         assert!(
             body.contains("event: type.b"),
             "type.b should match after trim, body: {body}"
-        );
-    }
-}
-
-// ========================= ADDITIONAL EDGE CASES ========================= //
-
-mod edge_cases {
-    use super::*;
-
-    #[tokio::test]
-    async fn cursor_zero_replays_all_via_sse() {
-        let f = Fixture::new("sse_cursor_zero_all").await;
-
-        f.event_hub().publish(make_event("a")).await.unwrap();
-        f.event_hub().publish(make_event("b")).await.unwrap();
-        f.event_hub().publish(make_event("c")).await.unwrap();
-
-        let req = Request::builder()
-            .uri("/v0.2/events?after=0")
-            .header("Accept", "text/event-stream")
-            .body(Body::empty())
-            .unwrap();
-
-        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
-        assert_eq!(status, StatusCode::OK);
-
-        assert!(body.contains("id: 1"), "expected event 1, body: {body}");
-        assert!(body.contains("id: 2"), "expected event 2, body: {body}");
-        assert!(body.contains("id: 3"), "expected event 3, body: {body}");
-    }
-
-    #[tokio::test]
-    async fn non_utf8_last_event_id_returns_400() {
-        let f = Fixture::new("sse_non_utf8").await;
-
-        let req = Request::builder()
-            .uri("/v0.2/events")
-            .header("Last-Event-ID", &b"\xff\xfe"[..])
-            .body(Body::empty())
-            .unwrap();
-
-        let (status, _bytes) = f.request(req).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn live_events_appear_after_replay() {
-        let f = Fixture::new("sse_replay_then_live").await;
-
-        // Publish 2 events before connecting
-        f.event_hub().publish(make_event("replay")).await.unwrap();
-        f.event_hub().publish(make_event("replay")).await.unwrap();
-
-        // Clone the hub for the spawned task
-        let hub = f.event_hub().clone();
-
-        // Spawn a task that publishes a live event after a short delay
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            hub.publish(make_event("live")).await.unwrap();
-        });
-
-        let req = Request::builder()
-            .uri("/v0.2/events?after=0")
-            .header("Accept", "text/event-stream")
-            .body(Body::empty())
-            .unwrap();
-
-        let (status, body) = f.request_sse(req, Duration::from_millis(300)).await;
-        assert_eq!(status, StatusCode::OK);
-
-        // Should contain both replayed events and the live event
-        assert!(
-            body.contains("id: 1"),
-            "expected replayed event 1, body: {body}"
-        );
-        assert!(
-            body.contains("id: 2"),
-            "expected replayed event 2, body: {body}"
-        );
-        assert!(
-            body.contains("id: 3"),
-            "expected live event 3, body: {body}"
-        );
-        assert!(
-            body.contains("event: live"),
-            "expected live event type, body: {body}"
         );
     }
 }
