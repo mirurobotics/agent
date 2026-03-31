@@ -12,7 +12,7 @@ use tokio_stream::StreamExt;
 
 pub async fn subscribe(
     event_hub: &EventHub,
-    cursor: Option<u64>,
+    cursor: Option<i64>,
     filter: Option<EventTypeFilter>,
 ) -> Result<Pin<Box<dyn Stream<Item = Event> + Send>>, ServiceErr> {
     // subscribe BEFORE replay to prevent gaps

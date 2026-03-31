@@ -38,7 +38,7 @@ enum Command {
         respond_to: oneshot::Sender<Result<Event, EventsErr>>,
     },
     ReplayAfter {
-        cursor: u64,
+        cursor: i64,
         respond_to: oneshot::Sender<Result<Vec<Event>, EventsErr>>,
     },
 }
@@ -124,7 +124,7 @@ impl EventHub {
         .await?
     }
 
-    pub async fn replay_after(&self, cursor: u64) -> Result<Vec<Event>, EventsErr> {
+    pub async fn replay_after(&self, cursor: i64) -> Result<Vec<Event>, EventsErr> {
         self.send_command(|tx| Command::ReplayAfter {
             cursor,
             respond_to: tx,

@@ -14,7 +14,7 @@ pub const DEFAULT_MAX_RETAINED: usize = 2_000;
 pub struct EventStore {
     log_file: filesys::File,
     events: Vec<Event>,
-    next_event_id: u64,
+    next_event_id: i64,
     max_retained: usize,
 }
 
@@ -64,7 +64,7 @@ impl EventStore {
     /// partition point rather than scanning linearly. We cannot index directly
     /// from the cursor because `load_log()` tolerates malformed/partial lines,
     /// which means persisted event IDs may be sparse after reload.
-    pub fn replay_after(&self, cursor: u64) -> Result<Vec<Event>, EventsErr> {
+    pub fn replay_after(&self, cursor: i64) -> Result<Vec<Event>, EventsErr> {
         if cursor != 0 {
             if let Some(earliest) = self.earliest_id() {
                 if cursor < earliest {
@@ -80,11 +80,11 @@ impl EventStore {
         Ok(self.events[start..].to_vec())
     }
 
-    pub fn earliest_id(&self) -> Option<u64> {
+    pub fn earliest_id(&self) -> Option<i64> {
         self.events.first().map(|e| e.id)
     }
 
-    pub fn latest_id(&self) -> Option<u64> {
+    pub fn latest_id(&self) -> Option<i64> {
         self.events.last().map(|e| e.id)
     }
 
@@ -140,9 +140,9 @@ impl EventStore {
 
     /// Read a JSONL log file into `events`, advancing `next_event_id` past
     /// the highest ID found. Malformed or empty lines are skipped.
-    async fn load_log(log_file: &filesys::File) -> Result<(Vec<Event>, u64), EventsErr> {
+    async fn load_log(log_file: &filesys::File) -> Result<(Vec<Event>, i64), EventsErr> {
         let mut events = Vec::new();
-        let mut next_event_id: u64 = 1;
+        let mut next_event_id: i64 = 1;
 
         let content = log_file.read_string().await?;
         for (line_num, line) in content.lines().enumerate() {

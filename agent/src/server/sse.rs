@@ -63,7 +63,8 @@ async fn events_impl(
     let stream = events_svc::subscribe(&state.event_hub, cursor, filter).await?;
 
     let sse_stream = stream.filter_map(|event| {
-        let json = serde_json::to_string(&event).ok()?;
+        let api_event = device_server::Event::from(&event);
+        let json = serde_json::to_string(&api_event).ok()?;
         Some(Ok::<_, Infallible>(
             SseEvent::default()
                 .id(event.id.to_string())
@@ -79,10 +80,10 @@ async fn events_impl(
     ))
 }
 
-fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<u64>, EventsErr> {
+fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<i64>, EventsErr> {
     if let Some(after) = &params.after {
         return after
-            .parse::<u64>()
+            .parse::<i64>()
             .map(Some)
             .map_err(|_| EventsErr::MalformedCursorErr(MalformedCursorErr { trace: trace!() }));
     }
@@ -91,7 +92,7 @@ fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<u6
             .to_str()
             .map_err(|_| EventsErr::MalformedCursorErr(MalformedCursorErr { trace: trace!() }))?;
         return s
-            .parse::<u64>()
+            .parse::<i64>()
             .map(Some)
             .map_err(|_| EventsErr::MalformedCursorErr(MalformedCursorErr { trace: trace!() }));
     }

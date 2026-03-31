@@ -260,10 +260,23 @@ mod stream {
             body.contains("event: test.event"),
             "expected event type in SSE output, body: {body}"
         );
-        assert!(
-            body.contains("data: "),
-            "expected data field in SSE output, body: {body}"
-        );
+
+        // deserialize the data payload into the openapi struct to verify contract conformance
+        let data_json = body
+            .lines()
+            .find(|l| l.starts_with("data: "))
+            .expect("expected data: line in SSE output")
+            .strip_prefix("data: ")
+            .unwrap();
+        let event: device_api::models::Event =
+            serde_json::from_str(data_json).unwrap_or_else(|e| {
+                panic!("data payload must deserialize as device API Event: {e}\nraw: {data_json}")
+            });
+
+        assert_eq!(event.object, device_api::models::event::Object::Event);
+        assert_eq!(event.id, 1);
+        assert_eq!(event.r#type, "test.event");
+        assert_eq!(event.data, serde_json::json!({"test": true}));
     }
 
     #[tokio::test]

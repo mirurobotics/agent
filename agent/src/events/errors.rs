@@ -17,8 +17,8 @@ impl crate::errors::Error for SerializationErr {}
 #[derive(Debug, thiserror::Error)]
 #[error("cursor {requested} has expired; earliest available event is {earliest_available}")]
 pub struct CursorExpiredErr {
-    pub earliest_available: u64,
-    pub requested: u64,
+    pub earliest_available: i64,
+    pub requested: i64,
     pub trace: Box<Trace>,
 }
 

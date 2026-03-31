@@ -20,7 +20,7 @@ pub type DeploymentRemovedEvent = device_server::DeploymentRemovedBeta1Event;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
-    pub id: u64,
+    pub id: i64,
     #[serde(rename = "type")]
     pub event_type: String,
     pub occurred_at: DateTime<Utc>,
@@ -28,7 +28,7 @@ pub struct Event {
 }
 
 impl Event {
-    pub(crate) fn new(id: u64, args: EventArgs) -> Self {
+    pub(crate) fn new(id: i64, args: EventArgs) -> Self {
         Self {
             id,
             event_type: args.event_type,

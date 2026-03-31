@@ -172,7 +172,7 @@ mod live {
 
         let items = collect_n(&mut stream, 5, Duration::from_millis(500)).await;
 
-        let ids: Vec<u64> = items.iter().map(|e| e.id).collect();
+        let ids: Vec<i64> = items.iter().map(|e| e.id).collect();
         assert_eq!(
             ids,
             vec![1, 2, 3, 4],
@@ -197,7 +197,7 @@ mod live {
 
         // replay yields [1, 2], live yields [3] (chain is deterministic)
         let items = collect_n(&mut stream, 4, Duration::from_millis(500)).await;
-        let ids: Vec<u64> = items.iter().map(|e| e.id).collect();
+        let ids: Vec<i64> = items.iter().map(|e| e.id).collect();
         assert_eq!(
             ids,
             vec![1, 2, 3],

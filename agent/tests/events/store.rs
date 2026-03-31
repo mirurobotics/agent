@@ -326,8 +326,8 @@ mod compaction {
         // compaction keeps 80% of max_retained events
         let keep_count = (max_retained * 80) / 100;
         let expected_earliest = (max_retained + 1) - keep_count + 1;
-        assert_eq!(store.earliest_id(), Some(expected_earliest as u64));
-        assert_eq!(store.latest_id(), Some((max_retained + 1) as u64));
+        assert_eq!(store.earliest_id(), Some(expected_earliest as i64));
+        assert_eq!(store.latest_id(), Some((max_retained + 1) as i64));
     }
 
     #[tokio::test]
