@@ -380,6 +380,20 @@ pub mod read_string {
             .unwrap();
         assert_eq!(file.read_string().await.unwrap(), "arglebargle");
     }
+
+    #[tokio::test]
+    async fn read_invalid_utf8() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let file = dir.file("test-file");
+        // Write invalid UTF-8 bytes directly
+        file.append_bytes(&[0xFF, 0xFE, 0xFD], filesys::AppendOptions::default())
+            .await
+            .unwrap();
+        assert!(matches!(
+            file.read_string().await.unwrap_err(),
+            FileSysErr::ConvertUTF8Err { .. }
+        ));
+    }
 }
 
 pub mod read_json {
@@ -405,6 +419,19 @@ pub mod read_json {
             file.read_json::<serde_json::Value>().await.unwrap(),
             serde_json::json!({"test": "arglebargle"})
         );
+    }
+
+    #[tokio::test]
+    async fn read_invalid_json() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let file = dir.file("test-file.json");
+        file.write_string("not valid json {{{", WriteOptions::default())
+            .await
+            .unwrap();
+        assert!(matches!(
+            file.read_json::<serde_json::Value>().await.unwrap_err(),
+            FileSysErr::ParseJSONErr { .. }
+        ));
     }
 }
 

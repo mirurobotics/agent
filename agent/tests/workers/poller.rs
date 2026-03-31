@@ -186,6 +186,138 @@ pub mod run {
     }
 
     #[tokio::test]
+    async fn sync_success_event_updates_last_synced_at() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+        let device_file = Arc::new(device_file);
+
+        let options = poller::Options::default();
+        let syncer = Arc::new(MockSyncer::default());
+        let sleep_ctrl = Arc::new(SleepController::new());
+
+        let options_for_spawn = options.clone();
+        let syncer_for_spawn = syncer.clone();
+        let sleep_ctrl_for_spawn = sleep_ctrl.clone();
+        let device_file_for_spawn = device_file.clone();
+        let shutdown_signal = Box::pin(async move {
+            std::future::pending::<()>().await;
+        });
+        let _handle = tokio::spawn(async move {
+            poller::run(
+                &options_for_spawn,
+                syncer_for_spawn.as_ref(),
+                &device_file_for_spawn,
+                sleep_ctrl_for_spawn.sleep_fn(),
+                shutdown_signal,
+            )
+            .await;
+        });
+
+        let secs_since_last_sync = 30;
+        let state = State {
+            last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
+            last_synced_at: Utc::now(),
+            cooldown_ends_at: Utc::now(),
+            err_streak: 0,
+        };
+        syncer.set_state(state);
+
+        let syncer_tx = syncer.get_transmitter();
+
+        // wait for the poller to enter sleep after initial sync
+        sleep_ctrl.await_sleep().await;
+
+        // verify last_synced_at is at UNIX_EPOCH before the event
+        let device_before = device_file.read().await.unwrap();
+        assert_eq!(
+            device_before.last_synced_at,
+            chrono::DateTime::<Utc>::UNIX_EPOCH
+        );
+
+        // send SyncSuccess event while the poller is sleeping
+        let before_event = Utc::now();
+        syncer_tx.send(SyncEvent::SyncSuccess).unwrap();
+        sleep_ctrl.release().await;
+
+        // wait for the poller to process the event and re-enter sleep
+        sleep_ctrl.await_sleep().await;
+
+        // verify last_synced_at was updated
+        let device_after = device_file.read().await.unwrap();
+        assert!(
+            device_after.last_synced_at >= before_event,
+            "last_synced_at should be updated after SyncSuccess event"
+        );
+        assert!(device_after.last_synced_at <= Utc::now());
+    }
+
+    #[tokio::test]
+    async fn cooldown_end_from_deployment_wait_triggers_sync() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+
+        let options = poller::Options::default();
+        let syncer = Arc::new(MockSyncer::default());
+        let sleep_ctrl = Arc::new(SleepController::new());
+
+        let options_for_spawn = options.clone();
+        let syncer_for_spawn = syncer.clone();
+        let sleep_ctrl_for_spawn = sleep_ctrl.clone();
+        let shutdown_signal = Box::pin(async move {
+            std::future::pending::<()>().await;
+        });
+        let _handle = tokio::spawn(async move {
+            poller::run(
+                &options_for_spawn,
+                syncer_for_spawn.as_ref(),
+                &device_file,
+                sleep_ctrl_for_spawn.sleep_fn(),
+                shutdown_signal,
+            )
+            .await;
+        });
+
+        let state = State {
+            last_attempted_sync_at: Utc::now(),
+            last_synced_at: Utc::now(),
+            cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
+            err_streak: 0,
+        };
+        syncer.set_state(state);
+
+        let syncer_tx = syncer.get_transmitter();
+
+        // wait for the poller to enter sleep after initial sync
+        sleep_ctrl.await_sleep().await;
+        let sync_calls_before = syncer.num_sync_calls();
+
+        // send DeploymentWait cooldown end event
+        syncer_tx
+            .send(SyncEvent::CooldownEnd(CooldownEnd::DeploymentWait))
+            .unwrap();
+        sleep_ctrl.release().await;
+
+        // wait for the poller to process the event and re-enter sleep
+        sleep_ctrl.await_sleep().await;
+
+        // DeploymentWait should trigger a sync
+        assert!(
+            syncer.num_sync_calls() > sync_calls_before,
+            "CooldownEnd::DeploymentWait should trigger a sync"
+        );
+    }
+
+    #[tokio::test]
     async fn ignored_syncer_events() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);

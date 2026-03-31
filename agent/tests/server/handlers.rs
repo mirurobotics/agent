@@ -132,6 +132,52 @@ pub mod routes {
             let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
             (status, bytes.to_vec())
         }
+
+        async fn post(&self, uri: &str) -> (StatusCode, Vec<u8>) {
+            let response = self
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
+            (status, bytes.to_vec())
+        }
+    }
+
+    mod device {
+        use super::*;
+
+        #[tokio::test]
+        async fn get_device_returns_200() {
+            let f = Fixture::new("handler_get_device").await;
+
+            let (status, bytes) = f.get("/v0.2/device").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::Device = serde_json::from_slice(&bytes).unwrap();
+            // default device has empty id and offline status
+            assert_eq!(actual.status, openapi::DeviceStatus::DEVICE_STATUS_OFFLINE);
+        }
+
+        #[tokio::test]
+        async fn sync_device_returns_500_when_syncer_channel_closed() {
+            let f = Fixture::new("handler_sync_device").await;
+
+            // The syncer's receiver is dropped in the fixture, so sync will fail
+            let (status, bytes) = f.post("/v0.2/device/sync").await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "internal_server_error");
+        }
     }
 
     mod deployments {
