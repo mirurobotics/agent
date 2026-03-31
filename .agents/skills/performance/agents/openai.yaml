@@ -1,0 +1,4 @@
+interface:
+  display_name: "Performance Workflow"
+  short_description: "Optimize hot paths and reduce overhead."
+  default_prompt: "Use $performance to evaluate and improve performance in this change."

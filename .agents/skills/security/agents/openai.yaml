@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security Workflow"
+  short_description: "Assess and harden security-sensitive code."
+  default_prompt: "Use $security to assess and improve security posture in this change."

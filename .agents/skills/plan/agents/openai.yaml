@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Workflow"
+  short_description: "Create and execute robust ExecPlans."
+  default_prompt: "Use $plan to create or execute an ExecPlan for this complex task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lint Workflow"
+  short_description: "Run linting and fix issues to green."
+  default_prompt: "Use $lint to run lint checks and fix issues in this repo."

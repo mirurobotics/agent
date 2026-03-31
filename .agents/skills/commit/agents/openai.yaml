@@ -1,0 +1,4 @@
+interface:
+  display_name: "Commit Workflow"
+  short_description: "Plan and execute safe Conventional Commits."
+  default_prompt: "Use $commit to plan and execute commits for my current changes."

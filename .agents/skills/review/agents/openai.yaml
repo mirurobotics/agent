@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Workflow"
+  short_description: "Review changes for risk, tests, and docs."
+  default_prompt: "Use $review to audit this change set and list findings by severity."

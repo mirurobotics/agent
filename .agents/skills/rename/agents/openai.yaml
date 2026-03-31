@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rename Workflow"
+  short_description: "Perform scoped, verified renames safely."
+  default_prompt: "Use $rename to rename this symbol safely across the repository."

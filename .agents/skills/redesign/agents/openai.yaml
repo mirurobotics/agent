@@ -1,0 +1,4 @@
+interface:
+  display_name: "Redesign Workflow"
+  short_description: "Refactor design while preserving behavior."
+  default_prompt: "Use $redesign to improve this code design without regressions."

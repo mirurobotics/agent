@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reliability Workflow"
+  short_description: "Harden code for robust failure handling."
+  default_prompt: "Use $reliability to assess and improve reliability risks in this change."
