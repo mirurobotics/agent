@@ -154,8 +154,8 @@ pub mod gen_key_pair {
             .await
             .unwrap();
 
-        let private_perms = std::fs::metadata(&private_key_path).unwrap().permissions();
-        let public_perms = std::fs::metadata(&public_key_path).unwrap().permissions();
+        let private_perms = private_key_file.permissions().await.unwrap();
+        let public_perms = public_key_file.permissions().await.unwrap();
         assert_eq!(
             private_perms.mode() & 0o777,
             0o600,

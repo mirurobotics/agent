@@ -1,11 +1,8 @@
-// standard crates
-use std::io::Write;
-
 // internal crates
 use miru_agent::events::errors::EventsErr;
 use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED};
 use miru_agent::events::store::{EventStore, DEFAULT_MAX_RETAINED};
-use miru_agent::filesys::{self, PathExt};
+use miru_agent::filesys::{self, WriteOptions};
 
 // external crates
 use chrono::Utc;
@@ -57,11 +54,15 @@ mod init {
             data: serde_json::json!({}),
         };
 
-        {
-            let mut f = std::fs::File::create(log_file.path()).unwrap();
-            writeln!(f, "{}", serde_json::to_string(&e1).unwrap()).unwrap();
-            writeln!(f, "{}", serde_json::to_string(&e2).unwrap()).unwrap();
-        }
+        let content = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&e1).unwrap(),
+            serde_json::to_string(&e2).unwrap(),
+        );
+        log_file
+            .write_string(&content, WriteOptions::default())
+            .await
+            .unwrap();
 
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
         assert_eq!(store.earliest_id(), Some(5));
@@ -87,17 +88,47 @@ mod init {
             data: serde_json::json!({}),
         };
 
-        {
-            let mut f = std::fs::File::create(log_file.path()).unwrap();
-            writeln!(f, "not valid json").unwrap();
-            writeln!(f).unwrap();
-            writeln!(f, "{}", serde_json::to_string(&valid).unwrap()).unwrap();
-            writeln!(f, "{{\"broken\": true}}").unwrap(); // missing required fields
-        }
+        let content = format!(
+            "not valid json\n\n{}\n{{\"broken\": true}}\n",
+            serde_json::to_string(&valid).unwrap(),
+        );
+        log_file
+            .write_string(&content, WriteOptions::default())
+            .await
+            .unwrap();
 
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
         assert_eq!(store.earliest_id(), Some(3));
         assert_eq!(store.latest_id(), Some(3));
+    }
+
+    #[tokio::test]
+    async fn all_malformed_lines_produces_empty_store() {
+        let dir = filesys::Dir::create_temp_dir("ev_all_malformed")
+            .await
+            .unwrap();
+        let log_file = dir.file("events.jsonl");
+
+        log_file
+            .write_string(
+                "not json at all\n{\"broken\": true}\nalso garbage\n",
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let mut store = EventStore::init(log_file, DEFAULT_MAX_RETAINED)
+            .await
+            .unwrap();
+        assert_eq!(store.earliest_id(), None);
+        assert_eq!(store.latest_id(), None);
+
+        // first append should get id=1
+        let e = store.append(make_event("first")).await.unwrap();
+        assert_eq!(
+            e.id, 1,
+            "next_event_id should start at 1 when all lines were malformed"
+        );
     }
 }
 
@@ -230,6 +261,24 @@ mod replay {
     }
 
     #[tokio::test]
+    async fn cursor_zero_on_empty_store_returns_empty() {
+        let dir = filesys::Dir::create_temp_dir("ev_empty_replay")
+            .await
+            .unwrap();
+        let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
+
+        let result = store.replay_after(0);
+        assert!(
+            result.is_ok(),
+            "replay_after(0) on empty store should succeed"
+        );
+        assert!(
+            result.unwrap().is_empty(),
+            "empty store should return empty replay"
+        );
+    }
+
+    #[tokio::test]
     async fn expired_cursor_returns_error() {
         let dir = filesys::Dir::create_temp_dir("ev_replay_expired")
             .await
@@ -320,58 +369,6 @@ mod compaction {
         assert_eq!(
             e6.id, 6,
             "IDs should continue monotonically after compaction"
-        );
-    }
-}
-
-// ========================= ADDITIONAL EDGE CASES ========================= //
-
-mod edge_cases {
-    use super::*;
-
-    #[tokio::test]
-    async fn cursor_zero_on_empty_store_returns_empty() {
-        let dir = filesys::Dir::create_temp_dir("ev_empty_replay")
-            .await
-            .unwrap();
-        let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
-
-        let result = store.replay_after(0);
-        assert!(
-            result.is_ok(),
-            "replay_after(0) on empty store should succeed"
-        );
-        assert!(
-            result.unwrap().is_empty(),
-            "empty store should return empty replay"
-        );
-    }
-
-    #[tokio::test]
-    async fn all_malformed_lines_produces_empty_store() {
-        let dir = filesys::Dir::create_temp_dir("ev_all_malformed")
-            .await
-            .unwrap();
-        let log_file = dir.file("events.jsonl");
-
-        {
-            let mut f = std::fs::File::create(log_file.path()).unwrap();
-            writeln!(f, "not json at all").unwrap();
-            writeln!(f, "{{\"broken\": true}}").unwrap();
-            writeln!(f, "also garbage").unwrap();
-        }
-
-        let mut store = EventStore::init(log_file, DEFAULT_MAX_RETAINED)
-            .await
-            .unwrap();
-        assert_eq!(store.earliest_id(), None);
-        assert_eq!(store.latest_id(), None);
-
-        // first append should get id=1
-        let e = store.append(make_event("first")).await.unwrap();
-        assert_eq!(
-            e.id, 1,
-            "next_event_id should start at 1 when all lines were malformed"
         );
     }
 }

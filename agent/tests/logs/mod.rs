@@ -2,6 +2,7 @@
 use std::collections::HashSet;
 
 // internal crates
+use miru_agent::filesys::PathExt;
 use miru_agent::logs::{self, LogLevel, Options};
 
 // ========================= deserialize ========================= //
@@ -205,30 +206,30 @@ fn test_log_level_variants() {
 
 // ========================= init ================================ //
 
-#[test]
-fn test_init_stdout() {
-    let tmp = std::env::temp_dir().join("miru_test_logs_stdout");
-    let _ = std::fs::create_dir_all(&tmp);
+#[tokio::test]
+async fn test_init_stdout() {
+    let dir = miru_agent::filesys::Dir::create_temp_dir("miru_test_logs_stdout")
+        .await
+        .unwrap();
     let options = Options {
         stdout: true,
         log_level: LogLevel::Debug,
-        log_dir: tmp.clone(),
+        log_dir: dir.path().clone(),
     };
     let guard = logs::init(options);
     drop(guard);
-    let _ = std::fs::remove_dir_all(&tmp);
 }
 
-#[test]
-fn test_init_file_only() {
-    let tmp = std::env::temp_dir().join("miru_test_logs_file");
-    let _ = std::fs::create_dir_all(&tmp);
+#[tokio::test]
+async fn test_init_file_only() {
+    let dir = miru_agent::filesys::Dir::create_temp_dir("miru_test_logs_file")
+        .await
+        .unwrap();
     let options = Options {
         stdout: false,
         log_level: LogLevel::Warn,
-        log_dir: tmp.clone(),
+        log_dir: dir.path().clone(),
     };
     let guard = logs::init(options);
     drop(guard);
-    let _ = std::fs::remove_dir_all(&tmp);
 }

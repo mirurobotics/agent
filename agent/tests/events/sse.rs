@@ -129,8 +129,13 @@ mod cursor {
             .body(Body::empty())
             .unwrap();
 
-        let (status, _bytes) = f.request(req).await;
+        let (status, bytes) = f.request(req).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        let body = String::from_utf8(bytes).unwrap();
+        assert!(
+            body.contains("malformed_cursor"),
+            "expected malformed_cursor error code, body: {body}"
+        );
     }
 
     #[tokio::test]
@@ -143,8 +148,13 @@ mod cursor {
             .body(Body::empty())
             .unwrap();
 
-        let (status, _bytes) = f.request(req).await;
+        let (status, bytes) = f.request(req).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        let body = String::from_utf8(bytes).unwrap();
+        assert!(
+            body.contains("malformed_cursor"),
+            "expected malformed_cursor error code, body: {body}"
+        );
     }
 
     #[tokio::test]
@@ -193,6 +203,12 @@ mod cursor {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::GONE);
+        let bytes = body::to_bytes(response.into_body(), 65536).await.unwrap();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(
+            body.contains("cursor_expired"),
+            "expected cursor_expired error code, body: {body}"
+        );
     }
 
     #[tokio::test]
