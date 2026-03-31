@@ -29,7 +29,7 @@ async fn make_hub(name: &str) -> (filesys::Dir, EventHub) {
     (dir, hub)
 }
 
-async fn make_small_hub(name: &str, max_retained: usize) -> (filesys::Dir, EventHub) {
+async fn make_hub_w_retained(name: &str, max_retained: usize) -> (filesys::Dir, EventHub) {
     let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
     let log_file = dir.file("events.jsonl");
     let opts = SpawnOptions {
@@ -116,7 +116,7 @@ mod replay {
 
     #[tokio::test]
     async fn expired_cursor_returns_error() {
-        let (_dir, hub) = make_small_hub("svc_sub_expired", 4).await;
+        let (_dir, hub) = make_hub_w_retained("svc_sub_expired", 4).await;
 
         for i in 0..6 {
             hub.publish(make_event(&format!("evt-{i}"))).await.unwrap();
@@ -206,9 +206,9 @@ mod live {
     }
 }
 
-// ========================= TYPE FILTER ========================= //
+// =========================== FILTER =========================== //
 
-mod type_filter {
+mod filter {
     use super::*;
 
     #[tokio::test]

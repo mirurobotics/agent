@@ -27,6 +27,7 @@ async fn make_hub(name: &str) -> (filesys::Dir, EventHub) {
 
 mod publish {
     use super::*;
+    use miru_agent::events::errors::EventsErr;
 
     #[tokio::test]
     async fn returns_event_with_monotonic_ids() {
@@ -54,6 +55,39 @@ mod publish {
         let (_dir, hub) = make_hub("hub_try_publish").await;
         hub.try_publish(make_event("test.ok")).await;
         // no panic = pass
+    }
+
+    #[tokio::test]
+    async fn publish_after_shutdown_returns_error() {
+        let (dir, _hub) = make_hub("hub_pub_shutdown").await;
+        let log_file = dir.file("events.jsonl");
+        let (hub, handle) = EventHub::spawn(log_file, SpawnOptions::default())
+            .await
+            .unwrap();
+
+        hub.shutdown().await.unwrap();
+        handle.await.unwrap();
+
+        let result = hub.publish(make_event("too.late")).await;
+        assert!(
+            matches!(result, Err(EventsErr::SendActorMessageErr(_))),
+            "publish after shutdown should return SendActorMessageErr, got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_publish_after_shutdown_does_not_panic() {
+        let (dir, _hub) = make_hub("hub_try_pub_shutdown").await;
+        let log_file = dir.file("events.jsonl");
+        let (hub, handle) = EventHub::spawn(log_file, SpawnOptions::default())
+            .await
+            .unwrap();
+
+        hub.shutdown().await.unwrap();
+        handle.await.unwrap();
+
+        hub.try_publish(make_event("too.late")).await;
+        // no panic = pass; error is logged internally
     }
 }
 

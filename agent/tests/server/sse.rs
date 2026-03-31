@@ -341,14 +341,14 @@ mod stream {
     }
 }
 
-// ========================= TYPE FILTER ========================= //
+// =========================== FILTER =========================== //
 
-mod type_filter {
+mod filter {
     use super::*;
 
     #[tokio::test]
     async fn filters_events_by_type() {
-        let f = Fixture::new("sse_type_filter").await;
+        let f = Fixture::new("sse_filter").await;
 
         f.event_hub().publish(make_event("type.a")).await.unwrap();
         f.event_hub().publish(make_event("type.b")).await.unwrap();
@@ -374,7 +374,7 @@ mod type_filter {
     }
 
     #[tokio::test]
-    async fn multiple_type_filter() {
+    async fn multiple_filter() {
         let f = Fixture::new("sse_multi_type").await;
 
         f.event_hub().publish(make_event("type.a")).await.unwrap();
