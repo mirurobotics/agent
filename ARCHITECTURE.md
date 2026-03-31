@@ -82,7 +82,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ### Generated code (workspace siblings)
 
-`libs/backend-api` and `libs/device-api` are auto-generated from OpenAPI specs in `api/`. Never edit these by hand. Regenerate with `make -C api` or `api/regen.sh`.
+`libs/backend-api` and `libs/device-api` are auto-generated from OpenAPI specs in `api/specs/`. Never edit these by hand. The specs themselves are sourced from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi) — to change schemas, modify the source repo, regenerate the bundle there, then copy the updated spec here and run `api/regen.sh`.
 
 ## Architectural Invariants
 
