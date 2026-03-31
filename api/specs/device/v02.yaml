@@ -9,17 +9,65 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.2.0-next
   x-git-commit:
-    sha: 2154d100e3f29015c9eaf542e5fd18332f99ed5e
-    url: https://github.com/mirurobotics/openapi/commit/2154d100e3f29015c9eaf542e5fd18332f99ed5e
-    message: 'feat(device-server): add SSE events endpoint and event schemas
+    sha: 6889747b0dfc30efec49f64cd146f3c3d84006c1
+    url: https://github.com/mirurobotics/openapi/commit/6889747b0dfc30efec49f64cd146f3c3d84006c1
+    message: 'fix(device): use enum $refs for event status fields (#8)
 
 
-      Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
-    author: Benjamin Smidt
-    branch: feat/sse
-    dirty: true
+      ## Summary
+
+      - Replace inline `type: string` with `$ref` to
+
+      `DeploymentActivityStatus` and `DeploymentTargetStatus` enums for
+
+      `activity_status` and `target_status` in `DeploymentDeployedBeta1Event`
+
+      and `DeploymentRemovedBeta1Event` schemas
+
+      - Regenerated `openapi.gen.yaml` bundle — validation passes with no new
+
+      warnings
+
+      - Aligns event schemas with the `Deployment` schema, which already uses
+
+      these enum refs
+
+
+      ## Context
+
+      The event schemas were added in 2154d10 with plain string types, while
+
+      the existing `Deployment` schema in the same spec uses `$ref` to the
+
+      enum definitions in `configs/components/enums/deployment-status.yaml`.
+
+      This was an oversight during initial authoring — there was no
+
+      intentional reason to diverge.
+
+
+      ## Test plan
+
+      - [x] `make -C apis/apps/device-server bundle` succeeds
+
+      - [x] `make -C apis/apps/device-server validate` passes (no new
+
+      warnings)
+
+      - [ ] Downstream codegen produces typed enums instead of `String` for
+
+      event status fields
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
+    author: ben-miru
+    branch: main
+    dirty: false
   x-build:
-    built_at: '2026-03-10T21:09:52.802165+00:00'
+    built_at: '2026-03-31T21:06:15.021225+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -253,7 +301,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - dirty-2154d100e3f29015c9eaf542e5fd18332f99ed5e
+      - 6889747b0dfc30efec49f64cd146f3c3d84006c1
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -271,13 +319,9 @@ components:
           description: ID of the deployment.
           example: dpl_123
         activity_status:
-          type: string
-          description: Activity status of the deployment after this event.
-          example: deployed
+          $ref: '#/components/schemas/DeploymentActivityStatus'
         target_status:
-          type: string
-          description: Target status of the deployment after this event.
-          example: deployed
+          $ref: '#/components/schemas/DeploymentTargetStatus'
         deployed_at:
           type: string
           format: date-time
@@ -302,13 +346,9 @@ components:
           description: ID of the deployment.
           example: dpl_123
         activity_status:
-          type: string
-          description: Activity status of the deployment after this event.
-          example: archived
+          $ref: '#/components/schemas/DeploymentActivityStatus'
         target_status:
-          type: string
-          description: Target status of the deployment after this event.
-          example: archived
+          $ref: '#/components/schemas/DeploymentTargetStatus'
         archived_at:
           type: string
           format: date-time
