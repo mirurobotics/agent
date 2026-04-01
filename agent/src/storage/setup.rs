@@ -42,11 +42,6 @@ pub async fn bootstrap(
         .move_to(&auth_dir.public_key(), Overwrite::Allow)
         .await?;
 
-    // wipe the customer configs directory
-    let customer_configs_dir = layout.customer_configs();
-    customer_configs_dir.delete().await?;
-    customer_configs_dir.create_if_absent().await?;
-
     // wipe resources directory
     let resources_dir = layout.resources();
     resources_dir.delete().await?;

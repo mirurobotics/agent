@@ -68,8 +68,6 @@ impl AppState {
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
         // initialize the syncer
-        let deploy_target_dir = layout.customer_configs();
-        let deploy_staging_dir = layout.srv_temp_dir();
         let (syncer, syncer_handle) = sync::Syncer::spawn(
             64,
             SyncerArgs {
@@ -77,8 +75,7 @@ impl AppState {
                 http_client: http_client.clone(),
                 token_mngr: token_mngr.clone(),
                 deploy_opts: apply::DeployOpts {
-                    staging_dir: deploy_staging_dir,
-                    target_dir: deploy_target_dir,
+                    filesys_root: layout.root.clone(),
                     retry_policy: dpl_retry_policy,
                 },
                 agent_version,

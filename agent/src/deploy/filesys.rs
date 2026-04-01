@@ -1,24 +1,28 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
 use crate::deploy::errors::{DeployErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr};
-use crate::filesys::{self, Overwrite, WriteOptions};
+use crate::filesys::{self, WriteOptions};
 use crate::models;
 use crate::storage;
 
 // external crates
 use tracing::{info, warn};
 
-/// Reads the deployment's config instances and writes them to the target directory
-/// via an atomic staging-directory swap.
+/// Reads the deployment's config instances and writes them directly to their
+/// absolute filesystem paths.
 pub async fn deploy(
     storage: &storage::CfgInstRef<'_>,
-    staging_dir: &filesys::Dir,
-    target_dir: &filesys::Dir,
+    filesys_root: &filesys::Dir,
     deployment: &models::Deployment,
 ) -> Result<(), DeployErr> {
     validate_deployment(deployment)?;
     let cfg_insts = read_config_instances(storage.meta, &deployment.config_instance_ids).await?;
 
-    write_files(&cfg_insts, storage.content, staging_dir, target_dir).await?;
+    for cfg_inst in &cfg_insts {
+        write_file(cfg_inst, storage.content, filesys_root).await?;
+    }
 
     info!(
         "wrote {} config instances to filesystem for deployment '{}'",
@@ -27,6 +31,60 @@ pub async fn deploy(
     );
 
     Ok(())
+}
+
+/// Removes config instance files from disk for the given deployment, skipping
+/// any filepaths present in the `keep` set.
+///
+/// This is best-effort: individual file deletion failures are logged as warnings
+/// rather than propagated, and metadata read failures cause the entire removal
+/// to be skipped (orphan files are preferable to deleting active files).
+pub async fn remove(
+    storage: &storage::CfgInstRef<'_>,
+    filesys_root: &filesys::Dir,
+    deployment: &models::Deployment,
+    ignore: &HashSet<String>,
+) {
+    let cfg_insts = match read_config_instances(storage.meta, &deployment.config_instance_ids).await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            debug_assert!(false, "failed to read config instances for removal of '{}': {e}", deployment.id);
+            warn!(
+                "failed to read config instances for removal of '{}': {e}",
+                deployment.id
+            );
+            return;
+        }
+    };
+
+    for cfg_inst in &cfg_insts {
+        if ignore.contains(&cfg_inst.filepath) {
+            continue;
+        }
+        let file = filesys_root.file(&cfg_inst.filepath);
+        if let Err(e) = file.delete().await {
+            debug_assert!(false, "failed to delete config file '{}': {e}", cfg_inst.filepath);
+            warn!(
+                "failed to delete config file '{}': {e}",
+                cfg_inst.filepath
+            );
+        }
+    }
+
+    info!(
+        "removed config instance files for deployment '{}'",
+        deployment.id
+    );
+}
+
+/// Collects the set of filepaths for the given config instance IDs.
+pub async fn filepaths(
+    storage: &storage::CfgInsts,
+    config_instance_ids: &[String],
+) -> Result<HashSet<String>, DeployErr> {
+    let cfg_insts = read_config_instances(storage, config_instance_ids).await?;
+    Ok(cfg_insts.into_iter().map(|ci| ci.filepath).collect())
 }
 
 fn validate_deployment(deployment: &models::Deployment) -> Result<(), DeployErr> {
@@ -60,46 +118,13 @@ async fn read_config_instances(
     Ok(cfg_insts)
 }
 
-async fn write_files(
-    cfg_insts: &[models::ConfigInstance],
-    content_stor: &storage::CfgInstContent,
-    staging_dir: &filesys::Dir,
-    target_dir: &filesys::Dir,
-) -> Result<(), DeployErr> {
-    let temp_dir = create_temp_dir(staging_dir).await?;
-
-    let result: Result<(), DeployErr> = async {
-        for cfg_inst in cfg_insts {
-            write_file(cfg_inst, content_stor, &temp_dir).await?;
-        }
-        // we assume the the move_to operation is atomic--if it fails the current
-        // directory is assumed to be as it was before the move_to operation.
-        temp_dir.move_to(target_dir, Overwrite::Allow).await?;
-        Ok(())
-    }
-    .await;
-
-    if let Err(e) = temp_dir.delete().await {
-        debug_assert!(false, "failed to clean up temporary directory: {e}");
-        warn!("failed to clean up temporary directory: {e}");
-    }
-
-    result
-}
-
-async fn create_temp_dir(staging_dir: &filesys::Dir) -> Result<filesys::Dir, DeployErr> {
-    let temp_dir = staging_dir.subdir(uuid::Uuid::new_v4().to_string());
-    temp_dir.create_if_absent().await?;
-    Ok(temp_dir)
-}
-
 async fn write_file(
     cfg_inst: &models::ConfigInstance,
     content_stor: &storage::CfgInstContent,
-    dest_dir: &filesys::Dir,
+    filesys_root: &filesys::Dir,
 ) -> Result<(), DeployErr> {
     let content = content_stor.read(cfg_inst.id.clone()).await?;
-    let dest = dest_dir.file(&cfg_inst.filepath);
+    let dest = filesys_root.file(&cfg_inst.filepath);
     dest.write_string(&content, WriteOptions::OVERWRITE_ATOMIC)
         .await?;
     Ok(())

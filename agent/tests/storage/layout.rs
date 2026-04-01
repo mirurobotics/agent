@@ -6,10 +6,10 @@ pub mod storage_layout {
     use super::*;
 
     #[test]
-    fn default_uses_filesystem_root() {
+    fn default_uses_filesys_root() {
         let layout = Layout::default();
         assert_eq!(
-            layout.filesystem_root.path(),
+            layout.root.path(),
             &std::path::PathBuf::from("/")
         );
     }
@@ -17,14 +17,14 @@ pub mod storage_layout {
     #[test]
     fn root_dir() {
         let layout = Layout::new(filesys::Dir::new("/"));
-        let dir = layout.root();
+        let dir = layout.internal();
         assert_eq!(dir.to_string(), "/var/lib/miru");
     }
 
     #[test]
-    fn root_dir_custom_filesystem_root() {
+    fn root_dir_custom_filesys_root() {
         let layout = Layout::new(filesys::Dir::new("/custom"));
-        let dir = layout.root();
+        let dir = layout.internal();
         assert_eq!(dir.to_string(), "/custom/var/lib/miru");
     }
 
@@ -97,33 +97,6 @@ pub mod storage_layout {
         assert_eq!(file.to_string(), "/var/lib/miru/resources/git_commits.json");
     }
 
-    #[test]
-    fn customer_configs() {
-        let layout = Layout::default();
-        let dir = layout.customer_configs();
-        assert_eq!(dir.to_string(), "/srv/miru/config_instances");
-    }
-
-    #[test]
-    fn customer_configs_custom_filesystem_root() {
-        let layout = Layout::new(filesys::Dir::new("/opt"));
-        let dir = layout.customer_configs();
-        assert_eq!(dir.to_string(), "/opt/srv/miru/config_instances");
-    }
-
-    #[test]
-    fn srv_temp_dir() {
-        let layout = Layout::default();
-        let dir = layout.srv_temp_dir();
-        assert_eq!(dir.to_string(), "/srv/miru/.temp");
-    }
-
-    #[test]
-    fn srv_temp_dir_custom_filesystem_root() {
-        let layout = Layout::new(filesys::Dir::new("/opt"));
-        let dir = layout.srv_temp_dir();
-        assert_eq!(dir.to_string(), "/opt/srv/miru/.temp");
-    }
 }
 
 pub mod auth_layout {

@@ -1,5 +1,8 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
-use miru_agent::deploy::filesys::deploy;
+use miru_agent::deploy::filesys::{deploy, filepaths, remove};
 use miru_agent::deploy::DeployErr;
 use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
@@ -11,8 +14,7 @@ use serde_json::json;
 struct Fixture {
     cfg_inst_meta: storage::CfgInsts,
     cfg_inst_content: storage::CfgInstContent,
-    staging_dir: filesys::Dir,
-    target_dir: filesys::Dir,
+    filesys_root: filesys::Dir,
     _temp_dir: filesys::Dir,
 }
 
@@ -32,15 +34,14 @@ impl Fixture {
                 .await
                 .unwrap();
 
-        let staging_dir = temp_dir.subdir("staging");
-        staging_dir.create().await.unwrap();
-        let target_dir = temp_dir.subdir("deployments");
+        // Use the temp dir as the filesystem root so absolute paths like
+        // "/test/filepath.json" resolve to "<temp_dir>/test/filepath.json".
+        let filesys_root = temp_dir.clone();
 
         Self {
             cfg_inst_meta,
             cfg_inst_content,
-            staging_dir,
-            target_dir,
+            filesys_root,
             _temp_dir: temp_dir,
         }
     }
@@ -80,7 +81,15 @@ impl Fixture {
             meta: &self.cfg_inst_meta,
             content: &self.cfg_inst_content,
         };
-        deploy(&stor, &self.staging_dir, &self.target_dir, deployment).await
+        deploy(&stor, &self.filesys_root, deployment).await
+    }
+
+    async fn remove(&self, deployment: &Deployment, keep: &HashSet<String>) {
+        let stor = storage::CfgInstRef {
+            meta: &self.cfg_inst_meta,
+            content: &self.cfg_inst_content,
+        };
+        remove(&stor, &self.filesys_root, deployment, keep).await
     }
 }
 
@@ -102,7 +111,7 @@ pub mod deploy_func {
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .target_dir
+            .filesys_root
             .file(&cfg_inst.filepath)
             .read_string()
             .await
@@ -122,7 +131,7 @@ pub mod deploy_func {
         f.seed_cfg_inst(&cfg_inst, new_content.clone()).await;
 
         // pre-populate the target with old content
-        let file = f.target_dir.file(&filepath);
+        let file = f.filesys_root.file(&filepath);
         file.write_json(&json!({"old": true}), WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -130,7 +139,12 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = f.target_dir.file(&filepath).read_string().await.unwrap();
+        let actual = f
+            .filesys_root
+            .file(&filepath)
+            .read_string()
+            .await
+            .unwrap();
         assert_eq!(actual, new_content);
     }
 
@@ -155,7 +169,7 @@ pub mod deploy_func {
 
         for (i, cfg_inst) in cfg_insts.iter().enumerate() {
             let actual = f
-                .target_dir
+                .filesys_root
                 .file(&cfg_inst.filepath)
                 .read_string()
                 .await
@@ -233,60 +247,7 @@ pub mod deploy_func {
     }
 
     #[tokio::test]
-    async fn staging_dir_is_cleaned_up_on_success() {
-        let f = Fixture::new().await;
-        let cfg_inst = ConfigInstance {
-            filepath: "/test/filepath".to_string(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&cfg_inst, "{\"ok\": true}".to_string())
-            .await;
-
-        let deployment = f.new_deployment(&[cfg_inst]);
-        f.deploy(&deployment).await.unwrap();
-
-        // staging_dir itself should still exist but have no subdirectories
-        // (the temp UUID dir was moved away, then delete() was called on the
-        // already-absent path, which is a no-op)
-        let subdirs = f.staging_dir.subdirs().await.unwrap();
-        assert!(
-            subdirs.is_empty(),
-            "staging dir should have no leftover temp directories, found: {subdirs:?}",
-        );
-    }
-
-    #[tokio::test]
-    async fn staging_dir_is_cleaned_up_on_write_failure() {
-        let f = Fixture::new().await;
-        let cfg_inst = ConfigInstance {
-            filepath: "/test/filepath".to_string(),
-            ..Default::default()
-        };
-        // seed metadata but NOT content — write_file will fail when reading content
-        f.cfg_inst_meta
-            .write(
-                cfg_inst.id.clone(),
-                cfg_inst.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
-
-        let deployment = f.new_deployment(&[cfg_inst]);
-        let result = f.deploy(&deployment).await;
-        assert!(result.is_err());
-
-        // the temp directory should have been cleaned up despite the error
-        let subdirs = f.staging_dir.subdirs().await.unwrap();
-        assert!(
-            subdirs.is_empty(),
-            "staging dir should be cleaned up after failure, found: {subdirs:?}",
-        );
-    }
-
-    #[tokio::test]
-    async fn target_dir_unchanged_on_write_failure() {
+    async fn partial_write_on_failure() {
         let f = Fixture::new().await;
 
         // seed one valid config instance
@@ -296,14 +257,6 @@ pub mod deploy_func {
         };
         f.seed_cfg_inst(&good_cfg, "{\"good\": true}".to_string())
             .await;
-
-        // pre-populate the target directory with existing content
-        let existing_file = f.target_dir.file("/test/existing");
-        let existing_content = json!({"existing": true});
-        existing_file
-            .write_json(&existing_content, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
 
         // create a deployment with a valid and an invalid config instance
         let bad_cfg = ConfigInstance {
@@ -329,22 +282,15 @@ pub mod deploy_func {
         let result = f.deploy(&deployment).await;
         assert!(result.is_err());
 
-        // the staging dir was never swapped in, so good_cfg's file should not appear
+        // with per-file writes, the successfully-written file exists on disk
         assert!(
-            !f.target_dir.file("/test/good").exists(),
-            "staged files should not appear in target after failure",
+            f.filesys_root.file("/test/good").exists(),
+            "successfully written files should exist after partial failure",
         );
-
-        // the existing target dir content should be untouched
-        let actual = existing_file
-            .read_json::<serde_json::Value>()
-            .await
-            .unwrap();
-        assert_eq!(actual, existing_content);
     }
 
     #[tokio::test]
-    async fn target_dir_created_if_absent() {
+    async fn parent_dirs_created_if_absent() {
         let f = Fixture::new().await;
         let cfg_inst = ConfigInstance {
             filepath: "/test/filepath".to_string(),
@@ -353,14 +299,11 @@ pub mod deploy_func {
         let content = "{\"new\": true}".to_string();
         f.seed_cfg_inst(&cfg_inst, content.clone()).await;
 
-        // deployment_dir does not exist yet
-        assert!(!f.target_dir.exists());
-
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .target_dir
+            .filesys_root
             .file(&cfg_inst.filepath)
             .read_string()
             .await
@@ -385,49 +328,12 @@ pub mod deploy_func {
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .target_dir
+            .filesys_root
             .file(&cfg_inst.filepath)
             .read_string()
             .await
             .unwrap();
         assert_eq!(actual, content);
-    }
-
-    #[tokio::test]
-    async fn deploy_removes_stale_files_from_target() {
-        let f = Fixture::new().await;
-
-        // first deploy writes file_a
-        let cfg_a = ConfigInstance {
-            filepath: "/test/file_a".to_string(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&cfg_a, "{\"a\": true}".to_string()).await;
-        let deployment_a = f.new_deployment(std::slice::from_ref(&cfg_a));
-        f.deploy(&deployment_a).await.unwrap();
-        assert!(f.target_dir.file("/test/file_a").exists());
-
-        // second deploy writes only file_b (different config instance set)
-        let cfg_b = ConfigInstance {
-            filepath: "/test/file_b".to_string(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&cfg_b, "{\"b\": true}".to_string()).await;
-        let deployment_b = f.new_deployment(std::slice::from_ref(&cfg_b));
-        f.deploy(&deployment_b).await.unwrap();
-
-        // file_a should be gone since the staging dir replaced the entire target
-        assert!(
-            !f.target_dir.file("/test/file_a").exists(),
-            "stale files from previous deploy should be removed",
-        );
-        let actual = f
-            .target_dir
-            .file("/test/file_b")
-            .read_string()
-            .await
-            .unwrap();
-        assert_eq!(actual, "{\"b\": true}");
     }
 
     #[tokio::test]
@@ -444,11 +350,153 @@ pub mod deploy_func {
         f.deploy(&deployment).await.unwrap();
 
         let actual = f
-            .target_dir
+            .filesys_root
             .file(&cfg_inst.filepath)
             .read_string()
             .await
             .unwrap();
         assert_eq!(actual, content);
+    }
+}
+
+pub mod remove_func {
+    use super::*;
+    use miru_agent::filesys::PathExt;
+
+    #[tokio::test]
+    async fn deletes_config_instance_files() {
+        let f = Fixture::new().await;
+        let cfg_inst = ConfigInstance {
+            filepath: "/test/remove-me.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_inst, "{\"data\": true}".to_string())
+            .await;
+
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        f.deploy(&deployment).await.unwrap();
+        assert!(f.filesys_root.file("/test/remove-me.json").exists());
+
+        f.remove(&deployment, &HashSet::new()).await;
+        assert!(
+            !f.filesys_root.file("/test/remove-me.json").exists(),
+            "file should be deleted after remove"
+        );
+    }
+
+    #[tokio::test]
+    async fn respects_keep_set() {
+        let f = Fixture::new().await;
+        let cfg_a = ConfigInstance {
+            filepath: "/test/keep-me.json".to_string(),
+            ..Default::default()
+        };
+        let cfg_b = ConfigInstance {
+            filepath: "/test/delete-me.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_a, "{\"a\": true}".to_string()).await;
+        f.seed_cfg_inst(&cfg_b, "{\"b\": true}".to_string()).await;
+
+        let deployment = f.new_deployment(&[cfg_a.clone(), cfg_b.clone()]);
+        f.deploy(&deployment).await.unwrap();
+
+        let keep: HashSet<String> = ["/test/keep-me.json".to_string()].into();
+        f.remove(&deployment, &keep).await;
+
+        assert!(
+            f.filesys_root.file("/test/keep-me.json").exists(),
+            "file in keep set should be preserved"
+        );
+        assert!(
+            !f.filesys_root.file("/test/delete-me.json").exists(),
+            "file not in keep set should be deleted"
+        );
+    }
+
+    #[tokio::test]
+    async fn best_effort_on_missing_files() {
+        let f = Fixture::new().await;
+        let cfg_inst = ConfigInstance {
+            filepath: "/test/nonexistent.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_inst, "content".to_string()).await;
+
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        // Don't deploy first -- file doesn't exist on disk
+        // remove should not panic or error
+        f.remove(&deployment, &HashSet::new()).await;
+    }
+
+    #[tokio::test]
+    async fn best_effort_on_missing_metadata() {
+        let f = Fixture::new().await;
+        // deployment references a config instance ID that doesn't exist in the cache
+        let deployment = Deployment {
+            target_status: DplTarget::Deployed,
+            activity_status: DplActivity::Deployed,
+            config_instance_ids: vec!["evicted-id".to_string()],
+            ..Default::default()
+        };
+        // remove should not panic -- it logs a warning and returns
+        f.remove(&deployment, &HashSet::new()).await;
+    }
+
+    #[tokio::test]
+    async fn removes_multiple_files() {
+        let f = Fixture::new().await;
+        let cfg_a = ConfigInstance {
+            filepath: "/test/a.json".to_string(),
+            ..Default::default()
+        };
+        let cfg_b = ConfigInstance {
+            filepath: "/test/b.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_a, "a".to_string()).await;
+        f.seed_cfg_inst(&cfg_b, "b".to_string()).await;
+
+        let deployment = f.new_deployment(&[cfg_a, cfg_b]);
+        f.deploy(&deployment).await.unwrap();
+
+        f.remove(&deployment, &HashSet::new()).await;
+
+        assert!(!f.filesys_root.file("/test/a.json").exists());
+        assert!(!f.filesys_root.file("/test/b.json").exists());
+    }
+}
+
+pub mod filepaths_func {
+    use super::*;
+
+    #[tokio::test]
+    async fn collects_filepaths() {
+        let f = Fixture::new().await;
+        let cfg_a = ConfigInstance {
+            filepath: "/srv/a.json".to_string(),
+            ..Default::default()
+        };
+        let cfg_b = ConfigInstance {
+            filepath: "/srv/b.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_a, "a".to_string()).await;
+        f.seed_cfg_inst(&cfg_b, "b".to_string()).await;
+
+        let ids = vec![cfg_a.id.clone(), cfg_b.id.clone()];
+        let result = filepaths(&f.cfg_inst_meta, &ids).await.unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result.contains("/srv/a.json"));
+        assert!(result.contains("/srv/b.json"));
+    }
+
+    #[tokio::test]
+    async fn missing_metadata_returns_error() {
+        let f = Fixture::new().await;
+        let ids = vec!["nonexistent".to_string()];
+        let result = filepaths(&f.cfg_inst_meta, &ids).await;
+        assert!(result.is_err());
     }
 }

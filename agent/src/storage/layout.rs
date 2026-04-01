@@ -3,39 +3,39 @@ use crate::filesys;
 
 #[derive(Clone, Debug)]
 pub struct Layout {
-    pub filesystem_root: filesys::Dir,
+    pub root: filesys::Dir,
 }
 
 impl Layout {
-    pub fn new(filesystem_root: filesys::Dir) -> Self {
-        Self { filesystem_root }
+    pub fn new(filesys_root: filesys::Dir) -> Self {
+        Self { root: filesys_root }
     }
 
-    pub fn root(&self) -> filesys::Dir {
-        self.filesystem_root
+    pub fn internal(&self) -> filesys::Dir {
+        self.root
             .subdir("var")
             .subdir("lib")
             .subdir("miru")
     }
 
     pub fn temp_dir(&self) -> filesys::Dir {
-        self.root().subdir("tmp")
+        self.internal().subdir("tmp")
     }
 
     pub fn auth(&self) -> AuthLayout {
-        AuthLayout::new(self.root().subdir("auth"))
+        AuthLayout::new(self.internal().subdir("auth"))
     }
 
     pub fn settings(&self) -> filesys::File {
-        self.root().file("settings.json")
+        self.internal().file("settings.json")
     }
 
     pub fn resources(&self) -> filesys::Dir {
-        self.root().subdir("resources")
+        self.internal().subdir("resources")
     }
 
     pub fn device(&self) -> filesys::File {
-        self.root().file("device.json")
+        self.internal().file("device.json")
     }
 
     fn config_instances(&self) -> filesys::Dir {
@@ -63,26 +63,13 @@ impl Layout {
     }
 
     pub fn events_dir(&self) -> filesys::Dir {
-        self.root().subdir("events")
+        self.internal().subdir("events")
     }
 
     pub fn events_log_file(&self) -> filesys::File {
         self.events_dir().file("events.jsonl")
     }
 
-    pub fn customer_configs(&self) -> filesys::Dir {
-        self.filesystem_root
-            .subdir("srv")
-            .subdir("miru")
-            .subdir("config_instances")
-    }
-
-    pub fn srv_temp_dir(&self) -> filesys::Dir {
-        self.filesystem_root
-            .subdir("srv")
-            .subdir("miru")
-            .subdir(".temp")
-    }
 }
 
 impl Default for Layout {

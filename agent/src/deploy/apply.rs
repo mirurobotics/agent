@@ -1,9 +1,12 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
 use crate::deploy::{
     errors::{ConflictingDeploymentsErr, DeployErr},
     filesys as dpl_filesys, fsm,
 };
-use crate::filesys::{self, Overwrite};
+use crate::filesys;
 use crate::models;
 use crate::storage;
 
@@ -12,8 +15,7 @@ use chrono::Utc;
 use tracing::{error, info, warn};
 
 pub struct DeployOpts {
-    pub staging_dir: filesys::Dir,
-    pub target_dir: filesys::Dir,
+    pub filesys_root: filesys::Dir,
     pub retry_policy: fsm::RetryPolicy,
 }
 
@@ -48,18 +50,28 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
         // for cooldown to end
         Some(deployment) => {
             let deployed_id = deployment.id.clone();
-            let mut outcomes = vec![apply_one(args, deployment).await];
-            outcomes.extend(apply_actionables(args, Some(deployed_id)).await?);
+            // Build keep set: filepaths from the new deployment that must not be
+            // deleted when cleaning up old deployments.
+            let keep = match dpl_filesys::filepaths(
+                args.storage.cfg_insts.meta,
+                &deployment.config_instance_ids,
+            )
+            .await
+            {
+                Ok(set) => set,
+                Err(e) => {
+                    warn!("failed to build keep set for stale cleanup: {e}");
+                    HashSet::new()
+                }
+            };
+            let mut outcomes = vec![apply_one(args, deployment, &keep).await];
+            outcomes.extend(apply_actionables(args, Some(deployed_id), &keep).await?);
             Ok(outcomes)
         }
-        // if there is no deployment which wishes to be deployed, we need to delete the
-        // target directory so that stale deployments are removed
+        // if there is no deployment which wishes to be deployed, nothing to keep
         None => {
-            let outcomes = apply_actionables(args, None).await?;
-            if let Err(e) = args.opts.target_dir.delete().await {
-                debug_assert!(false, "failed to delete target directory: {e}");
-                warn!("failed to delete target directory: {e}");
-            }
+            let keep = HashSet::new();
+            let outcomes = apply_actionables(args, None, &keep).await?;
             Ok(outcomes)
         }
     }
@@ -86,6 +98,7 @@ async fn find_target_deployed(
 async fn apply_actionables(
     args: &Args<'_>,
     exclude_id: Option<DeploymentID>,
+    keep: &HashSet<String>,
 ) -> Result<Vec<Outcome>, DeployErr> {
     let mut outcomes = Vec::new();
     let actionable = args
@@ -96,13 +109,17 @@ async fn apply_actionables(
         })
         .await?;
     for deployment in actionable {
-        let outcome = apply_one(args, deployment).await;
+        let outcome = apply_one(args, deployment, keep).await;
         outcomes.push(outcome);
     }
     Ok(outcomes)
 }
 
-async fn apply_one(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
+async fn apply_one(
+    args: &Args<'_>,
+    deployment: models::Deployment,
+    keep: &HashSet<String>,
+) -> Outcome {
     match fsm::next_action(&deployment) {
         fsm::NextAction::None => {
             info!("'{}' has no next action", deployment.id);
@@ -132,7 +149,7 @@ async fn apply_one(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
         }
         fsm::NextAction::Remove | fsm::NextAction::Archive => {
             info!("removing '{}'", deployment.id);
-            remove(args.storage.deployments, deployment).await
+            remove(args.storage, args.opts, deployment, keep).await
         }
     }
 }
@@ -146,14 +163,7 @@ async fn deploy(
 ) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
 
-    match dpl_filesys::deploy(
-        &storage.cfg_insts,
-        &opts.staging_dir,
-        &opts.target_dir,
-        &deployment,
-    )
-    .await
-    {
+    match dpl_filesys::deploy(&storage.cfg_insts, &opts.filesys_root, &deployment).await {
         Ok(()) => {
             let deployment = fsm::deploy(deployment);
             let error = write_deployment(storage.deployments, &deployment)
@@ -199,9 +209,17 @@ fn remaining_cooldown(deployment: &models::Deployment) -> Option<chrono::TimeDel
 
 // ================================= REMOVE ======================================== //
 
-async fn remove(deployments: &storage::Deployments, deployment: models::Deployment) -> Outcome {
+async fn remove(
+    storage: &Storage<'_>,
+    opts: &DeployOpts,
+    deployment: models::Deployment,
+    keep: &HashSet<String>,
+) -> Outcome {
+    // Clean up config instance files from disk before updating state
+    dpl_filesys::remove(&storage.cfg_insts, &opts.filesys_root, &deployment, keep).await;
+
     let deployment = fsm::remove(deployment);
-    let error = write_deployment(deployments, &deployment).await.err();
+    let error = write_deployment(storage.deployments, &deployment).await.err();
     Outcome {
         deployment,
         wait: None,
@@ -221,7 +239,7 @@ async fn write_deployment(
             deployment.id.clone(),
             deployment.clone(),
             storage::deployments::is_dirty,
-            Overwrite::Allow,
+            filesys::Overwrite::Allow,
         )
         .await
         .map_err(DeployErr::from)

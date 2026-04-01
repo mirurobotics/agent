@@ -34,9 +34,6 @@ pub mod bootstrap {
         let public_key_contents = public_key_file.read_string().await.unwrap();
         assert!(!public_key_contents.is_empty());
 
-        // config instance deployment directory
-        let config_instance_deployment_dir = layout.customer_configs();
-        assert!(config_instance_deployment_dir.exists());
     }
 
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
@@ -274,40 +271,4 @@ pub mod bootstrap {
         assert!(!subfile.exists());
     }
 
-    #[tokio::test]
-    async fn config_instance_deployment_directory_already_exists() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let layout = Layout::new(dir);
-        let settings = Settings::default();
-
-        // create the public / private key files
-        let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
-
-        // create the config instance deployment directory
-        let config_instance_deployment_dir = layout.customer_configs();
-        let subfile = config_instance_deployment_dir.file("test");
-        subfile
-            .write_string("test", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        assert!(subfile.exists());
-
-        // setup the storage
-        let device = Device::default();
-        storage::setup::bootstrap(
-            &layout,
-            &device,
-            &settings,
-            &private_key_file,
-            &public_key_file,
-        )
-        .await
-        .unwrap();
-
-        // validate the storage
-        validate_storage(&layout).await;
-
-        // subfile should be deleted
-        assert!(!subfile.exists());
-    }
 }
