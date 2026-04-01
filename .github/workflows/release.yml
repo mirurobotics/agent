@@ -43,9 +43,14 @@ jobs:
             echo "::notice::Tag is not on main or release/* — skipping release."
           fi
 
+  ci:
+    needs: check-main
+    if: needs.check-main.outputs.on_main == 'true'
+    uses: ./.github/workflows/ci.yml
+
   release:
     runs-on: ubuntu-latest
-    needs: check-main
+    needs: [ci, check-main]
     if: needs.check-main.outputs.on_main == 'true'
     steps:
       - name: Checkout Code
