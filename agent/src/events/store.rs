@@ -41,7 +41,10 @@ impl EventStore {
 
     pub async fn append(&mut self, event_args: EventArgs) -> Result<Event, EventsErr> {
         let event = Event::new(self.next_event_id, event_args);
-        self.next_event_id += 1;
+        self.next_event_id = self
+            .next_event_id
+            .checked_add(1)
+            .expect("event ID overflow: exhausted i64 space");
 
         let json = serde_json::to_string(&event)?;
         self.log_file
@@ -88,6 +91,11 @@ impl EventStore {
         self.events.last().map(|e| e.id)
     }
 
+    /// Check whether the store has exceeded max_retained.
+    ///
+    /// Uses `>` (not `>=`) intentionally: the store briefly holds
+    /// `max_retained + 1` events (after the triggering append) before
+    /// compacting down to 80% of `max_retained`.
     pub fn needs_compaction(&self) -> bool {
         self.events.len() > self.max_retained
     }
@@ -153,7 +161,10 @@ impl EventStore {
             match serde_json::from_str::<Event>(line) {
                 Ok(event) => {
                     if event.id >= next_event_id {
-                        next_event_id = event.id + 1;
+                        next_event_id = event
+                            .id
+                            .checked_add(1)
+                            .expect("event ID overflow: exhausted i64 space");
                     }
                     events.push(event);
                 }
