@@ -26,7 +26,7 @@ use axum::{
 };
 use serde::Deserialize;
 use tokio_stream::StreamExt;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
@@ -64,13 +64,18 @@ async fn events_impl(
 
     let sse_stream = stream.filter_map(|event| {
         let api_event = device_server::Event::from(&event);
-        let json = serde_json::to_string(&api_event).ok()?;
-        Some(Ok::<_, Infallible>(
-            SseEvent::default()
-                .id(event.id.to_string())
-                .event(event.event_type.clone())
-                .data(json),
-        ))
+        match serde_json::to_string(&api_event) {
+            Ok(json) => Some(Ok::<_, Infallible>(
+                SseEvent::default()
+                    .id(event.id.to_string())
+                    .event(event.event_type.clone())
+                    .data(json),
+            )),
+            Err(e) => {
+                warn!("failed to serialize event {}: {e}", event.id);
+                None
+            }
+        }
     });
 
     Ok(Sse::new(sse_stream).keep_alive(
@@ -100,10 +105,16 @@ fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<i6
 }
 
 fn parse_event_filter(types: Option<String>) -> Option<EventTypeFilter> {
-    types.map(|t| {
-        t.split(',')
+    types.and_then(|t| {
+        let set: EventTypeFilter = t
+            .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .collect()
+            .collect();
+        if set.is_empty() {
+            None
+        } else {
+            Some(set)
+        }
     })
 }

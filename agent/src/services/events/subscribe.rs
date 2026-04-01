@@ -1,20 +1,20 @@
-// standard crates
-use std::pin::Pin;
-
 // internal crates
-use crate::events::{hub::EventHub, model::Event, model::EventTypeFilter};
+use crate::events::{
+    hub::EventHub,
+    model::{Event, EventTypeFilter},
+};
 use crate::services::errors::ServiceErr;
 
 // external crates
-use futures::Stream;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tracing::warn;
 
 pub async fn subscribe(
     event_hub: &EventHub,
     cursor: Option<i64>,
     filter: Option<EventTypeFilter>,
-) -> Result<Pin<Box<dyn Stream<Item = Event> + Send>>, ServiceErr> {
+) -> Result<impl tokio_stream::Stream<Item = Event> + Send, ServiceErr> {
     // subscribe BEFORE replay to prevent gaps
     let broadcast_rx = event_hub.subscribe();
 
@@ -27,15 +27,22 @@ pub async fn subscribe(
 
     let replay_stream = tokio_stream::iter(replays);
     let live_stream = BroadcastStream::new(broadcast_rx)
+        .map(|result| {
+            result.map_err(|e| {
+                warn!("SSE client fell behind the event broadcast buffer, closing connection so it can reconnect and replay missed events: {e}");
+            })
+        })
+        // cut the stream off if the result is not vali
+        .take_while(|result| result.is_ok())
         .filter_map(|result| result.ok())
-        .filter(move |event: &Event| event.id > last_replayed_id);
+        .filter(move |event| event.id > last_replayed_id);
 
     let stream = replay_stream
         .chain(live_stream)
-        .filter(move |event: &Event| match &filter {
+        .filter(move |event| match &filter {
             Some(f) => f.contains(&event.event_type),
             None => true,
         });
 
-    Ok(Box::pin(stream))
+    Ok(stream)
 }

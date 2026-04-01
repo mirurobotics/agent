@@ -407,6 +407,53 @@ mod stream {
             "expected live event type, body: {body}"
         );
     }
+
+    #[tokio::test]
+    async fn broadcast_lag_closes_stream() {
+        let opts = SpawnOptions {
+            broadcast_capacity: 2,
+            ..SpawnOptions::default()
+        };
+        let f = Fixture::with_hub_opts("sse_lag_close", opts).await;
+
+        let req = Request::builder()
+            .uri("/v0.2/events")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        // Get the response (creates the subscriber) but don't read the body yet
+        let response = f.app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Flood the broadcast channel while nothing is consuming frames.
+        // With broadcast_capacity=2, publishing 10 events guarantees lag.
+        for i in 0..10 {
+            f.event_hub()
+                .publish(make_event(&format!("flood-{i}")))
+                .await
+                .unwrap();
+        }
+
+        // Now read the body — the stream should close without delivering all events
+        let mut body_stream = response.into_body();
+        let mut collected = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_millis(500), async {
+            while let Some(Ok(frame)) = body_stream.frame().await {
+                if let Some(data) = frame.data_ref() {
+                    collected.extend_from_slice(data);
+                }
+            }
+        })
+        .await;
+
+        let body = String::from_utf8(collected).unwrap_or_default();
+        let event_count = body.matches("\nevent: ").count();
+        assert!(
+            event_count < 10,
+            "stream should have closed due to lag, but got {event_count} events"
+        );
+    }
 }
 
 // =========================== FILTER =========================== //
@@ -464,7 +511,7 @@ mod filter {
     }
 
     #[tokio::test]
-    async fn empty_types_param_returns_no_events() {
+    async fn empty_types_param_returns_all_events() {
         let f = Fixture::new("sse_empty_types").await;
 
         f.event_hub().publish(make_event("type.a")).await.unwrap();
@@ -478,10 +525,31 @@ mod filter {
         let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
         assert_eq!(status, StatusCode::OK);
 
-        // empty types= produces an empty HashSet filter, which matches nothing
+        // empty types= is treated as no filter (returns all events)
         assert!(
-            !body.contains("event: type.a"),
-            "empty types param should filter out all events, body: {body}"
+            body.contains("event: type.a"),
+            "empty types param should return all events, body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_commas_types_param_returns_all_events() {
+        let f = Fixture::new("sse_commas_types").await;
+
+        f.event_hub().publish(make_event("type.a")).await.unwrap();
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0&types=,,,")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        assert!(
+            body.contains("event: type.a"),
+            "types=,,, should return all events, body: {body}"
         );
     }
 

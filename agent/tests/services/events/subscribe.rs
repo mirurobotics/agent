@@ -152,7 +152,7 @@ mod live {
     /// without duplicates when a live event is published after subscribing.
     ///
     /// Note: the dedup filter (`event.id > last_replayed_id`) in subscribe.rs
-    /// only activates when a publish races the internal subscribe→replay window,
+    /// only activates when a publish races the internal subscribe->replay window,
     /// which cannot be triggered deterministically in a single-threaded test.
     /// This test validates the replay+live chain produces the correct output.
     #[tokio::test]
@@ -267,7 +267,7 @@ mod error {
     use super::*;
 
     #[tokio::test]
-    async fn broadcast_lag_skips_lost_events() {
+    async fn broadcast_lag_terminates_stream() {
         let dir = filesys::Dir::create_temp_dir("svc_sub_lag").await.unwrap();
         let log_file = dir.file("events.jsonl");
         let opts = SpawnOptions {
@@ -286,12 +286,12 @@ mod error {
                 .unwrap();
         }
 
-        // Should receive some events without panic
+        // Stream should terminate (return None) rather than delivering all events
         let items = collect_n(&mut stream, 10, Duration::from_millis(500)).await;
         assert!(
-            !items.is_empty(),
-            "should receive at least some events despite lag"
+            items.len() < 10,
+            "stream should have terminated due to lag, got all {} events",
+            items.len()
         );
-        // No panic = pass
     }
 }
