@@ -6,16 +6,47 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0
+  x-release-version: v0.2.1-next
   x-git-commit:
-    sha: 5e98bcf13136459371f57ae422d353a1e7491b14
-    url: https://github.com/mirurobotics/openapi/commit/5e98bcf13136459371f57ae422d353a1e7491b14
-    message: 'chore: bump device api version'
-    author: Benjamin Smidt
-    branch: HEAD
+    sha: 5a504679eff8dced16e5a207680aea0f2e8bdfdc
+    url: https://github.com/mirurobotics/openapi/commit/5a504679eff8dced16e5a207680aea0f2e8bdfdc
+    message: 'feat: add removing deployment activity status (#11)
+
+
+      ## Summary
+
+
+      - Add `removing` to `DeploymentActivityStatus` enum to signal when a
+
+      deployment''s config instances are being removed from the device
+
+      - Add `removing` to `DeploymentStatus` (merged status) enum for
+
+      consistency
+
+      - Regenerate all spec bundles (agent, cli, frontend, platform,
+
+      device-server)
+
+
+      This enables consumers to distinguish between a fully deployed state and
+
+      a transitional removal state, which is needed now that the agent
+
+      writes/deletes config instance files individually rather than via an
+
+      atomic directory swap.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
+    author: ben-miru
+    branch: main
     dirty: false
   x-build:
-    built_at: '2026-03-10T03:12:29.573456+00:00'
+    built_at: '2026-04-01T22:36:12.963240+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -280,7 +311,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 5e98bcf13136459371f57ae422d353a1e7491b14
+      - 5a504679eff8dced16e5a207680aea0f2e8bdfdc
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -385,6 +416,10 @@ components:
         for consumption on the device.
 
 
+        `removing` means the deployment''s config instances are being removed from
+        the device.
+
+
         `archived` means the deployment is available for historical reference but
         cannot be deployed and is not active on the device.
 
@@ -394,12 +429,14 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       x-enum-varnames:
       - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
       - DEPLOYMENT_ACTIVITY_STATUS_STAGED
       - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
       - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+      - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
       - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
     PaginatedList:
       title: Paginated List
@@ -455,6 +492,7 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       - failed
       - retrying
@@ -463,6 +501,7 @@ components:
       - DEPLOYMENT_STATUS_STAGED
       - DEPLOYMENT_STATUS_QUEUED
       - DEPLOYMENT_STATUS_DEPLOYED
+      - DEPLOYMENT_STATUS_REMOVING
       - DEPLOYMENT_STATUS_ARCHIVED
       - DEPLOYMENT_STATUS_FAILED
       - DEPLOYMENT_STATUS_RETRYING
@@ -741,9 +780,9 @@ components:
           description: The name of the config type.
         filepath:
           type: string
-          example: /v1/motion-control.json
-          description: The file path to deploy the config instance relative to `/srv/miru/config_instances`.
-            `v1/motion-control.json` would deploy to `/srv/miru/config_instances/v1/motion-control.json`.
+          example: /srv/miru/configs/v1/motion-control.json
+          description: The absolute filesystem path where this config instance is
+            written.
         created_at:
           type: string
           format: date-time
@@ -764,8 +803,10 @@ components:
       type: string
       enum:
       - json
+      - yaml
       x-enum-varnames:
       - INSTANCE_FORMAT_JSON
+      - INSTANCE_FORMAT_YAML
     InstanceContent:
       title: Instance Content
       type: object
@@ -799,7 +840,7 @@ components:
         object: config_instance
         id: cfg_inst_123
         config_type_name: Motion Control
-        filepath: /v1/motion-control.json
+        filepath: /srv/miru/configs/v1/motion-control.json
         created_at: '2021-01-01T00:00:00Z'
         config_schema_id: cfg_sch_123
         config_type_id: cfg_typ_123
@@ -823,14 +864,14 @@ components:
             - object: config_instance
               id: cfg_inst_123
               config_type_name: Motion Control
-              filepath: /v1/motion-control.json
+              filepath: /srv/miru/configs/v1/motion-control.json
               created_at: '2021-01-01T00:00:00Z'
               config_schema_id: cfg_sch_123
               config_type_id: cfg_typ_123
             - object: config_instance
               id: cfg_inst_456
               config_type_name: Localization
-              filepath: /v1/localization.json
+              filepath: /srv/miru/configs/v1/localization.json
               created_at: '2021-01-02T00:00:00Z'
               config_schema_id: cfg_sch_456
               config_type_id: cfg_typ_456

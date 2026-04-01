@@ -9,54 +9,34 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.2.0-next
   x-git-commit:
-    sha: 6889747b0dfc30efec49f64cd146f3c3d84006c1
-    url: https://github.com/mirurobotics/openapi/commit/6889747b0dfc30efec49f64cd146f3c3d84006c1
-    message: 'fix(device): use enum $refs for event status fields (#8)
+    sha: 5a504679eff8dced16e5a207680aea0f2e8bdfdc
+    url: https://github.com/mirurobotics/openapi/commit/5a504679eff8dced16e5a207680aea0f2e8bdfdc
+    message: 'feat: add removing deployment activity status (#11)
 
 
       ## Summary
 
-      - Replace inline `type: string` with `$ref` to
 
-      `DeploymentActivityStatus` and `DeploymentTargetStatus` enums for
+      - Add `removing` to `DeploymentActivityStatus` enum to signal when a
 
-      `activity_status` and `target_status` in `DeploymentDeployedBeta1Event`
+      deployment''s config instances are being removed from the device
 
-      and `DeploymentRemovedBeta1Event` schemas
+      - Add `removing` to `DeploymentStatus` (merged status) enum for
 
-      - Regenerated `openapi.gen.yaml` bundle — validation passes with no new
+      consistency
 
-      warnings
+      - Regenerate all spec bundles (agent, cli, frontend, platform,
 
-      - Aligns event schemas with the `Deployment` schema, which already uses
-
-      these enum refs
+      device-server)
 
 
-      ## Context
+      This enables consumers to distinguish between a fully deployed state and
 
-      The event schemas were added in 2154d10 with plain string types, while
+      a transitional removal state, which is needed now that the agent
 
-      the existing `Deployment` schema in the same spec uses `$ref` to the
+      writes/deletes config instance files individually rather than via an
 
-      enum definitions in `configs/components/enums/deployment-status.yaml`.
-
-      This was an oversight during initial authoring — there was no
-
-      intentional reason to diverge.
-
-
-      ## Test plan
-
-      - [x] `make -C apis/apps/device-server bundle` succeeds
-
-      - [x] `make -C apis/apps/device-server validate` passes (no new
-
-      warnings)
-
-      - [ ] Downstream codegen produces typed enums instead of `String` for
-
-      event status fields
+      atomic directory swap.
 
 
       🤖 Generated with [Claude Code](https://claude.com/claude-code)
@@ -67,7 +47,7 @@ info:
     branch: main
     dirty: false
   x-build:
-    built_at: '2026-03-31T21:06:15.021225+00:00'
+    built_at: '2026-04-01T22:36:13.591115+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -301,7 +281,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 6889747b0dfc30efec49f64cd146f3c3d84006c1
+      - 5a504679eff8dced16e5a207680aea0f2e8bdfdc
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -438,6 +418,7 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       - failed
       - retrying
@@ -446,6 +427,7 @@ components:
       - DEPLOYMENT_STATUS_STAGED
       - DEPLOYMENT_STATUS_QUEUED
       - DEPLOYMENT_STATUS_DEPLOYED
+      - DEPLOYMENT_STATUS_REMOVING
       - DEPLOYMENT_STATUS_ARCHIVED
       - DEPLOYMENT_STATUS_FAILED
       - DEPLOYMENT_STATUS_RETRYING
@@ -469,6 +451,10 @@ components:
         for consumption on the device.
 
 
+        `removing` means the deployment''s config instances are being removed from
+        the device.
+
+
         `archived` means the deployment is available for historical reference but
         cannot be deployed and is not active on the device.
 
@@ -478,12 +464,14 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       x-enum-varnames:
       - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
       - DEPLOYMENT_ACTIVITY_STATUS_STAGED
       - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
       - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+      - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
       - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
     DeploymentErrorStatus:
       type: string
