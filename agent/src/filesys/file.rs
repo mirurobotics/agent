@@ -141,6 +141,37 @@ impl File {
         Ok(obj)
     }
 
+    pub async fn append_bytes(
+        &self,
+        buf: &[u8],
+        opts: crate::filesys::AppendOptions,
+    ) -> Result<(), FileSysErr> {
+        self.parent()?.create_if_absent().await?;
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.path())
+            .await
+            .map_err(|e| File::map_io_err_for_open(e, self))?;
+        file.write_all(buf).await.map_err(|e| {
+            FileSysErr::WriteFileErr(WriteFileErr {
+                source: Box::new(e),
+                file: self.clone(),
+                trace: trace!(),
+            })
+        })?;
+        if opts.sync == crate::filesys::Sync::Yes {
+            file.sync_data().await.map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: self.clone(),
+                    trace: trace!(),
+                })
+            })?;
+        }
+        Ok(())
+    }
+
     pub async fn write_bytes(&self, buf: &[u8], opts: WriteOptions) -> Result<(), FileSysErr> {
         // ensure parent directory exists
         self.parent()?.create_if_absent().await?;

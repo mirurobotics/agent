@@ -7,6 +7,7 @@ use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::errors::*;
+use crate::events;
 use crate::http;
 use crate::storage;
 use crate::sync::{agent_version, deployments, errors::*};
@@ -55,6 +56,7 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub agent_version: String,
+    pub event_hub: events::EventHub,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +90,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     agent_version: String,
+    event_hub: events::EventHub,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -108,6 +111,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             agent_version: args.agent_version,
+            event_hub: args.event_hub,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -256,6 +260,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             storage: &sync_storage,
             opts: &self.deploy_opts,
             token: &token.token,
+            event_hub: &self.event_hub,
         })
         .await
     }

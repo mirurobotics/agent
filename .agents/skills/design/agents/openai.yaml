@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Workflow"
+  short_description: "Design and implement code end-to-end."
+  default_prompt: "Use $design to design and implement this code change end-to-end."

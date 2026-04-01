@@ -3,6 +3,7 @@ use crate::authn;
 use crate::cache;
 use crate::crypt;
 use crate::errors::Trace;
+use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::services;
@@ -92,6 +93,8 @@ pub enum ServerErr {
 
     // internal crate errors
     #[error(transparent)]
+    EventsErr(events::errors::EventsErr),
+    #[error(transparent)]
     AuthnErr(authn::AuthnErr),
     #[error(transparent)]
     CacheErr(cache::CacheErr),
@@ -117,6 +120,12 @@ pub enum ServerErr {
     SendShutdownSignalErr(SendShutdownSignalErr),
     #[error(transparent)]
     JoinHandleErr(JoinHandleErr),
+}
+
+impl From<events::errors::EventsErr> for ServerErr {
+    fn from(e: events::errors::EventsErr) -> Self {
+        Self::EventsErr(e)
+    }
 }
 
 impl From<authn::AuthnErr> for ServerErr {
@@ -171,6 +180,7 @@ crate::impl_error!(ServerErr {
     MissingDeviceIDErr,
     TimestampConversionErr,
     ShutdownMngrDuplicateArgErr,
+    EventsErr,
     AuthnErr,
     CacheErr,
     CryptErr,

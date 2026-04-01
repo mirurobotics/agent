@@ -235,6 +235,8 @@ pub trait StatusFixture:
     fn variants() -> Vec<Self>;
     /// Test cases covering every variant plus at least one unknown input.
     fn cases() -> Vec<StatusCase<Self>>;
+    /// Wire-format string for this variant (delegates to the enum's `as_str()`).
+    fn wire_str(&self) -> &'static str;
 }
 
 // ─── status assertion helpers ────────────────────────────────────────────────
@@ -277,6 +279,24 @@ pub fn assert_status_unknown_defaults<S: StatusFixture>() {
     );
 }
 
+/// For each valid case, verify that `wire_str()` returns the same string
+/// that serde serialization produces.
+pub fn assert_status_as_str<S: StatusFixture>() {
+    for case in S::cases().into_iter().filter(|c| c.valid) {
+        let serde_str = serde_json::to_value(&case.expected)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            case.expected.wire_str(),
+            serde_str,
+            "as_str() mismatch for {:?}",
+            case.expected
+        );
+    }
+}
+
 pub fn assert_status_rejects_invalid_string<S: StatusFixture>() {
     for input in ["not-json", "42", "null", "[]"] {
         assert!(
@@ -314,6 +334,11 @@ macro_rules! status_serde_tests {
             #[test]
             fn rejects_invalid_string() {
                 assert_status_rejects_invalid_string::<$type>();
+            }
+
+            #[test]
+            fn as_str_matches_serde() {
+                assert_status_as_str::<$type>();
             }
         }
     };

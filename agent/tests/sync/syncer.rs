@@ -10,6 +10,7 @@ use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::errors::*;
+use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
@@ -130,6 +131,11 @@ impl Fixture {
         let http_client = Arc::new(MockClient::default());
         let storage = Arc::new(create_storage(&dir).await);
 
+        let log_file = dir.file("events.jsonl");
+        let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
+            .await
+            .unwrap();
+
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
@@ -143,6 +149,7 @@ impl Fixture {
                 },
                 backoff,
                 agent_version,
+                event_hub,
             },
         )
         .unwrap();
@@ -220,6 +227,11 @@ pub mod shutdown {
 
         let storage = Arc::new(create_storage(&dir).await);
 
+        let log_file = dir.file("events.jsonl");
+        let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
+            .await
+            .unwrap();
+
         let http_client = Arc::new(http::Client::new("doesntmatter").unwrap());
         let (syncer, worker_handler) = Syncer::spawn(
             32,
@@ -238,6 +250,7 @@ pub mod shutdown {
                     max_secs: 12 * 60 * 60,
                 },
                 agent_version: Device::default().agent_version,
+                event_hub,
             },
         )
         .unwrap();

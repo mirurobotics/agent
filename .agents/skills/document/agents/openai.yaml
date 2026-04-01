@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document Workflow"
+  short_description: "Add and improve docs for changed behavior."
+  default_prompt: "Use $document to update docs and comments for this code change."

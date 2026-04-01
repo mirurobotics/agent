@@ -388,6 +388,68 @@ pub mod handle_mqtt_error {
     }
 
     #[tokio::test]
+    async fn generic_error_increments_streak_and_sets_offline() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let device = Device {
+            id: "device_id".to_string(),
+            session_id: "device_session_id".to_string(),
+            status: DeviceStatus::Online,
+            ..Device::default()
+        };
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+                .await
+                .unwrap();
+
+        let token = Token {
+            token: "token".to_string(),
+            expires_at: Utc::now(),
+        };
+        let token_mngr = MockTokenManager::new(token);
+        let error = MQTTError::MockErr(MockErr {
+            is_authentication_error: false,
+            is_network_conn_err: false,
+        });
+
+        let options = Options::default();
+        let (client, eventloop) = Client::new(&options).await;
+        let created_at = client.created_at;
+
+        let before_patch = Utc::now();
+        let state = mqtt::State {
+            client,
+            eventloop,
+            err_streak: 5,
+        };
+        let state = handle_error(
+            state,
+            error,
+            &device,
+            &token_mngr,
+            &options.connect_address,
+            &device_file,
+        )
+        .await;
+
+        // should not refresh the token
+        assert_eq!(token_mngr.num_refresh_token_calls(), 0);
+
+        // should increment the error streak
+        assert_eq!(state.err_streak, 6);
+
+        // should not reinitialize the mqtt client
+        assert_eq!(state.client.created_at, created_at);
+
+        // should patch device to offline since it was online
+        let device = device_file.read().await.unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+        assert!(device.last_disconnected_at >= before_patch);
+        assert!(device.last_disconnected_at <= Utc::now());
+    }
+
+    #[tokio::test]
     async fn other_errors_are_ignored() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);

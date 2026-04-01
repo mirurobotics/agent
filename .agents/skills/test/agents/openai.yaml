@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Workflow"
+  short_description: "Plan and write high-value behavior tests."
+  default_prompt: "Use $test to plan and implement tests for this behavior."

@@ -8,6 +8,7 @@ use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
 use crate::crypt::jwt;
 use crate::deploy::{apply, fsm};
+use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
 use crate::models;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub syncer: Arc<sync::Syncer>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
+    pub event_hub: events::EventHub,
 }
 
 impl AppState {
@@ -61,6 +63,10 @@ impl AppState {
         )?;
         let token_mngr = Arc::new(token_mngr);
 
+        // initialize the event hub
+        let (event_hub, event_hub_handle) =
+            events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
+
         // initialize the syncer
         let deploy_target_dir = layout.customer_configs();
         let deploy_staging_dir = layout.srv_temp_dir();
@@ -81,6 +87,7 @@ impl AppState {
                     growth_factor: 2,
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
+                event_hub: event_hub.clone(),
             },
         )?;
         let syncer = Arc::new(syncer);
@@ -89,7 +96,7 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         let shutdown_handle = async move {
-            let handles = vec![token_mngr_handle, syncer_handle];
+            let handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -101,6 +108,7 @@ impl AppState {
                 syncer,
                 token_mngr,
                 activity_tracker,
+                event_hub,
             },
             shutdown_handle,
         ))
@@ -139,6 +147,11 @@ impl AppState {
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
+
+        // shutdown the event hub
+        if let Err(e) = self.event_hub.shutdown().await {
+            tracing::error!("failed to shutdown event hub: {e}");
+        }
 
         // shutdown storage (sets device offline + shuts down all stores)
         self.storage.shutdown().await?;

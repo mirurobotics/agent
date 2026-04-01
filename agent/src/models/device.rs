@@ -1,65 +1,12 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::Patch;
+use crate::models::{status::impl_status_enum, Patch};
 use device_api::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::error;
-
-macro_rules! impl_status_enum {
-    (
-        enum $name:ident,
-        default: $default:ident,
-        label: $label:expr,
-        log: $log_macro:ident,
-        agent_type: $agent_type:ty,
-        mappings: [
-            $(
-                $variant:ident => $wire:literal => $agent_value:expr
-            ),+ $(,)?
-        ]
-    ) => {
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                let s = String::deserialize(deserializer)?;
-                let default = $name::$default;
-                match s.as_str() {
-                    $(
-                        $wire => Ok($name::$variant),
-                    )+
-                    status => {
-                        $log_macro!(
-                            "{} '{}' is not valid, defaulting to {:?}",
-                            $label, status, default
-                        );
-                        Ok(default)
-                    }
-                }
-            }
-        }
-
-        impl $name {
-            pub fn variants() -> Vec<$name> {
-                vec![$($name::$variant),+]
-            }
-        }
-
-        impl From<&$name> for $agent_type {
-            fn from(status: &$name) -> Self {
-                match status {
-                    $(
-                        $name::$variant => $agent_value,
-                    )+
-                }
-            }
-        }
-    };
-}
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone, Hash)]
 #[serde(rename_all = "snake_case")]

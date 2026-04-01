@@ -27,6 +27,15 @@ pub enum Atomic {
     Yes,
 }
 
+/// Whether a write should be followed by `fdatasync` to ensure the data
+/// reaches stable storage before returning.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Sync {
+    #[default]
+    No,
+    Yes,
+}
+
 /// Options for file write operations.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WriteOptions {
@@ -52,4 +61,15 @@ impl WriteOptions {
         overwrite: Overwrite::Deny,
         atomic: Atomic::Yes,
     };
+}
+
+/// Options for file append operations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AppendOptions {
+    pub sync: Sync,
+}
+
+impl AppendOptions {
+    /// Append with `fdatasync` for crash durability.
+    pub const SYNC: Self = Self { sync: Sync::Yes };
 }

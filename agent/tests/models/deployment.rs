@@ -178,6 +178,9 @@ impl StatusFixture for DplTarget {
     fn variants() -> Vec<Self> {
         DplTarget::variants()
     }
+    fn wire_str(&self) -> &'static str {
+        self.as_str()
+    }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
@@ -277,6 +280,9 @@ fn target_status_sdk_conversions() {
 impl StatusFixture for DplActivity {
     fn variants() -> Vec<Self> {
         DplActivity::variants()
+    }
+    fn wire_str(&self) -> &'static str {
+        self.as_str()
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -404,6 +410,9 @@ impl StatusFixture for DplErrStatus {
     fn variants() -> Vec<Self> {
         DplErrStatus::variants()
     }
+    fn wire_str(&self) -> &'static str {
+        self.as_str()
+    }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
             StatusCase {
@@ -502,6 +511,9 @@ fn error_status_sdk_conversions() {
 impl StatusFixture for DplStatus {
     fn variants() -> Vec<Self> {
         DplStatus::variants()
+    }
+    fn wire_str(&self) -> &'static str {
+        self.as_str()
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![

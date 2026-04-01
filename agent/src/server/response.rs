@@ -1,4 +1,5 @@
 // internal crates
+use crate::events;
 use crate::models;
 use device_api::models as device_server;
 
@@ -55,6 +56,18 @@ impl From<&models::GitCommit> for device_server::GitCommit {
             message: gc.message.clone(),
             commit_url: gc.commit_url.clone(),
             created_at: gc.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<&events::model::Event> for device_server::Event {
+    fn from(event: &events::model::Event) -> Self {
+        device_server::Event {
+            object: device_server::event::Object::Event,
+            id: event.id,
+            r#type: event.event_type.clone(),
+            occurred_at: event.occurred_at.to_rfc3339(),
+            data: event.data.clone(),
         }
     }
 }
