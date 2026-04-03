@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub enum InstanceFormat {
     #[serde(rename = "json")]
     INSTANCE_FORMAT_JSON,
+    #[serde(rename = "yaml")]
+    INSTANCE_FORMAT_YAML,
 
 }
 
@@ -21,6 +23,7 @@ impl std::fmt::Display for InstanceFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::INSTANCE_FORMAT_JSON => write!(f, "json"),
+            Self::INSTANCE_FORMAT_YAML => write!(f, "yaml"),
         }
     }
 }

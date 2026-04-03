@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentActivityStatus : Last known activity state of the deployment.  `drifted` means the device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed.  `staged` means the deployment is ready to be deployed.  `queued` means the deployment's config instances are waiting to be received by the device and will be deployed as soon as the device is online.  `deployed` means the deployment's config instances are currently available for consumption on the device.  `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device. 
-/// Last known activity state of the deployment.  `drifted` means the device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed.  `staged` means the deployment is ready to be deployed.  `queued` means the deployment's config instances are waiting to be received by the device and will be deployed as soon as the device is online.  `deployed` means the deployment's config instances are currently available for consumption on the device.  `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device. 
+/// DeploymentActivityStatus : Last known activity state of the deployment.  `drifted` means the device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed.  `staged` means the deployment is ready to be deployed.  `queued` means the deployment's config instances are waiting to be received by the device and will be deployed as soon as the device is online.  `deployed` means the deployment's config instances are currently available for consumption on the device.  `removing` means the deployment's config instances are being removed from the device.  `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device. 
+/// Last known activity state of the deployment.  `drifted` means the device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed.  `staged` means the deployment is ready to be deployed.  `queued` means the deployment's config instances are waiting to be received by the device and will be deployed as soon as the device is online.  `deployed` means the deployment's config instances are currently available for consumption on the device.  `removing` means the deployment's config instances are being removed from the device.  `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeploymentActivityStatus {
     #[serde(rename = "drifted")]
@@ -21,6 +21,8 @@ pub enum DeploymentActivityStatus {
     DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
     #[serde(rename = "deployed")]
     DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+    #[serde(rename = "removing")]
+    DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
     #[serde(rename = "archived")]
     DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
 
@@ -33,6 +35,7 @@ impl std::fmt::Display for DeploymentActivityStatus {
             Self::DEPLOYMENT_ACTIVITY_STATUS_STAGED => write!(f, "staged"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_QUEUED => write!(f, "queued"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => write!(f, "deployed"),
+            Self::DEPLOYMENT_ACTIVITY_STATUS_REMOVING => write!(f, "removing"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => write!(f, "archived"),
         }
     }
