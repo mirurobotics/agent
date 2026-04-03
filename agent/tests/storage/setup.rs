@@ -33,7 +33,6 @@ pub mod bootstrap {
         assert!(public_key_file.exists());
         let public_key_contents = public_key_file.read_string().await.unwrap();
         assert!(!public_key_contents.is_empty());
-
     }
 
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
@@ -270,5 +269,4 @@ pub mod bootstrap {
         // subfile should be deleted
         assert!(!subfile.exists());
     }
-
 }

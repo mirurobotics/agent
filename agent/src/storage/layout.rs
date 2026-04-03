@@ -12,10 +12,7 @@ impl Layout {
     }
 
     pub fn internal(&self) -> filesys::Dir {
-        self.root
-            .subdir("var")
-            .subdir("lib")
-            .subdir("miru")
+        self.root.subdir("var").subdir("lib").subdir("miru")
     }
 
     pub fn temp_dir(&self) -> filesys::Dir {
@@ -69,7 +66,6 @@ impl Layout {
     pub fn events_log_file(&self) -> filesys::File {
         self.events_dir().file("events.jsonl")
     }
-
 }
 
 impl Default for Layout {

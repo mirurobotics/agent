@@ -38,6 +38,7 @@ pub fn next_action(deployment: &models::Deployment) -> NextAction {
             models::DplActivity::Staged => NextAction::None,
             models::DplActivity::Queued => NextAction::Archive,
             models::DplActivity::Deployed => NextAction::Remove,
+            models::DplActivity::Removing => NextAction::Remove,
             models::DplActivity::Archived => NextAction::None,
         },
         models::DplTarget::Deployed => match deployment.activity_status {
@@ -45,6 +46,7 @@ pub fn next_action(deployment: &models::Deployment) -> NextAction {
             models::DplActivity::Staged => NextAction::None,
             models::DplActivity::Queued => NextAction::Deploy,
             models::DplActivity::Deployed => NextAction::None,
+            models::DplActivity::Removing => NextAction::Deploy,
             models::DplActivity::Archived => NextAction::Deploy,
         },
         models::DplTarget::Archived => match deployment.activity_status {
@@ -52,6 +54,7 @@ pub fn next_action(deployment: &models::Deployment) -> NextAction {
             models::DplActivity::Staged => NextAction::Archive,
             models::DplActivity::Queued => NextAction::Archive,
             models::DplActivity::Deployed => NextAction::Remove,
+            models::DplActivity::Removing => NextAction::Remove,
             models::DplActivity::Archived => NextAction::None,
         },
     }
@@ -83,6 +86,14 @@ pub fn deploy(mut deployment: models::Deployment) -> models::Deployment {
     let new_activity = models::DplActivity::Deployed;
     let patch = get_success_updates(&deployment, new_activity);
     deployment.patch(patch);
+    deployment
+}
+
+/// Marks a deployment as actively being removed. This is a breadcrumb persisted
+/// before file deletion so that a crash mid-removal leaves the deployment in
+/// `Removing` rather than `Deployed`.
+pub fn removing(mut deployment: models::Deployment) -> models::Deployment {
+    deployment.activity_status = models::DplActivity::Removing;
     deployment
 }
 
@@ -138,12 +149,13 @@ fn has_recovered(deployment: &models::Deployment, new_activity: models::DplActiv
     match deployment.target_status {
         models::DplTarget::Staged => {
             // for staged, we're satisfied with the deployment being in other states as
-            // long as it is not deployed.
+            // long as it is not deployed or removing.
             match new_activity {
                 models::DplActivity::Drifted => true,
                 models::DplActivity::Staged => true,
                 models::DplActivity::Queued => true,
                 models::DplActivity::Deployed => false,
+                models::DplActivity::Removing => false,
                 models::DplActivity::Archived => true,
             }
         }
@@ -152,6 +164,7 @@ fn has_recovered(deployment: &models::Deployment, new_activity: models::DplActiv
             models::DplActivity::Staged => false,
             models::DplActivity::Queued => false,
             models::DplActivity::Deployed => true,
+            models::DplActivity::Removing => false,
             models::DplActivity::Archived => false,
         },
         models::DplTarget::Archived => match new_activity {
@@ -159,6 +172,7 @@ fn has_recovered(deployment: &models::Deployment, new_activity: models::DplActiv
             models::DplActivity::Staged => false,
             models::DplActivity::Queued => false,
             models::DplActivity::Deployed => false,
+            models::DplActivity::Removing => false,
             models::DplActivity::Archived => true,
         },
     }
@@ -305,11 +319,11 @@ mod tests {
 
         // From the FSM table:
         //
-        //  target\activity | Drifted | Staged | Queued  | Deployed | Archived
-        //  ----------------+---------+--------+---------+----------+---------
-        //  Staged          | None    | None   | Archive | Remove   | None
-        //  Deployed        | None    | None   | Deploy  | None     | Deploy
-        //  Archived        | Archive | Archive| Archive | Remove   | None
+        //  target\activity | Drifted | Staged | Queued  | Deployed | Removing | Archived
+        //  ----------------+---------+--------+---------+----------+----------+---------
+        //  Staged          | None    | None   | Archive | Remove   | Remove   | None
+        //  Deployed        | None    | None   | Deploy  | None     | Deploy   | Deploy
+        //  Archived        | Archive | Archive| Archive | Remove   | Remove   | None
 
         fn validate_for_activity(activity: DplActivity, actionable: Expected) {
             let mut deployment = Deployment {
@@ -389,6 +403,18 @@ mod tests {
                 Expected {
                     staged: NextAction::Remove,
                     deployed: NextAction::None,
+                    archived: NextAction::Remove,
+                },
+            );
+        }
+
+        #[test]
+        fn removing_activity() {
+            validate_for_activity(
+                DplActivity::Removing,
+                Expected {
+                    staged: NextAction::Remove,
+                    deployed: NextAction::Deploy,
                     archived: NextAction::Remove,
                 },
             );
@@ -855,11 +881,11 @@ mod tests {
 
         //  When error=Retrying, recovery depends on (target, new_activity):
         //
-        //  target \ activity | Drifted | Staged | Queued | Deployed | Archived
-        //  ------------------+---------+--------+--------+----------+---------
-        //  Staged            |  true   |  true  |  true  |  false   |  true
-        //  Deployed          |  false  |  false |  false |  true    |  false
-        //  Archived          |  false  |  false |  false |  false   |  true
+        //  target \ activity | Drifted | Staged | Queued | Deployed | Removing | Archived
+        //  ------------------+---------+--------+--------+----------+----------+---------
+        //  Staged            |  true   |  true  |  true  |  false   |  false   |  true
+        //  Deployed          |  false  |  false |  false |  true    |  false   |  false
+        //  Archived          |  false  |  false |  false |  false   |  false   |  true
 
         struct Case {
             target: DplTarget,
@@ -893,6 +919,11 @@ mod tests {
                 },
                 Case {
                     target: DplTarget::Staged,
+                    new_activity: DplActivity::Removing,
+                    recovered: false,
+                },
+                Case {
+                    target: DplTarget::Staged,
                     new_activity: DplActivity::Archived,
                     recovered: true,
                 },
@@ -919,6 +950,11 @@ mod tests {
                 },
                 Case {
                     target: DplTarget::Deployed,
+                    new_activity: DplActivity::Removing,
+                    recovered: false,
+                },
+                Case {
+                    target: DplTarget::Deployed,
                     new_activity: DplActivity::Archived,
                     recovered: false,
                 },
@@ -941,6 +977,11 @@ mod tests {
                 Case {
                     target: DplTarget::Archived,
                     new_activity: DplActivity::Deployed,
+                    recovered: false,
+                },
+                Case {
+                    target: DplTarget::Archived,
+                    new_activity: DplActivity::Removing,
                     recovered: false,
                 },
                 Case {

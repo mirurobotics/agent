@@ -139,12 +139,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = f
-            .filesys_root
-            .file(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = f.filesys_root.file(&filepath).read_string().await.unwrap();
         assert_eq!(actual, new_content);
     }
 

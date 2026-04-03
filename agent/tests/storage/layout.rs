@@ -8,10 +8,7 @@ pub mod storage_layout {
     #[test]
     fn default_uses_filesys_root() {
         let layout = Layout::default();
-        assert_eq!(
-            layout.root.path(),
-            &std::path::PathBuf::from("/")
-        );
+        assert_eq!(layout.root.path(), &std::path::PathBuf::from("/"));
     }
 
     #[test]
@@ -96,7 +93,6 @@ pub mod storage_layout {
         let file = layout.git_commits();
         assert_eq!(file.to_string(), "/var/lib/miru/resources/git_commits.json");
     }
-
 }
 
 pub mod auth_layout {

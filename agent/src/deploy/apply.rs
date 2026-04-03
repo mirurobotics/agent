@@ -215,11 +215,25 @@ async fn remove(
     deployment: models::Deployment,
     keep: &HashSet<String>,
 ) -> Outcome {
-    // Clean up config instance files from disk before updating state
+    // Step 1: Transition to Removing and persist as a breadcrumb. If the agent
+    // crashes mid-deletion the deployment will be stuck in Removing rather than
+    // Deployed, making it clear what was attempted.
+    let deployment = fsm::removing(deployment);
+    if let Err(e) = write_deployment(storage.deployments, &deployment).await {
+        error!(
+            "failed to write removing status for '{}': {e}",
+            deployment.id
+        );
+    }
+
+    // Step 2: Delete config instance files from disk (best-effort)
     dpl_filesys::remove(&storage.cfg_insts, &opts.filesys_root, &deployment, keep).await;
 
+    // Step 3: Transition to Archived
     let deployment = fsm::remove(deployment);
-    let error = write_deployment(storage.deployments, &deployment).await.err();
+    let error = write_deployment(storage.deployments, &deployment)
+        .await
+        .err();
     Outcome {
         deployment,
         wait: None,

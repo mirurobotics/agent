@@ -49,7 +49,6 @@ pub async fn remove(
     {
         Ok(v) => v,
         Err(e) => {
-            debug_assert!(false, "failed to read config instances for removal of '{}': {e}", deployment.id);
             warn!(
                 "failed to read config instances for removal of '{}': {e}",
                 deployment.id
@@ -64,11 +63,12 @@ pub async fn remove(
         }
         let file = filesys_root.file(&cfg_inst.filepath);
         if let Err(e) = file.delete().await {
-            debug_assert!(false, "failed to delete config file '{}': {e}", cfg_inst.filepath);
-            warn!(
+            debug_assert!(
+                false,
                 "failed to delete config file '{}': {e}",
                 cfg_inst.filepath
             );
+            warn!("failed to delete config file '{}': {e}", cfg_inst.filepath);
         }
     }
 

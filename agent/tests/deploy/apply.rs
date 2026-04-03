@@ -378,19 +378,11 @@ mod deploy_success {
         );
 
         assert_eq!(
-            f.filesys_root
-                .file("/a.json")
-                .read_string()
-                .await
-                .unwrap(),
+            f.filesys_root.file("/a.json").read_string().await.unwrap(),
             "content-a"
         );
         assert_eq!(
-            f.filesys_root
-                .file("/b.yaml")
-                .read_string()
-                .await
-                .unwrap(),
+            f.filesys_root.file("/b.yaml").read_string().await.unwrap(),
             "content-b"
         );
         assert_eq!(
@@ -703,7 +695,10 @@ mod remove_action {
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
-        assert_eq!(outcomes[0].deployment.activity_status, DplActivity::Archived);
+        assert_eq!(
+            outcomes[0].deployment.activity_status,
+            DplActivity::Archived
+        );
 
         // File should be deleted since no deployment wants it
         assert!(
