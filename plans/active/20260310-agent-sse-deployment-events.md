@@ -131,7 +131,7 @@ Key current components:
 - `agent/src/server/state.rs`: `server::State` struct with fields: `storage`, `http_client`, `syncer`, `token_mngr`, `activity_tracker`.
 - `agent/src/app/state.rs`: `AppState` struct with same five fields. `AppState::init()` creates storage, token manager, syncer, and activity tracker.
 - `agent/src/app/run.rs`: Orchestrates startup. `ShutdownManager` uses `register_handle()` with closures. `init_socket_server()` constructs `server::State::new(...)` at line 300.
-- `agent/src/storage/layout.rs`: `Layout` struct with `filesystem_root`. `root()` returns `/var/lib/miru/`. No events methods yet.
+- `agent/src/storage/layout.rs`: `Layout` struct with `filesys_root`. `root()` returns `/var/lib/miru/`. No events methods yet.
 - `agent/src/sync/syncer.rs`: Single-threaded syncer using actor pattern (mpsc channel). `SingleThreadSyncer` holds `watch::Sender<SyncEvent>`. `SyncerArgs` has: `storage`, `http_client`, `token_mngr`, `deploy_opts`, `backoff`, `agent_version`.
 - `agent/src/sync/deployments.rs`: `SyncArgs` has: `http_client`, `storage`, `opts`, `token`. `apply_deployments()` calls `deploy::apply::apply()` which returns `Vec<Outcome>`.
 - `agent/src/deploy/apply.rs`: `Outcome` struct: `deployment: models::Deployment`, `wait: Option<TimeDelta>`, `error: Option<DeployErr>`.
