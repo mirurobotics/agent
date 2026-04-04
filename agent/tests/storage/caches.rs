@@ -31,4 +31,28 @@ pub mod init {
         // shutdown storage
         storage.shutdown().await.unwrap();
     }
+
+    #[tokio::test]
+    async fn shutdown_while_online() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let capacities = Capacities::default();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
+
+        // set device to online before shutdown
+        use miru_agent::models::{self, device};
+        storage
+            .device
+            .patch(device::Updates {
+                status: Some(models::DeviceStatus::Online),
+                ..device::Updates::empty()
+            })
+            .await
+            .unwrap();
+
+        // shutdown should transition device back to offline
+        storage.shutdown().await.unwrap();
+    }
 }
