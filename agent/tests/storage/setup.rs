@@ -37,6 +37,10 @@ pub mod bootstrap {
         // config instance deployment directory
         let config_instance_deployment_dir = layout.customer_configs();
         assert!(config_instance_deployment_dir.exists());
+
+        // events directory
+        let events_dir = layout.events_dir();
+        assert!(events_dir.exists());
     }
 
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
@@ -271,6 +275,43 @@ pub mod bootstrap {
         validate_storage(&layout).await;
 
         // subfile should be deleted
+        assert!(!subfile.exists());
+    }
+
+    #[tokio::test]
+    async fn events_directory_already_exists() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let settings = Settings::default();
+
+        // create the public / private key files
+        let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
+
+        // create the events directory with a stale log file
+        let events_dir = layout.events_dir();
+        let subfile = events_dir.file("events.jsonl");
+        subfile
+            .write_string("{\"id\":1}\n", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        assert!(subfile.exists());
+
+        // setup the storage
+        let device = Device::default();
+        storage::setup::bootstrap(
+            &layout,
+            &device,
+            &settings,
+            &private_key_file,
+            &public_key_file,
+        )
+        .await
+        .unwrap();
+
+        // validate the storage
+        validate_storage(&layout).await;
+
+        // stale events file should be deleted
         assert!(!subfile.exists());
     }
 

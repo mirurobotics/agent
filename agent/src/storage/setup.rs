@@ -51,5 +51,10 @@ pub async fn bootstrap(
     let resources_dir = layout.resources();
     resources_dir.delete().await?;
 
+    // wipe events directory
+    let events_dir = layout.events_dir();
+    events_dir.delete().await?;
+    events_dir.create_if_absent().await?;
+
     Ok(())
 }
