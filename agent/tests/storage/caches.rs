@@ -55,4 +55,36 @@ pub mod init {
         // shutdown should transition device back to offline
         storage.shutdown().await.unwrap();
     }
+
+    #[tokio::test]
+    async fn shutdown_twice_returns_error() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let capacities = Capacities::default();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
+
+        // first shutdown succeeds
+        storage.shutdown().await.unwrap();
+
+        // second shutdown fails because the device actor is already stopped
+        storage.shutdown().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_pre_closed_substore() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let capacities = Capacities::default();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
+
+        // pre-close the cfg_insts meta store
+        storage.cfg_insts.meta.shutdown().await.unwrap();
+
+        // shutdown fails when it reaches the already-closed cfg_insts.meta
+        storage.shutdown().await.unwrap_err();
+    }
 }
