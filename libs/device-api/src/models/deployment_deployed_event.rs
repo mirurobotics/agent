@@ -9,14 +9,21 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentDeployedBeta1Event : Payload for `deployment.deployed.beta1` events.
+/// DeploymentDeployedEvent : Payload for `deployment.deployed` events.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DeploymentDeployedBeta1Event {
+pub struct DeploymentDeployedEvent {
     /// ID of the deployment.
     #[serde(rename = "deployment_id")]
     pub deployment_id: String,
+    /// ID of the release associated with this deployment.
+    #[serde(rename = "release_id")]
+    pub release_id: String,
+    #[serde(rename = "status")]
+    pub status: models::DeploymentStatus,
     #[serde(rename = "activity_status")]
     pub activity_status: models::DeploymentActivityStatus,
+    #[serde(rename = "error_status")]
+    pub error_status: models::DeploymentErrorStatus,
     #[serde(rename = "target_status")]
     pub target_status: models::DeploymentTargetStatus,
     /// Timestamp of when the deployment was deployed.
@@ -24,12 +31,15 @@ pub struct DeploymentDeployedBeta1Event {
     pub deployed_at: Option<String>,
 }
 
-impl DeploymentDeployedBeta1Event {
-    /// Payload for `deployment.deployed.beta1` events.
-    pub fn new(deployment_id: String, activity_status: models::DeploymentActivityStatus, target_status: models::DeploymentTargetStatus) -> DeploymentDeployedBeta1Event {
-        DeploymentDeployedBeta1Event {
+impl DeploymentDeployedEvent {
+    /// Payload for `deployment.deployed` events.
+    pub fn new(deployment_id: String, release_id: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus) -> DeploymentDeployedEvent {
+        DeploymentDeployedEvent {
             deployment_id,
+            release_id,
+            status,
             activity_status,
+            error_status,
             target_status,
             deployed_at: None,
         }
