@@ -17,7 +17,7 @@ pub struct Event {
     /// Monotonically increasing event ID. Used as the SSE `id` field and for replay cursors.
     #[serde(rename = "id")]
     pub id: i64,
-    /// Versioned event type string. The version suffix (e.g. `.beta1`) indicates the shape of the `data` payload.
+    /// Event type string in the format `{resource}.{action}`.
     #[serde(rename = "type")]
     pub r#type: String,
     /// Timestamp of when the event occurred.

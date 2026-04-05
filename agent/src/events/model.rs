@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 
 pub type EventTypeFilter = HashSet<String>;
 
-pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed.beta1";
-pub const DEPLOYMENT_REMOVED: &str = "deployment.removed.beta1";
+pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed";
+pub const DEPLOYMENT_REMOVED: &str = "deployment.removed";
 
-pub type DeploymentDeployedEvent = device_server::DeploymentDeployedBeta1Event;
-pub type DeploymentRemovedEvent = device_server::DeploymentRemovedBeta1Event;
+pub type DeploymentDeployedEvent = device_server::DeploymentDeployedEvent;
+pub type DeploymentRemovedEvent = device_server::DeploymentRemovedEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -60,7 +60,10 @@ impl EventArgs {
             DEPLOYMENT_DEPLOYED,
             DeploymentDeployedEvent {
                 deployment_id: deployment.id.clone(),
+                release_id: deployment.release_id.clone(),
+                status: (&deployment.status()).into(),
                 activity_status: (&deployment.activity_status).into(),
+                error_status: (&deployment.error_status).into(),
                 target_status: (&deployment.target_status).into(),
                 deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
             },
@@ -72,7 +75,10 @@ impl EventArgs {
             DEPLOYMENT_REMOVED,
             DeploymentRemovedEvent {
                 deployment_id: deployment.id.clone(),
+                release_id: deployment.release_id.clone(),
+                status: (&deployment.status()).into(),
                 activity_status: (&deployment.activity_status).into(),
+                error_status: (&deployment.error_status).into(),
                 target_status: (&deployment.target_status).into(),
                 archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
             },

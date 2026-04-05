@@ -7,46 +7,39 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0-next
+  x-release-version: v0.2.0-beta.1
   x-git-commit:
-    sha: 6889747b0dfc30efec49f64cd146f3c3d84006c1
-    url: https://github.com/mirurobotics/openapi/commit/6889747b0dfc30efec49f64cd146f3c3d84006c1
-    message: 'fix(device): use enum $refs for event status fields (#8)
+    sha: f32bac0eb62ffe2f2518528fe973ce47fba7f737
+    url: https://github.com/mirurobotics/openapi/commit/f32bac0eb62ffe2f2518528fe973ce47fba7f737
+    message: 'refactor(device): update SSE event schemas for v0.2.1 (#14)
 
 
       ## Summary
 
-      - Replace inline `type: string` with `$ref` to
 
-      `DeploymentActivityStatus` and `DeploymentTargetStatus` enums for
+      - Drop `.beta1` suffix from event type strings — events are now
 
-      `activity_status` and `target_status` in `DeploymentDeployedBeta1Event`
+      versioned with the API version (`deployment.deployed` instead of
 
-      and `DeploymentRemovedBeta1Event` schemas
+      `deployment.deployed.beta1`)
 
-      - Regenerated `openapi.gen.yaml` bundle — validation passes with no new
+      - Rename schemas: `DeploymentDeployedBeta1Event` →
 
-      warnings
+      `DeploymentDeployedEvent`, `DeploymentRemovedBeta1Event` →
 
-      - Aligns event schemas with the `Deployment` schema, which already uses
+      `DeploymentRemovedEvent`
 
-      these enum refs
+      - Add `release_id`, `status`, and `error_status` fields to both
 
+      deployment event data schemas
 
-      ## Context
+      - Remove 400/410 error responses from `GET /events` for consistency with
 
-      The event schemas were added in 2154d10 with plain string types, while
-
-      the existing `Deployment` schema in the same spec uses `$ref` to the
-
-      enum definitions in `configs/components/enums/deployment-status.yaml`.
-
-      This was an oversight during initial authoring — there was no
-
-      intentional reason to diverge.
+      other Device API endpoints
 
 
       ## Test plan
+
 
       - [x] `make -C apis/apps/device-server bundle` succeeds
 
@@ -54,9 +47,11 @@ info:
 
       warnings)
 
-      - [ ] Downstream codegen produces typed enums instead of `String` for
+      - [x] `scripts/lint.sh` passes (all custom MIRU rules clean)
 
-      event status fields
+      - [x] No `beta1` references remain in device-server source files
+
+      - [ ] Downstream codegen produces updated schema names and fields
 
 
       🤖 Generated with [Claude Code](https://claude.com/claude-code)
@@ -64,10 +59,10 @@ info:
 
       Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
     author: ben-miru
-    branch: main
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-03-31T21:06:15.021225+00:00'
+    built_at: '2026-04-04T23:50:27.621227+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -250,8 +245,8 @@ paths:
           items:
             type: string
         example:
-        - deployment.deployed.beta1
-        - deployment.removed.beta1
+        - deployment.deployed
+        - deployment.removed
       - name: Last-Event-ID
         in: header
         required: false
@@ -268,20 +263,6 @@ paths:
             text/event-stream:
               schema:
                 $ref: '#/components/schemas/Event'
-        '400':
-          description: Malformed cursor value.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '410':
-          description: Cursor expired — the requested event has been compacted from
-            the retention window. Client should re-fetch current state and reconnect
-            without a cursor.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ErrorResponse:
@@ -301,25 +282,36 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 6889747b0dfc30efec49f64cd146f3c3d84006c1
+      - f32bac0eb62ffe2f2518528fe973ce47fba7f737
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
-    DeploymentDeployedBeta1Event:
-      title: DeploymentDeployedBeta1Event
+    DeploymentDeployedEvent:
+      title: DeploymentDeployedEvent
       type: object
-      description: Payload for `deployment.deployed.beta1` events.
+      description: Payload for `deployment.deployed` events.
       required:
       - deployment_id
+      - release_id
+      - status
       - activity_status
+      - error_status
       - target_status
       properties:
         deployment_id:
           type: string
           description: ID of the deployment.
           example: dpl_123
+        release_id:
+          type: string
+          description: ID of the release associated with this deployment.
+          example: rls_123
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
         activity_status:
           $ref: '#/components/schemas/DeploymentActivityStatus'
+        error_status:
+          $ref: '#/components/schemas/DeploymentErrorStatus'
         target_status:
           $ref: '#/components/schemas/DeploymentTargetStatus'
         deployed_at:
@@ -329,24 +321,38 @@ components:
           example: '2026-03-10T12:00:00Z'
       example:
         deployment_id: dpl_123
+        release_id: rls_123
+        status: deployed
         activity_status: deployed
+        error_status: none
         target_status: deployed
         deployed_at: '2026-03-10T12:00:00Z'
-    DeploymentRemovedBeta1Event:
-      title: DeploymentRemovedBeta1Event
+    DeploymentRemovedEvent:
+      title: DeploymentRemovedEvent
       type: object
-      description: Payload for `deployment.removed.beta1` events.
+      description: Payload for `deployment.removed` events.
       required:
       - deployment_id
+      - release_id
+      - status
       - activity_status
+      - error_status
       - target_status
       properties:
         deployment_id:
           type: string
           description: ID of the deployment.
           example: dpl_123
+        release_id:
+          type: string
+          description: ID of the release associated with this deployment.
+          example: rls_123
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
         activity_status:
           $ref: '#/components/schemas/DeploymentActivityStatus'
+        error_status:
+          $ref: '#/components/schemas/DeploymentErrorStatus'
         target_status:
           $ref: '#/components/schemas/DeploymentTargetStatus'
         archived_at:
@@ -356,7 +362,10 @@ components:
           example: '2026-03-10T12:00:00Z'
       example:
         deployment_id: dpl_123
+        release_id: rls_123
+        status: archived
         activity_status: archived
+        error_status: none
         target_status: archived
         archived_at: '2026-03-10T12:00:00Z'
     HealthResponse:
@@ -438,6 +447,7 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       - failed
       - retrying
@@ -446,6 +456,7 @@ components:
       - DEPLOYMENT_STATUS_STAGED
       - DEPLOYMENT_STATUS_QUEUED
       - DEPLOYMENT_STATUS_DEPLOYED
+      - DEPLOYMENT_STATUS_REMOVING
       - DEPLOYMENT_STATUS_ARCHIVED
       - DEPLOYMENT_STATUS_FAILED
       - DEPLOYMENT_STATUS_RETRYING
@@ -469,6 +480,10 @@ components:
         for consumption on the device.
 
 
+        `removing` means the deployment''s config instances are being removed from
+        the device.
+
+
         `archived` means the deployment is available for historical reference but
         cannot be deployed and is not active on the device.
 
@@ -478,12 +493,14 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       x-enum-varnames:
       - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
       - DEPLOYMENT_ACTIVITY_STATUS_STAGED
       - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
       - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+      - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
       - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
     DeploymentErrorStatus:
       type: string
@@ -831,9 +848,8 @@ components:
           example: 42
         type:
           type: string
-          description: Versioned event type string. The version suffix (e.g. `.beta1`)
-            indicates the shape of the `data` payload.
-          example: deployment.deployed.beta1
+          description: Event type string in the format `{resource}.{action}`.
+          example: deployment.deployed
         occurred_at:
           type: string
           format: date-time
@@ -845,11 +861,14 @@ components:
       example:
         object: event
         id: 42
-        type: deployment.deployed.beta1
+        type: deployment.deployed
         occurred_at: '2026-03-10T12:00:00Z'
         data:
           deployment_id: dpl_123
+          release_id: rls_123
+          status: deployed
           activity_status: deployed
+          error_status: none
           target_status: deployed
           deployed_at: '2026-03-10T12:00:00Z'
     Error:
