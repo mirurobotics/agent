@@ -1,5 +1,7 @@
 // internal crates
-use device_api::models::{DeploymentActivityStatus, DeploymentTargetStatus};
+use device_api::models::{
+    DeploymentActivityStatus, DeploymentErrorStatus, DeploymentStatus, DeploymentTargetStatus,
+};
 use miru_agent::events::model::{
     DeploymentDeployedEvent, DeploymentRemovedEvent, Event, EventArgs, DEPLOYMENT_DEPLOYED,
     DEPLOYMENT_REMOVED,
@@ -20,12 +22,12 @@ mod event_types {
 
     #[test]
     fn deployment_deployed_type_string() {
-        assert_eq!(DEPLOYMENT_DEPLOYED, "deployment.deployed.beta1");
+        assert_eq!(DEPLOYMENT_DEPLOYED, "deployment.deployed");
     }
 
     #[test]
     fn deployment_removed_type_string() {
-        assert_eq!(DEPLOYMENT_REMOVED, "deployment.removed.beta1");
+        assert_eq!(DEPLOYMENT_REMOVED, "deployment.removed");
     }
 }
 
@@ -76,6 +78,7 @@ mod deployment_deployed {
         let t = fixed_time();
         let dpl = Deployment {
             id: "dpl-1".into(),
+            release_id: "rls-1".into(),
             activity_status: DplActivity::Deployed,
             error_status: DplErrStatus::None,
             target_status: DplTarget::Deployed,
@@ -89,7 +92,10 @@ mod deployment_deployed {
             actual.data,
             serde_json::json!(DeploymentDeployedEvent {
                 deployment_id: "dpl-1".into(),
+                release_id: "rls-1".into(),
+                status: DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
                 activity_status: DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+                error_status: DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
                 target_status: DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
                 deployed_at: Some(t.to_rfc3339()),
             })
@@ -140,6 +146,7 @@ mod deployment_removed {
         let t = fixed_time();
         let dpl = Deployment {
             id: "dpl-1".into(),
+            release_id: "rls-1".into(),
             activity_status: DplActivity::Archived,
             target_status: DplTarget::Archived,
             archived_at: Some(t),
@@ -152,7 +159,10 @@ mod deployment_removed {
             actual.data,
             serde_json::json!(DeploymentRemovedEvent {
                 deployment_id: "dpl-1".into(),
+                release_id: "rls-1".into(),
+                status: DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
                 activity_status: DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+                error_status: DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
                 target_status: DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
                 archived_at: Some(t.to_rfc3339()),
             })
