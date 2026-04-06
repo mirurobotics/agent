@@ -7,54 +7,62 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0-beta.1
+  x-release-version: v0.2.1
   x-git-commit:
-    sha: f32bac0eb62ffe2f2518528fe973ce47fba7f737
-    url: https://github.com/mirurobotics/openapi/commit/f32bac0eb62ffe2f2518528fe973ce47fba7f737
-    message: 'refactor(device): update SSE event schemas for v0.2.1 (#14)
+    sha: 10dc72e22958a4851e7f6718f5b7542b0c7f62e1
+    url: https://github.com/mirurobotics/openapi/commit/10dc72e22958a4851e7f6718f5b7542b0c7f62e1
+    message: 'feat(lint): add x-summary to event schemas and enforce via MIRU024 (#15)
 
 
       ## Summary
 
 
-      - Drop `.beta1` suffix from event type strings — events are now
+      - Add `x-summary` extension field and richer `description` to all
 
-      versioned with the API version (`deployment.deployed` instead of
+      `*Event` data schemas (`DeploymentDeployedEvent`,
 
-      `deployment.deployed.beta1`)
+      `DeploymentRemovedEvent`, `ValidateDeploymentEvent`)
 
-      - Rename schemas: `DeploymentDeployedBeta1Event` →
+      - Add MIRU024 lint rule (`event_schema_x_summary_required`) that
 
-      `DeploymentDeployedEvent`, `DeploymentRemovedBeta1Event` →
+      enforces `x-summary` on all `*Event` schemas (excluding the `Event`
 
-      `DeploymentRemovedEvent`
+      envelope)
 
-      - Add `release_id`, `status`, and `error_status` fields to both
+      - Add 3 test fixtures and test class for MIRU024 (197 tests pass, 99%
 
-      deployment event data schemas
+      coverage)
 
-      - Remove 400/410 error responses from `GET /events` for consistency with
 
-      other Device API endpoints
+      The `x-summary` field is consumed by the docs codegen
+
+      (`docs/api/generate_event_pages.py`) as the page subtitle, while
+
+      `description` provides the longer inline body text. This makes generated
+
+      event type reference pages more useful.
 
 
       ## Test plan
 
 
-      - [x] `make -C apis/apps/device-server bundle` succeeds
+      - [x] `./tools/lint/test.sh` — 197 tests pass
 
-      - [x] `make -C apis/apps/device-server validate` passes (no new
+      - [x] `./tools/lint/covgate.sh` — 99% coverage (gate: 98%)
 
-      warnings)
+      - [x] `./scripts/lint.sh` — all custom MIRU rules and Redocly clean
 
-      - [x] `scripts/lint.sh` passes (all custom MIRU rules clean)
+      - [x] MIRU024 fires on `*Event` schema missing `x-summary`
 
-      - [x] No `beta1` references remain in device-server source files
+      - [x] MIRU024 passes when `x-summary` is present
 
-      - [ ] Downstream codegen produces updated schema names and fields
+      - [x] MIRU024 exempts the `Event` envelope schema
 
 
       🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      ---------
 
 
       Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
@@ -62,7 +70,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-04-04T23:50:27.621227+00:00'
+    built_at: '2026-04-06T19:21:53.148075+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -282,14 +290,19 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - f32bac0eb62ffe2f2518528fe973ce47fba7f737
+      - 10dc72e22958a4851e7f6718f5b7542b0c7f62e1
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
     DeploymentDeployedEvent:
       title: DeploymentDeployedEvent
       type: object
-      description: Payload for `deployment.deployed` events.
+      x-summary: A deployment's config instances have been written to the device's
+        filesystem.
+      description: Emitted when a deployment's config instances have been written
+        to the device's filesystem and are available for consumption. Use this event
+        to reload configuration, restart dependent services, or confirm that new configuration
+        is live on the device.
       required:
       - deployment_id
       - release_id
@@ -330,7 +343,12 @@ components:
     DeploymentRemovedEvent:
       title: DeploymentRemovedEvent
       type: object
-      description: Payload for `deployment.removed` events.
+      x-summary: A deployment's config instances have been removed from the device's
+        filesystem.
+      description: Emitted when a deployment's config instances have been removed
+        from the device's filesystem and the deployment has been archived. Use this
+        event to clean up resources or stop services that depended on the removed
+        configuration.
       required:
       - deployment_id
       - release_id

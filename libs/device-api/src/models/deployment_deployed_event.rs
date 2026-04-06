@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentDeployedEvent : Payload for `deployment.deployed` events.
+/// DeploymentDeployedEvent : Emitted when a deployment's config instances have been written to the device's filesystem and are available for consumption. Use this event to reload configuration, restart dependent services, or confirm that new configuration is live on the device.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeploymentDeployedEvent {
     /// ID of the deployment.
@@ -32,7 +32,7 @@ pub struct DeploymentDeployedEvent {
 }
 
 impl DeploymentDeployedEvent {
-    /// Payload for `deployment.deployed` events.
+    /// Emitted when a deployment's config instances have been written to the device's filesystem and are available for consumption. Use this event to reload configuration, restart dependent services, or confirm that new configuration is live on the device.
     pub fn new(deployment_id: String, release_id: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus) -> DeploymentDeployedEvent {
         DeploymentDeployedEvent {
             deployment_id,
