@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeploymentRemovedEvent : Payload for `deployment.removed` events.
+/// DeploymentRemovedEvent : Emitted when a deployment's config instances have been removed from the device's filesystem and the deployment has been archived. Use this event to clean up resources or stop services that depended on the removed configuration.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeploymentRemovedEvent {
     /// ID of the deployment.
@@ -32,7 +32,7 @@ pub struct DeploymentRemovedEvent {
 }
 
 impl DeploymentRemovedEvent {
-    /// Payload for `deployment.removed` events.
+    /// Emitted when a deployment's config instances have been removed from the device's filesystem and the deployment has been archived. Use this event to clean up resources or stop services that depended on the removed configuration.
     pub fn new(deployment_id: String, release_id: String, status: models::DeploymentStatus, activity_status: models::DeploymentActivityStatus, error_status: models::DeploymentErrorStatus, target_status: models::DeploymentTargetStatus) -> DeploymentRemovedEvent {
         DeploymentRemovedEvent {
             deployment_id,
