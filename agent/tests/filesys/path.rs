@@ -31,7 +31,7 @@ pub mod write_options {
     fn default() {
         let opts = WriteOptions::default();
         assert_eq!(opts.overwrite, Overwrite::Deny);
-        assert_eq!(opts.atomic, Atomic::No);
+        assert_eq!(opts.atomic, Atomic::Yes);
     }
 
     #[test]
