@@ -25,21 +25,22 @@ A reader can verify the change by:
 
 ## Progress
 
-- [ ] M1: Flip the `Atomic` default and update the single test assertion that reads it.
-  - [ ] Move `#[default]` from `Atomic::No` to `Atomic::Yes` in `agent/src/filesys/mod.rs`.
-  - [ ] Update the `default()` assertion in `agent/tests/filesys/path.rs` to expect `Atomic::Yes`.
-  - [ ] Run `./scripts/test.sh` from `agent/` and confirm all tests pass.
-  - [ ] Run `./scripts/lint.sh` from `agent/` and confirm clean exit.
-  - [ ] Commit the change with a single conventional commit message (see Concrete Steps).
+- [x] M1: Flip the `Atomic` default and update the single test assertion that reads it. (2026-04-08)
+  - [x] Move `#[default]` from `Atomic::No` to `Atomic::Yes` in `agent/src/filesys/mod.rs`.
+  - [x] Update the `default()` assertion in `agent/tests/filesys/path.rs` to expect `Atomic::Yes`.
+  - [x] Run `./scripts/test.sh` from `agent/` and confirm all tests pass.
+  - [x] Run `./scripts/lint.sh` from `agent/` and confirm clean exit.
+  - [x] Commit the change with a single conventional commit message (see Concrete Steps).
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- Observation: `WriteOptions::ATOMIC` is now an exact alias of `WriteOptions::default()` — both produce `{ overwrite: Overwrite::Deny, atomic: Atomic::Yes }`.
+  Evidence: After the `#[default]` flip in `agent/src/filesys/mod.rs`, the `ATOMIC` constant (lines 60–63) and the derived `Default` impl yield identical values. The constant is kept intentionally (see Decision Log) and is not removed — this observation is recorded for future readers who may want to consolidate.
 
-- Observation: …
-  Evidence: …
+- Observation: Flipping the default is behaviorally a no-op in production; every production write site under `agent/src/` already passes `WriteOptions::OVERWRITE_ATOMIC` or explicitly sets `atomic: Atomic::Yes`.
+  Evidence: A `grep` over `agent/src/**/*.rs` at implementation time confirmed zero callers of `WriteOptions::default()` in production code. All ~50 callers live under `agent/tests/**`, where the write mechanism (tempfile+rename vs direct write) is irrelevant to the fixture behavior they exercise.
 
 ## Decision Log
 
@@ -53,7 +54,9 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Outcomes & Retrospective
 
-Not started. This section will be filled in when the milestone is implemented and validated.
+**Outcome.** M1 shipped in a single commit (`2e11438 refactor(filesys): default WriteOptions to atomic writes`). Two files changed, four lines of diff total: one `#[default]` attribute moved in `agent/src/filesys/mod.rs`, one assertion updated in `agent/tests/filesys/path.rs`. The full test suite (`./scripts/test.sh`) and lint suite (`./scripts/lint.sh`) passed. `WriteOptions::default()` now returns `{ overwrite: Overwrite::Deny, atomic: Atomic::Yes }` as intended.
+
+**Retrospective.** The plan's blast-radius audit held: production code was untouched, and every `WriteOptions::default()` call site in tests continued to pass without modification. The only noteworthy side effect (captured in Surprises & Discoveries) is that `WriteOptions::ATOMIC` is now an exact alias of the derived default. A follow-up consolidation of that constant is out of scope for this plan and would require its own plan if pursued.
 
 ## Context and Orientation
 
