@@ -1,8 +1,7 @@
 // internal crates
 use crate::authn::{self, TokenManagerExt};
 use crate::cache::errors::{CacheElementNotFound, CacheErr};
-use crate::http;
-use crate::http::errors::RequestFailed;
+use crate::http::{self, errors::RequestFailed};
 use crate::models;
 use crate::services::errors::ServiceErr;
 use crate::storage;
