@@ -10,6 +10,8 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 
 This plan lives in `agent/plans/` because every file touched is inside the `miru-agent` Rust crate in this repository. No other repos are read or written.
 
+**Repo layout note.** The `agent` repository is a Cargo workspace at its root. The `miru-agent` crate lives in the subdirectory `agent/` inside the repo (yes, the crate directory shares the name of the repo). All paths in this plan are **repo-root-relative**. So `agent/src/filesys/mod.rs` in this plan means the file at `<repo-root>/agent/src/filesys/mod.rs` — the crate source — not a path relative to the crate. The `scripts/` directory lives at the repo root (`<repo-root>/scripts/`), not inside the crate. Commands in Concrete Steps are run from the repo root.
+
 ## Purpose / Big Picture
 
 The `miru-agent` Rust crate has a `WriteOptions` struct used by `filesys::File::write_bytes` and its friends. `WriteOptions` derives `Default`, and today `WriteOptions::default()` returns a non-atomic, no-overwrite write because the `Atomic` enum has `#[default]` on the `No` variant. That is a footgun: a developer who reaches for `WriteOptions::default()` silently gets a non-atomic write, even though atomic writes are what every production call site in `agent/src/` actually asks for (all production write sites use `WriteOptions::OVERWRITE_ATOMIC` or explicitly construct `WriteOptions { atomic: Atomic::Yes, .. }`).
@@ -178,7 +180,7 @@ No new files are created.
 
 ## Concrete Steps
 
-All commands run from the `agent/` repo root, i.e. `cd /path/to/agent/` (on the author's machine: `/home/ben/miru/workbench1/agent`). Verify you are on the working branch before starting:
+All commands run from the **`agent` repository root**, i.e. `cd /path/to/agent/` (on the author's machine: `/home/ben/miru/workbench1/agent`). This is the repo root, not the nested `agent/` crate directory — `scripts/test.sh` and `scripts/lint.sh` live at the repo root and use `git rev-parse --show-toplevel` internally to find the workspace. Verify you are on the working branch before starting:
 
     git rev-parse --abbrev-ref HEAD
 
@@ -298,6 +300,6 @@ Every step in this plan is safe to repeat.
 
 - **Commit rollback**: if the commit was made but tests or lint later fail unexpectedly, revert the commit with `git revert HEAD` (preferred, preserves history) or, if not yet pushed and you want to redo the commit from scratch, `git reset --soft HEAD~1` to uncommit while keeping the changes staged. Do not use `git reset --hard` — that would discard the working tree.
 
-- **Full rollback to `main`**: since the working branch `refactor/atomic-writes` started identical to `main`, a full rollback is `git reset --hard origin/main` (destructive — only do this if you are sure you want to discard the work). A safer alternative is to abandon the branch and create a new one from `main`.
+- **Full rollback to `main`**: the working branch `refactor/atomic-writes` started identical to `main`, and before implementation begins it will contain one commit adding this plan file. A full rollback to `origin/main` (`git reset --hard origin/main`) would drop both the implementation commit and the plan-file commit, which is usually too aggressive. Prefer `git revert` of just the implementation commit; or, if you want to start over but keep the plan file, `git reset --hard <plan-commit-sha>`. Only `git reset --hard origin/main` if you intend to discard the plan file as well. A safer alternative is to abandon the branch and create a new one from `main`.
 
 - **Preflight failure recovery**: if `$preflight` finds issues, do not bypass the gate. Update this plan's Surprises & Discoveries and Decision Log sections, address the finding, and re-run `$preflight` until it reports clean. Only then open the PR.
