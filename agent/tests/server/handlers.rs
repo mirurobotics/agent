@@ -67,9 +67,10 @@ pub mod routes {
     use miru_agent::server::{serve, State};
     use miru_agent::sync::Syncer;
 
-    use crate::http::mock::MockClient;
+    use crate::http::mock::{self, MockClient};
     use crate::sync::syncer::{create_storage, create_token_manager};
 
+    use axum::routing::get;
     use chrono::{DateTime, TimeZone, Utc};
     use tokio::sync::mpsc;
 
@@ -81,6 +82,7 @@ pub mod routes {
         state: Arc<State>,
         app: Router,
         _dir: filesys::Dir,
+        _backend: mock::Server,
     }
 
     impl Fixture {
@@ -93,10 +95,16 @@ pub mod routes {
             let syncer = Arc::new(Syncer::new(sender));
             let activity_tracker = Arc::new(activity::Tracker::new());
 
-            // State expects Arc<http::Client>, but we only need it to exist;
-            // the handlers under test don't use it. Use a real client at a dummy URL.
+            // Backend mock server. Handlers that reach the cache-miss fallback
+            // hit this server; all routes respond with 404 so the service layer
+            // produces a CacheElementNotFound (surfacing as HTTP 404 to clients).
+            let backend_router = Router::new()
+                .route("/deployments/{id}", get(mock::not_found))
+                .route("/releases/{id}", get(mock::not_found))
+                .route("/git_commits/{id}", get(mock::not_found));
+            let backend = mock::run_server(backend_router).await;
             let real_http_client =
-                Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
+                Arc::new(miru_agent::http::Client::new(&backend.base_url).unwrap());
 
             let log_file = dir.file("events.jsonl");
             let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
@@ -118,6 +126,7 @@ pub mod routes {
                 state,
                 app,
                 _dir: dir,
+                _backend: backend,
             }
         }
 
