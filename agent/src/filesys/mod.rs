@@ -22,8 +22,8 @@ pub enum Overwrite {
 /// then rename into place).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Atomic {
-    #[default]
     No,
+    #[default]
     Yes,
 }
 
