@@ -1,4 +1,9 @@
+// standard crates
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+
 // internal crates
+use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::cache::errors::CacheErr;
 use miru_agent::filesys::{self, Overwrite};
@@ -10,12 +15,6 @@ use miru_agent::services::ServiceErr;
 use miru_agent::storage::GitCommits;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
-
-// external crates
-use backend_api::models as backend_client;
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 
 struct StubGitCommitFetcher {
     result: Mutex<Option<Result<backend_client::GitCommit, ServiceErr>>>,
@@ -35,7 +34,6 @@ impl StubGitCommitFetcher {
             call_count: AtomicUsize::new(0),
         }
     }
-    #[allow(dead_code)]
     fn calls(&self) -> usize {
         self.call_count.load(Ordering::SeqCst)
     }
