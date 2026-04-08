@@ -12,10 +12,7 @@ use backend_api::models as backend_client;
 
 #[allow(async_fn_in_trait)]
 pub trait GitCommitFetcher {
-    async fn fetch_git_commit(
-        &self,
-        id: &str,
-    ) -> Result<backend_client::GitCommit, ServiceErr>;
+    async fn fetch_git_commit(&self, id: &str) -> Result<backend_client::GitCommit, ServiceErr>;
 }
 
 pub struct HttpGitCommitFetcher<'a> {
@@ -24,10 +21,7 @@ pub struct HttpGitCommitFetcher<'a> {
 }
 
 impl<'a> GitCommitFetcher for HttpGitCommitFetcher<'a> {
-    async fn fetch_git_commit(
-        &self,
-        id: &str,
-    ) -> Result<backend_client::GitCommit, ServiceErr> {
+    async fn fetch_git_commit(&self, id: &str) -> Result<backend_client::GitCommit, ServiceErr> {
         let token = self
             .token_mngr
             .get_token()

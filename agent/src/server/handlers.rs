@@ -116,8 +116,7 @@ pub async fn get_release(
                 client: state.http_client.as_ref(),
                 token_mngr: state.token_mngr.as_ref(),
             };
-            let release =
-                rls_svc::get(&state.storage.releases, Some(&fetcher), release_id).await?;
+            let release = rls_svc::get(&state.storage.releases, Some(&fetcher), release_id).await?;
             Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting release",
@@ -148,12 +147,8 @@ pub async fn get_git_commit(
                 client: state.http_client.as_ref(),
                 token_mngr: state.token_mngr.as_ref(),
             };
-            let gc = git_cmt_svc::get(
-                &state.storage.git_commits,
-                Some(&fetcher),
-                git_commit_id,
-            )
-            .await?;
+            let gc =
+                git_cmt_svc::get(&state.storage.git_commits, Some(&fetcher), git_commit_id).await?;
             Ok::<_, ServerErr>(device_server::GitCommit::from(&gc))
         },
         "Error getting git commit",

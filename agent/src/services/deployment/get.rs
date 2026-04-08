@@ -13,10 +13,7 @@ use backend_api::models as backend_client;
 
 #[allow(async_fn_in_trait)]
 pub trait DeploymentFetcher {
-    async fn fetch_deployment(
-        &self,
-        id: &str,
-    ) -> Result<backend_client::Deployment, ServiceErr>;
+    async fn fetch_deployment(&self, id: &str) -> Result<backend_client::Deployment, ServiceErr>;
 }
 
 pub struct HttpDeploymentFetcher<'a> {
@@ -25,10 +22,7 @@ pub struct HttpDeploymentFetcher<'a> {
 }
 
 impl<'a> DeploymentFetcher for HttpDeploymentFetcher<'a> {
-    async fn fetch_deployment(
-        &self,
-        id: &str,
-    ) -> Result<backend_client::Deployment, ServiceErr> {
+    async fn fetch_deployment(&self, id: &str) -> Result<backend_client::Deployment, ServiceErr> {
         // TokenManager::get_token returns AuthnErr; convert via SyncErr because
         // ServiceErr already implements From<SyncErr> and SyncErr already
         // implements From<AuthnErr>. This avoids adding a new error variant.
@@ -91,7 +85,7 @@ pub async fn get<F: DeploymentFetcher>(
     // request expand=config_instances the backend must populate it. If it
     // doesn't, that's the same contract violation the syncer reports via
     // SyncErr::CfgInstsNotExpanded — reuse that variant.
-    let cfg_insts = backend_dpl.config_instances.clone().ok_or_else(|| {
+    let cfg_insts = backend_dpl.config_instances.as_ref().ok_or_else(|| {
         ServiceErr::SyncErr(sync::SyncErr::CfgInstsNotExpanded(
             sync::errors::CfgInstsNotExpandedErr {
                 deployment_id: backend_dpl.id.clone(),
@@ -99,7 +93,32 @@ pub async fn get<F: DeploymentFetcher>(
         ))
     })?;
     let cfg_inst_ids: Vec<String> = cfg_insts.iter().map(|ci| ci.id.clone()).collect();
-    let new_dpl = models::Deployment::from_backend(backend_dpl.clone(), cfg_inst_ids);
+
+    // Cache the expanded release if present. Duplicated inline from
+    // sync::deployments::store_expanded_release per the Decision Log to keep
+    // the service layer independent of sync internals. Mirrors the sync
+    // ordering: store expanded release BEFORE consuming backend_dpl into the
+    // deployment model.
+    if let Some(backend_release) = backend_dpl.release.as_deref() {
+        let release: models::Release = backend_release.clone().into();
+        let release_id = release.id.clone();
+        if let Err(e) = releases
+            .write_if_absent(release_id, release, |_, _| false)
+            .await
+        {
+            tracing::error!("failed to cache expanded release on cache-miss: {e}");
+        }
+        // Cache the expanded git_commit if present.
+        if let Some(Some(backend_gc)) = &backend_release.git_commit {
+            let gc: models::GitCommit = (*backend_gc.clone()).into();
+            let gc_id = gc.id.clone();
+            if let Err(e) = git_commits.write_if_absent(gc_id, gc, |_, _| false).await {
+                tracing::error!("failed to cache expanded git_commit on cache-miss: {e}");
+            }
+        }
+    }
+
+    let new_dpl = models::Deployment::from_backend(backend_dpl, cfg_inst_ids);
     let existing = deployments.read_optional(id.clone()).await.ok().flatten();
     let merged = resolve_dpl(new_dpl, existing);
     if let Err(e) = deployments
@@ -116,31 +135,6 @@ pub async fn get<F: DeploymentFetcher>(
             id = %id,
             "failed to cache fetched deployment; returning value anyway"
         );
-    }
-
-    // Cache the expanded release if present. Duplicated inline from
-    // sync::deployments::store_expanded_release per the Decision Log to keep
-    // the service layer independent of sync internals.
-    if let Some(backend_release) = backend_dpl.release.as_deref() {
-        let release: models::Release = backend_release.clone().into();
-        let release_id = release.id.clone();
-        if let Err(e) = releases
-            .write_if_absent(release_id, release, |_, _| false)
-            .await
-        {
-            tracing::error!("failed to cache expanded release on cache-miss: {e}");
-        }
-        // Cache the expanded git_commit if present.
-        if let Some(Some(backend_gc)) = &backend_release.git_commit {
-            let gc: models::GitCommit = (*backend_gc.clone()).into();
-            let gc_id = gc.id.clone();
-            if let Err(e) = git_commits
-                .write_if_absent(gc_id, gc, |_, _| false)
-                .await
-            {
-                tracing::error!("failed to cache expanded git_commit on cache-miss: {e}");
-            }
-        }
     }
 
     Ok(merged)
@@ -160,10 +154,7 @@ pub async fn get_current(
 // Inlined from sync::deployments::resolve_dpl per the Decision Log:
 // we duplicate this 5-line merge instead of promoting the sync function
 // to pub(crate), to keep the service layer free of sync dependencies.
-fn resolve_dpl(
-    new: models::Deployment,
-    cached: Option<models::Deployment>,
-) -> models::Deployment {
+fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> models::Deployment {
     match cached {
         Some(cached) => models::Deployment {
             target_status: new.target_status,
