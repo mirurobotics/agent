@@ -461,4 +461,72 @@ pub mod get_deployment_fallback {
             Err(ServiceErr::CacheErr(CacheErr::CacheElementNotFound(_)))
         ));
     }
+
+    #[test]
+    fn resolve_dpl_none_cached_returns_new() {
+        let new = make_deployment("dpl_1", DplActivity::Queued);
+        let merged = dpl_svc::resolve_dpl(new.clone(), None);
+        assert_eq!(merged.id, new.id);
+        assert_eq!(merged.activity_status, DplActivity::Queued);
+    }
+
+    #[test]
+    fn resolve_dpl_cached_preserves_local_state_and_takes_new_target() {
+        // Simulates a sync race: the cache was populated between the initial
+        // `read_optional` miss and the post-fetch re-read. The merge must
+        // preserve local fields from `cached` but take `target_status` and
+        // `updated_at` from the newly fetched backend deployment.
+        let cached = Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Staged,
+            updated_at: DateTime::<Utc>::UNIX_EPOCH,
+            ..Default::default()
+        };
+        let new = Deployment {
+            id: "dpl_1".to_string(),
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Deployed,
+            updated_at: DateTime::<Utc>::from_timestamp(42, 0).unwrap(),
+            ..Default::default()
+        };
+        let merged = dpl_svc::resolve_dpl(new.clone(), Some(cached.clone()));
+        // Local fields preserved from cached.
+        assert_eq!(merged.activity_status, DplActivity::Deployed);
+        // target_status and updated_at taken from new.
+        assert_eq!(merged.target_status, DplTarget::Deployed);
+        assert_eq!(merged.updated_at, new.updated_at);
+    }
+
+    #[tokio::test]
+    async fn cache_miss_backend_missing_config_instances_returns_sync_err() {
+        let (_dir, dpl_stor, rls_stor, gc_stor) = setup("fb_dpl_missing_cfg_insts").await;
+        // Backend returns a deployment without the expanded config_instances
+        // field — the service must surface this as SyncErr::CfgInstsNotExpanded
+        // (matching the syncer's contract-violation handling).
+        let backend_dpl = backend_client::Deployment {
+            id: "dpl_1".to_string(),
+            description: "test".to_string(),
+            device_id: "dvc_1".to_string(),
+            release_id: "rls_1".to_string(),
+            config_instances: None,
+            ..Default::default()
+        };
+        let stub = StubDeploymentFetcher::ok(backend_dpl);
+
+        let result = dpl_svc::get(
+            &dpl_stor,
+            &rls_stor,
+            &gc_stor,
+            Some(&stub),
+            "dpl_1".to_string(),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(ServiceErr::SyncErr(SyncErr::CfgInstsNotExpanded(_)))
+        ));
+    }
 }

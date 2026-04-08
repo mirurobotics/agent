@@ -153,7 +153,12 @@ pub async fn get_current(
 // Inlined from sync::deployments::resolve_dpl per the Decision Log:
 // we duplicate this 5-line merge instead of promoting the sync function
 // to pub(crate), to keep the service layer free of sync dependencies.
-fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> models::Deployment {
+// Exposed as `pub` so the cached-race merge path can be unit-tested
+// without having to inject a write between the two reads in `get`.
+pub fn resolve_dpl(
+    new: models::Deployment,
+    cached: Option<models::Deployment>,
+) -> models::Deployment {
     match cached {
         Some(cached) => models::Deployment {
             target_status: new.target_status,
