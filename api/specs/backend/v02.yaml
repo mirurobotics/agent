@@ -6,16 +6,41 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.0
+  x-release-version: v0.2.1-next
   x-git-commit:
-    sha: 5e98bcf13136459371f57ae422d353a1e7491b14
-    url: https://github.com/mirurobotics/openapi/commit/5e98bcf13136459371f57ae422d353a1e7491b14
-    message: 'chore: bump device api version'
-    author: Benjamin Smidt
-    branch: HEAD
+    sha: dd5f8be4ece5cfaf2dc853b635c9c734b923820d
+    url: https://github.com/mirurobotics/openapi/commit/dd5f8be4ece5cfaf2dc853b635c9c734b923820d
+    message: "feat(agent): add GET endpoints for deployments, releases, and git commits\
+      \ (#17)\n\n## Summary\n\n- Adds three new agent-audience GET endpoints to the\
+      \ backend-server\nopenapi spec so the on-device agent can fetch resources from\
+      \ the backend\non cache miss:\n  - `getDeployment` - `GET /deployments/{deployment_id}`\n\
+      \  - `getRelease` - `GET /releases/{release_id}`\n  - `getGitCommit` - `GET\
+      \ /git_commits/{git_commit_id}`\n- Motivating bug: the on-device agent currently\
+      \ returns 404 to local\nclients when a cached resource has been pruned, even\
+      \ though the backend\nstill has it. With these endpoints in place, a cache miss\
+      \ can fall back\nto the backend and re-cache; only \"doesn't exist anywhere\"\
+      \ will return\n404.\n- Regenerates the agent bundle (`openapi.gen.yaml`) and\
+      \ appends\nchangelog entries for the three new operations.\n\n## Follow-on work\n\
+      \n- The agent-side implementation (cache miss to backend fetch to\nre-cache)\
+      \ lands in a separate PR in the `agent` repo. This PR only ships\nthe spec +\
+      \ bundle so that generated clients expose the new operations.\n\n## Incidental\
+      \ changelog drift\n\n- While regenerating the agent bundle, the staleness check\
+      \ also surfaced\npre-existing changelog drift for the `cli`, `frontend`, `platform`,\
+      \ and\n`device-server` audiences (unrelated to this change, already on main).\n\
+      Those are folded in here so the staleness check stays clean - no spec\nchanges\
+      \ to those audiences, just changelog reconciliation.\n\n## Plan\n\n- ExecPlan\
+      \ lives at\n`plans/active/20260408-agent-resource-fetch-endpoints.md` and is\
+      \ marked\ncomplete on this branch.\n\n## Test plan\n\n- [x] `./scripts/preflight.sh`\
+      \ exits 0\n- [x] All 7 spec bundles validate (redocly lint)\n- [x] Lint tool:\
+      \ 225 tests pass at 99% coverage\n- [x] Release tool: 109 tests pass at 99%\
+      \ coverage\n- [x] Bundle staleness check clean across all audiences\n- [x] `getDeployment`,\
+      \ `getRelease`, and `getGitCommit` operationIds\npresent in `apis/apps/backend-server/agent/openapi.gen.yaml`\n\
+      \n---------\n\nCo-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+    author: ben-miru
+    branch: main
     dirty: false
   x-build:
-    built_at: '2026-03-10T03:12:29.573456+00:00'
+    built_at: '2026-04-08T20:29:13.878632+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -100,6 +125,21 @@ paths:
   /deployments/{deployment_id}:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Deployments
+      summary: Get
+      operationId: getDeployment
+      description: Retrieve a deployment by its ID.
+      parameters:
+      - $ref: '#/components/parameters/deployment_id'
+      responses:
+        '200':
+          description: Successfully retrieved the deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
     patch:
       tags:
       - Deployments
@@ -122,6 +162,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Deployment'
+  /releases/{release_id}:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Releases
+      summary: Get
+      operationId: getRelease
+      description: Retrieve a release by its ID.
+      parameters:
+      - $ref: '#/components/parameters/release_id'
+      responses:
+        '200':
+          description: Successfully retrieved the release.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+  /git_commits/{git_commit_id}:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Git Commits
+      summary: Get
+      operationId: getGitCommit
+      description: Retrieve a git commit by its ID.
+      parameters:
+      - $ref: '#/components/parameters/git_commit_id'
+      responses:
+        '200':
+          description: Successfully retrieved the git commit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitCommit'
   /devices/{device_id}:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -280,7 +356,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 5e98bcf13136459371f57ae422d353a1e7491b14
+      - dd5f8be4ece5cfaf2dc853b635c9c734b923820d
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -385,6 +461,10 @@ components:
         for consumption on the device.
 
 
+        `removing` means the deployment''s config instances are being removed from
+        the device.
+
+
         `archived` means the deployment is available for historical reference but
         cannot be deployed and is not active on the device.
 
@@ -394,12 +474,14 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       x-enum-varnames:
       - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
       - DEPLOYMENT_ACTIVITY_STATUS_STAGED
       - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
       - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+      - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
       - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
     PaginatedList:
       title: Paginated List
@@ -455,6 +537,7 @@ components:
       - staged
       - queued
       - deployed
+      - removing
       - archived
       - failed
       - retrying
@@ -463,6 +546,7 @@ components:
       - DEPLOYMENT_STATUS_STAGED
       - DEPLOYMENT_STATUS_QUEUED
       - DEPLOYMENT_STATUS_DEPLOYED
+      - DEPLOYMENT_STATUS_REMOVING
       - DEPLOYMENT_STATUS_ARCHIVED
       - DEPLOYMENT_STATUS_FAILED
       - DEPLOYMENT_STATUS_RETRYING
@@ -741,9 +825,9 @@ components:
           description: The name of the config type.
         filepath:
           type: string
-          example: /v1/motion-control.json
-          description: The file path to deploy the config instance relative to `/srv/miru/config_instances`.
-            `v1/motion-control.json` would deploy to `/srv/miru/config_instances/v1/motion-control.json`.
+          example: /srv/miru/configs/v1/motion-control.json
+          description: The absolute filesystem path where this config instance is
+            written.
         created_at:
           type: string
           format: date-time
@@ -764,8 +848,10 @@ components:
       type: string
       enum:
       - json
+      - yaml
       x-enum-varnames:
       - INSTANCE_FORMAT_JSON
+      - INSTANCE_FORMAT_YAML
     InstanceContent:
       title: Instance Content
       type: object
@@ -799,7 +885,7 @@ components:
         object: config_instance
         id: cfg_inst_123
         config_type_name: Motion Control
-        filepath: /v1/motion-control.json
+        filepath: /srv/miru/configs/v1/motion-control.json
         created_at: '2021-01-01T00:00:00Z'
         config_schema_id: cfg_sch_123
         config_type_id: cfg_typ_123
@@ -823,14 +909,14 @@ components:
             - object: config_instance
               id: cfg_inst_123
               config_type_name: Motion Control
-              filepath: /v1/motion-control.json
+              filepath: /srv/miru/configs/v1/motion-control.json
               created_at: '2021-01-01T00:00:00Z'
               config_schema_id: cfg_sch_123
               config_type_id: cfg_typ_123
             - object: config_instance
               id: cfg_inst_456
               config_type_name: Localization
-              filepath: /v1/localization.json
+              filepath: /srv/miru/configs/v1/localization.json
               created_at: '2021-01-02T00:00:00Z'
               config_schema_id: cfg_sch_456
               config_type_id: cfg_typ_456
@@ -1246,6 +1332,22 @@ components:
           $ref: '#/components/schemas/DeploymentExpansion'
         example:
         - release
+    release_id:
+      name: release_id
+      in: path
+      required: true
+      description: The unique identifier of the release.
+      schema:
+        type: string
+        example: rls_123
+    git_commit_id:
+      name: git_commit_id
+      in: path
+      required: true
+      description: The unique identifier of the git commit.
+      schema:
+        type: string
+        example: git_commit_123
     device_id:
       name: device_id
       in: path
