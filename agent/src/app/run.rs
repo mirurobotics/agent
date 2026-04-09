@@ -136,6 +136,7 @@ async fn init(
             options,
             app_state.clone(),
             shutdown_manager,
+            shutdown_tx.clone(),
             shutdown_tx.subscribe(),
         )
         .await?;
@@ -292,6 +293,7 @@ async fn init_socket_server(
     options: &AppOptions,
     app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
+    shutdown_tx: broadcast::Sender<()>,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), ServerErr> {
     info!("Initializing socket server...");
@@ -304,6 +306,7 @@ async fn init_socket_server(
         app_state.token_mngr.clone(),
         app_state.activity_tracker.clone(),
         app_state.event_hub.clone(),
+        shutdown_tx.clone(),
     );
     let server_handle = serve(&options.server, Arc::new(server_state), async move {
         let _ = shutdown_rx.recv().await;

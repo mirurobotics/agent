@@ -78,6 +78,12 @@ async fn events_impl(
         }
     });
 
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    let sse_stream = futures::StreamExt::take_until(
+        sse_stream,
+        async move { let _ = shutdown_rx.recv().await; },
+    );
+
     Ok(Sse::new(sse_stream).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(30))
