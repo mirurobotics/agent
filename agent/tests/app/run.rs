@@ -10,6 +10,7 @@ use miru_agent::server::Options;
 use miru_agent::storage::Layout;
 
 // external crates
+use serial_test::serial;
 use tokio::time::Duration;
 
 async fn prepare_valid_server_storage(dir: filesys::Dir) {
@@ -52,6 +53,7 @@ async fn invalid_app_state_initialization() {
     .unwrap();
 }
 
+#[serial]
 #[tokio::test]
 async fn max_runtime_reached() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
@@ -84,6 +86,7 @@ async fn max_runtime_reached() {
     .unwrap();
 }
 
+#[serial]
 #[tokio::test]
 async fn is_persistent() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
@@ -117,6 +120,7 @@ async fn is_persistent() {
     .unwrap_err();
 }
 
+#[serial]
 #[tokio::test]
 async fn idle_timeout_reached() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
@@ -151,6 +155,7 @@ async fn idle_timeout_reached() {
     .unwrap();
 }
 
+#[serial]
 #[tokio::test]
 async fn shutdown_signal_received() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
