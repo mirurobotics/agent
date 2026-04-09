@@ -71,7 +71,7 @@ pub mod routes {
     use crate::sync::syncer::{create_storage, create_token_manager};
 
     use chrono::{DateTime, TimeZone, Utc};
-    use tokio::sync::mpsc;
+    use tokio::sync::{broadcast, mpsc};
 
     fn fixed_time() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
@@ -103,6 +103,7 @@ pub mod routes {
                 .await
                 .unwrap();
 
+            let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(
                 storage,
                 real_http_client,
@@ -110,6 +111,7 @@ pub mod routes {
                 Arc::new(token_mngr),
                 activity_tracker,
                 event_hub,
+                shutdown_tx,
             ));
 
             let app = serve::routes(state.clone());

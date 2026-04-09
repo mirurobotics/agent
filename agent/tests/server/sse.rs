@@ -18,12 +18,13 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use chrono::Utc;
 use http_body_util::BodyExt;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tower::ServiceExt;
 
 struct Fixture {
     state: Arc<State>,
     app: Router,
+    shutdown_tx: broadcast::Sender<()>,
     _dir: filesys::Dir,
 }
 
@@ -47,6 +48,8 @@ impl Fixture {
         let log_file = dir.file("events.jsonl");
         let (event_hub, _handle) = EventHub::spawn(log_file, opts).await.unwrap();
 
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
         let state = Arc::new(State::new(
             storage,
             real_http_client,
@@ -54,6 +57,7 @@ impl Fixture {
             Arc::new(token_mngr),
             activity_tracker,
             event_hub,
+            shutdown_tx.clone(),
         ));
 
         let app = serve::routes(state.clone());
@@ -61,6 +65,7 @@ impl Fixture {
         Self {
             state,
             app,
+            shutdown_tx,
             _dir: dir,
         }
     }
@@ -452,6 +457,35 @@ mod stream {
         assert!(
             event_count < 10,
             "stream should have closed due to lag, but got {event_count} events"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_closes_on_shutdown() {
+        let f = Fixture::new("sse_stream_closes_on_shutdown").await;
+
+        // Open an SSE connection but do not read the body yet
+        let req = Request::builder()
+            .uri("/v0.2/events")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+        let response = f.app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Signal shutdown
+        f.shutdown_tx.send(()).unwrap();
+
+        // The body stream should end on its own promptly — not hang until timeout
+        let mut body = response.into_body();
+        let result = tokio::time::timeout(Duration::from_millis(500), async {
+            while let Some(Ok(_frame)) = body.frame().await {}
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "SSE stream should close promptly after shutdown signal, not hang until timeout"
         );
     }
 }
