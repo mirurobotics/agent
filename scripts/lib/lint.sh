@@ -3,7 +3,7 @@
 #
 # Runs: import linter, cargo fmt, machete, audit, clippy.
 # Optionally: cargo diet.
-# Run scripts/install-lints.sh first to update Cargo dependencies.
+# Run scripts/update-deps.sh first to refresh Cargo.lock.
 #
 # Required env:
 #   CRATE_DIR            — absolute path to the crate root (working directory for cargo)
