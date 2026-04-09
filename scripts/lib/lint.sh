@@ -2,7 +2,8 @@
 # Shared linter — called by per-crate wrapper scripts.
 #
 # Runs: import linter, cargo fmt, machete, audit, clippy.
-# Optionally: cargo diet, cargo update.
+# Optionally: cargo diet.
+# Run scripts/update-deps.sh first to refresh Cargo.lock.
 #
 # Required env:
 #   CRATE_DIR            — absolute path to the crate root (working directory for cargo)
@@ -21,14 +22,6 @@ cd "$CRATE_DIR"
 
 LINT_FIX="${LINT_FIX:-1}"
 RUN_DIET="${RUN_DIET:-0}"
-
-# Update cargo dependencies (skip in check-only mode)
-if [ "$LINT_FIX" = "1" ]; then
-    echo "Updating the Cargo dependencies"
-    echo "-------------------------------"
-    cargo update --verbose
-    echo ""
-fi
 
 echo "Custom Linter"
 echo "-------------"
