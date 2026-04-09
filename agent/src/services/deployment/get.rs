@@ -31,13 +31,7 @@ impl<'a> DeploymentFetcher for HttpDeploymentFetcher<'a> {
             .await
             .map_err(|e| ServiceErr::SyncErr(sync::SyncErr::from(e)))?;
         http::with_retry(|| async {
-            http::deployments::get(
-                self.client,
-                id,
-                &["config_instances", "release.git_commit"],
-                &token.token,
-            )
-            .await
+            http::deployments::get(self.client, id, &["config_instances"], &token.token).await
         })
         .await
         .map_err(ServiceErr::from)
@@ -46,8 +40,6 @@ impl<'a> DeploymentFetcher for HttpDeploymentFetcher<'a> {
 
 pub async fn get<F: DeploymentFetcher>(
     deployments: &storage::Deployments,
-    releases: &storage::Releases,
-    git_commits: &storage::GitCommits,
     backend: Option<&F>,
     id: String,
 ) -> Result<models::Deployment, ServiceErr> {
@@ -92,30 +84,6 @@ pub async fn get<F: DeploymentFetcher>(
         ))
     })?;
     let cfg_inst_ids: Vec<String> = cfg_insts.iter().map(|ci| ci.id.clone()).collect();
-
-    // Cache the expanded release if present. Duplicated inline from
-    // sync::deployments::store_expanded_release per the Decision Log to keep
-    // the service layer independent of sync internals. Mirrors the sync
-    // ordering: store expanded release BEFORE consuming backend_dpl into the
-    // deployment model.
-    if let Some(backend_release) = backend_dpl.release.as_deref() {
-        let release: models::Release = backend_release.clone().into();
-        let release_id = release.id.clone();
-        if let Err(e) = releases
-            .write_if_absent(release_id, release, |_, _| false)
-            .await
-        {
-            tracing::error!("failed to cache expanded release on cache-miss: {e}");
-        }
-        // Cache the expanded git_commit if present.
-        if let Some(Some(backend_gc)) = &backend_release.git_commit {
-            let gc: models::GitCommit = (*backend_gc.clone()).into();
-            let gc_id = gc.id.clone();
-            if let Err(e) = git_commits.write_if_absent(gc_id, gc, |_, _| false).await {
-                tracing::error!("failed to cache expanded git_commit on cache-miss: {e}");
-            }
-        }
-    }
 
     let new_dpl = models::Deployment::from_backend(backend_dpl, cfg_inst_ids);
     let existing = deployments.read_optional(id.clone()).await.ok().flatten();

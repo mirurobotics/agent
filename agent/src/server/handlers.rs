@@ -79,14 +79,8 @@ pub async fn get_deployment(
                 client: state.http_client.as_ref(),
                 token_mngr: state.token_mngr.as_ref(),
             };
-            let dpl = dpl_svc::get(
-                &state.storage.deployments,
-                &state.storage.releases,
-                &state.storage.git_commits,
-                Some(&fetcher),
-                deployment_id,
-            )
-            .await?;
+            let dpl =
+                dpl_svc::get(&state.storage.deployments, Some(&fetcher), deployment_id).await?;
             Ok::<_, ServerErr>(device_server::Deployment::from(&dpl))
         },
         "Error getting deployment",
