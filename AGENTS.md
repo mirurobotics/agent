@@ -41,14 +41,18 @@ Always use `scripts/test.sh`:
 
 ```bash
 ./scripts/test.sh
-# Runs: RUST_LOG=off cargo test --features test -- --test-threads=1
+# Runs: RUST_LOG=off cargo test --features test
 ```
 
-Both flags are required:
-- `--features test` — many test helpers and mocks are behind `#[cfg(feature = "test")]`.
-- `--test-threads=1` — tests share `/tmp/miru.sock`.
+The `--features test` flag is required — many test helpers and mocks are behind
+`#[cfg(feature = "test")]`. Without it, tests will fail with misleading errors
+(missing test helpers).
 
-Without these flags, tests will fail with misleading errors (socket in use, missing test helpers).
+Tests run in parallel by default. Tests that bind shared OS resources (e.g.,
+`/tmp/miru.sock`) are annotated with `#[serial]` from the `serial_test` crate,
+which serializes them relative to each other while leaving all other tests
+parallel. When adding a test that uses a fixed path or other global state, add
+`#[serial]` to that test function.
 
 Test files in `agent/tests/` mirror the `agent/src/` module structure.
 
