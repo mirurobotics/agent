@@ -50,6 +50,7 @@ pub enum DplActivity {
     Staged,
     Queued,
     Deployed,
+    Removing,
     Archived,
 }
 
@@ -73,6 +74,9 @@ impl_status_enum!(
         Deployed => "deployed" =>
             agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+        Removing => "removing" =>
+            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING =>
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
         Archived => "archived" =>
             agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
@@ -118,6 +122,7 @@ pub enum DplStatus {
     Staged,
     Queued,
     Deployed,
+    Removing,
     Archived,
     Failed,
     Retrying,
@@ -134,6 +139,7 @@ impl DplStatus {
                 DplActivity::Staged => DplStatus::Staged,
                 DplActivity::Queued => DplStatus::Queued,
                 DplActivity::Deployed => DplStatus::Deployed,
+                DplActivity::Removing => DplStatus::Removing,
                 DplActivity::Archived => DplStatus::Archived,
             },
             DplErrStatus::Retrying => DplStatus::Retrying,
@@ -162,6 +168,9 @@ impl_status_enum!(
         Deployed => "deployed" =>
             agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+        Removing => "removing" =>
+            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING =>
+            backend_client::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
         Archived => "archived" =>
             agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,

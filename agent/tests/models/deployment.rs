@@ -307,6 +307,11 @@ impl StatusFixture for DplActivity {
                 valid: true,
             },
             StatusCase {
+                input: "\"removing\"",
+                expected: DplActivity::Removing,
+                valid: true,
+            },
+            StatusCase {
                 input: "\"archived\"",
                 expected: DplActivity::Archived,
                 valid: true,
@@ -350,6 +355,10 @@ fn activity_status_backend_conversions() {
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
         },
         TestCase {
+            storage: DplActivity::Removing,
+            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
+        },
+        TestCase {
             storage: DplActivity::Archived,
             backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
         },
@@ -390,6 +399,10 @@ fn activity_status_sdk_conversions() {
         TestCase {
             storage: DplActivity::Deployed,
             sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+        },
+        TestCase {
+            storage: DplActivity::Removing,
+            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
         },
         TestCase {
             storage: DplActivity::Archived,
@@ -538,6 +551,11 @@ impl StatusFixture for DplStatus {
                 valid: true,
             },
             StatusCase {
+                input: "\"removing\"",
+                expected: DplStatus::Removing,
+                valid: true,
+            },
+            StatusCase {
                 input: "\"archived\"",
                 expected: DplStatus::Archived,
                 valid: true,
@@ -591,6 +609,10 @@ fn status_backend_conversion() {
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
         },
         TestCase {
+            storage: DplStatus::Removing,
+            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
+        },
+        TestCase {
             storage: DplStatus::Archived,
             backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
         },
@@ -639,6 +661,10 @@ fn status_sdk_conversion() {
         TestCase {
             storage: DplStatus::Deployed,
             sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+        },
+        TestCase {
+            storage: DplStatus::Removing,
+            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
         },
         TestCase {
             storage: DplStatus::Archived,
@@ -690,6 +716,11 @@ fn status_from_activity_and_error() {
             activity_status: DplActivity::Deployed,
             error_status: DplErrStatus::None,
             expected: DplStatus::Deployed,
+        },
+        TestCase {
+            activity_status: DplActivity::Removing,
+            error_status: DplErrStatus::None,
+            expected: DplStatus::Removing,
         },
         TestCase {
             activity_status: DplActivity::Archived,

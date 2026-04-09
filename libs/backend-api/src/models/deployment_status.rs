@@ -21,6 +21,8 @@ pub enum DeploymentStatus {
     DEPLOYMENT_STATUS_QUEUED,
     #[serde(rename = "deployed")]
     DEPLOYMENT_STATUS_DEPLOYED,
+    #[serde(rename = "removing")]
+    DEPLOYMENT_STATUS_REMOVING,
     #[serde(rename = "archived")]
     DEPLOYMENT_STATUS_ARCHIVED,
     #[serde(rename = "failed")]
@@ -37,6 +39,7 @@ impl std::fmt::Display for DeploymentStatus {
             Self::DEPLOYMENT_STATUS_STAGED => write!(f, "staged"),
             Self::DEPLOYMENT_STATUS_QUEUED => write!(f, "queued"),
             Self::DEPLOYMENT_STATUS_DEPLOYED => write!(f, "deployed"),
+            Self::DEPLOYMENT_STATUS_REMOVING => write!(f, "removing"),
             Self::DEPLOYMENT_STATUS_ARCHIVED => write!(f, "archived"),
             Self::DEPLOYMENT_STATUS_FAILED => write!(f, "failed"),
             Self::DEPLOYMENT_STATUS_RETRYING => write!(f, "retrying"),
