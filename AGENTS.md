@@ -62,7 +62,7 @@ Each module has a `.covgate` file with a minimum coverage percentage. Run `scrip
 
 ## Linting
 
-Use `scripts/lint.sh` for a full local lint pass. It runs: dependency update, the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy.
+Use `scripts/install-lints.sh` once to update Cargo dependencies before linting. Then run `scripts/lint.sh` for a full local lint pass. It runs: the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy.
 
 In CI, the Lint workflow runs:
 - `cargo run --manifest-path tools/lint/Cargo.toml -- --path agent/src --config .lint-imports.toml`
