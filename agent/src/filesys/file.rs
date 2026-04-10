@@ -6,17 +6,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 // internal crates
-use crate::filesys::{
-    dir::Dir,
-    errors::{
-        AtomicWriteFileErr, ConvertUTF8Err, CopyFileErr, CreateSymlinkErr, DeleteFileErr,
-        FileMetadataErr, FileSysErr, InvalidFileOverwriteErr, MoveFileErr, OpenFileErr,
-        ParseJSONErr, PathDoesNotExistErr, PermissionDeniedErr, ReadFileErr, ReadOnlyFilesystemErr,
-        UnknownFileNameErr, UnknownParentDirForFileErr, WriteFileErr,
-    },
-    path::PathExt,
-    Atomic, Overwrite, WriteOptions,
-};
+use crate::filesys::{dir::Dir, errors::*, path::PathExt, Atomic, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates

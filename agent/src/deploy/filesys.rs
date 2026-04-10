@@ -23,7 +23,7 @@ pub async fn deploy(
     let cfg_insts = read_cfg_insts(storage.meta, &deployment.config_instance_ids).await?;
     validate_cfg_insts(&cfg_insts)?;
 
-    write_files(&cfg_insts, storage.content).await
+    write_cfg_insts(&cfg_insts, storage.content).await
 }
 
 fn validate_has_cfg_insts(deployment: &models::Deployment) -> Result<(), DeployErr> {
@@ -61,7 +61,7 @@ async fn read_cfg_insts(
 
 fn validate_cfg_insts(cfg_insts: &[models::ConfigInstance]) -> Result<(), DeployErr> {
     for cfg_inst in cfg_insts {
-        validate_filepath(&filesys::File::new(PathBuf::from(&cfg_inst.filepath)))?;
+        validate_filepath(&filesys::File::new(&cfg_inst.filepath))?;
     }
     Ok(())
 }
@@ -90,19 +90,19 @@ fn validate_filepath(file: &filesys::File) -> Result<(), DeployErr> {
     Ok(())
 }
 
-async fn write_files(
+async fn write_cfg_insts(
     cfg_insts: &[models::ConfigInstance],
     content_stor: &storage::CfgInstContent,
 ) -> Result<(), DeployErr> {
     let mut snapshots: Vec<Snapshot> = Vec::with_capacity(cfg_insts.len());
-    if let Err(e) = write_files_impl(&mut snapshots, cfg_insts, content_stor).await {
+    if let Err(e) = write_cfg_insts_impl(&mut snapshots, cfg_insts, content_stor).await {
         rollback(&snapshots).await;
         return Err(e);
     }
     Ok(())
 }
 
-async fn write_files_impl(
+async fn write_cfg_insts_impl(
     snapshots: &mut Vec<Snapshot>,
     cfg_insts: &[models::ConfigInstance],
     content_stor: &storage::CfgInstContent,
@@ -203,21 +203,24 @@ pub async fn remove(
     let cfg_insts = read_cfg_insts(storage.meta, &deployment.config_instance_ids).await?;
     validate_cfg_insts(&cfg_insts)?;
 
-    remove_files(&cfg_insts, keeps).await
+    remove_cfg_insts(&cfg_insts, keeps).await;
+    Ok(())
 }
 
-async fn remove_files(
-    cfg_insts: &[models::ConfigInstance],
-    keeps: &[filesys::File],
-) -> Result<(), DeployErr> {
+async fn remove_cfg_insts(cfg_insts: &[models::ConfigInstance], keeps: &[filesys::File]) {
     for cfg_inst in cfg_insts {
         let dest = filesys::File::new(&cfg_inst.filepath);
         if keeps.contains(&dest) {
             continue;
         }
-        dest.delete().await?;
+        if let Err(e) = dest.delete().await {
+            error!(
+                "failed to remove config instance {} at {}: {e}",
+                cfg_inst.id,
+                dest.path().display()
+            );
+        }
     }
-    Ok(())
 }
 
 #[cfg(test)]

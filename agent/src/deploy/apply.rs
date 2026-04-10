@@ -38,7 +38,7 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
 
     match &categorized.target_deployed {
         Some(target_deployed) => {
-            let dont_remove: Vec<filesys::File> = read_cfg_insts(
+            let tgt_dpld_files: Vec<filesys::File> = read_cfg_insts(
                 args.storage.cfg_insts.meta,
                 &target_deployed.config_instance_ids,
             )
@@ -47,15 +47,16 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
             .map(|ci| filesys::File::new(&ci.filepath))
             .collect();
 
-            let outcome = apply_one(args, target_deployed.clone(), &dont_remove).await;
+            let outcome = apply_one(args, target_deployed.clone(), &[]).await;
+            // if deploying the target deployment fails, we return early to ensure that
+            // we don't remove a deployment that may be the one being replaced
             if outcome.error.is_some() {
                 return Ok(vec![outcome]);
             }
-            // if deploying the target deployment fails, we return early to ensure that
-            // we don't remove a deployment that may be the one being replaced
+
             let mut outcomes = vec![outcome];
             outcomes.extend(
-                apply_all(args, categorized.without_target_deployed(), &dont_remove).await?,
+                apply_all(args, categorized.without_target_deployed(), &tgt_dpld_files).await?,
             );
             Ok(outcomes)
         }

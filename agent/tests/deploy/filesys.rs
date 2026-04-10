@@ -1140,7 +1140,7 @@ pub mod remove_func {
     }
 
     #[tokio::test]
-    async fn delete_error_propagates_instead_of_archiving() {
+    async fn delete_error_is_swallowed() {
         let f = Fixture::new().await;
 
         // deploy a file to a directory, then lock the directory so delete fails
@@ -1158,9 +1158,14 @@ pub mod remove_func {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
 
+        // deletion errors are logged but swallowed — remove returns Ok
         assert!(
-            result.is_err(),
-            "remove should propagate the deletion error"
+            result.is_ok(),
+            "remove should succeed even when deletion fails (errors are logged)"
+        );
+        assert!(
+            dest.path().exists(),
+            "file should still exist since delete was blocked"
         );
     }
 }

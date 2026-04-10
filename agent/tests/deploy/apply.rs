@@ -484,7 +484,7 @@ mod deploy_errors {
         );
         f.seed_deployment(&dpl).await;
 
-        // apply returns Err because read_cfg_insts for the dont_remove list
+        // apply returns Err because read_cfg_insts for the deployed_files list
         // fails before any deployment is attempted
         let result = f.apply().await;
         assert!(matches!(result, Err(DeployErr::CacheErr(_))));
@@ -908,7 +908,7 @@ mod remove_action {
     }
 
     #[tokio::test]
-    async fn remove_delete_error_enters_retry() {
+    async fn remove_delete_error_logs_and_archives() {
         let f = Fixture::new().await;
 
         let ci = make_cfg_inst(&f, "locked/config.json");
@@ -943,17 +943,19 @@ mod remove_action {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
 
+        // delete errors are logged but swallowed — the deployment still
+        // transitions through remove into archived
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
             ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-remove-locked".into(),
-                activity: DplActivity::Removing,
-                error_status: DplErrStatus::Retrying,
-                attempts: 1,
-                has_error: true,
-                has_wait: true,
-                in_cooldown: true,
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
                 transitioned: true,
             }
         );
