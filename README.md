@@ -48,10 +48,9 @@ cargo build -p miru-agent --release  # release
 ./scripts/test.sh
 ```
 
-This runs `RUST_LOG=off cargo test --features test -- --test-threads=1`. Both flags are required:
+This runs `RUST_LOG=off cargo test --features test`. The `--features test` flag is required — it enables `#[cfg(feature = "test")]` gated test helpers and mock implementations.
 
-- `--features test` enables `#[cfg(feature = "test")]` gated test helpers and mock implementations.
-- `--test-threads=1` prevents conflicts on the shared `/tmp/miru.sock` Unix socket.
+Tests that bind `/tmp/miru.sock` are annotated with `#[serial]` and are serialised automatically; all other tests run in parallel.
 
 ### Coverage gates
 
