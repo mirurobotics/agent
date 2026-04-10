@@ -28,6 +28,43 @@ pub mod display {
     }
 }
 
+pub mod new_normalization {
+    use super::*;
+
+    #[test]
+    fn strips_dot_component() {
+        assert_eq!(
+            filesys::File::new(PathBuf::from("/a/./b")),
+            filesys::File::new(PathBuf::from("/a/b")),
+        );
+    }
+
+    #[test]
+    fn strips_trailing_separator() {
+        assert_eq!(
+            filesys::File::new(PathBuf::from("/a/b/")),
+            filesys::File::new(PathBuf::from("/a/b")),
+        );
+    }
+
+    #[test]
+    fn strips_dot_in_relative_path() {
+        assert_eq!(
+            filesys::File::new(PathBuf::from("relative/./path")),
+            filesys::File::new(PathBuf::from("relative/path")),
+        );
+    }
+
+    #[test]
+    fn preserves_parent_dir_component() {
+        // .. is NOT resolved — it is preserved as a component
+        assert_ne!(
+            filesys::File::new(PathBuf::from("/a/../b")),
+            filesys::File::new(PathBuf::from("/b")),
+        );
+    }
+}
+
 pub mod is_absolute {
     use super::*;
 
@@ -219,6 +256,116 @@ pub mod name {
             file.name().unwrap_err(),
             FileSysErr::UnknownFileNameErr { .. }
         ));
+    }
+}
+
+pub mod copy_to {
+    use super::*;
+
+    #[tokio::test]
+    async fn copies_bytes_to_new_destination() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("hello world", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+
+        src.copy_to(&dest, Overwrite::Deny).await.unwrap();
+
+        assert!(src.exists(), "source should still exist after copy");
+        assert!(dest.exists(), "destination should exist after copy");
+        assert_eq!(dest.read_string().await.unwrap(), "hello world");
+        assert_eq!(src.read_string().await.unwrap(), "hello world");
+    }
+
+    #[tokio::test]
+    async fn same_path_existing_file_succeeds() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let file = dir.file("test-file");
+        file.write_string("content", WriteOptions::default())
+            .await
+            .unwrap();
+
+        file.copy_to(&file, Overwrite::Deny).await.unwrap();
+        assert!(file.exists());
+        assert_eq!(file.read_string().await.unwrap(), "content");
+    }
+
+    #[tokio::test]
+    async fn same_path_missing_file_returns_path_does_not_exist() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let file = dir.file("nonexistent");
+
+        assert!(matches!(
+            file.copy_to(&file, Overwrite::Deny).await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn overwrite_deny_with_existing_dest_returns_invalid_overwrite() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("src", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+        dest.write_string("dest", WriteOptions::default())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            src.copy_to(&dest, Overwrite::Deny).await.unwrap_err(),
+            FileSysErr::InvalidFileOverwriteErr { .. }
+        ));
+        // dest content should be unchanged
+        assert_eq!(dest.read_string().await.unwrap(), "dest");
+    }
+
+    #[tokio::test]
+    async fn overwrite_allow_with_existing_dest_overwrites() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("new", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+        dest.write_string("old", WriteOptions::default())
+            .await
+            .unwrap();
+
+        src.copy_to(&dest, Overwrite::Allow).await.unwrap();
+        assert_eq!(dest.read_string().await.unwrap(), "new");
+        assert_eq!(src.read_string().await.unwrap(), "new");
+    }
+
+    #[tokio::test]
+    async fn source_missing_returns_path_does_not_exist() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("nonexistent-src");
+        let dest = dir.file("dest");
+
+        assert!(matches!(
+            src.copy_to(&dest, Overwrite::Allow).await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn creates_parent_dirs_for_destination() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("nested", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest_dir = dir.subdir("a").subdir("b").subdir("c");
+        let dest = dest_dir.file("dest-file");
+
+        assert!(!dest_dir.exists());
+        src.copy_to(&dest, Overwrite::Deny).await.unwrap();
+        assert!(dest.exists());
+        assert_eq!(dest.read_string().await.unwrap(), "nested");
     }
 }
 

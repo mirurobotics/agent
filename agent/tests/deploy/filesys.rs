@@ -554,6 +554,31 @@ pub mod deploy_func {
     }
 
     #[tokio::test]
+    async fn rejects_parent_traversal_filepath() {
+        let f = Fixture::new().await;
+        let cfg_inst = ConfigInstance {
+            filepath: "/etc/myapp/../passwd".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_inst, "{\"traversal\": true}".to_string())
+            .await;
+
+        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        let result = f.deploy(&deployment).await;
+
+        match result {
+            Err(DeployErr::PathNotAllowed(e)) => {
+                assert!(
+                    e.reason.contains("parent traversal"),
+                    "expected 'parent traversal' reason, got: {}",
+                    e.reason
+                );
+            }
+            other => panic!("expected PathNotAllowed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn rejects_deployment_when_any_filepath_is_invalid() {
         let f = Fixture::new().await;
 
@@ -1072,5 +1097,70 @@ pub mod remove_func {
         let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
         assert!(result.is_err(), "should reject relative filepath");
+    }
+
+    #[tokio::test]
+    async fn rejects_parent_traversal_filepath() {
+        let f = Fixture::new().await;
+        let ci = ConfigInstance {
+            filepath: "/etc/myapp/../passwd".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&ci, "{}".to_string()).await;
+
+        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let result = f.remove(&dpl, &[]).await;
+        match result {
+            Err(DeployErr::PathNotAllowed(e)) => {
+                assert!(
+                    e.reason.contains("parent traversal"),
+                    "expected 'parent traversal' reason, got: {}",
+                    e.reason
+                );
+            }
+            other => panic!("expected PathNotAllowed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_config_instance_metadata_returns_error() {
+        let f = Fixture::new().await;
+        let ci = ConfigInstance {
+            id: "nonexistent-ci".to_string(),
+            filepath: f.temp_dir.path().join("missing.json").display().to_string(),
+            ..Default::default()
+        };
+        // do NOT seed metadata — only reference the ID
+        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let result = f.remove(&dpl, &[]).await;
+        assert!(
+            matches!(result, Err(DeployErr::CacheErr(_))),
+            "expected CacheErr for missing metadata, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_error_propagates_instead_of_archiving() {
+        let f = Fixture::new().await;
+
+        // deploy a file to a directory, then lock the directory so delete fails
+        let ci = seed_and_deploy(&f, "locked/config.json", r#"{"v": 1}"#).await;
+        let dest = filesys::File::new(&ci.filepath);
+        assert!(dest.path().exists(), "file should exist before removal");
+
+        // lock the parent directory so remove_file fails with EACCES
+        let parent = dest.path().parent().unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let result = f.remove(&dpl, &[]).await;
+
+        // restore permissions so tempdir drop can recurse
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            result.is_err(),
+            "remove should propagate the deletion error"
+        );
     }
 }
