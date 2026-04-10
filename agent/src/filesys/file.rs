@@ -177,12 +177,22 @@ impl File {
         self.parent()?.create_if_absent().await?;
 
         if opts.atomic == Atomic::Yes {
-            let af = match opts.overwrite {
-                Overwrite::Allow => AtomicFile::new(self.path(), AllowOverwrite),
-                Overwrite::Deny => AtomicFile::new(self.path(), DisallowOverwrite),
+            let path = self.path().clone();
+            let buf_owned = buf.to_vec();
+            let overwrite = opts.overwrite;
+            let spawn_result = tokio::task::spawn_blocking(move || {
+                let af = match overwrite {
+                    Overwrite::Allow => AtomicFile::new(&path, AllowOverwrite),
+                    Overwrite::Deny => AtomicFile::new(&path, DisallowOverwrite),
+                };
+                af.write(|f| f.write_all(&buf_owned))
+                    .map_err(std::io::Error::from)
+            })
+            .await;
+            let io_err: Result<(), std::io::Error> = match spawn_result {
+                Ok(result) => result,
+                Err(join_err) => Err(std::io::Error::new(std::io::ErrorKind::Other, join_err)),
             };
-            let io_err: Result<(), std::io::Error> =
-                af.write(|f| f.write_all(buf)).map_err(|e| e.into());
             io_err.map_err(|e| {
                 if e.kind() == std::io::ErrorKind::AlreadyExists {
                     FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
@@ -211,6 +221,17 @@ impl File {
             }
             .map_err(|e| File::map_io_err_for_create(e, self, opts.overwrite))?;
             file.write_all(buf).await.map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: self.clone(),
+                    trace: trace!(),
+                })
+            })?;
+            // flush() ensures the kernel-side write completes before returning;
+            // tokio::fs::File::write_all() returns as soon as data is queued to
+            // a blocking thread, so without this the caller may read an empty
+            // file if the blocking write hasn't finished yet.
+            file.flush().await.map_err(|e| {
                 FileSysErr::WriteFileErr(WriteFileErr {
                     source: Box::new(e),
                     file: self.clone(),
