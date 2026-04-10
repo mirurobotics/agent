@@ -469,6 +469,31 @@ mod tests {
     mod successful_transitions {
         use super::*;
 
+
+        // -- helpers
+
+        fn with_attempts(deployments: Vec<Deployment>, attempts: u32) -> Vec<Deployment> {
+            deployments
+                .into_iter()
+                .map(|mut d| {
+                    d.attempts = attempts;
+                    d
+                })
+                .collect()
+        }
+
+        fn with_cooldown(deployments: Vec<Deployment>, cooldown: TimeDelta) -> Vec<Deployment> {
+            deployments
+                .into_iter()
+                .map(|mut d| {
+                    d.set_cooldown(cooldown);
+                    d
+                })
+                .collect()
+        }
+
+        // --- deploy transition ---
+
         fn validate_deploy_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
             let before = Utc::now();
             let actual = deploy(deployment.clone());
@@ -541,6 +566,55 @@ mod tests {
                 validate_deploy_transition(deployment, DplErrStatus::Failed);
             }
         }
+
+        #[test]
+        fn deploy_preserves_attempts_when_not_recovering() {
+            for deployment in with_attempts(with_error_status(DplErrStatus::None), 5) {
+                validate_deploy_transition(deployment, DplErrStatus::None);
+            }
+            for deployment in with_attempts(with_error_status(DplErrStatus::Failed), 5) {
+                validate_deploy_transition(deployment, DplErrStatus::Failed);
+            }
+        }
+
+        #[test]
+        fn deploy_resets_attempts_on_recovery() {
+            for deployment in with_attempts(with_error_status(DplErrStatus::Retrying), 5) {
+                match deployment.target_status {
+                    DplTarget::Deployed => {
+                        validate_deploy_transition(deployment, DplErrStatus::None)
+                    }
+                    _ => validate_deploy_transition(deployment, DplErrStatus::Retrying),
+                }
+            }
+        }
+
+        #[test]
+        fn deploy_clears_cooldown_on_recovery() {
+            let deployments = with_cooldown(
+                with_attempts(with_error_status(DplErrStatus::Retrying), 3),
+                TimeDelta::minutes(5),
+            );
+            for deployment in deployments {
+                match deployment.target_status {
+                    DplTarget::Deployed => {
+                        validate_deploy_transition(deployment, DplErrStatus::None)
+                    }
+                    _ => validate_deploy_transition(deployment, DplErrStatus::Retrying),
+                }
+            }
+        }
+
+        #[test]
+        fn deploy_preserves_pre_existing_archived_at() {
+            let past = Utc::now() - TimeDelta::hours(1);
+            for mut deployment in with_error_status(DplErrStatus::None) {
+                deployment.archived_at = Some(past);
+                validate_deploy_transition(deployment, DplErrStatus::None);
+            }
+        }
+
+        // --- remove transition ---
 
         fn validate_remove_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
             let before = Utc::now();
@@ -617,66 +691,6 @@ mod tests {
             }
         }
 
-        // --- non-zero attempts: verify attempts are preserved/reset correctly ---
-
-        fn with_attempts(deployments: Vec<Deployment>, attempts: u32) -> Vec<Deployment> {
-            deployments
-                .into_iter()
-                .map(|mut d| {
-                    d.attempts = attempts;
-                    d
-                })
-                .collect()
-        }
-
-        fn with_cooldown(deployments: Vec<Deployment>, cooldown: TimeDelta) -> Vec<Deployment> {
-            deployments
-                .into_iter()
-                .map(|mut d| {
-                    d.set_cooldown(cooldown);
-                    d
-                })
-                .collect()
-        }
-
-        #[test]
-        fn deploy_preserves_attempts_when_not_recovering() {
-            for deployment in with_attempts(with_error_status(DplErrStatus::None), 5) {
-                validate_deploy_transition(deployment, DplErrStatus::None);
-            }
-            for deployment in with_attempts(with_error_status(DplErrStatus::Failed), 5) {
-                validate_deploy_transition(deployment, DplErrStatus::Failed);
-            }
-        }
-
-        #[test]
-        fn deploy_resets_attempts_on_recovery() {
-            for deployment in with_attempts(with_error_status(DplErrStatus::Retrying), 5) {
-                match deployment.target_status {
-                    DplTarget::Deployed => {
-                        validate_deploy_transition(deployment, DplErrStatus::None)
-                    }
-                    _ => validate_deploy_transition(deployment, DplErrStatus::Retrying),
-                }
-            }
-        }
-
-        #[test]
-        fn deploy_clears_cooldown_on_recovery() {
-            let deployments = with_cooldown(
-                with_attempts(with_error_status(DplErrStatus::Retrying), 3),
-                TimeDelta::minutes(5),
-            );
-            for deployment in deployments {
-                match deployment.target_status {
-                    DplTarget::Deployed => {
-                        validate_deploy_transition(deployment, DplErrStatus::None)
-                    }
-                    _ => validate_deploy_transition(deployment, DplErrStatus::Retrying),
-                }
-            }
-        }
-
         #[test]
         fn remove_preserves_attempts_when_not_recovering() {
             for deployment in with_attempts(with_error_status(DplErrStatus::None), 5) {
@@ -716,17 +730,6 @@ mod tests {
                         validate_remove_transition(deployment, DplErrStatus::Retrying)
                     }
                 }
-            }
-        }
-
-        // --- pre-existing opposite timestamps: verify watermarks are independent ---
-
-        #[test]
-        fn deploy_preserves_pre_existing_archived_at() {
-            let past = Utc::now() - TimeDelta::hours(1);
-            for mut deployment in with_error_status(DplErrStatus::None) {
-                deployment.archived_at = Some(past);
-                validate_deploy_transition(deployment, DplErrStatus::None);
             }
         }
 
