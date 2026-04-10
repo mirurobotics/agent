@@ -357,7 +357,12 @@ mod deploy_success {
             "dpl-multi",
             DplTarget::Deployed,
             DplActivity::Queued,
-            vec![ci1.id.clone(), ci2.id.clone(), ci3.id.clone(), ci4.id.clone()],
+            vec![
+                ci1.id.clone(),
+                ci2.id.clone(),
+                ci3.id.clone(),
+                ci4.id.clone(),
+            ],
         );
         f.seed_deployment(&dpl).await;
 

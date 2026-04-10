@@ -300,7 +300,9 @@ pub mod copy_to {
         let file = dir.file("nonexistent");
 
         assert!(matches!(
-            file.copy_to(&file, CopyOptions::default()).await.unwrap_err(),
+            file.copy_to(&file, CopyOptions::default())
+                .await
+                .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -318,7 +320,9 @@ pub mod copy_to {
             .unwrap();
 
         assert!(matches!(
-            src.copy_to(&dest, CopyOptions::default()).await.unwrap_err(),
+            src.copy_to(&dest, CopyOptions::default())
+                .await
+                .unwrap_err(),
             FileSysErr::InvalidFileOverwriteErr { .. }
         ));
         // dest content should be unchanged
@@ -337,7 +341,9 @@ pub mod copy_to {
             .await
             .unwrap();
 
-        src.copy_to(&dest, CopyOptions::OVERWRITE_SYNC).await.unwrap();
+        src.copy_to(&dest, CopyOptions::OVERWRITE_SYNC)
+            .await
+            .unwrap();
         assert_eq!(dest.read_string().await.unwrap(), "new");
         assert_eq!(src.read_string().await.unwrap(), "new");
     }
@@ -349,7 +355,9 @@ pub mod copy_to {
         let dest = dir.file("dest");
 
         assert!(matches!(
-            src.copy_to(&dest, CopyOptions::OVERWRITE_SYNC).await.unwrap_err(),
+            src.copy_to(&dest, CopyOptions::OVERWRITE_SYNC)
+                .await
+                .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }

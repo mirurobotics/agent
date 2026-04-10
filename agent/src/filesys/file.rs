@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 // internal crates
-use crate::filesys::{dir::Dir, errors::*, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions};
+use crate::filesys::{
+    dir::Dir, errors::*, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
+};
 use crate::trace;
 
 // external crates

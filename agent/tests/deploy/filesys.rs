@@ -411,7 +411,10 @@ pub mod deploy_func {
 
         // EACCES on atomic write surfaces as AtomicWriteFileErr.
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            matches!(
+                &result,
+                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
+            ),
             "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
         );
         assert!(
@@ -466,7 +469,10 @@ pub mod deploy_func {
 
         // EACCES on atomic write surfaces as AtomicWriteFileErr.
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            matches!(
+                &result,
+                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
+            ),
             "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
         );
 
@@ -723,7 +729,10 @@ pub mod deploy_func {
 
         // EACCES on atomic write surfaces as AtomicWriteFileErr.
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            matches!(
+                &result,
+                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
+            ),
             "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
         );
 
@@ -794,7 +803,10 @@ pub mod deploy_func {
 
         // EACCES on atomic write surfaces as AtomicWriteFileErr.
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            matches!(
+                &result,
+                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
+            ),
             "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
         );
 
@@ -854,7 +866,10 @@ pub mod deploy_func {
 
         // EACCES on copy_to (snapshot backup) surfaces as CopyFileErr.
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::CopyFileErr(_)))),
+            matches!(
+                &result,
+                Err(DeployErr::FileSysErr(FileSysErr::CopyFileErr(_)))
+            ),
             "expected FileSysErr(CopyFileErr), got {result:?}",
         );
 

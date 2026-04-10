@@ -144,7 +144,8 @@ async fn snapshot(dst: &filesys::File) -> Result<Snapshot, FileSysErr> {
     }
 
     let backup = backup_location(dst)?;
-    dst.copy_to(&backup, filesys::CopyOptions::OVERWRITE_SYNC).await?;
+    dst.copy_to(&backup, filesys::CopyOptions::OVERWRITE_SYNC)
+        .await?;
 
     Ok(Snapshot::Existed {
         dst: dst.clone(),
