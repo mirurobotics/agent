@@ -7,6 +7,7 @@ use crate::errors::Error;
 use crate::server::{errors::*, state::State};
 use crate::services::{
     deployment as dpl_svc, device as dvc_svc, git_commit as git_cmt_svc, release as rls_svc,
+    HttpBackend,
 };
 use crate::version;
 use device_api::models as device_server;
@@ -75,7 +76,8 @@ pub async fn get_deployment(
 ) -> impl IntoResponse {
     handle(
         async {
-            let dpl = dpl_svc::get(&state.storage.deployments, deployment_id).await?;
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let dpl = dpl_svc::get(&state.storage.deployments, &backend, deployment_id).await?;
             Ok::<_, ServerErr>(device_server::Deployment::from(&dpl))
         },
         "Error getting deployment",
@@ -101,7 +103,8 @@ pub async fn get_release(
 ) -> impl IntoResponse {
     handle(
         async {
-            let release = rls_svc::get(&state.storage.releases, release_id).await?;
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let release = rls_svc::get(&state.storage.releases, &backend, release_id).await?;
             Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting release",
@@ -128,7 +131,8 @@ pub async fn get_git_commit(
 ) -> impl IntoResponse {
     handle(
         async {
-            let gc = git_cmt_svc::get(&state.storage.git_commits, git_commit_id).await?;
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let gc = git_cmt_svc::get(&state.storage.git_commits, &backend, git_commit_id).await?;
             Ok::<_, ServerErr>(device_server::GitCommit::from(&gc))
         },
         "Error getting git commit",

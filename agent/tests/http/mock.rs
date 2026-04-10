@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::{
     Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError, ErrorResponse,
-    TokenResponse,
+    GitCommit as BackendGitCommit, Release as BackendRelease, TokenResponse,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};
 
@@ -27,6 +27,8 @@ pub enum Call {
     GetDeployment,
     UpdateDeployment,
     GetConfigInstanceContent,
+    GetRelease,
+    GetGitCommit,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -46,6 +48,8 @@ pub struct CapturedRequest {
 
 type ListDeploymentsFn = Mutex<Box<dyn Fn() -> Result<DeploymentList, HTTPErr> + Send + Sync>>;
 type SingleDeploymentFn = Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync>>;
+type SingleReleaseFn = Mutex<Box<dyn Fn() -> Result<BackendRelease, HTTPErr> + Send + Sync>>;
+type SingleGitCommitFn = Mutex<Box<dyn Fn() -> Result<BackendGitCommit, HTTPErr> + Send + Sync>>;
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
@@ -56,6 +60,8 @@ pub struct MockClient {
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
     pub update_deployment_fn: SingleDeploymentFn,
+    pub get_release_fn: SingleReleaseFn,
+    pub get_git_commit_fn: SingleGitCommitFn,
     pub get_cfg_inst_content_fn: GetCfgInstContentFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
@@ -69,6 +75,8 @@ impl Default for MockClient {
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
             get_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             update_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
+            get_release_fn: Mutex::new(Box::new(|| Ok(BackendRelease::default()))),
+            get_git_commit_fn: Mutex::new(Box::new(|| Ok(BackendGitCommit::default()))),
             get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
@@ -116,6 +124,20 @@ impl MockClient {
         F: Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync + 'static,
     {
         *self.update_deployment_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_get_release<F>(&self, f: F)
+    where
+        F: Fn() -> Result<BackendRelease, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_release_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_get_git_commit<F>(&self, f: F)
+    where
+        F: Fn() -> Result<BackendGitCommit, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_git_commit_fn.lock().unwrap() = Box::new(f);
     }
 
     pub fn set_get_config_instance_content<F>(&self, f: F)
@@ -170,6 +192,8 @@ impl MockClient {
             (m, p) if *m == Method::PATCH && p.starts_with("/deployments/") => {
                 Call::UpdateDeployment
             }
+            (m, p) if *m == Method::GET && p.starts_with("/releases/") => Call::GetRelease,
+            (m, p) if *m == Method::GET && p.starts_with("/git_commits/") => Call::GetGitCommit,
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
     }
@@ -185,6 +209,8 @@ impl MockClient {
             }
             Call::GetDeployment => json(&(self.get_deployment_fn.lock().unwrap())()?),
             Call::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
+            Call::GetRelease => json(&(self.get_release_fn.lock().unwrap())()?),
+            Call::GetGitCommit => json(&(self.get_git_commit_fn.lock().unwrap())()?),
             Call::GetConfigInstanceContent => {
                 // Extract ID from /config_instances/{id}/content
                 let id = path
