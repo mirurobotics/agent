@@ -4,7 +4,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
-use miru_agent::filesys::{self, file, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{
+    self, file, Atomic, CopyOptions, FileSysErr, Overwrite, PathExt, WriteOptions,
+};
 
 // external crates
 use secrecy::ExposeSecret;
@@ -271,7 +273,7 @@ pub mod copy_to {
             .unwrap();
         let dest = dir.file("dest-file");
 
-        src.copy_to(&dest, Overwrite::Deny).await.unwrap();
+        src.copy_to(&dest, CopyOptions::default()).await.unwrap();
 
         assert!(src.exists(), "source should still exist after copy");
         assert!(dest.exists(), "destination should exist after copy");
@@ -287,7 +289,7 @@ pub mod copy_to {
             .await
             .unwrap();
 
-        file.copy_to(&file, Overwrite::Deny).await.unwrap();
+        file.copy_to(&file, CopyOptions::default()).await.unwrap();
         assert!(file.exists());
         assert_eq!(file.read_string().await.unwrap(), "content");
     }
@@ -298,7 +300,7 @@ pub mod copy_to {
         let file = dir.file("nonexistent");
 
         assert!(matches!(
-            file.copy_to(&file, Overwrite::Deny).await.unwrap_err(),
+            file.copy_to(&file, CopyOptions::default()).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -316,7 +318,7 @@ pub mod copy_to {
             .unwrap();
 
         assert!(matches!(
-            src.copy_to(&dest, Overwrite::Deny).await.unwrap_err(),
+            src.copy_to(&dest, CopyOptions::default()).await.unwrap_err(),
             FileSysErr::InvalidFileOverwriteErr { .. }
         ));
         // dest content should be unchanged
@@ -335,7 +337,7 @@ pub mod copy_to {
             .await
             .unwrap();
 
-        src.copy_to(&dest, Overwrite::Allow).await.unwrap();
+        src.copy_to(&dest, CopyOptions::OVERWRITE_SYNC).await.unwrap();
         assert_eq!(dest.read_string().await.unwrap(), "new");
         assert_eq!(src.read_string().await.unwrap(), "new");
     }
@@ -347,7 +349,7 @@ pub mod copy_to {
         let dest = dir.file("dest");
 
         assert!(matches!(
-            src.copy_to(&dest, Overwrite::Allow).await.unwrap_err(),
+            src.copy_to(&dest, CopyOptions::OVERWRITE_SYNC).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -363,7 +365,7 @@ pub mod copy_to {
         let dest = dest_dir.file("dest-file");
 
         assert!(!dest_dir.exists());
-        src.copy_to(&dest, Overwrite::Deny).await.unwrap();
+        src.copy_to(&dest, CopyOptions::default()).await.unwrap();
         assert!(dest.exists());
         assert_eq!(dest.read_string().await.unwrap(), "nested");
     }

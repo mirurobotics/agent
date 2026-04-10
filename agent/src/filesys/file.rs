@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 // internal crates
-use crate::filesys::{dir::Dir, errors::*, path::PathExt, Atomic, Overwrite, WriteOptions};
+use crate::filesys::{dir::Dir, errors::*, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -248,8 +248,8 @@ impl File {
         }
     }
 
-    /// Copy this file to a new file. 
-    pub async fn copy_to(&self, dst: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
+    /// Copy this file to a new file.
+    pub async fn copy_to(&self, dst: &File, opts: CopyOptions) -> Result<(), FileSysErr> {
         if self.path() == dst.path() {
             self.assert_exists()?;
             return Ok(());
@@ -258,11 +258,11 @@ impl File {
         // TOCTOU note: tokio::fs::copy has no O_EXCL equivalent, so this
         // pre-check is the best we can do for Overwrite::Deny. The race
         // window is unavoidable.
-        if overwrite == Overwrite::Deny && dst.exists() {
+        if opts.overwrite == Overwrite::Deny && dst.exists() {
             return Err(FileSysErr::InvalidFileOverwriteErr(
                 InvalidFileOverwriteErr {
                     file: dst.clone(),
-                    overwrite,
+                    overwrite: opts.overwrite,
                     trace: trace!(),
                 },
             ));
@@ -288,6 +288,20 @@ impl File {
                     })
                 }
             })?;
+
+        if opts.sync == crate::filesys::Sync::Yes {
+            let file = TokioFile::open(dst.path())
+                .await
+                .map_err(|e| File::map_io_err_for_open(e, dst))?;
+            file.sync_data().await.map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: dst.clone(),
+                    trace: trace!(),
+                })
+            })?;
+        }
+
         Ok(())
     }
 
