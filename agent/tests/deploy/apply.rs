@@ -1,6 +1,3 @@
-// standard crates
-use std::path::PathBuf;
-
 // internal crates
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
@@ -293,7 +290,7 @@ mod find_target_deployed {
             }
         );
 
-        let file = filesys::File::new(PathBuf::from(&ci.filepath));
+        let file = filesys::File::new(&ci.filepath);
         assert!(
             file.exists(),
             "healthy deployment file should exist on disk"
@@ -337,7 +334,7 @@ mod deploy_success {
         );
 
         // verify file on disk
-        let file = filesys::File::new(PathBuf::from(&ci.filepath));
+        let file = filesys::File::new(&ci.filepath);
         assert!(file.exists(), "deployed file should exist on disk");
         let content = file.read_string().await.unwrap();
         assert_eq!(content, r#"{"speed": 4}"#);
@@ -379,21 +376,21 @@ mod deploy_success {
         );
 
         assert_eq!(
-            filesys::File::new(PathBuf::from(&ci1.filepath))
+            filesys::File::new(&ci1.filepath)
                 .read_string()
                 .await
                 .unwrap(),
             "content-a"
         );
         assert_eq!(
-            filesys::File::new(PathBuf::from(&ci2.filepath))
+            filesys::File::new(&ci2.filepath)
                 .read_string()
                 .await
                 .unwrap(),
             "content-b"
         );
         assert_eq!(
-            filesys::File::new(PathBuf::from(&ci3.filepath))
+            filesys::File::new(&ci3.filepath)
                 .read_string()
                 .await
                 .unwrap(),

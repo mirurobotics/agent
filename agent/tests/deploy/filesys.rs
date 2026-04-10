@@ -1,6 +1,6 @@
 // standard crates
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // internal crates
 use miru_agent::deploy::filesys::{deploy, remove};
@@ -122,7 +122,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(PathBuf::from(&filepath))
+        let actual = filesys::File::new(&filepath)
             .read_string()
             .await
             .unwrap();
@@ -141,7 +141,7 @@ pub mod deploy_func {
         f.seed_cfg_inst(&cfg_inst, new_content.clone()).await;
 
         // pre-populate the file with old content
-        let file = filesys::File::new(PathBuf::from(&filepath));
+        let file = filesys::File::new(&filepath);
         file.write_json(&json!({"old": true}), WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -149,7 +149,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(PathBuf::from(&filepath))
+        let actual = filesys::File::new(&filepath)
             .read_string()
             .await
             .unwrap();
@@ -177,7 +177,7 @@ pub mod deploy_func {
         f.deploy(&deployment).await.unwrap();
 
         for (i, cfg_inst) in cfg_insts.iter().enumerate() {
-            let actual = filesys::File::new(PathBuf::from(&cfg_inst.filepath))
+            let actual = filesys::File::new(&cfg_inst.filepath)
                 .read_string()
                 .await
                 .unwrap();
@@ -267,7 +267,7 @@ pub mod deploy_func {
 
         // pre-populate an existing file at an absolute path under temp_dir
         let existing_path = abs_path(&f, "test/existing");
-        let existing_file = filesys::File::new(PathBuf::from(&existing_path));
+        let existing_file = filesys::File::new(&existing_path);
         let existing_content = json!({"existing": true});
         existing_file
             .write_json(&existing_content, WriteOptions::OVERWRITE_ATOMIC)
@@ -302,7 +302,7 @@ pub mod deploy_func {
         // good_cfg's file should not exist because content lookup fails before
         // any writes are attempted
         assert!(
-            !filesys::File::new(PathBuf::from(&good_cfg.filepath)).exists(),
+            !filesys::File::new(&good_cfg.filepath).exists(),
             "no files should be written when content lookup fails",
         );
 
@@ -331,7 +331,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(PathBuf::from(&filepath))
+        let actual = filesys::File::new(&filepath)
             .read_string()
             .await
             .unwrap();
@@ -355,7 +355,7 @@ pub mod deploy_func {
         f.deploy(&deployment).await.unwrap();
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(PathBuf::from(&filepath))
+        let actual = filesys::File::new(&filepath)
             .read_string()
             .await
             .unwrap();
@@ -376,7 +376,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(PathBuf::from(&filepath))
+        let actual = filesys::File::new(&filepath)
             .read_string()
             .await
             .unwrap();
@@ -399,7 +399,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(PathBuf::from(&filepath))
+        let actual = filesys::File::new(&filepath)
             .read_string()
             .await
             .unwrap();
@@ -441,7 +441,7 @@ pub mod deploy_func {
             other => panic!("expected FileSysErr(PermissionDeniedErr), got {other:?}"),
         }
         assert!(
-            !filesys::File::new(PathBuf::from(&filepath)).exists(),
+            !filesys::File::new(&filepath).exists(),
             "file should not exist in locked dir"
         );
     }
@@ -453,11 +453,11 @@ pub mod deploy_func {
         // pre-seed two files with old content via filesys::File::write_string
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
         let b_path = f.temp_dir.path().join("b.json").display().to_string();
-        filesys::File::new(PathBuf::from(&a_path))
+        filesys::File::new(&a_path)
             .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
-        filesys::File::new(PathBuf::from(&b_path))
+        filesys::File::new(&b_path)
             .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -505,12 +505,12 @@ pub mod deploy_func {
         }
 
         // a and b should be rolled back to old content
-        let a_actual = filesys::File::new(PathBuf::from(&a_path))
+        let a_actual = filesys::File::new(&a_path)
             .read_string()
             .await
             .unwrap();
         assert_eq!(a_actual, "old_a");
-        let b_actual = filesys::File::new(PathBuf::from(&b_path))
+        let b_actual = filesys::File::new(&b_path)
             .read_string()
             .await
             .unwrap();
@@ -518,7 +518,7 @@ pub mod deploy_func {
 
         // c should not exist
         assert!(
-            !filesys::File::new(PathBuf::from(&c_path)).exists(),
+            !filesys::File::new(&c_path).exists(),
             "c.json should not exist in locked dir"
         );
     }
@@ -548,7 +548,7 @@ pub mod deploy_func {
         }
 
         assert!(
-            !filesys::File::new(PathBuf::from("relative/config.json")).exists(),
+            !filesys::File::new(Path::new("relative").join("config.json")).exists(),
             "relative path file should not exist",
         );
     }
@@ -612,7 +612,7 @@ pub mod deploy_func {
 
         // The pre-pass must reject the deployment BEFORE any write happens.
         assert!(
-            !filesys::File::new(PathBuf::from(&good_path)).exists(),
+            !filesys::File::new(&good_path).exists(),
             "good.json should not exist — validate_cfg_insts must reject the deployment before any writes"
         );
         assert!(
@@ -663,12 +663,12 @@ pub mod deploy_func {
         let deployment = f.new_deployment(&[a_cfg, b_cfg]);
         f.deploy(&deployment).await.unwrap();
 
-        let a_actual = filesys::File::new(PathBuf::from(&a_path))
+        let a_actual = filesys::File::new(&a_path)
             .read_string()
             .await
             .unwrap();
         assert_eq!(a_actual, "new_a");
-        let b_actual = filesys::File::new(PathBuf::from(&b_path))
+        let b_actual = filesys::File::new(&b_path)
             .read_string()
             .await
             .unwrap();
@@ -783,16 +783,16 @@ pub mod deploy_func {
 
         // first two destinations were created then rolled back via delete
         assert!(
-            !filesys::File::new(PathBuf::from(&a_path)).exists(),
+            !filesys::File::new(&a_path).exists(),
             "a.json should have been removed by DidNotExist rollback"
         );
         assert!(
-            !filesys::File::new(PathBuf::from(&b_path)).exists(),
+            !filesys::File::new(&b_path).exists(),
             "b.json should have been removed by DidNotExist rollback"
         );
         // third destination never existed
         assert!(
-            !filesys::File::new(PathBuf::from(&c_path)).exists(),
+            !filesys::File::new(&c_path).exists(),
             "c.json should not exist in locked dir"
         );
 
@@ -810,7 +810,7 @@ pub mod deploy_func {
 
         // Existed: pre-populate a.json with "old_a"
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        filesys::File::new(PathBuf::from(&a_path))
+        filesys::File::new(&a_path)
             .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -861,7 +861,7 @@ pub mod deploy_func {
         }
 
         // Existed snapshot was restored via rename-back
-        let a_actual = filesys::File::new(PathBuf::from(&a_path))
+        let a_actual = filesys::File::new(&a_path)
             .read_string()
             .await
             .unwrap();
@@ -869,13 +869,13 @@ pub mod deploy_func {
 
         // DidNotExist snapshot was rolled back via delete
         assert!(
-            !filesys::File::new(PathBuf::from(&b_path)).exists(),
+            !filesys::File::new(&b_path).exists(),
             "b.json should have been removed by DidNotExist rollback"
         );
 
         // failing destination never existed
         assert!(
-            !filesys::File::new(PathBuf::from(&c_path)).exists(),
+            !filesys::File::new(&c_path).exists(),
             "c.json should not exist in locked dir"
         );
 
@@ -896,7 +896,7 @@ pub mod deploy_func {
         let locked_dir = f.temp_dir.path().join("locked");
         std::fs::create_dir_all(&locked_dir).unwrap();
         let c_path = locked_dir.join("c.json").display().to_string();
-        filesys::File::new(PathBuf::from(&c_path))
+        filesys::File::new(&c_path)
             .write_string("old", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -933,7 +933,7 @@ pub mod deploy_func {
         }
 
         // c.json content must be unchanged
-        let c_actual = filesys::File::new(PathBuf::from(&c_path))
+        let c_actual = filesys::File::new(&c_path)
             .read_string()
             .await
             .unwrap();
