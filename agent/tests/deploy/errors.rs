@@ -32,12 +32,14 @@ fn storage_err() -> StorageErr {
 fn empty_config_instances_err() -> EmptyConfigInstancesErr {
     EmptyConfigInstancesErr {
         deployment_id: "dpl_1".to_string(),
+        trace: miru_agent::trace!(),
     }
 }
 
 fn conflicting_deployments_err() -> ConflictingDeploymentsErr {
     ConflictingDeploymentsErr {
         ids: vec!["dpl_1".to_string(), "dpl_2".to_string()],
+        trace: miru_agent::trace!(),
     }
 }
 
@@ -45,6 +47,7 @@ fn invalid_deployment_target_err() -> InvalidDeploymentTargetErr {
     InvalidDeploymentTargetErr {
         deployment_id: "dpl_1".to_string(),
         target_status: DplTarget::Archived,
+        trace: miru_agent::trace!(),
     }
 }
 
@@ -105,6 +108,7 @@ mod from_conversions {
     fn generic_err_maps_to_deploy_generic_err() {
         let err: DeployErr = GenericErr {
             msg: "something went wrong".to_string(),
+            trace: miru_agent::trace!(),
         }
         .into();
         assert!(matches!(err, DeployErr::GenericErr(_)));

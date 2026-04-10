@@ -9,6 +9,7 @@ use crate::storage::StorageErr;
 #[error("deployment '{deployment_id}' has no config instances")]
 pub struct EmptyConfigInstancesErr {
     pub deployment_id: String,
+    pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for EmptyConfigInstancesErr {}
@@ -30,6 +31,7 @@ impl crate::errors::Error for PathNotAllowedErr {}
 pub struct InvalidDeploymentTargetErr {
     pub deployment_id: String,
     pub target_status: models::DplTarget,
+    pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for InvalidDeploymentTargetErr {}
@@ -38,6 +40,7 @@ impl crate::errors::Error for InvalidDeploymentTargetErr {}
 #[error("found {} deployments targeting deployed status (expected at most 1): [{}]", ids.len(), ids.join(", "))]
 pub struct ConflictingDeploymentsErr {
     pub ids: Vec<String>,
+    pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ConflictingDeploymentsErr {}
@@ -46,14 +49,27 @@ impl crate::errors::Error for ConflictingDeploymentsErr {}
 #[error("internal server error: {msg}")]
 pub struct GenericErr {
     pub msg: String,
+    pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for GenericErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("duplicate filepath '{filepath}'")]
+pub struct DuplicateFilepathErr {
+    pub filepath: String,
+    pub cfg_inst_ids: Vec<String>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for DuplicateFilepathErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum DeployErr {
     #[error(transparent)]
     ConflictingDeployments(ConflictingDeploymentsErr),
+    #[error(transparent)]
+    DuplicateFilepath(DuplicateFilepathErr),
     #[error(transparent)]
     EmptyConfigInstances(EmptyConfigInstancesErr),
     #[error(transparent)]
@@ -120,6 +136,7 @@ impl From<GenericErr> for DeployErr {
 
 crate::impl_error!(DeployErr {
     ConflictingDeployments,
+    DuplicateFilepath,
     EmptyConfigInstances,
     InvalidDeploymentTarget,
     CacheErr,

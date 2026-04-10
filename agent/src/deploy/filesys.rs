@@ -1,4 +1,5 @@
 // standard crates
+use std::collections::HashMap;
 use std::path::Component;
 
 // internal crates
@@ -10,6 +11,8 @@ use crate::trace;
 
 // external crates
 use tracing::{error, info, warn};
+
+pub const BACKUP_FILE_PREFIX: &str = "miru.backup";
 
 /// Reads the deployment's config instances and writes them to their filesystem
 /// destinations using a snapshot+atomic-rename loop with rollback on partial failure.
@@ -30,6 +33,7 @@ fn validate_has_cfg_insts(deployment: &models::Deployment) -> Result<(), DeployE
     if deployment.config_instance_ids.is_empty() {
         return Err(EmptyConfigInstancesErr {
             deployment_id: deployment.id.clone(),
+            trace: trace!(),
         }
         .into());
     }
@@ -41,6 +45,7 @@ fn validate_deploy_target(deployment: &models::Deployment) -> Result<(), DeployE
         return Err(InvalidDeploymentTargetErr {
             deployment_id: deployment.id.clone(),
             target_status: deployment.target_status,
+            trace: trace!(),
         }
         .into());
     }
@@ -60,8 +65,19 @@ async fn read_cfg_insts(
 }
 
 fn validate_cfg_insts(cfg_insts: &[models::ConfigInstance]) -> Result<(), DeployErr> {
+    let mut seen: HashMap<String, String> = HashMap::new();
+
     for cfg_inst in cfg_insts {
         validate_filepath(&filesys::File::new(&cfg_inst.filepath))?;
+
+        if let Some(first_cfg_inst_id) = seen.insert(cfg_inst.filepath.clone(), cfg_inst.id.clone())
+        {
+            return Err(DeployErr::DuplicateFilepath(DuplicateFilepathErr {
+                filepath: cfg_inst.filepath.clone(),
+                cfg_inst_ids: vec![first_cfg_inst_id, cfg_inst.id.clone()],
+                trace: trace!(),
+            }));
+        }
     }
     Ok(())
 }
@@ -122,7 +138,7 @@ async fn write_cfg_insts_impl(
             .await?;
     }
 
-    cleanup_backups(snapshots).await;
+    remove_backups(snapshots).await;
     Ok(())
 }
 
@@ -156,7 +172,7 @@ async fn snapshot(dst: &filesys::File) -> Result<Snapshot, FileSysErr> {
 fn backup_location(dst: &filesys::File) -> Result<filesys::File, FileSysErr> {
     let parent = dst.parent()?;
     let name = dst.name()?;
-    let sibling_name = format!("miru.backup.{}", name);
+    let sibling_name = format!("{BACKUP_FILE_PREFIX}.{name}");
     Ok(parent.file(&sibling_name))
 }
 
@@ -175,10 +191,10 @@ async fn rollback_snapshot(snapshot: &Snapshot) -> Result<(), FileSysErr> {
     }
 }
 
-/// Best-effort housekeeping that removes the backup file from each
-/// `Existed` snapshot on the success path. `NotFound` is ignored; other
-/// failures are logged at `warn!` level. Never returns an error.
-async fn cleanup_backups(snapshots: &[Snapshot]) {
+/// Best-effort housekeeping that removes the backup file from each `Existed` snapshot
+/// on the success path. `NotFound` is ignored; other failures are logged at `warn!`
+/// level. Never returns an error.
+async fn remove_backups(snapshots: &[Snapshot]) {
     for snapshot in snapshots {
         if let Snapshot::Existed { backup, .. } = snapshot {
             if let Err(e) = backup.delete().await {
@@ -332,6 +348,57 @@ mod tests {
         assert!(
             !existed_parent.join("dst.json").exists(),
             "Existed dst was never populated; rename-back failed so it should still be absent"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remove_backups_continues_when_delete_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Writable dir: backup can be deleted
+        let writable_dir = tmp.path().join("writable");
+        std::fs::create_dir_all(&writable_dir).unwrap();
+        std::fs::write(writable_dir.join("dst.json"), "content").unwrap();
+        std::fs::write(writable_dir.join("miru.backup.dst.json"), "backup").unwrap();
+
+        // Locked dir: backup cannot be deleted (EACCES)
+        let locked_dir = tmp.path().join("locked");
+        std::fs::create_dir_all(&locked_dir).unwrap();
+        std::fs::write(locked_dir.join("dst.json"), "content").unwrap();
+        std::fs::write(locked_dir.join("miru.backup.dst.json"), "backup").unwrap();
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Vec order matters: remove_backups iterates forward, so index 0
+        // (locked) is processed first and fails, index 1 (writable) is
+        // processed second. If remove_backups bailed on the first error,
+        // the writable backup would still be on disk.
+        let snapshots = vec![
+            Snapshot::Existed {
+                dst: filesys::File::new(locked_dir.join("dst.json")),
+                backup: filesys::File::new(locked_dir.join("miru.backup.dst.json")),
+            },
+            Snapshot::Existed {
+                dst: filesys::File::new(writable_dir.join("dst.json")),
+                backup: filesys::File::new(writable_dir.join("miru.backup.dst.json")),
+            },
+        ];
+
+        remove_backups(&snapshots).await;
+
+        // Restore permissions BEFORE assertions so tempdir Drop can recurse
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Writable backup was successfully deleted
+        assert!(
+            !writable_dir.join("miru.backup.dst.json").exists(),
+            "writable backup should have been deleted"
+        );
+
+        // Locked backup still exists — delete failed, error was logged at warn!
+        assert!(
+            locked_dir.join("miru.backup.dst.json").exists(),
+            "locked backup should still exist since delete was blocked by permissions"
         );
     }
 }

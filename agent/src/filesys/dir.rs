@@ -5,10 +5,9 @@ use std::path::PathBuf;
 // internal crates
 use crate::filesys::{
     errors::{
-        CreateDirErr, CreateTmpDirErr, DeleteDirErr, DirMetadataErr, FileSysErr,
-        InvalidDirNameErr, MoveDirErr, MoveDirRollbackErr, PathDoesNotExistErr, ReadDirErr,
-        SetDirPermissionsErr, UnknownCurrentDirErr, UnknownDirNameErr, UnknownHomeDirErr,
-        UnknownParentDirForDirErr,
+        CreateDirErr, CreateTmpDirErr, DeleteDirErr, DirMetadataErr, FileSysErr, InvalidDirNameErr,
+        MoveDirErr, MoveDirRollbackErr, PathDoesNotExistErr, ReadDirErr, SetDirPermissionsErr,
+        UnknownCurrentDirErr, UnknownDirNameErr, UnknownHomeDirErr, UnknownParentDirForDirErr,
     },
     file::File,
     path::PathExt,

@@ -1,10 +1,8 @@
 // standard crates
+use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
 // internal crates
-#[allow(unused_imports)]
-use std::os::unix::fs::PermissionsExt;
-
 use miru_agent::filesys::{self, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 // external crates

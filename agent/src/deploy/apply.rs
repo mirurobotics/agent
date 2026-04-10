@@ -3,6 +3,7 @@ use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
 use crate::filesys;
 use crate::models;
 use crate::storage;
+use crate::trace;
 
 // external crates
 use chrono::Utc;
@@ -97,11 +98,13 @@ async fn read_deployments(storage: &storage::Deployments) -> Result<Categorized,
                 if let Some(id) = &tgt_dpl_id {
                     return Err(ConflictingDeploymentsErr {
                         ids: vec![dpl.id.clone(), id.clone()],
+                        trace: trace!(),
                     }
                     .into());
                 } else {
                     return Err(GenericErr {
                         msg: "found unexpected deployment desiring to be deployed which did not match initial target deployment criteria".to_string(),
+                        trace: trace!(),
                     }.into());
                 }
             }
@@ -128,6 +131,7 @@ async fn find_target_deployed(
     if target_deployed.len() > 1 {
         return Err(ConflictingDeploymentsErr {
             ids: target_deployed.iter().map(|d| d.id.clone()).collect(),
+            trace: trace!(),
         }
         .into());
     }

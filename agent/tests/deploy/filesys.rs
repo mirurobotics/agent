@@ -3,9 +3,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 // internal crates
-use miru_agent::deploy::filesys::{deploy, remove};
+use miru_agent::deploy::filesys::{deploy, remove, BACKUP_FILE_PREFIX};
 use miru_agent::deploy::DeployErr;
-use miru_agent::filesys::{self, FileSysErr, Overwrite, WriteOptions};
+use miru_agent::filesys::{self, FileSysErr, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
 use miru_agent::storage;
 
@@ -41,6 +41,10 @@ impl Fixture {
         }
     }
 
+    async fn fixture_path(&self, rel: &str) -> String {
+        self.temp_dir.path().join(rel).display().to_string()
+    }
+
     async fn seed_cfg_inst(&self, cfg_inst: &ConfigInstance, content: String) {
         self.cfg_inst_meta
             .write(
@@ -62,7 +66,7 @@ impl Fixture {
             .unwrap();
     }
 
-    fn new_deployment(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
+    fn new_queued(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
         Deployment {
             target_status: DplTarget::Deployed,
             activity_status: DplActivity::Queued,
@@ -71,7 +75,16 @@ impl Fixture {
         }
     }
 
-    fn new_removal_deployment(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
+    fn new_staged(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
+        Deployment {
+            target_status: DplTarget::Staged,
+            activity_status: DplActivity::Staged,
+            config_instance_ids: cfg_insts.iter().map(|c| c.id.clone()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn new_removing(&self, cfg_insts: &[ConfigInstance]) -> Deployment {
         Deployment {
             target_status: DplTarget::Archived,
             activity_status: DplActivity::Removing,
@@ -100,18 +113,27 @@ impl Fixture {
     }
 }
 
-pub mod deploy_func {
-    use super::*;
-    use miru_agent::filesys::PathExt;
-
-    fn abs_path(f: &Fixture, rel: &str) -> String {
-        f.temp_dir.path().join(rel).display().to_string()
+/// Returns the entries in `dir` whose filename starts with the literal
+/// `miru.backup.` prefix emitted by `backup_location`.
+fn detect_backup_files(dir: &std::path::Path) -> Vec<filesys::File> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(BACKUP_FILE_PREFIX) {
+            out.push(filesys::File::new(entry.path()));
+        }
     }
+    out
+}
+
+pub mod deploy_func_success {
+    use super::*;
 
     #[tokio::test]
     async fn creates_new_file() {
         let f = Fixture::new().await;
-        let filepath = abs_path(&f, "test/filepath.json");
+        let filepath = f.fixture_path("test/filepath.json").await;
         let cfg_inst = ConfigInstance {
             filepath: filepath.clone(),
             ..Default::default()
@@ -119,7 +141,7 @@ pub mod deploy_func {
         let content = "{\"speed\": 4}".to_string();
         f.seed_cfg_inst(&cfg_inst, content.clone()).await;
 
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         let actual = filesys::File::new(&filepath).read_string().await.unwrap();
@@ -129,7 +151,7 @@ pub mod deploy_func {
     #[tokio::test]
     async fn overwrites_existing_file() {
         let f = Fixture::new().await;
-        let filepath = abs_path(&f, "test/filepath");
+        let filepath = f.fixture_path("test/filepath").await;
         let cfg_inst = ConfigInstance {
             filepath: filepath.clone(),
             ..Default::default()
@@ -143,7 +165,7 @@ pub mod deploy_func {
             .await
             .unwrap();
 
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         let actual = filesys::File::new(&filepath).read_string().await.unwrap();
@@ -156,7 +178,7 @@ pub mod deploy_func {
         let mut cfg_insts = Vec::new();
         let mut contents = Vec::new();
         for i in 0..3 {
-            let filepath = abs_path(&f, &format!("test/filepath{i}"));
+            let filepath = f.fixture_path(&format!("test/filepath{i}")).await;
             let cfg_inst = ConfigInstance {
                 filepath,
                 ..Default::default()
@@ -167,7 +189,7 @@ pub mod deploy_func {
             contents.push(content);
         }
 
-        let deployment = f.new_deployment(&cfg_insts);
+        let deployment = f.new_queued(&cfg_insts);
         f.deploy(&deployment).await.unwrap();
 
         for (i, cfg_inst) in cfg_insts.iter().enumerate() {
@@ -180,26 +202,113 @@ pub mod deploy_func {
     }
 
     #[tokio::test]
-    async fn empty_config_instance_ids_returns_error() {
+    async fn backup_files_not_leaked() {
         let f = Fixture::new().await;
-        let deployment = f.new_deployment(&[]);
 
-        let result = f.deploy(&deployment).await;
-        assert!(matches!(result, Err(DeployErr::EmptyConfigInstances(_))));
+        let a_path = f.temp_dir.path().join("a.json").display().to_string();
+        let b_path = f.temp_dir.path().join("b.json").display().to_string();
+        let a_cfg = ConfigInstance {
+            filepath: a_path.clone(),
+            ..Default::default()
+        };
+        let b_cfg = ConfigInstance {
+            filepath: b_path.clone(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
+        f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
+
+        let deployment = f.new_queued(&[a_cfg, b_cfg]);
+        f.deploy(&deployment).await.unwrap();
+
+        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        assert_eq!(a_actual, "new_a");
+        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
+        assert_eq!(b_actual, "new_b");
+
+        let leftover = detect_backup_files(f.temp_dir.path());
+        assert!(
+            leftover.is_empty(),
+            "expected no .miru-backup-* siblings, found {leftover:?}"
+        );
     }
+
+    #[tokio::test]
+    async fn deploy_is_idempotent() {
+        let f = Fixture::new().await;
+        let filepath = f.fixture_path("test/filepath").await;
+        let cfg_inst = ConfigInstance {
+            filepath: filepath.clone(),
+            ..Default::default()
+        };
+        let content = "{\"speed\": 4}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+
+        // deploy twice
+        f.deploy(&deployment).await.unwrap();
+        f.deploy(&deployment).await.unwrap();
+
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        assert_eq!(actual, content);
+    }
+
+    #[tokio::test]
+    async fn nested_filepath() {
+        let f = Fixture::new().await;
+        let filepath = f.fixture_path("deeply/nested/path/config.json").await;
+        let cfg_inst = ConfigInstance {
+            filepath: filepath.clone(),
+            ..Default::default()
+        };
+        let content = "{\"nested\": true}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+        f.deploy(&deployment).await.unwrap();
+
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        assert_eq!(actual, content);
+    }
+
+    #[tokio::test]
+    async fn write_files_creates_parent_directories() {
+        let f = Fixture::new().await;
+        let filepath = f.fixture_path("a/b/c/config.json").await;
+        let cfg_inst = ConfigInstance {
+            filepath: filepath.clone(),
+            ..Default::default()
+        };
+        let content = "{\"nested\": true}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
+
+        // parent directories do not yet exist
+        assert!(!f.temp_dir.path().join("a").exists());
+
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+        f.deploy(&deployment).await.unwrap();
+
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        assert_eq!(actual, content);
+    }
+}
+
+pub mod deploy_func_validation_errs {
+    use super::*;
+    use miru_agent::filesys::PathExt;
 
     #[tokio::test]
     async fn wrong_target_status_returns_error() {
         let f = Fixture::new().await;
         let cfg_inst = ConfigInstance {
-            filepath: abs_path(&f, "test/filepath"),
+            filepath: f.fixture_path("test/filepath").await,
             ..Default::default()
         };
         f.seed_cfg_inst(&cfg_inst, "{\"ok\": true}".to_string())
             .await;
 
-        let mut deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-        deployment.target_status = DplTarget::Staged;
+        let deployment = f.new_staged(std::slice::from_ref(&cfg_inst));
 
         let result = f.deploy(&deployment).await;
         match result {
@@ -212,7 +321,16 @@ pub mod deploy_func {
     }
 
     #[tokio::test]
-    async fn missing_config_instance_metadata_returns_error() {
+    async fn empty_config_instance_ids_returns_error() {
+        let f = Fixture::new().await;
+        let deployment = f.new_queued(&[]);
+
+        let result = f.deploy(&deployment).await;
+        assert!(matches!(result, Err(DeployErr::EmptyConfigInstances(_))));
+    }
+
+    #[tokio::test]
+    async fn missing_config_instance_returns_error() {
         let f = Fixture::new().await;
         // deployment references a config instance ID that doesn't exist in the cache
         let deployment = Deployment {
@@ -221,14 +339,17 @@ pub mod deploy_func {
             ..Default::default()
         };
         let result = f.deploy(&deployment).await;
-        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(DeployErr::CacheErr(_))),
+            "expected CacheErr for missing config instance, got {result:?}"
+        );
     }
 
     #[tokio::test]
     async fn missing_content_returns_error() {
         let f = Fixture::new().await;
         let cfg_inst = ConfigInstance {
-            filepath: abs_path(&f, "test/filepath"),
+            filepath: f.fixture_path("test/filepath").await,
             ..Default::default()
         };
         // seed metadata but not content
@@ -242,151 +363,135 @@ pub mod deploy_func {
             .await
             .unwrap();
 
-        let deployment = f.new_deployment(&[cfg_inst]);
+        let deployment = f.new_queued(&[cfg_inst]);
         let result = f.deploy(&deployment).await;
-        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(DeployErr::CacheErr(_))),
+            "expected CacheErr for missing config content, got {result:?}"
+        );
     }
 
     #[tokio::test]
-    async fn target_dir_unchanged_on_write_failure() {
+    async fn duplicate_cfg_inst_filepaths() {
         let f = Fixture::new().await;
 
-        // seed one valid config instance
-        let good_cfg = ConfigInstance {
-            filepath: abs_path(&f, "test/good"),
+        let filepath = f.temp_dir.path().join("config.json").display().to_string();
+
+        let cfg_inst_1 = ConfigInstance {
+            filepath: filepath.clone(),
             ..Default::default()
         };
-        f.seed_cfg_inst(&good_cfg, "{\"good\": true}".to_string())
-            .await;
-
-        // pre-populate an existing file at an absolute path under temp_dir
-        let existing_path = abs_path(&f, "test/existing");
-        let existing_file = filesys::File::new(&existing_path);
-        let existing_content = json!({"existing": true});
-        existing_file
-            .write_json(&existing_content, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        // create a deployment with a valid and an invalid config instance
-        let bad_cfg = ConfigInstance {
-            filepath: abs_path(&f, "test/bad"),
+        let cfg_inst_2 = ConfigInstance {
+            filepath: filepath.clone(),
             ..Default::default()
         };
-        // seed metadata for bad_cfg but NOT content -- this triggers a content read
-        // failure BEFORE write_all is called, so good_cfg's file must not exist.
-        f.cfg_inst_meta
-            .write(
-                bad_cfg.id.clone(),
-                bad_cfg.clone(),
-                |_, _| false,
-                Overwrite::Allow,
-            )
-            .await
-            .unwrap();
+        f.seed_cfg_inst(&cfg_inst_1, "content_1".to_string()).await;
+        f.seed_cfg_inst(&cfg_inst_2, "content_2".to_string()).await;
 
-        let deployment = Deployment {
-            target_status: DplTarget::Deployed,
-            config_instance_ids: vec![good_cfg.id.clone(), bad_cfg.id.clone()],
-            ..Default::default()
-        };
+        let deployment = f.new_queued(&[cfg_inst_1, cfg_inst_2]);
         let result = f.deploy(&deployment).await;
-        assert!(result.is_err());
 
-        // good_cfg's file should not exist because content lookup fails before
-        // any writes are attempted
         assert!(
-            !filesys::File::new(&good_cfg.filepath).exists(),
-            "no files should be written when content lookup fails",
+            matches!(result, Err(DeployErr::DuplicateFilepath(_))),
+            "expected DuplicateFilepath error, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_filepath_rejected() {
+        let f = Fixture::new().await;
+        let cfg_inst = ConfigInstance {
+            filepath: "relative/config.json".to_string(),
+            ..Default::default()
+        };
+        let content = "{\"relative\": true}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+        let result = f.deploy(&deployment).await;
+
+        assert!(
+            matches!(result, Err(DeployErr::PathNotAllowed(_))),
+            "expected PathNotAllowed, got {result:?}"
         );
 
-        // the pre-existing file should be untouched
-        let actual = existing_file
-            .read_json::<serde_json::Value>()
-            .await
-            .unwrap();
-        assert_eq!(actual, existing_content);
+        assert!(
+            !filesys::File::new(Path::new("relative").join("config.json")).exists(),
+            "relative path file should not exist",
+        );
     }
 
     #[tokio::test]
-    async fn write_files_creates_parent_directories_for_destinations() {
+    async fn rejects_parent_traversal_filepath() {
         let f = Fixture::new().await;
-        let filepath = abs_path(&f, "a/b/c/config.json");
         let cfg_inst = ConfigInstance {
-            filepath: filepath.clone(),
+            filepath: "/etc/myapp/../passwd".to_string(),
             ..Default::default()
         };
-        let content = "{\"nested\": true}".to_string();
-        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
+        f.seed_cfg_inst(&cfg_inst, "{\"traversal\": true}".to_string())
+            .await;
 
-        // parent directories do not yet exist
-        assert!(!f.temp_dir.path().join("a").exists());
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+        let result = f.deploy(&deployment).await;
 
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-        f.deploy(&deployment).await.unwrap();
+        assert!(
+            matches!(result, Err(DeployErr::PathNotAllowed(_))),
+            "expected PathNotAllowed, got {result:?}"
+        );
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
-        assert_eq!(actual, content);
+        assert!(
+            !filesys::File::new(Path::new("/etc/myapp/../passwd")).exists(),
+            "parent traversal path file should not exist",
+        );
     }
 
     #[tokio::test]
-    async fn deploy_is_idempotent() {
+    async fn rejects_deployment_when_any_filepath_is_invalid() {
         let f = Fixture::new().await;
-        let filepath = abs_path(&f, "test/filepath");
-        let cfg_inst = ConfigInstance {
-            filepath: filepath.clone(),
+
+        let good_path = f.fixture_path("good.json").await;
+        let good_cfg = ConfigInstance {
+            filepath: good_path.clone(),
             ..Default::default()
         };
-        let content = "{\"speed\": 4}".to_string();
-        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
-
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-
-        // deploy twice
-        f.deploy(&deployment).await.unwrap();
-        f.deploy(&deployment).await.unwrap();
-
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
-        assert_eq!(actual, content);
-    }
-
-    #[tokio::test]
-    async fn nested_filepath() {
-        let f = Fixture::new().await;
-        let filepath = abs_path(&f, "deeply/nested/path/config.json");
-        let cfg_inst = ConfigInstance {
-            filepath: filepath.clone(),
+        let bad_cfg = ConfigInstance {
+            filepath: "relative/config.json".to_string(),
             ..Default::default()
         };
-        let content = "{\"nested\": true}".to_string();
-        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
+        f.seed_cfg_inst(&good_cfg, "good content".to_string()).await;
+        f.seed_cfg_inst(&bad_cfg, "bad content".to_string()).await;
 
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-        f.deploy(&deployment).await.unwrap();
+        // good_cfg is first; if validation happened in-loop instead of as a
+        // pre-pass, good.json would be on disk after this call.
+        let deployment = f.new_queued(&[good_cfg.clone(), bad_cfg.clone()]);
+        let result = f.deploy(&deployment).await;
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
-        assert_eq!(actual, content);
+        match &result {
+            Err(DeployErr::PathNotAllowed(e)) => {
+                assert!(
+                    e.reason.contains("not absolute"),
+                    "expected 'not absolute' reason, got: {}",
+                    e.reason
+                );
+            }
+            other => panic!("expected PathNotAllowed, got {other:?}"),
+        }
+
+        // The pre-pass must reject the deployment BEFORE any write happens.
+        assert!(
+            !filesys::File::new(&good_path).exists(),
+            "good.json should not exist — validate_cfg_insts must reject the deployment before any writes"
+        );
+        assert!(
+            !filesys::File::new(PathBuf::from("relative").join("config.json")).exists(),
+            "relative path must not be created"
+        );
     }
+}
 
-    // ============================ absolute-config-paths tests ============================
-
-    #[tokio::test]
-    async fn writes_absolute_path_to_tempdir() {
-        let f = Fixture::new().await;
-        let filepath = f.temp_dir.path().join("config.json").display().to_string();
-        let cfg_inst = ConfigInstance {
-            filepath: filepath.clone(),
-            ..Default::default()
-        };
-        let content = r#"{"key":"value"}"#.to_string();
-        f.seed_cfg_inst(&cfg_inst, content.clone()).await;
-
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-        f.deploy(&deployment).await.unwrap();
-
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
-        assert_eq!(actual, content);
-    }
+pub mod deploy_func_write_errs {
+    use super::*;
+    use miru_agent::filesys::PathExt;
 
     #[tokio::test]
     async fn rejects_eacces_with_permission_denied_err() {
@@ -403,7 +508,7 @@ pub mod deploy_func {
         let content = "{\"locked\": true}".to_string();
         f.seed_cfg_inst(&cfg_inst, content).await;
 
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         let result = f.deploy(&deployment).await;
 
         // restore permissions BEFORE assertions so tempdir drop can recurse
@@ -461,7 +566,7 @@ pub mod deploy_func {
         f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
         f.seed_cfg_inst(&c_cfg, "new_c".to_string()).await;
 
-        let deployment = f.new_deployment(&[a_cfg, b_cfg, c_cfg]);
+        let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
 
         // restore permissions so tempdir drop can recurse
@@ -486,208 +591,6 @@ pub mod deploy_func {
         assert!(
             !filesys::File::new(&c_path).exists(),
             "c.json should not exist in locked dir"
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_relative_filepath_with_pathnotallowed() {
-        let f = Fixture::new().await;
-        let cfg_inst = ConfigInstance {
-            filepath: "relative/config.json".to_string(),
-            ..Default::default()
-        };
-        let content = "{\"relative\": true}".to_string();
-        f.seed_cfg_inst(&cfg_inst, content).await;
-
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-        let result = f.deploy(&deployment).await;
-
-        match result {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("not absolute"),
-                    "expected 'not absolute' reason, got: {}",
-                    e.reason
-                );
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
-
-        assert!(
-            !filesys::File::new(Path::new("relative").join("config.json")).exists(),
-            "relative path file should not exist",
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_parent_traversal_filepath() {
-        let f = Fixture::new().await;
-        let cfg_inst = ConfigInstance {
-            filepath: "/etc/myapp/../passwd".to_string(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&cfg_inst, "{\"traversal\": true}".to_string())
-            .await;
-
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
-        let result = f.deploy(&deployment).await;
-
-        match result {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("parent traversal"),
-                    "expected 'parent traversal' reason, got: {}",
-                    e.reason
-                );
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn rejects_deployment_when_any_filepath_is_invalid() {
-        let f = Fixture::new().await;
-
-        let good_path = abs_path(&f, "good.json");
-        let good_cfg = ConfigInstance {
-            filepath: good_path.clone(),
-            ..Default::default()
-        };
-        let bad_cfg = ConfigInstance {
-            filepath: "relative/config.json".to_string(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&good_cfg, "good content".to_string()).await;
-        f.seed_cfg_inst(&bad_cfg, "bad content".to_string()).await;
-
-        // good_cfg is first; if validation happened in-loop instead of as a
-        // pre-pass, good.json would be on disk after this call.
-        let deployment = f.new_deployment(&[good_cfg.clone(), bad_cfg.clone()]);
-        let result = f.deploy(&deployment).await;
-
-        match &result {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("not absolute"),
-                    "expected 'not absolute' reason, got: {}",
-                    e.reason
-                );
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
-
-        // The pre-pass must reject the deployment BEFORE any write happens.
-        assert!(
-            !filesys::File::new(&good_path).exists(),
-            "good.json should not exist — validate_cfg_insts must reject the deployment before any writes"
-        );
-        assert!(
-            !filesys::File::new(PathBuf::from("relative/config.json")).exists(),
-            "relative path must not be created"
-        );
-        let leftover = backup_siblings_in(f.temp_dir.path());
-        assert!(
-            leftover.is_empty(),
-            "expected no miru.backup.* siblings; validate_cfg_insts must run before snapshot, found {leftover:?}"
-        );
-    }
-
-    // ============================ fourth-pass write_files tests ============================
-
-    /// Returns the entries in `dir` whose filename starts with the literal
-    /// `miru.backup.` prefix emitted by `backup_location`. Used to assert
-    /// that snapshot backups are not leaked on the success path.
-    fn backup_siblings_in(dir: &std::path::Path) -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with("miru.backup.") {
-                out.push(entry.path());
-            }
-        }
-        out
-    }
-
-    #[tokio::test]
-    async fn write_files_creates_all_new_files_when_none_existed() {
-        let f = Fixture::new().await;
-
-        let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        let b_path = f.temp_dir.path().join("b.json").display().to_string();
-        let a_cfg = ConfigInstance {
-            filepath: a_path.clone(),
-            ..Default::default()
-        };
-        let b_cfg = ConfigInstance {
-            filepath: b_path.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
-        f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
-
-        let deployment = f.new_deployment(&[a_cfg, b_cfg]);
-        f.deploy(&deployment).await.unwrap();
-
-        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
-        assert_eq!(a_actual, "new_a");
-        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
-        assert_eq!(b_actual, "new_b");
-
-        let leftover = backup_siblings_in(f.temp_dir.path());
-        assert!(
-            leftover.is_empty(),
-            "expected no .miru-backup-* siblings, found {leftover:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn write_files_overwrites_all_when_all_existed() {
-        let f = Fixture::new().await;
-
-        let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        let b_path = f.temp_dir.path().join("b.json").display().to_string();
-
-        // pre-populate both destinations with old content via the agent's
-        // atomic write helper
-        filesys::File::new(PathBuf::from(&a_path))
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        filesys::File::new(PathBuf::from(&b_path))
-            .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let a_cfg = ConfigInstance {
-            filepath: a_path.clone(),
-            ..Default::default()
-        };
-        let b_cfg = ConfigInstance {
-            filepath: b_path.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
-        f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
-
-        let deployment = f.new_deployment(&[a_cfg, b_cfg]);
-        f.deploy(&deployment).await.unwrap();
-
-        let a_actual = filesys::File::new(PathBuf::from(&a_path))
-            .read_string()
-            .await
-            .unwrap();
-        assert_eq!(a_actual, "new_a");
-        let b_actual = filesys::File::new(PathBuf::from(&b_path))
-            .read_string()
-            .await
-            .unwrap();
-        assert_eq!(b_actual, "new_b");
-
-        let leftover = backup_siblings_in(f.temp_dir.path());
-        assert!(
-            leftover.is_empty(),
-            "expected no .miru-backup-* siblings, found {leftover:?}"
         );
     }
 
@@ -721,7 +624,7 @@ pub mod deploy_func {
         f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
         f.seed_cfg_inst(&c_cfg, "new_c".to_string()).await;
 
-        let deployment = f.new_deployment(&[a_cfg, b_cfg, c_cfg]);
+        let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
 
         // restore permissions so tempdir drop can recurse
@@ -752,7 +655,7 @@ pub mod deploy_func {
         );
 
         // both snapshots were DidNotExist so no backup siblings were created
-        let leftover = backup_siblings_in(f.temp_dir.path());
+        let leftover = detect_backup_files(f.temp_dir.path());
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -795,7 +698,7 @@ pub mod deploy_func {
         f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
         f.seed_cfg_inst(&c_cfg, "new_c".to_string()).await;
 
-        let deployment = f.new_deployment(&[a_cfg, b_cfg, c_cfg]);
+        let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
 
         // restore permissions so tempdir drop can recurse
@@ -828,7 +731,7 @@ pub mod deploy_func {
 
         // the backup created for a.json's Existed snapshot should have been
         // renamed back over a.json, leaving no .miru-backup-* sibling
-        let leftover = backup_siblings_in(f.temp_dir.path());
+        let leftover = detect_backup_files(f.temp_dir.path());
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -858,7 +761,7 @@ pub mod deploy_func {
         };
         f.seed_cfg_inst(&c_cfg, "new".to_string()).await;
 
-        let deployment = f.new_deployment(std::slice::from_ref(&c_cfg));
+        let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
         let result = f.deploy(&deployment).await;
 
         // restore permissions so tempdir drop can recurse
@@ -878,7 +781,7 @@ pub mod deploy_func {
         assert_eq!(c_actual, "old");
 
         // no backup siblings leaked next to c.json
-        let leftover = backup_siblings_in(&locked_dir);
+        let leftover = detect_backup_files(&locked_dir);
         assert!(
             leftover.is_empty(),
             "expected no miru.backup.* siblings near c.json, found {leftover:?}"
@@ -897,7 +800,7 @@ pub mod deploy_func {
         f.seed_cfg_inst(&cfg_inst, "{\"ok\": true}".to_string())
             .await;
 
-        let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
         // walk the tempdir root. Filter out the destination file and the
@@ -921,26 +824,135 @@ pub mod deploy_func {
             "expected no .miru-tmp-* or .miru-backup-* siblings in tempdir root, found {leaked:?}"
         );
     }
+
+    #[tokio::test]
+    async fn write_files_rolls_back_prior_writes_on_snapshot_failure() {
+        let f = Fixture::new().await;
+
+        // Pre-populate a.json and b.json in writable temp_dir root
+        let a_path = f.temp_dir.path().join("a.json").display().to_string();
+        let b_path = f.temp_dir.path().join("b.json").display().to_string();
+        filesys::File::new(&a_path)
+            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        filesys::File::new(&b_path)
+            .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
+        // backup copy cannot create miru.backup.c.json (EACCES)
+        let locked_dir = f.temp_dir.path().join("locked");
+        std::fs::create_dir_all(&locked_dir).unwrap();
+        let c_path = locked_dir.join("c.json").display().to_string();
+        filesys::File::new(&c_path)
+            .write_string("old_c", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let a_cfg = ConfigInstance {
+            filepath: a_path.clone(),
+            ..Default::default()
+        };
+        let b_cfg = ConfigInstance {
+            filepath: b_path.clone(),
+            ..Default::default()
+        };
+        let c_cfg = ConfigInstance {
+            filepath: c_path.clone(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
+        f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
+        f.seed_cfg_inst(&c_cfg, "new_c".to_string()).await;
+
+        let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
+        let result = f.deploy(&deployment).await;
+
+        // restore permissions so tempdir drop can recurse
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // c's snapshot backup copy fails with CopyFileErr
+        assert!(
+            matches!(
+                &result,
+                Err(DeployErr::FileSysErr(FileSysErr::CopyFileErr(_)))
+            ),
+            "expected FileSysErr(CopyFileErr), got {result:?}",
+        );
+
+        // a and b should be rolled back to old content
+        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        assert_eq!(a_actual, "old_a");
+        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
+        assert_eq!(b_actual, "old_b");
+
+        // c should be unchanged — snapshot failed before write
+        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
+        assert_eq!(c_actual, "old_c");
+
+        // backup files consumed by rollback (rename-back), none should remain
+        let leftover = detect_backup_files(f.temp_dir.path());
+        assert!(
+            leftover.is_empty(),
+            "expected no miru.backup.* siblings in temp_dir root, found {leftover:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_overwrites_stale_backup_from_prior_deploy() {
+        let f = Fixture::new().await;
+
+        // Pre-populate a.json with old content
+        let a_path = f.temp_dir.path().join("a.json").display().to_string();
+        filesys::File::new(&a_path)
+            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // Simulate a stale backup left by a prior interrupted deploy
+        let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
+        std::fs::write(&stale_backup, "stale_backup").unwrap();
+        assert!(stale_backup.exists());
+
+        let a_cfg = ConfigInstance {
+            filepath: a_path.clone(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&a_cfg));
+        f.deploy(&deployment).await.unwrap();
+
+        // a.json should have new content
+        let actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        assert_eq!(actual, "new_a");
+
+        // stale backup overwritten by snapshot then removed by cleanup_backups
+        let leftover = detect_backup_files(f.temp_dir.path());
+        assert!(
+            leftover.is_empty(),
+            "expected stale backup to be cleaned up, found {leftover:?}"
+        );
+    }
 }
 
 pub mod remove_func {
     use super::*;
     use miru_agent::filesys::PathExt;
 
-    fn abs_path(f: &Fixture, rel: &str) -> String {
-        f.temp_dir.path().join(rel).display().to_string()
-    }
-
     /// Helper: seed a cfg_inst, deploy it so the file exists on disk, then return
     /// a removal deployment referencing the same cfg_inst.
     async fn seed_and_deploy(f: &Fixture, rel: &str, content: &str) -> ConfigInstance {
-        let filepath = abs_path(f, rel);
+        let filepath = f.fixture_path(rel).await;
         let cfg_inst = ConfigInstance {
             filepath,
             ..Default::default()
         };
         f.seed_cfg_inst(&cfg_inst, content.to_string()).await;
-        let deploy_dpl = f.new_deployment(std::slice::from_ref(&cfg_inst));
+        let deploy_dpl = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deploy_dpl).await.unwrap();
         cfg_inst
     }
@@ -952,7 +964,7 @@ pub mod remove_func {
         let dest = filesys::File::new(&ci.filepath);
         assert!(dest.path().exists(), "file should exist before removal");
 
-        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
         f.remove(&dpl, &[]).await.unwrap();
         assert!(
             !dest.path().exists(),
@@ -968,7 +980,7 @@ pub mod remove_func {
         let dest_a = filesys::File::new(&ci_a.filepath);
         let dest_b = filesys::File::new(&ci_b.filepath);
 
-        let dpl = f.new_removal_deployment(&[ci_a, ci_b]);
+        let dpl = f.new_removing(&[ci_a, ci_b]);
         f.remove(&dpl, &[]).await.unwrap();
         assert!(!dest_a.path().exists(), "a.json should be deleted");
         assert!(!dest_b.path().exists(), "b.json should be deleted");
@@ -982,7 +994,7 @@ pub mod remove_func {
         let keep_file = filesys::File::new(&ci_keep.filepath);
         let remove_file = filesys::File::new(&ci_remove.filepath);
 
-        let dpl = f.new_removal_deployment(&[ci_keep, ci_remove]);
+        let dpl = f.new_removing(&[ci_keep, ci_remove]);
         f.remove(&dpl, std::slice::from_ref(&keep_file))
             .await
             .unwrap();
@@ -997,7 +1009,7 @@ pub mod remove_func {
     #[tokio::test]
     async fn idempotent_when_file_missing() {
         let f = Fixture::new().await;
-        let filepath = abs_path(&f, "nonexistent.json");
+        let filepath = f.fixture_path("nonexistent.json").await;
         let ci = ConfigInstance {
             filepath,
             ..Default::default()
@@ -1005,7 +1017,7 @@ pub mod remove_func {
         // seed metadata only — no file on disk
         f.seed_cfg_inst(&ci, "{}".to_string()).await;
 
-        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
         // should succeed even though file doesn't exist (File::delete is idempotent)
         f.remove(&dpl, &[]).await.unwrap();
     }
@@ -1032,9 +1044,12 @@ pub mod remove_func {
         };
         f.seed_cfg_inst(&ci, "{}".to_string()).await;
 
-        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
-        assert!(result.is_err(), "should reject relative filepath");
+        assert!(
+            matches!(result, Err(DeployErr::PathNotAllowed(_))),
+            "should reject relative filepath with PathNotAllowed, got {result:?}"
+        );
     }
 
     #[tokio::test]
@@ -1046,7 +1061,7 @@ pub mod remove_func {
         };
         f.seed_cfg_inst(&ci, "{}".to_string()).await;
 
-        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
         match result {
             Err(DeployErr::PathNotAllowed(e)) => {
@@ -1069,7 +1084,7 @@ pub mod remove_func {
             ..Default::default()
         };
         // do NOT seed metadata — only reference the ID
-        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
         assert!(
             matches!(result, Err(DeployErr::CacheErr(_))),
@@ -1090,7 +1105,7 @@ pub mod remove_func {
         let parent = dest.path().parent().unwrap();
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o555)).unwrap();
 
-        let dpl = f.new_removal_deployment(std::slice::from_ref(&ci));
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
 
         // restore permissions so tempdir drop can recurse

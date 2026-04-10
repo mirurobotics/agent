@@ -469,7 +469,6 @@ mod tests {
     mod successful_transitions {
         use super::*;
 
-
         // -- helpers
 
         fn with_attempts(deployments: Vec<Deployment>, attempts: u32) -> Vec<Deployment> {
