@@ -532,7 +532,9 @@ mod deploy_errors {
 
         let locked_dir = f.temp_dir.subdir("locked");
         locked_dir.create().await.unwrap();
-        std::fs::set_permissions(locked_dir.path(), std::fs::Permissions::from_mode(0o555))
+        locked_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o555))
+            .await
             .unwrap();
 
         let ci = make_cfg_inst(locked_dir.file("config.json").path().display().to_string());
@@ -548,7 +550,9 @@ mod deploy_errors {
 
         let outcomes = f.apply().await.unwrap();
 
-        std::fs::set_permissions(locked_dir.path(), std::fs::Permissions::from_mode(0o755))
+        locked_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o755))
+            .await
             .unwrap();
 
         assert_eq!(outcomes.len(), 1);
