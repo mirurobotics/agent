@@ -1,5 +1,6 @@
 // standard crates
 use std::fmt::Display;
+use std::io;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -8,10 +9,10 @@ use std::time::SystemTime;
 use crate::filesys::{
     dir::Dir,
     errors::{
-        AtomicWriteFileErr, ConvertUTF8Err, CreateSymlinkErr, DeleteFileErr, FileMetadataErr,
-        FileSysErr, InvalidFileOverwriteErr, MoveFileErr, OpenFileErr, ParseJSONErr,
-        PathDoesNotExistErr, ReadFileErr, UnknownFileNameErr, UnknownParentDirForFileErr,
-        WriteFileErr,
+        AtomicWriteFileErr, ConvertUTF8Err, CopyFileErr, CreateSymlinkErr, DeleteFileErr,
+        FileMetadataErr, FileSysErr, InvalidFileOverwriteErr, MoveFileErr, OpenFileErr,
+        ParseJSONErr, PathDoesNotExistErr, PermissionDeniedErr, ReadFileErr, ReadOnlyFilesystemErr,
+        UnknownFileNameErr, UnknownParentDirForFileErr, WriteFileErr,
     },
     path::PathExt,
     Atomic, Overwrite, WriteOptions,
@@ -28,7 +29,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
 /// File struct for interacting with files
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct File {
     path: PathBuf,
 }
@@ -47,7 +48,12 @@ impl PathExt for File {
 
 impl File {
     pub fn new<T: Into<PathBuf>>(path: T) -> Self {
-        File { path: path.into() }
+        let path: PathBuf = path.into().components().collect();
+        File { path }
+    }
+
+    pub fn is_absolute(&self) -> bool {
+        self.path().is_absolute()
     }
 
     pub fn name(&self) -> Result<&str, FileSysErr> {
@@ -89,10 +95,12 @@ impl File {
             .map_err(|e| File::map_io_err_for_open(e, self))?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).await.map_err(|e| {
-            FileSysErr::ReadFileErr(ReadFileErr {
-                source: Box::new(e),
-                file: self.clone(),
-                trace: trace!(),
+            File::map_io_err(e, self, |e| {
+                FileSysErr::ReadFileErr(ReadFileErr {
+                    source: Box::new(e),
+                    file: self.clone(),
+                    trace: trace!(),
+                })
             })
         })?;
         Ok(buf)
@@ -109,10 +117,12 @@ impl File {
         file.read_to_end(secret.expose_secret_mut())
             .await
             .map_err(|e| {
-                FileSysErr::ReadFileErr(ReadFileErr {
-                    source: Box::new(e),
-                    file: self.clone(),
-                    trace: trace!(),
+                File::map_io_err(e, self, |e| {
+                    FileSysErr::ReadFileErr(ReadFileErr {
+                        source: Box::new(e),
+                        file: self.clone(),
+                        trace: trace!(),
+                    })
                 })
             })?;
 
@@ -154,18 +164,22 @@ impl File {
             .await
             .map_err(|e| File::map_io_err_for_open(e, self))?;
         file.write_all(buf).await.map_err(|e| {
-            FileSysErr::WriteFileErr(WriteFileErr {
-                source: Box::new(e),
-                file: self.clone(),
-                trace: trace!(),
-            })
-        })?;
-        if opts.sync == crate::filesys::Sync::Yes {
-            file.sync_data().await.map_err(|e| {
+            File::map_io_err(e, self, |e| {
                 FileSysErr::WriteFileErr(WriteFileErr {
                     source: Box::new(e),
                     file: self.clone(),
                     trace: trace!(),
+                })
+            })
+        })?;
+        if opts.sync == crate::filesys::Sync::Yes {
+            file.sync_data().await.map_err(|e| {
+                File::map_io_err(e, self, |e| {
+                    FileSysErr::WriteFileErr(WriteFileErr {
+                        source: Box::new(e),
+                        file: self.clone(),
+                        trace: trace!(),
+                    })
                 })
             })?;
         }
@@ -181,22 +195,24 @@ impl File {
                 Overwrite::Allow => AtomicFile::new(self.path(), AllowOverwrite),
                 Overwrite::Deny => AtomicFile::new(self.path(), DisallowOverwrite),
             };
-            let io_err: Result<(), std::io::Error> =
+            let io_err: Result<(), io::Error> =
                 af.write(|f| f.write_all(buf)).map_err(|e| e.into());
             io_err.map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
-                        file: self.clone(),
-                        overwrite: opts.overwrite,
-                        trace: trace!(),
-                    })
-                } else {
-                    FileSysErr::AtomicWriteFileErr(AtomicWriteFileErr {
-                        source: Box::new(e),
-                        file: self.clone(),
-                        trace: trace!(),
-                    })
-                }
+                File::map_io_err(e, self, |e| {
+                    if e.kind() == io::ErrorKind::AlreadyExists {
+                        FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
+                            file: self.clone(),
+                            overwrite: opts.overwrite,
+                            trace: trace!(),
+                        })
+                    } else {
+                        FileSysErr::AtomicWriteFileErr(AtomicWriteFileErr {
+                            source: Box::new(e),
+                            file: self.clone(),
+                            trace: trace!(),
+                        })
+                    }
+                })
             })?;
         } else {
             let mut file = match opts.overwrite {
@@ -211,10 +227,12 @@ impl File {
             }
             .map_err(|e| File::map_io_err_for_create(e, self, opts.overwrite))?;
             file.write_all(buf).await.map_err(|e| {
-                FileSysErr::WriteFileErr(WriteFileErr {
-                    source: Box::new(e),
-                    file: self.clone(),
-                    trace: trace!(),
+                File::map_io_err(e, self, |e| {
+                    FileSysErr::WriteFileErr(WriteFileErr {
+                        source: Box::new(e),
+                        file: self.clone(),
+                        trace: trace!(),
+                    })
                 })
             })?;
         }
@@ -244,13 +262,66 @@ impl File {
     pub async fn delete(&self) -> Result<(), FileSysErr> {
         match tokio::fs::remove_file(self.path()).await {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(FileSysErr::DeleteFileErr(DeleteFileErr {
-                source: Box::new(e),
-                file: self.clone(),
-                trace: trace!(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(File::map_io_err(e, self, |e| {
+                FileSysErr::DeleteFileErr(DeleteFileErr {
+                    source: Box::new(e),
+                    file: self.clone(),
+                    trace: trace!(),
+                })
             })),
         }
+    }
+
+    /// Copy this file to a new file. The source is left unchanged.
+    /// Honors `Overwrite::Deny` by returning `InvalidFileOverwriteErr`
+    /// if `new_file` already exists. A `NotFound` from the underlying
+    /// I/O is mapped to `PathDoesNotExistErr` — the same "source missing"
+    /// variant `move_to` uses — so callers can pattern-match consistently.
+    pub async fn copy_to(&self, new_file: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
+        // if this file and the new file are the same, nothing needs to be done
+        // (but still verify the source exists — no I/O to map errors from here)
+        if self.path() == new_file.path() {
+            self.assert_exists()?;
+            return Ok(());
+        }
+
+        // TOCTOU note: tokio::fs::copy has no O_EXCL equivalent, so this
+        // pre-check is the best we can do for Overwrite::Deny. The race
+        // window is unavoidable.
+        if overwrite == Overwrite::Deny && new_file.exists() {
+            return Err(FileSysErr::InvalidFileOverwriteErr(
+                InvalidFileOverwriteErr {
+                    file: new_file.clone(),
+                    overwrite,
+                    trace: trace!(),
+                },
+            ));
+        }
+
+        // ensure the parent directory of the new file exists and create it if not
+        new_file.parent()?.create_if_absent().await?;
+
+        tokio::fs::copy(self.path(), new_file.path())
+            .await
+            .map_err(|e| {
+                File::map_io_err(e, new_file, |e| {
+                    if e.kind() == io::ErrorKind::NotFound {
+                        FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                            path: self.path().clone(),
+                            trace: trace!(),
+                        })
+                    } else {
+                        FileSysErr::CopyFileErr(CopyFileErr {
+                            source: Box::new(e),
+                            src_file: self.clone(),
+                            dest_file: new_file.clone(),
+                            trace: trace!(),
+                        })
+                    }
+                })
+            })?;
+        Ok(())
     }
 
     /// Rename this file to a new file.
@@ -282,19 +353,21 @@ impl File {
         tokio::fs::rename(self.path(), new_file.path())
             .await
             .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                        path: self.path().clone(),
-                        trace: trace!(),
-                    })
-                } else {
-                    FileSysErr::MoveFileErr(MoveFileErr {
-                        source: Box::new(e),
-                        src_file: self.clone(),
-                        dest_file: new_file.clone(),
-                        trace: trace!(),
-                    })
-                }
+                File::map_io_err(e, new_file, |e| {
+                    if e.kind() == io::ErrorKind::NotFound {
+                        FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                            path: self.path().clone(),
+                            trace: trace!(),
+                        })
+                    } else {
+                        FileSysErr::MoveFileErr(MoveFileErr {
+                            source: Box::new(e),
+                            src_file: self.clone(),
+                            dest_file: new_file.clone(),
+                            trace: trace!(),
+                        })
+                    }
+                })
             })?;
         Ok(())
     }
@@ -308,18 +381,20 @@ impl File {
         tokio::fs::set_permissions(self.path(), permissions)
             .await
             .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                        path: self.path().clone(),
-                        trace: trace!(),
-                    })
-                } else {
-                    FileSysErr::WriteFileErr(WriteFileErr {
-                        source: Box::new(e),
-                        file: self.clone(),
-                        trace: trace!(),
-                    })
-                }
+                File::map_io_err(e, self, |e| {
+                    if e.kind() == io::ErrorKind::NotFound {
+                        FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                            path: self.path().clone(),
+                            trace: trace!(),
+                        })
+                    } else {
+                        FileSysErr::WriteFileErr(WriteFileErr {
+                            source: Box::new(e),
+                            file: self.clone(),
+                            trace: trace!(),
+                        })
+                    }
+                })
             })?;
         Ok(())
     }
@@ -344,38 +419,42 @@ impl File {
         tokio::fs::symlink(self.path(), link.path())
             .await
             .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
-                        file: link.clone(),
-                        overwrite,
-                        trace: trace!(),
-                    })
-                } else {
-                    FileSysErr::CreateSymlinkErr(CreateSymlinkErr {
-                        source: Box::new(e),
-                        file: self.clone(),
-                        link: link.clone(),
-                        trace: trace!(),
-                    })
-                }
+                File::map_io_err(e, link, |e| {
+                    if e.kind() == io::ErrorKind::AlreadyExists {
+                        FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
+                            file: link.clone(),
+                            overwrite,
+                            trace: trace!(),
+                        })
+                    } else {
+                        FileSysErr::CreateSymlinkErr(CreateSymlinkErr {
+                            source: Box::new(e),
+                            file: self.clone(),
+                            link: link.clone(),
+                            trace: trace!(),
+                        })
+                    }
+                })
             })?;
         Ok(())
     }
 
     async fn metadata(&self) -> Result<std::fs::Metadata, FileSysErr> {
         tokio::fs::metadata(self.path()).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                    path: self.path().clone(),
-                    trace: trace!(),
-                })
-            } else {
-                FileSysErr::FileMetadataErr(FileMetadataErr {
-                    file: self.clone(),
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            }
+            File::map_io_err(e, self, |e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                        path: self.path().clone(),
+                        trace: trace!(),
+                    })
+                } else {
+                    FileSysErr::FileMetadataErr(FileMetadataErr {
+                        file: self.clone(),
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                }
+            })
         })
     }
 
@@ -395,35 +474,72 @@ impl File {
         Ok(self.metadata().await?.len())
     }
 
-    fn map_io_err_for_open(e: std::io::Error, file: &File) -> FileSysErr {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                path: file.path().clone(),
-                trace: trace!(),
-            })
-        } else {
-            FileSysErr::OpenFileErr(OpenFileErr {
-                source: Box::new(e),
-                file: file.clone(),
-                trace: trace!(),
-            })
+    /// Classify a `tokio::fs` `io::Error` into a `FileSysErr`. EACCES and
+    /// EROFS are mapped to friendly variants whose Display strings carry
+    /// operator-actionable reason text. Anything else is forwarded to the
+    /// `fallback` closure, which produces the operation-specific wrapper
+    /// (`AtomicWriteFileErr`, `MoveFileErr`, `CopyFileErr`, etc.).
+    ///
+    /// Note: EACCES/EROFS are checked BEFORE the fallback. For an
+    /// operation like `move_to` whose source is missing AND parent is
+    /// unreadable, whichever errno the kernel returns first wins; this
+    /// is implementation-defined.
+    pub(super) fn map_io_err<F>(err: io::Error, file: &File, fallback: F) -> FileSysErr
+    where
+        F: FnOnce(io::Error) -> FileSysErr,
+    {
+        match err.kind() {
+            io::ErrorKind::PermissionDenied => {
+                FileSysErr::PermissionDeniedErr(PermissionDeniedErr {
+                    source: Box::new(err),
+                    file: file.clone(),
+                    trace: trace!(),
+                })
+            }
+            io::ErrorKind::ReadOnlyFilesystem => {
+                FileSysErr::ReadOnlyFilesystemErr(ReadOnlyFilesystemErr {
+                    source: Box::new(err),
+                    file: file.clone(),
+                    trace: trace!(),
+                })
+            }
+            _ => fallback(err),
         }
     }
 
-    fn map_io_err_for_create(e: std::io::Error, file: &File, overwrite: Overwrite) -> FileSysErr {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
-                file: file.clone(),
-                overwrite,
-                trace: trace!(),
-            })
-        } else {
-            FileSysErr::OpenFileErr(OpenFileErr {
-                source: Box::new(e),
-                file: file.clone(),
-                trace: trace!(),
-            })
-        }
+    fn map_io_err_for_open(e: io::Error, file: &File) -> FileSysErr {
+        File::map_io_err(e, file, |e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                    path: file.path().clone(),
+                    trace: trace!(),
+                })
+            } else {
+                FileSysErr::OpenFileErr(OpenFileErr {
+                    source: Box::new(e),
+                    file: file.clone(),
+                    trace: trace!(),
+                })
+            }
+        })
+    }
+
+    fn map_io_err_for_create(e: io::Error, file: &File, overwrite: Overwrite) -> FileSysErr {
+        File::map_io_err(e, file, |e| {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
+                    file: file.clone(),
+                    overwrite,
+                    trace: trace!(),
+                })
+            } else {
+                FileSysErr::OpenFileErr(OpenFileErr {
+                    source: Box::new(e),
+                    file: file.clone(),
+                    trace: trace!(),
+                })
+            }
+        })
     }
 }
 
@@ -436,4 +552,66 @@ pub fn sanitize_filename(name: &str) -> String {
             _ => '_',
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_io_err_classifies_permission_denied() {
+        let file = File::new(PathBuf::from("/tmp/synthetic.json"));
+        let err = io::Error::from(io::ErrorKind::PermissionDenied);
+        let result = File::map_io_err(err, &file, |_| {
+            panic!("fallback should not run for PermissionDenied")
+        });
+        assert!(
+            matches!(result, FileSysErr::PermissionDeniedErr(_)),
+            "expected PermissionDeniedErr, got {result:?}"
+        );
+        let msg = result.to_string();
+        assert!(
+            msg.contains("permission denied for path"),
+            "expected friendly message, got: {msg}"
+        );
+        assert!(
+            msg.contains("/tmp/synthetic.json"),
+            "expected path in message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn map_io_err_classifies_read_only_filesystem() {
+        let file = File::new(PathBuf::from("/tmp/synthetic.json"));
+        let err = io::Error::from(io::ErrorKind::ReadOnlyFilesystem);
+        let result = File::map_io_err(err, &file, |_| {
+            panic!("fallback should not run for ReadOnlyFilesystem")
+        });
+        assert!(
+            matches!(result, FileSysErr::ReadOnlyFilesystemErr(_)),
+            "expected ReadOnlyFilesystemErr, got {result:?}"
+        );
+        let msg = result.to_string();
+        assert!(
+            msg.contains("read-only mount or denied by a systemd sandbox drop-in"),
+            "expected friendly EROFS message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn map_io_err_falls_through_for_other_kinds() {
+        let file = File::new(PathBuf::from("/tmp/synthetic.json"));
+        let err = io::Error::from(io::ErrorKind::Other);
+        let result = File::map_io_err(err, &file, |e| {
+            FileSysErr::AtomicWriteFileErr(AtomicWriteFileErr {
+                source: Box::new(e),
+                file: file.clone(),
+                trace: trace!(),
+            })
+        });
+        assert!(
+            matches!(result, FileSysErr::AtomicWriteFileErr(_)),
+            "expected fallback AtomicWriteFileErr, got {result:?}"
+        );
+    }
 }

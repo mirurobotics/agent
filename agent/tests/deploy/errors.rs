@@ -2,7 +2,8 @@
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::deploy::errors::{
-    ConflictingDeploymentsErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr,
+    ConflictingDeploymentsErr, EmptyConfigInstancesErr, GenericErr, InvalidDeploymentTargetErr,
+    PathNotAllowedErr,
 };
 use miru_agent::deploy::DeployErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
@@ -47,6 +48,14 @@ fn invalid_deployment_target_err() -> InvalidDeploymentTargetErr {
     }
 }
 
+fn path_not_allowed_err() -> PathNotAllowedErr {
+    PathNotAllowedErr {
+        filepath: "/x".to_string(),
+        reason: "test".to_string(),
+        trace: miru_agent::trace!(),
+    }
+}
+
 mod from_conversions {
     use super::*;
 
@@ -84,5 +93,20 @@ mod from_conversions {
     fn conflicting_deployments_err_maps_to_deploy_conflicting_deployments() {
         let err: DeployErr = conflicting_deployments_err().into();
         assert!(matches!(err, DeployErr::ConflictingDeployments(_)));
+    }
+
+    #[test]
+    fn path_not_allowed_err_maps_to_deploy_path_not_allowed() {
+        let err: DeployErr = path_not_allowed_err().into();
+        assert!(matches!(err, DeployErr::PathNotAllowed(_)));
+    }
+
+    #[test]
+    fn generic_err_maps_to_deploy_generic_err() {
+        let err: DeployErr = GenericErr {
+            msg: "something went wrong".to_string(),
+        }
+        .into();
+        assert!(matches!(err, DeployErr::GenericErr(_)));
     }
 }

@@ -76,13 +76,6 @@ impl Layout {
             .subdir("miru")
             .subdir("config_instances")
     }
-
-    pub fn srv_temp_dir(&self) -> filesys::Dir {
-        self.filesystem_root
-            .subdir("srv")
-            .subdir("miru")
-            .subdir(".temp")
-    }
 }
 
 impl Default for Layout {

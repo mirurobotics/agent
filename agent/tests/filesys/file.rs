@@ -28,6 +28,22 @@ pub mod display {
     }
 }
 
+pub mod is_absolute {
+    use super::*;
+
+    #[test]
+    fn returns_true_for_absolute_path() {
+        let f = filesys::File::new(PathBuf::from("/etc/foo.json"));
+        assert!(f.is_absolute());
+    }
+
+    #[test]
+    fn returns_false_for_relative_path() {
+        let f = filesys::File::new(PathBuf::from("foo/bar.json"));
+        assert!(!f.is_absolute());
+    }
+}
+
 pub mod parent {
     use super::*;
 

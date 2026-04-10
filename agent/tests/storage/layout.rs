@@ -110,20 +110,6 @@ pub mod storage_layout {
         let dir = layout.customer_configs();
         assert_eq!(dir.to_string(), "/opt/srv/miru/config_instances");
     }
-
-    #[test]
-    fn srv_temp_dir() {
-        let layout = Layout::default();
-        let dir = layout.srv_temp_dir();
-        assert_eq!(dir.to_string(), "/srv/miru/.temp");
-    }
-
-    #[test]
-    fn srv_temp_dir_custom_filesystem_root() {
-        let layout = Layout::new(filesys::Dir::new("/opt"));
-        let dir = layout.srv_temp_dir();
-        assert_eq!(dir.to_string(), "/opt/srv/miru/.temp");
-    }
 }
 
 pub mod auth_layout {

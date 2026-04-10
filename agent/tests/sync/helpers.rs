@@ -14,9 +14,15 @@ use chrono::{DateTime, TimeDelta, Utc};
 // ========================= FACTORIES ========================= //
 
 pub fn make_cfg_inst(id: &str) -> backend_api::models::ConfigInstance {
+    // Absolute filepath is required by the deploy/filesys layer's
+    // `validate_filepath` check. Sync tests that exercise the apply path
+    // will actually write these files; use a per-process tempdir prefix so
+    // parallel runs / repeat runs do not collide.
+    let base = std::env::temp_dir().join(format!("miru-sync-test-{}", std::process::id()));
+    let filepath = base.join(format!("{id}.json"));
     backend_api::models::ConfigInstance {
         id: id.to_string(),
-        filepath: format!("{id}.json"),
+        filepath: filepath.display().to_string(),
         ..Default::default()
     }
 }

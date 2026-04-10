@@ -1,5 +1,6 @@
 // internal crates
 use crate::cache;
+use crate::errors::Trace;
 use crate::filesys;
 use crate::models;
 use crate::storage::StorageErr;
@@ -11,6 +12,16 @@ pub struct EmptyConfigInstancesErr {
 }
 
 impl crate::errors::Error for EmptyConfigInstancesErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("filepath '{filepath}' is not allowed: {reason}")]
+pub struct PathNotAllowedErr {
+    pub filepath: String,
+    pub reason: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for PathNotAllowedErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error(
@@ -32,6 +43,14 @@ pub struct ConflictingDeploymentsErr {
 impl crate::errors::Error for ConflictingDeploymentsErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("internal server error: {msg}")]
+pub struct GenericErr {
+    pub msg: String,
+}
+
+impl crate::errors::Error for GenericErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum DeployErr {
     #[error(transparent)]
     ConflictingDeployments(ConflictingDeploymentsErr),
@@ -44,7 +63,11 @@ pub enum DeployErr {
     #[error(transparent)]
     FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
+    PathNotAllowed(PathNotAllowedErr),
+    #[error(transparent)]
     StorageErr(StorageErr),
+    #[error(transparent)]
+    GenericErr(GenericErr),
 }
 
 impl From<cache::CacheErr> for DeployErr {
@@ -83,11 +106,25 @@ impl From<ConflictingDeploymentsErr> for DeployErr {
     }
 }
 
+impl From<PathNotAllowedErr> for DeployErr {
+    fn from(e: PathNotAllowedErr) -> Self {
+        Self::PathNotAllowed(e)
+    }
+}
+
+impl From<GenericErr> for DeployErr {
+    fn from(e: GenericErr) -> Self {
+        Self::GenericErr(e)
+    }
+}
+
 crate::impl_error!(DeployErr {
     ConflictingDeployments,
     EmptyConfigInstances,
     InvalidDeploymentTarget,
     CacheErr,
     FileSysErr,
+    PathNotAllowed,
     StorageErr,
+    GenericErr,
 });

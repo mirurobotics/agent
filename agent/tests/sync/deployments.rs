@@ -32,8 +32,6 @@ struct Fixture {
     release_stor: Releases,
     git_commit_stor: GitCommits,
     http_client: MockClient,
-    staging_dir: filesys::Dir,
-    target_dir: filesys::Dir,
     retry_policy: fsm::RetryPolicy,
     event_hub: EventHub,
     _dir: filesys::Dir,
@@ -69,8 +67,6 @@ impl Fixture {
             release_stor,
             git_commit_stor,
             http_client: MockClient::default(),
-            staging_dir: dir.subdir("staging"),
-            target_dir: dir.subdir("deployments"),
             retry_policy: fsm::RetryPolicy::default(),
             event_hub,
             _dir: dir,
@@ -79,8 +75,6 @@ impl Fixture {
 
     async fn sync(&self) -> Result<Option<TimeDelta>, SyncErr> {
         let opts = apply::DeployOpts {
-            staging_dir: self.staging_dir.clone(),
-            target_dir: self.target_dir.clone(),
             retry_policy: self.retry_policy,
         };
         sync(&SyncArgs {

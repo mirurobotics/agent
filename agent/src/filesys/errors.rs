@@ -177,6 +177,17 @@ pub struct FileMetadataErr {
 impl crate::errors::Error for FileMetadataErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to copy file '{src_file}' to '{dest_file}': {source}")]
+pub struct CopyFileErr {
+    pub source: Box<std::io::Error>,
+    pub src_file: File,
+    pub dest_file: File,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for CopyFileErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("failed to move file '{src_file}' to '{dest_file}': {source}")]
 pub struct MoveFileErr {
     pub source: Box<std::io::Error>,
@@ -186,6 +197,26 @@ pub struct MoveFileErr {
 }
 
 impl crate::errors::Error for MoveFileErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("permission denied for path '{file}'; ensure the destination directory is writable by the miru user, e.g. 'sudo chgrp miru <dir> && sudo chmod g+w <dir>': {source}")]
+pub struct PermissionDeniedErr {
+    pub source: Box<std::io::Error>,
+    pub file: File,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for PermissionDeniedErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("path '{file}' is on a read-only mount or denied by a systemd sandbox drop-in; check ReadWritePaths if your deployment uses one: {source}")]
+pub struct ReadOnlyFilesystemErr {
+    pub source: Box<std::io::Error>,
+    pub file: File,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ReadOnlyFilesystemErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("failed to move directory '{src_dir}' to '{dest_dir}': {source}")]
@@ -318,7 +349,13 @@ pub enum FileSysErr {
     #[error(transparent)]
     FileMetadataErr(FileMetadataErr),
     #[error(transparent)]
+    CopyFileErr(CopyFileErr),
+    #[error(transparent)]
     MoveFileErr(MoveFileErr),
+    #[error(transparent)]
+    PermissionDeniedErr(PermissionDeniedErr),
+    #[error(transparent)]
+    ReadOnlyFilesystemErr(ReadOnlyFilesystemErr),
     #[error(transparent)]
     MoveDirErr(MoveDirErr),
     #[error(transparent)]
@@ -360,7 +397,10 @@ crate::impl_error!(FileSysErr {
     DeleteDirErr,
     DeleteFileErr,
     FileMetadataErr,
+    CopyFileErr,
     MoveFileErr,
+    PermissionDeniedErr,
+    ReadOnlyFilesystemErr,
     MoveDirErr,
     MoveDirRollbackErr,
     OpenFileErr,

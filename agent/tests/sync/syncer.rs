@@ -143,8 +143,6 @@ impl Fixture {
                 http_client: http_client.clone(),
                 token_mngr: token_mngr.clone(),
                 deploy_opts: apply::DeployOpts {
-                    staging_dir: dir.subdir("staging"),
-                    target_dir: dir.subdir("deployments"),
                     retry_policy: fsm::RetryPolicy::default(),
                 },
                 backoff,
@@ -240,8 +238,6 @@ pub mod shutdown {
                 http_client: http_client.clone(),
                 token_mngr: Arc::new(token_mngr),
                 deploy_opts: apply::DeployOpts {
-                    staging_dir: dir.subdir("staging"),
-                    target_dir: dir.subdir("deployments"),
                     retry_policy: fsm::RetryPolicy::default(),
                 },
                 backoff: cooldown::Backoff {

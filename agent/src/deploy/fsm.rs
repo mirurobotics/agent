@@ -89,7 +89,14 @@ pub fn deploy(mut deployment: models::Deployment) -> models::Deployment {
     deployment
 }
 
-pub fn remove(mut deployment: models::Deployment) -> models::Deployment {
+pub fn removing(mut deployment: models::Deployment) -> models::Deployment {
+    let new_activity = models::DplActivity::Removing;
+    let patch = get_success_updates(&deployment, new_activity);
+    deployment.patch(patch);
+    deployment
+}
+
+pub fn archive(mut deployment: models::Deployment) -> models::Deployment {
     let new_activity = models::DplActivity::Archived;
     let patch = get_success_updates(&deployment, new_activity);
     deployment.patch(patch);
@@ -537,7 +544,7 @@ mod tests {
 
         fn validate_remove_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
             let before = Utc::now();
-            let actual = remove(deployment.clone());
+            let actual = archive(deployment.clone());
             let after = Utc::now();
 
             let recovered = deployment.error_status == DplErrStatus::Retrying
@@ -729,6 +736,89 @@ mod tests {
             for mut deployment in with_error_status(DplErrStatus::None) {
                 deployment.deployed_at = Some(past);
                 validate_remove_transition(deployment, DplErrStatus::None);
+            }
+        }
+
+        // --- removing transition (intermediate state) ---
+
+        fn validate_removing_transition(deployment: Deployment) {
+            let actual = removing(deployment.clone());
+
+            // removing is intermediate — no timestamps should change
+            assert_eq!(
+                actual.deployed_at, deployment.deployed_at,
+                "deployed_at should be preserved",
+            );
+            assert_eq!(
+                actual.archived_at, deployment.archived_at,
+                "archived_at should be preserved",
+            );
+
+            // removing never counts as recovery, so error_status/attempts/cooldown are preserved
+            assert_eq!(
+                actual.cooldown_ends_at, deployment.cooldown_ends_at,
+                "cooldown should be unchanged",
+            );
+
+            let expected = Deployment {
+                activity_status: DplActivity::Removing,
+                ..deployment.clone()
+            };
+            assert!(
+                expected == actual,
+                "expected:\n{expected:?}\n actual:\n{actual:?}\n",
+            );
+        }
+
+        #[test]
+        fn removing_error_status_none() {
+            for deployment in with_error_status(DplErrStatus::None) {
+                validate_removing_transition(deployment);
+            }
+        }
+
+        #[test]
+        fn removing_error_status_retrying() {
+            for deployment in with_error_status(DplErrStatus::Retrying) {
+                validate_removing_transition(deployment);
+            }
+        }
+
+        #[test]
+        fn removing_error_status_failed() {
+            for deployment in with_error_status(DplErrStatus::Failed) {
+                validate_removing_transition(deployment);
+            }
+        }
+
+        #[test]
+        fn removing_preserves_attempts() {
+            for deployment in with_attempts(with_error_status(DplErrStatus::None), 5) {
+                validate_removing_transition(deployment);
+            }
+            for deployment in with_attempts(with_error_status(DplErrStatus::Retrying), 5) {
+                validate_removing_transition(deployment);
+            }
+        }
+
+        #[test]
+        fn removing_preserves_cooldown() {
+            let deployments = with_cooldown(
+                with_attempts(with_error_status(DplErrStatus::Retrying), 3),
+                TimeDelta::minutes(5),
+            );
+            for deployment in deployments {
+                validate_removing_transition(deployment);
+            }
+        }
+
+        #[test]
+        fn removing_preserves_pre_existing_timestamps() {
+            let past = Utc::now() - TimeDelta::hours(1);
+            for mut deployment in with_error_status(DplErrStatus::None) {
+                deployment.deployed_at = Some(past);
+                deployment.archived_at = Some(past);
+                validate_removing_transition(deployment);
             }
         }
     }
