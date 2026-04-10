@@ -1,10 +1,7 @@
-// standard crates
-use std::path::PathBuf;
-
 // internal crates
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
-use miru_agent::filesys::{self, WriteOptions};
+use miru_agent::filesys::{self, PathExt, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::Options;
 use miru_agent::storage::Layout;
@@ -60,7 +57,7 @@ async fn max_runtime_reached() {
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.clone()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -69,7 +66,7 @@ async fn max_runtime_reached() {
             ..Default::default()
         },
         server: Options {
-            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            socket_file: filesys::File::new(dir.path().join("miru.sock")),
         },
         ..Default::default()
     };
@@ -94,7 +91,7 @@ async fn is_persistent() {
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.clone()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -103,7 +100,7 @@ async fn is_persistent() {
             ..Default::default()
         },
         server: Options {
-            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            socket_file: filesys::File::new(dir.path().join("miru.sock")),
         },
         ..Default::default()
     };
@@ -127,7 +124,7 @@ async fn idle_timeout_reached() {
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.clone()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -138,7 +135,7 @@ async fn idle_timeout_reached() {
             ..Default::default()
         },
         server: Options {
-            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            socket_file: filesys::File::new(dir.path().join("miru.sock")),
         },
         ..Default::default()
     };
@@ -166,11 +163,11 @@ async fn shutdown_signal_received() {
             ..Default::default()
         },
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.clone()),
             ..Default::default()
         },
         server: Options {
-            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            socket_file: filesys::File::new(dir.path().join("miru.sock")),
         },
         ..Default::default()
     };
