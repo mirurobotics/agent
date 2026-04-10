@@ -1,5 +1,5 @@
 // standard crates
-use std::path::{Component, PathBuf};
+use std::path::Component;
 
 // internal crates
 use crate::deploy::errors::*;
