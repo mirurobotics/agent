@@ -484,22 +484,10 @@ mod deploy_errors {
         );
         f.seed_deployment(&dpl).await;
 
-        let outcomes = f.apply().await.unwrap();
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-missing-meta".into(),
-                activity: DplActivity::Queued,
-                error_status: DplErrStatus::Retrying,
-                attempts: 1,
-                has_error: true,
-                has_wait: true,
-                in_cooldown: true,
-                transitioned: true,
-            }
-        );
-        assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
+        // apply returns Err because read_cfg_insts for the dont_remove list
+        // fails before any deployment is attempted
+        let result = f.apply().await;
+        assert!(matches!(result, Err(DeployErr::CacheErr(_))));
     }
 
     #[tokio::test]
@@ -611,6 +599,7 @@ mod deploy_errors {
 
 mod remove_action {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn archived_target_deployed_activity() {
@@ -865,6 +854,109 @@ mod remove_action {
         );
         // old-only file should be deleted
         assert!(!old_dest.path().exists(), "old-only file should be deleted");
+    }
+
+    #[tokio::test]
+    async fn already_removing_transitions_to_archived() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(&f, "removing.json");
+        f.seed_cfg_inst(&ci, r#"{"removing": true}"#.into()).await;
+
+        // deploy first so file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-removing",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        // now set target=Archived, activity=Removing (already in removing state)
+        let dpl = Deployment {
+            id: "dpl-removing".to_string(),
+            target_status: DplTarget::Archived,
+            activity_status: DplActivity::Removing,
+            config_instance_ids: vec![ci.id.clone()],
+            ..Default::default()
+        };
+        f.seed_deployment(&dpl).await;
+
+        let dest = filesys::File::new(&ci.filepath);
+        assert!(dest.path().exists(), "file should exist before removal");
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-removing".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+        assert!(
+            !dest.path().exists(),
+            "file should be deleted after removal"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_delete_error_enters_retry() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(&f, "locked/config.json");
+        f.seed_cfg_inst(&ci, r#"{"v": 1}"#.into()).await;
+
+        // deploy first so file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-remove-locked",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        // lock the parent directory so delete fails
+        let dest = filesys::File::new(&ci.filepath);
+        let parent = dest.path().parent().unwrap().to_path_buf();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // now mark for removal
+        let dpl = make_deployment(
+            "dpl-remove-locked",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // restore permissions so tempdir drop can recurse
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-remove-locked".into(),
+                activity: DplActivity::Removing,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
     }
 }
 

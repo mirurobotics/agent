@@ -38,23 +38,14 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
 
     match &categorized.target_deployed {
         Some(target_deployed) => {
-            let dont_remove: Vec<filesys::File> = match read_cfg_insts(
+            let dont_remove: Vec<filesys::File> = read_cfg_insts(
                 args.storage.cfg_insts.meta,
                 &target_deployed.config_instance_ids,
             )
-            .await
-            {
-                Ok(cfg_insts) => cfg_insts
-                    .iter()
-                    .map(|ci| filesys::File::new(&ci.filepath))
-                    .collect(),
-                // If cfg_inst metadata lookup fails, proceed with an empty
-                // dont_remove list. apply_one will independently fail when it
-                // tries to read the same metadata inside dpl_filesys::deploy,
-                // and the early return below ensures we never reach the remove
-                // pass with a stale dont_remove list.
-                Err(_) => Vec::new(),
-            };
+            .await?
+            .iter()
+            .map(|ci| filesys::File::new(&ci.filepath))
+            .collect();
 
             let outcome = apply_one(args, target_deployed.clone(), &dont_remove).await;
             if outcome.error.is_some() {

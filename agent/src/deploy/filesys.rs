@@ -180,14 +180,12 @@ async fn rollback_snapshot(snapshot: &Snapshot) -> Result<(), FileSysErr> {
 async fn cleanup_backups(snapshots: &[Snapshot]) {
     for snapshot in snapshots {
         if let Snapshot::Existed { backup, .. } = snapshot {
-            if let Err(e) = tokio::fs::remove_file(backup.path()).await {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!(
-                        "failed to remove snapshot backup file '{}': {}",
-                        backup.path().display(),
-                        e,
-                    );
-                }
+            if let Err(e) = backup.delete().await {
+                warn!(
+                    "failed to remove snapshot backup file '{}': {}",
+                    backup.path().display(),
+                    e,
+                );
             }
         }
     }
@@ -205,24 +203,21 @@ pub async fn remove(
     let cfg_insts = read_cfg_insts(storage.meta, &deployment.config_instance_ids).await?;
     validate_cfg_insts(&cfg_insts)?;
 
-    remove_files(&cfg_insts, keeps).await;
-    Ok(())
+    remove_files(&cfg_insts, keeps).await
 }
 
-async fn remove_files(cfg_insts: &[models::ConfigInstance], keeps: &[filesys::File]) {
+async fn remove_files(
+    cfg_insts: &[models::ConfigInstance],
+    keeps: &[filesys::File],
+) -> Result<(), DeployErr> {
     for cfg_inst in cfg_insts {
         let dest = filesys::File::new(&cfg_inst.filepath);
         if keeps.contains(&dest) {
             continue;
         }
-        if let Err(e) = dest.delete().await {
-            error!(
-                "failed to remove config instance {} at {}: {e}",
-                cfg_inst.id,
-                dest.path().display()
-            );
-        }
+        dest.delete().await?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
