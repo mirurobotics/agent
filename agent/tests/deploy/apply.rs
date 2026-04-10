@@ -347,15 +347,17 @@ mod deploy_success {
         let ci1 = make_cfg_inst(f.fixture_path("a.json"));
         let ci2 = make_cfg_inst(f.fixture_path("b.yaml"));
         let ci3 = make_cfg_inst(f.fixture_path("nested/c.toml"));
+        let ci4 = make_cfg_inst(f.fixture_path("a/super/nested/file.txt"));
         f.seed_cfg_inst(&ci1, "content-a".into()).await;
         f.seed_cfg_inst(&ci2, "content-b".into()).await;
         f.seed_cfg_inst(&ci3, "content-c".into()).await;
+        f.seed_cfg_inst(&ci4, "content-d".into()).await;
 
         let dpl = make_deployment(
             "dpl-multi",
             DplTarget::Deployed,
             DplActivity::Queued,
-            vec![ci1.id.clone(), ci2.id.clone(), ci3.id.clone()],
+            vec![ci1.id.clone(), ci2.id.clone(), ci3.id.clone(), ci4.id.clone()],
         );
         f.seed_deployment(&dpl).await;
 
@@ -386,6 +388,10 @@ mod deploy_success {
         assert_eq!(
             File::new(&ci3.filepath).read_string().await.unwrap(),
             "content-c"
+        );
+        assert_eq!(
+            File::new(&ci4.filepath).read_string().await.unwrap(),
+            "content-d"
         );
     }
 
@@ -425,6 +431,8 @@ mod deploy_success {
 
 mod deploy_errors {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn empty_config_instances() {
@@ -510,6 +518,54 @@ mod deploy_errors {
             }
         );
         assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn config_instance_write_permission_denied() {
+        let f = Fixture::new().await;
+
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        std::fs::set_permissions(locked_dir.path(), std::fs::Permissions::from_mode(0o555))
+            .unwrap();
+
+        let ci = make_cfg_inst(locked_dir.file("config.json").path().display().to_string());
+        f.seed_cfg_inst(&ci, r#"{"locked": true}"#.into()).await;
+
+        let dpl = make_deployment(
+            "dpl-inaccessible-dest",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        std::fs::set_permissions(locked_dir.path(), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-inaccessible-dest".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(
+            outcomes[0].error,
+            Some(DeployErr::FileSysErr(
+                filesys::FileSysErr::PermissionDeniedErr(_)
+            ))
+        ));
     }
 
     #[tokio::test]

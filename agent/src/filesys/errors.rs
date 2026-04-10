@@ -199,7 +199,7 @@ pub struct MoveFileErr {
 impl crate::errors::Error for MoveFileErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("permission denied for path '{file}'; ensure the destination directory is writable by the miru user, e.g. 'sudo chgrp miru <dir> && sudo chmod g+w <dir>': {source}")]
+#[error("permission denied for path '{file}'; ensure the destination *directory* is writable by the miru user or miru group: {source}")]
 pub struct PermissionDeniedErr {
     pub source: Box<std::io::Error>,
     pub file: File,
