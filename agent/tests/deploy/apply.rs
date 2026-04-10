@@ -2,7 +2,7 @@
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
-use miru_agent::filesys::{self, Overwrite, PathExt};
+use miru_agent::filesys::{self, File, Overwrite, PathExt};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage;
 
@@ -45,7 +45,7 @@ impl Fixture {
 
     /// Build an absolute filepath under the fixture's temp_dir for use as a
     /// `ConfigInstance.filepath` value.
-    fn abs_path(&self, rel: &str) -> String {
+    fn fixture_path(&self, rel: &str) -> String {
         self.temp_dir.path().join(rel).display().to_string()
     }
 
@@ -127,9 +127,9 @@ impl Fixture {
 
 // ================================= HELPERS ===================================== //
 
-fn make_cfg_inst(f: &Fixture, rel_path: &str) -> ConfigInstance {
+fn make_cfg_inst(filepath: String) -> ConfigInstance {
     ConfigInstance {
-        filepath: f.abs_path(rel_path),
+        filepath,
         ..Default::default()
     }
 }
@@ -195,8 +195,8 @@ mod find_target_deployed {
     async fn conflicting_deployments() {
         let f = Fixture::new().await;
 
-        let ci1 = make_cfg_inst(&f, "a.json");
-        let ci2 = make_cfg_inst(&f, "b.json");
+        let ci1 = make_cfg_inst(f.fixture_path("a.json"));
+        let ci2 = make_cfg_inst(f.fixture_path("b.json"));
         f.seed_cfg_inst(&ci1, "{}".into()).await;
         f.seed_cfg_inst(&ci2, "{}".into()).await;
 
@@ -250,7 +250,7 @@ mod find_target_deployed {
     async fn failed_deployment_does_not_conflict_with_healthy() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "healthy.json");
+        let ci = make_cfg_inst(f.fixture_path("healthy.json"));
         f.seed_cfg_inst(&ci, "healthy-content".into()).await;
 
         // healthy: target=Deployed, activity=Queued -> should be picked and deployed
@@ -290,7 +290,7 @@ mod find_target_deployed {
             }
         );
 
-        let file = filesys::File::new(&ci.filepath);
+        let file = File::new(&ci.filepath);
         assert!(
             file.exists(),
             "healthy deployment file should exist on disk"
@@ -306,7 +306,7 @@ mod deploy_success {
     async fn single_queued_to_deployed() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "test/filepath.json");
+        let ci = make_cfg_inst(f.fixture_path("test/filepath.json"));
         f.seed_cfg_inst(&ci, r#"{"speed": 4}"#.into()).await;
 
         let dpl = make_deployment(
@@ -334,7 +334,7 @@ mod deploy_success {
         );
 
         // verify file on disk
-        let file = filesys::File::new(&ci.filepath);
+        let file = File::new(&ci.filepath);
         assert!(file.exists(), "deployed file should exist on disk");
         let content = file.read_string().await.unwrap();
         assert_eq!(content, r#"{"speed": 4}"#);
@@ -344,9 +344,9 @@ mod deploy_success {
     async fn multiple_config_instances() {
         let f = Fixture::new().await;
 
-        let ci1 = make_cfg_inst(&f, "a.json");
-        let ci2 = make_cfg_inst(&f, "b.yaml");
-        let ci3 = make_cfg_inst(&f, "nested/c.toml");
+        let ci1 = make_cfg_inst(f.fixture_path("a.json"));
+        let ci2 = make_cfg_inst(f.fixture_path("b.yaml"));
+        let ci3 = make_cfg_inst(f.fixture_path("nested/c.toml"));
         f.seed_cfg_inst(&ci1, "content-a".into()).await;
         f.seed_cfg_inst(&ci2, "content-b".into()).await;
         f.seed_cfg_inst(&ci3, "content-c".into()).await;
@@ -376,24 +376,15 @@ mod deploy_success {
         );
 
         assert_eq!(
-            filesys::File::new(&ci1.filepath)
-                .read_string()
-                .await
-                .unwrap(),
+            File::new(&ci1.filepath).read_string().await.unwrap(),
             "content-a"
         );
         assert_eq!(
-            filesys::File::new(&ci2.filepath)
-                .read_string()
-                .await
-                .unwrap(),
+            File::new(&ci2.filepath).read_string().await.unwrap(),
             "content-b"
         );
         assert_eq!(
-            filesys::File::new(&ci3.filepath)
-                .read_string()
-                .await
-                .unwrap(),
+            File::new(&ci3.filepath).read_string().await.unwrap(),
             "content-c"
         );
     }
@@ -402,7 +393,7 @@ mod deploy_success {
     async fn from_archived_activity() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "re-deploy.json");
+        let ci = make_cfg_inst(f.fixture_path("re-deploy.json"));
         f.seed_cfg_inst(&ci, "re-deployed".into()).await;
 
         // target=Deployed, activity=Archived -> FSM: Deploy
@@ -491,7 +482,7 @@ mod deploy_errors {
     async fn missing_content() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "test/filepath.json");
+        let ci = make_cfg_inst(f.fixture_path("test/filepath.json"));
         // seed metadata but NOT content
         f.seed_cfg_inst_meta_only(&ci).await;
 
@@ -602,7 +593,7 @@ mod remove_action {
     async fn archived_target_deployed_activity() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "remove-me.json");
+        let ci = make_cfg_inst(f.fixture_path("remove-me.json"));
         f.seed_cfg_inst(&ci, r#"{"old": true}"#.into()).await;
 
         // deploy first so file exists on disk
@@ -624,7 +615,7 @@ mod remove_action {
         );
         f.seed_deployment(&dpl).await;
 
-        let dest = filesys::File::new(&ci.filepath);
+        let dest = File::new(&ci.filepath);
         assert!(dest.path().exists(), "file should exist before removal");
 
         let outcomes = f.apply().await.unwrap();
@@ -652,7 +643,7 @@ mod remove_action {
     async fn staged_target_deployed_activity() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "staged-remove.json");
+        let ci = make_cfg_inst(f.fixture_path("staged-remove.json"));
         f.seed_cfg_inst(&ci, r#"{"staged": true}"#.into()).await;
 
         // deploy first
@@ -674,7 +665,7 @@ mod remove_action {
         );
         f.seed_deployment(&dpl).await;
 
-        let dest = filesys::File::new(&ci.filepath);
+        let dest = File::new(&ci.filepath);
         assert!(dest.path().exists(), "file should exist before removal");
 
         let outcomes = f.apply().await.unwrap();
@@ -774,11 +765,11 @@ mod remove_action {
         let f = Fixture::new().await;
 
         // shared config instance used by both old and new deployment
-        let ci_shared = make_cfg_inst(&f, "shared.json");
+        let ci_shared = make_cfg_inst(f.fixture_path("shared.json"));
         f.seed_cfg_inst(&ci_shared, r#"{"shared": true}"#.into())
             .await;
         // config instance only in the old deployment
-        let ci_old = make_cfg_inst(&f, "old-only.json");
+        let ci_old = make_cfg_inst(f.fixture_path("old-only.json"));
         f.seed_cfg_inst(&ci_old, r#"{"old": true}"#.into()).await;
 
         // deploy old deployment first so both files exist on disk
@@ -808,8 +799,8 @@ mod remove_action {
         f.seed_deployment(&new_dpl).await;
         f.seed_deployment(&old_dpl).await;
 
-        let shared_dest = filesys::File::new(&ci_shared.filepath);
-        let old_dest = filesys::File::new(&ci_old.filepath);
+        let shared_dest = File::new(&ci_shared.filepath);
+        let old_dest = File::new(&ci_old.filepath);
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 2);
@@ -857,7 +848,7 @@ mod remove_action {
     async fn already_removing_transitions_to_archived() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "removing.json");
+        let ci = make_cfg_inst(f.fixture_path("removing.json"));
         f.seed_cfg_inst(&ci, r#"{"removing": true}"#.into()).await;
 
         // deploy first so file exists on disk
@@ -880,7 +871,7 @@ mod remove_action {
         };
         f.seed_deployment(&dpl).await;
 
-        let dest = filesys::File::new(&ci.filepath);
+        let dest = File::new(&ci.filepath);
         assert!(dest.path().exists(), "file should exist before removal");
 
         let outcomes = f.apply().await.unwrap();
@@ -908,7 +899,7 @@ mod remove_action {
     async fn remove_delete_error_logs_and_archives() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "locked/config.json");
+        let ci = make_cfg_inst(f.fixture_path("locked/config.json"));
         f.seed_cfg_inst(&ci, r#"{"v": 1}"#.into()).await;
 
         // deploy first so file exists on disk
@@ -922,7 +913,7 @@ mod remove_action {
         f.apply().await.unwrap();
 
         // lock the parent directory so delete fails
-        let dest = filesys::File::new(&ci.filepath);
+        let dest = File::new(&ci.filepath);
         let parent = dest.path().parent().unwrap().to_path_buf();
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
 
@@ -1102,7 +1093,7 @@ mod no_action {
     async fn steady_state_deployed_is_noop() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "already-deployed.json");
+        let ci = make_cfg_inst(f.fixture_path("already-deployed.json"));
         f.seed_cfg_inst(&ci, "content".into()).await;
 
         // target=Deployed, activity=Deployed -> FSM: None (already at target)
@@ -1211,7 +1202,7 @@ mod ordering_and_composition {
     async fn deployed_target_first_then_actionables() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "active.json");
+        let ci = make_cfg_inst(f.fixture_path("active.json"));
         f.seed_cfg_inst(&ci, "active-content".into()).await;
 
         let dpl_active = make_deployment(
@@ -1264,7 +1255,7 @@ mod ordering_and_composition {
     async fn stale_removed_alongside_active() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(&f, "active.json");
+        let ci = make_cfg_inst(f.fixture_path("active.json"));
         f.seed_cfg_inst(&ci, "active-content".into()).await;
 
         let active = make_deployment(

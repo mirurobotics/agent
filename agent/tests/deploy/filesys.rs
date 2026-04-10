@@ -122,10 +122,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, content);
     }
 
@@ -149,10 +146,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, new_content);
     }
 
@@ -331,10 +325,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, content);
     }
 
@@ -355,10 +346,7 @@ pub mod deploy_func {
         f.deploy(&deployment).await.unwrap();
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, content);
     }
 
@@ -376,10 +364,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, content);
     }
 
@@ -399,10 +384,7 @@ pub mod deploy_func {
         let deployment = f.new_deployment(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath)
-            .read_string()
-            .await
-            .unwrap();
+        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, content);
     }
 
@@ -505,15 +487,9 @@ pub mod deploy_func {
         }
 
         // a and b should be rolled back to old content
-        let a_actual = filesys::File::new(&a_path)
-            .read_string()
-            .await
-            .unwrap();
+        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
         assert_eq!(a_actual, "old_a");
-        let b_actual = filesys::File::new(&b_path)
-            .read_string()
-            .await
-            .unwrap();
+        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
         assert_eq!(b_actual, "old_b");
 
         // c should not exist
@@ -663,15 +639,9 @@ pub mod deploy_func {
         let deployment = f.new_deployment(&[a_cfg, b_cfg]);
         f.deploy(&deployment).await.unwrap();
 
-        let a_actual = filesys::File::new(&a_path)
-            .read_string()
-            .await
-            .unwrap();
+        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
         assert_eq!(a_actual, "new_a");
-        let b_actual = filesys::File::new(&b_path)
-            .read_string()
-            .await
-            .unwrap();
+        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
         assert_eq!(b_actual, "new_b");
 
         let leftover = backup_siblings_in(f.temp_dir.path());
@@ -861,10 +831,7 @@ pub mod deploy_func {
         }
 
         // Existed snapshot was restored via rename-back
-        let a_actual = filesys::File::new(&a_path)
-            .read_string()
-            .await
-            .unwrap();
+        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
         assert_eq!(a_actual, "old_a");
 
         // DidNotExist snapshot was rolled back via delete
@@ -933,10 +900,7 @@ pub mod deploy_func {
         }
 
         // c.json content must be unchanged
-        let c_actual = filesys::File::new(&c_path)
-            .read_string()
-            .await
-            .unwrap();
+        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
         assert_eq!(c_actual, "old");
 
         // no backup siblings leaked next to c.json
