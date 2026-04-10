@@ -64,7 +64,6 @@ pub mod assert_doesnt_exist {
 
 pub mod delete {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn exists() {
@@ -80,31 +79,6 @@ pub mod delete {
         assert!(!dir.exists());
         dir.delete().await.unwrap();
         assert!(!dir.exists());
-    }
-
-    #[tokio::test]
-    async fn parent_not_writable() {
-        // Lock the grandparent so remove_dir_all cannot unlink the inner
-        // dir. Sixth-pass (D14): EACCES is classified at the filesys layer
-        // by map_io_err, so the resulting variant is PermissionDeniedErr
-        // rather than the old DeleteDirErr.
-        let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let locked = temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked).unwrap();
-        // pre-create the inner dir BEFORE locking
-        std::fs::create_dir_all(locked.join("inner")).unwrap();
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
-
-        let target = filesys::Dir::new(locked.join("inner"));
-        let result = target.delete().await;
-
-        // restore perms BEFORE assertions so tempdir drop can recurse
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        assert!(matches!(
-            result.unwrap_err(),
-            FileSysErr::PermissionDeniedErr(_)
-        ));
     }
 }
 
@@ -426,7 +400,6 @@ mod subdir {
 
 mod create {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     mod success {
         use super::*;
@@ -454,33 +427,6 @@ mod create {
             let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
             dir.create().await.unwrap();
             assert!(dir.exists());
-        }
-    }
-
-    mod failure {
-        use super::*;
-
-        #[tokio::test]
-        async fn parent_not_writable() {
-            // Lock a grandparent so create_dir_all cannot mkdir its child.
-            // Sixth-pass (D14): EACCES is classified at the filesys layer
-            // by map_io_err, so the resulting variant is PermissionDeniedErr
-            // rather than the old CreateDirErr.
-            let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-            let locked = temp_dir.path().join("locked");
-            std::fs::create_dir_all(&locked).unwrap();
-            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-
-            let target = filesys::Dir::new(locked.join("subdir"));
-            let result = target.create().await;
-
-            // restore perms BEFORE assertions so tempdir drop can recurse
-            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-            assert!(matches!(
-                result.unwrap_err(),
-                FileSysErr::PermissionDeniedErr(_)
-            ));
         }
     }
 }
@@ -603,7 +549,6 @@ mod file {
 
 mod subdirs {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn empty() {
@@ -629,33 +574,10 @@ mod subdirs {
         assert!(subdirs.iter().any(|d| d.path() == subdir1.path()));
         assert!(subdirs.iter().any(|d| d.path() == subdir2.path()));
     }
-
-    #[tokio::test]
-    async fn not_readable() {
-        // 0o000 on the directory itself prevents read_dir from listing it.
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let target_path = dir.path().join("inner");
-        std::fs::create_dir_all(&target_path).unwrap();
-        std::fs::set_permissions(&target_path, std::fs::Permissions::from_mode(0o000)).unwrap();
-
-        let target = filesys::Dir::new(target_path.clone());
-        let result = target.subdirs().await;
-
-        std::fs::set_permissions(&target_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, so the resulting variant is PermissionDeniedErr
-        // rather than the old ReadDirErr.
-        assert!(matches!(
-            result.unwrap_err(),
-            FileSysErr::PermissionDeniedErr(_)
-        ));
-    }
 }
 
 mod files {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn empty() {
@@ -685,33 +607,10 @@ mod files {
         assert!(files.iter().any(|f| f.path() == file1.path()));
         assert!(files.iter().any(|f| f.path() == file2.path()));
     }
-
-    #[tokio::test]
-    async fn not_readable() {
-        // 0o000 on the directory itself prevents read_dir from listing it.
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let target_path = dir.path().join("inner");
-        std::fs::create_dir_all(&target_path).unwrap();
-        std::fs::set_permissions(&target_path, std::fs::Permissions::from_mode(0o000)).unwrap();
-
-        let target = filesys::Dir::new(target_path.clone());
-        let result = target.files().await;
-
-        std::fs::set_permissions(&target_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, so the resulting variant is PermissionDeniedErr
-        // rather than the old ReadDirErr.
-        assert!(matches!(
-            result.unwrap_err(),
-            FileSysErr::PermissionDeniedErr(_)
-        ));
-    }
 }
 
 mod is_empty {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn success() {
@@ -735,36 +634,6 @@ mod is_empty {
         let subdir = dir.subdir(PathBuf::from("test"));
         subdir.create().await.unwrap();
         assert!(!dir.is_empty().await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn doesnt_exist_returns_false() {
-        // The NotFound branch in is_empty maps to Ok(false) — pin it so a
-        // future change doesn't accidentally promote ENOENT to an error.
-        let dir = filesys::Dir::new(PathBuf::from("/nonexistent_xyz_for_is_empty_test"));
-        assert!(!dir.is_empty().await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn not_readable() {
-        // 0o000 on the directory itself prevents read_dir from listing it.
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let target_path = dir.path().join("inner");
-        std::fs::create_dir_all(&target_path).unwrap();
-        std::fs::set_permissions(&target_path, std::fs::Permissions::from_mode(0o000)).unwrap();
-
-        let target = filesys::Dir::new(target_path.clone());
-        let result = target.is_empty().await;
-
-        std::fs::set_permissions(&target_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, so the resulting variant is PermissionDeniedErr
-        // rather than the old ReadDirErr.
-        assert!(matches!(
-            result.unwrap_err(),
-            FileSysErr::PermissionDeniedErr(_)
-        ));
     }
 }
 

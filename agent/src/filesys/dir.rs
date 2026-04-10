@@ -1,6 +1,5 @@
 // standard crates
 use std::fmt::Display;
-use std::io;
 use std::path::PathBuf;
 
 // internal crates
@@ -66,22 +65,13 @@ impl Dir {
     }
 
     pub async fn create_temp_dir(prefix: &str) -> Result<Dir, FileSysErr> {
-        // Classify EACCES/EROFS against the system temp root, which is
-        // tempfile::Builder's parent directory. This gives operators a
-        // meaningful path in the error message when the process can't
-        // write to /tmp (e.g. under a systemd PrivateTmp=yes sandbox whose
-        // tmp mount is read-only, or a container whose /tmp is not
-        // writable by the miru user).
-        let temp_root = File::new(std::env::temp_dir());
         let temp_dir = tempfile::Builder::new()
             .prefix(prefix)
             .tempdir()
             .map_err(|e| {
-                File::map_io_err(e, &temp_root, |e| {
-                    FileSysErr::CreateTmpDirErr(CreateTmpDirErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
+                FileSysErr::CreateTmpDirErr(CreateTmpDirErr {
+                    source: Box::new(e),
+                    trace: trace!(),
                 })
             })?;
         Ok(Dir::new(temp_dir.keep()))
@@ -367,67 +357,42 @@ impl Dir {
     }
 }
 
-/// Build a synthetic `File` whose path is this directory's path, so it can be
-/// handed to `File::map_io_err` as the `file` field of the friendly EACCES /
-/// EROFS variants. The `Display` of a directory path inside a `File` wrapper
-/// still renders the directory path — it's a naming artifact, not a semantic
-/// one — and keeping the classifier's signature uniform across file.rs and
-/// dir.rs avoids a parallel `map_io_err_for_dir` helper.
-fn dir_as_file(dir: &Dir) -> File {
-    File::new(dir.path().clone())
+fn read_dir_err(dir: Dir, e: std::io::Error) -> FileSysErr {
+    FileSysErr::ReadDirErr(ReadDirErr {
+        source: Box::new(e),
+        dir,
+        trace: trace!(),
+    })
 }
 
-fn read_dir_err(dir: Dir, e: io::Error) -> FileSysErr {
-    let file = dir_as_file(&dir);
-    File::map_io_err(e, &file, |e| {
-        FileSysErr::ReadDirErr(ReadDirErr {
-            source: Box::new(e),
-            dir,
+fn create_dir_err(dir: Dir, e: std::io::Error) -> FileSysErr {
+    FileSysErr::CreateDirErr(CreateDirErr {
+        source: Box::new(e),
+        dir,
+        trace: trace!(),
+    })
+}
+
+fn delete_dir_err(dir: Dir, e: std::io::Error) -> FileSysErr {
+    FileSysErr::DeleteDirErr(DeleteDirErr {
+        source: Box::new(e),
+        dir,
+        trace: trace!(),
+    })
+}
+
+fn move_dir_err(src_dir: Dir, dest_dir: Dir, e: std::io::Error) -> FileSysErr {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+            path: src_dir.path().clone(),
             trace: trace!(),
         })
-    })
-}
-
-fn create_dir_err(dir: Dir, e: io::Error) -> FileSysErr {
-    let file = dir_as_file(&dir);
-    File::map_io_err(e, &file, |e| {
-        FileSysErr::CreateDirErr(CreateDirErr {
+    } else {
+        FileSysErr::MoveDirErr(MoveDirErr {
             source: Box::new(e),
-            dir,
+            src_dir,
+            dest_dir,
             trace: trace!(),
         })
-    })
-}
-
-fn delete_dir_err(dir: Dir, e: io::Error) -> FileSysErr {
-    let file = dir_as_file(&dir);
-    File::map_io_err(e, &file, |e| {
-        FileSysErr::DeleteDirErr(DeleteDirErr {
-            source: Box::new(e),
-            dir,
-            trace: trace!(),
-        })
-    })
-}
-
-fn move_dir_err(src_dir: Dir, dest_dir: Dir, e: io::Error) -> FileSysErr {
-    // Use dest_dir as the reporting path for EACCES/EROFS since the failure
-    // mode these variants care about (unwritable target) is a property of the
-    // destination, not the source.
-    let file = dir_as_file(&dest_dir);
-    File::map_io_err(e, &file, |e| {
-        if e.kind() == io::ErrorKind::NotFound {
-            FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                path: src_dir.path().clone(),
-                trace: trace!(),
-            })
-        } else {
-            FileSysErr::MoveDirErr(MoveDirErr {
-                source: Box::new(e),
-                src_dir,
-                dest_dir,
-                trace: trace!(),
-            })
-        }
-    })
+    }
 }
