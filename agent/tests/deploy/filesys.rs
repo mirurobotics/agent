@@ -409,19 +409,11 @@ pub mod deploy_func {
         // restore permissions BEFORE assertions so tempdir drop can recurse
         std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, which produces FileSysErr::PermissionDeniedErr. The
-        // friendly "permission denied for path ..." message lives on that
-        // inner variant's Display and propagates through DeployErr::FileSysErr.
-        match &result {
-            Err(DeployErr::FileSysErr(FileSysErr::PermissionDeniedErr(e))) => {
-                assert!(
-                    e.to_string().contains("permission denied for path"),
-                    "expected friendly EACCES message on inner PermissionDeniedErr, got: {e}"
-                );
-            }
-            other => panic!("expected FileSysErr(PermissionDeniedErr), got {other:?}"),
-        }
+        // EACCES on atomic write surfaces as AtomicWriteFileErr.
+        assert!(
+            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
+        );
         assert!(
             !filesys::File::new(&filepath).exists(),
             "file should not exist in locked dir"
@@ -472,19 +464,11 @@ pub mod deploy_func {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, which produces FileSysErr::PermissionDeniedErr. The
-        // friendly "permission denied for path ..." message lives on that
-        // inner variant's Display and propagates through DeployErr::FileSysErr.
-        match &result {
-            Err(DeployErr::FileSysErr(FileSysErr::PermissionDeniedErr(e))) => {
-                assert!(
-                    e.to_string().contains("permission denied for path"),
-                    "expected friendly EACCES message on inner PermissionDeniedErr, got: {e}"
-                );
-            }
-            other => panic!("expected FileSysErr(PermissionDeniedErr), got {other:?}"),
-        }
+        // EACCES on atomic write surfaces as AtomicWriteFileErr.
+        assert!(
+            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
+        );
 
         // a and b should be rolled back to old content
         let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
@@ -737,19 +721,11 @@ pub mod deploy_func {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, which produces FileSysErr::PermissionDeniedErr. The
-        // friendly "permission denied for path ..." message lives on that
-        // inner variant's Display and propagates through DeployErr::FileSysErr.
-        match &result {
-            Err(DeployErr::FileSysErr(FileSysErr::PermissionDeniedErr(e))) => {
-                assert!(
-                    e.to_string().contains("permission denied for path"),
-                    "expected friendly EACCES message on inner PermissionDeniedErr, got: {e}"
-                );
-            }
-            other => panic!("expected FileSysErr(PermissionDeniedErr), got {other:?}"),
-        }
+        // EACCES on atomic write surfaces as AtomicWriteFileErr.
+        assert!(
+            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
+        );
 
         // first two destinations were created then rolled back via delete
         assert!(
@@ -816,19 +792,11 @@ pub mod deploy_func {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, which produces FileSysErr::PermissionDeniedErr. The
-        // friendly "permission denied for path ..." message lives on that
-        // inner variant's Display and propagates through DeployErr::FileSysErr.
-        match &result {
-            Err(DeployErr::FileSysErr(FileSysErr::PermissionDeniedErr(e))) => {
-                assert!(
-                    e.to_string().contains("permission denied for path"),
-                    "expected friendly EACCES message on inner PermissionDeniedErr, got: {e}"
-                );
-            }
-            other => panic!("expected FileSysErr(PermissionDeniedErr), got {other:?}"),
-        }
+        // EACCES on atomic write surfaces as AtomicWriteFileErr.
+        assert!(
+            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))),
+            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
+        );
 
         // Existed snapshot was restored via rename-back
         let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
@@ -884,20 +852,11 @@ pub mod deploy_func {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // Exercises map_io_err on File::copy_to via snapshot().
-        // Sixth-pass (D14): EACCES is classified at the filesys layer by
-        // map_io_err, which produces FileSysErr::PermissionDeniedErr. The
-        // friendly "permission denied for path ..." message lives on that
-        // inner variant's Display and propagates through DeployErr::FileSysErr.
-        match &result {
-            Err(DeployErr::FileSysErr(FileSysErr::PermissionDeniedErr(e))) => {
-                assert!(
-                    e.to_string().contains("permission denied for path"),
-                    "expected friendly EACCES message on inner PermissionDeniedErr, got: {e}"
-                );
-            }
-            other => panic!("expected FileSysErr(PermissionDeniedErr), got {other:?}"),
-        }
+        // EACCES on copy_to (snapshot backup) surfaces as CopyFileErr.
+        assert!(
+            matches!(&result, Err(DeployErr::FileSysErr(FileSysErr::CopyFileErr(_)))),
+            "expected FileSysErr(CopyFileErr), got {result:?}",
+        );
 
         // c.json content must be unchanged
         let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();

@@ -563,7 +563,7 @@ mod deploy_errors {
         assert!(matches!(
             outcomes[0].error,
             Some(DeployErr::FileSysErr(
-                filesys::FileSysErr::PermissionDeniedErr(_)
+                filesys::FileSysErr::AtomicWriteFileErr(_)
             ))
         ));
     }
