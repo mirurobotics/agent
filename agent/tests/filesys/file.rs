@@ -369,6 +369,79 @@ pub mod copy_to {
         assert!(dest.exists());
         assert_eq!(dest.read_string().await.unwrap(), "nested");
     }
+
+    #[tokio::test]
+    async fn copy_with_sync_yes() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("synced", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+
+        let opts = CopyOptions {
+            overwrite: Overwrite::Deny,
+            sync: filesys::Sync::Yes,
+        };
+        src.copy_to(&dest, opts).await.unwrap();
+        assert_eq!(dest.read_string().await.unwrap(), "synced");
+    }
+
+    #[tokio::test]
+    async fn copy_with_sync_no() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("unsynced", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+
+        let opts = CopyOptions {
+            overwrite: Overwrite::Deny,
+            sync: filesys::Sync::No,
+        };
+        src.copy_to(&dest, opts).await.unwrap();
+        assert_eq!(dest.read_string().await.unwrap(), "unsynced");
+    }
+
+    #[tokio::test]
+    async fn overwrite_allow_with_sync_no() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("new", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+        dest.write_string("old", WriteOptions::default())
+            .await
+            .unwrap();
+
+        src.copy_to(&dest, CopyOptions::OVERWRITE).await.unwrap();
+        assert_eq!(dest.read_string().await.unwrap(), "new");
+    }
+
+    #[tokio::test]
+    async fn overwrite_deny_with_sync_yes_rejects_existing() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let src = dir.file("src-file");
+        src.write_string("src", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+        dest.write_string("dest", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let opts = CopyOptions {
+            overwrite: Overwrite::Deny,
+            sync: filesys::Sync::Yes,
+        };
+        assert!(matches!(
+            src.copy_to(&dest, opts).await.unwrap_err(),
+            FileSysErr::InvalidFileOverwriteErr { .. }
+        ));
+        assert_eq!(dest.read_string().await.unwrap(), "dest");
+    }
 }
 
 pub mod move_to {
