@@ -432,6 +432,87 @@ mod deploy_success {
             }
         );
     }
+
+    #[tokio::test]
+    async fn from_removing_activity() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst("/re-deploy-removing.json");
+        f.seed_cfg_inst(&ci, "re-deployed-from-removing".into())
+            .await;
+
+        // target=Deployed, activity=Removing -> FSM: Deploy
+        let dpl = make_deployment(
+            "dpl-removing-redeploy",
+            DplTarget::Deployed,
+            DplActivity::Removing,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-removing-redeploy".into(),
+                activity: DplActivity::Deployed,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+
+        let file = f.target_dir.file("re-deploy-removing.json");
+        assert!(file.exists(), "deployed file should exist on disk");
+        assert_eq!(
+            file.read_string().await.unwrap(),
+            "re-deployed-from-removing"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_clears_retrying_state() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst("/recovery.json");
+        f.seed_cfg_inst(&ci, "recovered-content".into()).await;
+
+        // target=Deployed, activity=Queued, error_status=Retrying, attempts=3
+        // cooldown_ends_at defaults to UNIX_EPOCH (already expired) so FSM sees Deploy
+        let mut dpl = make_deployment(
+            "dpl-recovery",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        dpl.error_status = DplErrStatus::Retrying;
+        dpl.attempts = 3;
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-recovery".into(),
+                activity: DplActivity::Deployed,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+
+        let file = f.target_dir.file("recovery.json");
+        assert!(file.exists(), "recovered deployment file should exist");
+        assert_eq!(file.read_string().await.unwrap(), "recovered-content");
+    }
 }
 
 mod deploy_errors {
@@ -660,6 +741,36 @@ mod remove_action {
             ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-staged-remove".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn staged_target_removing_activity() {
+        let f = Fixture::new().await;
+
+        // target=Staged, activity=Removing -> FSM: Remove
+        let dpl = Deployment {
+            id: "dpl-staged-removing".to_string(),
+            target_status: DplTarget::Staged,
+            activity_status: DplActivity::Removing,
+            ..Default::default()
+        };
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-staged-removing".into(),
                 activity: DplActivity::Archived,
                 error_status: DplErrStatus::None,
                 attempts: 0,
@@ -1047,6 +1158,63 @@ mod ordering_and_composition {
             actual.id = String::new(); // normalize for comparison
             assert_eq!(actual, stale_expected);
         }
+    }
+
+    #[tokio::test]
+    async fn target_deploy_error_does_not_block_actionables() {
+        let f = Fixture::new().await;
+
+        // target deployment with empty cfg_insts -> will fail with EmptyConfigInstances
+        let target = make_deployment(
+            "dpl-target-fail",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![],
+        );
+        // stale deployment that should still be processed (removed/archived)
+        let stale = make_deployment(
+            "dpl-stale",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        );
+        f.seed_deployment(&target).await;
+        f.seed_deployment(&stale).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // both deployments are processed: target fails, stale is archived
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-target-fail".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(
+            outcomes[0].error,
+            Some(DeployErr::EmptyConfigInstances(_))
+        ));
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[1]),
+            ComparableOutcome {
+                id: "dpl-stale".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
     }
 
     #[tokio::test]
