@@ -283,14 +283,7 @@ async fn remove_cfg_insts(
         if keeps.contains(&dest) {
             continue;
         }
-        dest.delete().await.map_err(|e| {
-            error!(
-                "failed to remove config instance {} at {}: {e}",
-                cfg_inst.id,
-                dest.path().display()
-            );
-            DeployErr::from(e)
-        })?;
+        dest.delete().await?;
     }
     Ok(())
 }
