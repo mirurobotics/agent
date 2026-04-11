@@ -165,6 +165,12 @@ impl From<GenericErr> for DeployErr {
     }
 }
 
+impl From<DuplicateFilepathErr> for DeployErr {
+    fn from(e: DuplicateFilepathErr) -> Self {
+        Self::DuplicateFilepath(e)
+    }
+}
+
 impl From<BackupAccessDeniedErr> for DeployErr {
     fn from(e: BackupAccessDeniedErr) -> Self {
         Self::BackupAccessDenied(e)

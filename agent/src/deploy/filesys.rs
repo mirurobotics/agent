@@ -68,12 +68,13 @@ fn validate_cfg_insts(cfg_insts: &[models::ConfigInstance]) -> Result<(), Deploy
     let mut seen: HashMap<String, String> = HashMap::new();
 
     for cfg_inst in cfg_insts {
-        validate_filepath(&filesys::File::new(&cfg_inst.filepath))?;
+        let file = filesys::File::new(&cfg_inst.filepath);
+        validate_filepath(&file)?;
 
-        if let Some(first_cfg_inst_id) = seen.insert(cfg_inst.filepath.clone(), cfg_inst.id.clone())
-        {
+        let normalized_key = file.path().display().to_string();
+        if let Some(first_cfg_inst_id) = seen.insert(normalized_key.clone(), cfg_inst.id.clone()) {
             return Err(DeployErr::DuplicateFilepath(DuplicateFilepathErr {
-                filepath: cfg_inst.filepath.clone(),
+                filepath: normalized_key,
                 cfg_inst_ids: vec![first_cfg_inst_id, cfg_inst.id.clone()],
                 trace: trace!(),
             }));
@@ -127,14 +128,16 @@ fn is_access_denied(kind: std::io::ErrorKind) -> bool {
 
 fn map_write_err(cfg_inst: &models::ConfigInstance, err: FileSysErr) -> DeployErr {
     match err {
-        FileSysErr::AtomicWriteFileErr(atomic_write_err) if is_access_denied(atomic_write_err.source.kind()) => {
-                WriteAccessDeniedErr {
-                    cfg_inst_id: cfg_inst.id.clone(),
-                    filepath: cfg_inst.filepath.clone(),
-                    source: atomic_write_err.source,
-                    trace: trace!(),
-                }
-                .into()
+        FileSysErr::AtomicWriteFileErr(atomic_write_err)
+            if is_access_denied(atomic_write_err.source.kind()) =>
+        {
+            WriteAccessDeniedErr {
+                cfg_inst_id: cfg_inst.id.clone(),
+                filepath: cfg_inst.filepath.clone(),
+                source: atomic_write_err.source,
+                trace: trace!(),
+            }
+            .into()
         }
         _ => err.into(),
     }
@@ -202,21 +205,19 @@ enum Snapshot {
 }
 
 async fn snapshot(dst: &filesys::File, backup: &filesys::File) -> Result<Snapshot, FileSysErr> {
-    match dst.copy_to(backup, filesys::CopyOptions::OVERWRITE_SYNC)
-        .await {
-            Ok(()) => Ok(Snapshot::Existed {
-                dst: dst.clone(),
-                backup: backup.clone(),
-            }),
-            Err(e) => match e {
-                FileSysErr::PathDoesNotExistErr(_) => {
-                    Ok(Snapshot::DidNotExist {
-                        dst: dst.clone(),
-                    })
-                }
-                e => Err(e),
-            },
-        }
+    match dst
+        .copy_to(backup, filesys::CopyOptions::OVERWRITE_SYNC)
+        .await
+    {
+        Ok(()) => Ok(Snapshot::Existed {
+            dst: dst.clone(),
+            backup: backup.clone(),
+        }),
+        Err(e) => match e {
+            FileSysErr::PathDoesNotExistErr(_) => Ok(Snapshot::DidNotExist { dst: dst.clone() }),
+            e => Err(e),
+        },
+    }
 }
 
 fn backup_location(dst: &filesys::File) -> Result<filesys::File, FileSysErr> {
@@ -270,24 +271,28 @@ pub async fn remove(
     let cfg_insts = read_cfg_insts(storage.meta, &deployment.config_instance_ids).await?;
     validate_cfg_insts(&cfg_insts)?;
 
-    remove_cfg_insts(&cfg_insts, keeps).await;
-    Ok(())
+    remove_cfg_insts(&cfg_insts, keeps).await
 }
 
-async fn remove_cfg_insts(cfg_insts: &[models::ConfigInstance], keeps: &[filesys::File]) {
+async fn remove_cfg_insts(
+    cfg_insts: &[models::ConfigInstance],
+    keeps: &[filesys::File],
+) -> Result<(), DeployErr> {
     for cfg_inst in cfg_insts {
         let dest = filesys::File::new(&cfg_inst.filepath);
         if keeps.contains(&dest) {
             continue;
         }
-        if let Err(e) = dest.delete().await {
+        dest.delete().await.map_err(|e| {
             error!(
                 "failed to remove config instance {} at {}: {e}",
                 cfg_inst.id,
                 dest.path().display()
             );
-        }
+            DeployErr::from(e)
+        })?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -517,13 +522,19 @@ mod tests {
     #[test]
     fn validate_filepath_rejects_relative_path() {
         let f = filesys::File::new(PathBuf::from("v1/motion-control.json"));
-        matches!(validate_filepath(&f), Err(DeployErr::PathNotAllowed(_)));
+        assert!(matches!(
+            validate_filepath(&f),
+            Err(DeployErr::PathNotAllowed(_))
+        ));
     }
 
     #[test]
     fn validate_filepath_rejects_parent_traversal() {
         let f = filesys::File::new(PathBuf::from("/etc/myapp/../passwd"));
-        matches!(validate_filepath(&f), Err(DeployErr::PathNotAllowed(_)));
+        assert!(matches!(
+            validate_filepath(&f),
+            Err(DeployErr::PathNotAllowed(_))
+        ));
     }
 
     // ============================= rollback ============================= //

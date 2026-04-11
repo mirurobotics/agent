@@ -35,7 +35,7 @@ pub struct Outcome {
 pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
     let mut categorized = read_deployments(args.storage.deployments).await?;
 
-    categorized.remove = mark_all_removing(args.storage.deployments, categorized.remove).await?;
+    categorized.remove = mark_removing(args.storage.deployments, categorized.remove).await?;
 
     match &categorized.target_deployed {
         Some(target_deployed) => {
@@ -278,7 +278,7 @@ fn remaining_cooldown(deployment: &models::Deployment) -> Option<chrono::TimeDel
 }
 
 // ================================= REMOVING ====================================== //
-async fn mark_all_removing(
+async fn mark_removing(
     storage: &storage::Deployments,
     deployments: Vec<models::Deployment>,
 ) -> Result<Vec<models::Deployment>, DeployErr> {

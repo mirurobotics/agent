@@ -2,8 +2,9 @@
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::deploy::errors::{
-    BackupAccessDeniedErr, ConflictingDeploymentsErr, EmptyConfigInstancesErr, GenericErr,
-    InvalidDeploymentTargetErr, PathNotAllowedErr, WriteAccessDeniedErr,
+    BackupAccessDeniedErr, ConflictingDeploymentsErr, DuplicateFilepathErr,
+    EmptyConfigInstancesErr, GenericErr, InvalidDeploymentTargetErr, PathNotAllowedErr,
+    WriteAccessDeniedErr,
 };
 use miru_agent::deploy::DeployErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
@@ -67,6 +68,14 @@ fn write_access_denied_err() -> WriteAccessDeniedErr {
             std::io::ErrorKind::PermissionDenied,
             "permission denied",
         )),
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn duplicate_filepath_err() -> DuplicateFilepathErr {
+    DuplicateFilepathErr {
+        filepath: "/etc/app/config.json".to_string(),
+        cfg_inst_ids: vec!["cfg_inst_1".to_string(), "cfg_inst_2".to_string()],
         trace: miru_agent::trace!(),
     }
 }
@@ -149,5 +158,11 @@ mod from_conversions {
     fn backup_access_denied_err_maps_to_deploy_backup_access_denied() {
         let err: DeployErr = backup_access_denied_err().into();
         assert!(matches!(err, DeployErr::BackupAccessDenied(_)));
+    }
+
+    #[test]
+    fn duplicate_filepath_err_maps_to_deploy_duplicate_filepath() {
+        let err: DeployErr = duplicate_filepath_err().into();
+        assert!(matches!(err, DeployErr::DuplicateFilepath(_)));
     }
 }

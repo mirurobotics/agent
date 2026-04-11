@@ -571,9 +571,7 @@ mod deploy_errors {
         );
         assert!(matches!(
             outcomes[0].error,
-            Some(DeployErr::FileSysErr(
-                filesys::FileSysErr::AtomicWriteFileErr(_)
-            ))
+            Some(DeployErr::WriteAccessDenied(_))
         ));
     }
 
@@ -647,6 +645,70 @@ mod deploy_errors {
             outcomes[0].error,
             Some(DeployErr::EmptyConfigInstances(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn target_deploy_error_skips_remaining_actionables() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(f.fixture_path("removal-target.json"));
+        f.seed_cfg_inst(&ci, r#"{"v": 1}"#.into()).await;
+
+        // deploy first so the file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-removal",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        // now: new target deployment will fail (empty config instances),
+        // old deployment is pending removal
+        let failing_target = make_deployment(
+            "dpl-failing-target",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![],
+        );
+        let removal_dpl = make_deployment(
+            "dpl-removal",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&failing_target).await;
+        f.seed_deployment(&removal_dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // early-return: only the failing target deployment outcome is returned
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-failing-target".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(
+            outcomes[0].error,
+            Some(DeployErr::EmptyConfigInstances(_))
+        ));
+
+        // the removal deployment was not touched — file still exists on disk
+        let dest = File::new(&ci.filepath);
+        assert!(
+            dest.path().exists(),
+            "removal deployment file should still exist (early-return prevented removal)"
+        );
     }
 }
 
@@ -996,19 +1058,18 @@ mod remove_action {
         // restore permissions so tempdir drop can recurse
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // delete errors are logged but swallowed — the deployment still
-        // transitions through remove into archived
+        // delete errors are now propagated — the deployment enters retry
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
             ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-remove-locked".into(),
-                activity: DplActivity::Archived,
-                error_status: DplErrStatus::None,
-                attempts: 0,
-                has_error: false,
-                has_wait: false,
-                in_cooldown: false,
+                activity: DplActivity::Removing,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
                 transitioned: true,
             }
         );

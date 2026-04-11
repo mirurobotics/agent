@@ -629,7 +629,6 @@ pub mod deploy_func_backup_errs {
         // restore permissions
         locked_dir.set_permissions(writeable()).await.unwrap();
 
-
         // files should be unchanged
         let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
         assert_eq!(a_actual, "old_a");
@@ -974,7 +973,7 @@ pub mod remove_func_success {
     }
 
     #[tokio::test]
-    async fn delete_error_is_ignored() {
+    async fn delete_error_is_propagated() {
         let f = Fixture::new().await;
 
         // deploy a file to a directory, then lock the directory so delete fails
@@ -992,10 +991,10 @@ pub mod remove_func_success {
         // restore permissions so tempdir drop can recurse
         parent.set_permissions(writeable()).await.unwrap();
 
-        // deletion errors are logged but swallowed — remove returns Ok
+        // deletion errors are now propagated
         assert!(
-            result.is_ok(),
-            "remove should succeed even when deletion fails (errors are logged)"
+            result.is_err(),
+            "remove should return error when deletion fails"
         );
         assert!(
             dest.path().exists(),
@@ -1099,6 +1098,4 @@ pub mod remove_func_errs {
             "relative path must not be created"
         );
     }
-
-
 }
