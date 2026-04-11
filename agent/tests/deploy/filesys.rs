@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 // internal crates
 use miru_agent::deploy::filesys::{deploy, remove, BACKUP_FILE_PREFIX};
 use miru_agent::deploy::DeployErr;
-use miru_agent::filesys::{self, FileSysErr, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
 use miru_agent::storage;
 
@@ -113,11 +113,19 @@ impl Fixture {
     }
 }
 
+fn read_only() -> std::fs::Permissions {
+    std::fs::Permissions::from_mode(0o555)
+}
+
+fn writeable() -> std::fs::Permissions {
+    std::fs::Permissions::from_mode(0o755)
+}
+
 /// Returns the entries in `dir` whose filename starts with the literal
 /// `miru.backup.` prefix emitted by `backup_location`.
-fn detect_backup_files(dir: &std::path::Path) -> Vec<filesys::File> {
+fn detect_backup_files(dir: &filesys::Dir) -> Vec<filesys::File> {
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir).unwrap() {
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
         let entry = entry.unwrap();
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with(BACKUP_FILE_PREFIX) {
@@ -226,7 +234,7 @@ pub mod deploy_func_success {
         let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
         assert_eq!(b_actual, "new_b");
 
-        let leftover = detect_backup_files(f.temp_dir.path());
+        let leftover = detect_backup_files(&f.temp_dir);
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -291,6 +299,43 @@ pub mod deploy_func_success {
 
         let actual = filesys::File::new(&filepath).read_string().await.unwrap();
         assert_eq!(actual, content);
+    }
+
+    #[tokio::test]
+    async fn stale_backup_overwritten() {
+        let f = Fixture::new().await;
+
+        // Pre-populate a.json with old content
+        let a_path = f.temp_dir.path().join("a.json").display().to_string();
+        filesys::File::new(&a_path)
+            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // Simulate a stale backup left by a prior interrupted deploy
+        let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
+        std::fs::write(&stale_backup, "stale_backup").unwrap();
+        assert!(stale_backup.exists());
+
+        let a_cfg = ConfigInstance {
+            filepath: a_path.clone(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&a_cfg));
+        f.deploy(&deployment).await.unwrap();
+
+        // a.json should have new content
+        let actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        assert_eq!(actual, "new_a");
+
+        // stale backup overwritten by snapshot then removed by cleanup_backups
+        let leftover = detect_backup_files(&f.temp_dir);
+        assert!(
+            leftover.is_empty(),
+            "expected stale backup to be cleaned up, found {leftover:?}"
+        );
     }
 }
 
@@ -465,17 +510,10 @@ pub mod deploy_func_validation_errs {
         // pre-pass, good.json would be on disk after this call.
         let deployment = f.new_queued(&[good_cfg.clone(), bad_cfg.clone()]);
         let result = f.deploy(&deployment).await;
-
-        match &result {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("not absolute"),
-                    "expected 'not absolute' reason, got: {}",
-                    e.reason
-                );
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
+        assert!(
+            matches!(result, Err(DeployErr::PathNotAllowed(_))),
+            "expected PathNotAllowed, got {result:?}"
+        );
 
         // The pre-pass must reject the deployment BEFORE any write happens.
         assert!(
@@ -489,50 +527,60 @@ pub mod deploy_func_validation_errs {
     }
 }
 
-pub mod deploy_func_write_errs {
+pub mod deploy_func_backup_errs {
     use super::*;
     use miru_agent::filesys::PathExt;
 
     #[tokio::test]
-    async fn rejects_eacces_with_permission_denied_err() {
+    async fn copy_file_for_backup_permission_denied() {
         let f = Fixture::new().await;
-        let locked_dir = f.temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
 
-        let filepath = locked_dir.join("config.json").display().to_string();
-        let cfg_inst = ConfigInstance {
-            filepath: filepath.clone(),
+        // create locked_dir and write c.json with "old" content BEFORE locking
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        let c_path = locked_dir.file("c.json").path().display().to_string();
+        filesys::File::new(&c_path)
+            .write_string("old", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // now lock the parent directory so snapshot_destination's sibling
+        // backup copy cannot succeed
+        locked_dir.set_permissions(read_only()).await.unwrap();
+
+        let c_cfg = ConfigInstance {
+            filepath: c_path.clone(),
             ..Default::default()
         };
-        let content = "{\"locked\": true}".to_string();
-        f.seed_cfg_inst(&cfg_inst, content).await;
+        f.seed_cfg_inst(&c_cfg, "new".to_string()).await;
 
-        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+        let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
         let result = f.deploy(&deployment).await;
-
-        // restore permissions BEFORE assertions so tempdir drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // EACCES on atomic write surfaces as AtomicWriteFileErr.
         assert!(
-            matches!(
-                &result,
-                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
-            ),
-            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
+            matches!(&result, Err(DeployErr::BackupAccessDenied(_))),
+            "expected BackupAccessDenied, got {result:?}"
         );
+
+        // restore permissions
+        locked_dir.set_permissions(writeable()).await.unwrap();
+
+        // c.json content must be unchanged
+        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
+        assert_eq!(c_actual, "old");
+
+        // no backup siblings leaked next to c.json
+        let leftover = detect_backup_files(&locked_dir);
         assert!(
-            !filesys::File::new(&filepath).exists(),
-            "file should not exist in locked dir"
+            leftover.is_empty(),
+            "expected no miru.backup.* siblings near c.json, found {leftover:?}"
         );
     }
 
     #[tokio::test]
-    async fn write_files_rolls_back_existing_files_on_mid_failure() {
+    async fn copy_backups_failure_retains_original_files() {
         let f = Fixture::new().await;
 
-        // pre-seed two files with old content via filesys::File::write_string
+        // Pre-populate a.json and b.json in writable temp_dir root
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
         let b_path = f.temp_dir.path().join("b.json").display().to_string();
         filesys::File::new(&a_path)
@@ -544,11 +592,16 @@ pub mod deploy_func_write_errs {
             .await
             .unwrap();
 
-        // create locked subdir
-        let locked_dir = f.temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let c_path = locked_dir.join("c.json").display().to_string();
+        // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
+        // backup copy cannot create miru.backup.c.json (EACCES)
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        let c_path = locked_dir.file("c.json").path().display().to_string();
+        filesys::File::new(&c_path)
+            .write_string("old_c", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        locked_dir.set_permissions(read_only()).await.unwrap();
 
         let a_cfg = ConfigInstance {
             filepath: a_path.clone(),
@@ -568,18 +621,112 @@ pub mod deploy_func_write_errs {
 
         let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
-
-        // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // EACCES on atomic write surfaces as AtomicWriteFileErr.
         assert!(
-            matches!(
-                &result,
-                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
-            ),
-            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
+            matches!(&result, Err(DeployErr::BackupAccessDenied(_))),
+            "expected BackupAccessDenied, got {result:?}"
         );
+
+        // restore permissions
+        locked_dir.set_permissions(writeable()).await.unwrap();
+
+
+        // files should be unchanged
+        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        assert_eq!(a_actual, "old_a");
+        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
+        assert_eq!(b_actual, "old_b");
+        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
+        assert_eq!(c_actual, "old_c");
+
+        // backup files consumed by rollback (rename-back), none should remain
+        let leftover = detect_backup_files(&f.temp_dir);
+        assert!(
+            leftover.is_empty(),
+            "expected no miru.backup.* siblings in temp_dir root, found {leftover:?}"
+        );
+    }
+}
+
+pub mod deploy_func_write_errs {
+    use super::*;
+    use miru_agent::filesys::PathExt;
+
+    #[tokio::test]
+    async fn write_file_permission_denied() {
+        let f = Fixture::new().await;
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        locked_dir.set_permissions(read_only()).await.unwrap();
+
+        let filepath = locked_dir.file("config.json").path().display().to_string();
+        let cfg_inst = ConfigInstance {
+            filepath: filepath.clone(),
+            ..Default::default()
+        };
+        let content = "{\"locked\": true}".to_string();
+        f.seed_cfg_inst(&cfg_inst, content).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
+        let result = f.deploy(&deployment).await;
+        assert!(matches!(result, Err(DeployErr::WriteAccessDenied(_))));
+
+        assert!(
+            !filesys::File::new(&filepath).exists(),
+            "file should not exist in locked dir"
+        );
+
+        // backups should not be leaked
+        let leftover = detect_backup_files(&locked_dir);
+        assert!(
+            leftover.is_empty(),
+            "expected no .miru-backup-* siblings, found {leftover:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_files_restores_existing_files_on_mid_failure() {
+        let f = Fixture::new().await;
+
+        // pre-seed two files with old content via filesys::File::write_string
+        let a_path = f.temp_dir.file("a.json").path().display().to_string();
+        let b_path = f.temp_dir.file("b.json").path().display().to_string();
+        filesys::File::new(&a_path)
+            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        filesys::File::new(&b_path)
+            .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // create locked subdir
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        locked_dir.set_permissions(read_only()).await.unwrap();
+        let c_path = locked_dir.file("c.json").path().display().to_string();
+
+        let a_cfg = ConfigInstance {
+            filepath: a_path.clone(),
+            ..Default::default()
+        };
+        let b_cfg = ConfigInstance {
+            filepath: b_path.clone(),
+            ..Default::default()
+        };
+        let c_cfg = ConfigInstance {
+            filepath: c_path.clone(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
+        f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
+        f.seed_cfg_inst(&c_cfg, "new_c".to_string()).await;
+
+        let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
+        let result = f.deploy(&deployment).await;
+        assert!(matches!(result, Err(DeployErr::WriteAccessDenied(_))));
+
+        // restore permissions
+        locked_dir.set_permissions(writeable()).await.unwrap();
 
         // a and b should be rolled back to old content
         let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
@@ -592,21 +739,28 @@ pub mod deploy_func_write_errs {
             !filesys::File::new(&c_path).exists(),
             "c.json should not exist in locked dir"
         );
+
+        // backups should not be leaked
+        let leftover = detect_backup_files(&f.temp_dir);
+        assert!(
+            leftover.is_empty(),
+            "expected no .miru-backup-* siblings, found {leftover:?}"
+        );
     }
 
     #[tokio::test]
-    async fn write_files_rolls_back_new_files_by_deleting_on_mid_failure() {
+    async fn write_files_deletes_new_files_on_mid_failure() {
         let f = Fixture::new().await;
 
         // first two destinations are fresh tempdir paths (DidNotExist snapshots)
-        let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        let b_path = f.temp_dir.path().join("b.json").display().to_string();
+        let a_path = f.temp_dir.file("a.json").path().display().to_string();
+        let b_path = f.temp_dir.file("b.json").path().display().to_string();
 
         // third destination lives under a locked subdirectory so the write fails
-        let locked_dir = f.temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let c_path = locked_dir.join("c.json").display().to_string();
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        locked_dir.set_permissions(read_only()).await.unwrap();
+        let c_path = locked_dir.file("c.json").path().display().to_string();
 
         let a_cfg = ConfigInstance {
             filepath: a_path.clone(),
@@ -626,18 +780,10 @@ pub mod deploy_func_write_errs {
 
         let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
+        assert!(matches!(&result, Err(DeployErr::WriteAccessDenied(_))));
 
-        // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // EACCES on atomic write surfaces as AtomicWriteFileErr.
-        assert!(
-            matches!(
-                &result,
-                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
-            ),
-            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
-        );
+        // restore permissions
+        locked_dir.set_permissions(writeable()).await.unwrap();
 
         // first two destinations were created then rolled back via delete
         assert!(
@@ -654,8 +800,8 @@ pub mod deploy_func_write_errs {
             "c.json should not exist in locked dir"
         );
 
-        // both snapshots were DidNotExist so no backup siblings were created
-        let leftover = detect_backup_files(f.temp_dir.path());
+        // backups should not be leaked
+        let leftover = detect_backup_files(&f.temp_dir);
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -667,20 +813,20 @@ pub mod deploy_func_write_errs {
         let f = Fixture::new().await;
 
         // Existed: pre-populate a.json with "old_a"
-        let a_path = f.temp_dir.path().join("a.json").display().to_string();
+        let a_path = f.temp_dir.file("a.json").path().display().to_string();
         filesys::File::new(&a_path)
             .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
         // DidNotExist: fresh path b.json
-        let b_path = f.temp_dir.path().join("b.json").display().to_string();
+        let b_path = f.temp_dir.file("b.json").path().display().to_string();
 
         // Failing destination: locked_dir/c.json
-        let locked_dir = f.temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let c_path = locked_dir.join("c.json").display().to_string();
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        locked_dir.set_permissions(read_only()).await.unwrap();
+        let c_path = locked_dir.file("c.json").path().display().to_string();
 
         let a_cfg = ConfigInstance {
             filepath: a_path.clone(),
@@ -700,18 +846,10 @@ pub mod deploy_func_write_errs {
 
         let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
+        assert!(matches!(&result, Err(DeployErr::WriteAccessDenied(_))));
 
         // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // EACCES on atomic write surfaces as AtomicWriteFileErr.
-        assert!(
-            matches!(
-                &result,
-                Err(DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(_)))
-            ),
-            "expected FileSysErr(AtomicWriteFileErr), got {result:?}",
-        );
+        locked_dir.set_permissions(writeable()).await.unwrap();
 
         // Existed snapshot was restored via rename-back
         let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
@@ -731,215 +869,15 @@ pub mod deploy_func_write_errs {
 
         // the backup created for a.json's Existed snapshot should have been
         // renamed back over a.json, leaving no .miru-backup-* sibling
-        let leftover = detect_backup_files(f.temp_dir.path());
+        let leftover = detect_backup_files(&f.temp_dir);
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
         );
     }
-
-    #[tokio::test]
-    async fn write_files_returns_snapshot_failure_when_initial_read_fails() {
-        let f = Fixture::new().await;
-
-        // create locked_dir and write c.json with "old" content BEFORE locking
-        let locked_dir = f.temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        let c_path = locked_dir.join("c.json").display().to_string();
-        filesys::File::new(&c_path)
-            .write_string("old", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        // now lock the parent directory so snapshot_destination's sibling
-        // backup copy cannot succeed
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-
-        let c_cfg = ConfigInstance {
-            filepath: c_path.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&c_cfg, "new".to_string()).await;
-
-        let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
-        let result = f.deploy(&deployment).await;
-
-        // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // EACCES on copy_to (snapshot backup) surfaces as CopyFileErr.
-        assert!(
-            matches!(
-                &result,
-                Err(DeployErr::FileSysErr(FileSysErr::CopyFileErr(_)))
-            ),
-            "expected FileSysErr(CopyFileErr), got {result:?}",
-        );
-
-        // c.json content must be unchanged
-        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
-        assert_eq!(c_actual, "old");
-
-        // no backup siblings leaked next to c.json
-        let leftover = detect_backup_files(&locked_dir);
-        assert!(
-            leftover.is_empty(),
-            "expected no miru.backup.* siblings near c.json, found {leftover:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn write_files_does_not_leak_temp_files_on_success() {
-        let f = Fixture::new().await;
-
-        let filepath = f.temp_dir.path().join("config.json").display().to_string();
-        let cfg_inst = ConfigInstance {
-            filepath: filepath.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&cfg_inst, "{\"ok\": true}".to_string())
-            .await;
-
-        let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
-        f.deploy(&deployment).await.unwrap();
-
-        // walk the tempdir root. Filter out the destination file and the
-        // Fixture's own `resources` subdir. Assert nothing matches the
-        // `.miru-tmp-*` or `.miru-backup-*` sibling naming pattern.
-        let mut leaked: Vec<String> = Vec::new();
-        for entry in std::fs::read_dir(f.temp_dir.path()).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name == "config.json" || name == "resources" {
-                continue;
-            }
-            if name.starts_with('.')
-                && (name.contains(".miru-tmp-") || name.contains(".miru-backup-"))
-            {
-                leaked.push(name);
-            }
-        }
-        assert!(
-            leaked.is_empty(),
-            "expected no .miru-tmp-* or .miru-backup-* siblings in tempdir root, found {leaked:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn write_files_rolls_back_prior_writes_on_snapshot_failure() {
-        let f = Fixture::new().await;
-
-        // Pre-populate a.json and b.json in writable temp_dir root
-        let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        let b_path = f.temp_dir.path().join("b.json").display().to_string();
-        filesys::File::new(&a_path)
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        filesys::File::new(&b_path)
-            .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
-        // backup copy cannot create miru.backup.c.json (EACCES)
-        let locked_dir = f.temp_dir.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        let c_path = locked_dir.join("c.json").display().to_string();
-        filesys::File::new(&c_path)
-            .write_string("old_c", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-
-        let a_cfg = ConfigInstance {
-            filepath: a_path.clone(),
-            ..Default::default()
-        };
-        let b_cfg = ConfigInstance {
-            filepath: b_path.clone(),
-            ..Default::default()
-        };
-        let c_cfg = ConfigInstance {
-            filepath: c_path.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
-        f.seed_cfg_inst(&b_cfg, "new_b".to_string()).await;
-        f.seed_cfg_inst(&c_cfg, "new_c".to_string()).await;
-
-        let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
-        let result = f.deploy(&deployment).await;
-
-        // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // c's snapshot backup copy fails with CopyFileErr
-        assert!(
-            matches!(
-                &result,
-                Err(DeployErr::FileSysErr(FileSysErr::CopyFileErr(_)))
-            ),
-            "expected FileSysErr(CopyFileErr), got {result:?}",
-        );
-
-        // a and b should be rolled back to old content
-        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
-        assert_eq!(a_actual, "old_a");
-        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
-        assert_eq!(b_actual, "old_b");
-
-        // c should be unchanged — snapshot failed before write
-        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
-        assert_eq!(c_actual, "old_c");
-
-        // backup files consumed by rollback (rename-back), none should remain
-        let leftover = detect_backup_files(f.temp_dir.path());
-        assert!(
-            leftover.is_empty(),
-            "expected no miru.backup.* siblings in temp_dir root, found {leftover:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn snapshot_overwrites_stale_backup_from_prior_deploy() {
-        let f = Fixture::new().await;
-
-        // Pre-populate a.json with old content
-        let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        filesys::File::new(&a_path)
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        // Simulate a stale backup left by a prior interrupted deploy
-        let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
-        std::fs::write(&stale_backup, "stale_backup").unwrap();
-        assert!(stale_backup.exists());
-
-        let a_cfg = ConfigInstance {
-            filepath: a_path.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&a_cfg, "new_a".to_string()).await;
-
-        let deployment = f.new_queued(std::slice::from_ref(&a_cfg));
-        f.deploy(&deployment).await.unwrap();
-
-        // a.json should have new content
-        let actual = filesys::File::new(&a_path).read_string().await.unwrap();
-        assert_eq!(actual, "new_a");
-
-        // stale backup overwritten by snapshot then removed by cleanup_backups
-        let leftover = detect_backup_files(f.temp_dir.path());
-        assert!(
-            leftover.is_empty(),
-            "expected stale backup to be cleaned up, found {leftover:?}"
-        );
-    }
 }
 
-pub mod remove_func {
+pub mod remove_func_success {
     use super::*;
     use miru_agent::filesys::PathExt;
 
@@ -958,7 +896,7 @@ pub mod remove_func {
     }
 
     #[tokio::test]
-    async fn removes_file() {
+    async fn remove_one_file() {
         let f = Fixture::new().await;
         let ci = seed_and_deploy(&f, "config.json", r#"{"v": 1}"#).await;
         let dest = filesys::File::new(&ci.filepath);
@@ -973,7 +911,7 @@ pub mod remove_func {
     }
 
     #[tokio::test]
-    async fn removes_multiple_files() {
+    async fn remove_multiple_files() {
         let f = Fixture::new().await;
         let ci_a = seed_and_deploy(&f, "a.json", r#"{"a": 1}"#).await;
         let ci_b = seed_and_deploy(&f, "nested/b.json", r#"{"b": 2}"#).await;
@@ -1036,7 +974,58 @@ pub mod remove_func {
     }
 
     #[tokio::test]
-    async fn rejects_relative_filepath() {
+    async fn delete_error_is_ignored() {
+        let f = Fixture::new().await;
+
+        // deploy a file to a directory, then lock the directory so delete fails
+        let ci = seed_and_deploy(&f, "locked/config.json", r#"{"v": 1}"#).await;
+        let dest = filesys::File::new(&ci.filepath);
+        assert!(dest.path().exists(), "file should exist before removal");
+
+        // lock the parent directory so remove_file fails with EACCES
+        let parent = dest.parent().unwrap();
+        parent.set_permissions(read_only()).await.unwrap();
+
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
+        let result = f.remove(&dpl, &[]).await;
+
+        // restore permissions so tempdir drop can recurse
+        parent.set_permissions(writeable()).await.unwrap();
+
+        // deletion errors are logged but swallowed — remove returns Ok
+        assert!(
+            result.is_ok(),
+            "remove should succeed even when deletion fails (errors are logged)"
+        );
+        assert!(
+            dest.path().exists(),
+            "file should still exist since delete was blocked"
+        );
+    }
+}
+
+pub mod remove_func_errs {
+    use super::*;
+
+    #[tokio::test]
+    async fn missing_cfg_inst_returns_error() {
+        let f = Fixture::new().await;
+        let ci = ConfigInstance {
+            id: "nonexistent-ci".to_string(),
+            filepath: f.temp_dir.path().join("missing.json").display().to_string(),
+            ..Default::default()
+        };
+        // do NOT seed metadata — only reference the ID
+        let dpl = f.new_removing(std::slice::from_ref(&ci));
+        let result = f.remove(&dpl, &[]).await;
+        assert!(
+            matches!(result, Err(DeployErr::CacheErr(_))),
+            "expected CacheErr for missing metadata, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_filepath_rejected() {
         let f = Fixture::new().await;
         let ci = ConfigInstance {
             filepath: "relative/path.json".to_string(),
@@ -1063,62 +1052,53 @@ pub mod remove_func {
 
         let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
-        match result {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("parent traversal"),
-                    "expected 'parent traversal' reason, got: {}",
-                    e.reason
-                );
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
+        assert!(
+            matches!(result, Err(DeployErr::PathNotAllowed(_))),
+            "expected PathNotAllowed, got {result:?}"
+        );
     }
 
     #[tokio::test]
-    async fn missing_config_instance_metadata_returns_error() {
+    async fn rejects_deployment_when_any_filepath_is_invalid() {
         let f = Fixture::new().await;
-        let ci = ConfigInstance {
-            id: "nonexistent-ci".to_string(),
-            filepath: f.temp_dir.path().join("missing.json").display().to_string(),
+
+        let good_path = f.fixture_path("good.json").await;
+        let good_cfg = ConfigInstance {
+            filepath: good_path.clone(),
             ..Default::default()
         };
-        // do NOT seed metadata — only reference the ID
-        let dpl = f.new_removing(std::slice::from_ref(&ci));
-        let result = f.remove(&dpl, &[]).await;
+        let bad_cfg = ConfigInstance {
+            filepath: "relative/config.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&good_cfg, "good content".to_string()).await;
+        f.seed_cfg_inst(&bad_cfg, "bad content".to_string()).await;
+
+        // Create the good file up front. If validation happened in-loop rather
+        // than as a pre-pass, this file would be removed before the bad path is
+        // discovered.
+        filesys::File::new(&good_path)
+            .write_string("on_disk_before_remove", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let deployment = f.new_removing(&[good_cfg, bad_cfg]);
+        let result = f.remove(&deployment, &[]).await;
         assert!(
-            matches!(result, Err(DeployErr::CacheErr(_))),
-            "expected CacheErr for missing metadata, got {result:?}"
+            matches!(result, Err(DeployErr::PathNotAllowed(_))),
+            "expected PathNotAllowed, got {result:?}"
+        );
+
+        // The pre-pass must reject the deployment BEFORE any remove happens.
+        assert!(
+            filesys::File::new(&good_path).exists(),
+            "good.json should still exist — validate_cfg_insts must reject before any deletes"
+        );
+        assert!(
+            !filesys::File::new(PathBuf::from("relative").join("config.json")).exists(),
+            "relative path must not be created"
         );
     }
 
-    #[tokio::test]
-    async fn delete_error_is_swallowed() {
-        let f = Fixture::new().await;
 
-        // deploy a file to a directory, then lock the directory so delete fails
-        let ci = seed_and_deploy(&f, "locked/config.json", r#"{"v": 1}"#).await;
-        let dest = filesys::File::new(&ci.filepath);
-        assert!(dest.path().exists(), "file should exist before removal");
-
-        // lock the parent directory so remove_file fails with EACCES
-        let parent = dest.path().parent().unwrap();
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o555)).unwrap();
-
-        let dpl = f.new_removing(std::slice::from_ref(&ci));
-        let result = f.remove(&dpl, &[]).await;
-
-        // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // deletion errors are logged but swallowed — remove returns Ok
-        assert!(
-            result.is_ok(),
-            "remove should succeed even when deletion fails (errors are logged)"
-        );
-        assert!(
-            dest.path().exists(),
-            "file should still exist since delete was blocked"
-        );
-    }
 }

@@ -2,8 +2,8 @@
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::deploy::errors::{
-    ConflictingDeploymentsErr, EmptyConfigInstancesErr, GenericErr, InvalidDeploymentTargetErr,
-    PathNotAllowedErr,
+    BackupAccessDeniedErr, ConflictingDeploymentsErr, EmptyConfigInstancesErr, GenericErr,
+    InvalidDeploymentTargetErr, PathNotAllowedErr, WriteAccessDeniedErr,
 };
 use miru_agent::deploy::DeployErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
@@ -55,6 +55,31 @@ fn path_not_allowed_err() -> PathNotAllowedErr {
     PathNotAllowedErr {
         filepath: "/x".to_string(),
         reason: "test".to_string(),
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn write_access_denied_err() -> WriteAccessDeniedErr {
+    WriteAccessDeniedErr {
+        cfg_inst_id: "cfg_inst_1".to_string(),
+        filepath: "/locked/config.json".to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        )),
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn backup_access_denied_err() -> BackupAccessDeniedErr {
+    BackupAccessDeniedErr {
+        cfg_inst_id: "cfg_inst_1".to_string(),
+        filepath: "/locked/config.json".to_string(),
+        backup_filepath: "/locked/miru.backup.config.json".to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        )),
         trace: miru_agent::trace!(),
     }
 }
@@ -112,5 +137,17 @@ mod from_conversions {
         }
         .into();
         assert!(matches!(err, DeployErr::GenericErr(_)));
+    }
+
+    #[test]
+    fn write_access_denied_err_maps_to_deploy_write_access_denied() {
+        let err: DeployErr = write_access_denied_err().into();
+        assert!(matches!(err, DeployErr::WriteAccessDenied(_)));
+    }
+
+    #[test]
+    fn backup_access_denied_err_maps_to_deploy_backup_access_denied() {
+        let err: DeployErr = backup_access_denied_err().into();
+        assert!(matches!(err, DeployErr::BackupAccessDenied(_)));
     }
 }

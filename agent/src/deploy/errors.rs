@@ -65,7 +65,36 @@ pub struct DuplicateFilepathErr {
 impl crate::errors::Error for DuplicateFilepathErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error(
+    "permission denied creating backup for config instance '{cfg_inst_id}' at filepath '{filepath}' -> '{backup_filepath}': ensure that the miru user/group has read access to the existing file and write+execute access to the parent directory"
+)]
+pub struct BackupAccessDeniedErr {
+    pub cfg_inst_id: String,
+    pub filepath: String,
+    pub backup_filepath: String,
+    pub source: Box<std::io::Error>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for BackupAccessDeniedErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "permission denied writing config instance '{cfg_inst_id}' to filepath '{filepath}' (or filesystem is read-only): ensure that the miru user/group has write+execute access to the parent directory"
+)]
+pub struct WriteAccessDeniedErr {
+    pub cfg_inst_id: String,
+    pub filepath: String,
+    pub source: Box<std::io::Error>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for WriteAccessDeniedErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum DeployErr {
+    #[error(transparent)]
+    BackupAccessDenied(BackupAccessDeniedErr),
     #[error(transparent)]
     ConflictingDeployments(ConflictingDeploymentsErr),
     #[error(transparent)]
@@ -82,6 +111,8 @@ pub enum DeployErr {
     PathNotAllowed(PathNotAllowedErr),
     #[error(transparent)]
     StorageErr(StorageErr),
+    #[error(transparent)]
+    WriteAccessDenied(WriteAccessDeniedErr),
     #[error(transparent)]
     GenericErr(GenericErr),
 }
@@ -134,7 +165,20 @@ impl From<GenericErr> for DeployErr {
     }
 }
 
+impl From<BackupAccessDeniedErr> for DeployErr {
+    fn from(e: BackupAccessDeniedErr) -> Self {
+        Self::BackupAccessDenied(e)
+    }
+}
+
+impl From<WriteAccessDeniedErr> for DeployErr {
+    fn from(e: WriteAccessDeniedErr) -> Self {
+        Self::WriteAccessDenied(e)
+    }
+}
+
 crate::impl_error!(DeployErr {
+    BackupAccessDenied,
     ConflictingDeployments,
     DuplicateFilepath,
     EmptyConfigInstances,
@@ -143,5 +187,6 @@ crate::impl_error!(DeployErr {
     FileSysErr,
     PathNotAllowed,
     StorageErr,
+    WriteAccessDenied,
     GenericErr,
 });

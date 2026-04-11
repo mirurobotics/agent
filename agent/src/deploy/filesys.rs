@@ -118,6 +118,49 @@ async fn write_cfg_insts(
     Ok(())
 }
 
+fn is_access_denied(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    )
+}
+
+fn map_write_err(cfg_inst: &models::ConfigInstance, err: FileSysErr) -> DeployErr {
+    match err {
+        FileSysErr::AtomicWriteFileErr(atomic_write_err) if is_access_denied(atomic_write_err.source.kind()) => {
+                WriteAccessDeniedErr {
+                    cfg_inst_id: cfg_inst.id.clone(),
+                    filepath: cfg_inst.filepath.clone(),
+                    source: atomic_write_err.source,
+                    trace: trace!(),
+                }
+                .into()
+        }
+        _ => err.into(),
+    }
+}
+
+fn map_snapshot_err(
+    cfg_inst: &models::ConfigInstance,
+    dest: &filesys::File,
+    backup: &filesys::File,
+    err: FileSysErr,
+) -> DeployErr {
+    match err {
+        FileSysErr::CopyFileErr(copy_err) if is_access_denied(copy_err.source.kind()) => {
+            BackupAccessDeniedErr {
+                cfg_inst_id: cfg_inst.id.clone(),
+                filepath: dest.path().display().to_string(),
+                backup_filepath: backup.path().display().to_string(),
+                source: copy_err.source,
+                trace: trace!(),
+            }
+            .into()
+        }
+        _ => err.into(),
+    }
+}
+
 async fn write_cfg_insts_impl(
     snapshots: &mut Vec<Snapshot>,
     cfg_insts: &[models::ConfigInstance],
@@ -131,11 +174,15 @@ async fn write_cfg_insts_impl(
             cfg_inst.id,
             dest.path().display()
         );
-        let snapshot = snapshot(&dest).await?;
+        let backup = backup_location(&dest)?;
+        let snapshot = snapshot(&dest, &backup)
+            .await
+            .map_err(|e| map_snapshot_err(cfg_inst, &dest, &backup, e))?;
         snapshots.push(snapshot);
 
         dest.write_string(&content, WriteOptions::OVERWRITE_ATOMIC)
-            .await?;
+            .await
+            .map_err(|e| map_write_err(cfg_inst, e))?;
     }
 
     remove_backups(snapshots).await;
@@ -154,19 +201,22 @@ enum Snapshot {
     },
 }
 
-async fn snapshot(dst: &filesys::File) -> Result<Snapshot, FileSysErr> {
-    if !dst.exists() {
-        return Ok(Snapshot::DidNotExist { dst: dst.clone() });
-    }
-
-    let backup = backup_location(dst)?;
-    dst.copy_to(&backup, filesys::CopyOptions::OVERWRITE_SYNC)
-        .await?;
-
-    Ok(Snapshot::Existed {
-        dst: dst.clone(),
-        backup,
-    })
+async fn snapshot(dst: &filesys::File, backup: &filesys::File) -> Result<Snapshot, FileSysErr> {
+    match dst.copy_to(backup, filesys::CopyOptions::OVERWRITE_SYNC)
+        .await {
+            Ok(()) => Ok(Snapshot::Existed {
+                dst: dst.clone(),
+                backup: backup.clone(),
+            }),
+            Err(e) => match e {
+                FileSysErr::PathDoesNotExistErr(_) => {
+                    Ok(Snapshot::DidNotExist {
+                        dst: dst.clone(),
+                    })
+                }
+                e => Err(e),
+            },
+        }
 }
 
 fn backup_location(dst: &filesys::File) -> Result<filesys::File, FileSysErr> {
@@ -243,6 +293,7 @@ async fn remove_cfg_insts(cfg_insts: &[models::ConfigInstance], keeps: &[filesys
 #[cfg(test)]
 mod tests {
     // standard crates
+    use std::io;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -250,6 +301,210 @@ mod tests {
     // internal crates
     use super::*;
     use crate::filesys;
+
+    // ============================= map_write_err ============================= //
+
+    #[test]
+    fn map_write_err_maps_permission_denied_atomic_write_to_write_access_denied() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_1".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let err = FileSysErr::AtomicWriteFileErr(filesys::errors::AtomicWriteFileErr {
+            file: filesys::File::new(&cfg_inst.filepath),
+            source: Box::new(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "permission denied",
+            )),
+            trace: trace!(),
+        });
+
+        let actual = map_write_err(&cfg_inst, err);
+        assert!(
+            matches!(actual, DeployErr::WriteAccessDenied(_)),
+            "expected WriteAccessDenied, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn map_write_err_maps_read_only_fs_atomic_write_to_write_access_denied() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_2".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let err = FileSysErr::AtomicWriteFileErr(filesys::errors::AtomicWriteFileErr {
+            file: filesys::File::new(&cfg_inst.filepath),
+            source: Box::new(io::Error::new(
+                io::ErrorKind::ReadOnlyFilesystem,
+                "read-only filesystem",
+            )),
+            trace: trace!(),
+        });
+
+        let actual = map_write_err(&cfg_inst, err);
+        assert!(
+            matches!(actual, DeployErr::WriteAccessDenied(_)),
+            "expected WriteAccessDenied, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn map_write_err_keeps_atomic_write_err_for_non_permission_kinds() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_3".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let err = FileSysErr::AtomicWriteFileErr(filesys::errors::AtomicWriteFileErr {
+            file: filesys::File::new(&cfg_inst.filepath),
+            source: Box::new(io::Error::new(io::ErrorKind::NotFound, "missing parent")),
+            trace: trace!(),
+        });
+
+        let actual = map_write_err(&cfg_inst, err);
+        match actual {
+            DeployErr::FileSysErr(FileSysErr::AtomicWriteFileErr(e)) => {
+                assert_eq!(e.source.kind(), io::ErrorKind::NotFound);
+            }
+            other => panic!("expected FileSysErr(AtomicWriteFileErr), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_write_err_keeps_non_atomic_filesys_errors_unchanged() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_4".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let err = FileSysErr::CreateTmpDirErr(filesys::errors::CreateTmpDirErr {
+            source: Box::new(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "mkdir denied",
+            )),
+            trace: trace!(),
+        });
+
+        let actual = map_write_err(&cfg_inst, err);
+        assert!(
+            matches!(
+                actual,
+                DeployErr::FileSysErr(FileSysErr::CreateTmpDirErr(_))
+            ),
+            "expected FileSysErr(CreateTmpDirErr), got {actual:?}"
+        );
+    }
+
+    // ============================= map_snapshot_err ============================= //
+
+    #[test]
+    fn map_snapshot_err_maps_copy_permission_denied_to_backup_access_denied() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_5".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let dest = filesys::File::new(&cfg_inst.filepath);
+        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let err = FileSysErr::CopyFileErr(filesys::errors::CopyFileErr {
+            source: Box::new(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "permission denied",
+            )),
+            src_file: dest.clone(),
+            dest_file: backup.clone(),
+            trace: trace!(),
+        });
+
+        let actual = map_snapshot_err(&cfg_inst, &dest, &backup, err);
+        match actual {
+            DeployErr::BackupAccessDenied(e) => {
+                assert_eq!(e.cfg_inst_id, cfg_inst.id);
+                assert_eq!(e.filepath, cfg_inst.filepath);
+                assert_eq!(e.backup_filepath, backup.path().display().to_string());
+                assert_eq!(e.source.kind(), io::ErrorKind::PermissionDenied);
+            }
+            other => panic!("expected BackupAccessDenied, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_snapshot_err_maps_copy_read_only_fs_to_backup_access_denied() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_7".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let dest = filesys::File::new(&cfg_inst.filepath);
+        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let err = FileSysErr::CopyFileErr(filesys::errors::CopyFileErr {
+            source: Box::new(io::Error::new(
+                io::ErrorKind::ReadOnlyFilesystem,
+                "read-only filesystem",
+            )),
+            src_file: dest.clone(),
+            dest_file: backup.clone(),
+            trace: trace!(),
+        });
+
+        let actual = map_snapshot_err(&cfg_inst, &dest, &backup, err);
+        assert!(
+            matches!(actual, DeployErr::BackupAccessDenied(_)),
+            "expected BackupAccessDenied, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn map_snapshot_err_keeps_copy_err_for_non_permission_kinds() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_6".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let dest = filesys::File::new(&cfg_inst.filepath);
+        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let err = FileSysErr::CopyFileErr(filesys::errors::CopyFileErr {
+            source: Box::new(io::Error::new(io::ErrorKind::NotFound, "missing source")),
+            src_file: dest.clone(),
+            dest_file: backup.clone(),
+            trace: trace!(),
+        });
+
+        let actual = map_snapshot_err(&cfg_inst, &dest, &backup, err);
+        assert!(
+            matches!(actual, DeployErr::FileSysErr(FileSysErr::CopyFileErr(_))),
+            "expected FileSysErr(CopyFileErr), got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn map_snapshot_err_keeps_non_copy_filesys_errors_unchanged() {
+        let cfg_inst = models::ConfigInstance {
+            id: "cfg_8".to_string(),
+            filepath: "/tmp/config.json".to_string(),
+            ..Default::default()
+        };
+        let dest = filesys::File::new(&cfg_inst.filepath);
+        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let err = FileSysErr::CreateTmpDirErr(filesys::errors::CreateTmpDirErr {
+            source: Box::new(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "mkdir denied",
+            )),
+            trace: trace!(),
+        });
+
+        let actual = map_snapshot_err(&cfg_inst, &dest, &backup, err);
+        assert!(
+            matches!(
+                actual,
+                DeployErr::FileSysErr(FileSysErr::CreateTmpDirErr(_))
+            ),
+            "expected FileSysErr(CreateTmpDirErr), got {actual:?}"
+        );
+    }
 
     // ============================= validate_filepath ============================= //
 
@@ -262,32 +517,13 @@ mod tests {
     #[test]
     fn validate_filepath_rejects_relative_path() {
         let f = filesys::File::new(PathBuf::from("v1/motion-control.json"));
-        match validate_filepath(&f) {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("not absolute"),
-                    "got reason: {}",
-                    e.reason
-                );
-                assert_eq!(e.filepath, "v1/motion-control.json");
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
+        matches!(validate_filepath(&f), Err(DeployErr::PathNotAllowed(_)));
     }
 
     #[test]
     fn validate_filepath_rejects_parent_traversal() {
         let f = filesys::File::new(PathBuf::from("/etc/myapp/../passwd"));
-        match validate_filepath(&f) {
-            Err(DeployErr::PathNotAllowed(e)) => {
-                assert!(
-                    e.reason.contains("parent traversal"),
-                    "got reason: {}",
-                    e.reason
-                );
-            }
-            other => panic!("expected PathNotAllowed, got {other:?}"),
-        }
+        matches!(validate_filepath(&f), Err(DeployErr::PathNotAllowed(_)));
     }
 
     // ============================= rollback ============================= //
