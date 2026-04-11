@@ -443,6 +443,36 @@ pub mod deploy_func_validation_errs {
     }
 
     #[tokio::test]
+    async fn duplicate_cfg_inst_filepaths_after_normalization() {
+        let f = Fixture::new().await;
+
+        let base = f.temp_dir.path().display().to_string();
+        // These differ as raw strings but normalize to the same path
+        let raw_a = format!("{base}/./config.json");
+        let raw_b = format!("{base}/config.json");
+        assert_ne!(raw_a, raw_b, "raw strings must differ for this test");
+
+        let cfg_inst_1 = ConfigInstance {
+            filepath: raw_a,
+            ..Default::default()
+        };
+        let cfg_inst_2 = ConfigInstance {
+            filepath: raw_b,
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&cfg_inst_1, "content_1".to_string()).await;
+        f.seed_cfg_inst(&cfg_inst_2, "content_2".to_string()).await;
+
+        let deployment = f.new_queued(&[cfg_inst_1, cfg_inst_2]);
+        let result = f.deploy(&deployment).await;
+
+        assert!(
+            matches!(result, Err(DeployErr::DuplicateFilepath(_))),
+            "expected DuplicateFilepath error for normalized-duplicate paths, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn relative_filepath_rejected() {
         let f = Fixture::new().await;
         let cfg_inst = ConfigInstance {
