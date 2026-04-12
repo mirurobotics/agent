@@ -889,6 +889,65 @@ pub mod apply_failure {
     }
 }
 
+mod apply_error_isolation {
+    use super::*;
+
+    /// When a single deployment's apply fails (e.g., filesystem permission
+    /// denied), sync() should still return Ok — the error is handled
+    /// per-deployment via FSM cooldown, not at the sync level.
+    #[tokio::test]
+    async fn apply_error_does_not_fail_sync() {
+        let f = Fixture::new("apply_err_no_sync_err").await;
+
+        // one deployment writes to an unreachable path
+        let bad_cfg = vec![CfgInstArgs {
+            id: "cfg_inst_bad".to_string(),
+            filepath: "/nonexistent/dir/file.json".to_string(),
+        }];
+        let backend_dep = make_deployment("dpl_bad", bad_cfg);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+        f.http_client
+            .set_get_config_instance_content(|_id| Ok(r#"{"key":"val"}"#.to_string()));
+
+        // sync returns Ok even though the deployment apply failed
+        let result = f.sync().await;
+        assert!(result.is_ok(), "sync should succeed despite apply error");
+
+        // deployment should be in Retrying state with bumped attempts
+        let cached = read_deployment(&f.deployment_stor, "dpl_bad").await;
+        assert_eq!(cached.error_status, DplErrStatus::Retrying);
+        assert!(cached.attempts > 0, "attempts should be bumped");
+    }
+
+    /// A deployment whose apply fails should still get its status pushed
+    /// to the backend with the retrying error status.
+    #[tokio::test]
+    async fn apply_error_still_pushes_retrying_status() {
+        let f = Fixture::new("apply_err_push_status").await;
+
+        let bad_cfg = vec![CfgInstArgs {
+            id: "cfg_inst_bad".to_string(),
+            filepath: "/nonexistent/dir/file.json".to_string(),
+        }];
+        let backend_dep = make_deployment("dpl_bad", bad_cfg);
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+        f.http_client
+            .set_get_config_instance_content(|_id| Ok(r#"{"key":"val"}"#.to_string()));
+
+        f.sync().await.unwrap();
+
+        // push should have sent the retrying status to the backend
+        let bodies = push_bodies(&f.http_client.requests());
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0].error_status,
+            Some(BackendErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING)
+        );
+    }
+}
+
 mod push_success {
     use super::*;
 

@@ -907,3 +907,56 @@ fn from_backend_invalid_dates() {
     assert_eq!(deployment.created_at, DateTime::<Utc>::UNIX_EPOCH);
     assert_eq!(deployment.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }
+
+// ─── retry state tests ──────────────────────────────────────────────────────
+
+#[test]
+fn reset_retry_state_clears_attempts_and_cooldown() {
+    let mut deployment = Deployment {
+        attempts: 5,
+        ..Default::default()
+    };
+    deployment.set_cooldown(TimeDelta::hours(1));
+    assert!(deployment.is_in_cooldown());
+
+    deployment.reset_retry_state();
+
+    assert_eq!(deployment.attempts, 0);
+    assert_eq!(deployment.cooldown_ends_at, DateTime::<Utc>::UNIX_EPOCH);
+    assert!(!deployment.is_in_cooldown());
+}
+
+#[test]
+fn has_clean_retry_state_default() {
+    let deployment = Deployment::default();
+    assert!(deployment.has_clean_retry_state());
+}
+
+#[test]
+fn has_clean_retry_state_false_with_attempts() {
+    let deployment = Deployment {
+        attempts: 1,
+        ..Default::default()
+    };
+    assert!(!deployment.has_clean_retry_state());
+}
+
+#[test]
+fn has_clean_retry_state_false_when_in_cooldown() {
+    let mut deployment = Deployment::default();
+    deployment.set_cooldown(TimeDelta::hours(1));
+    assert!(!deployment.has_clean_retry_state());
+}
+
+#[test]
+fn has_clean_retry_state_true_after_reset() {
+    let mut deployment = Deployment {
+        attempts: 3,
+        ..Default::default()
+    };
+    deployment.set_cooldown(TimeDelta::hours(1));
+    assert!(!deployment.has_clean_retry_state());
+
+    deployment.reset_retry_state();
+    assert!(deployment.has_clean_retry_state());
+}
