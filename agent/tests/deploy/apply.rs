@@ -906,9 +906,9 @@ mod remove_action {
         let ci = make_cfg_inst(f.fixture_path("staged-remove.json"));
         f.seed_cfg_inst(&ci, r#"{"staged": true}"#.into()).await;
 
-        // deploy first
+        // deploy first so file exists on disk
         let deploy_dpl = make_deployment(
-            "dpl-staged",
+            "dpl-staged-remove",
             DplTarget::Deployed,
             DplActivity::Queued,
             vec![ci.id.clone()],
@@ -916,24 +916,27 @@ mod remove_action {
         f.seed_deployment(&deploy_dpl).await;
         f.apply().await.unwrap();
 
-        // target=Staged, activity=Deployed -> FSM: Remove
+        let dest = File::new(&ci.filepath);
+        assert!(
+            dest.path().exists(),
+            "file should exist after initial deploy"
+        );
+
+        // Re-seed as target=Staged, activity=Deployed -> FSM: Remove
         let dpl = make_deployment(
-            "dpl-staged",
+            "dpl-staged-remove",
             DplTarget::Staged,
             DplActivity::Deployed,
             vec![ci.id.clone()],
         );
         f.seed_deployment(&dpl).await;
 
-        let dest = File::new(&ci.filepath);
-        assert!(dest.path().exists(), "file should exist before removal");
-
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
             ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
-                id: "dpl-staged".into(),
+                id: "dpl-staged-remove".into(),
                 activity: DplActivity::Archived,
                 error_status: DplErrStatus::None,
                 attempts: 0,
@@ -945,7 +948,7 @@ mod remove_action {
         );
         assert!(
             !dest.path().exists(),
-            "file should be deleted after removal"
+            "file should be deleted after staged removal"
         );
     }
 
