@@ -8,8 +8,8 @@ The per-deployment cooldown already works correctly — `fsm::error()` sets `coo
 
 ## Progress
 
-- [ ] M1: Fix `apply_deployments()` to not push per-deployment errors into the sync errors vec.
-- [ ] M2: Validate — build, test, clippy, lint.
+- [x] M1: Fix `apply_deployments()` to not push per-deployment errors into the sync errors vec.
+- [x] M2: Validate — build, test, clippy, lint.
 
 ## The Change
 
