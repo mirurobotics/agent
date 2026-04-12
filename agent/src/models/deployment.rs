@@ -275,6 +275,16 @@ impl Deployment {
     pub fn attempts(&self) -> u32 {
         self.attempts
     }
+
+    /// Resets retry state so the deployment can be retried immediately.
+    pub fn reset_retry_state(&mut self) {
+        self.attempts = 0;
+        self.cooldown_ends_at = DateTime::<Utc>::UNIX_EPOCH;
+    }
+
+    pub fn has_clean_retry_state(&self) -> bool {
+        self.attempts() == 0 && !self.is_in_cooldown()
+    }
 }
 
 impl<'de> Deserialize<'de> for Deployment {
