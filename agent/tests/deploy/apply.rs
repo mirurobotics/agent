@@ -847,6 +847,7 @@ mod deploy_errors {
 
 mod remove_action {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
@@ -1158,12 +1159,13 @@ mod remove_action {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
-    async fn remove_delete_error_logs_and_archives() {
+    async fn remove_io_error_permission_denied() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst(f.fixture_path("locked/config.json"));
-        f.seed_cfg_inst(&ci, r#"{"v": 1}"#.into()).await;
+        let ci = make_cfg_inst(f.fixture_path("remove-locked/config.json"));
+        f.seed_cfg_inst(&ci, r#"{"locked": true}"#.into()).await;
 
         // deploy first so file exists on disk
         let deploy_dpl = make_deployment(
@@ -1175,12 +1177,17 @@ mod remove_action {
         f.seed_deployment(&deploy_dpl).await;
         f.apply().await.unwrap();
 
-        // lock the parent directory so delete fails
         let dest = File::new(&ci.filepath);
-        let parent = dest.path().parent().unwrap().to_path_buf();
-        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+        assert!(
+            dest.path().exists(),
+            "file should exist after initial deploy"
+        );
 
-        // now mark for removal
+        // Lock the parent directory so removal fails with EACCES
+        let parent_dir = dest.path().parent().unwrap();
+        std::fs::set_permissions(parent_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Seed deployment as target=Archived, activity=Deployed for removal
         let dpl = make_deployment(
             "dpl-remove-locked",
             DplTarget::Archived,
@@ -1191,10 +1198,9 @@ mod remove_action {
 
         let outcomes = f.apply().await.unwrap();
 
-        // restore permissions so tempdir drop can recurse
-        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Restore permissions BEFORE assertions so tempdir cleanup succeeds
+        std::fs::set_permissions(parent_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // delete errors are now propagated — the deployment enters retry
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
             ComparableOutcome::from(&outcomes[0]),
@@ -1208,6 +1214,12 @@ mod remove_action {
                 in_cooldown: true,
                 transitioned: true,
             }
+        );
+
+        // File should still exist since removal failed
+        assert!(
+            dest.path().exists(),
+            "file should still exist after permission-denied removal"
         );
     }
 }
