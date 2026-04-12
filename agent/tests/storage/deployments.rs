@@ -1,15 +1,10 @@
-// standard crates
-use std::collections::HashMap;
-
 // internal crates
 use miru_agent::cache::CacheEntry;
-use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus};
 use miru_agent::storage::deployments::is_dirty;
-use miru_agent::storage::{Capacities, Layout, Storage};
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::Utc;
 
 pub mod is_dirty_func {
     use super::*;
