@@ -630,6 +630,74 @@ mod deploy_errors {
         assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
     }
 
+    #[tokio::test]
+    async fn deploy_error_preserves_old_deployment_files() {
+        let f = Fixture::new().await;
+
+        // Deploy an old deployment with a real config instance file on disk
+        let ci_old = make_cfg_inst(f.fixture_path("old-config.json"));
+        f.seed_cfg_inst(&ci_old, r#"{"old": true}"#.into()).await;
+
+        let dpl_old = make_deployment(
+            "dpl-old",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_old.id.clone()],
+        );
+        f.seed_deployment(&dpl_old).await;
+        f.apply().await.unwrap();
+
+        let old_file = File::new(&ci_old.filepath);
+        assert!(old_file.exists(), "old file should exist after initial deploy");
+
+        // Seed a new deployment that will fail: metadata only, no content -> CacheErr
+        let ci_new = make_cfg_inst(f.fixture_path("new-config.json"));
+        f.seed_cfg_inst_meta_only(&ci_new).await;
+
+        let dpl_new = make_deployment(
+            "dpl-new",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_new.id.clone()],
+        );
+        f.seed_deployment(&dpl_new).await;
+
+        // Seed the old deployment as target=Archived, activity=Deployed for removal
+        let dpl_old_remove = make_deployment(
+            "dpl-old",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci_old.id.clone()],
+        );
+        f.seed_deployment(&dpl_old_remove).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // Only the failing new deployment should produce an outcome; the old
+        // deployment's removal is skipped because the deploy phase errored.
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-new".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
+
+        // The old deployment's file must still exist on disk
+        assert!(
+            old_file.exists(),
+            "old deployment file should survive when the new deploy fails"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn config_instance_write_permission_denied() {
