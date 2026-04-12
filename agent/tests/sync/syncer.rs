@@ -827,20 +827,41 @@ pub mod subscribe {
         let f = Fixture::new("subscribe_sync_success").await;
 
         let mut subscriber = f.syncer.subscribe().await.unwrap();
+        let events = Arc::new(Mutex::new(vec![]));
+
+        let mut subscriber_for_spawn = subscriber.clone();
+        let events_for_spawn = events.clone();
+        let handle = tokio::spawn(async move {
+            // expect two events: 1. sync success -> 2. cooldown ended
+            for _ in 0..2 {
+                subscriber_for_spawn.changed().await.unwrap();
+                events_for_spawn
+                    .lock()
+                    .unwrap()
+                    .push(subscriber_for_spawn.borrow().clone());
+            }
+        });
 
         f.syncer.sync().await.unwrap();
-
-        // On a plain success (no deployment waits), only the immediate
-        // SyncSuccess event fires. No cooldown end notification is
-        // scheduled — there is nothing for the poller to wake up for.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            subscriber.changed().await.unwrap();
+        // wait for the cooldown end event
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                subscriber.changed().await.unwrap();
+                let event = subscriber.borrow().clone();
+                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess)) {
+                    break;
+                }
+            }
         })
         .await
-        .expect("timed out waiting for SyncSuccess");
+        .expect("timed out waiting for CooldownEnd::SyncSuccess");
 
-        let event = subscriber.borrow().clone();
-        assert_eq!(event, SyncEvent::SyncSuccess);
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], SyncEvent::SyncSuccess);
+        assert_eq!(events[1], SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
+
+        handle.await.unwrap();
     }
 
     #[tokio::test(start_paused = true)]
@@ -1039,9 +1060,9 @@ pub mod subscribe {
         let f = Fixture::new_with_backoff(
             "subscribe_success_over_dpl",
             // backoff.base_secs = 10 → success_wait = 10s > deployment_wait ~5s
-            // Syncer cooldown is always success_wait. Only a DeploymentWait
-            // notification fires — no SyncSuccess cooldown end is scheduled
-            // on success paths.
+            // Both SyncSuccess and DeploymentWait cooldown end notifications
+            // fire independently. DeploymentWait fires first (~6s), then
+            // SyncSuccess (~11s).
             cooldown::Backoff {
                 base_secs: 10,
                 growth_factor: 2,
@@ -1097,18 +1118,32 @@ pub mod subscribe {
 
         f.syncer.sync().await.unwrap();
 
-        // Only the DeploymentWait notification fires (~5+1=6s). No
-        // SyncSuccess cooldown end is scheduled on success paths.
-        tokio::time::timeout(Duration::from_secs(10), async {
+        // Both notifications fire: DeploymentWait (~5+1=6s) and
+        // SyncSuccess (~10+1=11s).
+        let mut saw_deployment_wait = false;
+        let mut saw_sync_success = false;
+        tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 subscriber.changed().await.unwrap();
                 let event = subscriber.borrow().clone();
-                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::DeploymentWait)) {
+                match event {
+                    SyncEvent::CooldownEnd(CooldownEnd::DeploymentWait) => {
+                        saw_deployment_wait = true;
+                    }
+                    SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess) => {
+                        saw_sync_success = true;
+                    }
+                    _ => {}
+                }
+                if saw_deployment_wait && saw_sync_success {
                     break;
                 }
             }
         })
         .await
-        .expect("timed out waiting for CooldownEnd::DeploymentWait");
+        .expect("timed out waiting for both cooldown events");
+
+        assert!(saw_deployment_wait);
+        assert!(saw_sync_success);
     }
 }
