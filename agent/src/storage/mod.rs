@@ -27,7 +27,7 @@ use self::layout::Layout as StorLayout;
 use crate::filesys::Overwrite;
 use crate::models;
 
-use tracing::{debug, info};
+use tracing::info;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Capacities {
@@ -195,12 +195,13 @@ impl Storage {
 /// they are retried immediately after an agent restart. The most common
 /// reason for a restart is "I fixed the problem, retry now."
 async fn reset_deployment_retry_state(deployments: &Deployments) -> Result<(), StorErr> {
-    let entries = deployments.entries().await?;
+    let entries = deployments
+        .find_entries_where(|e| e.value.attempts() > 0 || e.value.is_in_cooldown())
+        .await?;
     for entry in entries {
         let id = entry.key.clone();
         let mut dpl = entry.value;
         dpl.reset_retry_state();
-        debug!("reset retry state for deployment '{id}'");
         deployments
             .write(id, dpl, |_, _| false, Overwrite::Allow)
             .await?;
