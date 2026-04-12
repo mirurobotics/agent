@@ -852,6 +852,125 @@ mod deploy_errors {
             Some(DeployErr::EmptyConfigInstances(_))
         ));
     }
+
+    #[tokio::test]
+    async fn archives_processed_on_deploy_failure() {
+        let f = Fixture::new().await;
+
+        // Target deployment that will fail (no config instance content)
+        let dpl = make_deployment(
+            "dpl-target",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![],
+        );
+        f.seed_deployment(&dpl).await;
+
+        // Old deployment needing archive: (Archived, Queued) → FSM: Archive
+        f.seed_deployment(&make_deployment(
+            "dpl-to-archive",
+            DplTarget::Archived,
+            DplActivity::Queued,
+            vec![],
+        ))
+        .await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        assert_eq!(outcomes.len(), 2);
+        // First outcome: the failed target
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-target".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        // Second outcome: the old deployment was archived
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[1]),
+            ComparableOutcome {
+                id: "dpl-to-archive".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn removals_blocked_but_archives_proceed_on_deploy_failure() {
+        let f = Fixture::new().await;
+
+        // Target deployment that will fail (no config instance content)
+        let dpl = make_deployment(
+            "dpl-target",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![],
+        );
+        f.seed_deployment(&dpl).await;
+
+        // Old deployment needing archive: (Archived, Queued) → FSM: Archive
+        f.seed_deployment(&make_deployment(
+            "dpl-to-archive",
+            DplTarget::Archived,
+            DplActivity::Queued,
+            vec![],
+        ))
+        .await;
+
+        // Old deployment needing removal: (Archived, Deployed) → FSM: Remove
+        // This should be skipped because removals are unsafe when target failed
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // Only 2 outcomes: failed target + archived. Removal is skipped.
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-target".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[1]),
+            ComparableOutcome {
+                id: "dpl-to-archive".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+    }
 }
 
 mod remove_action {

@@ -170,21 +170,27 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
 
         self.state.last_attempted_sync_at = Utc::now();
         let result = self.sync_impl().await;
-        let (event, wait) = match &result {
-            Ok(None) => (CooldownEnd::SyncSuccess, self.handle_sync_success()),
+        let wait = match &result {
+            Ok(None) => self.handle_sync_success(),
             Ok(Some(deployment_wait)) => {
                 let success_wait = self.handle_sync_success();
-                if *deployment_wait >= success_wait {
-                    (CooldownEnd::DeploymentWait, *deployment_wait)
-                } else {
-                    (CooldownEnd::SyncSuccess, success_wait)
-                }
+                self.schedule_cooldown_end_notification(
+                    *deployment_wait,
+                    CooldownEnd::DeploymentWait,
+                );
+                success_wait
             }
-            Err(e) => (CooldownEnd::SyncFailure, self.handle_sync_failure(e)),
+            Err(e) => {
+                let failure_wait = self.handle_sync_failure(e);
+                self.schedule_cooldown_end_notification(
+                    failure_wait,
+                    CooldownEnd::SyncFailure,
+                );
+                failure_wait
+            }
         };
 
         self.state.cooldown_ends_at = Utc::now() + wait;
-        self.schedule_cooldown_end_notification(wait, event);
         debug!(
             "backend syncer cooling down for {wait} (until {:?})",
             self.state.cooldown_ends_at

@@ -49,10 +49,20 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
             .collect();
 
             let outcome = apply_one(args, target_deployed.clone(), &[]).await;
-            // if deploying the target deployment fails, we return early to ensure that
-            // we don't remove a deployment that may be the one being replaced
             if outcome.error.is_some() {
-                return Ok(vec![outcome]);
+                // The target deployment failed — skip removals (which could
+                // delete files the retrying deployment still needs) but still
+                // process archives (pure FSM state transitions) and waits
+                // (for accurate cooldown reporting).
+                let mut outcomes = vec![outcome];
+                let safe: Vec<_> = categorized
+                    .archive
+                    .iter()
+                    .chain(categorized.wait.iter())
+                    .cloned()
+                    .collect();
+                outcomes.extend(apply_all(args, safe, &tgt_dpld_files).await?);
+                return Ok(outcomes);
             }
 
             let mut outcomes = vec![outcome];
