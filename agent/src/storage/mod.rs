@@ -196,7 +196,7 @@ impl Storage {
 /// reason for a restart is "I fixed the problem, retry now."
 async fn reset_deployment_retry_state(deployments: &Deployments) -> Result<(), StorErr> {
     let entries = deployments
-        .find_entries_where(|e| e.value.attempts() > 0 || e.value.is_in_cooldown())
+        .find_entries_where(|e| !e.value.has_clean_retry_state())
         .await?;
     for entry in entries {
         let id = entry.key.clone();

@@ -276,13 +276,14 @@ impl Deployment {
         self.attempts
     }
 
-    /// Resets retry state so the deployment is retried immediately. Called at
-    /// agent startup so that restarting the agent gives failing deployments a
-    /// fresh chance — the most common reason for a restart is "I fixed the
-    /// problem, retry now."
+    /// Resets retry state so the deployment can be retried immediately. 
     pub fn reset_retry_state(&mut self) {
         self.attempts = 0;
         self.cooldown_ends_at = DateTime::<Utc>::UNIX_EPOCH;
+    }
+
+    pub fn has_clean_retry_state(&self) -> bool {
+        self.attempts() == 0 && !self.is_in_cooldown()
     }
 }
 
