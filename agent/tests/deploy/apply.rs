@@ -538,7 +538,8 @@ mod deploy_errors {
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
-        )).await;
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
@@ -580,7 +581,8 @@ mod deploy_errors {
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
-        )).await;
+        ))
+        .await;
 
         // apply returns Err because read_cfg_insts for the deployed_files list
         // fails before any deployment is attempted
@@ -610,7 +612,8 @@ mod deploy_errors {
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
-        )).await;
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
@@ -730,7 +733,8 @@ mod deploy_errors {
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
-        )).await;
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
 
@@ -778,7 +782,8 @@ mod deploy_errors {
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
-        )).await;
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
@@ -819,7 +824,8 @@ mod deploy_errors {
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
-        )).await;
+        ))
+        .await;
 
         let policy = RetryPolicy {
             max_attempts: 1,
@@ -1188,7 +1194,10 @@ mod remove_action {
 
         // Lock the parent directory so removal fails with EACCES
         let parent_dir = dest.parent().unwrap();
-        parent_dir.set_permissions(std::fs::Permissions::from_mode(0o555)).await.unwrap();
+        parent_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o555))
+            .await
+            .unwrap();
 
         // Seed deployment as target=Archived, activity=Deployed for removal
         let dpl = make_deployment(
@@ -1202,7 +1211,10 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
 
         // Restore permissions BEFORE assertions so tempdir cleanup succeeds
-        parent_dir.set_permissions(std::fs::Permissions::from_mode(0o755)).await.unwrap();
+        parent_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(

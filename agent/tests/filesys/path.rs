@@ -42,7 +42,10 @@ pub mod write_options {
 
     #[test]
     fn overwrite() {
-        assert_eq!(WriteOptions::OVERWRITE_NONATOMIC.overwrite, Overwrite::Allow);
+        assert_eq!(
+            WriteOptions::OVERWRITE_NONATOMIC.overwrite,
+            Overwrite::Allow
+        );
         assert_eq!(WriteOptions::OVERWRITE_NONATOMIC.atomic, Atomic::No);
     }
 }
