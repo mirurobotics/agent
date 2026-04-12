@@ -214,6 +214,13 @@ impl File {
                     trace: trace!(),
                 })
             })?;
+            file.flush().await.map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: self.clone(),
+                    trace: trace!(),
+                })
+            })?;
         }
         Ok(())
     }
