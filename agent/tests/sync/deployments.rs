@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 // internal crates
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, Overwrite};
+use miru_agent::filesys::{self, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
@@ -32,11 +32,9 @@ struct Fixture {
     release_stor: Releases,
     git_commit_stor: GitCommits,
     http_client: MockClient,
-    staging_dir: filesys::Dir,
-    target_dir: filesys::Dir,
     retry_policy: fsm::RetryPolicy,
     event_hub: EventHub,
-    _dir: filesys::Dir,
+    dir: filesys::Dir,
 }
 
 impl Fixture {
@@ -69,18 +67,14 @@ impl Fixture {
             release_stor,
             git_commit_stor,
             http_client: MockClient::default(),
-            staging_dir: dir.subdir("staging"),
-            target_dir: dir.subdir("deployments"),
             retry_policy: fsm::RetryPolicy::default(),
             event_hub,
-            _dir: dir,
+            dir,
         }
     }
 
     async fn sync(&self) -> Result<Option<TimeDelta>, SyncErr> {
         let opts = apply::DeployOpts {
-            staging_dir: self.staging_dir.clone(),
-            target_dir: self.target_dir.clone(),
             retry_policy: self.retry_policy,
         };
         sync(&SyncArgs {
@@ -100,6 +94,10 @@ impl Fixture {
         })
         .await
     }
+
+    fn fixture_path(&self, rel: &str) -> String {
+        self.dir.path().join(rel).display().to_string()
+    }
 }
 
 fn push_bodies(requests: &[CapturedRequest]) -> Vec<UpdateDeploymentRequest> {
@@ -109,6 +107,15 @@ fn push_bodies(requests: &[CapturedRequest]) -> Vec<UpdateDeploymentRequest> {
         .map(|r| {
             serde_json::from_str(r.body.as_deref().expect("push should have a body"))
                 .expect("push body should deserialize as UpdateDeploymentRequest")
+        })
+        .collect()
+}
+
+fn cfg_inst_args(f: &Fixture, ids: &[&str]) -> Vec<CfgInstArgs> {
+    ids.iter()
+        .map(|id| CfgInstArgs {
+            id: (*id).to_string(),
+            filepath: f.fixture_path(&format!("{id}.json")),
         })
         .collect()
 }
@@ -127,7 +134,8 @@ mod pull_success {
     #[tokio::test]
     async fn stores_deployment_and_config_instances() {
         let f = Fixture::new("stores_deployment_and_config_instances").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -141,8 +149,10 @@ mod pull_success {
     #[tokio::test]
     async fn stores_multiple_deployments() {
         let f = Fixture::new("stores_multiple_deployments").await;
-        let dpl_1 = make_deployment("dpl_1", &["cfg_inst_a", "cfg_inst_c"]);
-        let dpl_2 = make_archived_dpl("dpl_2", &["cfg_inst_b", "cfg_inst_d"]);
+        let cfg_inst_args_1 = cfg_inst_args(&f, &["cfg_inst_a", "cfg_inst_c"]);
+        let dpl_1 = make_deployment("dpl_1", cfg_inst_args_1);
+        let cfg_inst_args_2 = cfg_inst_args(&f, &["cfg_inst_b", "cfg_inst_d"]);
+        let dpl_2 = make_archived_dpl("dpl_2", cfg_inst_args_2);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_1.clone(), dpl_2.clone()]));
         f.sync().await.unwrap();
@@ -161,7 +171,8 @@ mod pull_success {
     #[tokio::test]
     async fn stores_release_and_git_commit_from_expanded_deployment() {
         let f = Fixture::new("sync_release_gc").await;
-        let dpl = make_deployment_with_release("dpl_1", &["cfg_inst_1"], "rel_1", Some("gc_1"));
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let dpl = make_deployment_with_release("dpl_1", cfg_inst_args, "rel_1", Some("gc_1"));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
 
@@ -175,7 +186,8 @@ mod pull_success {
     #[tokio::test]
     async fn stores_release_without_git_commit() {
         let f = Fixture::new("sync_release_no_gc").await;
-        let dpl = make_deployment_with_release("dpl_1", &["cfg_inst_1"], "rel_2", None);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let dpl = make_deployment_with_release("dpl_1", cfg_inst_args, "rel_2", None);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
 
@@ -192,7 +204,8 @@ mod pull_success {
     #[tokio::test]
     async fn fetches_content_individually() {
         let f = Fixture::new("sync_content_individual").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client
@@ -216,7 +229,8 @@ mod pull_success {
     #[tokio::test]
     async fn content_already_cached_skips_fetch() {
         let f = Fixture::new("sync_content_cached").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -270,7 +284,8 @@ mod pull_success {
             .await
             .unwrap();
 
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -307,7 +322,7 @@ mod pull_success {
         let backend_dep = BackendDeployment {
             activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
             target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
-            ..make_deployment("dpl_1", &["cfg_inst_1"])
+            ..make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]))
         };
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
@@ -326,8 +341,9 @@ mod pull_success {
         let f = Fixture::new("sync_shared_cfg_inst").await;
 
         // both deployments reference the same config instance
-        let dpl_1 = make_deployment("dpl_1", &["shared_cfg_inst"]);
-        let dpl_2 = make_archived_dpl("dpl_2", &["shared_cfg_inst"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["shared_cfg_inst"]);
+        let dpl_1 = make_deployment("dpl_1", cfg_inst_args.clone());
+        let dpl_2 = make_archived_dpl("dpl_2", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_1.clone(), dpl_2.clone()]));
         f.http_client
@@ -349,7 +365,8 @@ mod pull_success {
     async fn pull_deployments_retries_on_network_error() {
         let f = Fixture::new("sync_retry_pull").await;
         let call_count = AtomicUsize::new(0);
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client.set_list_all_deployments(move || {
             let n = call_count.fetch_add(1, Ordering::SeqCst);
             if n < 2 {
@@ -413,9 +430,10 @@ mod pull_failure {
     #[tokio::test]
     async fn cfg_inst_not_expanded_error() {
         let f = Fixture::new("cfg_insts_not_expanded_error").await;
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
         let unexpanded = BackendDeployment {
             config_instances: None,
-            ..make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"])
+            ..make_deployment("dpl_1", cfg_inst_args)
         };
         f.http_client
             .set_list_all_deployments(move || Ok(vec![unexpanded.clone()]));
@@ -435,7 +453,8 @@ mod pull_failure {
     #[tokio::test]
     async fn content_partial_failure_fetches_remaining() {
         let f = Fixture::new("sync_content_partial").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client
@@ -480,7 +499,8 @@ mod pull_failure {
     #[tokio::test]
     async fn content_all_fetches_fail() {
         let f = Fixture::new("sync_content_all_fail").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_get_config_instance_content(|_id| {
@@ -521,7 +541,8 @@ mod pull_failure {
     #[tokio::test]
     async fn failure_still_applies_and_pushes() {
         let f = Fixture::new("sync_pull_fail_push").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_get_config_instance_content(|_id| {
@@ -544,8 +565,10 @@ mod pull_failure {
     #[tokio::test]
     async fn multiple_deployments_partial_content_failure() {
         let f = Fixture::new("sync_multi_dpl_partial").await;
-        let dpl_1 = make_archived_dpl("dpl_1", &["cfg_inst_a"]);
-        let dpl_2 = make_deployment("dpl_2", &["cfg_inst_b"]);
+        let cfg_inst_args_1 = cfg_inst_args(&f, &["cfg_inst_a"]);
+        let cfg_inst_args_2 = cfg_inst_args(&f, &["cfg_inst_b"]);
+        let dpl_1 = make_archived_dpl("dpl_1", cfg_inst_args_1);
+        let dpl_2 = make_deployment("dpl_2", cfg_inst_args_2);
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_1.clone(), dpl_2.clone()]));
         f.http_client
@@ -570,7 +593,8 @@ mod pull_failure {
     #[tokio::test]
     async fn metadata_stored_but_content_missing_recovers_on_next_sync() {
         let f = Fixture::new("sync_content_recovery").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args);
 
         let call_count = std::sync::atomic::AtomicUsize::new(0);
         f.http_client
@@ -654,7 +678,7 @@ pub mod apply_success {
     #[tokio::test]
     async fn deploy_queued_deployment() {
         let f = Fixture::new("apply_deploy_queued").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -668,7 +692,7 @@ pub mod apply_success {
     #[tokio::test]
     async fn archive_queued_deployment() {
         let f = Fixture::new("apply_archive_queued").await;
-        let backend_dep = make_archived_dpl("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_archived_dpl("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -710,7 +734,8 @@ pub mod apply_success {
             .unwrap();
 
         // backend returns same deployment (resolve_dpl preserves cooldown)
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1", "cfg_inst_2"]);
+        let backend_dep =
+            make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -790,8 +815,8 @@ pub mod apply_success {
             .unwrap();
 
         // backend returns both deployments (different targets to avoid ConflictingDeployments)
-        let backend_a = make_deployment("dpl_a", &["cfg_inst_a"]);
-        let backend_b = make_archived_dpl("dpl_b", &["cfg_inst_b"]);
+        let backend_a = make_deployment("dpl_a", cfg_inst_args(&f, &["cfg_inst_a"]));
+        let backend_b = make_archived_dpl("dpl_b", cfg_inst_args(&f, &["cfg_inst_b"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_a.clone(), backend_b.clone()]));
 
@@ -818,8 +843,8 @@ pub mod apply_failure {
     #[tokio::test]
     async fn conflicting_deployments() {
         let f = Fixture::new("apply_conflicting").await;
-        let dpl_1 = make_deployment("dpl_1", &["cfg_inst_1"]);
-        let dpl_2 = make_deployment("dpl_2", &["cfg_inst_2"]);
+        let dpl_1 = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        let dpl_2 = make_deployment("dpl_2", cfg_inst_args(&f, &["cfg_inst_2"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_1.clone(), dpl_2.clone()]));
 
@@ -839,7 +864,7 @@ pub mod apply_failure {
     #[tokio::test]
     async fn content_missing_triggers_retrying() {
         let f = Fixture::new("apply_content_missing").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_get_config_instance_content(|_id| {
@@ -870,7 +895,7 @@ mod push_success {
     #[tokio::test]
     async fn sends_dirty_deployments() {
         let f = Fixture::new("sync_push").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -891,7 +916,7 @@ mod push_success {
     #[tokio::test]
     async fn dirty_flag_preserved_on_failure() {
         let f = Fixture::new("sync_push_dirty_preserved").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_update_deployment(|| {
@@ -938,7 +963,7 @@ mod push_success {
     #[tokio::test]
     async fn successful_push_clears_dirty_flag() {
         let f = Fixture::new("sync_push_clears_dirty").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -958,7 +983,7 @@ mod push_failure {
     #[tokio::test]
     async fn error_accumulation() {
         let f = Fixture::new("sync_push_err").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_update_deployment(|| {
@@ -977,7 +1002,7 @@ mod push_failure {
     #[tokio::test]
     async fn retries_on_network_error() {
         let f = Fixture::new("push_retry_network").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1002,7 +1027,7 @@ mod push_failure {
     #[tokio::test]
     async fn no_retry_on_app_error() {
         let f = Fixture::new("push_no_retry_app").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_update_deployment(|| {
@@ -1024,7 +1049,7 @@ mod push_failure {
     #[tokio::test]
     async fn exhausts_retries() {
         let f = Fixture::new("push_retry_exhaust").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
         f.http_client.set_update_deployment(|| {
@@ -1048,8 +1073,8 @@ mod push_failure {
         let f = Fixture::new("push_partial_multi").await;
 
         // backend returns 2 deployments: one to deploy, one to archive
-        let dpl_deploy = make_deployment("dpl_1", &["cfg_inst_1"]);
-        let dpl_archive = make_archived_dpl("dpl_2", &["cfg_inst_2"]);
+        let dpl_deploy = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        let dpl_archive = make_archived_dpl("dpl_2", cfg_inst_args(&f, &["cfg_inst_2"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_deploy.clone(), dpl_archive.clone()]));
         f.http_client
@@ -1134,7 +1159,7 @@ mod cross_phase {
             .unwrap();
 
         // backend returns the same deployment but with target=Archived
-        let backend_dep = make_archived_dpl("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_archived_dpl("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1194,7 +1219,7 @@ mod cross_phase {
             .unwrap();
 
         // backend returns same deployment
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1227,7 +1252,7 @@ mod cross_phase {
         let f = Fixture::new("cross_error_retrying_push").await;
 
         // backend returns a deployment with 1 config instance
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1268,7 +1293,12 @@ mod idempotency {
     #[tokio::test]
     async fn double_sync_does_not_duplicate_stores() {
         let f = Fixture::new("sync_idempotent").await;
-        let dpl = make_deployment_with_release("dpl_1", &["cfg_inst_1"], "rel_1", Some("gc_1"));
+        let dpl = make_deployment_with_release(
+            "dpl_1",
+            cfg_inst_args(&f, &["cfg_inst_1"]),
+            "rel_1",
+            Some("gc_1"),
+        );
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
         f.http_client
@@ -1301,7 +1331,7 @@ mod idempotency {
     #[tokio::test]
     async fn double_sync_does_not_duplicate_events() {
         let f = Fixture::new("sync_idempotent_events").await;
-        let dpl = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let dpl = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
 
@@ -1333,7 +1363,7 @@ mod event_emission {
     #[tokio::test]
     async fn deployed_deployment_emits_deployed_event() {
         let f = Fixture::new("evt_deployed").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1373,7 +1403,7 @@ mod event_emission {
             .await
             .unwrap();
 
-        let backend_dep = make_archived_dpl("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_archived_dpl("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1415,7 +1445,7 @@ mod event_emission {
             .await
             .unwrap();
 
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1434,8 +1464,8 @@ mod event_emission {
         let f = Fixture::new("evt_failed_apply").await;
 
         // two deployments both targeting deployed — will conflict
-        let dpl_1 = make_deployment("dpl_1", &["cfg_inst_1"]);
-        let dpl_2 = make_deployment("dpl_2", &["cfg_inst_2"]);
+        let dpl_1 = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        let dpl_2 = make_deployment("dpl_2", cfg_inst_args(&f, &["cfg_inst_2"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_1.clone(), dpl_2.clone()]));
 
@@ -1452,7 +1482,7 @@ mod event_emission {
     #[tokio::test]
     async fn deployed_event_data_includes_timestamps() {
         let f = Fixture::new("evt_timestamps").await;
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 
@@ -1498,8 +1528,8 @@ mod event_emission {
             .unwrap();
 
         // dpl_1: queued -> deployed, dpl_2: deployed -> archived
-        let dpl_deploy = make_deployment("dpl_1", &["cfg_inst_1"]);
-        let dpl_archive = make_archived_dpl("dpl_2", &["cfg_inst_2"]);
+        let dpl_deploy = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        let dpl_archive = make_archived_dpl("dpl_2", cfg_inst_args(&f, &["cfg_inst_2"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![dpl_deploy.clone(), dpl_archive.clone()]));
 
@@ -1547,7 +1577,7 @@ mod event_emission {
             .unwrap();
 
         // backend returns the same deployment (no state change)
-        let backend_dep = make_deployment("dpl_1", &["cfg_inst_1"]);
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
         f.http_client
             .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
 

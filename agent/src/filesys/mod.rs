@@ -31,8 +31,8 @@ pub enum Atomic {
 /// reaches stable storage before returning.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Sync {
-    #[default]
     No,
+    #[default]
     Yes,
 }
 
@@ -51,7 +51,7 @@ impl WriteOptions {
     };
 
     /// Overwrite existing files, non-atomic.
-    pub const OVERWRITE: Self = Self {
+    pub const OVERWRITE_NONATOMIC: Self = Self {
         overwrite: Overwrite::Allow,
         atomic: Atomic::No,
     };
@@ -72,4 +72,25 @@ pub struct AppendOptions {
 impl AppendOptions {
     /// Append with `fdatasync` for crash durability.
     pub const SYNC: Self = Self { sync: Sync::Yes };
+}
+
+/// Options for file copy operations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CopyOptions {
+    pub overwrite: Overwrite,
+    pub sync: Sync,
+}
+
+impl CopyOptions {
+    /// Allow overwriting, sync after copy.
+    pub const OVERWRITE_SYNC: Self = Self {
+        overwrite: Overwrite::Allow,
+        sync: Sync::Yes,
+    };
+
+    /// Allow overwriting, no sync.
+    pub const OVERWRITE_NO_SYNC: Self = Self {
+        overwrite: Overwrite::Allow,
+        sync: Sync::No,
+    };
 }

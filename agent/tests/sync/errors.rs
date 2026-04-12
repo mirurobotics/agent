@@ -30,6 +30,7 @@ fn cache_err() -> CacheErr {
 fn deploy_err() -> DeployErr {
     DeployErr::EmptyConfigInstances(EmptyConfigInstancesErr {
         deployment_id: "dpl_1".to_string(),
+        trace: miru_agent::trace!(),
     })
 }
 

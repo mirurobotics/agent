@@ -177,6 +177,37 @@ pub struct FileMetadataErr {
 impl crate::errors::Error for FileMetadataErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to extract metadata for directory '{dir}': {source}")]
+pub struct DirMetadataErr {
+    pub dir: Dir,
+    pub source: Box<std::io::Error>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for DirMetadataErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to set permissions on directory '{dir}': {source}")]
+pub struct SetDirPermissionsErr {
+    pub dir: Dir,
+    pub source: Box<std::io::Error>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for SetDirPermissionsErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to copy file '{src_file}' to '{dest_file}': {source}")]
+pub struct CopyFileErr {
+    pub source: Box<std::io::Error>,
+    pub src_file: File,
+    pub dest_file: File,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for CopyFileErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("failed to move file '{src_file}' to '{dest_file}': {source}")]
 pub struct MoveFileErr {
     pub source: Box<std::io::Error>,
@@ -318,6 +349,12 @@ pub enum FileSysErr {
     #[error(transparent)]
     FileMetadataErr(FileMetadataErr),
     #[error(transparent)]
+    DirMetadataErr(DirMetadataErr),
+    #[error(transparent)]
+    SetDirPermissionsErr(SetDirPermissionsErr),
+    #[error(transparent)]
+    CopyFileErr(CopyFileErr),
+    #[error(transparent)]
     MoveFileErr(MoveFileErr),
     #[error(transparent)]
     MoveDirErr(MoveDirErr),
@@ -360,6 +397,9 @@ crate::impl_error!(FileSysErr {
     DeleteDirErr,
     DeleteFileErr,
     FileMetadataErr,
+    DirMetadataErr,
+    SetDirPermissionsErr,
+    CopyFileErr,
     MoveFileErr,
     MoveDirErr,
     MoveDirRollbackErr,

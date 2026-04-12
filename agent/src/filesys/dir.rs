@@ -5,9 +5,9 @@ use std::path::PathBuf;
 // internal crates
 use crate::filesys::{
     errors::{
-        CreateDirErr, CreateTmpDirErr, DeleteDirErr, FileSysErr, InvalidDirNameErr, MoveDirErr,
-        MoveDirRollbackErr, PathDoesNotExistErr, ReadDirErr, UnknownCurrentDirErr,
-        UnknownDirNameErr, UnknownHomeDirErr, UnknownParentDirForDirErr,
+        CreateDirErr, CreateTmpDirErr, DeleteDirErr, DirMetadataErr, FileSysErr, InvalidDirNameErr,
+        MoveDirErr, MoveDirRollbackErr, PathDoesNotExistErr, ReadDirErr, SetDirPermissionsErr,
+        UnknownCurrentDirErr, UnknownDirNameErr, UnknownHomeDirErr, UnknownParentDirForDirErr,
     },
     file::File,
     path::PathExt,
@@ -272,6 +272,52 @@ impl Dir {
 
     fn is_not_empty_err(e: &std::io::Error) -> bool {
         e.kind() == std::io::ErrorKind::DirectoryNotEmpty
+    }
+
+    /// Set the directory permissions using octal
+    /// (https://www.redhat.com/sysadmin/linux-file-permissions-explained)
+    pub async fn set_permissions(
+        &self,
+        permissions: std::fs::Permissions,
+    ) -> Result<(), FileSysErr> {
+        tokio::fs::set_permissions(self.path(), permissions)
+            .await
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                        path: self.path().clone(),
+                        trace: trace!(),
+                    })
+                } else {
+                    FileSysErr::SetDirPermissionsErr(SetDirPermissionsErr {
+                        source: Box::new(e),
+                        dir: self.clone(),
+                        trace: trace!(),
+                    })
+                }
+            })?;
+        Ok(())
+    }
+
+    pub async fn permissions(&self) -> Result<std::fs::Permissions, FileSysErr> {
+        Ok(self.metadata().await?.permissions())
+    }
+
+    async fn metadata(&self) -> Result<std::fs::Metadata, FileSysErr> {
+        tokio::fs::metadata(self.path()).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                    path: self.path().clone(),
+                    trace: trace!(),
+                })
+            } else {
+                FileSysErr::DirMetadataErr(DirMetadataErr {
+                    dir: self.clone(),
+                    source: Box::new(e),
+                    trace: trace!(),
+                })
+            }
+        })
     }
 
     /// Move this directory to a new directory.

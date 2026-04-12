@@ -13,16 +13,22 @@ use chrono::{DateTime, TimeDelta, Utc};
 
 // ========================= FACTORIES ========================= //
 
-pub fn make_cfg_inst(id: &str) -> backend_api::models::ConfigInstance {
+#[derive(Clone, Debug, PartialEq)]
+pub struct CfgInstArgs {
+    pub id: String,
+    pub filepath: String,
+}
+
+pub fn make_cfg_inst(args: CfgInstArgs) -> backend_api::models::ConfigInstance {
     backend_api::models::ConfigInstance {
-        id: id.to_string(),
-        filepath: format!("{id}.json"),
+        id: args.id,
+        filepath: args.filepath,
         ..Default::default()
     }
 }
 
-pub fn make_deployment(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
-    let cfg_insts: Vec<_> = cfg_inst_ids.iter().map(|id| make_cfg_inst(id)).collect();
+pub fn make_deployment(id: &str, cfg_inst_args: Vec<CfgInstArgs>) -> BackendDeployment {
+    let cfg_insts: Vec<_> = cfg_inst_args.into_iter().map(make_cfg_inst).collect();
     BackendDeployment {
         id: id.to_string(),
         activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
@@ -32,10 +38,10 @@ pub fn make_deployment(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
     }
 }
 
-pub fn make_archived_dpl(id: &str, cfg_inst_ids: &[&str]) -> BackendDeployment {
+pub fn make_archived_dpl(id: &str, cfg_inst_args: Vec<CfgInstArgs>) -> BackendDeployment {
     BackendDeployment {
         target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
-        ..make_deployment(id, cfg_inst_ids)
+        ..make_deployment(id, cfg_inst_args)
     }
 }
 
@@ -69,11 +75,11 @@ pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
 
 pub fn make_deployment_with_release(
     id: &str,
-    cfg_inst_ids: &[&str],
+    cfg_inst_args: Vec<CfgInstArgs>,
     release_id: &str,
     gc_id: Option<&str>,
 ) -> BackendDeployment {
-    let mut dpl = make_deployment(id, cfg_inst_ids);
+    let mut dpl = make_deployment(id, cfg_inst_args);
     dpl.release_id = release_id.to_string();
     dpl.release = Some(Box::new(make_backend_release(release_id, gc_id)));
     dpl

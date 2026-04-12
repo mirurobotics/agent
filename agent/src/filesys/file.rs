@@ -6,15 +6,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{
-    dir::Dir,
-    errors::{
-        AtomicWriteFileErr, ConvertUTF8Err, CreateSymlinkErr, DeleteFileErr, FileMetadataErr,
-        FileSysErr, InvalidFileOverwriteErr, MoveFileErr, OpenFileErr, ParseJSONErr,
-        PathDoesNotExistErr, ReadFileErr, UnknownFileNameErr, UnknownParentDirForFileErr,
-        WriteFileErr,
-    },
-    path::PathExt,
-    Atomic, Overwrite, WriteOptions,
+    dir::Dir, errors::*, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
 };
 use crate::trace;
 
@@ -28,7 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
 /// File struct for interacting with files
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct File {
     path: PathBuf,
 }
@@ -47,7 +39,12 @@ impl PathExt for File {
 
 impl File {
     pub fn new<T: Into<PathBuf>>(path: T) -> Self {
-        File { path: path.into() }
+        let path: PathBuf = path.into().components().collect();
+        File { path }
+    }
+
+    pub fn is_absolute(&self) -> bool {
+        self.path().is_absolute()
     }
 
     pub fn name(&self) -> Result<&str, FileSysErr> {
@@ -217,6 +214,13 @@ impl File {
                     trace: trace!(),
                 })
             })?;
+            file.flush().await.map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: self.clone(),
+                    trace: trace!(),
+                })
+            })?;
         }
         Ok(())
     }
@@ -251,6 +255,63 @@ impl File {
                 trace: trace!(),
             })),
         }
+    }
+
+    /// Copy this file to a new file.
+    pub async fn copy_to(&self, dst: &File, opts: CopyOptions) -> Result<(), FileSysErr> {
+        if self.path() == dst.path() {
+            self.assert_exists()?;
+            return Ok(());
+        }
+
+        // TOCTOU note: tokio::fs::copy has no O_EXCL equivalent, so this
+        // pre-check is the best we can do for Overwrite::Deny. The race
+        // window is unavoidable.
+        if opts.overwrite == Overwrite::Deny && dst.exists() {
+            return Err(FileSysErr::InvalidFileOverwriteErr(
+                InvalidFileOverwriteErr {
+                    file: dst.clone(),
+                    overwrite: opts.overwrite,
+                    trace: trace!(),
+                },
+            ));
+        }
+
+        // ensure the parent directory of the new file exists and create it if not
+        dst.parent()?.create_if_absent().await?;
+
+        tokio::fs::copy(self.path(), dst.path())
+            .await
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                        path: self.path().clone(),
+                        trace: trace!(),
+                    })
+                } else {
+                    FileSysErr::CopyFileErr(CopyFileErr {
+                        source: Box::new(e),
+                        src_file: self.clone(),
+                        dest_file: dst.clone(),
+                        trace: trace!(),
+                    })
+                }
+            })?;
+
+        if opts.sync == crate::filesys::Sync::Yes {
+            let file = TokioFile::open(dst.path())
+                .await
+                .map_err(|e| File::map_io_err_for_open(e, dst))?;
+            file.sync_data().await.map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: dst.clone(),
+                    trace: trace!(),
+                })
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Rename this file to a new file.

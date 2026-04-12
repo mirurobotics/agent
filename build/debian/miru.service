@@ -22,12 +22,12 @@ StandardError=journal
 SyslogIdentifier=miru-agent
 
 # security
-# Allows read / write access
+# ReadWritePaths is kept even though ProtectSystem is not enabled by
+# default. It is a no-op in the default configuration, but becomes
+# meaningful if a customer ships a hardening drop-in that enables
+# ProtectSystem=strict — the agent's own working directories are then
+# writable without the customer needing to remember to add them.
 ReadWritePaths=/var/lib/miru /var/log/miru /srv/miru
-# Makes the entire filesystem read-only except for paths in ReadWritePaths
-ProtectSystem=strict
-# Prevents access to /home, /root, and /run/user
-ProtectHome=true
 # Prevents the service and its children from gaining new privileges
 NoNewPrivileges=true
 # Gives the service a private /tmp and /var/tmp

@@ -1,4 +1,5 @@
 // standard crates
+use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
 // internal crates
@@ -1144,5 +1145,103 @@ mod move_to {
         );
 
         assert_no_trash_dirs(&base_dir).await;
+    }
+}
+
+pub mod set_permissions {
+    use super::*;
+
+    #[tokio::test]
+    async fn doesnt_exist() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let target = dir.subdir("nonexistent-dir");
+        let permissions = std::fs::Permissions::from_mode(0o755);
+
+        assert!(matches!(
+            target.set_permissions(permissions).await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn basic_permissions() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let target = dir.subdir("test-dir");
+        target.create().await.unwrap();
+
+        let readonly = std::fs::Permissions::from_mode(0o555);
+        let readwrite = std::fs::Permissions::from_mode(0o755);
+        let restricted = std::fs::Permissions::from_mode(0o700);
+
+        // Test read-execute only (555 in octal)
+        target.set_permissions(readonly).await.unwrap();
+        let perms = target.permissions().await.unwrap();
+        assert_eq!(perms.mode() & 0o777, 0o555);
+
+        // Test read-write-execute (755 in octal)
+        target.set_permissions(readwrite).await.unwrap();
+        let perms = target.permissions().await.unwrap();
+        assert_eq!(perms.mode() & 0o777, 0o755);
+
+        // Test owner-only (700 in octal)
+        target.set_permissions(restricted).await.unwrap();
+        let perms = target.permissions().await.unwrap();
+        assert_eq!(perms.mode() & 0o777, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn all_permission_combinations() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let target = dir.subdir("test-dir");
+        target.create().await.unwrap();
+
+        let permissions = [
+            0o500, // read-execute for owner
+            0o700, // read-write-execute for owner
+            0o550, // read-execute for owner and group
+            0o555, // read-execute for all
+            0o755, // read-write-execute owner, read-execute others
+            0o777, // full permissions for all
+        ];
+
+        for mode in permissions {
+            let expected = std::fs::Permissions::from_mode(mode);
+            target.set_permissions(expected.clone()).await.unwrap();
+            let actual = target.permissions().await.unwrap();
+            assert_eq!(actual.mode() & 0o777, expected.mode() & 0o777);
+        }
+    }
+}
+
+pub mod permissions {
+    use super::*;
+
+    #[tokio::test]
+    async fn doesnt_exist() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let target = dir.subdir("nonexistent-dir");
+
+        assert!(matches!(
+            target.permissions().await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn returns_current_permissions() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let target = dir.subdir("test-dir");
+        target.create().await.unwrap();
+
+        // set known permissions and verify read-back
+        target
+            .set_permissions(std::fs::Permissions::from_mode(0o750))
+            .await
+            .unwrap();
+        let perms = target.permissions().await.unwrap();
+        assert_eq!(perms.mode() & 0o777, 0o750);
     }
 }

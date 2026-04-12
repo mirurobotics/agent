@@ -2,7 +2,7 @@
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
-use miru_agent::filesys::{self, Overwrite, PathExt};
+use miru_agent::filesys::{self, File, Overwrite, PathExt};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage;
 
@@ -15,9 +15,7 @@ struct Fixture {
     deployments: storage::Deployments,
     cfg_insts: storage::CfgInsts,
     cfg_inst_content: storage::CfgInstContent,
-    staging_dir: filesys::Dir,
-    target_dir: filesys::Dir,
-    _temp_dir: filesys::Dir,
+    temp_dir: filesys::Dir,
 }
 
 impl Fixture {
@@ -37,17 +35,18 @@ impl Fixture {
                 .await
                 .unwrap();
 
-        let staging_dir = temp_dir.subdir("staging");
-        let target_dir = temp_dir.subdir("target");
-
         Self {
             deployments,
             cfg_insts,
             cfg_inst_content,
-            staging_dir,
-            target_dir,
-            _temp_dir: temp_dir,
+            temp_dir,
         }
+    }
+
+    /// Build an absolute filepath under the fixture's temp_dir for use as a
+    /// `ConfigInstance.filepath` value.
+    fn fixture_path(&self, rel: &str) -> String {
+        self.temp_dir.path().join(rel).display().to_string()
     }
 
     async fn seed_cfg_inst(&self, cfg_inst: &ConfigInstance, content: String) {
@@ -78,6 +77,13 @@ impl Fixture {
             .unwrap();
     }
 
+    async fn seed_cfg_inst_content(&self, cfg_inst: &ConfigInstance, content: String) {
+        self.cfg_inst_content
+            .write(cfg_inst.id.clone(), content, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+    }
+
     async fn seed_deployment(&self, deployment: &Deployment) {
         self.deployments
             .write(
@@ -103,8 +109,6 @@ impl Fixture {
     async fn apply(&self) -> Result<Vec<Outcome>, DeployErr> {
         let storage = self.storage();
         let opts = apply::DeployOpts {
-            staging_dir: self.staging_dir.clone(),
-            target_dir: self.target_dir.clone(),
             retry_policy: RetryPolicy::default(),
         };
         let args = apply::Args {
@@ -119,11 +123,7 @@ impl Fixture {
         retry_policy: RetryPolicy,
     ) -> Result<Vec<Outcome>, DeployErr> {
         let storage = self.storage();
-        let opts = apply::DeployOpts {
-            staging_dir: self.staging_dir.clone(),
-            target_dir: self.target_dir.clone(),
-            retry_policy,
-        };
+        let opts = apply::DeployOpts { retry_policy };
         let args = apply::Args {
             storage: &storage,
             opts: &opts,
@@ -134,9 +134,9 @@ impl Fixture {
 
 // ================================= HELPERS ===================================== //
 
-fn make_cfg_inst(filepath: &str) -> ConfigInstance {
+fn make_cfg_inst(filepath: String) -> ConfigInstance {
     ConfigInstance {
-        filepath: filepath.to_string(),
+        filepath,
         ..Default::default()
     }
 }
@@ -202,8 +202,8 @@ mod find_target_deployed {
     async fn conflicting_deployments() {
         let f = Fixture::new().await;
 
-        let ci1 = make_cfg_inst("/a.json");
-        let ci2 = make_cfg_inst("/b.json");
+        let ci1 = make_cfg_inst(f.fixture_path("a.json"));
+        let ci2 = make_cfg_inst(f.fixture_path("b.json"));
         f.seed_cfg_inst(&ci1, "{}".into()).await;
         f.seed_cfg_inst(&ci2, "{}".into()).await;
 
@@ -257,7 +257,7 @@ mod find_target_deployed {
     async fn failed_deployment_does_not_conflict_with_healthy() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/healthy.json");
+        let ci = make_cfg_inst(f.fixture_path("healthy.json"));
         f.seed_cfg_inst(&ci, "healthy-content".into()).await;
 
         // healthy: target=Deployed, activity=Queued -> should be picked and deployed
@@ -297,7 +297,7 @@ mod find_target_deployed {
             }
         );
 
-        let file = f.target_dir.file("healthy.json");
+        let file = File::new(&ci.filepath);
         assert!(
             file.exists(),
             "healthy deployment file should exist on disk"
@@ -313,7 +313,7 @@ mod deploy_success {
     async fn single_queued_to_deployed() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/test/filepath.json");
+        let ci = make_cfg_inst(f.fixture_path("test/filepath.json"));
         f.seed_cfg_inst(&ci, r#"{"speed": 4}"#.into()).await;
 
         let dpl = make_deployment(
@@ -341,7 +341,7 @@ mod deploy_success {
         );
 
         // verify file on disk
-        let file = f.target_dir.file("test/filepath.json");
+        let file = File::new(&ci.filepath);
         assert!(file.exists(), "deployed file should exist on disk");
         let content = file.read_string().await.unwrap();
         assert_eq!(content, r#"{"speed": 4}"#);
@@ -351,18 +351,25 @@ mod deploy_success {
     async fn multiple_config_instances() {
         let f = Fixture::new().await;
 
-        let ci1 = make_cfg_inst("/a.json");
-        let ci2 = make_cfg_inst("/b.yaml");
-        let ci3 = make_cfg_inst("/nested/c.toml");
+        let ci1 = make_cfg_inst(f.fixture_path("a.json"));
+        let ci2 = make_cfg_inst(f.fixture_path("b.yaml"));
+        let ci3 = make_cfg_inst(f.fixture_path("nested/c.toml"));
+        let ci4 = make_cfg_inst(f.fixture_path("a/super/nested/file.txt"));
         f.seed_cfg_inst(&ci1, "content-a".into()).await;
         f.seed_cfg_inst(&ci2, "content-b".into()).await;
         f.seed_cfg_inst(&ci3, "content-c".into()).await;
+        f.seed_cfg_inst(&ci4, "content-d".into()).await;
 
         let dpl = make_deployment(
             "dpl-multi",
             DplTarget::Deployed,
             DplActivity::Queued,
-            vec![ci1.id.clone(), ci2.id.clone(), ci3.id.clone()],
+            vec![
+                ci1.id.clone(),
+                ci2.id.clone(),
+                ci3.id.clone(),
+                ci4.id.clone(),
+            ],
         );
         f.seed_deployment(&dpl).await;
 
@@ -383,20 +390,20 @@ mod deploy_success {
         );
 
         assert_eq!(
-            f.target_dir.file("a.json").read_string().await.unwrap(),
+            File::new(&ci1.filepath).read_string().await.unwrap(),
             "content-a"
         );
         assert_eq!(
-            f.target_dir.file("b.yaml").read_string().await.unwrap(),
+            File::new(&ci2.filepath).read_string().await.unwrap(),
             "content-b"
         );
         assert_eq!(
-            f.target_dir
-                .file("nested/c.toml")
-                .read_string()
-                .await
-                .unwrap(),
+            File::new(&ci3.filepath).read_string().await.unwrap(),
             "content-c"
+        );
+        assert_eq!(
+            File::new(&ci4.filepath).read_string().await.unwrap(),
+            "content-d"
         );
     }
 
@@ -404,7 +411,7 @@ mod deploy_success {
     async fn from_archived_activity() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/re-deploy.json");
+        let ci = make_cfg_inst(f.fixture_path("re-deploy.json"));
         f.seed_cfg_inst(&ci, "re-deployed".into()).await;
 
         // target=Deployed, activity=Archived -> FSM: Deploy
@@ -432,15 +439,91 @@ mod deploy_success {
             }
         );
     }
+
+    /// Full replacement scenario: deployment A has files [x, y], replaced by
+    /// deployment B with files [y, z]. Verifies:
+    /// - x (old-only) is deleted
+    /// - y (shared) survives with new content
+    /// - z (new-only) is created
+    #[tokio::test]
+    async fn replacement_removes_old_keeps_shared_creates_new() {
+        let f = Fixture::new().await;
+
+        let ci_old_only = make_cfg_inst(f.fixture_path("old-only.json"));
+        let ci_shared = make_cfg_inst(f.fixture_path("shared.json"));
+        let ci_new_only = make_cfg_inst(f.fixture_path("new-only.json"));
+        f.seed_cfg_inst(&ci_old_only, r#"{"file": "x"}"#.into())
+            .await;
+        f.seed_cfg_inst(&ci_shared, r#"{"file": "y-old"}"#.into())
+            .await;
+        f.seed_cfg_inst(&ci_new_only, r#"{"file": "z"}"#.into())
+            .await;
+
+        // deploy A with [old-only, shared]
+        let dpl_a = make_deployment(
+            "dpl-a",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_old_only.id.clone(), ci_shared.id.clone()],
+        );
+        f.seed_deployment(&dpl_a).await;
+        f.apply().await.unwrap();
+
+        // update shared content for deployment B
+        f.seed_cfg_inst_content(&ci_shared, r#"{"file": "y-new"}"#.into())
+            .await;
+
+        // deployment B wants [shared, new-only]; deployment A is being removed
+        let dpl_b = make_deployment(
+            "dpl-b",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_shared.id.clone(), ci_new_only.id.clone()],
+        );
+        let dpl_a_remove = make_deployment(
+            "dpl-a",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci_old_only.id.clone(), ci_shared.id.clone()],
+        );
+        f.seed_deployment(&dpl_b).await;
+        f.seed_deployment(&dpl_a_remove).await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 2);
+
+        let old_only = File::new(&ci_old_only.filepath);
+        let shared = File::new(&ci_shared.filepath);
+        let new_only = File::new(&ci_new_only.filepath);
+
+        // old-only file deleted
+        assert!(
+            !old_only.path().exists(),
+            "old-only file should be deleted after replacement"
+        );
+
+        // shared file survives with updated content
+        assert!(shared.path().exists(), "shared file should survive");
+        let content = shared.read_string().await.unwrap();
+        assert_eq!(content, r#"{"file": "y-new"}"#);
+
+        // new-only file created
+        assert!(new_only.path().exists(), "new-only file should be created");
+        let content = new_only.read_string().await.unwrap();
+        assert_eq!(content, r#"{"file": "z"}"#);
+    }
 }
 
 mod deploy_errors {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn empty_config_instances() {
         let f = Fixture::new().await;
 
+        // to deploy
         let dpl = make_deployment(
             "dpl-empty",
             DplTarget::Deployed,
@@ -448,6 +531,15 @@ mod deploy_errors {
             vec![],
         );
         f.seed_deployment(&dpl).await;
+
+        // to remove -- used to ensure that deployment is not removed in errors
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
@@ -483,29 +575,26 @@ mod deploy_errors {
         );
         f.seed_deployment(&dpl).await;
 
-        let outcomes = f.apply().await.unwrap();
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-missing-meta".into(),
-                activity: DplActivity::Queued,
-                error_status: DplErrStatus::Retrying,
-                attempts: 1,
-                has_error: true,
-                has_wait: true,
-                in_cooldown: true,
-                transitioned: true,
-            }
-        );
-        assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
+        // to remove -- used to ensure that deployment is not removed in errors
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
+
+        // apply returns Err because read_cfg_insts for the deployed_files list
+        // fails before any deployment is attempted
+        let result = f.apply().await;
+        assert!(matches!(result, Err(DeployErr::CacheErr(_))));
     }
 
     #[tokio::test]
     async fn missing_content() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/test/filepath.json");
+        let ci = make_cfg_inst(f.fixture_path("test/filepath.json"));
         // seed metadata but NOT content
         f.seed_cfg_inst_meta_only(&ci).await;
 
@@ -516,6 +605,15 @@ mod deploy_errors {
             vec![ci.id.clone()],
         );
         f.seed_deployment(&dpl).await;
+
+        // to remove -- used to ensure that deployment is not removed in errors
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
@@ -536,6 +634,136 @@ mod deploy_errors {
     }
 
     #[tokio::test]
+    async fn deploy_error_preserves_old_deployment_files() {
+        let f = Fixture::new().await;
+
+        // Deploy an old deployment with a real config instance file on disk
+        let ci_old = make_cfg_inst(f.fixture_path("old-config.json"));
+        f.seed_cfg_inst(&ci_old, r#"{"old": true}"#.into()).await;
+
+        let dpl_old = make_deployment(
+            "dpl-old",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_old.id.clone()],
+        );
+        f.seed_deployment(&dpl_old).await;
+        f.apply().await.unwrap();
+
+        let old_file = File::new(&ci_old.filepath);
+        assert!(
+            old_file.exists(),
+            "old file should exist after initial deploy"
+        );
+
+        // Seed a new deployment that will fail: metadata only, no content -> CacheErr
+        let ci_new = make_cfg_inst(f.fixture_path("new-config.json"));
+        f.seed_cfg_inst_meta_only(&ci_new).await;
+
+        let dpl_new = make_deployment(
+            "dpl-new",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_new.id.clone()],
+        );
+        f.seed_deployment(&dpl_new).await;
+
+        // Seed the old deployment as target=Archived, activity=Deployed for removal
+        let dpl_old_remove = make_deployment(
+            "dpl-old",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci_old.id.clone()],
+        );
+        f.seed_deployment(&dpl_old_remove).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // Only the failing new deployment should produce an outcome; the old
+        // deployment's removal is skipped because the deploy phase errored.
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-new".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(outcomes[0].error, Some(DeployErr::CacheErr(_))));
+
+        // The old deployment's file must still exist on disk
+        assert!(
+            old_file.exists(),
+            "old deployment file should survive when the new deploy fails"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn config_instance_write_permission_denied() {
+        let f = Fixture::new().await;
+
+        let locked_dir = f.temp_dir.subdir("locked");
+        locked_dir.create().await.unwrap();
+        locked_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o555))
+            .await
+            .unwrap();
+
+        let ci = make_cfg_inst(locked_dir.file("config.json").path().display().to_string());
+        f.seed_cfg_inst(&ci, r#"{"locked": true}"#.into()).await;
+
+        let dpl = make_deployment(
+            "dpl-inaccessible-dest",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        // to remove -- used to ensure that deployment is not removed in errors
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        locked_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-inaccessible-dest".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(
+            outcomes[0].error,
+            Some(DeployErr::WriteAccessDenied(_))
+        ));
+    }
+
+    #[tokio::test]
     async fn error_bumps_attempts_and_sets_cooldown() {
         let f = Fixture::new().await;
 
@@ -547,6 +775,15 @@ mod deploy_errors {
         );
         dpl.attempts = 3;
         f.seed_deployment(&dpl).await;
+
+        // to remove -- used to ensure that deployment is not removed in errors
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
@@ -581,6 +818,15 @@ mod deploy_errors {
         );
         f.seed_deployment(&dpl).await;
 
+        // to remove -- used to ensure that deployment is not removed in errors
+        f.seed_deployment(&make_deployment(
+            "dpl-to-remove",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        ))
+        .await;
+
         let policy = RetryPolicy {
             max_attempts: 1,
             ..RetryPolicy::default()
@@ -610,26 +856,44 @@ mod deploy_errors {
 
 mod remove_action {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn archived_target_deployed_activity() {
         let f = Fixture::new().await;
 
-        // target=Archived, activity=Deployed -> FSM: Remove
+        let ci = make_cfg_inst(f.fixture_path("remove-me.json"));
+        f.seed_cfg_inst(&ci, r#"{"old": true}"#.into()).await;
+
+        // deploy first so file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-deploy-first",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        // now mark it for removal: target=Archived, activity=Deployed -> FSM: Remove
         let dpl = make_deployment(
-            "dpl-remove",
+            "dpl-deploy-first",
             DplTarget::Archived,
             DplActivity::Deployed,
-            vec![],
+            vec![ci.id.clone()],
         );
         f.seed_deployment(&dpl).await;
+
+        let dest = File::new(&ci.filepath);
+        assert!(dest.path().exists(), "file should exist before removal");
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
             ComparableOutcome::from(&outcomes[0]),
             ComparableOutcome {
-                id: "dpl-remove".into(),
+                id: "dpl-deploy-first".into(),
                 activity: DplActivity::Archived,
                 error_status: DplErrStatus::None,
                 attempts: 0,
@@ -639,18 +903,41 @@ mod remove_action {
                 transitioned: true,
             }
         );
+        assert!(
+            !dest.path().exists(),
+            "file should be deleted after removal"
+        );
     }
 
     #[tokio::test]
     async fn staged_target_deployed_activity() {
         let f = Fixture::new().await;
 
-        // target=Staged, activity=Deployed -> FSM: Remove
+        let ci = make_cfg_inst(f.fixture_path("staged-remove.json"));
+        f.seed_cfg_inst(&ci, r#"{"staged": true}"#.into()).await;
+
+        // deploy first so file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-staged-remove",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        let dest = File::new(&ci.filepath);
+        assert!(
+            dest.path().exists(),
+            "file should exist after initial deploy"
+        );
+
+        // Re-seed as target=Staged, activity=Deployed -> FSM: Remove
         let dpl = make_deployment(
             "dpl-staged-remove",
             DplTarget::Staged,
             DplActivity::Deployed,
-            vec![],
+            vec![ci.id.clone()],
         );
         f.seed_deployment(&dpl).await;
 
@@ -668,6 +955,286 @@ mod remove_action {
                 in_cooldown: false,
                 transitioned: true,
             }
+        );
+        assert!(
+            !dest.path().exists(),
+            "file should be deleted after staged removal"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_config_instances_is_noop() {
+        let f = Fixture::new().await;
+
+        // target=Archived, activity=Deployed, no config instances -> FSM: Remove (no-op)
+        let dpl = make_deployment(
+            "dpl-empty",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-empty".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_error_enters_retry() {
+        let f = Fixture::new().await;
+
+        // cfg_inst with a relative filepath triggers PathNotAllowed in remove
+        let ci = ConfigInstance {
+            filepath: "relative/path.json".to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst_meta_only(&ci).await;
+
+        // target=Archived, activity=Deployed -> FSM: Remove
+        let dpl = make_deployment(
+            "dpl-remove-err",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-remove-err".into(),
+                activity: DplActivity::Removing,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(
+            outcomes[0].error,
+            Some(DeployErr::PathNotAllowed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn dont_remove_protects_shared_files() {
+        let f = Fixture::new().await;
+
+        // shared config instance used by both old and new deployment
+        let ci_shared = make_cfg_inst(f.fixture_path("shared.json"));
+        f.seed_cfg_inst(&ci_shared, r#"{"shared": true}"#.into())
+            .await;
+        // config instance only in the old deployment
+        let ci_old = make_cfg_inst(f.fixture_path("old-only.json"));
+        f.seed_cfg_inst(&ci_old, r#"{"old": true}"#.into()).await;
+
+        // deploy old deployment first so both files exist on disk
+        let old_deploy = make_deployment(
+            "dpl-old",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_shared.id.clone(), ci_old.id.clone()],
+        );
+        f.seed_deployment(&old_deploy).await;
+        f.apply().await.unwrap();
+
+        // now: new deployment wants to be deployed (uses shared config),
+        // old deployment is being removed
+        let new_dpl = make_deployment(
+            "dpl-new",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_shared.id.clone()],
+        );
+        let old_dpl = make_deployment(
+            "dpl-old",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci_shared.id.clone(), ci_old.id.clone()],
+        );
+        f.seed_deployment(&new_dpl).await;
+        f.seed_deployment(&old_dpl).await;
+
+        let shared_dest = File::new(&ci_shared.filepath);
+        let old_dest = File::new(&ci_old.filepath);
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 2);
+
+        // new deployment should deploy successfully
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-new".into(),
+                activity: DplActivity::Deployed,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+
+        // old deployment should be archived
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[1]),
+            ComparableOutcome {
+                id: "dpl-old".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+
+        // shared file should survive (protected by dont_remove)
+        assert!(
+            shared_dest.path().exists(),
+            "shared file should be protected from deletion"
+        );
+        // old-only file should be deleted
+        assert!(!old_dest.path().exists(), "old-only file should be deleted");
+    }
+
+    #[tokio::test]
+    async fn already_removing_transitions_to_archived() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(f.fixture_path("removing.json"));
+        f.seed_cfg_inst(&ci, r#"{"removing": true}"#.into()).await;
+
+        // deploy first so file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-removing",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        // now set target=Archived, activity=Removing (already in removing state)
+        let dpl = Deployment {
+            id: "dpl-removing".to_string(),
+            target_status: DplTarget::Archived,
+            activity_status: DplActivity::Removing,
+            config_instance_ids: vec![ci.id.clone()],
+            ..Default::default()
+        };
+        f.seed_deployment(&dpl).await;
+
+        let dest = File::new(&ci.filepath);
+        assert!(dest.path().exists(), "file should exist before removal");
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-removing".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+        assert!(
+            !dest.path().exists(),
+            "file should be deleted after removal"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remove_io_error_permission_denied() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(f.fixture_path("remove-locked/config.json"));
+        f.seed_cfg_inst(&ci, r#"{"locked": true}"#.into()).await;
+
+        // deploy first so file exists on disk
+        let deploy_dpl = make_deployment(
+            "dpl-remove-locked",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&deploy_dpl).await;
+        f.apply().await.unwrap();
+
+        let dest = File::new(&ci.filepath);
+        assert!(
+            dest.path().exists(),
+            "file should exist after initial deploy"
+        );
+
+        // Lock the parent directory so removal fails with EACCES
+        let parent_dir = dest.parent().unwrap();
+        parent_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o555))
+            .await
+            .unwrap();
+
+        // Seed deployment as target=Archived, activity=Deployed for removal
+        let dpl = make_deployment(
+            "dpl-remove-locked",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        );
+        f.seed_deployment(&dpl).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        // Restore permissions BEFORE assertions so tempdir cleanup succeeds
+        parent_dir
+            .set_permissions(std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-remove-locked".into(),
+                activity: DplActivity::Removing,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+
+        // File should still exist since removal failed
+        assert!(
+            dest.path().exists(),
+            "file should still exist after permission-denied removal"
         );
     }
 }
@@ -815,7 +1382,7 @@ mod no_action {
     async fn steady_state_deployed_is_noop() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/already-deployed.json");
+        let ci = make_cfg_inst(f.fixture_path("already-deployed.json"));
         f.seed_cfg_inst(&ci, "content".into()).await;
 
         // target=Deployed, activity=Deployed -> FSM: None (already at target)
@@ -914,12 +1481,6 @@ mod wait_action {
         );
         let wait = outcomes[0].wait.unwrap();
         assert!(wait.num_seconds() > 3500);
-
-        // target_dir should have been deleted (None branch)
-        assert!(
-            !f.target_dir.exists(),
-            "target_dir should be deleted when no deployment targets Deployed"
-        );
     }
 }
 
@@ -930,7 +1491,7 @@ mod ordering_and_composition {
     async fn deployed_target_first_then_actionables() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/active.json");
+        let ci = make_cfg_inst(f.fixture_path("active.json"));
         f.seed_cfg_inst(&ci, "active-content".into()).await;
 
         let dpl_active = make_deployment(
@@ -983,7 +1544,7 @@ mod ordering_and_composition {
     async fn stale_removed_alongside_active() {
         let f = Fixture::new().await;
 
-        let ci = make_cfg_inst("/active.json");
+        let ci = make_cfg_inst(f.fixture_path("active.json"));
         f.seed_cfg_inst(&ci, "active-content".into()).await;
 
         let active = make_deployment(
@@ -1047,45 +1608,5 @@ mod ordering_and_composition {
             actual.id = String::new(); // normalize for comparison
             assert_eq!(actual, stale_expected);
         }
-    }
-
-    #[tokio::test]
-    async fn no_deployed_target_deletes_target_dir() {
-        let f = Fixture::new().await;
-
-        // Create target_dir on disk
-        f.target_dir.create().await.unwrap();
-        assert!(f.target_dir.exists());
-
-        // 1 deployment: target=Archived, activity=Deployed (actionable Remove, but no target=Deployed)
-        let dpl = make_deployment(
-            "dpl-stale-only",
-            DplTarget::Archived,
-            DplActivity::Deployed,
-            vec![],
-        );
-        f.seed_deployment(&dpl).await;
-
-        let outcomes = f.apply().await.unwrap();
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
-            ComparableOutcome {
-                id: "dpl-stale-only".into(),
-                activity: DplActivity::Archived,
-                error_status: DplErrStatus::None,
-                attempts: 0,
-                has_error: false,
-                has_wait: false,
-                in_cooldown: false,
-                transitioned: true,
-            }
-        );
-
-        // The None branch calls target_dir.delete()
-        assert!(
-            !f.target_dir.exists(),
-            "target_dir should be deleted when no deployment targets Deployed"
-        );
     }
 }

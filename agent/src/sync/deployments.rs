@@ -305,10 +305,7 @@ async fn apply_deployments<'a>(
     let mut wait: Option<chrono::TimeDelta> = None;
     for outcome in outcomes {
         if let Some(e) = outcome.error {
-            error!(
-                "error applying deployment {}: {:?}",
-                outcome.deployment.id, e
-            );
+            error!("error applying deployment {}: {}", outcome.deployment.id, e);
             errors.push(SyncErr::from(e));
         } else if outcome.transitioned {
             debug!("successfully applied deployment {}", outcome.deployment.id);

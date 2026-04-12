@@ -2,7 +2,9 @@
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::deploy::errors::{
-    ConflictingDeploymentsErr, EmptyConfigInstancesErr, InvalidDeploymentTargetErr,
+    BackupAccessDeniedErr, ConflictingDeploymentsErr, DuplicateFilepathErr,
+    EmptyConfigInstancesErr, GenericErr, InvalidDeploymentTargetErr, PathNotAllowedErr,
+    WriteAccessDeniedErr,
 };
 use miru_agent::deploy::DeployErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
@@ -31,12 +33,14 @@ fn storage_err() -> StorageErr {
 fn empty_config_instances_err() -> EmptyConfigInstancesErr {
     EmptyConfigInstancesErr {
         deployment_id: "dpl_1".to_string(),
+        trace: miru_agent::trace!(),
     }
 }
 
 fn conflicting_deployments_err() -> ConflictingDeploymentsErr {
     ConflictingDeploymentsErr {
         ids: vec!["dpl_1".to_string(), "dpl_2".to_string()],
+        trace: miru_agent::trace!(),
     }
 }
 
@@ -44,6 +48,48 @@ fn invalid_deployment_target_err() -> InvalidDeploymentTargetErr {
     InvalidDeploymentTargetErr {
         deployment_id: "dpl_1".to_string(),
         target_status: DplTarget::Archived,
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn path_not_allowed_err() -> PathNotAllowedErr {
+    PathNotAllowedErr {
+        filepath: "/x".to_string(),
+        reason: "test".to_string(),
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn write_access_denied_err() -> WriteAccessDeniedErr {
+    WriteAccessDeniedErr {
+        cfg_inst_id: "cfg_inst_1".to_string(),
+        filepath: "/locked/config.json".to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        )),
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn duplicate_filepath_err() -> DuplicateFilepathErr {
+    DuplicateFilepathErr {
+        filepath: "/etc/app/config.json".to_string(),
+        cfg_inst_ids: vec!["cfg_inst_1".to_string(), "cfg_inst_2".to_string()],
+        trace: miru_agent::trace!(),
+    }
+}
+
+fn backup_access_denied_err() -> BackupAccessDeniedErr {
+    BackupAccessDeniedErr {
+        cfg_inst_id: "cfg_inst_1".to_string(),
+        filepath: "/locked/config.json".to_string(),
+        backup_filepath: "/locked/miru.backup.config.json".to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        )),
+        trace: miru_agent::trace!(),
     }
 }
 
@@ -84,5 +130,39 @@ mod from_conversions {
     fn conflicting_deployments_err_maps_to_deploy_conflicting_deployments() {
         let err: DeployErr = conflicting_deployments_err().into();
         assert!(matches!(err, DeployErr::ConflictingDeployments(_)));
+    }
+
+    #[test]
+    fn path_not_allowed_err_maps_to_deploy_path_not_allowed() {
+        let err: DeployErr = path_not_allowed_err().into();
+        assert!(matches!(err, DeployErr::PathNotAllowed(_)));
+    }
+
+    #[test]
+    fn generic_err_maps_to_deploy_generic_err() {
+        let err: DeployErr = GenericErr {
+            msg: "something went wrong".to_string(),
+            trace: miru_agent::trace!(),
+        }
+        .into();
+        assert!(matches!(err, DeployErr::GenericErr(_)));
+    }
+
+    #[test]
+    fn write_access_denied_err_maps_to_deploy_write_access_denied() {
+        let err: DeployErr = write_access_denied_err().into();
+        assert!(matches!(err, DeployErr::WriteAccessDenied(_)));
+    }
+
+    #[test]
+    fn backup_access_denied_err_maps_to_deploy_backup_access_denied() {
+        let err: DeployErr = backup_access_denied_err().into();
+        assert!(matches!(err, DeployErr::BackupAccessDenied(_)));
+    }
+
+    #[test]
+    fn duplicate_filepath_err_maps_to_deploy_duplicate_filepath() {
+        let err: DeployErr = duplicate_filepath_err().into();
+        assert!(matches!(err, DeployErr::DuplicateFilepath(_)));
     }
 }
