@@ -275,6 +275,15 @@ impl Deployment {
     pub fn attempts(&self) -> u32 {
         self.attempts
     }
+
+    /// Resets retry state so the deployment is retried immediately. Called at
+    /// agent startup so that restarting the agent gives failing deployments a
+    /// fresh chance — the most common reason for a restart is "I fixed the
+    /// problem, retry now."
+    pub fn reset_retry_state(&mut self) {
+        self.attempts = 0;
+        self.cooldown_ends_at = DateTime::<Utc>::UNIX_EPOCH;
+    }
 }
 
 impl<'de> Deserialize<'de> for Deployment {

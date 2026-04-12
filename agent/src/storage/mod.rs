@@ -24,9 +24,10 @@ pub use self::settings::{Backend, MQTTBroker, Settings};
 use self::device::Device as DeviceStorage;
 use self::errors::StorageErr as StorErr;
 use self::layout::Layout as StorLayout;
+use crate::filesys::Overwrite;
 use crate::models;
 
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Capacities {
@@ -123,6 +124,7 @@ impl Storage {
         // deployments
         let (deployment_stor, deployment_stor_handle) =
             Deployments::spawn(64, layout.deployments(), capacities.deployments).await?;
+        reset_deployment_retry_state(&deployment_stor).await?;
         let deployments = Arc::new(deployment_stor);
 
         // releases
@@ -187,4 +189,21 @@ impl Storage {
 
         Ok(())
     }
+}
+
+/// Resets retry state (attempts, cooldown) for all persisted deployments so
+/// they are retried immediately after an agent restart. The most common
+/// reason for a restart is "I fixed the problem, retry now."
+async fn reset_deployment_retry_state(deployments: &Deployments) -> Result<(), StorErr> {
+    let entries = deployments.entries().await?;
+    for entry in entries {
+        let id = entry.key.clone();
+        let mut dpl = entry.value;
+        dpl.reset_retry_state();
+        debug!("reset retry state for deployment '{id}'");
+        deployments
+            .write(id, dpl, |_, _| false, Overwrite::Allow)
+            .await?;
+    }
+    Ok(())
 }
