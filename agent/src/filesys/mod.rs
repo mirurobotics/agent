@@ -51,7 +51,7 @@ impl WriteOptions {
     };
 
     /// Overwrite existing files, non-atomic.
-    pub const OVERWRITE: Self = Self {
+    pub const OVERWRITE_NONATOMIC: Self = Self {
         overwrite: Overwrite::Allow,
         atomic: Atomic::No,
     };
@@ -89,7 +89,7 @@ impl CopyOptions {
     };
 
     /// Allow overwriting, no sync.
-    pub const OVERWRITE: Self = Self {
+    pub const OVERWRITE_NO_SYNC: Self = Self {
         overwrite: Overwrite::Allow,
         sync: Sync::No,
     };

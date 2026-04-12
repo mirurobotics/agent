@@ -424,7 +424,7 @@ pub mod copy_to {
             .await
             .unwrap();
 
-        src.copy_to(&dest, CopyOptions::OVERWRITE).await.unwrap();
+        src.copy_to(&dest, CopyOptions::OVERWRITE_NO_SYNC).await.unwrap();
         assert_eq!(dest.read_string().await.unwrap(), "new");
     }
 

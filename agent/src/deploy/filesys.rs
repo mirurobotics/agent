@@ -207,10 +207,7 @@ enum Snapshot {
 async fn snapshot(dst: &filesys::File, backup: &filesys::File) -> Result<Snapshot, FileSysErr> {
     // The backup only needs to survive within the same process run for
     // application-level rollback, not across power loss — skip fsync.
-    match dst
-        .copy_to(backup, filesys::CopyOptions::OVERWRITE)
-        .await
-    {
+    match dst.copy_to(backup, filesys::CopyOptions::OVERWRITE_NO_SYNC).await {
         Ok(()) => Ok(Snapshot::Existed {
             dst: dst.clone(),
             backup: backup.clone(),

@@ -66,7 +66,7 @@ pub mod gen_key_pair {
 
         // public key file exists
         public_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
@@ -78,7 +78,7 @@ pub mod gen_key_pair {
         private_key_file.delete().await.unwrap();
         public_key_file.delete().await.unwrap();
         private_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
@@ -103,7 +103,7 @@ pub mod gen_key_pair {
 
         // public key file exists
         public_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
@@ -113,7 +113,7 @@ pub mod gen_key_pair {
 
         // private key file exists
         private_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
@@ -204,7 +204,7 @@ pub mod read_private_key {
         private_key_file.delete().await.unwrap();
 
         private_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         let result = rsa::read_private_key(&private_key_file).await;
@@ -261,7 +261,7 @@ pub mod read_public_key {
         public_key_file.delete().await.unwrap();
 
         public_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         let result = rsa::read_public_key(&public_key_file).await;
@@ -319,7 +319,7 @@ pub mod sign {
         private_key_file.delete().await.unwrap();
 
         private_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         let data = b"hello world";
@@ -452,7 +452,7 @@ pub mod verify {
         public_key_file.delete().await.unwrap();
 
         public_key_file
-            .write_bytes(&[4, 4], WriteOptions::OVERWRITE)
+            .write_bytes(&[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
         let data = b"hello world";

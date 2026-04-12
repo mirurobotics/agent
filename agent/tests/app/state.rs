@@ -257,7 +257,7 @@ pub mod shutdown {
         let device_file = layout.device();
         let device = Device::default();
         device_file
-            .write_json(&device, WriteOptions::OVERWRITE)
+            .write_json(&device, WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
 

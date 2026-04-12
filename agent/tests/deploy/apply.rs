@@ -648,7 +648,10 @@ mod deploy_errors {
         f.apply().await.unwrap();
 
         let old_file = File::new(&ci_old.filepath);
-        assert!(old_file.exists(), "old file should exist after initial deploy");
+        assert!(
+            old_file.exists(),
+            "old file should exist after initial deploy"
+        );
 
         // Seed a new deployment that will fail: metadata only, no content -> CacheErr
         let ci_new = make_cfg_inst(f.fixture_path("new-config.json"));
@@ -1184,8 +1187,8 @@ mod remove_action {
         );
 
         // Lock the parent directory so removal fails with EACCES
-        let parent_dir = dest.path().parent().unwrap();
-        std::fs::set_permissions(parent_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let parent_dir = dest.parent().unwrap();
+        parent_dir.set_permissions(std::fs::Permissions::from_mode(0o555)).await.unwrap();
 
         // Seed deployment as target=Archived, activity=Deployed for removal
         let dpl = make_deployment(
@@ -1199,7 +1202,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
 
         // Restore permissions BEFORE assertions so tempdir cleanup succeeds
-        std::fs::set_permissions(parent_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        parent_dir.set_permissions(std::fs::Permissions::from_mode(0o755)).await.unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(

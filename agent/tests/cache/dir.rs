@@ -56,7 +56,7 @@ pub mod concurrent {
         // write invalid json files to files in the cache directory
         let invalid_json_file = dir.file("invalid.json");
         invalid_json_file
-            .write_string("invalid json", WriteOptions::OVERWRITE)
+            .write_string("invalid json", WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
 
