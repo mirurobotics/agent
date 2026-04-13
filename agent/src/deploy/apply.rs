@@ -49,16 +49,20 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
             .collect();
 
             let outcome = apply_one(args, target_deployed.clone(), &[]).await;
-            // if deploying the target deployment fails, we return early to ensure that
-            // we don't remove a deployment that may be the one being replaced
-            if outcome.error.is_some() {
-                return Ok(vec![outcome]);
-            }
-
-            let mut outcomes = vec![outcome];
-            outcomes.extend(
-                apply_all(args, categorized.without_target_deployed(), &tgt_dpld_files).await?,
-            );
+            let outcomes = if outcome.error.is_some() {
+                // the target deployment failed — skip removals (which could
+                // delete files the retrying deployment still needs)
+                let mut outcomes = vec![outcome];
+                let safe = categorized.without_target_deployed_or_removing();
+                outcomes.extend(apply_all(args, safe, &tgt_dpld_files).await?);
+                outcomes
+            } else {
+                let mut outcomes = vec![outcome];
+                outcomes.extend(
+                    apply_all(args, categorized.without_target_deployed(), &tgt_dpld_files).await?,
+                );
+                outcomes
+            };
             Ok(outcomes)
         }
         None => apply_all(args, categorized.without_target_deployed(), &[]).await,
@@ -164,6 +168,15 @@ impl Categorized {
             .iter()
             .chain(self.wait.iter())
             .chain(self.remove.iter())
+            .chain(self.archive.iter())
+            .cloned()
+            .collect()
+    }
+
+    fn without_target_deployed_or_removing(&self) -> Vec<models::Deployment> {
+        self.none
+            .iter()
+            .chain(self.wait.iter())
             .chain(self.archive.iter())
             .cloned()
             .collect()

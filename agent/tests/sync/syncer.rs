@@ -970,8 +970,8 @@ pub mod subscribe {
     async fn deployment_wait_event() {
         let f = Fixture::new_with_backoff(
             "subscribe_deployment_wait",
-            // backoff.base_secs = 1 → success_wait = 1s < deployment_wait ~5s
-            // → min picks deployment_wait → emits CooldownEnd::DeploymentWait
+            // backoff.base_secs = 1 → success_wait = 1s
+            // deployment_wait ~5s is scheduled separately
             cooldown::Backoff {
                 base_secs: 1,
                 growth_factor: 2,
@@ -1027,7 +1027,21 @@ pub mod subscribe {
 
         f.syncer.sync().await.unwrap();
 
-        // Wait for the CooldownEnd::DeploymentWait event
+        // The syncer's own cooldown uses only the success_wait (1s),
+        // independent of the deployment's cooldown (5s). Verify the
+        // syncer's cooldown is short (success_wait = 1s, not 5s).
+        let state = f.syncer.get_sync_state().await.unwrap();
+        let syncer_cooldown = state
+            .cooldown_ends_at
+            .signed_duration_since(state.last_synced_at);
+        assert!(
+            syncer_cooldown <= TimeDelta::seconds(2),
+            "syncer cooldown should be ~1s (success_wait), got {:?}",
+            syncer_cooldown
+        );
+
+        // The DeploymentWait notification is scheduled separately and
+        // fires after the deployment's cooldown (~5s + 1s grace).
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 subscriber.changed().await.unwrap();
@@ -1046,7 +1060,9 @@ pub mod subscribe {
         let f = Fixture::new_with_backoff(
             "subscribe_success_over_dpl",
             // backoff.base_secs = 10 → success_wait = 10s > deployment_wait ~5s
-            // → min picks success_wait → emits CooldownEnd::SyncSuccess
+            // Both SyncSuccess and DeploymentWait cooldown end notifications
+            // fire independently. DeploymentWait fires first (~6s), then
+            // SyncSuccess (~11s).
             cooldown::Backoff {
                 base_secs: 10,
                 growth_factor: 2,
@@ -1102,18 +1118,32 @@ pub mod subscribe {
 
         f.syncer.sync().await.unwrap();
 
-        // Wait for the CooldownEnd::SyncSuccess event
-        // cooldown notification fires at base_secs + 1 = 11s
+        // Both notifications fire: DeploymentWait (~5+1=6s) and
+        // SyncSuccess (~10+1=11s).
+        let mut saw_deployment_wait = false;
+        let mut saw_sync_success = false;
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 subscriber.changed().await.unwrap();
                 let event = subscriber.borrow().clone();
-                if matches!(event, SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess)) {
+                match event {
+                    SyncEvent::CooldownEnd(CooldownEnd::DeploymentWait) => {
+                        saw_deployment_wait = true;
+                    }
+                    SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess) => {
+                        saw_sync_success = true;
+                    }
+                    _ => {}
+                }
+                if saw_deployment_wait && saw_sync_success {
                     break;
                 }
             }
         })
         .await
-        .expect("timed out waiting for CooldownEnd::SyncSuccess");
+        .expect("timed out waiting for both cooldown events");
+
+        assert!(saw_deployment_wait);
+        assert!(saw_sync_success);
     }
 }

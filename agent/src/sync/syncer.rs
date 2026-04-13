@@ -170,25 +170,23 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
 
         self.state.last_attempted_sync_at = Utc::now();
         let result = self.sync_impl().await;
-        let (event, wait) = match &result {
-            Ok(None) => (CooldownEnd::SyncSuccess, self.handle_sync_success()),
-            Ok(Some(deployment_wait)) => {
-                let success_wait = self.handle_sync_success();
-                if *deployment_wait >= success_wait {
-                    (CooldownEnd::DeploymentWait, *deployment_wait)
-                } else {
-                    (CooldownEnd::SyncSuccess, success_wait)
-                }
-            }
+
+        // determine the syncer's own cooldown period
+        let (event, sync_wait) = match &result {
+            Ok(_) => (CooldownEnd::SyncSuccess, self.handle_sync_success()),
             Err(e) => (CooldownEnd::SyncFailure, self.handle_sync_failure(e)),
         };
-
-        self.state.cooldown_ends_at = Utc::now() + wait;
-        self.schedule_cooldown_end_notification(wait, event);
+        self.state.cooldown_ends_at = Utc::now() + sync_wait;
+        self.schedule_cooldown_end_notification(sync_wait, event);
         debug!(
-            "backend syncer cooling down for {wait} (until {:?})",
+            "backend syncer cooling down for {sync_wait} (until {:?})",
             self.state.cooldown_ends_at
         );
+
+        // send an orthogonal notification when the next deployment may be attempted
+        if let Ok(Some(deployment_wait)) = result {
+            self.schedule_cooldown_end_notification(deployment_wait, CooldownEnd::DeploymentWait);
+        }
 
         result.map(|_| ())
     }
