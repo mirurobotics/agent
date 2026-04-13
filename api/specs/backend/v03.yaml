@@ -6,16 +6,70 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-beta.1
+  x-release-version: v0.3.0
   x-git-commit:
-    sha: 95232e6c08785066e50d355240b69ff59ad73a3a
-    url: https://github.com/mirurobotics/openapi/commit/95232e6c08785066e50d355240b69ff59ad73a3a
-    message: 'chore: update stainless (#26)'
-    author: ben-miru
+    sha: cbab3abdadf10fb9970627133c029c4c376b0412
+    url: https://github.com/mirurobotics/openapi/commit/cbab3abdadf10fb9970627133c029c4c376b0412
+    message: 'feat(lint): add non-Go surface linters (yamllint, shellcheck, actionlint)
+      (#27)
+
+
+      ## Summary
+
+
+      - Adds yamllint, shellcheck, and actionlint to repo:openapi, matching
+
+      the surface-linting setup already in repo:core
+
+      - New `scripts/lint-surface.sh` driver with `command -v` guards (tools
+
+      skipped locally if not installed)
+
+      - Config files: `.yamllint.yml`, `.shellcheckrc`,
+
+      `.github/actionlint.yml`
+
+      - New `surface-lint` CI job in `.github/workflows/lint.yml` (separate
+
+      from `lint` so it runs without Go/Python toolchain)
+
+      - `scripts/preflight.sh` extended with surface-lint as a 6th parallel
+
+      job
+
+      - Pre-existing YAML violations fixed across 45 API spec files (trailing
+
+      spaces, missing final newlines, trailing blank lines)
+
+      - SC1007 inline suppressions added to `tools/lint/covgate.sh` and
+
+      `tools/release/covgate.sh` for the `CDPATH=` idiom
+
+
+      ## Test plan
+
+
+      - [ ] `./scripts/lint-surface.sh` exits 0 (warnings only for
+
+      line-length, which is expected)
+
+      - [ ] `./scripts/preflight.sh` reports `=== All checks passed ===`
+
+      - [ ] CI `surface-lint` job appears in the PR checks and passes
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      ---------
+
+
+      Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>'
+    author: miru-agents
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-04-09T17:21:30.437637+00:00'
+    built_at: '2026-04-13T03:07:57.264871+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -331,7 +385,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 95232e6c08785066e50d355240b69ff59ad73a3a
+      - cbab3abdadf10fb9970627133c029c4c376b0412
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
