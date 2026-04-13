@@ -51,7 +51,7 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
             let outcome = apply_one(args, target_deployed.clone(), &[]).await;
             let outcomes = if outcome.error.is_some() {
                 // the target deployment failed — skip removals (which could
-                // delete files the retrying deployment still needs) 
+                // delete files the retrying deployment still needs)
                 let mut outcomes = vec![outcome];
                 let safe = categorized.without_target_deployed_or_removing();
                 outcomes.extend(apply_all(args, safe, &tgt_dpld_files).await?);
