@@ -971,6 +971,63 @@ mod deploy_errors {
             }
         );
     }
+
+    #[tokio::test]
+    async fn waits_processed_on_deploy_failure() {
+        let f = Fixture::new().await;
+
+        // Target deployment that will fail (no config instance content)
+        let dpl = make_deployment(
+            "dpl-target",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![],
+        );
+        f.seed_deployment(&dpl).await;
+
+        // Deployment in cooldown: (Archived, Deployed) → FSM would be Remove,
+        // but set_cooldown makes it Wait
+        let mut dpl_wait = make_deployment(
+            "dpl-in-cooldown",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![],
+        );
+        dpl_wait.set_cooldown(TimeDelta::minutes(60));
+        f.seed_deployment(&dpl_wait).await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        assert_eq!(outcomes.len(), 2);
+        // First outcome: the failed target
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-target".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        // Second outcome: the wait deployment is included with no transition
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[1]),
+            ComparableOutcome {
+                id: "dpl-in-cooldown".into(),
+                activity: DplActivity::Deployed,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: false,
+            }
+        );
+    }
 }
 
 mod remove_action {
