@@ -608,4 +608,83 @@ use std::fmt::Debug;
         assert_eq!(exit_code, 0);
         assert!(stderr.contains("warning: could not read"));
     }
+
+    fn assert_cli(assert_paths: Vec<PathBuf>) -> Cli {
+        Cli {
+            path: None,
+            fix: false,
+            config: None,
+            assert_paths,
+            assert_threshold: 4,
+        }
+    }
+
+    #[test]
+    fn run_assert_check_flags_field_by_field_asserts() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("test.rs"),
+            r#"
+#[test]
+fn test_example() {
+    let req = get_request();
+    assert_eq!(req.call, Call::GetDeployment);
+    assert_eq!(req.method, Method::GET);
+    assert_eq!(req.path, "/deployments");
+    assert_eq!(req.url, "http://mock/deployments");
+}
+"#,
+        )
+        .unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &assert_cli(vec![dir.path().to_path_buf()]),
+            &mut stdout,
+            &mut stderr,
+        );
+        let stdout = String::from_utf8(stdout).unwrap();
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.contains("field-by-field-assert"));
+        assert!(stdout.contains("`req`"));
+    }
+
+    #[test]
+    fn run_assert_check_clean_when_below_threshold() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("test.rs"),
+            r#"
+#[test]
+fn test_example() {
+    assert_eq!(req.call, Call::GetDeployment);
+    assert_eq!(req.method, Method::GET);
+}
+"#,
+        )
+        .unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &assert_cli(vec![dir.path().to_path_buf()]),
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 0);
+        assert!(stdout.is_empty());
+    }
+
+    #[test]
+    fn run_assert_check_skipped_when_no_paths() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(&assert_cli(vec![]), &mut stdout, &mut stderr);
+
+        assert_eq!(exit_code, 0);
+        assert!(stdout.is_empty());
+    }
 }
