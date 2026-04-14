@@ -2,8 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::mocks::error::SleepController;
-use crate::mocks::syncer::MockSyncer;
+use crate::mocks::{error::SleepController, syncer::MockSyncer};
 use miru_agent::filesys;
 use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout};

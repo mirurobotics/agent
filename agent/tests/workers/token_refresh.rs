@@ -3,8 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::token_manager::MockTokenManager;
-use crate::mocks::error::SleepController;
+use crate::mocks::{error::SleepController, token_manager::MockTokenManager};
 use miru_agent::authn::errors::MockError;
 use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::cooldown;
