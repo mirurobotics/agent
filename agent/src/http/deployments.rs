@@ -84,6 +84,18 @@ pub async fn list_all(
     Ok(all_deployments)
 }
 
+pub async fn get(
+    client: &impl ClientI,
+    id: &str,
+    expansions: &[&str],
+    token: &str,
+) -> Result<Deployment, HTTPErr> {
+    let qp = QueryParams::new().expand(expansions);
+    let url = format!("{}/deployments/{}", client.base_url(), id);
+    let request = request::Params::get(&url).with_query(qp).with_token(token);
+    super::client::fetch(client, request).await
+}
+
 pub async fn update(
     client: &impl ClientI,
     params: UpdateParams<'_>,

@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::http::mock::MockClient;
+use crate::mocks::http_client::MockClient;
 use backend_api::models::TokenResponse;
 use miru_agent::authn::{token_mngr::TokenFile, AuthnErr, Token, TokenManager, TokenManagerExt};
 use miru_agent::crypt::rsa;

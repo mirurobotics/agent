@@ -1,5 +1,5 @@
 // internal crates
-use crate::http::mock::{self, MockClient};
+use crate::mocks::http_client::{self as mock, MockClient};
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};

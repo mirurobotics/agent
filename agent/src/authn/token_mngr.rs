@@ -38,7 +38,7 @@ struct IssueTokenClaim {
 
 // =================================== TRAIT ======================================= //
 #[allow(async_fn_in_trait)]
-pub trait TokenManagerExt {
+pub trait TokenManagerExt: Send + Sync {
     async fn shutdown(&self) -> Result<(), AuthnErr>;
     async fn get_token(&self) -> Result<Arc<Token>, AuthnErr>;
     async fn refresh_token(&self) -> Result<(), AuthnErr>;

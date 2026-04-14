@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::http::mock::MockClient;
+use crate::mocks::http_client::MockClient;
 use crate::sync::syncer::{create_storage, create_token_manager};
 use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};

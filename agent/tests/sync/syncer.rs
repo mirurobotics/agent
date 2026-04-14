@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::http::mock::{Call, MockClient};
+use crate::mocks::http_client::{Call, MockClient};
 use crate::sync::helpers::*;
 use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager, TokenManagerExt};

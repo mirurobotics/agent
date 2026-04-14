@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 // internal crates
-use crate::mqtt::mock;
+use crate::mocks::mqtt_client as mock;
 use miru_agent::errors::Error;
 use miru_agent::mqtt::client::{poll, Publish};
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};

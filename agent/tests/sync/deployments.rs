@@ -12,7 +12,7 @@ use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::SyncErr;
 
 // test crates
-use crate::http::mock::{Call, CapturedRequest, MockClient};
+use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
 use crate::sync::helpers::*;
 use backend_api::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,

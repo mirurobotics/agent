@@ -1,5 +1,5 @@
 // internal crates
-use crate::sync::mock::MockSyncer;
+use crate::mocks::syncer::MockSyncer;
 use device_api::models::{SyncDeviceResponse, SyncDeviceResult};
 use miru_agent::services::device as dvc_svc;
 use miru_agent::sync::errors::{MockErr, SyncerInCooldownErr};
