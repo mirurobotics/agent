@@ -238,3 +238,151 @@ async fn fetch_deployment_with_retry_recovers_from_network_error() {
     // Retry logic: 2 failures + 1 success = 3 total calls.
     assert_eq!(mock.call_count(Call::GetDeployment), 3);
 }
+
+// ========================== fetch_release error paths ========================== //
+
+#[tokio::test]
+async fn fetch_release_token_failure_returns_sync_err() {
+    let mock = MockClient::default();
+    let token_mngr = StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
+        is_network_conn_err: false,
+        trace: miru_agent::trace!(),
+    }));
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let result = backend.fetch_release("rls_1").await;
+    assert!(matches!(
+        result,
+        Err(ServiceErr::SyncErr(SyncErr::AuthnErr(AuthnErr::MockError(
+            _
+        ))))
+    ));
+    // No HTTP request should have been issued.
+    assert!(mock.requests().is_empty());
+}
+
+#[tokio::test]
+async fn fetch_release_404_propagates_as_request_failed() {
+    let mock = MockClient::default();
+    mock.set_get_release(|| {
+        Err(HTTPErr::RequestFailed(RequestFailed {
+            request: HttpParams::get("http://mock/releases/rls_1")
+                .meta()
+                .unwrap(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: None,
+            trace: miru_agent::trace!(),
+        }))
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let result = backend.fetch_release("rls_1").await;
+    let err = result.expect_err("expected 404 to propagate as error");
+    match err {
+        ServiceErr::HTTPErr(HTTPErr::RequestFailed(rf)) => {
+            assert_eq!(rf.status, reqwest::StatusCode::NOT_FOUND);
+        }
+        other => panic!("expected ServiceErr::HTTPErr(RequestFailed), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn fetch_release_with_retry_recovers_from_network_error() {
+    let mock = MockClient::default();
+    let counter = AtomicUsize::new(0);
+    mock.set_get_release(move || {
+        let n = counter.fetch_add(1, Ordering::SeqCst);
+        if n < 2 {
+            Err(HTTPErr::MockErr(HttpMockErr {
+                is_network_conn_err: true,
+            }))
+        } else {
+            Ok(backend_client::Release {
+                id: "rls_1".to_string(),
+                ..Default::default()
+            })
+        }
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let rls = backend.fetch_release("rls_1").await.unwrap();
+    assert_eq!(rls.id, "rls_1");
+    // Retry logic: 2 failures + 1 success = 3 total calls.
+    assert_eq!(mock.call_count(Call::GetRelease), 3);
+}
+
+// ======================== fetch_git_commit error paths ========================= //
+
+#[tokio::test]
+async fn fetch_git_commit_token_failure_returns_sync_err() {
+    let mock = MockClient::default();
+    let token_mngr = StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
+        is_network_conn_err: false,
+        trace: miru_agent::trace!(),
+    }));
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let result = backend.fetch_git_commit("gc_1").await;
+    assert!(matches!(
+        result,
+        Err(ServiceErr::SyncErr(SyncErr::AuthnErr(AuthnErr::MockError(
+            _
+        ))))
+    ));
+    // No HTTP request should have been issued.
+    assert!(mock.requests().is_empty());
+}
+
+#[tokio::test]
+async fn fetch_git_commit_404_propagates_as_request_failed() {
+    let mock = MockClient::default();
+    mock.set_get_git_commit(|| {
+        Err(HTTPErr::RequestFailed(RequestFailed {
+            request: HttpParams::get("http://mock/git_commits/gc_1")
+                .meta()
+                .unwrap(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: None,
+            trace: miru_agent::trace!(),
+        }))
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let result = backend.fetch_git_commit("gc_1").await;
+    let err = result.expect_err("expected 404 to propagate as error");
+    match err {
+        ServiceErr::HTTPErr(HTTPErr::RequestFailed(rf)) => {
+            assert_eq!(rf.status, reqwest::StatusCode::NOT_FOUND);
+        }
+        other => panic!("expected ServiceErr::HTTPErr(RequestFailed), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn fetch_git_commit_with_retry_recovers_from_network_error() {
+    let mock = MockClient::default();
+    let counter = AtomicUsize::new(0);
+    mock.set_get_git_commit(move || {
+        let n = counter.fetch_add(1, Ordering::SeqCst);
+        if n < 2 {
+            Err(HTTPErr::MockErr(HttpMockErr {
+                is_network_conn_err: true,
+            }))
+        } else {
+            Ok(backend_client::GitCommit {
+                id: "gc_1".to_string(),
+                ..Default::default()
+            })
+        }
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let gc = backend.fetch_git_commit("gc_1").await.unwrap();
+    assert_eq!(gc.id, "gc_1");
+    // Retry logic: 2 failures + 1 success = 3 total calls.
+    assert_eq!(mock.call_count(Call::GetGitCommit), 3);
+}

@@ -5,6 +5,9 @@ use crate::services::{backend::BackendFetcher, errors::ServiceErr};
 use crate::storage;
 use crate::sync;
 
+// external crates
+use tracing::error;
+
 pub async fn get<B: BackendFetcher>(
     deployments: &storage::Deployments,
     backend: &B,
@@ -41,10 +44,6 @@ async fn cache_deployment(deployments: &storage::Deployments, storage_dpl: model
         )
         .await
     {
-        tracing::error!(
-            error = ?e,
-            id = %id,
-            "failed to cache fetched deployment; returning value anyway"
-        );
+        error!("failed to cache fetched deployment {id}: {e}");
     }
 }

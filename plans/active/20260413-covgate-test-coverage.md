@@ -33,21 +33,23 @@ After this plan, all `.covgate` thresholds should increase and the coverage gaps
 
 ## Progress
 
-- [ ] Move plan to `plans/active/`
-- [ ] Milestone 1: Identify exact coverage gaps (run `covgate.sh` and optionally `cargo llvm-cov --html`)
-- [ ] Milestone 2: Add `backend.rs` error-path tests for `fetch_release` and `fetch_git_commit`
-- [ ] Milestone 3: Investigate and add cache write error tests for all three `get.rs` files
-- [ ] Milestone 4: Test the deployment dirty-flag predicate
-- [ ] Milestone 5: Re-run `covgate.sh`, verify improvement, and ratchet `.covgate` files upward
+- [x] Move plan to `plans/active/`
+- [x] Milestone 1: Identify exact coverage gaps (run `covgate.sh` and optionally `cargo llvm-cov --html`)
+- [x] Milestone 2: Add `backend.rs` error-path tests for `fetch_release` and `fetch_git_commit`
+- [x] Milestone 3: Investigate and add cache write error tests for all three `get.rs` files
+- [x] Milestone 4: Test the deployment dirty-flag predicate
+- [x] Milestone 5: Re-run `covgate.sh`, verify improvement, and ratchet `.covgate` files upward
 - [ ] Validation: preflight must report `clean` before publishing
 
 ## Surprises & Discoveries
 
-(Fill in during implementation.)
+- The dirty-flag predicate test does not exercise the production `get()` code path (only reachable via a concurrent write race), but it validates the closure logic directly through the storage layer, which is the best achievable without production code changes.
+- The sub-module covgates (`services/deployment`, `services/release`, `services/git_commit`) did not increase because the new backend.rs tests only exercise code in `backend.rs` (under the parent `services/` module). The dirty-flag test exercises `storage` module code.
+- Cache write error branches remain untested (Option A chosen) -- documented with comments in all three `get.rs` test files.
 
 ## Decision Log
 
-(Fill in during implementation.)
+- **Cache write errors (Milestone 3)**: Chose Option A (skip and document). The `shutdown()` approach breaks `read_optional()` first, making write errors unreachable through the public `get()` API. No clean mock approach exists under ~50 lines of infrastructure. Added comments in all three test files.
 
 ## Outcomes & Retrospective
 

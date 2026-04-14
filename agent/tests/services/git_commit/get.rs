@@ -20,6 +20,11 @@ async fn setup(name: &str) -> (filesys::Dir, GitCommits) {
     (dir, stor)
 }
 
+// NOTE: The cache write error branch in cache_git_commit is not reachable through
+// the public get() API in tests. Inducing a write failure (e.g. via shutdown)
+// also breaks the read_optional() call that precedes it.
+// The branch is a defensive log-and-continue pattern.
+
 pub mod get_git_commit {
     use super::*;
 
