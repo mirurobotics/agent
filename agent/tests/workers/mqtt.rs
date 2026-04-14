@@ -1,7 +1,7 @@
 // internal crates
-use crate::authn::mock::MockTokenManager;
-use crate::mqtt::mock::MockClient;
-use crate::sync::mock::MockSyncer;
+use crate::mocks::token_manager::MockTokenManager;
+use crate::mocks::mqtt_client::MockClient;
+use crate::mocks::syncer::MockSyncer;
 use miru_agent::authn::Token;
 use miru_agent::filesys;
 use miru_agent::models::{Device, DeviceStatus};

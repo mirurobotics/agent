@@ -2,8 +2,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
-use crate::http::mock::{Call, CapturedRequest, MockClient};
-use crate::test_utils::token_manager::StubTokenManager;
+use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
+use crate::mocks::stub_token_manager::StubTokenManager;
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};

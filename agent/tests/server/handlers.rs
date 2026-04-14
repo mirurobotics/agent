@@ -68,7 +68,7 @@ pub mod routes {
     use miru_agent::server::{serve, State};
     use miru_agent::sync::Syncer;
 
-    use crate::http::mock::{self, MockClient};
+    use crate::mocks::http_client::{self as mock, MockClient};
     use crate::sync::syncer::{create_storage, create_token_manager};
 
     use chrono::{DateTime, TimeZone, Utc};

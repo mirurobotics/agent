@@ -1,5 +1,5 @@
 // internal crates
-use crate::http::mock::{Call, CapturedRequest, MockClient};
+use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
 use backend_api::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,

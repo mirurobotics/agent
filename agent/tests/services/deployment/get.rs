@@ -1,5 +1,5 @@
 // internal crates
-use crate::services::backend_stub::{PanicBackend, StubBackend};
+use crate::mocks::backend::{PanicBackend, StubBackend};
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::filesys::{self, Overwrite};

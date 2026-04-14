@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::http::mock;
+use crate::mocks::http_client as mock;
 use miru_agent::errors::Error;
 use miru_agent::http::request::Params;
 use miru_agent::http::{self, ClientI, HTTPErr};

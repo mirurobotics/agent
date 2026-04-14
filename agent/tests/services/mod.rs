@@ -1,5 +1,4 @@
 pub mod backend;
-pub mod backend_stub;
 pub mod deployment;
 pub mod device;
 pub mod errors;

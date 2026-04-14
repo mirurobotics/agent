@@ -1,5 +1,5 @@
 // internal crates
-use crate::http::mock::MockClient;
+use crate::mocks::http_client::MockClient;
 use miru_agent::filesys;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;

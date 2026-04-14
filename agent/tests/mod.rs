@@ -12,7 +12,7 @@ pub mod filesys;
 pub mod http;
 pub mod installer;
 pub mod logs;
-pub mod mock;
+pub mod mocks;
 pub mod models;
 pub mod mqtt;
 pub mod server;
