@@ -7,6 +7,7 @@ pub mod default_capacities {
 
     #[test]
     fn default() {
+        // lint:allow(field-by-field-assert)
         let capacities = Capacities::default();
         assert_eq!(capacities.cfg_insts, 1000);
         assert_eq!(capacities.cfg_inst_content, 1000);

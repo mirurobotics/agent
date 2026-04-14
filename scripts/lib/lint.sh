@@ -34,6 +34,13 @@ for lint_path in $IMPORT_LINT_PATHS; do
 done
 echo ""
 
+if [ -n "${ASSERT_LINT_PATHS:-}" ]; then
+    echo "Assert Linter"
+    echo "-------------"
+    cargo run --manifest-path "$REPO_ROOT/tools/lint-asserts/Cargo.toml" -- --path $ASSERT_LINT_PATHS
+    echo ""
+fi
+
 echo "Cargo fmt"
 echo "---------"
 if [ "$LINT_FIX" = "1" ]; then

@@ -32,6 +32,7 @@ mod timeouts {
 
     #[test]
     fn default() {
+        // lint:allow(field-by-field-assert)
         let t = Timeouts::default();
         assert_eq!(t.publish, Duration::from_secs(3));
         assert_eq!(t.subscribe, Duration::from_secs(3));
@@ -45,6 +46,7 @@ mod opts {
 
     #[test]
     fn new_defaults() {
+        // lint:allow(field-by-field-assert)
         let creds = Credentials {
             username: "user".to_string(),
             password: "pass".to_string(),
@@ -60,6 +62,7 @@ mod opts {
 
     #[test]
     fn default() {
+        // lint:allow(field-by-field-assert)
         let opts = Options::default();
         assert!(matches!(opts.connect_address.protocol, Protocol::SSL));
         assert_eq!(opts.credentials.username, "miru-agent");

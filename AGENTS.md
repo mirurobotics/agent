@@ -66,6 +66,7 @@ Use `scripts/update-deps.sh` to refresh `Cargo.lock` before linting. Then run `s
 
 In CI, the Lint workflow runs:
 - `cargo run --manifest-path tools/lint/Cargo.toml -- --path agent/src --config .lint-imports.toml`
+- `cargo run --manifest-path tools/lint-asserts/Cargo.toml -- --path agent/tests` — detects 4+ `assert_eq!` calls on fields of the same variable in a test function and suggests constructing an expected struct instead. Suppress with `// lint:allow(field-by-field-assert)` inside the test body.
 - `cargo fmt -p miru-agent -- --check`
 - `cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings`
 - `cargo machete`

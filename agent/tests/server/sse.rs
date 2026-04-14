@@ -241,6 +241,7 @@ mod stream {
 
     #[tokio::test]
     async fn returns_200_with_sse_content() {
+        // lint:allow(field-by-field-assert)
         let f = Fixture::new("sse_stream_200").await;
 
         f.event_hub()
