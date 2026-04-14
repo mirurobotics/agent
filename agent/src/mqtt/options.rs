@@ -24,7 +24,7 @@ impl Default for ConnectAddress {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -39,7 +39,7 @@ impl Default for Credentials {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Timeouts {
     pub publish: Duration,
     pub subscribe: Duration,
@@ -58,7 +58,7 @@ impl Default for Timeouts {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Options {
     pub connect_address: ConnectAddress,
     pub credentials: Credentials,

@@ -32,12 +32,14 @@ mod timeouts {
 
     #[test]
     fn default() {
-        // lint:allow(field-by-field-assert)
-        let t = Timeouts::default();
-        assert_eq!(t.publish, Duration::from_secs(3));
-        assert_eq!(t.subscribe, Duration::from_secs(3));
-        assert_eq!(t.unsubscribe, Duration::from_secs(3));
-        assert_eq!(t.disconnect, Duration::from_secs(3));
+        let actual = Timeouts::default();
+        let expected = Timeouts {
+            publish: Duration::from_secs(3),
+            subscribe: Duration::from_secs(3),
+            unsubscribe: Duration::from_secs(3),
+            disconnect: Duration::from_secs(3),
+        };
+        assert_eq!(actual, expected);
     }
 }
 
@@ -46,29 +48,35 @@ mod opts {
 
     #[test]
     fn new_defaults() {
-        // lint:allow(field-by-field-assert)
         let creds = Credentials {
             username: "user".to_string(),
             password: "pass".to_string(),
         };
-        let opts = Options::new(creds);
-        assert_eq!(opts.credentials.username, "user");
-        assert_eq!(opts.credentials.password, "pass");
-        assert_eq!(opts.client_id, "user");
-        assert_eq!(opts.keep_alive, Duration::from_secs(20));
-        assert_eq!(opts.capacity, 64);
-        assert!(matches!(opts.connect_address.protocol, Protocol::SSL));
+        let actual = Options::new(creds.clone());
+        let expected = Options {
+            credentials: creds,
+            client_id: "user".to_string(),
+            connect_address: ConnectAddress::default(),
+            keep_alive: Duration::from_secs(20),
+            timeouts: Timeouts::default(),
+            capacity: 64,
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn default() {
-        // lint:allow(field-by-field-assert)
-        let opts = Options::default();
-        assert!(matches!(opts.connect_address.protocol, Protocol::SSL));
-        assert_eq!(opts.credentials.username, "miru-agent");
-        assert_eq!(opts.client_id, "miru-agent");
-        assert_eq!(opts.keep_alive, Duration::from_secs(20));
-        assert_eq!(opts.capacity, 64);
+        let actual = Options::default();
+        let expected = Options {
+            credentials: Credentials::default(),
+            client_id: "miru-agent".to_string(),
+            connect_address: ConnectAddress::default(),
+            keep_alive: Duration::from_secs(20),
+            timeouts: Timeouts::default(),
+            capacity: 64,
+        };
+        assert!(matches!(actual.connect_address.protocol, Protocol::SSL));
+        assert_eq!(actual, expected);
     }
 
     #[test]

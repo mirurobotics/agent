@@ -241,7 +241,6 @@ mod stream {
 
     #[tokio::test]
     async fn returns_200_with_sse_content() {
-        // lint:allow(field-by-field-assert)
         let f = Fixture::new("sse_stream_200").await;
 
         f.event_hub()
@@ -274,15 +273,19 @@ mod stream {
             .expect("expected data: line in SSE output")
             .strip_prefix("data: ")
             .unwrap();
-        let event: device_api::models::Event =
+        let actual: device_api::models::Event =
             serde_json::from_str(data_json).unwrap_or_else(|e| {
                 panic!("data payload must deserialize as device API Event: {e}\nraw: {data_json}")
             });
 
-        assert_eq!(event.object, device_api::models::event::Object::Event);
-        assert_eq!(event.id, 1);
-        assert_eq!(event.r#type, "test.event");
-        assert_eq!(event.data, serde_json::json!({"test": true}));
+        let expected = device_api::models::Event {
+            object: device_api::models::event::Object::Event,
+            id: 1,
+            r#type: "test.event".to_string(),
+            occurred_at: Utc::now().to_rfc3339(),
+            data: serde_json::json!({"test": true}),
+        };
+        assert_eq!(actual, expected);
     }
 
     #[tokio::test]
