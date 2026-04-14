@@ -115,8 +115,13 @@ pub async fn get_release(
 pub async fn get_current_release(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
         async {
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let release =
-                rls_svc::get_current(&state.storage.deployments, &state.storage.releases).await?;
+                rls_svc::get_current(
+                    &state.storage.deployments, 
+                    &state.storage.releases, 
+                    &backend,
+                ).await?;
             Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting current release",
