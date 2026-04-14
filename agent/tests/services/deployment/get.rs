@@ -34,11 +34,6 @@ fn make_deployment(id: &str, activity: DplActivity) -> Deployment {
     }
 }
 
-// NOTE: The cache write error branch in cache_deployment is not reachable through
-// the public get() API in tests. Inducing a write failure (e.g. via shutdown)
-// also breaks the read_optional() call that precedes it.
-// The branch is a defensive log-and-continue pattern.
-
 pub mod get_deployment {
     use super::*;
 
