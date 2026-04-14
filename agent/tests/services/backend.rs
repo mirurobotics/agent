@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
-use crate::http::mock::{Call, MockClient};
+use crate::http::mock::{Call, CapturedRequest, MockClient};
 use crate::test_utils::token_manager::StubTokenManager;
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
@@ -13,72 +13,63 @@ use miru_agent::sync::SyncErr;
 
 #[tokio::test]
 async fn fetch_deployment_constructs_url_and_expand_param() {
-    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
 
     backend.fetch_deployment("dpl_1").await.unwrap();
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 1);
-    let req = &requests[0];
-    assert_eq!(req.call, Call::GetDeployment);
-    assert_eq!(req.method, reqwest::Method::GET);
-    assert_eq!(req.path, "/deployments/dpl_1");
-    assert_eq!(req.url, "http://mock/deployments/dpl_1");
-    assert_eq!(
-        req.query,
-        vec![("expand".to_string(), "config_instances".to_string())]
-    );
-    assert_eq!(req.token.as_deref(), Some("test-token"));
+    let expected = CapturedRequest {
+        call: Call::GetDeployment,
+        method: reqwest::Method::GET,
+        path: "/deployments/dpl_1".to_string(),
+        url: "http://mock/deployments/dpl_1".to_string(),
+        query: vec![("expand".to_string(), "config_instances".to_string())],
+        body: None,
+        token: Some("test-token".to_string()),
+    };
+    assert_eq!(mock.requests(), vec![expected]);
 }
 
 #[tokio::test]
 async fn fetch_deployment_returns_deserialized_value() {
-    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
-    mock.set_get_deployment(|| {
-        Ok(backend_client::Deployment {
-            id: "dpl_1".to_string(),
-            description: "test".to_string(),
-            device_id: "dvc_1".to_string(),
-            release_id: "rls_1".to_string(),
-            ..Default::default()
-        })
+    let expected = backend_client::Deployment {
+        id: "dpl_1".to_string(),
+        description: "test".to_string(),
+        device_id: "dvc_1".to_string(),
+        release_id: "rls_1".to_string(),
+        ..Default::default()
+    };
+    mock.set_get_deployment({
+        let expected = expected.clone();
+        move || Ok(expected.clone())
     });
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
 
     let dpl = backend.fetch_deployment("dpl_1").await.unwrap();
-    assert_eq!(dpl.id, "dpl_1");
-    assert_eq!(dpl.description, "test");
-    assert_eq!(dpl.device_id, "dvc_1");
-    assert_eq!(dpl.release_id, "rls_1");
+    assert_eq!(dpl, expected);
 }
 
 #[tokio::test]
 async fn fetch_release_constructs_url_no_expand() {
-    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
 
     backend.fetch_release("rls_1").await.unwrap();
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 1);
-    let req = &requests[0];
-    assert_eq!(req.call, Call::GetRelease);
-    assert_eq!(req.method, reqwest::Method::GET);
-    assert_eq!(req.path, "/releases/rls_1");
-    assert_eq!(req.url, "http://mock/releases/rls_1");
-    assert!(
-        req.query.is_empty(),
-        "expected no query params for release fetch, got {:?}",
-        req.query
-    );
-    assert_eq!(req.token.as_deref(), Some("test-token"));
+    let expected = CapturedRequest {
+        call: Call::GetRelease,
+        method: reqwest::Method::GET,
+        path: "/releases/rls_1".to_string(),
+        url: "http://mock/releases/rls_1".to_string(),
+        query: vec![],
+        body: None,
+        token: Some("test-token".to_string()),
+    };
+    assert_eq!(mock.requests(), vec![expected]);
 }
 
 #[tokio::test]
@@ -103,26 +94,22 @@ async fn fetch_release_returns_deserialized_value() {
 
 #[tokio::test]
 async fn fetch_git_commit_constructs_url_no_expand() {
-    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
 
     backend.fetch_git_commit("gc_1").await.unwrap();
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 1);
-    let req = &requests[0];
-    assert_eq!(req.call, Call::GetGitCommit);
-    assert_eq!(req.method, reqwest::Method::GET);
-    assert_eq!(req.path, "/git_commits/gc_1");
-    assert_eq!(req.url, "http://mock/git_commits/gc_1");
-    assert!(
-        req.query.is_empty(),
-        "expected no query params for git_commit fetch, got {:?}",
-        req.query
-    );
-    assert_eq!(req.token.as_deref(), Some("test-token"));
+    let expected = CapturedRequest {
+        call: Call::GetGitCommit,
+        method: reqwest::Method::GET,
+        path: "/git_commits/gc_1".to_string(),
+        url: "http://mock/git_commits/gc_1".to_string(),
+        query: vec![],
+        body: None,
+        token: Some("test-token".to_string()),
+    };
+    assert_eq!(mock.requests(), vec![expected]);
 }
 
 #[tokio::test]

@@ -84,7 +84,6 @@ pub mod get_deployment_fallback {
 
     #[tokio::test]
     async fn cache_miss_backend_hit_caches_value() {
-        // lint:allow(field-by-field-assert)
         let (_dir, dpl_stor) = setup("fb_dpl_backend_hit").await;
         let backend_dpl = backend_client::Deployment {
             id: "dpl_1".to_string(),
@@ -99,20 +98,33 @@ pub mod get_deployment_fallback {
         };
         let stub = StubBackend::new().with_deployment(Ok(backend_dpl));
 
+        let expected = Deployment {
+            id: "dpl_1".to_string(),
+            description: "test".to_string(),
+            activity_status: DplActivity::Drifted,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Staged,
+            device_id: "dvc_1".to_string(),
+            release_id: "rls_1".to_string(),
+            created_at: DateTime::<Utc>::UNIX_EPOCH,
+            updated_at: DateTime::<Utc>::UNIX_EPOCH,
+            attempts: 0,
+            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+            deployed_at: None,
+            archived_at: None,
+            config_instance_ids: vec!["cfg_1".to_string()],
+        };
         let result = dpl_svc::get(&dpl_stor, &stub, "dpl_1".to_string())
             .await
             .unwrap();
-        assert_eq!(result.id, "dpl_1");
-        assert_eq!(result.device_id, "dvc_1");
-        assert_eq!(result.release_id, "rls_1");
-        assert_eq!(result.config_instance_ids, vec!["cfg_1".to_string()]);
+        assert_eq!(result, expected);
         assert_eq!(stub.deployment_calls(), 1);
 
         // Second call with PanicBackend must succeed (proves cache).
         let result2 = dpl_svc::get(&dpl_stor, &PanicBackend, "dpl_1".to_string())
             .await
             .unwrap();
-        assert_eq!(result2.id, "dpl_1");
+        assert_eq!(result2, expected);
     }
 
     #[tokio::test]
