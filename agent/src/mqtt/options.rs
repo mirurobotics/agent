@@ -1,13 +1,13 @@
 // standard crates
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Protocol {
     TCP,
     SSL,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnectAddress {
     pub protocol: Protocol,
     pub broker: String,
