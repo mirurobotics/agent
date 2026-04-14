@@ -1,10 +1,7 @@
 // internal crates
 use crate::models;
 use crate::services::{
-    deployment as dpl_svc, 
-    release as rls_svc,
-    backend::BackendFetcher, 
-    errors::ServiceErr,
+    backend::BackendFetcher, deployment as dpl_svc, errors::ServiceErr, release as rls_svc,
 };
 use crate::storage;
 
