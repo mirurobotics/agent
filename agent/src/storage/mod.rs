@@ -29,7 +29,7 @@ use crate::models;
 
 use tracing::info;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Capacities {
     pub cfg_insts: usize,
     pub cfg_inst_content: usize,

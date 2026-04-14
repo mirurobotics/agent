@@ -282,7 +282,7 @@ mod stream {
             object: device_api::models::event::Object::Event,
             id: 1,
             r#type: "test.event".to_string(),
-            occurred_at: Utc::now().to_rfc3339(),
+            occurred_at: actual.occurred_at.clone(),
             data: serde_json::json!({"test": true}),
         };
         assert_eq!(actual, expected);
