@@ -96,11 +96,7 @@ fn run_from_dir(
     0
 }
 
-fn run_assert_check(
-    base_dir: &Path,
-    cli: &Cli,
-    stdout: &mut impl Write,
-) -> Vec<Violation> {
+fn run_assert_check(base_dir: &Path, cli: &Cli, stdout: &mut impl Write) -> Vec<Violation> {
     let mut all_violations: Vec<Violation> = Vec::new();
 
     for dir in &cli.assert_paths {
