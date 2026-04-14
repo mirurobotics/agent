@@ -1,4 +1,5 @@
 mod app;
+mod asserts;
 mod checker;
 mod classifier;
 mod config;

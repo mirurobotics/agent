@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 // internal crates
+use crate::asserts::detect::{check_file as check_asserts, Violation};
 use crate::checker::check;
 use crate::classifier::Classifier;
 use crate::config::Config;
@@ -15,21 +16,29 @@ use walkdir::WalkDir;
 
 #[derive(ClapParser)]
 #[command(
-    name = "lint-imports",
-    about = "Lint Rust import grouping, ordering, and comment headers"
+    name = "lint",
+    about = "Lint Rust import grouping, ordering, comment headers, and test assert patterns"
 )]
 pub struct Cli {
-    /// Directory to scan for .rs files
-    #[arg(long, default_value = ".")]
-    pub path: PathBuf,
+    /// Directory to scan for import checking
+    #[arg(long)]
+    pub path: Option<PathBuf>,
 
-    /// Auto-fix violations in place
+    /// Auto-fix import violations in place
     #[arg(long)]
     pub fix: bool,
 
     /// Path to .lint-imports.toml config file
     #[arg(long)]
     pub config: Option<PathBuf>,
+
+    /// Directories to scan for field-by-field assert detection in test files
+    #[arg(long = "assert-paths", num_args = 1..)]
+    pub assert_paths: Vec<PathBuf>,
+
+    /// Minimum field-asserts on the same receiver to flag (default: 4)
+    #[arg(long = "assert-threshold", default_value_t = 4)]
+    pub assert_threshold: usize,
 }
 
 pub fn run(cli: &Cli, stdout: &mut impl Write, stderr: &mut impl Write) -> i32 {
@@ -43,33 +52,85 @@ fn run_from_dir(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> i32 {
-    let config = load_config(base_dir, cli);
-    let classifier = Classifier::new(&config);
     let mut totals = Totals::default();
 
-    for file_path in rust_files(base_dir, &cli.path) {
-        process_file(
-            &file_path,
-            cli,
-            &classifier,
-            &config,
-            &mut totals,
-            stdout,
-            stderr,
-        );
+    // Run import checking if --path is provided.
+    if let Some(ref path) = cli.path {
+        let config = load_config(base_dir, cli);
+        let classifier = Classifier::new(&config);
+
+        for file_path in rust_files(base_dir, path) {
+            process_file(
+                &file_path,
+                cli,
+                &classifier,
+                &config,
+                &mut totals,
+                stdout,
+                stderr,
+            );
+        }
     }
+
+    // Run assert checker if paths are specified.
+    let assert_violations = if !cli.assert_paths.is_empty() {
+        run_assert_check(base_dir, cli, stdout)
+    } else {
+        Vec::new()
+    };
 
     if cli.fix {
         let _ = writeln!(stdout, "\n{} file(s) fixed.", totals.files_fixed);
+        if !assert_violations.is_empty() {
+            return 1;
+        }
         return 0;
     }
 
-    if totals.diagnostics > 0 {
-        let _ = writeln!(stdout, "\n{} violation(s) found.", totals.diagnostics);
+    let total_issues = totals.diagnostics + assert_violations.len();
+    if total_issues > 0 {
+        let _ = writeln!(stdout, "\n{} violation(s) found.", total_issues);
         return 1;
     }
 
     0
+}
+
+fn run_assert_check(base_dir: &Path, cli: &Cli, stdout: &mut impl Write) -> Vec<Violation> {
+    let mut all_violations: Vec<Violation> = Vec::new();
+
+    for dir in &cli.assert_paths {
+        let resolved = resolve_input_path(base_dir, dir);
+        for entry in WalkDir::new(&resolved).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let source = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            all_violations.extend(check_asserts(path, &source, cli.assert_threshold));
+        }
+    }
+
+    if all_violations.is_empty() {
+        return all_violations;
+    }
+
+    all_violations.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    for v in &all_violations {
+        let display_path = v.file.strip_prefix(&cwd).unwrap_or(&v.file).display();
+        let _ = writeln!(
+            stdout,
+            "{}:{}: {} assert_eq! calls on fields of `{}` \u{2014} consider constructing an expected struct [field-by-field-assert]",
+            display_path, v.line, v.count, v.receiver
+        );
+    }
+
+    all_violations
 }
 
 #[derive(Default)]
@@ -79,9 +140,10 @@ struct Totals {
 }
 
 fn load_config(base_dir: &Path, cli: &Cli) -> Config {
-    match &cli.config {
-        Some(path) => Config::from_file(&resolve_input_path(base_dir, path)),
-        None => Config::find_from(&resolve_input_path(base_dir, &cli.path)),
+    match (&cli.config, &cli.path) {
+        (Some(cfg), _) => Config::from_file(&resolve_input_path(base_dir, cfg)),
+        (None, Some(path)) => Config::find_from(&resolve_input_path(base_dir, path)),
+        (None, None) => Config::default(),
     }
 }
 
@@ -223,7 +285,13 @@ mod tests {
     use tempfile::tempdir;
 
     fn cli(path: PathBuf, fix: bool, config: Option<PathBuf>) -> Cli {
-        Cli { path, fix, config }
+        Cli {
+            path: Some(path),
+            fix,
+            config,
+            assert_paths: Vec::new(),
+            assert_threshold: 4,
+        }
     }
 
     #[test]
@@ -539,5 +607,84 @@ use std::fmt::Debug;
 
         assert_eq!(exit_code, 0);
         assert!(stderr.contains("warning: could not read"));
+    }
+
+    fn assert_cli(assert_paths: Vec<PathBuf>) -> Cli {
+        Cli {
+            path: None,
+            fix: false,
+            config: None,
+            assert_paths,
+            assert_threshold: 4,
+        }
+    }
+
+    #[test]
+    fn run_assert_check_flags_field_by_field_asserts() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("test.rs"),
+            r#"
+#[test]
+fn test_example() {
+    let req = get_request();
+    assert_eq!(req.call, Call::GetDeployment);
+    assert_eq!(req.method, Method::GET);
+    assert_eq!(req.path, "/deployments");
+    assert_eq!(req.url, "http://mock/deployments");
+}
+"#,
+        )
+        .unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &assert_cli(vec![dir.path().to_path_buf()]),
+            &mut stdout,
+            &mut stderr,
+        );
+        let stdout = String::from_utf8(stdout).unwrap();
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.contains("field-by-field-assert"));
+        assert!(stdout.contains("`req`"));
+    }
+
+    #[test]
+    fn run_assert_check_clean_when_below_threshold() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("test.rs"),
+            r#"
+#[test]
+fn test_example() {
+    assert_eq!(req.call, Call::GetDeployment);
+    assert_eq!(req.method, Method::GET);
+}
+"#,
+        )
+        .unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &assert_cli(vec![dir.path().to_path_buf()]),
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(exit_code, 0);
+        assert!(stdout.is_empty());
+    }
+
+    #[test]
+    fn run_assert_check_skipped_when_no_paths() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(&assert_cli(vec![]), &mut stdout, &mut stderr);
+
+        assert_eq!(exit_code, 0);
+        assert!(stdout.is_empty());
     }
 }

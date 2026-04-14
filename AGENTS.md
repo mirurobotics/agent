@@ -65,7 +65,7 @@ Each module has a `.covgate` file with a minimum coverage percentage. Run `scrip
 Use `scripts/update-deps.sh` to refresh `Cargo.lock` before linting. Then run `scripts/lint.sh` for a full local lint pass. It runs: the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy.
 
 In CI, the Lint workflow runs:
-- `cargo run --manifest-path tools/lint/Cargo.toml -- --path agent/src --config .lint-imports.toml`
+- `cargo run --manifest-path tools/lint/Cargo.toml -- --path agent/src --config .lint-imports.toml --assert-paths agent/tests` — runs import linting and field-by-field assert detection (4+ `assert_eq!` on fields of the same variable in a test function). Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
 - `cargo fmt -p miru-agent -- --check`
 - `cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings`
 - `cargo machete`

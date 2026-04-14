@@ -25,12 +25,20 @@ RUN_DIET="${RUN_DIET:-0}"
 
 echo "Custom Linter"
 echo "-------------"
+ASSERT_ARGS=""
+if [ -n "${ASSERT_LINT_PATHS:-}" ]; then
+    ASSERT_ARGS="--assert-paths $ASSERT_LINT_PATHS"
+fi
 for lint_path in $IMPORT_LINT_PATHS; do
     if [ "$LINT_FIX" = "1" ]; then
-        cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --fix --config "$IMPORT_LINT_CONFIG"
+        # shellcheck disable=SC2086
+        cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --fix --config "$IMPORT_LINT_CONFIG" $ASSERT_ARGS
     else
-        cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --config "$IMPORT_LINT_CONFIG"
+        # shellcheck disable=SC2086
+        cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --config "$IMPORT_LINT_CONFIG" $ASSERT_ARGS
     fi
+    # Only run assert check on the first iteration to avoid duplicate reports.
+    ASSERT_ARGS=""
 done
 echo ""
 
