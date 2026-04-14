@@ -38,15 +38,12 @@ impl StubBackend {
         *self.git_commit_result.lock().unwrap() = Some(r);
         self
     }
-    #[allow(dead_code)]
     pub fn deployment_calls(&self) -> usize {
         self.deployment_calls.load(Ordering::SeqCst)
     }
-    #[allow(dead_code)]
     pub fn release_calls(&self) -> usize {
         self.release_calls.load(Ordering::SeqCst)
     }
-    #[allow(dead_code)]
     pub fn git_commit_calls(&self) -> usize {
         self.git_commit_calls.load(Ordering::SeqCst)
     }

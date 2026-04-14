@@ -89,6 +89,7 @@ pub mod get_deployment_fallback {
 
     #[tokio::test]
     async fn cache_miss_backend_hit_caches_value() {
+        // lint:allow(field-by-field-assert)
         let (_dir, dpl_stor) = setup("fb_dpl_backend_hit").await;
         let backend_dpl = backend_client::Deployment {
             id: "dpl_1".to_string(),

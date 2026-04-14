@@ -13,6 +13,7 @@ use miru_agent::sync::SyncErr;
 
 #[tokio::test]
 async fn fetch_deployment_constructs_url_and_expand_param() {
+    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
@@ -35,6 +36,7 @@ async fn fetch_deployment_constructs_url_and_expand_param() {
 
 #[tokio::test]
 async fn fetch_deployment_returns_deserialized_value() {
+    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     mock.set_get_deployment(|| {
         Ok(backend_client::Deployment {
@@ -57,6 +59,7 @@ async fn fetch_deployment_returns_deserialized_value() {
 
 #[tokio::test]
 async fn fetch_release_constructs_url_no_expand() {
+    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
@@ -100,6 +103,7 @@ async fn fetch_release_returns_deserialized_value() {
 
 #[tokio::test]
 async fn fetch_git_commit_constructs_url_no_expand() {
+    // lint:allow(field-by-field-assert)
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
