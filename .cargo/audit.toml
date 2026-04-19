@@ -2,9 +2,4 @@
 # Remove the ignore once the upstream dependency is updated.
 
 [advisories]
-ignore = [
-    # rustls-webpki CRL matching logic bug. Fixed in >=0.103.10 but
-    # rumqttd 0.20.0 / rumqttc 0.25.1 pin rustls-webpki 0.102.x.
-    # Tracking: https://github.com/mirurobotics/agent/issues/2
-    "RUSTSEC-2026-0049",
-]
+ignore = []

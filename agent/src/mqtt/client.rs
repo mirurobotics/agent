@@ -11,7 +11,7 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, Transport};
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, TlsConfiguration, Transport};
 
 pub struct Publish<'a> {
     pub topic: &'a str,
@@ -56,7 +56,13 @@ impl Client {
                 mqtt_options.set_transport(Transport::Tcp);
             }
             Protocol::SSL => {
-                mqtt_options.set_transport(Transport::Tls(Default::default()));
+                // Use native-tls (OpenSSL on Linux) rather than rustls to avoid
+                // pulling in rustls-webpki 0.102.x (RUSTSEC-2026-0098 /
+                // RUSTSEC-2026-0099). `TlsConfiguration::Native` defers to
+                // `native_tls::TlsConnector::new()` inside rumqttc, which loads
+                // the system trust store — matching the prior rustls-native-certs
+                // behaviour.
+                mqtt_options.set_transport(Transport::tls_with_config(TlsConfiguration::Native));
             }
         }
 

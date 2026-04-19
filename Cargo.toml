@@ -29,8 +29,15 @@ device-api = { path = "libs/device-api" }
 openssl = { version = "0.10.64", features = ["vendored"] }
 # https://crates.io/crates/openssl-src/versions
 # OpenSSL version 3.0.8+ LTS is the currently recommended version: https://endoflife.date/openssl. CISA (https://www.cisa.gov/news-events/alerts/2023/02/09/openssl-releases-security-advisory) recognizes 3.0.0 to 3.0.7 as particularly vulnerable and must be avoided. OpenSSL 1.1.1 LTS and 1.0.2 LTS are not recommended due to EOL support. Please update your system to use OpenSSL 3.0.X LTS."
-rumqttc = "0.25.1"
-rumqttd = "0.20.0"
+# Routed via native-tls (OpenSSL) rather than rustls to avoid transitively
+# pulling in rustls-webpki 0.102.8, which is affected by RUSTSEC-2026-0098
+# and RUSTSEC-2026-0099. rumqttc 0.25.1 / rumqttd 0.20.0 pin rustls-webpki
+# 0.102.x with no 0.102.9+ backport on crates.io; the newest upstream fix
+# lives in 0.103.12. The workspace already vendors OpenSSL (see the
+# `openssl` entry above), which native-tls uses on Linux. Revisit when
+# rumqttc/rumqttd publish releases that bump rustls-webpki to 0.103.12+.
+rumqttc = { version = "0.25.1", default-features = false, features = ["use-native-tls"] }
+rumqttd = { version = "0.20.0", default-features = false, features = ["use-native-tls"] }
 secrecy = "0.10.3"
 serial_test = "3.2.0"
 serde = { version = "1.0.215", features = ["derive"] }
