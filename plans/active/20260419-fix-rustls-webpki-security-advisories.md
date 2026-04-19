@@ -27,15 +27,20 @@ The plan selects a route during Milestone 0, then executes it. Two routes are pr
 
 ## Progress
 
-- [ ] Milestone 0: Route selection & spike.
-- [ ] Milestone 1: Implement chosen route.
-- [ ] Milestone 2: Validate — run `./scripts/lint.sh`, `cargo build --workspace`, `cargo test --workspace --features test`.
-- [ ] Milestone 3: Preflight (`./scripts/preflight.sh`) clean.
-- [ ] Milestone 4: Commit and push.
+- [x] Milestone 0: Route selection & spike. Chose Route A.
+- [x] Milestone 1: Implement chosen route. Edited workspace `Cargo.toml`, `agent/src/mqtt/client.rs`, `.cargo/audit.toml`; regenerated `Cargo.lock`.
+- [x] Milestone 2: Validate — `cargo build --workspace` succeeds; `./scripts/test.sh` reports 1206 passed / 0 failed; `./scripts/lint.sh` ends with `Lint complete` (exit 0); `cargo audit` exits 0 with no vulnerabilities.
+- [x] Milestone 3: Preflight (`./scripts/preflight.sh`) clean — reports `Preflight clean`.
+- [ ] Milestone 4: Commit and push. (Orchestrator handles commit via `$commit` after implement returns.)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- `TlsConfiguration::Native` already exists in `rumqttc 0.25.1` under the `use-native-tls` feature; internally it calls `native_tls::TlsConnector::new()?` (rumqttc `src/tls.rs:157`). This lets us use `Transport::tls_with_config(TlsConfiguration::Native)` directly without importing `native-tls` or `tokio-native-tls` into the agent. The plan's initial proposal to add `native-tls` / `tokio-native-tls` as direct workspace deps is therefore unnecessary — we only need to flip feature flags on `rumqttc` and `rumqttd` plus swap one line in `agent/src/mqtt/client.rs`.
+- `TlsConfiguration::Default` (what `Transport::Tls(Default::default())` relies on today) is gated behind `use-rustls-no-provider` (rumqttc `src/lib.rs:365`). After disabling `use-rustls`, `Default::default()` on that enum stops compiling, so the one-line change is mandatory (not cosmetic).
+- `rumqttd 0.20.0` types used by the test broker (`Broker`, `Config`, `ServerSettings`, `ConnectionSettings`, `RouterConfig`) are all declared at the top level of `src/lib.rs` without `#[cfg(feature = ...)]` gating; dropping `default-features` on `rumqttd` does not remove them. `websocket`/`use-rustls` defaults are safe to drop — the test broker uses TCP with `ws: None` and `tls: None`.
+- Vendored OpenSSL is already enabled workspace-wide via `openssl = { version = "0.10.64", features = ["vendored"] }`. `native-tls` on Linux uses system OpenSSL by default; the `openssl-sys` build already being vendored means no host OpenSSL dev package is required.
+- `cargo tree --workspace -i rustls-webpki:0.102.8` confirms two paths: `rumqttc` (runtime) and `rumqttd` (dev-dep). Both must be reconfigured for `cargo audit` to clear the advisories.
+- `Cargo.lock` is present in the repo but is `.gitignore`d, per plan; do not `git add` it.
 
 ## Decision Log
 
@@ -43,9 +48,26 @@ The plan selects a route during Milestone 0, then executes it. Two routes are pr
   Rationale: No drop-in semver-compatible upgrade exists for `rustls-webpki 0.102.x`; each route has trade-offs.
   Date/Author: 2026-04-19 / plan author.
 
+- Decision: Take Route A (switch `rumqttc`/`rumqttd` to `use-native-tls`).
+  Rationale: Minimal code impact (one line in `agent/src/mqtt/client.rs` plus feature-flag flips in two `Cargo.toml` files); zero ongoing maintenance burden (no fork to rebase); vendored OpenSSL already present so no new system dep; `TlsConfiguration::Native` is provided upstream so no new crate dependencies are required; trust-store semantics align with the current rustls-native-certs path.
+  Rejected: Route B (`[patch.crates-io]` fork of `bytebeamio/rumqtt`). Requires operating a `mirurobotics/rumqtt` fork, rebasing it against upstream over time, and handling the rustls 0.22 → 0.23 migration inside rumqttc. Disproportionate cost for a change this small.
+  Date/Author: 2026-04-19 / implement-skill agent.
+
+- Decision: Do not add `native-tls` / `tokio-native-tls` as direct workspace deps.
+  Rationale: The plan's Route A step 2 proposed adding them, but `rumqttc::TlsConfiguration::Native` already performs `native_tls::TlsConnector::new()` internally. Adding direct deps would duplicate the call site without benefit and expand our API surface.
+  Date/Author: 2026-04-19 / implement-skill agent.
+
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Route A succeeded on the first pass. Final observations:
+
+- `cargo audit` exit code: 0. `rustls-webpki 0.102.8` is no longer in `Cargo.lock`; both RUSTSEC-2026-0098 and RUSTSEC-2026-0099 are cleared. The previously-ignored RUSTSEC-2026-0049 (rustls-webpki 0.102.x CRL bug) is also cleared incidentally; the ignore entry in `.cargo/audit.toml` was removed.
+- The unrelated `RUSTSEC-2025-0134` warning (unmaintained `rustls-pemfile`) is also cleared because `rustls-pemfile` falls out of the graph with rustls disabled. `cargo audit` now reports zero findings (errors or warnings).
+- One other `rustls-webpki` node remains in the tree at `v0.103.12`, pulled transitively through `reqwest` → `hyper-rustls`. That version is not affected by either advisory.
+- Code churn was smaller than the plan anticipated. The plan's Route A step 2 suggested adding `native-tls` and `tokio-native-tls` as direct workspace dependencies; this turned out to be unnecessary because `rumqttc::TlsConfiguration::Native` already encapsulates the `native_tls::TlsConnector::new()` call. The workspace gains no new direct deps.
+- Final touched files: `Cargo.toml`, `agent/src/mqtt/client.rs`, `.cargo/audit.toml`, plus the auto-regenerated `Cargo.lock` (not tracked).
+- Trust-store semantics: unchanged in practice. The old `TlsConfiguration::default()` loaded native roots via `rustls-native-certs`; `TlsConfiguration::Native` loads them via OpenSSL through `native-tls`. Both consult the OS trust store.
+- Preflight reported `Preflight clean` on first run with no fix-ups required. Test suite reported 1206 passed / 0 failed / 0 ignored.
 
 ## Context and Orientation
 
