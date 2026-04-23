@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::cli::{Args, InstallArgs};
+use miru_agent::cli::{Args, InstallArgs, ProvisionArgs};
 
 fn to_inputs(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
@@ -124,5 +124,95 @@ mod install_args_parse {
         let args = InstallArgs::parse(&inputs);
 
         assert!(args.device_name.is_none());
+    }
+}
+
+mod provision_args_parse {
+    use super::*;
+
+    #[test]
+    fn parses_device_name_only() {
+        let inputs = to_inputs(&["miru-agent", "provision", "--device-name=foo"]);
+
+        let args = Args::parse(&inputs);
+
+        assert!(args.provision_args.is_some());
+        let provision_args = args
+            .provision_args
+            .expect("provision args should be present");
+        assert_eq!(Some("foo"), provision_args.device_name.as_deref());
+        assert_eq!(None, provision_args.allow_reactivation);
+        assert!(provision_args.backend_host.is_none());
+        assert!(provision_args.mqtt_broker_host.is_none());
+    }
+
+    #[test]
+    fn parses_allow_reactivation_false() {
+        let inputs = to_inputs(&[
+            "miru-agent",
+            "provision",
+            "--device-name=foo",
+            "--allow-reactivation=false",
+        ]);
+
+        let args = Args::parse(&inputs);
+        let provision_args = args
+            .provision_args
+            .expect("provision args should be present");
+
+        assert_eq!(Some("foo"), provision_args.device_name.as_deref());
+        assert_eq!(Some(false), provision_args.allow_reactivation);
+    }
+
+    #[test]
+    fn parses_all_fields() {
+        let inputs = to_inputs(&[
+            "miru-agent",
+            "provision",
+            "--device-name=foo",
+            "--allow-reactivation=true",
+            "--backend-host=https://x",
+            "--mqtt-broker-host=mqtt://y",
+        ]);
+
+        let args = Args::parse(&inputs);
+        let provision_args = args
+            .provision_args
+            .expect("provision args should be present");
+
+        assert_eq!(Some("foo"), provision_args.device_name.as_deref());
+        assert_eq!(Some(true), provision_args.allow_reactivation);
+        assert_eq!(Some("https://x"), provision_args.backend_host.as_deref());
+        assert_eq!(Some("mqtt://y"), provision_args.mqtt_broker_host.as_deref());
+    }
+
+    #[test]
+    fn no_args_yields_all_none_fields() {
+        let inputs = to_inputs(&["miru-agent", "provision"]);
+
+        let args = Args::parse(&inputs);
+        let provision_args = args
+            .provision_args
+            .expect("provision args should be present");
+
+        assert!(provision_args.device_name.is_none());
+        assert_eq!(None, provision_args.allow_reactivation);
+        assert!(provision_args.backend_host.is_none());
+        assert!(provision_args.mqtt_broker_host.is_none());
+    }
+
+    #[test]
+    fn parses_directly_via_provision_args_parse() {
+        let inputs = to_inputs(&[
+            "miru-agent",
+            "provision",
+            "--device-name=robot-7",
+            "--allow-reactivation=true",
+        ]);
+
+        let args = ProvisionArgs::parse(&inputs);
+
+        assert_eq!(Some("robot-7"), args.device_name.as_deref());
+        assert_eq!(Some(true), args.allow_reactivation);
     }
 }

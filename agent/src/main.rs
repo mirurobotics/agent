@@ -34,7 +34,17 @@ async fn main() {
         return;
     }
 
+    if let Some(provision_args) = cli_args.provision_args {
+        let exit_code = run_provision(provision_args).await;
+        std::process::exit(exit_code);
+    }
+
     run_agent().await;
+}
+
+async fn run_provision(_args: cli::ProvisionArgs) -> i32 {
+    eprintln!("provision: not implemented");
+    cli::exit_codes::GENERIC_FAILURE
 }
 
 async fn run_installer(args: cli::InstallArgs) -> Result<backend_client::Device, InstallErr> {
