@@ -6,6 +6,8 @@ use crate::logs::LogLevel;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+pub const DEFAULT_BACKEND_HOST: &str = "https://api.mirurobotics.com";
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Settings {
     pub log_level: LogLevel,
@@ -95,7 +97,7 @@ pub struct Backend {
 impl Default for Backend {
     fn default() -> Self {
         Self {
-            base_url: "https://api.mirurobotics.com/agent/v1".to_string(),
+            base_url: format!("{}/agent/v1", DEFAULT_BACKEND_HOST),
         }
     }
 }

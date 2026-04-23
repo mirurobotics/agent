@@ -7,6 +7,7 @@ use crate::crypt::{jwt, rsa};
 use crate::filesys::{self, Overwrite};
 use crate::http;
 use crate::installer::errors::*;
+pub use crate::storage::settings::DEFAULT_BACKEND_HOST;
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;
@@ -89,11 +90,20 @@ async fn register_with_backend<HTTPClientT: http::ClientI>(
 }
 
 pub fn determine_settings(args: &cli::InstallArgs) -> settings::Settings {
+    determine_settings_from(
+        args.backend_host.as_deref(),
+        args.mqtt_broker_host.as_deref(),
+    )
+}
+
+pub fn determine_settings_from(
+    backend_host: Option<&str>,
+    mqtt_broker_host: Option<&str>,
+) -> settings::Settings {
     let mut settings = settings::Settings::default();
-    if let Some(backend_host) = &args.backend_host {
-        settings.backend.base_url = format!("{}/agent/v1", backend_host);
-    }
-    if let Some(mqtt_broker_host) = &args.mqtt_broker_host {
+    let host = backend_host.unwrap_or(DEFAULT_BACKEND_HOST);
+    settings.backend.base_url = format!("{}/agent/v1", host);
+    if let Some(mqtt_broker_host) = mqtt_broker_host {
         settings.mqtt_broker.host = mqtt_broker_host.to_string();
     }
     settings

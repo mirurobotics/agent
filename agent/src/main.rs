@@ -6,9 +6,13 @@ use backend_api::models as backend_client;
 use miru_agent::app::options::{AppOptions, LifecycleOptions};
 use miru_agent::app::run::run;
 use miru_agent::cli;
-use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
-use miru_agent::installer::{display, errors::*, install};
+use miru_agent::installer::{
+    self, display,
+    errors::*,
+    install,
+    provision::{self, ProvisionErr},
+};
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
 use miru_agent::storage;
@@ -42,21 +46,68 @@ async fn main() {
     run_agent().await;
 }
 
-async fn run_provision(_args: cli::ProvisionArgs) -> i32 {
-    eprintln!("provision: not implemented");
-    cli::exit_codes::GENERIC_FAILURE
+async fn run_provision(args: cli::ProvisionArgs) -> i32 {
+    let (_guard, tmp_dir) = match installer::init_installer_logging().await {
+        Ok(pair) => pair,
+        Err(_) => return cli::exit_codes::GENERIC_FAILURE,
+    };
+
+    let api_key = match provision::read_api_key_from_env() {
+        Ok(k) => k,
+        Err(_) => {
+            eprintln!("MIRU_API_KEY environment variable is not set");
+            return cli::exit_codes::MISSING_API_KEY;
+        }
+    };
+
+    let device_name = match args.device_name.as_deref() {
+        Some(n) => n,
+        None => {
+            eprintln!("--device-name is required");
+            return cli::exit_codes::GENERIC_FAILURE;
+        }
+    };
+
+    let settings = install::determine_settings_from(
+        args.backend_host.as_deref(),
+        args.mqtt_broker_host.as_deref(),
+    );
+
+    let backend_host = args
+        .backend_host
+        .as_deref()
+        .unwrap_or(install::DEFAULT_BACKEND_HOST);
+    let agent_http_client = match http::Client::new(&settings.backend.base_url) {
+        Ok(c) => c,
+        Err(_) => return cli::exit_codes::GENERIC_FAILURE,
+    };
+    let public_api_http_client = match http::Client::new(&format!("{}/v1", backend_host)) {
+        Ok(c) => c,
+        Err(_) => return cli::exit_codes::GENERIC_FAILURE,
+    };
+
+    let layout = storage::Layout::default();
+    let result = provision::provision(
+        &public_api_http_client,
+        &agent_http_client,
+        &layout,
+        &settings,
+        &api_key,
+        device_name,
+        args.allow_reactivation.unwrap_or(false),
+    )
+    .await;
+
+    drop(_guard);
+    if let Err(e) = tmp_dir.delete().await {
+        eprintln!("failed to clean up provision log dir: {e}");
+    }
+
+    handle_provision_result(result)
 }
 
 async fn run_installer(args: cli::InstallArgs) -> Result<backend_client::Device, InstallErr> {
-    // initialize logging
-    let tmp_dir = Dir::create_temp_dir("miru-agent-installer-logs").await?;
-    let options = logs::Options {
-        // sending logs to stdout will interfere with the installer outputs
-        stdout: false,
-        log_dir: tmp_dir.path().to_path_buf(),
-        ..Default::default()
-    };
-    let _guard = logs::init(options);
+    let (_guard, tmp_dir) = installer::init_installer_logging().await?;
 
     let settings = install::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
@@ -86,6 +137,33 @@ fn handle_install_result(result: Result<backend_client::Device, InstallErr>) {
             error!("Installation failed: {:?}", e);
             println!("An error occurred during your installation. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
             std::process::exit(1);
+        }
+    }
+}
+
+fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>) -> i32 {
+    match result {
+        Ok(device) => {
+            let msg = format!(
+                "Successfully activated this device as {}!",
+                display::color(&device.name, display::Colors::Green)
+            );
+            println!("{}", display::format_info(msg.as_str()));
+            cli::exit_codes::SUCCESS
+        }
+        Err(e) => {
+            error!("Provision failed: {:?}", e);
+            println!("An error occurred during provisioning. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            match e {
+                ProvisionErr::MissingApiKeyErr(_) => cli::exit_codes::MISSING_API_KEY,
+                ProvisionErr::BackendErr(_) => cli::exit_codes::BACKEND_ERROR,
+                ProvisionErr::ReactivationNotAllowedErr(_) => {
+                    cli::exit_codes::REACTIVATION_NOT_ALLOWED
+                }
+                ProvisionErr::InstallErr(_) => cli::exit_codes::INSTALL_FAILURE,
+                ProvisionErr::NotRootErr(_) => cli::exit_codes::GENERIC_FAILURE,
+                ProvisionErr::SystemdErr(_) => cli::exit_codes::INSTALL_FAILURE,
+            }
         }
     }
 }
