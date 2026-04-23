@@ -31,7 +31,13 @@ Observable behavior:
 
 `scripts/install/provision.sh` is **not** removed by this plan — existing customer deployments still use it. Both flows coexist until the next deprecation cycle.
 
-The APT publishing pipeline (how the new binary gets onto the customer's machine in the first place) is out of scope; it is tracked separately.
+**Out of scope.**
+
+- The APT publishing pipeline (how the new binary gets onto the customer's machine in the first place) — tracked separately.
+- Removal or deprecation of `scripts/install/provision.sh` — left in place during the transition; both flows coexist until the next deprecation cycle.
+- Migration of existing already-activated devices.
+- Backend OpenAPI regeneration for the new `CreateDeviceRequest` type — a local request type is used inside `agent/src/http/devices.rs` instead.
+- HTTP retry / backoff logic for the new provision calls — single-attempt, fail-loud behavior; operators re-run on transient error.
 
 ## Progress
 
@@ -50,7 +56,33 @@ Add entries as work proceeds.
 
 ## Decision Log
 
-Add entries as work proceeds. The key open decisions are listed in **Plan of Work** and must be recorded here once made (where provision code lives, how `X-API-Key` is plumbed, where `CreateDeviceRequest` lives, systemd policy, root-check policy, exact exit codes).
+All entries below recorded 2026-04-22 by plan author.
+
+- **CLI shape (M1).** A new top-level `provision` subcommand (sibling to `--install`), not a `--provision` flag. Rationale: matches customer-facing UX in the published example and parses cleanly as a positional verb in the existing custom parser.
+- **Module location (M1/M3).** `agent/src/installer/provision.rs`, sibling to `install.rs`. Rationale: shares the device-onboarding domain with `install.rs`; alternative top-level `agent/src/provision.rs` was rejected to keep onboarding code colocated.
+- **Local request type (M2).** `CreateDeviceRequest { name }` is defined locally in `agent/src/http/devices.rs` rather than regenerating the OpenAPI client. Rationale: OpenAPI regeneration is out of scope; the type is small. Long-term it should move into `libs/backend-api` (TODO comment at the type definition).
+- **Create-or-fetch placement (M2).** The POST + GET-on-409 fallback is collapsed into a single HTTP-layer function (`create_or_fetch_device`) so callers see one operation. Rationale: matches the way `provision.sh` presents it to users and keeps the orchestrator thin.
+- **`X-API-Key` plumbing (M2).** Add `api_key: Option<&str>` to `request::Params` (extends the existing token-bearing surface) rather than introducing a new auth-mode enum. Rationale: minimal surface change; mirrors the existing `with_token` pattern.
+- **`issue_token` boundary (M2).** Add a new `issue_activation_token()` function targeting `/devices/{id}/activation_token`; do NOT modify the existing `issue_token` (which targets `/devices/{id}/issue_token` and has live callers in `authn/token_mngr.rs` and elsewhere).
+- **`determine_settings` refactor (M3).** Refactor `installer::install::determine_settings` so it accepts the `(backend_host, mqtt_broker_host)` inputs directly (e.g. `determine_settings_from(Option<&str>, Option<&str>)`), allowing `run_provision` to build settings once and reuse them across both HTTP clients. Rationale: removes duplication and keeps the install path unchanged.
+- **Default backend host (M3).** Introduce `pub const DEFAULT_BACKEND_HOST: &str = "https://api.mirurobotics.com";` in `agent/src/installer/install.rs` and derive `Settings::default().backend.base_url` from it (`format!("{}/agent/v1", DEFAULT_BACKEND_HOST)`). `determine_settings_from` falls back to the constant when `backend_host` is `None`, and `run_provision` reuses it as `unwrap_or(installer::install::DEFAULT_BACKEND_HOST)` when building the public-API client. Rationale: avoids duplicating the host string between `Settings::default()` and `provision`, and gives both call sites one place to override.
+- **Logging-init helper (M3).** Extract the existing 25-line stdout-off + temp-dir logging setup from `main.rs::run_installer` (lines 40–64) into `agent/src/installer/mod.rs::init_installer_logging() -> Result<(logs::Guard, filesys::Dir), InstallErr>`. Both `run_installer` and `run_provision` call it. Add `pub type Guard = tracing_appender::non_blocking::WorkerGuard;` to `agent/src/logs/mod.rs` so the helper signature reads naturally; `logs::init` returns the underlying `WorkerGuard` today. Rationale: avoids copy/paste drift; the alias makes the cross-module signature self-documenting.
+- **Two backend base URLs (M3).** `provision` constructs **two** `http::Client` instances: a public-API client at `{backend_host}/v1` for the create-or-fetch and activation-token calls, and the existing agent-API client at `{backend_host}/agent/v1` for `installer::install()`. Rationale: the public API and agent API live at distinct prefixes (verified in `provision.sh`).
+- **Privilege check (M4).** Add `libc = "0.2"` to `agent/Cargo.toml` `[dependencies]`. `assert_root()` returns `NotRootErr` when `unsafe { libc::geteuid() } != 0`. Rationale: `nix` is not currently a dependency (verified); `libc` is smaller and the call is trivial.
+- **Systemd policy (M4).** Always attempt the operation (`systemctl stop miru` before install, `systemctl restart miru` after install); treat exit code 5 (`Unit miru.service not loaded`) as a no-op; any other non-zero exit returns `SystemdErr`. Rationale: `systemctl is-active` returns non-zero for both "unit not loaded" and "unit loaded but inactive", which would incorrectly skip restart on a stopped-but-installed unit (e.g. after a manual stop). Single-attempt with exit-code matching is simpler and correctly handles the recovery scenario.
+- **Backend "device already activated" error code (M3).** The string is `device_is_active` (verified in `backend/internal/configs/domain/devices/errors.go::IsActiveCode`, raised inside `backend/internal/configs/services/devices/activation_token.go::IssueActivationToken` via `dvcdmn.VerifyInactive`). Branch on `HTTPErr::RequestFailed` whose `error.code == "device_is_active"` and return `ProvisionErr::ReactivationNotAllowedErr`.
+- **Exit codes.** Authoritative mapping (also encoded in `agent/src/cli/exit_codes.rs`):
+
+  | Exit | Constant | Scenario |
+  |------|----------|----------|
+  | 0 | `SUCCESS` | Provision succeeded. |
+  | 1 | `GENERIC_FAILURE` | CLI parse failure, missing `--device-name`, non-root caller, configuration/programming errors (URL parse, `http::Client::new` failure, logging init failure). |
+  | 2 | `MISSING_API_KEY` | `MIRU_API_KEY` env var unset. |
+  | 3 | `BACKEND_ERROR` | An actual HTTP failure (network down, 5xx, timeout) on a provision call. Reserved exclusively for HTTP failures — configuration errors map to 1. |
+  | 4 | `REACTIVATION_NOT_ALLOWED` | Backend returned `device_is_active` while `--allow-reactivation=false`. |
+  | 5 | `INSTALL_FAILURE` | Inner `installer::install::install()` returned `InstallErr` (RSA keygen failure, `/srv/miru` write failure, `register_with_backend` activation failure, etc.) or systemd stop/restart failure. |
+
+  Rationale for the 1-vs-3 split: exit 3 is reserved for actual HTTP failures so customer scripts can confidently retry on 3; configuration/programming errors (URL parse, client construction) deserve a different signal and map to exit 1.
 
 ## Outcomes & Retrospective
 
@@ -85,7 +117,7 @@ A reader who has never seen this repo before should be able to find their feet f
 - `agent/tests/installer/install.rs` — pattern for installer tests: `#[tokio::test]`, `MockClient` from `agent/tests/mocks/http_client.rs` (closure fields per endpoint), filesystem isolation via `filesys::Dir::create_temp_dir("install-test")`. New `agent/tests/provision/` module mirrors this pattern.
 - `agent/tests/mocks/http_client.rs` — `MockClient` with `activate_device_fn`, `issue_device_token_fn`, etc. closures. New `create_device_fn` and `fetch_device_by_name_fn` (or a single `create_or_fetch_device_fn` if Decision in Plan of Work picks the merged function) get added here.
 - `agent/tests/mod.rs` — registers test modules; new `provision` module gets added.
-- `libs/backend-api/src/models/` — generated OpenAPI types: `Device`, `ActivateDeviceRequest`, `IssueDeviceTokenRequest` (already has `allow_reactivation`), `TokenResponse`, `UpdateDeviceFromAgentRequest`, `ErrorResponse`. **No** request type for `POST /v1/devices`.
+- `libs/backend-api/src/models/` — generated OpenAPI types: `Device`, `ActivateDeviceRequest`, `IssueDeviceTokenRequest` (`{ claims, signature }` — for the agent-side `/issue_token` endpoint, NOT the public `/activation_token` endpoint), `TokenResponse`, `UpdateDeviceFromAgentRequest`, `ErrorResponse`. **No** request type for `POST /v1/devices`. **No** request type for `POST /v1/devices/{id}/activation_token` either; the plan defines a local `IssueActivationTokenRequest { allow_reactivation: bool }` in `agent/src/http/devices.rs` (parallel to `CreateDeviceRequest`).
 - `scripts/install/provision.sh` — the existing shell-based provisioner. **Read-only for this plan**; the plan does not delete or modify it.
 - `agent/ARCHITECTURE.md` — lines 8–12 and 79–81 describe "Installer mode (--install)" and "Device setup". Both get updated in Milestone 5 to mention `provision`.
 - `agent/README.md` — does not currently mention provision; gets a new section.
@@ -111,18 +143,24 @@ A reader who has never seen this repo before should be able to find their feet f
 
 **Backend endpoints used (verified against `scripts/install/provision.sh`).**
 
-- `POST {backend_host}/v1/devices`
+Two distinct base URLs are in play. The provision module constructs **two** separate `http::Client` instances:
+- A public-API client whose `base_url()` returns `format!("{}/v1", backend_host)` — used for the create-or-fetch and activation-token calls below.
+- An agent-API client whose `base_url()` returns `format!("{}/agent/v1", backend_host)` (the existing `install::determine_settings()` shape) — used by the inner `installer::install()` call.
+
+- `POST {backend_host}/v1/devices` (public API)
   Headers: `X-API-Key: $MIRU_API_KEY`, `Content-Type: application/json`, `Miru-Version: 2026-03-09.tetons`.
   Body: `{"name": "<device-name>"}`.
   Responses: `200`/`201` → `Device`. `409 Conflict` → device exists; the caller must then `GET /v1/devices?name=<device-name>` (same `X-API-Key` header) to retrieve it.
 
-- `POST {backend_host}/v1/devices/{device_id}/activation_token`
+- `POST {backend_host}/v1/devices/{device_id}/activation_token` (public API)
   Headers: `X-API-Key: $MIRU_API_KEY`.
   Body: `{"allow_reactivation": <bool>}`.
-  Response: `{"token": "<jwt>", "expires_at": "..."}`. Backend rejects with a typed error when the device was previously activated and `allow_reactivation=false`. The plan must branch on the error code to surface exit code 4 (see Plan of Work).
+  Response: `{"token": "<jwt>", "expires_at": "..."}`. Backend returns `error.code == "device_is_active"` (HTTP 400) when the device was previously activated and `allow_reactivation=false`; the plan branches on this code to surface exit code 4 (see Plan of Work).
 
-- `POST {backend_host}/v1/devices/{device_id}/activate`
+- `POST {backend_host}/agent/v1/devices/{device_id}/activate` (agent API)
   This is the existing, agent-issued call performed by `installer::install()`. Bearer-auth with the activation JWT. Untouched by this plan.
+
+Note: the existing `http::devices::issue_token()` posts to a different agent-API path (`/devices/{id}/issue_token`) and is referenced by `agent/src/authn/token_mngr.rs` and other call sites. It must NOT be modified by this plan; the new `issue_activation_token()` is a separate function.
 
 ## Plan of Work
 
@@ -166,9 +204,9 @@ Edits:
 
    Stub `run_provision()` returns `cli::exit_codes::GENERIC_FAILURE` and prints "provision: not implemented".
 
-4. **Decision to record:** the parser today uses a single shared loop and treats `--install` as a flag. `provision` is a verb, but to minimize scope we treat it as a flag too (no positional-vs-flag distinction). Document this in Decision Log.
+4. The parser treats `provision` as a token in the existing single-pass loop (the same way `--install` is treated today, after `trim_start_matches('-')`). No positional-vs-flag distinction is added.
 
-Validation for M1: `cargo build -p miru-agent`, `cargo fmt -p miru-agent`, `cargo clippy --package miru-agent --all-features -- -D warnings`, `./scripts/test.sh` all green. Manual: `./target/debug/miru-agent provision --device-name=foo` prints "not implemented" and exits 1.
+Validation for M1: per-milestone validation recipe. Manual smoke: ./target/debug/miru-agent provision --device-name=foo prints "provision: not implemented" and exits 1.
 
 Commit: `feat(cli): add provision subcommand skeleton`.
 
@@ -187,7 +225,7 @@ Edits:
 
    In `build()` (after `add_token_to_headers`), add `add_api_key_to_headers()` that does `headers.insert("X-API-Key", HeaderValue::from_str(api_key)?)` with the same `InvalidHeaderValueErr` mapping as `add_token_to_headers`. Unit-test `Params::with_api_key` and that `build()` puts the header on the request.
 
-2. `agent/src/http/devices.rs` — add a local request type and the new function. **Decision to record:** define `CreateDeviceRequest` locally in `agent/src/http/devices.rs` rather than regenerate the OpenAPI client. Long-term it should move into `libs/backend-api`, but the OpenAPI generator pipeline is out of scope for this plan. Add a `// TODO(provision): move to libs/backend-api once OpenAPI spec is regenerated.` comment at the type definition.
+2. `agent/src/http/devices.rs` — add a local request type and the new function. Define `CreateDeviceRequest` locally; add a `// TODO(provision): move to libs/backend-api once OpenAPI spec is regenerated.` comment at the type definition.
 
        #[derive(Debug, Serialize)]
        pub struct CreateDeviceRequest<'a> {
@@ -203,12 +241,14 @@ Edits:
            client: &impl ClientI,
            params: CreateOrFetchDeviceParams<'_>,
        ) -> Result<Device, HTTPErr> {
+           // `client.base_url()` is `{backend_host}/v1` for this client (constructed in
+           // `run_provision`), so the absolute URL is `{backend_host}/v1/devices`.
            let url = format!("{}/devices", client.base_url());
            let body = request::marshal_json(&CreateDeviceRequest { name: params.name })?;
            let post = request::Params::post(&url, body).with_api_key(params.api_key);
            match super::client::fetch::<_, Device>(client, post).await {
                Ok(device) => Ok(device),
-               Err(HTTPErr::RequestFailed(_, status, _)) if status == reqwest::StatusCode::CONFLICT => {
+               Err(HTTPErr::RequestFailed(rf)) if rf.status == reqwest::StatusCode::CONFLICT => {
                    let get = request::Params::get(&url)
                        .with_api_key(params.api_key)
                        .with_query(QueryParams::from([("name", params.name)]));
@@ -218,17 +258,13 @@ Edits:
            }
        }
 
-   **Decision to record:** the create-and-fetch fallback is performed inside the HTTP-layer function (one logical operation from the caller's perspective) rather than orchestrated in the provision module. This matches how `provision.sh` presents it to users.
+   Add a sibling `issue_activation_token()` that POSTs to `/devices/{id}/activation_token` (note: distinct path from `issue_token`'s `/devices/{id}/issue_token`) using `X-API-Key` instead of bearer auth, mirroring the call `provision.sh` makes. Define a local `IssueActivationTokenRequest { allow_reactivation: bool }` in `agent/src/http/devices.rs`, parallel to `CreateDeviceRequest`. Add a `// TODO(provision): move to libs/backend-api once OpenAPI spec is regenerated.` comment at the type definition. Define an `IssueActivationTokenParams<'a> { id: &'a str, api_key: &'a str, allow_reactivation: bool }` struct. Do NOT modify `issue_token` — it has other callers (`authn/token_mngr.rs`, etc.) and uses a different endpoint.
 
-   Note: the precise `RequestFailed` arm pattern depends on the variant signature in `agent/src/http/errors.rs`. Verify against that file when implementing — match against the same shape `super::client::fetch` already uses elsewhere in `devices.rs` (none today), so cross-reference `agent/src/http/client.rs` for how `RequestFailed` is constructed and how `StatusCode` is exposed.
-
-   Add a sibling `issue_activation_token()` (or extend `issue_token()`) that uses `X-API-Key` instead of bearer auth — `provision.sh` calls `POST /v1/devices/{id}/activation_token` with `X-API-Key`, not bearer. The existing `issue_token` is unauthenticated in headers (lines 39–46 of `devices.rs`), and the body shape (`IssueDeviceTokenRequest`) already has `allow_reactivation`. **Decision to record:** add a new function `issue_activation_token_with_api_key` rather than mutating `issue_token`, to avoid breaking any existing callers. (Verify call sites with `Grep "issue_token"` before deciding; if no other callers exist, change `issue_token` directly and document that.)
-
-3. `agent/tests/mocks/http_client.rs` — add `create_or_fetch_device_fn: Option<...>` closure field. Add `issue_activation_token_with_api_key_fn` (or update existing). Provide reasonable defaults that panic with "no mock set" so tests fail loudly.
+3. `agent/tests/mocks/http_client.rs` — add `create_or_fetch_device_fn` closure field. Add `issue_activation_token_with_api_key_fn` (or update existing). Default each new closure to `Box::new(|_params| Ok(Default::default()))`, matching the existing convention in `agent/tests/mocks/http_client.rs` (lines 72–80). Individual tests override the closure to assert specific behavior.
 
 4. Tests in `agent/tests/http/devices.rs` (or new file under that module): test `create_or_fetch_device` happy path (200 → device returned), 409 path (POST returns 409, GET returns device), and unrelated 5xx (propagated as `HTTPErr`). Use the existing test pattern in `agent/tests/http/`.
 
-Validation for M2: `./scripts/test.sh` and `./scripts/lint.sh` clean.
+Validation for M2: per-milestone validation recipe.
 
 Commit: `feat(http): add X-API-Key header and create_or_fetch_device`.
 
@@ -238,40 +274,50 @@ Goal: `miru-agent provision --device-name=foo` runs end-to-end against a mocked 
 
 Edits:
 
-1. `agent/src/installer/provision.rs` (NEW) — the orchestrator. **Decision to record:** lives at `agent/src/installer/provision.rs`, sibling to `install.rs`, because it shares the device-onboarding domain. Alternative (`agent/src/provision.rs` top-level) was considered and rejected to keep onboarding code colocated.
+1. `agent/src/installer/provision.rs` (NEW) — the orchestrator, sibling to `install.rs`.
 
    Public entrypoint signature:
 
-       pub async fn provision<HTTPClientT: http::ClientI>(
-           http_client: &HTTPClientT,
+       pub async fn provision<PublicHTTPClientT, AgentHTTPClientT>(
+           public_api_client: &PublicHTTPClientT,
+           agent_client: &AgentHTTPClientT,
            layout: &storage::Layout,
            settings: &settings::Settings,
            api_key: &str,
            device_name: &str,
            allow_reactivation: bool,
        ) -> Result<backend_client::Device, ProvisionErr>
+       where
+           PublicHTTPClientT: http::ClientI,
+           AgentHTTPClientT: http::ClientI,
 
    Steps inside:
-   - Call `http::devices::create_or_fetch_device({ name: device_name, api_key })` → `Device`.
-   - Call `http::devices::issue_activation_token_with_api_key({ id: device.id, api_key, allow_reactivation })` → `TokenResponse`.
-   - Branch on the typed backend error for "device already activated && reactivation not allowed" — return a distinct `ProvisionErr::ReactivationNotAllowed` variant so the CLI can map to exit code 4. The exact backend error code string must be confirmed against the backend (search `backend/internal/...` or live-test with `provision.sh`); record the verified string in Decision Log.
-   - Hand off to `installer::install::install(http_client, layout, settings, &token, Some(device_name.to_string()))`. Map the resulting `InstallErr` into `ProvisionErr::InstallErr`.
+   - Call `http::devices::create_or_fetch_device(public_api_client, { name: device_name, api_key })` → `Device`. Uses the `{backend_host}/v1` base URL.
+   - Call `http::devices::issue_activation_token(public_api_client, { id: &device.id, api_key, allow_reactivation })` → `TokenResponse`. Same `{backend_host}/v1` base URL.
+   - On `HTTPErr::RequestFailed` whose `error.code == "device_is_active"`, return `ProvisionErr::ReactivationNotAllowedErr` (mapped to exit code 4 by `handle_provision_result`). All other `HTTPErr` values map to `ProvisionErr::BackendErr`. The `device_is_active` code is emitted by `backend/internal/configs/domain/devices/errors.go::NewDeviceIsActive` when `dvcdmn.VerifyInactive(device)` fails inside `backend/internal/configs/services/devices/activation_token.go::IssueActivationToken` (verified).
+   - Hand off to `installer::install::install(agent_client, layout, settings, &token, Some(device_name.to_string()))`. Map the resulting `InstallErr` into `ProvisionErr::InstallErr`.
 
    Define `ProvisionErr` with `thiserror` and `crate::impl_error!`, mirroring `InstallErr`. Variants: `MissingApiKeyErr(MissingEnvVarErr)`, `BackendErr(http::HTTPErr)`, `ReactivationNotAllowedErr { device_id: String, trace: Box<Trace> }`, `InstallErr(installer::errors::InstallErr)`, `NotRootErr { trace: Box<Trace> }` (used in M4), `SystemdErr { msg: String, trace: Box<Trace> }` (used in M4).
 
    Add `pub fn read_api_key_from_env() -> Result<String, ProvisionErr>` mirroring `install::read_token_from_env()` but reading `MIRU_API_KEY` and returning `MissingApiKeyErr`.
 
-   Add a settings adapter: provision needs `backend.base_url` and `mqtt_broker.host`, same as install. Reuse `install::determine_settings` by constructing an `InstallArgs { backend_host, mqtt_broker_host, device_name }` from `ProvisionArgs` — or, cleaner, refactor `determine_settings` into a free function that takes `(backend_host: Option<&str>, mqtt_broker_host: Option<&str>)` and call it from both. **Decision to record:** the plan picks the refactor (small, safe, removes duplication).
+   Introduce `pub const DEFAULT_BACKEND_HOST: &str = "https://api.mirurobotics.com";` in `agent/src/installer/install.rs`. Refactor `Settings::default()` (in `agent/src/storage/settings.rs`) so its `backend.base_url` is built as `format!("{}/agent/v1", installer::install::DEFAULT_BACKEND_HOST)` (or move the constant to `storage::settings` if the cycle is awkward — the implementer picks the placement, but the constant must be a single source of truth). Then refactor `installer::install::determine_settings` so it accepts the inputs directly (e.g. `pub fn determine_settings_from(backend_host: Option<&str>, mqtt_broker_host: Option<&str>) -> settings::Settings`), uses `DEFAULT_BACKEND_HOST` when `backend_host` is `None`, and have `determine_settings(args: &cli::InstallArgs)` delegate to it. `run_provision` calls `determine_settings_from` directly and reuses the same `DEFAULT_BACKEND_HOST` for the public-API client base URL.
 
-2. `agent/src/installer/mod.rs` — add `pub mod provision;`.
+2. `agent/src/installer/mod.rs`:
+   - Extract `pub async fn init_installer_logging() -> Result<(logs::Guard, filesys::dir::Dir), InstallErr>` covering the existing 25-line setup in `agent/src/main.rs::run_installer` (lines 40–64): create a `Dir::create_temp_dir("miru-agent-installer-logs")`, build `logs::Options { stdout: false, log_dir: tmp_dir.path().to_path_buf(), ..Default::default() }`, call `logs::init(options)`, and return `(guard, tmp_dir)` to the caller for cleanup. Add `pub type Guard = tracing_appender::non_blocking::WorkerGuard;` to `agent/src/logs/mod.rs` so the helper's return type is readable; `logs::init` returns `tracing_appender::non_blocking::WorkerGuard` directly today and no `logs::Guard` alias exists yet.
+   - Update `main.rs::run_installer` to call this helper instead of duplicating the setup.
+   - Add `pub mod provision;`.
 
 3. `agent/src/installer/errors.rs` — no changes needed (the new `ProvisionErr` lives in `provision.rs`).
 
 4. `agent/src/main.rs` — replace the M1 stub with a real `run_provision()`:
 
        async fn run_provision(args: cli::ProvisionArgs) -> i32 {
-           // initialize logging exactly as run_installer does (temp dir, stdout off)
-           // ...
+           let (_guard, tmp_dir) = match installer::init_installer_logging().await {
+               Ok(pair) => pair,
+               Err(_) => return cli::exit_codes::GENERIC_FAILURE,
+           };
+
            let api_key = match installer::provision::read_api_key_from_env() {
                Ok(k) => k,
                Err(_) => {
@@ -290,15 +336,40 @@ Edits:
                args.backend_host.as_deref(),
                args.mqtt_broker_host.as_deref(),
            );
-           let http_client = match http::Client::new(&settings.backend.base_url) {
+
+           // The agent install path uses `{backend_host}/agent/v1`; the provision
+           // calls (POST /v1/devices, POST /v1/devices/{id}/activation_token) live
+           // on the public API at `{backend_host}/v1`. Build a separate client for
+           // each base URL and pass both into `provision()`.
+           let backend_host = args
+               .backend_host
+               .as_deref()
+               .unwrap_or(installer::install::DEFAULT_BACKEND_HOST);
+           let agent_http_client = match http::Client::new(&settings.backend.base_url) {
                Ok(c) => c,
-               Err(_) => return cli::exit_codes::BACKEND_ERROR,
+               Err(_) => return cli::exit_codes::GENERIC_FAILURE,
            };
+           let public_api_http_client =
+               match http::Client::new(&format!("{}/v1", backend_host)) {
+                   Ok(c) => c,
+                   Err(_) => return cli::exit_codes::GENERIC_FAILURE,
+               };
+
            let layout = storage::Layout::default();
            let result = installer::provision::provision(
-               &http_client, &layout, &settings, &api_key,
-               device_name, args.allow_reactivation,
+               &public_api_http_client,
+               &agent_http_client,
+               &layout,
+               &settings,
+               &api_key,
+               device_name,
+               args.allow_reactivation,
            ).await;
+
+           drop(_guard);
+           if let Err(e) = tmp_dir.delete().await {
+               eprintln!("failed to clean up provision log dir: {e}");
+           }
            handle_provision_result(result)
        }
 
@@ -314,14 +385,14 @@ Edits:
 5. Tests under `agent/tests/provision/` (new directory). Mirror `agent/tests/installer/install.rs`. Required cases:
    - happy path: `MockClient` returns a device on POST, returns a token on issue, install bootstraps storage; `provision` returns `Ok(device)` and `/srv/miru` (test layout) is populated.
    - 409 fetch path: POST returns 409, GET returns device; assert the GET was called with `?name=<device-name>`.
-   - missing `MIRU_API_KEY`: assert `MissingApiKeyErr`.
+   - `read_api_key_from_env()` returns `MissingApiKeyErr` when `MIRU_API_KEY` is unset (test alongside the function in `agent/tests/provision/`).
    - backend 5xx on POST: `BackendErr` returned.
    - device already activated + `allow_reactivation=false`: token-issue mock returns the typed error; assert `ReactivationNotAllowedErr` with the correct `device_id`.
    - install failure (e.g., RSA keygen target dir read-only): `InstallErr` returned.
 
    Register the new module in `agent/tests/mod.rs`.
 
-Validation for M3: `./scripts/test.sh` and `./scripts/lint.sh` clean.
+Validation for M3: per-milestone validation recipe.
 
 Commit: `feat(provision): orchestrate device create-or-fetch + activation`.
 
@@ -331,21 +402,23 @@ Goal: provision behaves correctly when run as root on a machine that already has
 
 Edits:
 
-1. `agent/src/installer/provision.rs`:
-   - Add `fn assert_root() -> Result<(), ProvisionErr>` using `nix::unistd::geteuid()` (already a dep — confirm with `Grep` against `agent/Cargo.toml`; if not present, use `unsafe { libc::geteuid() } == 0` which is the more portable raw call). Returns `NotRootErr` if not root. Call at the very top of `provision()`.
+1. `agent/Cargo.toml` — add `libc = "0.2"` under `[dependencies]` (alphabetically positioned between `futures` and `backend-api`, matching the existing layout).
+
+2. `agent/src/installer/provision.rs`:
+   - Define `fn assert_root() -> Result<(), ProvisionErr>` that returns `Err(ProvisionErr::NotRootErr { trace: crate::trace!() })` when `unsafe { libc::geteuid() } != 0`. The function lives in `installer/provision.rs` but is invoked from `run_provision()` in `agent/src/main.rs` as the **very first** statement — before `init_installer_logging()`, `read_api_key_from_env()`, or the `--device-name` parse — so privilege failure short-circuits before any side effects (logging dir creation, env reads, arg validation).
    - Add `fn stop_miru_unit_if_running()` and `fn restart_miru_unit_if_present()` using `std::process::Command::new("systemctl")`. Both must succeed silently when the unit is absent (handles the fresh-install case where the unit hasn't been written yet — `provision` may run either before or after a fresh apt install).
 
-     Approach: `systemctl is-active miru` exit code 0 → unit is loaded; otherwise treat as absent and return `Ok`. On `is-active` returning 0, run `systemctl stop miru` (before install) and `systemctl restart miru` (after install). If those calls themselves fail, return `SystemdErr { msg, trace }`.
+     Approach: always attempt the operation in a single shot and treat exit code 5 (`Unit miru.service not loaded`) as a no-op. For `stop_miru_unit_if_running()`, run `systemctl stop miru`; for `restart_miru_unit_if_present()`, run `systemctl restart miru`. In both cases inspect the exit code: `0` → success; `5` → no-op (unit not loaded); any other non-zero → return `SystemdErr { msg, trace }` carrying the captured stderr. Rationale: `systemctl is-active` returns non-zero for both "not loaded" and "loaded but inactive", which would incorrectly skip restart on a stopped-but-installed unit (e.g. after an operator manually stopped the service).
 
-     **Decision to record:** the `is-active`-first probe is the chosen policy; alternative (always run `stop` and ignore "unit not found") was rejected as too easy to mask real failures.
+   - Wire `stop_miru_unit_if_running()` and `restart_miru_unit_if_present()` into `provision()`: `stop_miru_unit_if_running()` runs at the very start of `provision()`, then the existing M3 flow (create-or-fetch device → issue activation token → `installer::install::install`), then on success `restart_miru_unit_if_present()`. `assert_root()` is invoked from `run_provision()` in `main.rs` as the first statement (see the bullet above), so by the time `provision()` is called the privilege check has already passed and `read_api_key_from_env()` / arg checks have run.
 
-   - Wire these into `provision()`: `assert_root()` first → `read_api_key_from_env()` → `stop_miru_unit_if_running()` → existing flow → on success, `restart_miru_unit_if_present()`.
+   - Update the M3 `run_provision()` snippet in `agent/src/main.rs` to add `if let Err(_) = installer::provision::assert_root() { eprintln!("miru-agent provision must be run as root (sudo -E)"); return cli::exit_codes::GENERIC_FAILURE; }` as the very first statement, before `init_installer_logging()`.
 
-2. Tests:
-   - `assert_root` is hard to unit-test inside CI (CI usually runs as a non-root user). Make `assert_root` a free function and add a `#[cfg(test)]` shim allowing tests to inject a fake euid; assert `provision()` short-circuits with `NotRootErr`.
-   - For systemd, abstract the `Command::new("systemctl")` calls behind a small trait (e.g., `SystemctlI { fn is_active(&self, unit: &str) -> bool; fn stop(&self, unit: &str) -> Result<(), SystemdErr>; fn restart(&self, unit: &str) -> Result<(), SystemdErr>; }`) with a real impl `RealSystemctl` and a mock impl for tests. Provision takes a `&impl SystemctlI`. Add tests for: unit absent → no calls beyond `is_active`; unit present → stop called, then restart called; stop fails → provision returns `SystemdErr` and skips install.
+3. Tests:
+   - `assert_root` is hard to unit-test inside CI (CI usually runs as a non-root user). Make `assert_root` a free function and add a `#[cfg(test)]` shim allowing tests to inject a fake euid; assert `assert_root()` returns `Err(NotRootErr)` when the fake euid is non-zero and `Ok(())` when zero. (The driver-level `run_provision()` short-circuit is exercised by the M6 manual smoke test, not in unit tests.)
+   - For systemd, abstract the `Command::new("systemctl")` calls behind a small trait (e.g., `SystemctlI { fn stop(&self, unit: &str) -> Result<(), SystemdErr>; fn restart(&self, unit: &str) -> Result<(), SystemdErr>; }`) with a real impl `RealSystemctl` (which maps exit code `5` to `Ok(())` and any other non-zero exit to `SystemdErr`) and a mock impl for tests. Provision takes a `&impl SystemctlI`. Add tests for: unit not loaded (mock returns `Ok(())` from both `stop` and `restart` — provision proceeds and finishes); unit loaded (mock records both calls in order); stop returns `SystemdErr` → provision returns `SystemdErr` and skips install.
 
-Validation for M4: `./scripts/test.sh` and `./scripts/lint.sh` clean.
+Validation for M4: per-milestone validation recipe.
 
 Commit: `feat(provision): privilege check and systemd lifecycle`.
 
@@ -404,67 +477,54 @@ Commit: none required — Outcomes & Retrospective edits cover this.
 
 All commands assume working directory `/home/ben/miru/workbench4/repos/agent/` unless stated.
 
-**M1 — CLI plumbing.**
+### Per-milestone validation recipe
+
+Run, in order, after the edits for each milestone:
+
+    cargo fmt -p miru-agent
+    cargo build -p miru-agent
+    ./scripts/test.sh
+    ./scripts/lint.sh
+
+All four must exit 0 before committing the milestone.
+
+### Branch setup (once)
 
     git checkout -b feat/agent-provision-subcommand
-    # Edit agent/src/cli/mod.rs, agent/src/cli/exit_codes.rs (NEW), agent/src/main.rs.
-    cargo fmt -p miru-agent
-    cargo build -p miru-agent
-    cargo clippy --package miru-agent --all-features -- -D warnings
-    ./scripts/test.sh
-    # Manual smoke:
-    ./target/debug/miru-agent provision --device-name=foo
-    # Expected: prints "provision: not implemented", exit 1.
-    git add agent/src/cli/mod.rs agent/src/cli/exit_codes.rs agent/src/main.rs
-    git commit -m "feat(cli): add provision subcommand skeleton"
 
-**M2 — HTTP layer.**
+### M1 — CLI plumbing
+Files touched: `agent/src/cli/mod.rs`, `agent/src/cli/exit_codes.rs` (NEW), `agent/src/main.rs`.
+Run the per-milestone validation recipe.
+Manual smoke: `./target/debug/miru-agent provision --device-name=foo` prints "provision: not implemented" and exits 1.
+Commit: `feat(cli): add provision subcommand skeleton`.
 
-    # Edit agent/src/http/request.rs, agent/src/http/devices.rs, agent/tests/mocks/http_client.rs,
-    # add agent/tests/http/devices.rs (or extend existing).
-    cargo fmt -p miru-agent
-    cargo build -p miru-agent
-    ./scripts/test.sh
-    # Expected: new tests for create_or_fetch_device and X-API-Key header pass.
-    ./scripts/lint.sh
-    git add agent/src/http/ agent/tests/
-    git commit -m "feat(http): add X-API-Key header and create_or_fetch_device"
+### M2 — HTTP layer
+Files touched: `agent/src/http/request.rs`, `agent/src/http/devices.rs`, `agent/tests/mocks/http_client.rs`, `agent/tests/http/devices.rs` (extend or new).
+Run the per-milestone validation recipe.
+Commit: `feat(http): add X-API-Key header and create_or_fetch_device`.
 
-**M3 — Provision flow.**
+### M3 — Provision flow
+Files touched: `agent/src/installer/mod.rs`, `agent/src/installer/install.rs` (refactor `determine_settings` and add `determine_settings_from`), `agent/src/installer/provision.rs` (NEW), `agent/src/main.rs`, `agent/tests/provision/` (NEW), `agent/tests/mod.rs`.
+Run the per-milestone validation recipe.
+Commit: `feat(provision): orchestrate device create-or-fetch + activation`.
 
-    # Add agent/src/installer/provision.rs, edit agent/src/installer/mod.rs and agent/src/main.rs.
-    # Add agent/tests/provision/ directory and register in agent/tests/mod.rs.
-    cargo fmt -p miru-agent
-    cargo build -p miru-agent
-    ./scripts/test.sh
-    ./scripts/lint.sh
-    git add agent/src/installer/ agent/src/main.rs agent/tests/
-    git commit -m "feat(provision): orchestrate device create-or-fetch + activation"
+### M4 — Systemd + root check
+Files touched: `agent/Cargo.toml` (add `libc = "0.2"`), `agent/src/installer/provision.rs`, `agent/tests/provision/`.
+Run the per-milestone validation recipe.
+Commit: `feat(provision): privilege check and systemd lifecycle`.
 
-**M4 — Systemd + root check.**
+### M5 — Docs
+Files touched: `agent/ARCHITECTURE.md`, `agent/README.md`.
+Run only `./scripts/lint.sh` (no code changes).
+Commit: `docs: describe miru-agent provision subcommand`.
 
-    # Edit agent/src/installer/provision.rs; add SystemctlI trait + RealSystemctl impl.
-    cargo fmt -p miru-agent
-    cargo build -p miru-agent
-    ./scripts/test.sh
-    ./scripts/lint.sh
-    git add agent/src/installer/provision.rs agent/tests/provision/
-    git commit -m "feat(provision): privilege check and systemd lifecycle"
-
-**M5 — Docs.**
-
-    # Edit agent/ARCHITECTURE.md, agent/README.md.
-    ./scripts/lint.sh
-    git add agent/ARCHITECTURE.md agent/README.md
-    git commit -m "docs: describe miru-agent provision subcommand"
-
-**M6 — Manual smoke test.**
+### M6 — Manual smoke test
 
     cargo build --release -p miru-agent
     # Follow the manual procedure in Plan of Work / Milestone 6.
     # Record results in Outcomes & Retrospective.
 
-**Final preflight (before opening PR).**
+### Final preflight (before opening PR)
 
     ./scripts/preflight.sh
     # Expected: ends with "Preflight clean".
@@ -473,11 +533,14 @@ All commands assume working directory `/home/ben/miru/workbench4/repos/agent/` u
 
 Acceptance is behavioral. Each criterion below is checked against the binary or test suite.
 
+`$preflight` must report `clean` before changes are published.
+
 1. **The new subcommand parses and dispatches.**
 
        ./target/debug/miru-agent provision --device-name=foo --allow-reactivation=false
 
-   After M3, this exits 2 if `MIRU_API_KEY` is unset; after M4 it exits 1 (`NotRoot`) if not root.
+   - After M3, when run as root with `MIRU_API_KEY` unset → exits 2 with `MissingApiKey` error.
+   - After M4, when run as non-root → exits 1 with `NotRoot` error before any other check, regardless of env-var state.
 
 2. **Unit tests pass.** From repo root:
 
@@ -496,22 +559,17 @@ Acceptance is behavioral. Each criterion below is checked against the binary or 
 
        ./scripts/preflight.sh
 
-   Expected: trailing line `Preflight clean`. **`$preflight` must report `clean` before changes are published.**
+   Expected: trailing line `Preflight clean`. See the standalone preflight gate above.
 
 5. **Manual smoke test (Milestone 6).** All eight steps in the M6 procedure produce the documented exit codes and observable on-disk / systemd state.
 
-6. **Exit-code contract honoured by the binary.** Verified by either unit tests on `handle_provision_result()` or the manual procedure:
-   - `MIRU_API_KEY` unset → exit 2.
-   - Network down or backend 5xx on either device-create or token-issue → exit 3.
-   - Device already activated, `--allow-reactivation=false` → exit 4.
-   - `/srv/miru` not writable, RSA keygen fails, etc. → exit 5.
-   - Otherwise non-zero → exit 1.
+6. **Exit-code contract honoured by the binary.** Verified by either unit tests on `handle_provision_result()` or the manual procedure. The authoritative exit-code → scenario mapping lives in the Decision Log entry "Exit codes". Each row of that table must be exercised by either a unit test or one of the M6 manual steps.
 
 ## Idempotence and Recovery
 
 - All `cargo`, `./scripts/test.sh`, `./scripts/lint.sh`, `./scripts/preflight.sh`, `./scripts/update-deps.sh` invocations are idempotent.
 - The `provision` subcommand itself is **safe to re-run** as long as `--allow-reactivation=true`. Re-running with `=false` against an already-activated device exits 4 without modifying `/srv/miru`. Re-running with `=true` overwrites `/srv/miru/auth/*` (this matches `provision.sh` semantics today).
-- Systemd handling: stopping a unit that is already stopped is a no-op via the `is-active` probe. Restarting a unit that is not loaded is suppressed by the same probe. If the unit file is corrupted or missing after partial install, the operator can `systemctl daemon-reload` and re-run `provision`.
+- Systemd handling: `stop_miru_unit_if_running()` and `restart_miru_unit_if_present()` always invoke `systemctl` once and treat exit code 5 (`Unit miru.service not loaded`) as a no-op, so re-running `provision` is safe whether the unit is loaded, stopped, or absent. Any other non-zero exit fails fast with `SystemdErr`. If the unit file is corrupted or missing after partial install, the operator can `systemctl daemon-reload` and re-run `provision`.
 - Filesystem: the `install()` flow writes via a temp dir + atomic move (see `agent/src/installer/install.rs` and `storage::setup::bootstrap`). A crash mid-write leaves the previous `/srv/miru/auth/*` intact. Recovery: re-run `provision` with the same args.
 - HTTP retries: not added by this plan. `http::Client` already times out at 10s; transient backend errors surface as exit 3 and the operator re-runs.
 - Rollback for a regression discovered post-merge: `git revert <merge-sha>` removes the subcommand. `provision.sh` continues to work because it was never touched. Existing devices are unaffected (no schema or storage changes).
