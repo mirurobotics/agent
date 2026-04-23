@@ -42,6 +42,56 @@ cargo build -p miru-agent            # debug
 cargo build -p miru-agent --release  # release
 ```
 
+## Provisioning a device
+
+```bash
+export MIRU_API_KEY=<your-api-key>
+sudo -E miru-agent provision \
+    --device-name=$HOSTNAME \
+    --allow-reactivation=false
+```
+
+`provision` creates or fetches the device on the backend by name, issues an
+activation token, then bootstraps `/srv/miru` and starts the `miru` systemd
+unit. It must run as root because it writes to `/srv/miru` (and chowns the
+contents to `miru:miru`) and invokes `systemctl`.
+
+### Flags
+
+- `--device-name` (required): name to register the device under. Re-using an
+  existing name fetches that device instead of creating a new one.
+- `--allow-reactivation` (default `false`): permit a re-issuance of the
+  activation token if the device has previously been activated. Without this,
+  the command exits with code `4`; pass `--allow-reactivation=true` to opt in
+  to retrying activation on an already-activated device.
+- `--backend-host` (optional): override the backend URL. Defaults to
+  `https://api.mirurobotics.com`.
+- `--mqtt-broker-host` (optional): override the MQTT broker host.
+
+### Environment variables
+
+- `MIRU_API_KEY` (required): your API key, sent as `X-API-Key` on the
+  device-create and activation-token calls.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | Success. |
+| `1`  | Generic failure: CLI parse error, missing `--device-name`, non-root caller, or configuration error. |
+| `2`  | `MIRU_API_KEY` is unset. |
+| `3`  | Backend HTTP failure (network down, 5xx, timeout). Safe to retry. |
+| `4`  | Device is already activated and `--allow-reactivation=false`. Re-run with `--allow-reactivation=true` to opt in. |
+| `5`  | Install failure: writing `/srv/miru`, RSA keygen, or systemd interaction failed. |
+
+### Systemd interaction
+
+`provision` stops the `miru` systemd unit before install and restarts it
+after. On a fresh install where the unit does not yet exist, `systemctl`
+returns exit code `5` ("Unit miru.service not loaded"); this is treated as a
+no-op so the command works on first-time provisioning as well as
+re-provisioning of an already-running device.
+
 ## Testing
 
 ```bash

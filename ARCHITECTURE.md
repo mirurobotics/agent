@@ -6,9 +6,10 @@ This document describes the high-level architecture of the Miru Agent. If you wa
 
 The agent is a Rust binary that runs on customer devices (robots). It solves one core problem: keeping device configurations in sync with what the user defined in the Miru platform. It pulls configuration deployments from the Miru backend, applies them to a target directory on disk, and reports status back. It also exposes a local Unix socket server so that on-device applications can query the device state.
 
-The binary has two mutually exclusive modes, selected at startup:
+The binary has three mutually exclusive modes, selected at startup:
 
-- **Installer mode** (`--install`): activates a new device by reading an activation token from the environment, registering with the backend, and writing device identity and auth files to disk.
+- **Provision mode** (`provision`): customer-facing entry point that calls the backend to create or fetch the device by name (using `MIRU_API_KEY` from env), requests an activation token, and then runs the install path. Requires root privileges (touches `/srv/miru` and the systemd unit). Replaces the device-creation logic in `scripts/install/provision.sh`.
+- **Installer mode** (`--install`): activates a new device by reading an activation token from the environment, registering with the backend, and writing device identity and auth files to disk. Remains the lower-level primitive used internally by `provision` and by the existing `provision.sh` script.
 - **Agent runtime mode** (default): reads settings from disk, initializes shared state (AppState), starts background workers (MQTT subscriber, poller, token refresh), serves a local HTTP server, and waits for a shutdown signal.
 
 These modes do not share runtime state.
@@ -78,7 +79,10 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ### Device setup
 
-`installer` — interactive activation flow. Reads activation token from environment, calls backend to register the device, writes device identity and auth credentials to disk. Display helpers in `installer/display`.
+`installer` — device activation and provisioning flows. Submodules:
+
+- `installer/install` — the lower-level primitive. Reads an activation token from environment, calls the backend to register the device, writes device identity and auth credentials to disk. Used by `--install` and reused internally by `provision`. Display helpers in `installer/display`.
+- `installer/provision` — customer-facing orchestration for the `provision` subcommand. Calls the backend's public API with `MIRU_API_KEY` to create or fetch a device by name, requests an activation token, then delegates to `installer/install` to write `/srv/miru/{device.json,settings.json,auth/...}`. Stops the `miru` systemd unit before install and restarts it after; requires root.
 
 ### Generated code (workspace siblings)
 
@@ -86,7 +90,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ## Architectural Invariants
 
-- **Installer and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; installer writes the files that runtime later reads.
+- **Provision, installer, and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; provision and installer write the files that runtime later reads (provision wraps installer).
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
