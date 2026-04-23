@@ -58,6 +58,7 @@ type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + S
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
 type CreateOrFetchDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
+type FetchDevicesByNameFn = Mutex<Box<dyn Fn() -> Result<Vec<Device>, HTTPErr> + Send + Sync>>;
 type IssueActivationTokenFn = Mutex<Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
@@ -65,6 +66,7 @@ pub struct MockClient {
     pub issue_device_token_fn: Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>,
     pub update_device_fn: UpdateDeviceFn,
     pub create_or_fetch_device_fn: CreateOrFetchDeviceFn,
+    pub fetch_devices_by_name_fn: FetchDevicesByNameFn,
     pub issue_activation_token_fn: IssueActivationTokenFn,
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
@@ -82,6 +84,7 @@ impl Default for MockClient {
             issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
             update_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
             create_or_fetch_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
+            fetch_devices_by_name_fn: Mutex::new(Box::new(|| Ok(vec![Device::default()]))),
             issue_activation_token_fn: Mutex::new(Box::new(|| Ok(TokenResponse::default()))),
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
             get_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
@@ -107,6 +110,13 @@ impl MockClient {
         F: Fn() -> Result<Device, HTTPErr> + Send + Sync + 'static,
     {
         *self.create_or_fetch_device_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_fetch_devices_by_name<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Vec<Device>, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.fetch_devices_by_name_fn.lock().unwrap() = Box::new(f);
     }
 
     pub fn set_issue_activation_token<F>(&self, f: F)
@@ -233,8 +243,16 @@ impl MockClient {
             Call::ActivateDevice => json(&(self.activate_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
             Call::UpdateDevice => json(&(self.update_device_fn.lock().unwrap())()?),
-            Call::CreateDevice | Call::FetchDeviceByName => {
-                json(&(self.create_or_fetch_device_fn.lock().unwrap())()?)
+            Call::CreateDevice => json(&(self.create_or_fetch_device_fn.lock().unwrap())()?),
+            Call::FetchDeviceByName => {
+                let data = (self.fetch_devices_by_name_fn.lock().unwrap())()?;
+                json(&serde_json::json!({
+                    "object": "list",
+                    "data": data,
+                    "limit": data.len() as i32,
+                    "offset": 0,
+                    "has_more": false,
+                }))
             }
             Call::IssueActivationToken => {
                 json(&(self.issue_activation_token_fn.lock().unwrap())()?)

@@ -269,17 +269,12 @@ pub mod create_or_fetch_device {
     #[tokio::test]
     async fn conflict_falls_back_to_get_with_name_query() {
         let mock = MockClient::default();
-        let counter = std::sync::atomic::AtomicUsize::new(0);
-        mock.set_create_or_fetch_device(move || {
-            let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if n == 0 {
-                Err(conflict_err())
-            } else {
-                Ok(Device {
-                    id: "dvc_existing".into(),
-                    ..Device::default()
-                })
-            }
+        mock.set_create_or_fetch_device(|| Err(conflict_err()));
+        mock.set_fetch_devices_by_name(|| {
+            Ok(vec![Device {
+                id: "dvc_existing".into(),
+                ..Device::default()
+            }])
         });
 
         let result = devices::create_or_fetch_device(
@@ -350,6 +345,29 @@ pub mod create_or_fetch_device {
         // Only the POST attempt — no GET fallback for non-409 errors.
         assert_eq!(mock.call_count(Call::CreateDevice), 1);
         assert_eq!(mock.call_count(Call::FetchDeviceByName), 0);
+    }
+
+    #[tokio::test]
+    async fn conflict_with_empty_fetch_returns_unmarshal_err() {
+        let mock = MockClient::default();
+        mock.set_create_or_fetch_device(|| Err(conflict_err()));
+        mock.set_fetch_devices_by_name(|| Ok(vec![]));
+
+        let result = devices::create_or_fetch_device(
+            &mock,
+            CreateOrFetchDeviceParams {
+                name: "host-missing",
+                api_key: "secret-key",
+            },
+        )
+        .await;
+
+        match result {
+            Err(HTTPErr::UnmarshalJSONErr(_)) => {}
+            other => panic!("expected UnmarshalJSONErr, got {other:?}"),
+        }
+        assert_eq!(mock.call_count(Call::CreateDevice), 1);
+        assert_eq!(mock.call_count(Call::FetchDeviceByName), 1);
     }
 }
 

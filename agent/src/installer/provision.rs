@@ -139,7 +139,7 @@ pub trait SystemctlI {
     fn restart(&self, unit: &str) -> Result<(), SystemdErr>;
 }
 
-/// Real `systemctl` implementation that shells out to `/usr/bin/systemctl`.
+/// Real `systemctl` implementation that shells out to `systemctl` (resolved via PATH).
 pub struct RealSystemctl;
 
 impl SystemctlI for RealSystemctl {

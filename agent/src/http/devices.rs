@@ -1,12 +1,17 @@
 // internal crates
-use crate::http::{errors::HTTPErr, query::QueryParams, request, ClientI};
+use crate::http::{
+    errors::{HTTPErr, UnmarshalJSONErr},
+    query::QueryParams,
+    request, ClientI,
+};
 use backend_api::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };
 
 // external crates
-use serde::Serialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Serialize};
 
 // ================================ LOCAL REQUEST TYPES ============================ //
 
@@ -20,6 +25,17 @@ pub struct CreateDeviceRequest {
 #[derive(Debug, Serialize)]
 pub struct IssueActivationTokenRequest {
     pub allow_reactivation: bool,
+}
+
+// ================================ LOCAL RESPONSE TYPES =========================== //
+
+// TODO(provision): move to libs/backend-api once OpenAPI spec is regenerated.
+// Mirrors the public `GET /v1/devices` paginated response shape:
+// `{"object": "list", "data": [Device, ...], "limit": ..., "offset": ..., "has_more": ...}`.
+// Only the `data` array is consumed here.
+#[derive(Debug, Deserialize)]
+pub struct DeviceListResponse {
+    pub data: Vec<Device>,
 }
 
 // ================================ PARAM STRUCTS ================================== //
@@ -97,7 +113,18 @@ pub async fn create_or_fetch_device(
             let get = request::Params::get(&url)
                 .with_api_key(params.api_key)
                 .with_query(QueryParams::new().add("name", params.name));
-            super::client::fetch(client, get).await
+            let meta = get.meta()?;
+            let list: DeviceListResponse = super::client::fetch(client, get).await?;
+            list.data.into_iter().next().ok_or_else(|| {
+                HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {
+                    request: meta,
+                    source: serde_json::Error::custom(format!(
+                        "GET /devices?name={} returned empty data list after POST returned 409",
+                        params.name,
+                    )),
+                    trace: crate::trace!(),
+                })
+            })
         }
         Err(e) => Err(e),
     }

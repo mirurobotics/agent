@@ -173,16 +173,9 @@ pub mod provision_fn {
 
         let (public_client, _agent_client) = build_clients();
 
-        // First POST returns 409, the GET fallback returns the device.
-        let counter = std::sync::atomic::AtomicUsize::new(0);
-        public_client.set_create_or_fetch_device(move || {
-            let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if n == 0 {
-                Err(conflict_err())
-            } else {
-                Ok(new_device(DEVICE_ID, "test-device"))
-            }
-        });
+        // POST returns 409, the GET fallback returns the device wrapped in a list.
+        public_client.set_create_or_fetch_device(|| Err(conflict_err()));
+        public_client.set_fetch_devices_by_name(|| Ok(vec![new_device(DEVICE_ID, "test-device")]));
         let token_for_mock = token.clone();
         public_client.set_issue_activation_token(move || {
             Ok(TokenResponse {
