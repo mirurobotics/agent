@@ -23,6 +23,9 @@ pub enum Call {
     ActivateDevice,
     IssueDeviceToken,
     UpdateDevice,
+    CreateDevice,
+    FetchDeviceByName,
+    IssueActivationToken,
     ListDeployments,
     GetDeployment,
     UpdateDeployment,
@@ -42,6 +45,7 @@ pub struct CapturedRequest {
     pub query: Vec<(String, String)>,
     pub body: Option<String>,
     pub token: Option<String>,
+    pub api_key: Option<String>,
 }
 
 // ================================ MOCK CLIENT ==================================== //
@@ -53,10 +57,15 @@ type SingleGitCommitFn = Mutex<Box<dyn Fn() -> Result<BackendGitCommit, HTTPErr>
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
+type CreateOrFetchDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
+type IssueActivationTokenFn = Mutex<Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>>;
+
 pub struct MockClient {
     pub activate_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
     pub issue_device_token_fn: Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>,
     pub update_device_fn: UpdateDeviceFn,
+    pub create_or_fetch_device_fn: CreateOrFetchDeviceFn,
+    pub issue_activation_token_fn: IssueActivationTokenFn,
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
     pub update_deployment_fn: SingleDeploymentFn,
@@ -72,6 +81,8 @@ impl Default for MockClient {
             activate_device_fn: Box::new(|| Ok(Device::default())),
             issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
             update_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
+            create_or_fetch_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
+            issue_activation_token_fn: Mutex::new(Box::new(|| Ok(TokenResponse::default()))),
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
             get_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             update_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
@@ -89,6 +100,20 @@ impl MockClient {
         F: Fn() -> Result<Device, HTTPErr> + Send + Sync + 'static,
     {
         *self.update_device_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_create_or_fetch_device<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Device, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.create_or_fetch_device_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_issue_activation_token<F>(&self, f: F)
+    where
+        F: Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.issue_activation_token_fn.lock().unwrap() = Box::new(f);
     }
 
     pub fn set_list_all_deployments<F>(&self, f: F)
@@ -179,6 +204,11 @@ impl MockClient {
         match (method, path) {
             (m, p) if *m == Method::POST && p.ends_with("/activate") => Call::ActivateDevice,
             (m, p) if *m == Method::POST && p.ends_with("/issue_token") => Call::IssueDeviceToken,
+            (m, p) if *m == Method::POST && p.ends_with("/activation_token") => {
+                Call::IssueActivationToken
+            }
+            (m, p) if *m == Method::POST && p == "/devices" => Call::CreateDevice,
+            (m, p) if *m == Method::GET && p == "/devices" => Call::FetchDeviceByName,
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
             (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
             (m, p)
@@ -203,6 +233,12 @@ impl MockClient {
             Call::ActivateDevice => json(&(self.activate_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
             Call::UpdateDevice => json(&(self.update_device_fn.lock().unwrap())()?),
+            Call::CreateDevice | Call::FetchDeviceByName => {
+                json(&(self.create_or_fetch_device_fn.lock().unwrap())()?)
+            }
+            Call::IssueActivationToken => {
+                json(&(self.issue_activation_token_fn.lock().unwrap())()?)
+            }
             Call::ListDeployments => {
                 let list = (self.list_deployments_fn.lock().unwrap())()?;
                 json(&list)
@@ -251,6 +287,7 @@ impl http::ClientI for MockClient {
             query: params.query.clone(),
             body: params.body.clone(),
             token: params.token.map(|t| t.to_string()),
+            api_key: params.api_key.map(|k| k.to_string()),
         });
         let text = self.handle_route(&call, path)?;
         Ok((text, meta))

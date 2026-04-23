@@ -29,6 +29,7 @@ async fn fetch_deployment_constructs_url_and_expand_param() {
         query: vec![("expand".to_string(), "config_instances".to_string())],
         body: None,
         token: Some("test-token".to_string()),
+        api_key: None,
     };
     assert_eq!(mock.requests(), vec![expected]);
 }
@@ -70,6 +71,7 @@ async fn fetch_release_constructs_url_no_expand() {
         query: vec![],
         body: None,
         token: Some("test-token".to_string()),
+        api_key: None,
     };
     assert_eq!(mock.requests(), vec![expected]);
 }
@@ -110,6 +112,7 @@ async fn fetch_git_commit_constructs_url_no_expand() {
         query: vec![],
         body: None,
         token: Some("test-token".to_string()),
+        api_key: None,
     };
     assert_eq!(mock.requests(), vec![expected]);
 }

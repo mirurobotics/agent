@@ -4,8 +4,12 @@ use backend_api::models::{
     ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };
-use miru_agent::http::devices::{self, ActivateParams, IssueTokenParams, UpdateParams};
-use miru_agent::http::errors::MockErr;
+use miru_agent::http::devices::{
+    self, ActivateParams, CreateOrFetchDeviceParams, IssueActivationTokenParams, IssueTokenParams,
+    UpdateParams,
+};
+use miru_agent::http::errors::{MockErr, RequestFailed};
+use miru_agent::http::request::Params as HttpParams;
 use miru_agent::http::HTTPErr;
 
 fn mock_err() -> HTTPErr {
@@ -50,6 +54,7 @@ pub mod activate {
                 query: vec![],
                 body: Some(expected_body),
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }
@@ -108,6 +113,7 @@ pub mod issue_token {
                 query: vec![],
                 body: Some(expected_body),
                 token: None,
+                api_key: None,
             }]
         );
     }
@@ -168,6 +174,7 @@ pub mod update {
                 query: vec![],
                 body: Some(expected_body),
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }
@@ -186,6 +193,241 @@ pub mod update {
                 id: "dvc_1",
                 payload: &payload,
                 token: "test-token",
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(HTTPErr::MockErr(_))));
+    }
+}
+
+pub mod create_or_fetch_device {
+    use super::*;
+
+    fn conflict_err() -> HTTPErr {
+        HTTPErr::RequestFailed(RequestFailed {
+            request: HttpParams::post("http://mock/devices", String::new())
+                .meta()
+                .unwrap(),
+            status: reqwest::StatusCode::CONFLICT,
+            error: None,
+            trace: miru_agent::trace!(),
+        })
+    }
+
+    fn server_err() -> HTTPErr {
+        HTTPErr::RequestFailed(RequestFailed {
+            request: HttpParams::post("http://mock/devices", String::new())
+                .meta()
+                .unwrap(),
+            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            error: None,
+            trace: miru_agent::trace!(),
+        })
+    }
+
+    #[tokio::test]
+    async fn happy_path_returns_device_from_post() {
+        let mock = MockClient::default();
+        mock.set_create_or_fetch_device(|| {
+            Ok(Device {
+                id: "dvc_new".into(),
+                ..Device::default()
+            })
+        });
+
+        let result = devices::create_or_fetch_device(
+            &mock,
+            CreateOrFetchDeviceParams {
+                name: "host-foo",
+                api_key: "secret-key",
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.id, "dvc_new");
+        assert_eq!(mock.call_count(Call::CreateDevice), 1);
+        assert_eq!(mock.call_count(Call::FetchDeviceByName), 0);
+        let expected_body =
+            serde_json::to_string(&serde_json::json!({"name": "host-foo"})).unwrap();
+        assert_eq!(
+            mock.requests(),
+            vec![CapturedRequest {
+                call: Call::CreateDevice,
+                method: reqwest::Method::POST,
+                path: "/devices".into(),
+                url: "http://mock/devices".into(),
+                query: vec![],
+                body: Some(expected_body),
+                token: None,
+                api_key: Some("secret-key".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn conflict_falls_back_to_get_with_name_query() {
+        let mock = MockClient::default();
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        mock.set_create_or_fetch_device(move || {
+            let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n == 0 {
+                Err(conflict_err())
+            } else {
+                Ok(Device {
+                    id: "dvc_existing".into(),
+                    ..Device::default()
+                })
+            }
+        });
+
+        let result = devices::create_or_fetch_device(
+            &mock,
+            CreateOrFetchDeviceParams {
+                name: "host-foo",
+                api_key: "secret-key",
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.id, "dvc_existing");
+        assert_eq!(mock.call_count(Call::CreateDevice), 1);
+        assert_eq!(mock.call_count(Call::FetchDeviceByName), 1);
+
+        let requests = mock.requests();
+        let expected_body =
+            serde_json::to_string(&serde_json::json!({"name": "host-foo"})).unwrap();
+        assert_eq!(
+            requests[0],
+            CapturedRequest {
+                call: Call::CreateDevice,
+                method: reqwest::Method::POST,
+                path: "/devices".into(),
+                url: "http://mock/devices".into(),
+                query: vec![],
+                body: Some(expected_body),
+                token: None,
+                api_key: Some("secret-key".into()),
+            }
+        );
+        assert_eq!(
+            requests[1],
+            CapturedRequest {
+                call: Call::FetchDeviceByName,
+                method: reqwest::Method::GET,
+                path: "/devices".into(),
+                url: "http://mock/devices".into(),
+                query: vec![("name".into(), "host-foo".into())],
+                body: None,
+                token: None,
+                api_key: Some("secret-key".into()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn non_conflict_error_propagates() {
+        let mock = MockClient::default();
+        mock.set_create_or_fetch_device(|| Err(server_err()));
+
+        let result = devices::create_or_fetch_device(
+            &mock,
+            CreateOrFetchDeviceParams {
+                name: "host-foo",
+                api_key: "secret-key",
+            },
+        )
+        .await;
+
+        match result {
+            Err(HTTPErr::RequestFailed(rf)) => {
+                assert_eq!(rf.status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            other => panic!("expected RequestFailed(500), got {other:?}"),
+        }
+        // Only the POST attempt — no GET fallback for non-409 errors.
+        assert_eq!(mock.call_count(Call::CreateDevice), 1);
+        assert_eq!(mock.call_count(Call::FetchDeviceByName), 0);
+    }
+}
+
+pub mod issue_activation_token {
+    use super::*;
+
+    #[tokio::test]
+    async fn happy_path_returns_token() {
+        let mock = MockClient::default();
+        mock.set_issue_activation_token(|| {
+            Ok(TokenResponse {
+                token: "test-jwt".into(),
+                ..TokenResponse::default()
+            })
+        });
+
+        let result = devices::issue_activation_token(
+            &mock,
+            IssueActivationTokenParams {
+                id: "dvc_1",
+                api_key: "secret-key",
+                allow_reactivation: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.token, "test-jwt");
+        assert_eq!(mock.call_count(Call::IssueActivationToken), 1);
+        let expected_body =
+            serde_json::to_string(&serde_json::json!({"allow_reactivation": false})).unwrap();
+        assert_eq!(
+            mock.requests(),
+            vec![CapturedRequest {
+                call: Call::IssueActivationToken,
+                method: reqwest::Method::POST,
+                path: "/devices/dvc_1/activation_token".into(),
+                url: "http://mock/devices/dvc_1/activation_token".into(),
+                query: vec![],
+                body: Some(expected_body),
+                token: None,
+                api_key: Some("secret-key".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn allow_reactivation_true_serializes_correctly() {
+        let mock = MockClient::default();
+
+        devices::issue_activation_token(
+            &mock,
+            IssueActivationTokenParams {
+                id: "dvc_1",
+                api_key: "secret-key",
+                allow_reactivation: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let requests = mock.requests();
+        let expected_body =
+            serde_json::to_string(&serde_json::json!({"allow_reactivation": true})).unwrap();
+        assert_eq!(requests[0].body, Some(expected_body));
+    }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mock = MockClient::default();
+        mock.set_issue_activation_token(|| Err(mock_err()));
+
+        let result = devices::issue_activation_token(
+            &mock,
+            IssueActivationTokenParams {
+                id: "dvc_1",
+                api_key: "secret-key",
+                allow_reactivation: false,
             },
         )
         .await;

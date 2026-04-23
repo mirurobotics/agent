@@ -43,6 +43,7 @@ pub mod get_content {
                 query: vec![],
                 body: None,
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }

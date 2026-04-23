@@ -63,6 +63,7 @@ pub mod list {
                 query: vec![("limit".into(), "10".into()), ("offset".into(), "0".into()),],
                 body: None,
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }
@@ -100,6 +101,7 @@ pub mod list {
                 ],
                 body: None,
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }
@@ -135,6 +137,7 @@ pub mod list {
                 ],
                 body: None,
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }
@@ -202,6 +205,7 @@ pub mod list_all {
                 ],
                 body: None,
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }
@@ -268,6 +272,7 @@ pub mod list_all {
             ],
             body: None,
             token: Some("test-token".into()),
+            api_key: None,
         };
         assert_eq!(
             mock.requests(),
@@ -369,6 +374,7 @@ pub mod update {
                 query: vec![],
                 body: Some(expected_body),
                 token: Some("test-token".into()),
+                api_key: None,
             }]
         );
     }

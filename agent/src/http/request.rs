@@ -25,6 +25,7 @@ pub struct Params<'a> {
     pub body: Option<String>,
     pub timeout: Duration,
     pub token: Option<&'a str>,
+    pub api_key: Option<&'a str>,
 }
 
 impl<'a> Params<'a> {
@@ -65,6 +66,7 @@ impl<'a> Params<'a> {
             body: None,
             timeout: DEFAULT_TIMEOUT,
             token: None,
+            api_key: None,
         }
     }
 
@@ -76,6 +78,7 @@ impl<'a> Params<'a> {
             body: Some(body),
             timeout: DEFAULT_TIMEOUT,
             token: None,
+            api_key: None,
         }
     }
 
@@ -87,6 +90,7 @@ impl<'a> Params<'a> {
             body: Some(body),
             timeout: DEFAULT_TIMEOUT,
             token: None,
+            api_key: None,
         }
     }
 
@@ -97,6 +101,11 @@ impl<'a> Params<'a> {
 
     pub fn with_token(mut self, token: &'a str) -> Self {
         self.token = Some(token);
+        self
+    }
+
+    pub fn with_api_key(mut self, api_key: &'a str) -> Self {
+        self.api_key = Some(api_key);
         self
     }
 
@@ -215,6 +224,9 @@ pub fn build(
     if let Some(token) = params.token {
         add_token_to_headers(&mut header_map, token)?;
     }
+    if let Some(api_key) = params.api_key {
+        add_api_key_to_headers(&mut header_map, api_key)?;
+    }
     request = request.headers(header_map);
     // body
     if let Some(body) = params.body {
@@ -237,6 +249,20 @@ fn add_token_to_headers(headers: &mut HeaderMap, token: &str) -> Result<(), HTTP
     headers.insert(
         AUTHORIZATION,
         HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
+            HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
+                msg: e.to_string(),
+                source: e,
+                trace: trace!(),
+            })
+        })?,
+    );
+    Ok(())
+}
+
+fn add_api_key_to_headers(headers: &mut HeaderMap, api_key: &str) -> Result<(), HTTPErr> {
+    headers.insert(
+        "X-API-Key",
+        HeaderValue::from_str(api_key).map_err(|e| {
             HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
                 msg: e.to_string(),
                 source: e,

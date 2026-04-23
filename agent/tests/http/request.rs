@@ -102,6 +102,7 @@ pub mod params {
                 body: None,
                 timeout: Duration::from_secs(10),
                 token: None,
+                api_key: None,
             };
             assert_eq!(actual, expected);
         }
@@ -116,6 +117,7 @@ pub mod params {
                 body: Some("body".into()),
                 timeout: Duration::from_secs(10),
                 token: None,
+                api_key: None,
             };
             assert_eq!(actual, expected);
         }
@@ -130,6 +132,7 @@ pub mod params {
                 body: Some("data".into()),
                 timeout: Duration::from_secs(10),
                 token: None,
+                api_key: None,
             };
             assert_eq!(actual, expected);
         }
@@ -142,6 +145,12 @@ pub mod params {
         fn with_token_sets_token() {
             let params = Params::get("https://example.com").with_token("my-token");
             assert_eq!(params.token, Some("my-token"));
+        }
+
+        #[test]
+        fn with_api_key_sets_api_key() {
+            let params = Params::get("https://example.com").with_api_key("my-api-key");
+            assert_eq!(params.api_key, Some("my-api-key"));
         }
 
         #[test]
@@ -277,6 +286,25 @@ pub mod build {
         let req = request::build(&client, &headers, params).unwrap();
         let auth = req.reqwest.headers().get("authorization").unwrap();
         assert_eq!(auth, "Bearer tok123");
+    }
+
+    #[test]
+    fn api_key_adds_x_api_key_header() {
+        let client = make_client();
+        let headers = Headers::default();
+        let params = Params::get("https://example.com/test").with_api_key("apikey123");
+        let req = request::build(&client, &headers, params).unwrap();
+        let api_key = req.reqwest.headers().get("X-API-Key").unwrap();
+        assert_eq!(api_key, "apikey123");
+    }
+
+    #[test]
+    fn no_api_key_omits_x_api_key_header() {
+        let client = make_client();
+        let headers = Headers::default();
+        let params = Params::get("https://example.com/test");
+        let req = request::build(&client, &headers, params).unwrap();
+        assert!(req.reqwest.headers().get("X-API-Key").is_none());
     }
 
     #[test]
