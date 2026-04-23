@@ -37,12 +37,12 @@ Observable behavior:
 
 ## Progress
 
-- [ ] Milestone 1: CLI plumbing — `ProvisionArgs` parsed, `main.rs` dispatches, exit-code constants exist, stub returns "not implemented".
-- [ ] Milestone 2: HTTP layer — `X-API-Key` header support in `http/request.rs`, `create_or_fetch_device()` + `CreateDeviceRequest` in `http/devices.rs`, `MockClient` field added, unit tests pass.
-- [ ] Milestone 3: Provision flow — `installer/provision.rs` implements end-to-end orchestration, wired into CLI, unit tests pass.
-- [ ] Milestone 4: Systemd handling and root-privilege check.
-- [ ] Milestone 5: Docs — `ARCHITECTURE.md` and `README.md` updated.
-- [ ] Milestone 6: Manual smoke test against staging.
+- [x] (2026-04-22) Milestone 1: CLI plumbing — `ProvisionArgs` parsed, `main.rs` dispatches, exit-code constants exist, stub returns "not implemented". Commit `573c16a`.
+- [x] (2026-04-22) Milestone 2: HTTP layer — `X-API-Key` header support in `http/request.rs`, `create_or_fetch_device()` + `CreateDeviceRequest` in `http/devices.rs`, `MockClient` field added, unit tests pass. Commit `4dfca28`.
+- [x] (2026-04-22) Milestone 3: Provision flow — `installer/provision.rs` implements end-to-end orchestration, wired into CLI, unit tests pass. Commit `039af36`.
+- [x] (2026-04-22) Milestone 4: Systemd handling and root-privilege check. Commit `899cea1`.
+- [x] (2026-04-22) Milestone 5: Docs — `ARCHITECTURE.md` and `README.md` updated. Commit `57143e2`.
+- [ ] Milestone 6: Manual smoke test against staging — operator-driven; not executed in this implementation pass (see Outcomes & Retrospective for the documented procedure).
 
 One commit per milestone.
 
@@ -82,7 +82,17 @@ All entries below recorded 2026-04-22 by plan author.
 
 ## Outcomes & Retrospective
 
-Fill in at the end of each milestone and again at completion.
+**M1–M5 (2026-04-22).** All five code/docs milestones landed on `feat/agent-provision-subcommand` (commits `573c16a`, `4dfca28`, `039af36`, `899cea1`, `57143e2`). Test count grew from 1211 to 1232 (+21 across M1–M4). Manual smoke confirmed: `./target/debug/miru-agent provision --device-name=foo` exits 1 with "must be run as root (sudo -E)" before any env or arg check (validation criterion 1).
+
+Notable surprises captured during implementation:
+
+- `crate::impl_error!` requires single-field tuple variants, so the `ProvisionErr` "struct-shaped" variants in the plan (`ReactivationNotAllowedErr { device_id, trace }`, etc.) became named structs wrapped in tuple variants — same field shape, idiomatic to the existing `InstallErr` pattern.
+- The fake-euid test shim in `installer/provision.rs` had to be `#[cfg(feature = "test")]`, not `#[cfg(test)]`: integration tests in `agent/tests/` compile the crate as a library without `cfg(test)` set. This matches the existing convention used in `sync/syncer.rs` and `http/retry.rs`.
+- `DEFAULT_BACKEND_HOST` lives in `storage::settings` (re-exported from `installer::install`) to avoid the circular dependency that placing it in `installer::install` would create.
+- The clippy `too_many_arguments` lint trips on `provision()`'s 8 parameters after the systemd injection. Currently silenced with a localized `#[allow(clippy::too_many_arguments)]`. If future work adds another parameter, pack into a `ProvisionDeps` struct.
+- `cli::ProvisionArgs::allow_reactivation` is `Option<bool>` (not `bool` defaulting to false), so `run_provision()` calls `args.allow_reactivation.unwrap_or(false)` when threading it through.
+
+**M6 — Manual smoke test (deferred to operator).** Not executed in this implementation pass: the smoke test requires `sudo`, a live staging backend, and a Linux box with the `miru` apt package available — none reproducible in the agent's working environment. The plan's M6 procedure is the operating instructions for the operator. Worth confirming during execution: the plan's hard-coded `--backend-host=https://api-staging.miruml.com` matches the actual staging URL (the production default in code/README is `https://api.mirurobotics.com`).
 
 ## Context and Orientation
 
