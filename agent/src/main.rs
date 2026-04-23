@@ -47,6 +47,14 @@ async fn main() {
 }
 
 async fn run_provision(args: cli::ProvisionArgs) -> i32 {
+    // Privilege check is the very first action — before logging init, env
+    // reads, or arg validation — so non-root callers fail fast with a clear
+    // message and zero side effects.
+    if provision::assert_root().is_err() {
+        eprintln!("miru-agent provision must be run as root (sudo -E)");
+        return cli::exit_codes::GENERIC_FAILURE;
+    }
+
     let (_guard, tmp_dir) = match installer::init_installer_logging().await {
         Ok(pair) => pair,
         Err(_) => return cli::exit_codes::GENERIC_FAILURE,
@@ -87,9 +95,11 @@ async fn run_provision(args: cli::ProvisionArgs) -> i32 {
     };
 
     let layout = storage::Layout::default();
+    let systemctl = provision::RealSystemctl;
     let result = provision::provision(
         &public_api_http_client,
         &agent_http_client,
+        &systemctl,
         &layout,
         &settings,
         &api_key,

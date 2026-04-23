@@ -3,14 +3,17 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 
 // internal crates
-use crate::mocks::http_client::{Call, MockClient};
+use crate::mocks::{
+    http_client::{Call, MockClient},
+    systemctl::MockSystemctl,
+};
 use backend_api::models::{Device, ErrorResponse, TokenResponse};
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::errors::{MockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::http::HTTPErr;
-use miru_agent::installer::provision::{self, ProvisionErr};
+use miru_agent::installer::provision::{self, ProvisionErr, SystemdErr};
 use miru_agent::storage::{Layout, Settings};
 
 // external crates
@@ -122,9 +125,11 @@ pub mod provision_fn {
             ..agent_client
         };
 
+        let systemctl = MockSystemctl::default();
         let device = provision::provision(
             &public_client,
             &activated_client,
+            &systemctl,
             &layout,
             &settings,
             "secret-key",
@@ -192,9 +197,11 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
+        let systemctl = MockSystemctl::default();
         let device = provision::provision(
             &public_client,
             &agent_client,
+            &systemctl,
             &layout,
             &settings,
             "secret-key",
@@ -229,9 +236,11 @@ pub mod provision_fn {
         let (public_client, agent_client) = build_clients();
         public_client.set_create_or_fetch_device(|| Err(server_err()));
 
+        let systemctl = MockSystemctl::default();
         let result = provision::provision(
             &public_client,
             &agent_client,
+            &systemctl,
             &layout,
             &settings,
             "secret-key",
@@ -264,9 +273,11 @@ pub mod provision_fn {
         public_client.set_create_or_fetch_device(|| Ok(new_device(DEVICE_ID, "test-device")));
         public_client.set_issue_activation_token(|| Err(device_is_active_err()));
 
+        let systemctl = MockSystemctl::default();
         let result = provision::provision(
             &public_client,
             &agent_client,
+            &systemctl,
             &layout,
             &settings,
             "secret-key",
@@ -317,9 +328,11 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
+        let systemctl = MockSystemctl::default();
         let result = provision::provision(
             &public_client,
             &agent_client,
+            &systemctl,
             &layout,
             &settings,
             "secret-key",
@@ -361,5 +374,232 @@ pub mod read_api_key_from_env {
             matches!(err, ProvisionErr::MissingApiKeyErr(ref e) if e.name == "MIRU_API_KEY"),
             "expected MissingApiKeyErr, got: {err:?}"
         );
+    }
+}
+
+pub mod assert_root {
+    use super::*;
+    use miru_agent::installer::provision::test_support;
+
+    /// Guard that resets the fake euid on drop so a panicking test cannot
+    /// leak state into sibling tests on the same thread.
+    struct FakeEuidGuard;
+
+    impl Drop for FakeEuidGuard {
+        fn drop(&mut self) {
+            test_support::set_fake_euid(None);
+        }
+    }
+
+    fn set_fake_euid(euid: u32) -> FakeEuidGuard {
+        test_support::set_fake_euid(Some(euid));
+        FakeEuidGuard
+    }
+
+    #[test]
+    fn returns_ok_when_euid_is_zero() {
+        let _g = set_fake_euid(0);
+        provision::assert_root().expect("euid 0 should be accepted as root");
+    }
+
+    #[test]
+    fn returns_not_root_err_when_euid_is_nonzero() {
+        let _g = set_fake_euid(1000);
+        let err = provision::assert_root().expect_err("non-zero euid must fail");
+        assert!(
+            matches!(err, ProvisionErr::NotRootErr(_)),
+            "expected NotRootErr, got: {err:?}"
+        );
+    }
+}
+
+pub mod systemd_lifecycle {
+    use super::*;
+    use crate::mocks::systemctl::SystemctlCall;
+
+    fn systemd_err(msg: &str) -> SystemdErr {
+        SystemdErr {
+            msg: msg.to_string(),
+            trace: miru_agent::trace!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn happy_path_records_stop_then_restart() {
+        let device_name = "test-device";
+        let token = new_jwt(DEVICE_ID);
+
+        let root = filesys::Dir::create_temp_dir("provision-test")
+            .await
+            .unwrap();
+        let layout = Layout::new(root.clone());
+        let settings = Settings::default();
+
+        let (public_client, _agent_client) = build_clients();
+        public_client.set_create_or_fetch_device(|| Ok(new_device(DEVICE_ID, "test-device")));
+        let token_for_mock = token.clone();
+        public_client.set_issue_activation_token(move || {
+            Ok(TokenResponse {
+                token: token_for_mock.clone(),
+                ..TokenResponse::default()
+            })
+        });
+
+        let activated_name = device_name.to_string();
+        let agent_client = MockClient {
+            activate_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, &activated_name))),
+            ..MockClient::default()
+        };
+
+        let systemctl = MockSystemctl::default();
+        let device = provision::provision(
+            &public_client,
+            &agent_client,
+            &systemctl,
+            &layout,
+            &settings,
+            "secret-key",
+            device_name,
+            false,
+        )
+        .await
+        .expect("provision should succeed");
+        assert_eq!(device.id, DEVICE_ID);
+
+        // stop must precede restart, and both target the `miru` unit
+        let calls = systemctl.calls();
+        assert_eq!(
+            calls,
+            vec![
+                SystemctlCall {
+                    verb: "stop".to_string(),
+                    unit: "miru".to_string(),
+                },
+                SystemctlCall {
+                    verb: "restart".to_string(),
+                    unit: "miru".to_string(),
+                },
+            ]
+        );
+
+        root.delete().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stop_failure_skips_install_and_returns_systemd_err() {
+        let root = filesys::Dir::create_temp_dir("provision-test")
+            .await
+            .unwrap();
+        let layout = Layout::new(root.clone());
+        let settings = Settings::default();
+
+        let (public_client, _agent_client) = build_clients();
+        // If we ever reach the public-API call this assertion in the mock
+        // would still fire, but we cross-check via call_count below.
+        public_client.set_create_or_fetch_device(|| {
+            panic!("create_or_fetch_device must not be called when stop fails");
+        });
+
+        let agent_client = MockClient {
+            activate_device_fn: Box::new(|| {
+                panic!("agent activate must not be called when stop fails");
+            }),
+            ..MockClient::default()
+        };
+
+        let systemctl = MockSystemctl::default();
+        systemctl.set_stop(|_unit| Err(systemd_err("stop boom")));
+
+        let result = provision::provision(
+            &public_client,
+            &agent_client,
+            &systemctl,
+            &layout,
+            &settings,
+            "secret-key",
+            "test-device",
+            false,
+        )
+        .await;
+
+        match result {
+            Err(ProvisionErr::SystemdErr(e)) => assert_eq!(e.msg, "stop boom"),
+            other => panic!("expected SystemdErr, got {other:?}"),
+        }
+
+        // Neither HTTP path was exercised.
+        assert_eq!(public_client.call_count(Call::CreateDevice), 0);
+        assert_eq!(public_client.call_count(Call::IssueActivationToken), 0);
+        assert_eq!(agent_client.call_count(Call::ActivateDevice), 0);
+
+        // Only the stop call was attempted; restart never ran.
+        let calls = systemctl.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].verb, "stop");
+
+        root.delete().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn restart_failure_after_install_returns_systemd_err() {
+        let device_name = "test-device";
+        let token = new_jwt(DEVICE_ID);
+
+        let root = filesys::Dir::create_temp_dir("provision-test")
+            .await
+            .unwrap();
+        let layout = Layout::new(root.clone());
+        let settings = Settings::default();
+
+        let (public_client, _agent_client) = build_clients();
+        public_client.set_create_or_fetch_device(|| Ok(new_device(DEVICE_ID, "test-device")));
+        let token_for_mock = token.clone();
+        public_client.set_issue_activation_token(move || {
+            Ok(TokenResponse {
+                token: token_for_mock.clone(),
+                ..TokenResponse::default()
+            })
+        });
+
+        let activated_name = device_name.to_string();
+        let agent_client = MockClient {
+            activate_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, &activated_name))),
+            ..MockClient::default()
+        };
+
+        let systemctl = MockSystemctl::default();
+        systemctl.set_restart(|_unit| Err(systemd_err("restart boom")));
+
+        let result = provision::provision(
+            &public_client,
+            &agent_client,
+            &systemctl,
+            &layout,
+            &settings,
+            "secret-key",
+            device_name,
+            false,
+        )
+        .await;
+
+        match result {
+            Err(ProvisionErr::SystemdErr(e)) => assert_eq!(e.msg, "restart boom"),
+            other => panic!("expected SystemdErr from restart, got {other:?}"),
+        }
+
+        // Install ran end-to-end before the restart failure.
+        assert_eq!(agent_client.call_count(Call::ActivateDevice), 1);
+        let device_file = layout.device();
+        assert!(
+            device_file.exists(),
+            "device.json should be written before restart failure"
+        );
+
+        let calls = systemctl.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].verb, "stop");
+        assert_eq!(calls[1].verb, "restart");
+
+        root.delete().await.unwrap();
     }
 }
