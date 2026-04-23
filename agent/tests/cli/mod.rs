@@ -215,4 +215,42 @@ mod provision_args_parse {
         assert_eq!(Some("robot-7"), args.device_name.as_deref());
         assert_eq!(Some(true), args.allow_reactivation);
     }
+
+    #[test]
+    fn empty_value_after_equals_is_none() {
+        let inputs = to_inputs(&["miru-agent", "provision", "--device-name="]);
+
+        let args = ProvisionArgs::parse(&inputs);
+
+        assert!(args.device_name.is_none());
+    }
+
+    #[test]
+    fn allow_reactivation_with_invalid_value_is_none() {
+        let inputs = to_inputs(&[
+            "miru-agent",
+            "provision",
+            "--device-name=robot-9",
+            "--allow-reactivation=maybe",
+        ]);
+
+        let args = ProvisionArgs::parse(&inputs);
+
+        assert_eq!(Some("robot-9"), args.device_name.as_deref());
+        assert!(args.allow_reactivation.is_none());
+    }
+
+    #[test]
+    fn unrecognized_flag_is_ignored() {
+        let inputs = to_inputs(&[
+            "miru-agent",
+            "provision",
+            "--device-name=robot-10",
+            "--something-else=foo",
+        ]);
+
+        let args = ProvisionArgs::parse(&inputs);
+
+        assert_eq!(Some("robot-10"), args.device_name.as_deref());
+    }
 }

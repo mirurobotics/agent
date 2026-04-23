@@ -292,6 +292,79 @@ pub mod provision_fn {
     }
 
     #[tokio::test]
+    async fn token_issue_request_failed_without_device_is_active_returns_backend_err() {
+        let root = filesys::Dir::create_temp_dir("provision-test")
+            .await
+            .unwrap();
+        let layout = Layout::new(root.clone());
+        let settings = Settings::default();
+
+        let (public_client, agent_client) = build_clients();
+        public_client.set_create_or_fetch_device(|| Ok(new_device(DEVICE_ID, "test-device")));
+        // RequestFailed with no error body — exercises the BackendErr re-wrap branch.
+        public_client.set_issue_activation_token(|| Err(server_err()));
+
+        let systemctl = MockSystemctl::default();
+        let result = provision::provision(
+            &public_client,
+            &agent_client,
+            &systemctl,
+            &layout,
+            &settings,
+            "secret-key",
+            "test-device",
+            false,
+        )
+        .await;
+
+        match result {
+            Err(ProvisionErr::BackendErr(HTTPErr::RequestFailed(_))) => {}
+            other => panic!("expected BackendErr(RequestFailed), got {other:?}"),
+        }
+        assert_eq!(agent_client.call_count(Call::ActivateDevice), 0);
+
+        root.delete().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn token_issue_non_request_failed_http_err_returns_backend_err() {
+        let root = filesys::Dir::create_temp_dir("provision-test")
+            .await
+            .unwrap();
+        let layout = Layout::new(root.clone());
+        let settings = Settings::default();
+
+        let (public_client, agent_client) = build_clients();
+        public_client.set_create_or_fetch_device(|| Ok(new_device(DEVICE_ID, "test-device")));
+        public_client.set_issue_activation_token(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let systemctl = MockSystemctl::default();
+        let result = provision::provision(
+            &public_client,
+            &agent_client,
+            &systemctl,
+            &layout,
+            &settings,
+            "secret-key",
+            "test-device",
+            false,
+        )
+        .await;
+
+        match result {
+            Err(ProvisionErr::BackendErr(HTTPErr::MockErr(_))) => {}
+            other => panic!("expected BackendErr(MockErr), got {other:?}"),
+        }
+        assert_eq!(agent_client.call_count(Call::ActivateDevice), 0);
+
+        root.delete().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn install_failure_returns_install_err() {
         let token = new_jwt(DEVICE_ID);
 
@@ -594,5 +667,20 @@ pub mod systemd_lifecycle {
         assert_eq!(calls[1].verb, "restart");
 
         root.delete().await.unwrap();
+    }
+}
+
+pub mod error_conversion {
+    use super::*;
+    use miru_agent::installer::errors::{InstallErr, MissingEnvVarErr};
+
+    #[test]
+    fn install_err_into_provision_err() {
+        let install_err = InstallErr::MissingEnvVarErr(MissingEnvVarErr {
+            name: "MIRU_ACTIVATION_TOKEN".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        let provision_err: ProvisionErr = install_err.into();
+        assert!(matches!(provision_err, ProvisionErr::InstallErr(_)));
     }
 }
