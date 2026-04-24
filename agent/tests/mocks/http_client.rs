@@ -20,7 +20,7 @@ use tokio::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Call {
-    ActivateDevice,
+    ProvisionDevice,
     IssueDeviceToken,
     UpdateDevice,
     ListDeployments,
@@ -54,7 +54,7 @@ type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + S
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
-    pub activate_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
+    pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
     pub issue_device_token_fn: Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>,
     pub update_device_fn: UpdateDeviceFn,
     pub list_deployments_fn: ListDeploymentsFn,
@@ -69,7 +69,7 @@ pub struct MockClient {
 impl Default for MockClient {
     fn default() -> Self {
         Self {
-            activate_device_fn: Box::new(|| Ok(Device::default())),
+            provision_device_fn: Box::new(|| Ok(Device::default())),
             issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
             update_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
@@ -177,7 +177,7 @@ impl MockClient {
     fn match_route(method: &reqwest::Method, path: &str) -> Call {
         use reqwest::Method;
         match (method, path) {
-            (m, p) if *m == Method::POST && p.ends_with("/activate") => Call::ActivateDevice,
+            (m, p) if *m == Method::POST && p == "/devices/provision" => Call::ProvisionDevice,
             (m, p) if *m == Method::POST && p.ends_with("/issue_token") => Call::IssueDeviceToken,
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
             (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
@@ -200,7 +200,7 @@ impl MockClient {
 
     fn handle_route(&self, call: &Call, path: &str) -> Result<String, HTTPErr> {
         match call {
-            Call::ActivateDevice => json(&(self.activate_device_fn)()?),
+            Call::ProvisionDevice => json(&(self.provision_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
             Call::UpdateDevice => json(&(self.update_device_fn.lock().unwrap())()?),
             Call::ListDeployments => {
