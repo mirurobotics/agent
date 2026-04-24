@@ -201,15 +201,9 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        entry::provision(
-            &mock_ok,
-            &layout,
-            &settings,
-            &token,
-            Some("initial".into()),
-        )
-        .await
-        .unwrap();
+        entry::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+            .await
+            .unwrap();
 
         // capture every persisted blob byte-for-byte
         let device_bytes = layout.device().read_string().await.unwrap();
