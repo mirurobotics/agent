@@ -86,7 +86,7 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
     Ok(http::devices::provision(http_client, params).await?)
 }
 
-pub fn determine_settings(args: &cli::InstallArgs) -> settings::Settings {
+pub fn determine_settings(args: &cli::ProvisionArgs) -> settings::Settings {
     let mut settings = settings::Settings::default();
     if let Some(backend_host) = &args.backend_host {
         settings.backend.base_url = format!("{}/agent/v1", backend_host);
@@ -140,7 +140,7 @@ mod tests {
 
         #[test]
         fn backend_host_appends_agent_v1_suffix() {
-            let args = cli::InstallArgs {
+            let args = cli::ProvisionArgs {
                 backend_host: Some("https://custom.example.com".to_string()),
                 ..Default::default()
             };
@@ -155,7 +155,7 @@ mod tests {
 
         #[test]
         fn mqtt_broker_host_override() {
-            let args = cli::InstallArgs {
+            let args = cli::ProvisionArgs {
                 mqtt_broker_host: Some("mqtt.custom.example.com".to_string()),
                 ..Default::default()
             };
@@ -167,7 +167,7 @@ mod tests {
 
         #[test]
         fn no_overrides_preserves_defaults() {
-            let args = cli::InstallArgs::default();
+            let args = cli::ProvisionArgs::default();
             let defaults = settings::Settings::default();
 
             let settings = determine_settings(&args);

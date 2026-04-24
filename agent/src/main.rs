@@ -8,7 +8,7 @@ use miru_agent::app::run::run;
 use miru_agent::cli;
 use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
-use miru_agent::installer::{display, errors::*, install};
+use miru_agent::provision::{display, errors::*, entry};
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
 use miru_agent::storage;
@@ -28,53 +28,53 @@ async fn main() {
         return;
     }
 
-    if let Some(install_args) = cli_args.install_args {
-        let result = run_installer(install_args).await;
-        handle_install_result(result);
+    if let Some(provision_args) = cli_args.provision_args {
+        let result = run_provision(provision_args).await;
+        handle_provision_result(result);
         return;
     }
 
     run_agent().await;
 }
 
-async fn run_installer(args: cli::InstallArgs) -> Result<backend_client::Device, InstallErr> {
+async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Device, ProvisionErr> {
     // initialize logging
-    let tmp_dir = Dir::create_temp_dir("miru-agent-installer-logs").await?;
+    let tmp_dir = Dir::create_temp_dir("miru-agent-provision-logs").await?;
     let options = logs::Options {
-        // sending logs to stdout will interfere with the installer outputs
+        // sending logs to stdout will interfere with the provision outputs
         stdout: false,
         log_dir: tmp_dir.path().to_path_buf(),
         ..Default::default()
     };
     let _guard = logs::init(options);
 
-    let settings = install::determine_settings(&args);
+    let settings = entry::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = storage::Layout::default();
-    let token = install::read_token_from_env()?;
+    let token = entry::read_token_from_env()?;
 
-    let result = install::install(&http_client, &layout, &settings, &token, args.device_name).await;
+    let result = entry::provision(&http_client, &layout, &settings, &token, args.device_name).await;
 
     drop(_guard);
     if let Err(e) = tmp_dir.delete().await {
-        eprintln!("failed to clean up installer log dir: {e}");
+        eprintln!("failed to clean up provision log dir: {e}");
     }
 
     result
 }
 
-fn handle_install_result(result: Result<backend_client::Device, InstallErr>) {
+fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>) {
     match result {
         Ok(device) => {
             let msg = format!(
-                "Successfully activated this device as {}!",
+                "Successfully provisioned this device as {}!",
                 display::color(&device.name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }
         Err(e) => {
-            error!("Installation failed: {:?}", e);
-            println!("An error occurred during your installation. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            error!("Provisioning failed: {:?}", e);
+            println!("An error occurred during provisioning. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
             std::process::exit(1);
         }
     }
