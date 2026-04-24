@@ -3,7 +3,7 @@ set -e
 
 # Script: uat-provision.sh
 # Jinja Template: provision.j2
-# Build Timestamp: 2026-03-08T13:40:36.053310
+# Build Timestamp: 2026-04-24T16:50:03.002196
 # Description: Provision a device & install the Miru Agent in the UAT environment
 
 # DISPLAY #
@@ -378,6 +378,6 @@ fi
 # Reset the /srv/miru directory to be owned by the miru user and group
 sudo chown -R miru:miru /srv/miru
 
-# Execute the installer
-sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
+# Execute the provision flow
+sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --provision $args
 exit 0

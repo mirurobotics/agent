@@ -31,5 +31,5 @@ fi
 # Reset the /srv/miru directory to be owned by the miru user and group
 sudo chown -R miru:miru /srv/miru
 
-# Execute the installer
-sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
+# Execute the provision flow
+sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --provision $args

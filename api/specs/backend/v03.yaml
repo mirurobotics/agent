@@ -6,70 +6,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0
+  x-release-version: v0.3.0-next
   x-git-commit:
-    sha: cbab3abdadf10fb9970627133c029c4c376b0412
-    url: https://github.com/mirurobotics/openapi/commit/cbab3abdadf10fb9970627133c029c4c376b0412
-    message: 'feat(lint): add non-Go surface linters (yamllint, shellcheck, actionlint)
-      (#27)
-
-
-      ## Summary
-
-
-      - Adds yamllint, shellcheck, and actionlint to repo:openapi, matching
-
-      the surface-linting setup already in repo:core
-
-      - New `scripts/lint-surface.sh` driver with `command -v` guards (tools
-
-      skipped locally if not installed)
-
-      - Config files: `.yamllint.yml`, `.shellcheckrc`,
-
-      `.github/actionlint.yml`
-
-      - New `surface-lint` CI job in `.github/workflows/lint.yml` (separate
-
-      from `lint` so it runs without Go/Python toolchain)
-
-      - `scripts/preflight.sh` extended with surface-lint as a 6th parallel
-
-      job
-
-      - Pre-existing YAML violations fixed across 45 API spec files (trailing
-
-      spaces, missing final newlines, trailing blank lines)
-
-      - SC1007 inline suppressions added to `tools/lint/covgate.sh` and
-
-      `tools/release/covgate.sh` for the `CDPATH=` idiom
-
-
-      ## Test plan
-
-
-      - [ ] `./scripts/lint-surface.sh` exits 0 (warnings only for
-
-      line-length, which is expected)
-
-      - [ ] `./scripts/preflight.sh` reports `=== All checks passed ===`
-
-      - [ ] CI `surface-lint` job appears in the PR checks and passes
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-
-      ---------
-
-
-      Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>'
-    author: miru-agents
-    branch: HEAD
-    dirty: false
+    sha: 2abd3035b6b2d7ff9f4da7c5fd8e183b58e9ab64
+    url: https://github.com/mirurobotics/openapi/commit/2abd3035b6b2d7ff9f4da7c5fd8e183b58e9ab64
+    message: 'fix(api): clarify provisioning target device'
+    author: Benjamin Smidt
+    branch: feat/provision-token
+    dirty: true
   x-build:
-    built_at: '2026-04-13T03:07:57.264871+00:00'
+    built_at: '2026-04-24T23:16:39.541835+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -251,26 +197,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Device'
-  /devices/{device_id}/activate:
+  /devices/provision:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
     post:
       tags:
       - Devices
-      summary: Activate
-      operationId: activateDevice
-      description: Activate a device.
-      parameters:
-      - $ref: '#/components/parameters/device_id'
+      summary: Provision
+      operationId: provisionDevice
+      description: Provision a device. With `create` tokens this creates a new device;
+        with `activate` or `reactivate` tokens the request must include `device_id`
+        to target an existing device.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ActivateDeviceRequest'
+              $ref: '#/components/schemas/ProvisionDeviceRequest'
       responses:
         '200':
-          description: Successfully activated the device.
+          description: Successfully provisioned the device.
           content:
             application/json:
               schema:
@@ -385,7 +331,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - cbab3abdadf10fb9970627133c029c4c376b0412
+      - dirty-2abd3035b6b2d7ff9f4da7c5fd8e183b58e9ab64
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1123,11 +1069,13 @@ components:
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
         session_id: dvc_sess_123
-    ActivateDeviceRequest:
-      title: Activate Device Request
+    ProvisionDeviceRequest:
+      title: Provision Device Request
       type: object
+      description: Provision a device using a provisioning token.
       required:
       - public_key_pem
+      - agent_version
       properties:
         public_key_pem:
           type: string
@@ -1136,14 +1084,14 @@ components:
             PUBLIC KEY-----
 
             '
-        name:
-          type: string
-          example: Robot 1
-          description: The name to assign to the device.
         agent_version:
           type: string
           description: The version of the agent the device is running.
           example: v1.0.0
+        name:
+          type: string
+          example: Robot 1
+          description: The name to assign to the device.
     IssueDeviceClaims:
       title: Issue Device Claims
       type: object

@@ -19,7 +19,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Core infrastructure
 
-`cli` — command-line argument parsing. Determines installer vs runtime mode.
+`cli` — command-line argument parsing. Determines provision vs runtime mode.
 
 `errors` — custom Error trait with `code()`, `http_status()`, `params()`, `is_network_conn_err()` methods. All error types derive `thiserror::Error`. Aggregating enums use the `impl_error!` macro defined here.
 
@@ -78,7 +78,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ### Device setup
 
-`installer` — interactive activation flow. Reads activation token from environment, calls backend to register the device, writes device identity and auth credentials to disk. Display helpers in `installer/display`.
+`provision` — interactive provisioning flow. Reads activation token from environment, calls backend to register the device, writes device identity and auth credentials to disk. Display helpers in `provision/display`.
 
 ### Generated code (workspace siblings)
 
@@ -86,7 +86,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ## Architectural Invariants
 
-- **Installer and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; installer writes the files that runtime later reads.
+- **Provision and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; provision writes the files that runtime later reads.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
