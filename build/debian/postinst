@@ -13,7 +13,7 @@ create_miru_group() {
 create_miru_user() {
   if ! id -u miru > /dev/null 2>&1; then
     printf "\033[32m Creating the 'miru' user\033[0m\n"
-    useradd -r -s /bin/false miru
+    useradd -r -g miru -s /bin/false miru
   else
     printf "\033[32m The 'miru' user already exists\033[0m\n"
   fi
