@@ -69,13 +69,6 @@ impl Layout {
     pub fn events_log_file(&self) -> filesys::File {
         self.events_dir().file("events.jsonl")
     }
-
-    pub fn customer_configs(&self) -> filesys::Dir {
-        self.filesystem_root
-            .subdir("srv")
-            .subdir("miru")
-            .subdir("config_instances")
-    }
 }
 
 impl Default for Layout {

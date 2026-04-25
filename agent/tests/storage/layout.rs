@@ -96,20 +96,6 @@ pub mod storage_layout {
         let file = layout.git_commits();
         assert_eq!(file.to_string(), "/var/lib/miru/resources/git_commits.json");
     }
-
-    #[test]
-    fn customer_configs() {
-        let layout = Layout::default();
-        let dir = layout.customer_configs();
-        assert_eq!(dir.to_string(), "/srv/miru/config_instances");
-    }
-
-    #[test]
-    fn customer_configs_custom_filesystem_root() {
-        let layout = Layout::new(filesys::Dir::new("/opt"));
-        let dir = layout.customer_configs();
-        assert_eq!(dir.to_string(), "/opt/srv/miru/config_instances");
-    }
 }
 
 pub mod auth_layout {

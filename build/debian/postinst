@@ -3,19 +3,19 @@
 socket_name="miru.socket"
 service_name="miru.service"
 
-create_miru_user() {
-  if ! id -u miru > /dev/null 2>&1; then
-    printf "\033[32m Creating the 'miru' user\033[0m\n"
-    useradd -r -s /bin/false miru
-  else
-    printf "\033[32m The 'miru' user already exists\033[0m\n"
-  fi
-}
-
 create_miru_group() {
   if ! getent group miru > /dev/null 2>&1; then
     printf "\033[32m Creating the 'miru' group\033[0m\n"
     groupadd -r miru
+  fi
+}
+
+create_miru_user() {
+  if ! id -u miru > /dev/null 2>&1; then
+    printf "\033[32m Creating the 'miru' user\033[0m\n"
+    useradd -r -g miru -s /bin/false miru
+  else
+    printf "\033[32m The 'miru' user already exists\033[0m\n"
   fi
 }
 
@@ -45,8 +45,8 @@ post_install() {
     printf "\033[32m Post Install of an upgrade\033[0m\n"
 
     # create the miru user and group
-    create_miru_user
     create_miru_group
+    create_miru_user
     create_miru_directories
 
     # reload the unit from disk 

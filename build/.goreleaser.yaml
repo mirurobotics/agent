@@ -59,6 +59,10 @@ nfpms:
         dst: "/lib/systemd/system/miru.socket"
         file_info:
           mode: 0644
+      - src: "debian/miru-agent.tmpfiles"
+        dst: "/usr/lib/tmpfiles.d/miru-agent.conf"
+        file_info:
+          mode: 0644
       - src: "debian/copyright"
         dst: "/usr/share/doc/miru-agent/copyright"
         file_info:
