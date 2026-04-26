@@ -82,8 +82,35 @@ fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>)
 }
 
 async fn run_agent() {
-    // check the agent has been activated
     let layout = storage::Layout::default();
+
+    // initialize logging early so the upgrade gate's retry messages are
+    // visible. The settings file may not yet exist on a fresh install or
+    // mid-rebootstrap, so use the default log level here. The settings
+    // load below uses the same global subscriber once the gate has
+    // converged.
+    let _guard = logs::init(logs::Options::default());
+
+    // idempotent upgrade gate: rebootstrap on-disk schema if the running
+    // binary's version differs from the marker file. Blocks forever on a
+    // backend outage rather than failing fast (a half-wiped state on the
+    // next boot would be worse than the wait).
+    let backend_default = storage::Backend::default();
+    let bootstrap_http_client = match http::Client::new(&backend_default.base_url) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("upgrade: failed to construct http client: {e}");
+            return;
+        }
+    };
+    if let Err(e) =
+        miru_agent::app::upgrade::ensure(&layout, &bootstrap_http_client, version::VERSION).await
+    {
+        error!("upgrade gate failed: {e}");
+        return;
+    }
+
+    // check the agent has been activated
     let device_file = layout.device();
     if let Err(e) = storage::assert_activated(&device_file).await {
         error!("Device is not yet activated: {}", e);
@@ -99,13 +126,6 @@ async fn run_agent() {
             return;
         }
     };
-
-    // initialize the logging
-    let log_options = logs::Options {
-        log_level: settings.log_level,
-        ..Default::default()
-    };
-    let _guard = logs::init(log_options);
 
     // run the server
     let options = AppOptions {
@@ -127,12 +147,7 @@ async fn run_agent() {
         ..Default::default()
     };
     info!("Running the server with options: {:?}", options);
-    let result = run(
-        version::VERSION.to_string(),
-        options,
-        await_shutdown_signal(),
-    )
-    .await;
+    let result = run(options, await_shutdown_signal()).await;
     if let Err(e) = result {
         error!("Failed to run the server: {e}");
     }
