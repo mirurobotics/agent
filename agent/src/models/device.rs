@@ -197,7 +197,6 @@ impl Updates {
             ..Self::empty()
         }
     }
-
 }
 
 #[cfg(test)]
