@@ -72,7 +72,7 @@ response_body=$(echo "$response_body" | head -n -1)
 # Check if the request succeeded
 if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
     log "Successfully created activation token"
-    MIRU_PROVISIONING_TOKEN=$(echo "$response_body" | jq -r '.token')
+    MIRU_ACTIVATION_TOKEN=$(echo "$response_body" | jq -r '.token')
 else
     error "Activation token request failed (HTTP status $http_code)"
     error "Response body:"
