@@ -11,7 +11,7 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
 use miru_agent::server::ServerErr;
-use miru_agent::storage::{Capacities, Layout};
+use miru_agent::storage::{Capacities, Layout, StorageErr};
 
 // external crates
 use chrono::Utc;
@@ -24,7 +24,6 @@ pub mod init {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let result = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -56,14 +55,16 @@ pub mod init {
             .unwrap();
 
         let result = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
         .await;
-        assert!(matches!(result, Err(ServerErr::MissingDeviceIDErr(_))));
+        assert!(matches!(
+            result,
+            Err(ServerErr::StorageErr(StorageErr::ResolveDeviceIDErr(_)))
+        ));
     }
 
     #[tokio::test]
@@ -91,7 +92,6 @@ pub mod init {
             .unwrap();
 
         let (state, _) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -138,7 +138,6 @@ pub mod init {
             .unwrap();
 
         let (state, _) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -183,7 +182,6 @@ pub mod init {
             .unwrap();
 
         let _ = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -223,7 +221,6 @@ pub mod shutdown {
             .unwrap();
 
         let (state, state_handle) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -263,7 +260,6 @@ pub mod shutdown {
 
         let before_shutdown = Utc::now();
         let (state, state_handle) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),

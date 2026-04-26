@@ -1,7 +1,8 @@
 // internal crates
+use miru_agent::authn;
 use miru_agent::filesys::{self, PathExt, WriteOptions};
 use miru_agent::models::Device;
-use miru_agent::storage::{self, Layout, Settings};
+use miru_agent::storage::{self, AgentVersion, Layout, Settings};
 
 pub mod bootstrap {
     use super::*;
@@ -309,5 +310,164 @@ pub mod bootstrap {
 
         // stale events file should be deleted
         assert!(!subfile.exists());
+    }
+}
+
+pub mod reset {
+    use super::*;
+
+    const PRIVATE_KEY_CONTENTS: &str = "private-key-contents";
+    const PUBLIC_KEY_CONTENTS: &str = "public-key-contents";
+
+    async fn write_existing_keys(layout: &Layout) {
+        let auth_dir = layout.auth();
+        auth_dir.root.create_if_absent().await.unwrap();
+        auth_dir
+            .private_key()
+            .write_string(PRIVATE_KEY_CONTENTS, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        auth_dir
+            .public_key()
+            .write_string(PUBLIC_KEY_CONTENTS, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+    }
+
+    async fn assert_keys_preserved(layout: &Layout) {
+        let auth_dir = layout.auth();
+        let private_key = auth_dir
+            .private_key()
+            .read_string()
+            .await
+            .expect("private key should still exist after reset");
+        let public_key = auth_dir
+            .public_key()
+            .read_string()
+            .await
+            .expect("public key should still exist after reset");
+        assert_eq!(private_key, PRIVATE_KEY_CONTENTS);
+        assert_eq!(public_key, PUBLIC_KEY_CONTENTS);
+    }
+
+    async fn assert_marker(layout: &Layout, expected_version: &str) {
+        let marker = layout
+            .agent_version()
+            .read_json::<AgentVersion>()
+            .await
+            .expect("marker should exist after reset");
+        assert_eq!(marker.version, expected_version);
+    }
+
+    async fn assert_default_token(layout: &Layout) {
+        let token = layout
+            .auth()
+            .token()
+            .read_json::<authn::Token>()
+            .await
+            .unwrap();
+        assert_eq!(token, authn::Token::default());
+    }
+
+    #[tokio::test]
+    async fn preserves_keys_and_writes_marker() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        write_existing_keys(&layout).await;
+
+        // pre-write a stale device file with arbitrary content
+        layout
+            .device()
+            .write_string("{\"some\":\"stale\"}", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let device = Device::default();
+        let settings = Settings::default();
+        storage::setup::reset(&layout, &device, &settings, "v9.9.9")
+            .await
+            .unwrap();
+
+        assert_keys_preserved(&layout).await;
+
+        // device + settings written from inputs
+        let on_disk_device = layout.device().read_json::<Device>().await.unwrap();
+        assert_eq!(on_disk_device, device);
+        let on_disk_settings = layout.settings().read_json::<Settings>().await.unwrap();
+        assert_eq!(on_disk_settings, settings);
+
+        assert_default_token(&layout).await;
+        assert_marker(&layout, "v9.9.9").await;
+
+        // resources/ wiped
+        assert!(!layout.resources().exists());
+        // events/ recreated empty
+        assert!(layout.events_dir().exists());
+    }
+
+    #[tokio::test]
+    async fn wipes_resources_subtree() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        write_existing_keys(&layout).await;
+
+        // pre-create something under resources/config_instances/contents/
+        let stale = layout.config_instance_content().file("stale.json");
+        stale
+            .write_string("{}", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        assert!(stale.exists());
+
+        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+            .await
+            .unwrap();
+
+        assert!(!stale.exists());
+        assert!(!layout.resources().exists());
+    }
+
+    #[tokio::test]
+    async fn no_prior_state() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.1.0")
+            .await
+            .unwrap();
+
+        // device + settings + token + marker written; events dir created
+        assert!(layout.device().exists());
+        assert!(layout.settings().exists());
+        assert!(layout.auth().token().exists());
+        assert_marker(&layout, "v0.1.0").await;
+        assert!(layout.events_dir().exists());
+    }
+
+    #[tokio::test]
+    async fn overwrites_existing_marker() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        write_existing_keys(&layout).await;
+
+        // pre-write an old marker
+        let layout_root = layout.root();
+        layout_root.create_if_absent().await.unwrap();
+        layout
+            .agent_version()
+            .write_json(
+                &AgentVersion {
+                    version: "v0.0.1".to_string(),
+                },
+                WriteOptions::OVERWRITE_ATOMIC,
+            )
+            .await
+            .unwrap();
+
+        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.0.2")
+            .await
+            .unwrap();
+
+        assert_marker(&layout, "v0.0.2").await;
     }
 }
