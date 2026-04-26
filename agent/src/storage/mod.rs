@@ -13,7 +13,6 @@ pub mod releases;
 pub mod settings;
 pub mod setup;
 
-pub use self::agent_version::AgentVersion;
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{assert_activated, resolve_device_id, Device};

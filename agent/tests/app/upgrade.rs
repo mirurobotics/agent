@@ -9,7 +9,7 @@ use miru_agent::crypt::rsa;
 use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
-use miru_agent::storage::{self, AgentVersion, Layout};
+use miru_agent::storage::{self, Layout};
 
 // external crates
 use chrono::{Duration, Utc};
@@ -93,14 +93,7 @@ async fn ensure_is_noop_when_marker_matches() {
 
     // pre-write the marker with the same version we're about to call ensure
     // with; ensure() should make zero HTTP calls.
-    layout
-        .agent_version()
-        .write_json(
-            &AgentVersion {
-                version: "v1.0.0".to_string(),
-            },
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
+    storage::agent_version::write(&layout.agent_version(), "v1.0.0")
         .await
         .unwrap();
 
@@ -123,12 +116,10 @@ async fn ensure_rebootstraps_when_marker_missing() {
     ensure(&layout, mock.as_ref(), "v0.9.0").await.unwrap();
 
     // marker present, version stamped
-    let marker = layout
-        .agent_version()
-        .read_json::<AgentVersion>()
+    let marker = storage::agent_version::read(&layout.agent_version())
         .await
         .unwrap();
-    assert_eq!(marker.version, "v0.9.0");
+    assert_eq!(marker, Some("v0.9.0".to_string()));
 
     // keys preserved by content
     let (priv_after, pub_after) = read_keys(&layout).await;
@@ -151,26 +142,17 @@ async fn ensure_rebootstraps_when_marker_missing() {
 async fn ensure_rebootstraps_when_marker_version_differs() {
     let (layout, _dir) = prepare_layout("upgrade_old_marker", "dvc_3").await;
 
-    layout
-        .agent_version()
-        .write_json(
-            &AgentVersion {
-                version: "v0.0.1".to_string(),
-            },
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
+    storage::agent_version::write(&layout.agent_version(), "v0.0.1")
         .await
         .unwrap();
 
     let mock = make_mock_client(backend_device("dvc_3", "gamma"));
     ensure(&layout, mock.as_ref(), "v0.0.2").await.unwrap();
 
-    let marker = layout
-        .agent_version()
-        .read_json::<AgentVersion>()
+    let marker = storage::agent_version::read(&layout.agent_version())
         .await
         .unwrap();
-    assert_eq!(marker.version, "v0.0.2");
+    assert_eq!(marker, Some("v0.0.2".to_string()));
     assert_eq!(mock.num_update_device_calls(), 1);
 }
 
@@ -205,12 +187,10 @@ async fn ensure_retries_until_get_device_succeeds() {
     ensure(&layout, mock.as_ref(), "v1.2.3").await.unwrap();
 
     // marker now reflects the new version
-    let marker = layout
-        .agent_version()
-        .read_json::<AgentVersion>()
+    let marker = storage::agent_version::read(&layout.agent_version())
         .await
         .unwrap();
-    assert_eq!(marker.version, "v1.2.3");
+    assert_eq!(marker, Some("v1.2.3".to_string()));
 
     // GET /device was called at least 3 times
     assert!(mock.num_get_device_calls() >= 3);

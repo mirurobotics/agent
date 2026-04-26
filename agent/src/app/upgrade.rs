@@ -50,12 +50,12 @@ pub async fn ensure<HTTPClientT: ClientI>(
     // fast path: marker exists and matches running version
     let marker_file = layout.agent_version();
     if let Some(marker) = storage::agent_version::read(&marker_file).await? {
-        if marker.version == version {
+        if marker == version {
             return Ok(());
         }
         info!(
             "upgrade: on-disk marker version '{}' differs from running version '{}'; rebootstrapping",
-            marker.version, version
+            marker, version
         );
     } else {
         info!(

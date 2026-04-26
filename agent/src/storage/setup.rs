@@ -56,13 +56,7 @@ pub async fn reset(
     events_dir.create_if_absent().await?;
 
     // write the new marker last; its presence means "rebootstrap done"
-    storage::agent_version::write(
-        &layout.agent_version(),
-        &storage::AgentVersion {
-            version: agent_version.to_string(),
-        },
-    )
-    .await?;
+    storage::agent_version::write(&layout.agent_version(), agent_version).await?;
 
     Ok(())
 }

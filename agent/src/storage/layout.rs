@@ -39,7 +39,7 @@ impl Layout {
     }
 
     pub fn agent_version(&self) -> filesys::File {
-        self.root().file("agent_version.json")
+        self.root().file("agent_version")
     }
 
     fn config_instances(&self) -> filesys::Dir {

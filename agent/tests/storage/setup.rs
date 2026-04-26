@@ -2,7 +2,7 @@
 use miru_agent::authn;
 use miru_agent::filesys::{self, PathExt, WriteOptions};
 use miru_agent::models::Device;
-use miru_agent::storage::{self, AgentVersion, Layout, Settings};
+use miru_agent::storage::{self, Layout, Settings};
 
 pub mod bootstrap {
     use super::*;
@@ -351,12 +351,11 @@ pub mod reset {
     }
 
     async fn assert_marker(layout: &Layout, expected_version: &str) {
-        let marker = layout
-            .agent_version()
-            .read_json::<AgentVersion>()
+        let marker = storage::agent_version::read(&layout.agent_version())
             .await
+            .expect("marker read should succeed")
             .expect("marker should exist after reset");
-        assert_eq!(marker.version, expected_version);
+        assert_eq!(marker, expected_version);
     }
 
     async fn assert_default_token(layout: &Layout) {
@@ -453,14 +452,7 @@ pub mod reset {
         // pre-write an old marker
         let layout_root = layout.root();
         layout_root.create_if_absent().await.unwrap();
-        layout
-            .agent_version()
-            .write_json(
-                &AgentVersion {
-                    version: "v0.0.1".to_string(),
-                },
-                WriteOptions::OVERWRITE_ATOMIC,
-            )
+        storage::agent_version::write(&layout.agent_version(), "v0.0.1")
             .await
             .unwrap();
 
