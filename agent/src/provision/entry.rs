@@ -52,19 +52,19 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     result
 }
 
-const TOKEN_ENV_VAR: &str = "MIRU_ACTIVATION_TOKEN";
+const TOKEN_ENV_VAR: &str = "MIRU_PROVISIONING_TOKEN";
 
 pub fn read_token_from_env() -> Result<String, ProvisionErr> {
-    match env::var(TOKEN_ENV_VAR) {
-        Ok(token) => Ok(token),
-        Err(_) => {
-            error!("The {TOKEN_ENV_VAR} environment variable is not set");
-            Err(ProvisionErr::MissingEnvVarErr(MissingEnvVarErr {
-                name: TOKEN_ENV_VAR.to_string(),
-                trace: crate::trace!(),
-            }))
+    if let Ok(token) = env::var(TOKEN_ENV_VAR) {
+        if !token.is_empty() {
+            return Ok(token);
         }
     }
+    error!("The {TOKEN_ENV_VAR} environment variable is not set");
+    Err(ProvisionErr::MissingEnvVarErr(MissingEnvVarErr {
+        name: TOKEN_ENV_VAR.to_string(),
+        trace: crate::trace!(),
+    }))
 }
 
 async fn provision_with_backend<HTTPClientT: http::ClientI>(
@@ -115,21 +115,21 @@ mod tests {
         #[test]
         fn returns_token_when_set() {
             let _env_lock = lock_env();
-            env::set_var("MIRU_ACTIVATION_TOKEN", "test-token-123");
+            env::set_var("MIRU_PROVISIONING_TOKEN", "test-token-123");
             let result = read_token_from_env();
             assert_eq!(result.unwrap(), "test-token-123");
-            env::remove_var("MIRU_ACTIVATION_TOKEN");
+            env::remove_var("MIRU_PROVISIONING_TOKEN");
         }
 
         #[test]
         fn returns_error_when_not_set() {
             let _env_lock = lock_env();
-            env::remove_var("MIRU_ACTIVATION_TOKEN");
+            env::remove_var("MIRU_PROVISIONING_TOKEN");
             let result = read_token_from_env();
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(
-                matches!(err, ProvisionErr::MissingEnvVarErr(ref e) if e.name == "MIRU_ACTIVATION_TOKEN"),
+                matches!(err, ProvisionErr::MissingEnvVarErr(ref e) if e.name == "MIRU_PROVISIONING_TOKEN"),
                 "expected MissingEnvVarErr, got: {err:?}"
             );
         }

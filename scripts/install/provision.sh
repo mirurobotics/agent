@@ -3,7 +3,7 @@ set -e
 
 # Script: provision.sh
 # Jinja Template: provision.j2
-# Build Timestamp: 2026-04-24T16:50:03.002196
+# Build Timestamp: 2026-04-26T10:58:29.434286
 # Description: Provision a device & install the Miru Agent
 
 # DISPLAY #
@@ -261,7 +261,7 @@ response_body=$(echo "$response_body" | head -n -1)
 # Check if the request succeeded
 if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
     log "Successfully created activation token"
-    MIRU_ACTIVATION_TOKEN=$(echo "$response_body" | jq -r '.token')
+    MIRU_PROVISIONING_TOKEN=$(echo "$response_body" | jq -r '.token')
 else
     error "Activation token request failed (HTTP status $http_code)"
     error "Response body:"
@@ -371,13 +371,13 @@ if [ -n "$DEVICE_NAME" ]; then
     args="$args --device-name=$DEVICE_NAME"
 fi
 
-if [ -z "$MIRU_ACTIVATION_TOKEN" ]; then
-    fatal "The MIRU_ACTIVATION_TOKEN environment variable is not set"
+if [ -z "$MIRU_PROVISIONING_TOKEN" ]; then
+    fatal "The MIRU_PROVISIONING_TOKEN environment variable is not set"
 fi
 
 # Reset the /srv/miru directory to be owned by the miru user and group
 sudo chown -R miru:miru /srv/miru
 
 # Execute the provision flow
-sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --provision $args
+sudo -u miru -E env MIRU_PROVISIONING_TOKEN="$MIRU_PROVISIONING_TOKEN" /usr/sbin/miru-agent --provision $args
 exit 0

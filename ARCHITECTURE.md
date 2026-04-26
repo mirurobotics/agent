@@ -8,7 +8,7 @@ The agent is a Rust binary that runs on customer devices (robots). It solves one
 
 The binary has two mutually exclusive modes, selected at startup:
 
-- **Installer mode** (`--install`): activates a new device by reading an activation token from the environment, registering with the backend, and writing device identity and auth files to disk.
+- **Provision mode** (`--provision`): activates a new device by reading a provisioning token from the environment, registering with the backend, and writing device identity and auth files to disk.
 - **Agent runtime mode** (default): reads settings from disk, initializes shared state (AppState), starts background workers (MQTT subscriber, poller, token refresh), serves a local HTTP server, and waits for a shutdown signal.
 
 These modes do not share runtime state.
