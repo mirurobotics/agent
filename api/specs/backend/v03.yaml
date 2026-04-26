@@ -173,6 +173,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GitCommit'
+  /device:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Devices
+      summary: Get
+      operationId: getDevice
+      description: Retrieve the device record for the authenticated agent.
+      responses:
+        '200':
+          description: Successfully retrieved the device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
   /devices/{device_id}:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'

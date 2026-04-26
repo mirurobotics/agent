@@ -50,3 +50,9 @@ pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<D
         .with_token(params.token);
     super::client::fetch(client, request).await
 }
+
+pub async fn get(client: &impl ClientI, token: &str) -> Result<Device, HTTPErr> {
+    let url = format!("{}/device", client.base_url());
+    let request = request::Params::get(&url).with_token(token);
+    super::client::fetch(client, request).await
+}
