@@ -1,7 +1,7 @@
 #[derive(Debug, Default)]
 pub struct Args {
     pub display_version: bool,
-    pub install_args: Option<InstallArgs>,
+    pub provision_args: Option<ProvisionArgs>,
 }
 
 impl Args {
@@ -10,7 +10,7 @@ impl Args {
         for input in inputs.iter().skip(1) {
             match input.trim_start_matches('-') {
                 "version" => args.display_version = true,
-                "install" => args.install_args = Some(InstallArgs::parse(inputs)),
+                "provision" => args.provision_args = Some(ProvisionArgs::parse(inputs)),
                 _ => {}
             }
         }
@@ -19,13 +19,13 @@ impl Args {
 }
 
 #[derive(Debug, Default)]
-pub struct InstallArgs {
+pub struct ProvisionArgs {
     pub backend_host: Option<String>,
     pub mqtt_broker_host: Option<String>,
     pub device_name: Option<String>,
 }
 
-impl InstallArgs {
+impl ProvisionArgs {
     pub fn parse(inputs: &[String]) -> Self {
         let mut args = Self::default();
         for input in inputs.iter().skip(1) {

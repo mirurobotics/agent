@@ -16,7 +16,7 @@ pub struct MissingEnvVarErr {
 impl crate::errors::Error for MissingEnvVarErr {}
 
 #[derive(Debug, thiserror::Error)]
-pub enum InstallErr {
+pub enum ProvisionErr {
     #[error(transparent)]
     MissingEnvVarErr(MissingEnvVarErr),
     #[error(transparent)]
@@ -31,37 +31,37 @@ pub enum InstallErr {
     StorageErr(StorageErr),
 }
 
-impl From<authn::AuthnErr> for InstallErr {
+impl From<authn::AuthnErr> for ProvisionErr {
     fn from(e: authn::AuthnErr) -> Self {
         Self::AuthnErr(e)
     }
 }
 
-impl From<crypt::CryptErr> for InstallErr {
+impl From<crypt::CryptErr> for ProvisionErr {
     fn from(e: crypt::CryptErr) -> Self {
         Self::CryptErr(e)
     }
 }
 
-impl From<filesys::FileSysErr> for InstallErr {
+impl From<filesys::FileSysErr> for ProvisionErr {
     fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-impl From<http::HTTPErr> for InstallErr {
+impl From<http::HTTPErr> for ProvisionErr {
     fn from(e: http::HTTPErr) -> Self {
         Self::HTTPErr(e)
     }
 }
 
-impl From<StorageErr> for InstallErr {
+impl From<StorageErr> for ProvisionErr {
     fn from(e: StorageErr) -> Self {
         Self::StorageErr(e)
     }
 }
 
-crate::impl_error!(InstallErr {
+crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
     AuthnErr,
     CryptErr,
@@ -85,8 +85,8 @@ mod tests {
                     trace: crate::trace!(),
                 },
             );
-            let install_err = InstallErr::from(err);
-            assert!(matches!(install_err, InstallErr::AuthnErr(_)));
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::AuthnErr(_)));
         }
 
         #[test]
@@ -95,8 +95,8 @@ mod tests {
                 msg: "test".to_string(),
                 trace: crate::trace!(),
             });
-            let install_err = InstallErr::from(err);
-            assert!(matches!(install_err, InstallErr::CryptErr(_)));
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::CryptErr(_)));
         }
 
         #[test]
@@ -106,8 +106,8 @@ mod tests {
                     name: "test".to_string(),
                     trace: crate::trace!(),
                 });
-            let install_err = InstallErr::from(err);
-            assert!(matches!(install_err, InstallErr::FileSysErr(_)));
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::FileSysErr(_)));
         }
 
         #[test]
@@ -115,8 +115,8 @@ mod tests {
             let err = http::HTTPErr::MockErr(crate::http::errors::MockErr {
                 is_network_conn_err: false,
             });
-            let install_err = InstallErr::from(err);
-            assert!(matches!(install_err, InstallErr::HTTPErr(_)));
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::HTTPErr(_)));
         }
 
         #[test]
@@ -125,8 +125,8 @@ mod tests {
                 msg: "test".to_string(),
                 trace: crate::trace!(),
             });
-            let install_err = InstallErr::from(err);
-            assert!(matches!(install_err, InstallErr::StorageErr(_)));
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::StorageErr(_)));
         }
     }
 }

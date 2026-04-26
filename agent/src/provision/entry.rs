@@ -3,10 +3,10 @@ use std::env;
 
 // internal crates
 use crate::cli;
-use crate::crypt::{jwt, rsa};
+use crate::crypt::rsa;
 use crate::filesys::{self, Overwrite};
 use crate::http;
-use crate::installer::errors::*;
+use crate::provision::errors::*;
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;
@@ -15,13 +15,13 @@ use backend_api::models as backend_client;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
-pub async fn install<HTTPClientT: http::ClientI>(
+pub async fn provision<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &storage::Layout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
-) -> Result<backend_client::Device, InstallErr> {
+) -> Result<backend_client::Device, ProvisionErr> {
     let temp_dir = layout.temp_dir();
 
     let result = async {
@@ -32,7 +32,7 @@ pub async fn install<HTTPClientT: http::ClientI>(
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
 
         let device =
-            register_with_backend(http_client, &public_key_file, token, device_name).await?;
+            provision_with_backend(http_client, &public_key_file, token, device_name).await?;
         storage::setup::bootstrap(
             layout,
             &(&device).into(),
@@ -52,43 +52,41 @@ pub async fn install<HTTPClientT: http::ClientI>(
     result
 }
 
-const TOKEN_ENV_VAR: &str = "MIRU_ACTIVATION_TOKEN";
+const TOKEN_ENV_VAR: &str = "MIRU_PROVISIONING_TOKEN";
 
-pub fn read_token_from_env() -> Result<String, InstallErr> {
-    match env::var(TOKEN_ENV_VAR) {
-        Ok(token) => Ok(token),
-        Err(_) => {
-            error!("The {TOKEN_ENV_VAR} environment variable is not set");
-            Err(InstallErr::MissingEnvVarErr(MissingEnvVarErr {
-                name: TOKEN_ENV_VAR.to_string(),
-                trace: crate::trace!(),
-            }))
+pub fn read_token_from_env() -> Result<String, ProvisionErr> {
+    if let Ok(token) = env::var(TOKEN_ENV_VAR) {
+        if !token.is_empty() {
+            return Ok(token);
         }
     }
+    error!("The {TOKEN_ENV_VAR} environment variable is not set");
+    Err(ProvisionErr::MissingEnvVarErr(MissingEnvVarErr {
+        name: TOKEN_ENV_VAR.to_string(),
+        trace: crate::trace!(),
+    }))
 }
 
-async fn register_with_backend<HTTPClientT: http::ClientI>(
+async fn provision_with_backend<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     public_key_file: &filesys::File,
     token: &str,
     device_name: Option<String>,
-) -> Result<backend_client::Device, InstallErr> {
-    let device_id = jwt::extract_device_id(token)?;
+) -> Result<backend_client::Device, ProvisionErr> {
     let public_key_pem = public_key_file.read_string().await?;
-    let payload = backend_client::ActivateDeviceRequest {
+    let payload = backend_client::ProvisionDeviceRequest {
         public_key_pem,
+        agent_version: version::VERSION.to_string(),
         name: device_name,
-        agent_version: Some(version::VERSION.to_string()),
     };
-    let params = http::devices::ActivateParams {
-        id: &device_id,
+    let params = http::devices::ProvisionParams {
         payload: &payload,
         token,
     };
-    Ok(http::devices::activate(http_client, params).await?)
+    Ok(http::devices::provision(http_client, params).await?)
 }
 
-pub fn determine_settings(args: &cli::InstallArgs) -> settings::Settings {
+pub fn determine_settings(args: &cli::ProvisionArgs) -> settings::Settings {
     let mut settings = settings::Settings::default();
     if let Some(backend_host) = &args.backend_host {
         settings.backend.base_url = format!("{}/agent/v1", backend_host);
@@ -117,21 +115,35 @@ mod tests {
         #[test]
         fn returns_token_when_set() {
             let _env_lock = lock_env();
-            env::set_var("MIRU_ACTIVATION_TOKEN", "test-token-123");
+            env::set_var("MIRU_PROVISIONING_TOKEN", "test-token-123");
             let result = read_token_from_env();
             assert_eq!(result.unwrap(), "test-token-123");
-            env::remove_var("MIRU_ACTIVATION_TOKEN");
+            env::remove_var("MIRU_PROVISIONING_TOKEN");
         }
 
         #[test]
         fn returns_error_when_not_set() {
             let _env_lock = lock_env();
-            env::remove_var("MIRU_ACTIVATION_TOKEN");
+            env::remove_var("MIRU_PROVISIONING_TOKEN");
             let result = read_token_from_env();
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(
-                matches!(err, InstallErr::MissingEnvVarErr(ref e) if e.name == "MIRU_ACTIVATION_TOKEN"),
+                matches!(err, ProvisionErr::MissingEnvVarErr(ref e) if e.name == "MIRU_PROVISIONING_TOKEN"),
+                "expected MissingEnvVarErr, got: {err:?}"
+            );
+        }
+
+        #[test]
+        fn returns_error_when_empty() {
+            let _env_lock = lock_env();
+            env::set_var("MIRU_PROVISIONING_TOKEN", "");
+            let result = read_token_from_env();
+            env::remove_var("MIRU_PROVISIONING_TOKEN");
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, ProvisionErr::MissingEnvVarErr(ref e) if e.name == "MIRU_PROVISIONING_TOKEN"),
                 "expected MissingEnvVarErr, got: {err:?}"
             );
         }
@@ -142,7 +154,7 @@ mod tests {
 
         #[test]
         fn backend_host_appends_agent_v1_suffix() {
-            let args = cli::InstallArgs {
+            let args = cli::ProvisionArgs {
                 backend_host: Some("https://custom.example.com".to_string()),
                 ..Default::default()
             };
@@ -157,7 +169,7 @@ mod tests {
 
         #[test]
         fn mqtt_broker_host_override() {
-            let args = cli::InstallArgs {
+            let args = cli::ProvisionArgs {
                 mqtt_broker_host: Some("mqtt.custom.example.com".to_string()),
                 ..Default::default()
             };
@@ -169,7 +181,7 @@ mod tests {
 
         #[test]
         fn no_overrides_preserves_defaults() {
-            let args = cli::InstallArgs::default();
+            let args = cli::ProvisionArgs::default();
             let defaults = settings::Settings::default();
 
             let settings = determine_settings(&args);

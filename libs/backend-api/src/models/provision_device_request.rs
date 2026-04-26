@@ -9,25 +9,27 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
+/// ProvisionDeviceRequest : Provision a device using a provisioning token.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ActivateDeviceRequest {
+pub struct ProvisionDeviceRequest {
     /// The public key in PEM format.
     #[serde(rename = "public_key_pem")]
     pub public_key_pem: String,
+    /// The version of the agent the device is running.
+    #[serde(rename = "agent_version")]
+    pub agent_version: String,
     /// The name to assign to the device.
     #[serde(rename = "name", skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// The version of the agent the device is running.
-    #[serde(rename = "agent_version", skip_serializing_if = "Option::is_none")]
-    pub agent_version: Option<String>,
 }
 
-impl ActivateDeviceRequest {
-    pub fn new(public_key_pem: String) -> ActivateDeviceRequest {
-        ActivateDeviceRequest {
+impl ProvisionDeviceRequest {
+    /// Provision a device using a provisioning token.
+    pub fn new(public_key_pem: String, agent_version: String) -> ProvisionDeviceRequest {
+        ProvisionDeviceRequest {
             public_key_pem,
+            agent_version,
             name: None,
-            agent_version: None,
         }
     }
 }

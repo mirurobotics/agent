@@ -1,5 +1,3 @@
-pub mod activate_device_request;
-pub use self::activate_device_request::ActivateDeviceRequest;
 pub mod api_git_commit;
 pub use self::api_git_commit::ApiGitCommit;
 pub mod api_version;
@@ -60,6 +58,8 @@ pub mod ping;
 pub use self::ping::Ping;
 pub mod pong;
 pub use self::pong::Pong;
+pub mod provision_device_request;
+pub use self::provision_device_request::ProvisionDeviceRequest;
 pub mod release;
 pub use self::release::Release;
 pub mod sync_device;

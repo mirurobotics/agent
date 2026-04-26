@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::cli::{Args, InstallArgs};
+use miru_agent::cli::{Args, ProvisionArgs};
 
 fn to_inputs(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
@@ -9,11 +9,11 @@ mod args_parse {
     use super::*;
 
     #[test]
-    fn parses_version_and_install_with_install_args() {
+    fn parses_version_and_provision_with_provision_args() {
         let inputs = to_inputs(&[
             "miru-agent",
             "--version",
-            "install",
+            "provision",
             "--backend-host=https://backend.example.com",
             "--mqtt-broker-host=mqtt.example.com",
             "--device-name=robot-1",
@@ -22,22 +22,24 @@ mod args_parse {
         let args = Args::parse(&inputs);
 
         assert!(args.display_version);
-        assert!(args.install_args.is_some());
+        assert!(args.provision_args.is_some());
 
-        let install_args = args.install_args.expect("install args should be present");
+        let provision_args = args
+            .provision_args
+            .expect("provision args should be present");
         assert_eq!(
             Some("https://backend.example.com"),
-            install_args.backend_host.as_deref()
+            provision_args.backend_host.as_deref()
         );
         assert_eq!(
             Some("mqtt.example.com"),
-            install_args.mqtt_broker_host.as_deref()
+            provision_args.mqtt_broker_host.as_deref()
         );
-        assert_eq!(Some("robot-1"), install_args.device_name.as_deref());
+        assert_eq!(Some("robot-1"), provision_args.device_name.as_deref());
     }
 
     #[test]
-    fn ignores_installer_options_without_install_flag() {
+    fn ignores_provision_options_without_provision_flag() {
         let inputs = to_inputs(&[
             "miru-agent",
             "--backend-host=https://backend.example.com",
@@ -47,7 +49,7 @@ mod args_parse {
         let args = Args::parse(&inputs);
 
         assert!(!args.display_version);
-        assert!(args.install_args.is_none());
+        assert!(args.provision_args.is_none());
     }
 
     #[test]
@@ -56,11 +58,11 @@ mod args_parse {
         let args = Args::parse(&inputs);
 
         assert!(!args.display_version);
-        assert!(args.install_args.is_none());
+        assert!(args.provision_args.is_none());
     }
 }
 
-mod install_args_parse {
+mod provision_args_parse {
     use super::*;
 
     #[test]
@@ -72,7 +74,7 @@ mod install_args_parse {
             "--device-name=robot-1",
         ]);
 
-        let args = InstallArgs::parse(&inputs);
+        let args = ProvisionArgs::parse(&inputs);
 
         assert_eq!(
             Some("https://backend.example.com"),
@@ -89,10 +91,10 @@ mod install_args_parse {
             "--unknown=value",
             "--backend-host=https://backend.example.com",
             "--device-name",
-            "install",
+            "provision",
         ]);
 
-        let args = InstallArgs::parse(&inputs);
+        let args = ProvisionArgs::parse(&inputs);
 
         assert_eq!(
             Some("https://backend.example.com"),
@@ -110,7 +112,7 @@ mod install_args_parse {
             "--backend-host=https://second.example.com",
         ]);
 
-        let args = InstallArgs::parse(&inputs);
+        let args = ProvisionArgs::parse(&inputs);
 
         assert_eq!(
             Some("https://second.example.com"),
@@ -121,7 +123,7 @@ mod install_args_parse {
     #[test]
     fn empty_values_are_treated_as_none() {
         let inputs = to_inputs(&["miru-agent", "--device-name="]);
-        let args = InstallArgs::parse(&inputs);
+        let args = ProvisionArgs::parse(&inputs);
 
         assert!(args.device_name.is_none());
     }

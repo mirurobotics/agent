@@ -1,15 +1,14 @@
 // internal crates
 use crate::http::{errors::HTTPErr, request, ClientI};
 use backend_api::models::{
-    ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
+    Device, IssueDeviceTokenRequest, ProvisionDeviceRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };
 
 // ================================ PARAM STRUCTS ================================== //
 
-pub struct ActivateParams<'a> {
-    pub id: &'a str,
-    pub payload: &'a ActivateDeviceRequest,
+pub struct ProvisionParams<'a> {
+    pub payload: &'a ProvisionDeviceRequest,
     pub token: &'a str,
 }
 
@@ -26,11 +25,11 @@ pub struct UpdateParams<'a> {
 
 // ================================ FREE FUNCTIONS ================================= //
 
-pub async fn activate(
+pub async fn provision(
     client: &impl ClientI,
-    params: ActivateParams<'_>,
+    params: ProvisionParams<'_>,
 ) -> Result<Device, HTTPErr> {
-    let url = format!("{}/devices/{}/activate", client.base_url(), params.id);
+    let url = format!("{}/devices/provision", client.base_url());
     let request = request::Params::post(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
     super::client::fetch(client, request).await

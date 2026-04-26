@@ -1,10 +1,10 @@
 // internal crates
 use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
 use backend_api::models::{
-    ActivateDeviceRequest, Device, IssueDeviceTokenRequest, TokenResponse,
+    Device, IssueDeviceTokenRequest, ProvisionDeviceRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
 };
-use miru_agent::http::devices::{self, ActivateParams, IssueTokenParams, UpdateParams};
+use miru_agent::http::devices::{self, IssueTokenParams, ProvisionParams, UpdateParams};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::HTTPErr;
 
@@ -14,23 +14,23 @@ fn mock_err() -> HTTPErr {
     })
 }
 
-pub mod activate {
+pub mod provision {
     use super::*;
 
     #[tokio::test]
     async fn success() {
         let mock = MockClient::default();
 
-        let payload = ActivateDeviceRequest {
+        let payload = ProvisionDeviceRequest {
             public_key_pem: "test-pem".to_string(),
-            ..ActivateDeviceRequest::default()
+            agent_version: "v0.0.0".to_string(),
+            ..ProvisionDeviceRequest::default()
         };
         let expected_body = serde_json::to_string(&payload).unwrap();
 
-        let result = devices::activate(
+        let result = devices::provision(
             &mock,
-            ActivateParams {
-                id: "dvc_1",
+            ProvisionParams {
                 payload: &payload,
                 token: "test-token",
             },
@@ -39,14 +39,14 @@ pub mod activate {
         .unwrap();
 
         assert_eq!(result, Device::default());
-        assert_eq!(mock.call_count(Call::ActivateDevice), 1);
+        assert_eq!(mock.call_count(Call::ProvisionDevice), 1);
         assert_eq!(
             mock.requests(),
             vec![CapturedRequest {
-                call: Call::ActivateDevice,
+                call: Call::ProvisionDevice,
                 method: reqwest::Method::POST,
-                path: "/devices/dvc_1/activate".into(),
-                url: "http://mock/devices/dvc_1/activate".into(),
+                path: "/devices/provision".into(),
+                url: "http://mock/devices/provision".into(),
                 query: vec![],
                 body: Some(expected_body),
                 token: Some("test-token".into()),
@@ -57,15 +57,14 @@ pub mod activate {
     #[tokio::test]
     async fn error_propagates() {
         let mock = MockClient {
-            activate_device_fn: Box::new(|| Err(mock_err())),
+            provision_device_fn: Box::new(|| Err(mock_err())),
             ..MockClient::default()
         };
 
-        let payload = ActivateDeviceRequest::default();
-        let result = devices::activate(
+        let payload = ProvisionDeviceRequest::default();
+        let result = devices::provision(
             &mock,
-            ActivateParams {
-                id: "dvc_1",
+            ProvisionParams {
                 payload: &payload,
                 token: "test-token",
             },
