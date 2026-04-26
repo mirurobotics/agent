@@ -2,6 +2,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
+pub mod agent_version;
 pub mod config_instances;
 pub mod deployments;
 pub mod device;
@@ -12,9 +13,10 @@ pub mod releases;
 pub mod settings;
 pub mod setup;
 
+pub use self::agent_version::AgentVersion;
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
-pub use self::device::{assert_activated, Device};
+pub use self::device::{assert_activated, resolve_device_id, Device};
 pub use self::errors::{DeviceNotActivatedErr, StorageErr};
 pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;

@@ -33,6 +33,25 @@ pub struct PruneCacheErrs {
 impl crate::errors::Error for PruneCacheErrs {}
 
 #[derive(Debug, thiserror::Error)]
+pub struct ResolveDeviceIDErr {
+    pub device_file_err: Box<filesys::FileSysErr>,
+    pub jwt_err: Box<crypt::CryptErr>,
+    pub trace: Box<Trace>,
+}
+
+impl std::fmt::Display for ResolveDeviceIDErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "unable to determine device id from the device file or the token on file: device file error: {}, jwt error: {}",
+            self.device_file_err, self.jwt_err
+        )
+    }
+}
+
+impl crate::errors::Error for ResolveDeviceIDErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum StorageErr {
     #[error(transparent)]
     DeviceNotActivatedErr(DeviceNotActivatedErr),
@@ -46,6 +65,8 @@ pub enum StorageErr {
     FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
     JoinHandleErr(JoinHandleErr),
+    #[error(transparent)]
+    ResolveDeviceIDErr(Box<ResolveDeviceIDErr>),
 }
 
 impl From<cache::CacheErr> for StorageErr {
@@ -73,4 +94,5 @@ crate::impl_error!(StorageErr {
     CryptErr,
     FileSysErr,
     JoinHandleErr,
+    ResolveDeviceIDErr,
 });
