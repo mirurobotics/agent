@@ -133,6 +133,20 @@ mod tests {
                 "expected MissingEnvVarErr, got: {err:?}"
             );
         }
+
+        #[test]
+        fn returns_error_when_empty() {
+            let _env_lock = lock_env();
+            env::set_var("MIRU_PROVISIONING_TOKEN", "");
+            let result = read_token_from_env();
+            env::remove_var("MIRU_PROVISIONING_TOKEN");
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, ProvisionErr::MissingEnvVarErr(ref e) if e.name == "MIRU_PROVISIONING_TOKEN"),
+                "expected MissingEnvVarErr, got: {err:?}"
+            );
+        }
     }
 
     mod determine_settings {

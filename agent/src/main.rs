@@ -53,7 +53,8 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Devic
     let layout = storage::Layout::default();
     let token = provision::read_token_from_env()?;
 
-    let result = provision::provision(&http_client, &layout, &settings, &token, args.device_name).await;
+    let result =
+        provision::provision(&http_client, &layout, &settings, &token, args.device_name).await;
 
     drop(_guard);
     if let Err(e) = tmp_dir.delete().await {
