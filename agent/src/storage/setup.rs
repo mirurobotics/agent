@@ -63,13 +63,16 @@ pub async fn reset(
 
 /// Installer entry point. Moves the freshly-generated RSA keypair from the
 /// installer's temp directory into `auth/` and then delegates to `reset` to
-/// write the rest of the persistent state, including the marker.
+/// write the rest of the persistent state, including the marker. The caller
+/// supplies the running agent's version string explicitly; this is the value
+/// stamped into the marker file.
 pub async fn bootstrap(
     layout: &Layout,
     device: &models::Device,
     settings: &Settings,
     private_key_file: &filesys::File,
     public_key_file: &filesys::File,
+    version: &str,
 ) -> Result<(), StorageErr> {
     // create the auth directory
     let auth_dir = layout.auth();
@@ -84,5 +87,5 @@ pub async fn bootstrap(
         .await?;
 
     // delegate to the shared wipe-and-write path
-    reset(layout, device, settings, &device.agent_version).await
+    reset(layout, device, settings, version).await
 }

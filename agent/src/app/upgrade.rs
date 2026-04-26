@@ -90,8 +90,7 @@ pub async fn ensure<HTTPClientT: ClientI>(
     .await?;
 
     // build the on-disk Device with the running agent version stamped in
-    let mut device_model: models::Device = (&device).into();
-    device_model.agent_version = version.to_string();
+    let device_model: models::Device = (&device).into();
 
     // wipe + rewrite all stateful files (also writes the marker)
     let settings = Settings::default();

@@ -39,6 +39,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
             settings,
             &private_key_file,
             &public_key_file,
+            version::VERSION,
         )
         .await?;
         Ok(device)
