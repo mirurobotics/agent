@@ -6,18 +6,13 @@ use std::sync::Arc;
 use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
-use crate::crypt::jwt;
 use crate::deploy::{apply, fsm};
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
-use crate::models;
-use crate::server::{self, errors::MissingDeviceIDErr};
+use crate::server;
 use crate::storage;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
-use crate::trace;
-
-pub type DeviceID = String;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -31,7 +26,6 @@ pub struct AppState {
 
 impl AppState {
     pub async fn init(
-        agent_version: String,
         layout: &storage::Layout,
         capacities: storage::Capacities,
         http_client: Arc<http::Client>,
@@ -45,8 +39,8 @@ impl AppState {
         let token_file =
             TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
 
-        // get the device id
-        let device_id = Self::init_device_id(layout, &token_file).await?;
+        // get the device id (shared with the upgrade gate)
+        let device_id = storage::resolve_device_id(layout).await?;
 
         // initialize storage
         let (stor, storage_handle) =
@@ -77,7 +71,6 @@ impl AppState {
                 deploy_opts: apply::DeployOpts {
                     retry_policy: dpl_retry_policy,
                 },
-                agent_version,
                 backoff: cooldown::Backoff {
                     base_secs: 1,
                     growth_factor: 2,
@@ -108,36 +101,6 @@ impl AppState {
             },
             shutdown_handle,
         ))
-    }
-
-    async fn init_device_id(
-        layout: &storage::Layout,
-        token_file: &TokenFile,
-    ) -> Result<DeviceID, server::ServerErr> {
-        // attempt to get the device id from the agent file
-        let device_file_err = match layout.device().read_json::<models::Device>().await {
-            Ok(device) => {
-                return Ok(device.id.clone());
-            }
-            Err(e) => e,
-        };
-
-        // attempt to get the device id from the existing token on file
-        let token = token_file.read().await;
-        let device_id = match jwt::extract_device_id(&token.token) {
-            Ok(device_id) => device_id,
-            Err(e) => {
-                return Err(server::ServerErr::MissingDeviceIDErr(Box::new(
-                    MissingDeviceIDErr {
-                        device_file_err,
-                        jwt_err: e,
-                        trace: trace!(),
-                    },
-                )));
-            }
-        };
-
-        Ok(device_id)
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
