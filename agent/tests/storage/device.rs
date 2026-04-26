@@ -70,7 +70,7 @@ pub mod assert_activated {
 pub mod resolve_device_id {
     use super::*;
 
-    fn jwt_with_sub(device_id: &str) -> String {
+    fn new_jwt(device_id: &str) -> String {
         let payload = serde_json::json!({
             "iss": "miru",
             "aud": "device",
@@ -114,7 +114,7 @@ pub mod resolve_device_id {
         let auth = layout.auth();
         auth.root.create_if_absent().await.unwrap();
         let token = Token {
-            token: jwt_with_sub("dvc_from_jwt"),
+            token: new_jwt("dvc_from_jwt"),
             expires_at: Utc::now() + Duration::minutes(5),
         };
         auth.token()
