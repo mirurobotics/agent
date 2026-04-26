@@ -69,7 +69,6 @@ pub mod success {
             id: "dev-42".to_string(),
             session_id: "sess-99".to_string(),
             name: "test-robot".to_string(),
-            agent_version: "1.2.3".to_string(),
             activated: true,
             status: DeviceStatus::Online,
             last_synced_at: DateTime::<Utc>::UNIX_EPOCH,

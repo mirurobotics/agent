@@ -74,6 +74,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap_err();
@@ -97,6 +98,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap_err();
@@ -119,12 +121,19 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();
 
         // validate the storage
         validate_storage(&layout).await;
+
+        // marker file records the version passed to bootstrap
+        let marker = storage::agent_version::read(&layout.agent_version())
+            .await
+            .expect("marker read should succeed");
+        assert_eq!(marker.as_deref(), Some("v0.0.0"));
     }
 
     #[tokio::test]
@@ -151,6 +160,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();
@@ -180,6 +190,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();
@@ -205,6 +216,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();
@@ -230,6 +242,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();
@@ -264,6 +277,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();
@@ -301,6 +315,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
+            "v0.0.0",
         )
         .await
         .unwrap();

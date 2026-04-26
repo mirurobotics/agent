@@ -131,7 +131,6 @@ async fn ensure_rebootstraps_when_marker_missing() {
     let on_disk_device = layout.device().read_json::<Device>().await.unwrap();
     assert_eq!(on_disk_device.id, "dvc_2");
     assert_eq!(on_disk_device.name, "beta");
-    assert_eq!(on_disk_device.agent_version, "v0.9.0");
 
     // backend was told the new version exactly once
     assert_eq!(mock.num_update_device_calls(), 1);
