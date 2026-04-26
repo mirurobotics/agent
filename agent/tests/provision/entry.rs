@@ -4,8 +4,7 @@ use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::HTTPErr;
-use miru_agent::provision::entry;
-use miru_agent::provision::ProvisionErr;
+use miru_agent::provision::{self, errors::*};
 use miru_agent::storage::{Layout, Settings};
 
 // external crates
@@ -56,7 +55,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let device = entry::provision(
+        let device = provision::provision(
             &mock,
             &layout,
             &settings,
@@ -117,7 +116,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let result = entry::provision(&mock, &layout, &settings, &token, None).await;
+        let result = provision::provision(&mock, &layout, &settings, &token, None).await;
 
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
 
@@ -150,7 +149,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "first"))),
             ..MockClient::default()
         };
-        entry::provision(&mock1, &layout, &settings, &token, Some("first".into()))
+        provision::provision(&mock1, &layout, &settings, &token, Some("first".into()))
             .await
             .unwrap();
 
@@ -165,7 +164,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "second"))),
             ..MockClient::default()
         };
-        entry::provision(&mock2, &layout, &settings, &token, Some("second".into()))
+        provision::provision(&mock2, &layout, &settings, &token, Some("second".into()))
             .await
             .unwrap();
 
@@ -201,7 +200,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        entry::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+        provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
             .await
             .unwrap();
 
@@ -221,7 +220,7 @@ pub mod provision_fn {
             }),
             ..MockClient::default()
         };
-        let result = entry::provision(&mock_fail, &layout, &settings, &token, None).await;
+        let result = provision::provision(&mock_fail, &layout, &settings, &token, None).await;
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
 
         // every captured blob is byte-identical
