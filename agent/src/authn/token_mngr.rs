@@ -2,21 +2,16 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::authn::{errors::*, token, token::Token};
-use crate::crypt::{base64, rsa};
+use crate::authn::{errors::*, issue, token, token::Token};
 use crate::filesys::{cached_file::SingleThreadCachedFile, file::File, path::PathExt};
-use crate::http::{self, devices};
+use crate::http;
 use crate::trace;
-use backend_api::models::{IssueDeviceClaims, IssueDeviceTokenRequest};
 
 // external crates
-use chrono::{DateTime, Duration, Utc};
-use serde::Serialize;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use uuid::Uuid;
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -28,13 +23,6 @@ macro_rules! dispatch {
 }
 
 pub type TokenFile = SingleThreadCachedFile<Token, token::Updates>;
-
-#[derive(Serialize)]
-struct IssueTokenClaim {
-    pub device_id: String,
-    pub nonce: String,
-    pub expiration: i64,
-}
 
 // =================================== TRAIT ======================================= //
 #[allow(async_fn_in_trait)]
@@ -85,68 +73,12 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
     }
 
     async fn issue_token(&self) -> Result<Token, AuthnErr> {
-        // prepare the token request
-        let payload = self.prepare_issue_token_request().await?;
-
-        // send the token request
-        let resp = devices::issue_token(
+        issue::issue_token(
             self.http_client.as_ref(),
-            devices::IssueTokenParams {
-                id: &self.device_id,
-                payload: &payload,
-            },
+            &self.private_key_file,
+            &self.device_id,
         )
-        .await?;
-
-        // format the response
-        let expires_at = resp.expires_at.parse::<DateTime<Utc>>().map_err(|e| {
-            AuthnErr::TimestampConversionErr(TimestampConversionErr {
-                msg: format!(
-                    "failed to parse date time '{}' from string: {}",
-                    resp.expires_at, e
-                ),
-                trace: trace!(),
-            })
-        })?;
-        Ok(Token {
-            token: resp.token,
-            expires_at,
-        })
-    }
-
-    async fn prepare_issue_token_request(&self) -> Result<IssueDeviceTokenRequest, AuthnErr> {
-        // prepare the claims
-        let nonce = Uuid::new_v4().to_string();
-        let expiration = Utc::now() + Duration::minutes(2);
-        let claims = IssueTokenClaim {
-            device_id: self.device_id.to_string(),
-            nonce: nonce.clone(),
-            expiration: expiration.timestamp(),
-        };
-
-        // serialize the claims into a JSON byte vector
-        let claims_bytes = serde_json::to_vec(&claims).map_err(|e| {
-            AuthnErr::SerdeErr(SerdeErr {
-                source: e,
-                trace: trace!(),
-            })
-        })?;
-
-        // sign the claims
-        let signature_bytes = rsa::sign(&self.private_key_file, &claims_bytes).await?;
-        let signature = base64::encode_bytes_standard(&signature_bytes);
-
-        // convert it to the http client format
-        let claims = IssueDeviceClaims {
-            device_id: self.device_id.to_string(),
-            nonce,
-            expiration: expiration.to_rfc3339(),
-        };
-
-        Ok(IssueDeviceTokenRequest {
-            claims: Box::new(claims),
-            signature,
-        })
+        .await
     }
 }
 
