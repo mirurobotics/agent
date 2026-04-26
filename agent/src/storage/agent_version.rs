@@ -1,12 +1,3 @@
-//! Marker file written to `/var/lib/miru/agent_version` recording the agent
-//! version of the binary that last successfully bootstrapped the on-disk
-//! state. Read once at boot and written once on rebootstrap.
-//!
-//! Plain UTF-8 text — one line, the version string. Plain text rather than
-//! JSON because the marker carries a single field and the wipe-and-rebootstrap
-//! flow exists precisely to tolerate schema churn elsewhere; this is the one
-//! file where having no schema is the point.
-
 // internal crates
 use crate::filesys::{self, PathExt, WriteOptions};
 use crate::storage::errors::StorageErr;

@@ -8,15 +8,6 @@ use crate::storage::{self, errors::*, layout::Layout, settings::Settings};
 /// device's RSA keypair under `auth/` is intentionally NOT touched here —
 /// the keypair is the device's identity at the backend, so losing it would
 /// orphan the device.
-///
-/// This is the shared body used by both `bootstrap` (the installer entry
-/// point that moves freshly-generated keys into place before calling this)
-/// and `app::upgrade::ensure` (the boot-time rebootstrap path that reuses
-/// the existing keys).
-///
-/// The marker file at `Layout::agent_version()` is written last so that a
-/// crash mid-reset leaves no marker, which causes the next boot to re-enter
-/// the rebootstrap loop and converge.
 pub async fn reset(
     layout: &Layout,
     device: &models::Device,
@@ -55,17 +46,15 @@ pub async fn reset(
     events_dir.delete().await?;
     events_dir.create_if_absent().await?;
 
-    // write the new marker last; its presence means "rebootstrap done"
+    // write the new marker last so that when resetting storage for the agent upgrade,
+    // the marker represents a complete bootstrap.
     storage::agent_version::write(&layout.agent_version(), agent_version).await?;
 
     Ok(())
 }
 
-/// Installer entry point. Moves the freshly-generated RSA keypair from the
-/// installer's temp directory into `auth/` and then delegates to `reset` to
-/// write the rest of the persistent state, including the marker. The caller
-/// supplies the running agent's version string explicitly; this is the value
-/// stamped into the marker file.
+/// Initialized the file system state with the given parameters. The storage state is
+/// reset if already has existing state.
 pub async fn bootstrap(
     layout: &Layout,
     device: &models::Device,
