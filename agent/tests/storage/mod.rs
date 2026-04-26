@@ -1,3 +1,4 @@
+pub mod agent_version;
 pub mod caches;
 pub mod deployments;
 pub mod device;
