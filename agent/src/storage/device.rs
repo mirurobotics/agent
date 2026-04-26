@@ -29,12 +29,7 @@ pub async fn assert_activated(device_file: &filesys::File) -> Result<(), Storage
     Ok(())
 }
 
-/// Recover the device id from on-disk state without requiring the device file
-/// to be parseable. Falls back to extracting the device id from the JWT in
-/// `auth/token.json` if `device.json` is missing or corrupt.
-///
-/// Returns `ResolveDeviceIDErr` when neither source yields a device id —
-/// typically because the agent was never installed.
+/// Resolve the device id from the on-disk state.
 pub async fn resolve_device_id(layout: &Layout) -> Result<String, StorageErr> {
     // attempt to get the device id from the device file
     let device_file_err = match layout.device().read_json::<models::Device>().await {
@@ -43,10 +38,8 @@ pub async fn resolve_device_id(layout: &Layout) -> Result<String, StorageErr> {
     };
 
     // attempt to get the device id from the existing token on file
-    let auth = layout.auth();
-    let token_file_path = auth.token();
     let token_file =
-        TokenFile::new_with_default(token_file_path, crate::authn::Token::default()).await?;
+        TokenFile::new_with_default(layout.auth().token(), crate::authn::Token::default()).await?;
     let token = token_file.read().await;
     let jwt_err = match jwt::extract_device_id(&token.token) {
         Ok(device_id) => return Ok(device_id),
