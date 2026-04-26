@@ -2,6 +2,7 @@
 use std::time::Duration;
 
 // internal crates
+use crate::app::errors::UpgradeErr;
 use crate::authn;
 use crate::cooldown;
 use crate::filesys::PathExt;
@@ -12,37 +13,11 @@ use crate::storage::{self, Layout, Settings};
 // external crates
 use tracing::{info, warn};
 
-#[derive(Debug, thiserror::Error)]
-pub enum UpgradeErr {
-    #[error(transparent)]
-    StorageErr(#[from] storage::StorageErr),
-    #[error(transparent)]
-    HTTPErr(#[from] http::HTTPErr),
-    #[error(transparent)]
-    AuthnErr(#[from] authn::AuthnErr),
-    #[error(transparent)]
-    FileSysErr(#[from] crate::filesys::FileSysErr),
-}
-
-/// Idempotent upgrade gate. Called at boot before `assert_activated` to
-/// reconcile the on-disk schema with the running binary's compile-time
-/// `version::VERSION`. If the marker file at `Layout::agent_version()`
-/// matches `version`, this is a no-op. Otherwise this rebootstraps the
-/// agent's persistent state in place: it re-fetches the `Device` record
-/// from the backend (using a JWT minted from the on-disk private key),
-/// rewrites `device.json`, `settings.json`, and `auth/token.json` from
-/// compile-time defaults plus the backend response, wipes
-/// `resources/` and `events/`, PATCHes the backend with the new agent
-/// version, and finally writes the marker.
-///
-/// The keypair under `auth/` is never touched — it is the device's
-/// identity at the backend and losing it would orphan the device.
-///
-/// Network failures retry forever using exponential backoff. A
-/// rebootstrap that fails fast would leave the agent in a half-wiped
-/// state on the next boot; blocking until the backend is reachable is
-/// the safer choice.
-pub async fn ensure<HTTPClientT: ClientI>(
+/// Reconcile on-disk state with the running version. No-op if the marker
+/// matches; otherwise wipes per-version state and rebootstraps from the
+/// backend. Blocks indefinitely on network failure to avoid leaving a
+/// half-wiped device.
+pub async fn reconcile<HTTPClientT: ClientI>(
     layout: &Layout,
     http_client: &HTTPClientT,
     version: &str,
@@ -64,10 +39,7 @@ pub async fn ensure<HTTPClientT: ClientI>(
         );
     }
 
-    // resolve the device id from the on-disk state. If the device file is
-    // missing or corrupt, fall back to the JWT in the on-disk token. If
-    // both fail the agent has never been installed and cannot recover —
-    // surface that error so the operator can run `miru-agent install`.
+    // device id (with fallback to the on-disk JWT — see resolve_device_id)
     let device_id = storage::resolve_device_id(layout).await?;
 
     let auth_dir = layout.auth();
@@ -96,12 +68,9 @@ pub async fn ensure<HTTPClientT: ClientI>(
     let settings = Settings::default();
     storage::setup::reset(layout, &device_model, &settings, version).await?;
 
-    // tell the backend about the new agent version (forever-retry on
-    // network errors). The marker is already on disk, so a crash here will
-    // re-enter `ensure` next boot — the marker check at the top of this
-    // function will pass and we'll skip the rebootstrap. The PATCH must
-    // therefore retry inside `ensure` so the backend always learns the new
-    // version before we let the agent boot fully.
+    // PATCH after the marker is on disk: a crash here re-enters next boot,
+    // sees the matching marker, and skips the rebootstrap — so the PATCH must
+    // succeed within this call or the backend never learns the new version.
     retry_forever(&backoff, "PATCH /devices/{id}", || async {
         let token = authn::issue_token(http_client, &private_key_file, &device_id).await?;
         http::devices::update(

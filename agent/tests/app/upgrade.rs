@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
 use backend_api::models as backend_client;
-use miru_agent::app::upgrade::{ensure, UpgradeErr};
+use miru_agent::app::upgrade::reconcile;
+use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
@@ -20,7 +21,7 @@ const PLACEHOLDER_PUBLIC_KEY: &str = "PLACEHOLDER_PUBLIC_KEY";
 
 /// Build a Layout backed by a temp dir, generate a real RSA keypair under
 /// `auth/`, and pre-populate `device.json` with a known device id so that
-/// `resolve_device_id` and the JWT-signing path inside `ensure` both work
+/// `resolve_device_id` and the JWT-signing path inside `reconcile` both work
 /// without contacting a real backend.
 async fn prepare_layout(name: &str, device_id: &str) -> (Layout, filesys::Dir) {
     let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
@@ -88,17 +89,17 @@ async fn read_keys(layout: &Layout) -> (String, String) {
 // ============================ TESTS ============================ //
 
 #[tokio::test]
-async fn ensure_is_noop_when_marker_matches() {
+async fn reconcile_is_noop_when_marker_matches() {
     let (layout, _dir) = prepare_layout("upgrade_noop", "dvc_1").await;
 
-    // pre-write the marker with the same version we're about to call ensure
-    // with; ensure() should make zero HTTP calls.
+    // pre-write the marker with the same version we're about to call reconcile
+    // with; reconcile() should make zero HTTP calls.
     storage::agent_version::write(&layout.agent_version(), "v1.0.0")
         .await
         .unwrap();
 
     let mock = make_mock_client(backend_device("dvc_1", "alpha"));
-    ensure(&layout, mock.as_ref(), "v1.0.0").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v1.0.0").await.unwrap();
 
     assert_eq!(mock.num_get_device_calls(), 0);
     assert_eq!(mock.num_update_device_calls(), 0);
@@ -106,14 +107,14 @@ async fn ensure_is_noop_when_marker_matches() {
 }
 
 #[tokio::test]
-async fn ensure_rebootstraps_when_marker_missing() {
+async fn reconcile_rebootstraps_when_marker_missing() {
     let (layout, _dir) = prepare_layout("upgrade_missing_marker", "dvc_2").await;
 
     // remember the keys before so we can confirm they survive
     let (priv_before, pub_before) = read_keys(&layout).await;
 
     let mock = make_mock_client(backend_device("dvc_2", "beta"));
-    ensure(&layout, mock.as_ref(), "v0.9.0").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v0.9.0").await.unwrap();
 
     // marker present, version stamped
     let marker = storage::agent_version::read(&layout.agent_version())
@@ -138,7 +139,7 @@ async fn ensure_rebootstraps_when_marker_missing() {
 }
 
 #[tokio::test]
-async fn ensure_rebootstraps_when_marker_version_differs() {
+async fn reconcile_rebootstraps_when_marker_version_differs() {
     let (layout, _dir) = prepare_layout("upgrade_old_marker", "dvc_3").await;
 
     storage::agent_version::write(&layout.agent_version(), "v0.0.1")
@@ -146,7 +147,7 @@ async fn ensure_rebootstraps_when_marker_version_differs() {
         .unwrap();
 
     let mock = make_mock_client(backend_device("dvc_3", "gamma"));
-    ensure(&layout, mock.as_ref(), "v0.0.2").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v0.0.2").await.unwrap();
 
     let marker = storage::agent_version::read(&layout.agent_version())
         .await
@@ -156,7 +157,7 @@ async fn ensure_rebootstraps_when_marker_version_differs() {
 }
 
 #[tokio::test]
-async fn ensure_retries_until_get_device_succeeds() {
+async fn reconcile_retries_until_get_device_succeeds() {
     let (layout, _dir) = prepare_layout("upgrade_retry", "dvc_4").await;
 
     let device = backend_device("dvc_4", "delta");
@@ -183,7 +184,7 @@ async fn ensure_retries_until_get_device_succeeds() {
     // at max_secs, so if the test's retry logic accidentally overshoots
     // we'd hang. We rely on the real backoff (base 1s, max 12h) — that
     // means each retry waits 1s, 2s, ... so this test ends in ~3s.
-    ensure(&layout, mock.as_ref(), "v1.2.3").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v1.2.3").await.unwrap();
 
     // marker now reflects the new version
     let marker = storage::agent_version::read(&layout.agent_version())
@@ -197,7 +198,7 @@ async fn ensure_retries_until_get_device_succeeds() {
 }
 
 #[tokio::test]
-async fn ensure_returns_uninstalled_err_when_no_device_id_resolvable() {
+async fn reconcile_returns_uninstalled_err_when_no_device_id_resolvable() {
     // empty layout: no device.json, no token.json
     let dir = filesys::Dir::create_temp_dir("upgrade_no_install")
         .await
@@ -205,7 +206,9 @@ async fn ensure_returns_uninstalled_err_when_no_device_id_resolvable() {
     let layout = Layout::new(dir);
 
     let mock = make_mock_client(backend_device("dvc_5", "epsilon"));
-    let err = ensure(&layout, mock.as_ref(), "v1.0.0").await.unwrap_err();
+    let err = reconcile(&layout, mock.as_ref(), "v1.0.0")
+        .await
+        .unwrap_err();
 
     match err {
         UpgradeErr::StorageErr(storage::StorageErr::ResolveDeviceIDErr(_)) => {}

@@ -26,7 +26,7 @@ struct IssueTokenClaim {
 ///
 /// This free function is the shared core used by both
 /// `SingleThreadTokenManager::issue_token` (the long-running token refresh
-/// path inside the agent) and `app::upgrade::ensure` (the boot-time
+/// path inside the agent) and `app::upgrade::reconcile` (the boot-time
 /// rebootstrap path that does not yet have a `TokenManager` set up).
 pub async fn issue_token<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,

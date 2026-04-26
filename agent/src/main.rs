@@ -104,7 +104,7 @@ async fn run_agent() {
         }
     };
     if let Err(e) =
-        miru_agent::app::upgrade::ensure(&layout, &bootstrap_http_client, version::VERSION).await
+        miru_agent::app::upgrade::reconcile(&layout, &bootstrap_http_client, version::VERSION).await
     {
         error!("upgrade gate failed: {e}");
         return;
