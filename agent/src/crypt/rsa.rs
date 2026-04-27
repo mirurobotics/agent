@@ -123,39 +123,39 @@ pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Publ
     )
 }
 
-/// Create a signature from the provided data using the private key stored in the
-/// specified file
-pub async fn sign(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr> {
+/// Shared signing core. Reads the private key, converts to a PKey, then
+/// signs `data` with the supplied digest. SHA-256 is used by the public
+/// `sign`; SHA-512 is used by `sign_rs512` (for RS512 JWTs). Centralizing
+/// the OpenSSL plumbing here keeps the per-digest entry points to a
+/// single delegation each.
+async fn sign_with_digest(
+    private_key_file: &filesys::File,
+    data: &[u8],
+    digest: MessageDigest,
+) -> Result<Vec<u8>, CryptErr> {
     let rsa_private_key = read_private_key(private_key_file).await?;
     let private_key = ssl_err!(RSAToPKeyErr, PKey::from_rsa(rsa_private_key))?;
 
-    let mut signer = ssl_err!(
-        SignDataErr,
-        Signer::new(MessageDigest::sha256(), &private_key)
-    )?;
+    let mut signer = ssl_err!(SignDataErr, Signer::new(digest, &private_key))?;
     ssl_err!(SignDataErr, signer.update(data))?;
     let signature = ssl_err!(SignDataErr, signer.sign_to_vec())?;
     Ok(signature)
 }
 
+/// Create a signature from the provided data using the private key stored in the
+/// specified file. Uses SHA-256.
+pub async fn sign(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr> {
+    sign_with_digest(private_key_file, data, MessageDigest::sha256()).await
+}
+
 /// Create an RS512 (RSASSA-PKCS1-v1_5 with SHA-512) signature, per RFC 7518
 /// §3.3. Used to sign self-issued JWTs for the `/devices/issue_token`
-/// endpoint. The SHA-256 `sign` above is preserved for any other callers
-/// that depend on its existing behavior.
+/// endpoint.
 pub async fn sign_rs512(
     private_key_file: &filesys::File,
     data: &[u8],
 ) -> Result<Vec<u8>, CryptErr> {
-    let rsa_private_key = read_private_key(private_key_file).await?;
-    let private_key = ssl_err!(RSAToPKeyErr, PKey::from_rsa(rsa_private_key))?;
-
-    let mut signer = ssl_err!(
-        SignDataErr,
-        Signer::new(MessageDigest::sha512(), &private_key)
-    )?;
-    ssl_err!(SignDataErr, signer.update(data))?;
-    let signature = ssl_err!(SignDataErr, signer.sign_to_vec())?;
-    Ok(signature)
+    sign_with_digest(private_key_file, data, MessageDigest::sha512()).await
 }
 
 /// Verify a signature using the public key stored in the specified file

@@ -27,6 +27,20 @@ struct JwtPayload {
     exp: i64,
 }
 
+/// Serialize `value` to JSON bytes, then base64url-no-pad-encode the result.
+/// `serde_json::to_vec` cannot fail for the structs we feed it (no custom
+/// serializers, no recursive references), but we still propagate the error
+/// for defense in depth.
+fn jwt_segment<T: Serialize>(value: &T) -> Result<String, AuthnErr> {
+    let bytes = serde_json::to_vec(value).map_err(|e| {
+        AuthnErr::SerdeErr(SerdeErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    Ok(base64::encode_bytes_url_safe_no_pad(&bytes))
+}
+
 /// Mint a fresh device token by building a self-signed RS512 JWT carrying
 /// the device's public key as a JWK header (RFC 7517) and posting it to
 /// the backend's `/devices/issue_token` endpoint.
@@ -90,27 +104,8 @@ async fn build_self_signed_jwt(
         exp: exp.timestamp(),
     };
 
-    // serialize to JSON bytes
-    let header_bytes = serde_json::to_vec(&header).map_err(|e| {
-        AuthnErr::SerdeErr(SerdeErr {
-            source: e,
-            trace: trace!(),
-        })
-    })?;
-    let payload_bytes = serde_json::to_vec(&payload).map_err(|e| {
-        AuthnErr::SerdeErr(SerdeErr {
-            source: e,
-            trace: trace!(),
-        })
-    })?;
-
-    // base64url-no-pad-encode header and payload, join with '.', sign, then
-    // append the base64url-no-pad-encoded signature
-    let signing_input = format!(
-        "{}.{}",
-        base64::encode_bytes_url_safe_no_pad(&header_bytes),
-        base64::encode_bytes_url_safe_no_pad(&payload_bytes),
-    );
+    // serialize header and payload, base64url-no-pad-encode, then join with '.'
+    let signing_input = format!("{}.{}", jwt_segment(&header)?, jwt_segment(&payload)?);
     let signature = rsa::sign_rs512(private_key_file, signing_input.as_bytes()).await?;
     Ok(format!(
         "{signing_input}.{}",
@@ -127,4 +122,25 @@ pub async fn build_self_signed_jwt_for_test(
     public_key_file: &File,
 ) -> Result<String, AuthnErr> {
     build_self_signed_jwt(private_key_file, public_key_file).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::ser::Error as _;
+
+    /// A `Serialize` impl that always fails — used to exercise the
+    /// `jwt_segment` error mapping path.
+    struct AlwaysFails;
+    impl Serialize for AlwaysFails {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+            Err(S::Error::custom("intentional failure"))
+        }
+    }
+
+    #[test]
+    fn jwt_segment_maps_serialize_failure_to_serde_err() {
+        let result = jwt_segment(&AlwaysFails);
+        assert!(matches!(result, Err(AuthnErr::SerdeErr(_))));
+    }
 }

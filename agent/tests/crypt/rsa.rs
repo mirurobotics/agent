@@ -505,14 +505,9 @@ pub mod rsa_public_key_to_jwk {
         assert_eq!(jwk_a.kty, "RSA");
         assert!(!jwk_a.n.is_empty());
         assert!(!jwk_a.e.is_empty());
-        assert!(jwk_a
-            .n
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
-        assert!(jwk_a
-            .e
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        let url_safe = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        assert!(jwk_a.n.chars().all(url_safe));
+        assert!(jwk_a.e.chars().all(url_safe));
     }
 
     #[tokio::test]
