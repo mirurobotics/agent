@@ -1,8 +1,7 @@
 // internal crates
 use crate::http::{errors::HTTPErr, request, ClientI};
 use backend_api::models::{
-    Device, IssueDeviceTokenRequest, ProvisionDeviceRequest, TokenResponse,
-    UpdateDeviceFromAgentRequest,
+    Device, ProvisionDeviceRequest, TokenResponse, UpdateDeviceFromAgentRequest,
 };
 
 // ================================ PARAM STRUCTS ================================== //
@@ -13,8 +12,7 @@ pub struct ProvisionParams<'a> {
 }
 
 pub struct IssueTokenParams<'a> {
-    pub id: &'a str,
-    pub payload: &'a IssueDeviceTokenRequest,
+    pub token: &'a str,
 }
 
 pub struct UpdateParams<'a> {
@@ -39,8 +37,8 @@ pub async fn issue_token(
     client: &impl ClientI,
     params: IssueTokenParams<'_>,
 ) -> Result<TokenResponse, HTTPErr> {
-    let url = format!("{}/devices/{}/issue_token", client.base_url(), params.id);
-    let request = request::Params::post(&url, request::marshal_json(params.payload)?);
+    let url = format!("{}/devices/issue_token", client.base_url());
+    let request = request::Params::post(&url, String::new()).with_token(params.token);
     super::client::fetch(client, request).await
 }
 

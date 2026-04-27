@@ -7,7 +7,6 @@ use crate::crypt::{base64, rsa};
 use crate::filesys::file::File;
 use crate::http::{self, devices};
 use crate::trace;
-use backend_api::models::{IssueDeviceClaims, IssueDeviceTokenRequest};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
@@ -15,14 +14,25 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Serialize)]
-struct IssueTokenClaim {
-    pub device_id: String,
-    pub nonce: String,
-    pub expiration: i64,
+struct JwtHeader {
+    alg: &'static str,
+    typ: &'static str,
+    jwk: rsa::Jwk,
 }
 
-/// Mint a fresh device token by signing claims with the on-disk private key
-/// and posting them to the backend's `issue_token` endpoint.
+#[derive(Serialize)]
+struct JwtPayload {
+    jti: String,
+    iat: i64,
+    exp: i64,
+}
+
+/// Mint a fresh device token by building a self-signed RS512 JWT carrying
+/// the device's public key as a JWK header (RFC 7517) and posting it to
+/// the backend's `/devices/issue_token` endpoint.
+///
+/// The server identifies the device by the SHA-256 fingerprint of the JWK
+/// in the header, so no `device_id` is required on the wire.
 ///
 /// This free function is the shared core used by both
 /// `SingleThreadTokenManager::issue_token` (the long-running token refresh
@@ -31,20 +41,13 @@ struct IssueTokenClaim {
 pub async fn issue_token<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     private_key_file: &File,
-    device_id: &str,
+    public_key_file: &File,
 ) -> Result<Token, AuthnErr> {
-    // prepare and sign the claims
-    let payload = prepare_issue_token_request(private_key_file, device_id).await?;
+    // build the self-signed JWT
+    let jwt = build_self_signed_jwt(private_key_file, public_key_file).await?;
 
     // send the token request
-    let resp = devices::issue_token(
-        http_client,
-        devices::IssueTokenParams {
-            id: device_id,
-            payload: &payload,
-        },
-    )
-    .await?;
+    let resp = devices::issue_token(http_client, devices::IssueTokenParams { token: &jwt }).await?;
 
     // format the response
     let expires_at = resp.expires_at.parse::<DateTime<Utc>>().map_err(|e| {
@@ -62,40 +65,66 @@ pub async fn issue_token<HTTPClientT: http::ClientI>(
     })
 }
 
-async fn prepare_issue_token_request(
+/// Build a self-signed RS512 JWT (RFC 7519) whose header carries the
+/// device's public key as a JWK (RFC 7517). The payload contains a unique
+/// `jti`, the current `iat`, and an `exp` two minutes in the future.
+async fn build_self_signed_jwt(
     private_key_file: &File,
-    device_id: &str,
-) -> Result<IssueDeviceTokenRequest, AuthnErr> {
-    // prepare the claims
-    let nonce = Uuid::new_v4().to_string();
-    let expiration = Utc::now() + Duration::minutes(2);
-    let claims = IssueTokenClaim {
-        device_id: device_id.to_string(),
-        nonce: nonce.clone(),
-        expiration: expiration.timestamp(),
+    public_key_file: &File,
+) -> Result<String, AuthnErr> {
+    // load the public key and serialize it as a JWK
+    let public_key = rsa::read_public_key(public_key_file).await?;
+    let jwk = rsa::rsa_public_key_to_jwk(&public_key);
+
+    // build header and payload
+    let header = JwtHeader {
+        alg: "RS512",
+        typ: "JWT",
+        jwk,
+    };
+    let now = Utc::now();
+    let exp = now + Duration::minutes(2);
+    let payload = JwtPayload {
+        jti: Uuid::new_v4().to_string(),
+        iat: now.timestamp(),
+        exp: exp.timestamp(),
     };
 
-    // serialize the claims into a JSON byte vector
-    let claims_bytes = serde_json::to_vec(&claims).map_err(|e| {
+    // serialize to JSON bytes
+    let header_bytes = serde_json::to_vec(&header).map_err(|e| {
+        AuthnErr::SerdeErr(SerdeErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    let payload_bytes = serde_json::to_vec(&payload).map_err(|e| {
         AuthnErr::SerdeErr(SerdeErr {
             source: e,
             trace: trace!(),
         })
     })?;
 
-    // sign the claims
-    let signature_bytes = rsa::sign(private_key_file, &claims_bytes).await?;
-    let signature = base64::encode_bytes_standard(&signature_bytes);
+    // base64url-no-pad-encode header and payload, join with '.', sign, then
+    // append the base64url-no-pad-encoded signature
+    let signing_input = format!(
+        "{}.{}",
+        base64::encode_bytes_url_safe_no_pad(&header_bytes),
+        base64::encode_bytes_url_safe_no_pad(&payload_bytes),
+    );
+    let signature = rsa::sign_rs512(private_key_file, signing_input.as_bytes()).await?;
+    Ok(format!(
+        "{signing_input}.{}",
+        base64::encode_bytes_url_safe_no_pad(&signature),
+    ))
+}
 
-    // convert it to the http client format
-    let claims = IssueDeviceClaims {
-        device_id: device_id.to_string(),
-        nonce,
-        expiration: expiration.to_rfc3339(),
-    };
-
-    Ok(IssueDeviceTokenRequest {
-        claims: Box::new(claims),
-        signature,
-    })
+/// Test-only shim exposing the internal `build_self_signed_jwt` helper to
+/// integration tests under `agent/tests/`. Gated behind the `test` feature
+/// so it is not part of the public release surface.
+#[cfg(feature = "test")]
+pub async fn build_self_signed_jwt_for_test(
+    private_key_file: &File,
+    public_key_file: &File,
+) -> Result<String, AuthnErr> {
+    build_self_signed_jwt(private_key_file, public_key_file).await
 }

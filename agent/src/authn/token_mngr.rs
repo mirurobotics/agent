@@ -34,26 +34,27 @@ pub trait TokenManagerExt: Send + Sync {
 
 // ======================== SINGLE THREADED IMPLEMENTATION ========================= //
 pub(crate) struct SingleThreadTokenManager<HTTPClientT: http::ClientI> {
-    device_id: String,
     http_client: Arc<HTTPClientT>,
     token_file: TokenFile,
     private_key_file: File,
+    public_key_file: File,
 }
 
 impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
     pub(crate) fn new(
-        device_id: String,
         http_client: Arc<HTTPClientT>,
         token_file: TokenFile,
         private_key_file: File,
+        public_key_file: File,
     ) -> Result<Self, AuthnErr> {
         token_file.file.assert_exists()?;
         private_key_file.assert_exists()?;
+        public_key_file.assert_exists()?;
         Ok(Self {
-            device_id,
             http_client,
             token_file,
             private_key_file,
+            public_key_file,
         })
     }
 
@@ -76,7 +77,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
         issue::issue_token(
             self.http_client.as_ref(),
             &self.private_key_file,
-            &self.device_id,
+            &self.public_key_file,
         )
         .await
     }
@@ -137,18 +138,18 @@ pub struct TokenManager {
 impl TokenManager {
     pub fn spawn<HTTPClientT: http::ClientI + 'static>(
         buffer_size: usize,
-        device_id: String,
         http_client: Arc<HTTPClientT>,
         token_file: TokenFile,
         private_key_file: File,
+        public_key_file: File,
     ) -> Result<(Self, JoinHandle<()>), AuthnErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             token_mngr: SingleThreadTokenManager::new(
-                device_id,
                 http_client,
                 token_file,
                 private_key_file,
+                public_key_file,
             )?,
             receiver,
         };

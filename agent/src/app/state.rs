@@ -35,6 +35,8 @@ impl AppState {
         let auth_dir = layout.auth();
         let private_key_file = auth_dir.private_key();
         private_key_file.assert_exists()?;
+        let public_key_file = auth_dir.public_key();
+        public_key_file.assert_exists()?;
 
         let token_file =
             TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
@@ -44,16 +46,16 @@ impl AppState {
 
         // initialize storage
         let (stor, storage_handle) =
-            storage::Storage::init(layout, capacities, device_id.clone()).await?;
+            storage::Storage::init(layout, capacities, device_id).await?;
         let storage = Arc::new(stor);
 
         // initialize the token manager
         let (token_mngr, token_mngr_handle) = authn::TokenManager::spawn(
             64,
-            device_id.clone(),
             http_client.clone(),
             token_file,
             private_key_file,
+            public_key_file,
         )?;
         let token_mngr = Arc::new(token_mngr);
 

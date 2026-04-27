@@ -45,6 +45,8 @@ pub async fn reconcile<HTTPClientT: ClientI>(
     let auth_dir = layout.auth();
     let private_key_file = auth_dir.private_key();
     private_key_file.assert_exists()?;
+    let public_key_file = auth_dir.public_key();
+    public_key_file.assert_exists()?;
 
     let backoff = cooldown::Backoff {
         base_secs: 1,
@@ -55,7 +57,7 @@ pub async fn reconcile<HTTPClientT: ClientI>(
     // fetch the current Device record from the backend (forever-retry on
     // network errors)
     let device = retry_forever(&backoff, "GET /device", || async {
-        let token = authn::issue_token(http_client, &private_key_file, &device_id).await?;
+        let token = authn::issue_token(http_client, &private_key_file, &public_key_file).await?;
         let device = http::devices::get(http_client, &token.token).await?;
         Ok::<backend_api::models::Device, UpgradeErr>(device)
     })
@@ -72,7 +74,7 @@ pub async fn reconcile<HTTPClientT: ClientI>(
     // sees the matching marker, and skips the rebootstrap — so the PATCH must
     // succeed within this call or the backend never learns the new version.
     retry_forever(&backoff, "PATCH /devices/{id}", || async {
-        let token = authn::issue_token(http_client, &private_key_file, &device_id).await?;
+        let token = authn::issue_token(http_client, &private_key_file, &public_key_file).await?;
         http::devices::update(
             http_client,
             http::devices::UpdateParams {
