@@ -85,27 +85,24 @@ Definitions:
 
 ### Milestone 1 — JWK serializer and RS512 sign helper in `crypt`
 
-Add a JWK helper exposed as `pub fn rsa_public_key_to_jwk(key: &Rsa<Public>) -> Result<serde_json::Value, CryptErr>` (or returning a typed `Jwk` struct that derives `Serialize`; the typed struct is preferred because it documents the field shape and is testable for deterministic output). It takes an already-parsed `Rsa<Public>` so callers can decide how to read the key. Place it in `agent/src/crypt/rsa.rs` next to the other RSA helpers. Implementation: `key.n().to_vec()` and `key.e().to_vec()` return big-endian `Vec<u8>`; encode each with `crate::crypt::base64::encode_bytes_url_safe_no_pad`; serialize as `{"kty":"RSA","n":<n>,"e":<e>}` using a `#[derive(Serialize)] struct Jwk { kty: &'static str, n: String, e: String }`.
+In `agent/src/crypt/rsa.rs`:
 
-Add an RS512 sign helper. The current `rsa::sign` uses SHA-256 and is called only by `authn::issue::prepare_issue_token_request` (non-test) — but that is the path being rewritten, so the digest can change without affecting other production code. Decision: add a sibling `pub async fn sign_rs512(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr>` that mirrors `sign` but uses `MessageDigest::sha512()`. Keep `sign` (SHA-256) for backward compatibility with its existing test surface, since that surface contributes to the `crypt/.covgate` floor. Record this decision in the Decision Log.
+- Add a typed `pub struct Jwk { kty: &'static str, n: String, e: String }` deriving `Serialize`, plus `pub fn rsa_public_key_to_jwk(key: &Rsa<Public>) -> Jwk` that big-endian-encodes `key.n().to_vec()` and `key.e().to_vec()` with `base64::encode_bytes_url_safe_no_pad` and sets `kty = "RSA"`.
+- Add `pub async fn sign_rs512(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr>` that mirrors the existing `sign` but uses `MessageDigest::sha512()`. Keep the SHA-256 `sign` to avoid disturbing its existing test coverage; the only non-test caller (`prepare_issue_token_request`) is being rewritten in M2 to use `sign_rs512`. Record this in the Decision Log.
 
 ### Milestone 2 — Rewrite `authn::issue`
 
-Rewrite `prepare_issue_token_request` and `issue_token` in `agent/src/authn/issue.rs`:
+Rewrite `agent/src/authn/issue.rs`:
 
-- New signature: `pub async fn issue_token<HTTPClientT: http::ClientI>(http_client: &HTTPClientT, private_key_file: &File, public_key_file: &File) -> Result<Token, AuthnErr>`. Drop the `device_id` parameter.
-- New private builder: `async fn build_self_signed_jwt(private_key_file: &File, public_key_file: &File) -> Result<String, AuthnErr>`.
-- The builder:
-  1. `let rsa_pub = crypt::rsa::read_public_key(public_key_file).await?;`
-  2. Build `Jwk` via `crypt::rsa::rsa_public_key_to_jwk(&rsa_pub)?`.
-  3. Build header `{"alg":"RS512","typ":"JWT","jwk":<jwk>}` as a typed struct with `Serialize`.
-  4. Build payload `{"jti":<uuid v4 string>,"iat":<now unix ts>,"exp":<now+120 unix ts>}` as a typed struct.
-  5. JSON-serialize header and payload via `serde_json::to_vec` (mapped to `AuthnErr::SerdeErr`).
-  6. Build signing input: `format!("{}.{}", base64::encode_bytes_url_safe_no_pad(&header_bytes), base64::encode_bytes_url_safe_no_pad(&payload_bytes))`.
-  7. Sign with `crypt::rsa::sign_rs512(private_key_file, signing_input.as_bytes()).await?`.
-  8. Return `format!("{signing_input}.{}", base64::encode_bytes_url_safe_no_pad(&sig))`.
-- Replace `IssueTokenClaim`, `IssueDeviceClaims`, `IssueDeviceTokenRequest` usage. Delete the `backend_api::models::{IssueDeviceClaims, IssueDeviceTokenRequest}` import.
-- Call `devices::issue_token` with the new params shape (see M3).
+- Drop the `backend_api::models::{IssueDeviceClaims, IssueDeviceTokenRequest}` import and the `IssueTokenClaim` struct.
+- Add `#[derive(Serialize)] struct JwtHeader { alg: &'static str, typ: &'static str, jwk: crypt::rsa::Jwk }` and `#[derive(Serialize)] struct JwtPayload { jti: String, iat: i64, exp: i64 }`.
+- Add `async fn build_self_signed_jwt(private_key_file: &File, public_key_file: &File) -> Result<String, AuthnErr>`:
+  1. `read_public_key(public_key_file)` → `rsa_public_key_to_jwk`.
+  2. Header `{alg:"RS512", typ:"JWT", jwk:<jwk>}`; payload `{jti: Uuid::new_v4().to_string(), iat: now, exp: now+120}`.
+  3. `signing_input = format!("{}.{}", base64::encode_bytes_url_safe_no_pad(&header_bytes), base64::encode_bytes_url_safe_no_pad(&payload_bytes))` where `*_bytes = serde_json::to_vec(...)` mapped to `AuthnErr::SerdeErr`.
+  4. `sig = crypt::rsa::sign_rs512(private_key_file, signing_input.as_bytes()).await?`.
+  5. Return `format!("{signing_input}.{}", base64::encode_bytes_url_safe_no_pad(&sig))`.
+- New `pub async fn issue_token<HTTPClientT: http::ClientI>(http_client: &HTTPClientT, private_key_file: &File, public_key_file: &File) -> Result<Token, AuthnErr>` (no `device_id`) that calls `build_self_signed_jwt` and posts via `devices::issue_token(http_client, devices::IssueTokenParams { token: &jwt }).await?`. Reuse the existing `expires_at` parsing block at the end.
 
 ### Milestone 3 — `http::devices::issue_token` + `IssueTokenParams`
 
