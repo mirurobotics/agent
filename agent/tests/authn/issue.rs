@@ -46,8 +46,8 @@ async fn jwt_header_decodes_to_rs512_with_jwk() {
     assert_eq!(header["alg"], "RS512");
     assert_eq!(header["typ"], "JWT");
     assert_eq!(header["jwk"]["kty"], "RSA");
-    assert!(header["jwk"]["n"].as_str().unwrap().len() > 0);
-    assert!(header["jwk"]["e"].as_str().unwrap().len() > 0);
+    assert!(!header["jwk"]["n"].as_str().unwrap().is_empty());
+    assert!(!header["jwk"]["e"].as_str().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -118,14 +118,10 @@ async fn jti_is_unique_across_calls() {
 
     let parts_a: Vec<&str> = jwt_a.split('.').collect();
     let parts_b: Vec<&str> = jwt_b.split('.').collect();
-    let payload_a: Value = serde_json::from_slice(
-        &base64::decode_bytes_url_safe_no_pad(parts_a[1]).unwrap(),
-    )
-    .unwrap();
-    let payload_b: Value = serde_json::from_slice(
-        &base64::decode_bytes_url_safe_no_pad(parts_b[1]).unwrap(),
-    )
-    .unwrap();
+    let payload_a: Value =
+        serde_json::from_slice(&base64::decode_bytes_url_safe_no_pad(parts_a[1]).unwrap()).unwrap();
+    let payload_b: Value =
+        serde_json::from_slice(&base64::decode_bytes_url_safe_no_pad(parts_b[1]).unwrap()).unwrap();
 
     assert_ne!(payload_a["jti"], payload_b["jti"]);
 }
