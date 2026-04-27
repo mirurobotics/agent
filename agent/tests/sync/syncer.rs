@@ -40,13 +40,18 @@ pub async fn create_token_manager(
         .write_string("private_key", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
+    let public_key_file = dir.file("public_key.pem");
+    public_key_file
+        .write_string("public_key", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
 
     TokenManager::spawn(
         32,
-        "device_id".to_string(),
         http_client.clone(),
         token_file,
         private_key_file,
+        public_key_file,
     )
     .unwrap()
 }

@@ -23,6 +23,13 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
         .await
         .unwrap();
 
+    // create a public key file
+    let public_key_file = layout.auth().public_key();
+    public_key_file
+        .write_string("test", WriteOptions::default())
+        .await
+        .unwrap();
+
     // create the device file
     let device_file = layout.device();
     let device = Device::default();

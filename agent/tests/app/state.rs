@@ -44,12 +44,49 @@ pub mod init {
     }
 
     #[tokio::test]
+    async fn fail_missing_public_key_file() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        // create a private key file (but no public key file)
+        let private_key_file = layout.auth().private_key();
+        private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let result = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+        )
+        .await;
+        match result {
+            Err(ServerErr::FileSysErr(e)) => {
+                assert!(matches!(e, FileSysErr::PathDoesNotExistErr(_)));
+            }
+            Err(e) => {
+                panic!("Expected FileSysErr not {e:?}");
+            }
+            Ok(_) => {
+                panic!("expected error from initializing server state");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn fail_missing_device_id() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         // create a private key file
         let private_key_file = layout.auth().private_key();
         private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
@@ -76,6 +113,13 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth().private_key();
         private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
@@ -129,6 +173,13 @@ pub mod init {
             .await
             .unwrap();
 
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
@@ -164,6 +215,13 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth().private_key();
         private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
@@ -212,6 +270,13 @@ pub mod shutdown {
             .await
             .unwrap();
 
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
@@ -246,6 +311,13 @@ pub mod shutdown {
         // create a private key file
         let private_key_file = layout.auth().private_key();
         private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();

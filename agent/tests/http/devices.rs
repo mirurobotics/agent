@@ -1,8 +1,7 @@
 // internal crates
 use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
 use backend_api::models::{
-    Device, IssueDeviceTokenRequest, ProvisionDeviceRequest, TokenResponse,
-    UpdateDeviceFromAgentRequest,
+    Device, ProvisionDeviceRequest, TokenResponse, UpdateDeviceFromAgentRequest,
 };
 use miru_agent::http::devices::{self, IssueTokenParams, ProvisionParams, UpdateParams};
 use miru_agent::http::errors::MockErr;
@@ -82,14 +81,10 @@ pub mod issue_token {
     async fn success() {
         let mock = MockClient::default();
 
-        let payload = IssueDeviceTokenRequest::default();
-        let expected_body = serde_json::to_string(&payload).unwrap();
-
         let result = devices::issue_token(
             &mock,
             IssueTokenParams {
-                id: "dvc_1",
-                payload: &payload,
+                token: "test-token",
             },
         )
         .await
@@ -102,11 +97,11 @@ pub mod issue_token {
             vec![CapturedRequest {
                 call: Call::IssueDeviceToken,
                 method: reqwest::Method::POST,
-                path: "/devices/dvc_1/issue_token".into(),
-                url: "http://mock/devices/dvc_1/issue_token".into(),
+                path: "/devices/issue_token".into(),
+                url: "http://mock/devices/issue_token".into(),
                 query: vec![],
-                body: Some(expected_body),
-                token: None,
+                body: Some(String::new()),
+                token: Some("test-token".into()),
             }]
         );
     }
@@ -118,12 +113,10 @@ pub mod issue_token {
             ..MockClient::default()
         };
 
-        let payload = IssueDeviceTokenRequest::default();
         let result = devices::issue_token(
             &mock,
             IssueTokenParams {
-                id: "dvc_1",
-                payload: &payload,
+                token: "test-token",
             },
         )
         .await;
