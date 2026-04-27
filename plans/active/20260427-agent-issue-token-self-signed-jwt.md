@@ -17,26 +17,30 @@ After this change the agent talks to backend `v0.3.0-beta.3` correctly. Today th
 
 ## Progress
 
-- [ ] M1: Add JWK serializer + RS512 sign helper in `crypt`.
-- [ ] M2: Rewrite `authn::issue::prepare_issue_token_request` and `issue_token` to build a self-signed JWT and plumb the public key path.
-- [ ] M3: Update `http::devices::issue_token` + `IssueTokenParams` to the new URL/auth/no-body shape.
-- [ ] M4: Update callers in `app::upgrade::reconcile`, `authn::token_mngr`, `app::state::AppState::init`, and tests in `tests/authn/token_mngr.rs` and `tests/sync/syncer.rs` to plumb the public key file.
-- [ ] M5: Update `tests/http/devices.rs` issue_token cases and verify `tests/mocks/http_client.rs` route match still works.
-- [ ] M6: Run preflight; iterate until it reports `Preflight clean`.
-
-Add timestamps when you complete steps.
+- [x] M1: Add JWK serializer + RS512 sign helper in `crypt`. (2026-04-27)
+- [x] M2: Rewrite `authn::issue::prepare_issue_token_request` and `issue_token` to build a self-signed JWT and plumb the public key path. (2026-04-27)
+- [x] M3: Update `http::devices::issue_token` + `IssueTokenParams` to the new URL/auth/no-body shape. (2026-04-27)
+- [x] M4: Update callers in `app::upgrade::reconcile`, `authn::token_mngr`, `app::state::AppState::init`, and tests in `tests/authn/token_mngr.rs` and `tests/sync/syncer.rs` to plumb the public key file. (2026-04-27)
+- [x] M5: Update `tests/http/devices.rs` issue_token cases and verify `tests/mocks/http_client.rs` route match still works. (2026-04-27)
+- [x] M6: Run preflight; iterate until it reports `Preflight clean`. (2026-04-27)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The `device_id` argument was no longer needed by `TokenManager::spawn` after `issue::issue_token` stopped taking it; removed the field and the constructor parameter. `app::upgrade::reconcile` still needs `device_id` for the PATCH endpoint, so it remains there.
+- `tests/mocks/http_client.rs::match_route` already maps `(POST, p) if p.ends_with("/issue_token")` to `Call::IssueDeviceToken`, so the new path `/devices/issue_token` works without any mock change.
+- Several pre-existing tests in `tests/app/run.rs` and `tests/app/state.rs` write a private key file but no public key file; updated them to also write a `public_key.pem` placeholder so `AppState::init`'s new `assert_exists` check passes.
+- Region-based coverage proved sensitive to the new `sign_rs512` adding duplicate openssl plumbing alongside `sign`. Refactoring both to delegate to a shared `sign_with_digest` helper restored the `crypt` directory above its 94.98% threshold without lowering it. Similarly, replacing the two `serde_json::to_vec().map_err(...)` blocks in `build_self_signed_jwt` with a single `jwt_segment` helper and adding a unit test that uses a custom failing `Serialize` impl pushed `authn` back above its 95.31% threshold.
 
 ## Decision Log
 
-(Add entries as you go.)
+- M1: Kept the SHA-256 `sign` and added a sibling `sign_rs512`. After M2 was complete, refactored both into delegations that share a `sign_with_digest` core to keep coverage high and reduce duplication.
+- M2: Exposed `build_self_signed_jwt` to integration tests via a `#[cfg(feature = "test")] pub async fn build_self_signed_jwt_for_test` shim so the JWT-shape tests under `agent/tests/authn/issue.rs` can exercise the function directly without needing an HTTP mock.
+- M3: Pass `String::new()` as the body to `Params::post` for the no-body POST. `Params::post` requires a `String`; an empty body serialises as zero bytes, which the backend tolerates per the spec change.
+- M4: Removed the `device_id: String` field from `SingleThreadTokenManager` since it's no longer used; this also dropped a `device_id.clone()` in `AppState::init`.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+The refactor cleanly swapped the issue_token flow over to the new self-signed JWT contract. Build, tests, lint, and coverage gates all pass under `./scripts/preflight.sh`. The shared `sign_with_digest` core reduced overall complexity in `crypt::rsa.rs` despite adding the new RS512 entry point. Coverage is preserved without lowering any `.covgate` thresholds.
 
 ## Context and Orientation
 
