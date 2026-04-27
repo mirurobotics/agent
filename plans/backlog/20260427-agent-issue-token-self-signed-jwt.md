@@ -72,7 +72,7 @@ Key files (full paths from repo root `/home/ben/miru/workbench2/repos/agent/`):
 - `agent/tests/http/devices.rs` — `issue_token::success` and `issue_token::error_propagates`. They construct an `IssueDeviceTokenRequest::default()` and assert path `/devices/dvc_1/issue_token`.
 - `agent/tests/mocks/http_client.rs` — `MockClient::match_route` matches `(POST, p) if p.ends_with("/issue_token")` to `Call::IssueDeviceToken`. The new path `/devices/issue_token` still ends with `/issue_token`, so the existing match works without code change. Confirm in M5 by running tests.
 - `agent/tests/authn/token_mngr.rs` — `setup_with_rsa` already generates both `private_key.pem` and `public_key.pem`; `setup` only writes a dummy private key. The fakery `setup` flow needs a parallel dummy public key once the function signatures plumb a `public_key_file` through.
-- `agent/tests/sync/syncer.rs:44` — also calls `TokenManager::spawn`; needs the public key file plumbed in.
+- `agent/tests/sync/syncer.rs::create_token_manager` (around lines 31-52) — helper that calls `TokenManager::spawn` with a dummy `private_key.pem`; needs a parallel dummy `public_key.pem` plumbed in.
 
 Definitions:
 
@@ -151,9 +151,9 @@ In `agent/src/http/devices.rs`:
 - In `setup_with_rsa`, the `public_key.pem` is already generated; pass `public_key_file` into `spawn`.
 - In the two `spawn` failure cases (token-file-missing, private-key-missing), supply a valid public-key file so the failure mode under test is the only failing precondition. Add a third case `public_key_file_does_not_exist` that asserts `AuthnErr::FileSysErr` when only the public key is missing.
 
-`agent/tests/sync/syncer.rs:44`:
+`agent/tests/sync/syncer.rs::create_token_manager` (lines 31-52):
 
-- Read this call site fully and pass an additional public-key file matching how the test creates its private key (mirror the existing `setup`/`setup_with_rsa` pattern from `tests/authn/token_mngr.rs`).
+- Before `TokenManager::spawn`, write a dummy public-key file: `let public_key_file = dir.file("public_key.pem"); public_key_file.write_string("public_key", WriteOptions::OVERWRITE_ATOMIC).await.unwrap();`. Pass it into `spawn` in the new positional slot.
 
 ### Milestone 5 — Update `tests/http/devices.rs` issue_token cases + verify mock route
 
@@ -244,7 +244,9 @@ All commands are run from the repo root unless stated otherwise: `cd /home/ben/m
 
 3. Run the focused test pass:
 
-       ./scripts/test.sh -- --test crypt
+       CARGO_TEST_ARGS="crypt::" ./scripts/test.sh
+
+   (Equivalent to `cargo test --package miru-agent --features test crypt::` from the repo root, which filters by test path substring.)
 
    Expect `test result: ok` for all crypt tests.
 
@@ -291,7 +293,7 @@ All commands are run from the repo root unless stated otherwise: `cd /home/ben/m
 
 5. Run:
 
-       ./scripts/test.sh -- --test authn
+       CARGO_TEST_ARGS="authn::" ./scripts/test.sh
 
    Expect all authn tests to pass.
 
@@ -360,7 +362,7 @@ All commands are run from the repo root unless stated otherwise: `cd /home/ben/m
 
 2. Run targeted test:
 
-       ./scripts/test.sh -- --test http::devices
+       CARGO_TEST_ARGS="http::devices::" ./scripts/test.sh
 
    Expect `issue_token::success` and `issue_token::error_propagates` to pass.
 
