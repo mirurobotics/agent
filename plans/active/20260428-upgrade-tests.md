@@ -28,7 +28,7 @@ Use timestamps when you complete steps.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- 2026-04-28 — `agent/agent/tests/mocks/http_client.rs` `match_route` only matched `POST /issue_token` (suffix), but `agent/agent/src/http/devices.rs::issue_token` builds URL `/devices/token` (renamed in commit c2da7ce). All three pre-existing `reconcile_*` tests that exercise `reconcile_impl`'s issue-token step panicked with `MockClient: unhandled route: POST /devices/token` even on M1 baseline. The plan said "after M1 the four pre-existing `reconcile_*` tests pass" — that was only achievable after updating the mock matcher. Fix: changed `p.ends_with("/issue_token")` → `p.ends_with("/devices/token")`. This is a test-helper fix in `agent/agent/tests/mocks/http_client.rs`; no production code changed.
 
 ## Decision Log
 
