@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
 use backend_api::models as backend_client;
-use miru_agent::app::upgrade::reconcile;
+use miru_agent::app::upgrade::{needs_upgrade, reconcile};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
-use miru_agent::filesys::{self, Overwrite, WriteOptions};
+use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
 use miru_agent::storage::{self, Layout};
@@ -195,5 +195,41 @@ async fn reconcile_retries_until_get_device_succeeds() {
     // GET /device was called at least 3 times
     assert!(mock.num_get_device_calls() >= 3);
     assert_eq!(mock.num_update_device_calls(), 1);
+}
+
+#[tokio::test]
+async fn needs_upgrade_returns_true_when_marker_missing() {
+    let (layout, _dir) = prepare_layout("needs_upgrade_missing", "dvc_nu1").await;
+    assert!(needs_upgrade(&layout, "v1.0.0").await);
+}
+
+#[tokio::test]
+async fn needs_upgrade_returns_false_when_marker_matches() {
+    let (layout, _dir) = prepare_layout("needs_upgrade_match", "dvc_nu2").await;
+    storage::agent_version::write(&layout.agent_version(), "v1.2.3")
+        .await
+        .unwrap();
+    assert!(!needs_upgrade(&layout, "v1.2.3").await);
+}
+
+#[tokio::test]
+async fn needs_upgrade_returns_true_when_marker_differs() {
+    let (layout, _dir) = prepare_layout("needs_upgrade_differs", "dvc_nu3").await;
+    storage::agent_version::write(&layout.agent_version(), "v1.0.0")
+        .await
+        .unwrap();
+    assert!(needs_upgrade(&layout, "v2.0.0").await);
+}
+
+#[tokio::test]
+async fn needs_upgrade_returns_true_when_read_errors() {
+    let (layout, _dir) = prepare_layout("needs_upgrade_read_err", "dvc_nu4").await;
+    // Force a read error: create a directory at the marker path. `exists()`
+    // returns true for a directory, so `read_string` runs and fails with a
+    // FileSysErr; `needs_upgrade` treats the error as "missing" and returns true.
+    tokio::fs::create_dir_all(layout.agent_version().path())
+        .await
+        .unwrap();
+    assert!(needs_upgrade(&layout, "v1.0.0").await);
 }
 
