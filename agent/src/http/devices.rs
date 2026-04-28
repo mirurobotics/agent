@@ -22,7 +22,6 @@ pub struct UpdateParams<'a> {
 }
 
 // ================================ FREE FUNCTIONS ================================= //
-
 pub async fn provision(
     client: &impl ClientI,
     params: ProvisionParams<'_>,
@@ -37,7 +36,7 @@ pub async fn issue_token(
     client: &impl ClientI,
     params: IssueTokenParams<'_>,
 ) -> Result<TokenResponse, HTTPErr> {
-    let url = format!("{}/devices/issue_token", client.base_url());
+    let url = format!("{}/devices/token", client.base_url());
     let request = request::Params::post(&url, String::new()).with_token(params.token);
     super::client::fetch(client, request).await
 }

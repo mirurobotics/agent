@@ -6,56 +6,43 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-beta.3
+  x-release-version: v0.3.0-beta.4
   x-git-commit:
-    sha: ed8164f495e1b2735eab8124f21e58b0f9b23a4e
-    url: https://github.com/mirurobotics/openapi/commit/ed8164f495e1b2735eab8124f21e58b0f9b23a4e
-    message: 'feat(api): add provisioning token endpoints (#32)
+    sha: 89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
+    url: https://github.com/mirurobotics/openapi/commit/89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
+    message: 'refactor(agent): rename POST /devices/issue_token to /devices/token
+      (#37)
 
 
       ## Summary
 
-      - Add provisioning token endpoints (create, get, list, revoke) and a
+      - Rename agent endpoint `POST /devices/issue_token` to `POST
 
-      `ProvisioningToken` resource that pins an optional `device_id` and
+      /devices/token` to drop the verb-in-URL antipattern; HTTP method already
 
-      exposes capabilities (`create`, `activate`, `reactivate`).
+      conveys "create" and the `/devices/` grouping is retained because the
 
-      - Wire the agent''s `provisionDevice` operation to the new model: the
+      `DeviceKeyJWT` auth scheme is device-specific.
 
-      device is identified by the token''s `device_id` for activate/reactivate,
+      - Update path key in `apis/apps/backend-server/agent/paths/devices.yaml`
 
-      and request bodies no longer carry `device_id`.
+      and the description prose plus path ref in
 
-      - Round out list endpoints with expansions (`created_by`, `updated_by`,
+      `apis/apps/backend-server/agent/openapi.yaml`; regenerate
 
-      `total_count`) and search parameters (`id`, `is_expired`, `is_revoked`);
+      `apis/apps/backend-server/agent/openapi.gen.yaml` via
 
-      rename the resource''s `revoked` boolean to `is_revoked` to match.
+      `scripts/regen.sh`.
 
-      - Refresh the resource shape: drop
+      - Preserve `operationId: issueDeviceToken` and summary `Issue Token` so
 
-      `status`/`max_uses`/`uses_count`/`device_ids` in favor of `device_id` +
+      generated client method names remain stable.
 
-      `is_revoked`, and rewrite request/response examples to match.
+      - Safe pre-release rename: zero deployed clients other than the open
 
+      `mirurobotics/agent#48` PR against the unreleased v0.3.0-beta.3 spec.
 
-      ## Test plan
-
-      - [ ] CI: `scripts/lint.sh` passes (Redocly + MIRU custom linter).
-
-      - [ ] Generated bundles in
-
-      `apis/apps/backend-server/{agent,frontend,platform}/openapi.gen.yaml`
-
-      are coherent with their sources (no `is-stale` regressions).
-
-      - [ ] Spot-check generated SDKs / Stainless configs for the
-
-      provisioning-token surface in a downstream consumer.
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+      - Includes the rename plan under `plans/` for traceability.
 
 
       ---------
@@ -66,7 +53,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-04-27T16:24:07.139999+00:00'
+    built_at: '2026-04-27T21:31:19.844963+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -289,7 +276,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Device'
-  /devices/issue_token:
+  /devices/token:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
     post:
@@ -420,9 +407,9 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: 'Server-issued device session token. Obtained by the device from
-        `POST /devices/issue_token` (defined in this spec) using its `DeviceKeyJWT`
-        bootstrap credential, then sent as `Authorization: Bearer <token>` on every
-        other agent endpoint. The token identifies the calling device to the backend.
+        `POST /devices/token` (defined in this spec) using its `DeviceKeyJWT` bootstrap
+        credential, then sent as `Authorization: Bearer <token>` on every other agent
+        endpoint. The token identifies the calling device to the backend.
 
         '
     DeviceKeyJWT:
@@ -446,7 +433,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - ed8164f495e1b2735eab8124f21e58b0f9b23a4e
+      - 89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
