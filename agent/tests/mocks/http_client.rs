@@ -193,7 +193,7 @@ impl MockClient {
         use reqwest::Method;
         match (method, path) {
             (m, p) if *m == Method::POST && p == "/devices/provision" => Call::ProvisionDevice,
-            (m, p) if *m == Method::POST && p.ends_with("/issue_token") => Call::IssueDeviceToken,
+            (m, p) if *m == Method::POST && p.ends_with("/devices/token") => Call::IssueDeviceToken,
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
             (m, p) if *m == Method::GET && p == "/device" => Call::GetDevice,
             (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
