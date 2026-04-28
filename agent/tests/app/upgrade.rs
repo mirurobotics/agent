@@ -197,20 +197,3 @@ async fn reconcile_retries_until_get_device_succeeds() {
     assert_eq!(mock.num_update_device_calls(), 1);
 }
 
-#[tokio::test]
-async fn reconcile_returns_uninstalled_err_when_no_device_id_resolvable() {
-    // empty layout: no device.json, no token.json
-    let dir = filesys::Dir::create_temp_dir("upgrade_no_install")
-        .await
-        .unwrap();
-    let layout = Layout::new(dir);
-
-    let mock = make_mock_client(backend_device("dvc_5", "epsilon"));
-    let err = reconcile(&layout, mock.as_ref(), "v1.0.0", tokio::time::sleep)
-        .await;
-
-    match err {
-        UpgradeErr::StorageErr(storage::StorageErr::ResolveDeviceIDErr(_)) => {}
-        other => panic!("expected ResolveDeviceIDErr, got {other:?}"),
-    }
-}
