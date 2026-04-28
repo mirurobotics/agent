@@ -104,7 +104,7 @@ The Rust crate under test is `miru-agent` rooted at `agent/agent/` (Cargo manife
 - Setters that mutate at runtime: `set_get_device(F)`, `set_update_device(F)`, plus deployment/config/release setters.
 - Counters: `num_get_device_calls()`, `num_update_device_calls()`, `call_count(Call::IssueDeviceToken)`.
 - Failure injection: closures may return `Err(HTTPErr::MockErr(HTTPMockErr { is_network_conn_err: true }))`.
-- `issue_device_token_fn` is a plain `Box<dyn Fn>` (no setter) — to swap it after construction, build a fresh `MockClient` with the override directly. To swap dynamically, use the existing per-call mutex pattern: call `make_mock_client` then patch via `set_*` setters where available, or for `issue_device_token` just construct with the right closure.
+- `issue_device_token_fn` is a plain `Box<dyn Fn>` (no setter); to override it, construct the `MockClient` directly with the desired closure rather than starting from `make_mock_client`.
 
 **Storage helpers — `agent/agent/src/storage/`:**
 
@@ -125,7 +125,7 @@ All edits are in `agent/agent/tests/app/upgrade.rs`. No source changes are requi
 
 ### M1 — Delete the broken test (unblocks compilation)
 
-Delete the function `reconcile_returns_uninstalled_err_when_no_device_id_resolvable` (and its `#[tokio::test]` attribute) at lines 200–216 of `agent/agent/tests/app/upgrade.rs`. The body references the old `reconcile_impl` signature and prevents the whole file from compiling, so this must happen before any other milestone. After deletion, `cargo test -p miru-agent --test mod -- app::upgrade` should compile and run the four pre-existing `reconcile_*` tests cleanly. Drop any imports that become unused, but note `UpgradeErr` will be re-used by the new M3 tests so it can stay.
+Delete the function `reconcile_returns_uninstalled_err_when_no_device_id_resolvable` (and its `#[tokio::test]` attribute) from `agent/agent/tests/app/upgrade.rs`. The body references the old `reconcile` return type and prevents the whole file from compiling, so this must happen before any other milestone. After deletion, `cargo test -p miru-agent --test mod -- app::upgrade` should compile and run the four pre-existing `reconcile_*` tests cleanly. Drop any imports that become unused, but note `UpgradeErr` will be re-used by the new M3 tests so it can stay.
 
 ### M2 — `needs_upgrade` unit tests (4 cases)
 
@@ -157,7 +157,7 @@ Import `miru_agent::app::upgrade::reconcile_impl`. Use `prepare_layout` and `mak
 
 ### M4 — `reconcile` retry-loop tests
 
-Three already exist (`reconcile_is_noop_when_marker_matches`, `reconcile_rebootstraps_when_marker_missing`, `reconcile_rebootstraps_when_marker_version_differs`, `reconcile_retries_until_get_device_succeeds`). Keep them. Add one more:
+Four already exist (`reconcile_is_noop_when_marker_matches`, `reconcile_rebootstraps_when_marker_missing`, `reconcile_rebootstraps_when_marker_version_differs`, `reconcile_retries_until_get_device_succeeds`). Keep them. Add one more:
 
 1. `reconcile_uses_injected_sleep_and_recovers_after_repeated_failures` — `prepare_layout`. Use `make_mock_client`. Configure `set_get_device` to fail `N = 4` consecutive times then succeed. Inject a counting no-op sleep. Note: `tests/app/upgrade.rs` already imports `chrono::Duration`, so the sleep-fn parameter must use a disambiguated name. Add `use std::time::Duration as StdDuration;` near the top of the file, and write the closure parameter as `StdDuration`. `reconcile`'s bound is `Fn(Duration) -> impl Future<Output = ()> + Send` (not `FnMut`); show the closure as `move |_: StdDuration| { counter.fetch_add(1, Ordering::SeqCst); async {} }`. `Arc<AtomicUsize>::fetch_add` takes `&self`, so the bare `Fn` bound is satisfiable.
 
