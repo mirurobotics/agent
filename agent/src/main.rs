@@ -3,8 +3,11 @@ use std::env;
 
 // internal crates
 use backend_api::models as backend_client;
-use miru_agent::app::options::{AppOptions, LifecycleOptions};
 use miru_agent::app::run::run;
+use miru_agent::app::{
+    options::{AppOptions, LifecycleOptions},
+    upgrade,
+};
 use miru_agent::cli;
 use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
@@ -84,31 +87,26 @@ fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>)
 async fn run_agent() {
     let layout = storage::Layout::default();
 
-    // initialize logging early so the upgrade gate's retry messages are
-    // visible. The settings file may not yet exist on a fresh install or
-    // mid-rebootstrap, so use the default log level here. The settings
-    // load below uses the same global subscriber once the gate has
-    // converged.
+    // initialize logging with default options for reconciliation
     let _guard = logs::init(logs::Options::default());
 
-    // idempotent upgrade gate: rebootstrap on-disk schema if the running
-    // binary's version differs from the marker file. Blocks forever on a
-    // backend outage rather than failing fast (a half-wiped state on the
-    // next boot would be worse than the wait).
-    let backend_default = storage::Backend::default();
-    let bootstrap_http_client = match http::Client::new(&backend_default.base_url) {
+    // use the 
+    let url = get_bootstrap_base_url().await;
+    let bootstrap_http_client = match http::Client::new(&url) {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
             return;
         }
     };
-    if let Err(e) =
-        miru_agent::app::upgrade::reconcile(&layout, &bootstrap_http_client, version::VERSION).await
-    {
-        error!("upgrade gate failed: {e}");
-        return;
-    }
+
+    upgrade::reconcile(
+        &layout,
+        &bootstrap_http_client,
+        version::VERSION,
+        tokio::time::sleep,
+    )
+    .await;
 
     // check the agent has been activated
     let device_file = layout.device();
@@ -151,6 +149,15 @@ async fn run_agent() {
     if let Err(e) = result {
         error!("Failed to run the server: {e}");
     }
+}
+
+async fn get_bootstrap_base_url() -> String {
+    let settings_file = storage::Layout::default().settings();
+    if let Ok(settings) = settings_file.read_json::<storage::Settings>().await {
+        return settings.backend.base_url;
+    }
+
+    storage::Backend::default().base_url
 }
 
 async fn await_shutdown_signal() {

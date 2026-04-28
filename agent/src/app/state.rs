@@ -41,7 +41,7 @@ impl AppState {
         let token_file =
             TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
 
-        // get the device id (shared with the upgrade gate)
+        // get the device id
         let device_id = storage::resolve_device_id(layout).await?;
 
         // initialize storage

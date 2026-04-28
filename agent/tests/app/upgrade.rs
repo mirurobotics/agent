@@ -99,7 +99,7 @@ async fn reconcile_is_noop_when_marker_matches() {
         .unwrap();
 
     let mock = make_mock_client(backend_device("dvc_1", "alpha"));
-    reconcile(&layout, mock.as_ref(), "v1.0.0").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v1.0.0", tokio::time::sleep).await;
 
     assert_eq!(mock.num_get_device_calls(), 0);
     assert_eq!(mock.num_update_device_calls(), 0);
@@ -114,7 +114,7 @@ async fn reconcile_rebootstraps_when_marker_missing() {
     let (priv_before, pub_before) = read_keys(&layout).await;
 
     let mock = make_mock_client(backend_device("dvc_2", "beta"));
-    reconcile(&layout, mock.as_ref(), "v0.9.0").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v0.9.0", tokio::time::sleep).await;
 
     // marker present, version stamped
     let marker = storage::agent_version::read(&layout.agent_version())
@@ -147,7 +147,7 @@ async fn reconcile_rebootstraps_when_marker_version_differs() {
         .unwrap();
 
     let mock = make_mock_client(backend_device("dvc_3", "gamma"));
-    reconcile(&layout, mock.as_ref(), "v0.0.2").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v0.0.2", tokio::time::sleep).await;
 
     let marker = storage::agent_version::read(&layout.agent_version())
         .await
@@ -184,7 +184,7 @@ async fn reconcile_retries_until_get_device_succeeds() {
     // at max_secs, so if the test's retry logic accidentally overshoots
     // we'd hang. We rely on the real backoff (base 1s, max 12h) — that
     // means each retry waits 1s, 2s, ... so this test ends in ~3s.
-    reconcile(&layout, mock.as_ref(), "v1.2.3").await.unwrap();
+    reconcile(&layout, mock.as_ref(), "v1.2.3", tokio::time::sleep).await;
 
     // marker now reflects the new version
     let marker = storage::agent_version::read(&layout.agent_version())
@@ -206,9 +206,8 @@ async fn reconcile_returns_uninstalled_err_when_no_device_id_resolvable() {
     let layout = Layout::new(dir);
 
     let mock = make_mock_client(backend_device("dvc_5", "epsilon"));
-    let err = reconcile(&layout, mock.as_ref(), "v1.0.0")
-        .await
-        .unwrap_err();
+    let err = reconcile(&layout, mock.as_ref(), "v1.0.0", tokio::time::sleep)
+        .await;
 
     match err {
         UpgradeErr::StorageErr(storage::StorageErr::ResolveDeviceIDErr(_)) => {}
