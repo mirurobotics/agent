@@ -90,7 +90,7 @@ async fn run_agent() {
     // initialize logging with default options for reconciliation
     let _guard = logs::init(logs::Options::default());
 
-    // use the 
+    // use the
     let url = get_bootstrap_base_url().await;
     let bootstrap_http_client = match http::Client::new(&url) {
         Ok(c) => c,

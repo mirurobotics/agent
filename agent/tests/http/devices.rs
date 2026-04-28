@@ -97,8 +97,8 @@ pub mod issue_token {
             vec![CapturedRequest {
                 call: Call::IssueDeviceToken,
                 method: reqwest::Method::POST,
-                path: "/devices/issue_token".into(),
-                url: "http://mock/devices/issue_token".into(),
+                path: "/devices/token".into(),
+                url: "http://mock/devices/token".into(),
                 query: vec![],
                 body: Some(String::new()),
                 token: Some("test-token".into()),

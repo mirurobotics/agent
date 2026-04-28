@@ -1,6 +1,8 @@
 // internal crates
-use crate::authn::errors::{AuthnErr, SerdeErr, TimestampConversionErr};
-use crate::authn::token::Token;
+use crate::authn::{
+    errors::{AuthnErr, SerdeErr, TimestampConversionErr},
+    token::Token,
+};
 use crate::crypt::{base64, rsa};
 use crate::filesys::file::File;
 use crate::http::{self, devices};

@@ -241,7 +241,9 @@ async fn reconcile_impl_happy_path_writes_marker_and_updates_backend() {
     let mock = make_mock_client(backend_device("dvc_ri1", "happy"));
 
     let version = "v3.4.5";
-    reconcile_impl(mock.as_ref(), &layout, version).await.unwrap();
+    reconcile_impl(mock.as_ref(), &layout, version)
+        .await
+        .unwrap();
 
     let marker = storage::agent_version::read(&layout.agent_version())
         .await
