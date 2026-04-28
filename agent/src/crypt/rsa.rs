@@ -26,9 +26,9 @@ pub struct Jwk {
     pub e: String,
 }
 
-/// Serialize an RSA public key as a JWK (RFC 7517) with `n` and `e` as
-/// big-endian base64url-no-pad-encoded byte strings.
-pub fn rsa_public_key_to_jwk(key: &Rsa<Public>) -> Jwk {
+/// Serialize an RSA public key as a JWK (RFC 7517) with `n` and `e` as big-endian
+/// base64url-no-pad-encoded byte strings.
+pub fn pub_key_to_jwk(key: &Rsa<Public>) -> Jwk {
     Jwk {
         kty: "RSA",
         n: crate::crypt::base64::encode_bytes_url_safe_no_pad(&key.n().to_vec()),
@@ -123,12 +123,7 @@ pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Publ
     )
 }
 
-/// Shared signing core. Reads the private key, converts to a PKey, then
-/// signs `data` with the supplied digest. SHA-256 is used by the public
-/// `sign`; SHA-512 is used by `sign_rs512` (for RS512 JWTs). Centralizing
-/// the OpenSSL plumbing here keeps the per-digest entry points to a
-/// single delegation each.
-async fn sign_with_digest(
+async fn sign(
     private_key_file: &filesys::File,
     data: &[u8],
     digest: MessageDigest,
@@ -142,20 +137,20 @@ async fn sign_with_digest(
     Ok(signature)
 }
 
-/// Create a signature from the provided data using the private key stored in the
-/// specified file. Uses SHA-256.
-pub async fn sign(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr> {
-    sign_with_digest(private_key_file, data, MessageDigest::sha256()).await
+/// Create an RSASSA-PKCS1-v1_5 (RFC 7518 §3.2) signature using SHA-256.
+pub async fn sign_rs256(
+    private_key_file: &filesys::File,
+    data: &[u8],
+) -> Result<Vec<u8>, CryptErr> {
+    sign(private_key_file, data, MessageDigest::sha256()).await
 }
 
-/// Create an RS512 (RSASSA-PKCS1-v1_5 with SHA-512) signature, per RFC 7518
-/// §3.3. Used to sign self-issued JWTs for the `/devices/issue_token`
-/// endpoint.
+/// Create an RSASSA-PKCS1-v1_5 (RFC 7518 §3.3) signature using SHA-512.
 pub async fn sign_rs512(
     private_key_file: &filesys::File,
     data: &[u8],
 ) -> Result<Vec<u8>, CryptErr> {
-    sign_with_digest(private_key_file, data, MessageDigest::sha512()).await
+    sign(private_key_file, data, MessageDigest::sha512()).await
 }
 
 /// Verify a signature using the public key stored in the specified file

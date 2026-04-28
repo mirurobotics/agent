@@ -5,6 +5,60 @@ use std::os::unix::fs::PermissionsExt;
 use miru_agent::crypt::{rsa, CryptErr};
 use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 
+pub mod pub_key_to_jwk {
+    use super::*;
+    use miru_agent::crypt::rsa::pub_key_to_jwk;
+
+    #[tokio::test]
+    async fn success_deterministic_for_known_key() {
+        let crypt_dir = filesys::Dir::create_temp_dir("crypt_rsa_test")
+            .await
+            .unwrap();
+        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
+        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
+
+        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
+        let jwk_a = pub_key_to_jwk(&public_key);
+        let jwk_b = pub_key_to_jwk(&public_key);
+
+        // deterministic: two calls yield the same struct
+        assert_eq!(jwk_a, jwk_b);
+
+        // shape: kty is RSA, n and e are non-empty url-safe-no-pad strings
+        assert_eq!(jwk_a.kty, "RSA");
+        assert!(!jwk_a.n.is_empty());
+        assert!(!jwk_a.e.is_empty());
+        let url_safe = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        assert!(jwk_a.n.chars().all(url_safe));
+        assert!(jwk_a.e.chars().all(url_safe));
+    }
+
+    #[tokio::test]
+    async fn serialized_json_field_order() {
+        let crypt_dir = filesys::Dir::create_temp_dir("crypt_rsa_test")
+            .await
+            .unwrap();
+        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
+        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
+
+        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
+        let jwk = pub_key_to_jwk(&public_key);
+        let serialized = serde_json::to_string(&jwk).unwrap();
+
+        assert!(serialized.contains(r#""kty":"RSA""#));
+        assert!(serialized.contains(r#""n":"#));
+        assert!(serialized.contains(r#""e":"#));
+    }
+}
+
 pub mod gen_key_pair {
     use super::*;
 
@@ -283,7 +337,7 @@ pub mod read_public_key {
     }
 }
 
-pub mod sign {
+pub mod sign_rs256 {
     use super::*;
 
     #[tokio::test]
@@ -304,7 +358,7 @@ pub mod sign {
             .unwrap();
 
         let data = b"hello world";
-        let signature = rsa::sign(&private_key_file, data).await.unwrap();
+        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         assert!(!signature.is_empty());
     }
 
@@ -323,7 +377,7 @@ pub mod sign {
             .await
             .unwrap();
         let data = b"hello world";
-        let result = rsa::sign(&private_key_file, data).await;
+        let result = rsa::sign_rs256(&private_key_file, data).await;
         assert!(result.is_err());
     }
 
@@ -338,7 +392,7 @@ pub mod sign {
         private_key_file.delete().await.unwrap();
 
         let data = b"hello world";
-        let result = rsa::sign(&private_key_file, data).await;
+        let result = rsa::sign_rs256(&private_key_file, data).await;
         assert!(result.is_err());
     }
 }
@@ -364,7 +418,7 @@ pub mod verify {
             .unwrap();
 
         let data = b"hello world";
-        let signature = rsa::sign(&private_key_file, data).await.unwrap();
+        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         let result = rsa::verify(&public_key_file, data, &signature).await;
         assert!(result.is_ok());
         assert!(result.unwrap());
@@ -386,7 +440,7 @@ pub mod verify {
             .unwrap();
 
         let data = b"hello world";
-        let signature = rsa::sign(&private_key_file, data).await.unwrap();
+        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         // verify with different data — should return Ok(false)
         let is_valid = rsa::verify(&public_key_file, b"different data", &signature)
             .await
@@ -415,7 +469,7 @@ pub mod verify {
 
         // sign with key pair 1, verify with key pair 2's public key
         let data = b"hello world";
-        let signature = rsa::sign(&priv1, data).await.unwrap();
+        let signature = rsa::sign_rs256(&priv1, data).await.unwrap();
         let is_valid = rsa::verify(&pub2, data, &signature).await.unwrap();
         assert!(!is_valid);
     }
@@ -433,7 +487,7 @@ pub mod verify {
             .unwrap();
 
         let data = b"";
-        let signature = rsa::sign(&private_key_file, data).await.unwrap();
+        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         assert!(!signature.is_empty());
         let is_valid = rsa::verify(&public_key_file, data, &signature)
             .await
@@ -475,60 +529,6 @@ pub mod verify {
         let signature = vec![4, 4];
         let result = rsa::verify(&public_key_file, data, &signature).await;
         assert!(result.is_err());
-    }
-}
-
-pub mod rsa_public_key_to_jwk {
-    use super::*;
-    use miru_agent::crypt::rsa::rsa_public_key_to_jwk;
-
-    #[tokio::test]
-    async fn success_deterministic_for_known_key() {
-        let crypt_dir = filesys::Dir::create_temp_dir("crypt_rsa_test")
-            .await
-            .unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
-
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
-
-        let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
-        let jwk_a = rsa_public_key_to_jwk(&public_key);
-        let jwk_b = rsa_public_key_to_jwk(&public_key);
-
-        // deterministic: two calls yield the same struct
-        assert_eq!(jwk_a, jwk_b);
-
-        // shape: kty is RSA, n and e are non-empty url-safe-no-pad strings
-        assert_eq!(jwk_a.kty, "RSA");
-        assert!(!jwk_a.n.is_empty());
-        assert!(!jwk_a.e.is_empty());
-        let url_safe = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-        assert!(jwk_a.n.chars().all(url_safe));
-        assert!(jwk_a.e.chars().all(url_safe));
-    }
-
-    #[tokio::test]
-    async fn serialized_json_field_order() {
-        let crypt_dir = filesys::Dir::create_temp_dir("crypt_rsa_test")
-            .await
-            .unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
-
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
-
-        let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
-        let jwk = rsa_public_key_to_jwk(&public_key);
-        let serialized = serde_json::to_string(&jwk).unwrap();
-
-        assert!(serialized.contains(r#""kty":"RSA""#));
-        assert!(serialized.contains(r#""n":"#));
-        assert!(serialized.contains(r#""e":"#));
     }
 }
 

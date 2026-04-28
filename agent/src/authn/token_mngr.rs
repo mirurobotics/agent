@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::authn::{errors::*, issue, token, token::Token};
+use crate::authn::{errors::*, issue::issue_token, token, token::Token};
 use crate::filesys::{cached_file::SingleThreadCachedFile, file::File, path::PathExt};
 use crate::http;
 use crate::trace;
@@ -74,7 +74,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
     }
 
     async fn issue_token(&self) -> Result<Token, AuthnErr> {
-        issue::issue_token(
+        issue_token(
             self.http_client.as_ref(),
             &self.private_key_file,
             &self.public_key_file,
