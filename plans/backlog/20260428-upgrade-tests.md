@@ -18,13 +18,13 @@ This plan lives in `agent/plans/backlog/` because all changes are confined to th
 2. `reconcile_impl(http_client, layout, version) -> Result<(), UpgradeErr>`
 3. `reconcile(layout, http_client, version, sleep_fn) -> ()` (loops forever until success)
 
-The existing `reconcile_returns_uninstalled_err_when_no_device_id_resolvable` test no longer compiles against the current `reconcile_impl` signature (the source no longer calls `storage::resolve_device_id`), so the entire `tests/app/upgrade.rs` file fails to build. Until that test is deleted, no other test in the file — existing or new — can run. The very first action of this plan is to delete the broken test so the file compiles; only then is a baseline `cargo test` run possible. After that, every public function in `app::upgrade` gains direct unit-test coverage. A novice running `cargo test -p miru-agent --test mod` from `agent/agent/` will see the new tests pass with the broken test gone. The user-visible outcome is a green test run with the new tests included; CI no longer skips upgrade behavior verification.
+The existing `reconcile_returns_uninstalled_err_when_no_device_id_resolvable` test no longer compiles against the current `reconcile_impl` signature (the source no longer calls `storage::resolve_device_id`), so the entire `tests/app/upgrade.rs` file fails to build. The plan stages the work so that after M1 alone the file compiles and the 4 pre-existing `reconcile_*` tests pass; M2–M4 then add 10 new tests (4 `needs_upgrade`, 5 `reconcile_impl`, 1 `reconcile` retry-with-counted-sleep), bringing the post-completion total to 14 passing tests.
 
 ## Progress
 
 - [ ] M1: Delete the broken `reconcile_returns_uninstalled_err_when_no_device_id_resolvable` test so `tests/app/upgrade.rs` compiles, then confirm `cargo test` runs.
 - [ ] M2: Add four `needs_upgrade` tests (missing marker, match, mismatch, read-error).
-- [ ] M3: Add five `reconcile_impl` tests (happy path + one failure per step).
+- [ ] M3: Add five `reconcile_impl` tests (happy path + one representative failure per pipeline step: FileSysErr from key check, HTTPErr from get_device, StorageErr from reset, HTTPErr from update_device).
 - [ ] M4: Verify and (if missing) add one `reconcile` test that asserts the backoff loop is exercised at least N times before final success, using a counting no-op `sleep_fn`.
 - [ ] Final: preflight clean (formatting, clippy, tests).
 
@@ -40,7 +40,7 @@ Use timestamps when you complete steps.
   Rationale: The five existing upgrade tests already live in `tests/app/upgrade.rs` with a working harness (`prepare_layout`, `make_mock_client`, `backend_device`, `read_keys`). Reusing it is simpler than duplicating helpers inline, and keeps coverage discoverable. The "read-error" case for `needs_upgrade` does **not** require module-private access — it can be triggered by making `layout.agent_version()` return a path that exists but contains invalid content (e.g. write a directory in its place, or write bytes that fail the storage decode), so an integration test is sufficient.
   Date/Author: 2026-04-28 / plan author.
 
-- Decision: Do not introduce any new `pub` items in `agent/src/app/upgrade.rs` for testing. The private helpers `issue_token`, `fetch_device`, `update_device` are exercised indirectly through `reconcile_impl`. `reconcile_impl` is already `pub` in the source as of today (verified at `agent/src/app/upgrade.rs:85`).
+- Decision: Do not introduce any new `pub` items in `agent/src/app/upgrade.rs` for testing. The private helpers `issue_token`, `fetch_device`, `update_device` are exercised indirectly through `reconcile_impl`. `reconcile_impl` is already `pub` in the source as of today (verified by inspecting the `reconcile_impl` declaration in `agent/src/app/upgrade.rs`).
   Rationale: Avoid widening public surface for tests; the integration tests in `agent/agent/tests/` consume `miru_agent::app::upgrade::*` as a downstream crate.
   Date/Author: 2026-04-28 / plan author.
 
@@ -49,10 +49,10 @@ Use timestamps when you complete steps.
   Date/Author: 2026-04-28 / plan author.
 
 - Decision: Delete `reconcile_returns_uninstalled_err_when_no_device_id_resolvable` outright; do not treat any new test as its replacement.
-  Rationale: The old test premise — that `reconcile` returns `UpgradeErr::StorageErr(StorageErr::ResolveDeviceIDErr(_))` when no device id is on disk — is dead because `reconcile_impl` no longer calls `storage::resolve_device_id`; the device is fetched from the backend instead. The new `reconcile_impl_returns_storage_err_when_reset_fails` test added under M2 is independent coverage of the storage-failure path inside `reconcile_impl`, not a "replacement" — `reconcile_impl` returning `UpgradeErr::StorageErr` via the `#[from]` conversion is a property worth asserting on its own merits.
+  Rationale: The old test premise — that `reconcile` returns `UpgradeErr::StorageErr(StorageErr::ResolveDeviceIDErr(_))` when no device id is on disk — is dead because `reconcile_impl` no longer calls `storage::resolve_device_id`; the device is fetched from the backend instead. The new `reconcile_impl_returns_storage_err_when_reset_fails` test added under M3 is independent coverage of the storage-failure path inside `reconcile_impl`, not a "replacement" — `reconcile_impl` returning `UpgradeErr::StorageErr` via the `#[from]` conversion is a property worth asserting on its own merits.
   Date/Author: 2026-04-28 / plan author.
 
-- Decision: Do not pass `--features test`. `agent/agent/Cargo.toml` declares `[features] test = []` (lines 9–10) — an empty feature list. `--features test` is only required when a test references a `#[cfg(feature = "test")]` symbol, and none of the new tests do. The canonical invocation for this work is `cargo test -p miru-agent --test mod`.
+- Decision: Do not pass `--features test`. `agent/agent/Cargo.toml` declares `[features] test = []` — an empty feature list. `--features test` is only required when a test references a `#[cfg(feature = "test")]` symbol, and none of the new tests do. The canonical invocation for this work is `cargo test -p miru-agent --test mod`.
   Date/Author: 2026-04-28 / plan author.
 
 ## Outcomes & Retrospective
@@ -65,19 +65,19 @@ The Rust crate under test is `miru-agent` rooted at `agent/agent/` (Cargo manife
 
 **Code under test — `agent/agent/src/app/upgrade.rs`:**
 
-- `pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool` (lines 60–83). Reads `layout.agent_version()` via `storage::agent_version::read`. Returns:
+- `pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool` (see the `needs_upgrade` function in `agent/src/app/upgrade.rs`). Reads `layout.agent_version()` via `storage::agent_version::read`. Returns:
   - `true` when the marker is missing (`Ok(None)`).
   - `false` when the marker matches `cur_version`.
   - `true` when the marker is present but differs.
   - `true` when the read errors (logs and treats as missing).
 
-- `pub async fn reconcile_impl<HTTPClientT: ClientI>(http_client, layout, version) -> Result<(), UpgradeErr>` (lines 85–95). Sequence:
+- `pub async fn reconcile_impl<HTTPClientT: ClientI>(http_client, layout, version) -> Result<(), UpgradeErr>` (see the `reconcile_impl` function in `agent/src/app/upgrade.rs`). Sequence:
   1. `issue_token` — asserts `auth/private_key` and `auth/public_key` exist, then calls `authn::issue_token` (which calls `http::issue_token` on the client). Returns `UpgradeErr::FileSysErr` on missing key file, `UpgradeErr::AuthnErr` or `UpgradeErr::HTTPErr` on JWT/HTTP failure.
   2. `fetch_device` — `http::devices::get(&token)` then `(&api).into()`. Returns `UpgradeErr::HTTPErr` on failure.
   3. `storage::setup::reset(layout, &device, &Settings::default(), version)` — writes `auth/`, `device.json`, `settings.json`, blank token, wipes `resources/`, writes the agent-version marker LAST so partial failures are recoverable. Returns `UpgradeErr::StorageErr` on failure.
   4. `update_device` — `http::devices::update` with the running version in the body. Returns `UpgradeErr::HTTPErr` on failure.
 
-- `pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(layout, http_client, version, sleep_fn)` (lines 20–58). Loop:
+- `pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(layout, http_client, version, sleep_fn)` (see the `reconcile` function in `agent/src/app/upgrade.rs`). Loop:
   - If `!needs_upgrade(...)` → return.
   - Call `reconcile_impl`. On `Ok` → break. On `Err` → log, increment `err_streak`, sleep via `sleep_fn` for `cooldown::calc(&Backoff { base_secs: 1, growth_factor: 2, max_secs: 60 }, err_streak)` seconds, retry.
   - **Retries on every error type, not just network.** Tests must arrange eventual success or they hang.
@@ -134,23 +134,32 @@ Add these tests at the bottom of `agent/agent/tests/app/upgrade.rs`, after the e
 1. `needs_upgrade_returns_true_when_marker_missing` — `prepare_layout`, do not write a marker, assert `needs_upgrade(&layout, "v1.0.0").await == true`.
 2. `needs_upgrade_returns_false_when_marker_matches` — `prepare_layout`, `storage::agent_version::write(&layout.agent_version(), "v1.2.3").await.unwrap()`, assert `needs_upgrade(&layout, "v1.2.3").await == false`.
 3. `needs_upgrade_returns_true_when_marker_differs` — write `"v1.0.0"`, call with `"v2.0.0"`, expect `true`.
-4. `needs_upgrade_returns_true_when_read_errors` — force a read error by creating a directory at the marker path: `tokio::fs::create_dir_all(&layout.agent_version()).await.unwrap()`. The mechanism is deterministic: `agent_version::read` (`agent/agent/src/storage/agent_version.rs:5–11`) checks `file.exists()` (true for a directory) and then calls `file.read_string().await?`, which fails on a directory and returns `Err(StorageErr::FileSysErr(_))`. Assert `needs_upgrade(...) == true`. If the executor finds this does not error, record it in Surprises & Discoveries — the plan does not provide a fallback because the source path is unambiguous.
+4. `needs_upgrade_returns_true_when_read_errors` — force a read error by creating a directory at the marker path:
 
-### M3 — `reconcile_impl` tests (happy path + one failure per step)
+        tokio::fs::create_dir_all(layout.agent_version().path()).await.unwrap();
+
+   Note `Layout::agent_version()` returns `filesys::File`; use `.path()` to get the underlying `&Path` for `tokio::fs` calls. The mechanism is deterministic: see the `read` function in `agent/src/storage/agent_version.rs`, which checks `file.exists()` (true for a directory) and then calls `file.read_string().await?`, which fails on a directory and returns `Err(StorageErr::FileSysErr(_))`. Assert `needs_upgrade(...) == true`. If the executor finds this does not error, record it in Surprises & Discoveries — the plan does not provide a fallback because the source path is unambiguous.
+
+### M3 — `reconcile_impl` tests (happy path + one representative failure per pipeline step: FileSysErr from key check, HTTPErr from get_device, StorageErr from reset, HTTPErr from update_device)
 
 Import `miru_agent::app::upgrade::reconcile_impl`. Use `prepare_layout` and `make_mock_client` exactly as the existing `reconcile_*` tests do.
 
 1. `reconcile_impl_happy_path_writes_marker_and_updates_backend` — happy path. Assert `Ok(())`, marker on disk equals `version`, `mock.num_update_device_calls() == 1`, `mock.num_get_device_calls() >= 1`, `mock.call_count(Call::IssueDeviceToken) >= 1`.
 2. `reconcile_impl_returns_filesys_err_when_private_key_missing` — `prepare_layout` then `tokio::fs::remove_file(&layout.auth().private_key()).await.unwrap()`. Call `reconcile_impl`. Match `Err(UpgradeErr::FileSysErr(_))` (ultimately surfaced from `private_key_file.assert_exists()?`).
 3. `reconcile_impl_returns_http_err_when_get_device_fails` — `mock.set_get_device(|| Err(HTTPErr::MockErr(HTTPMockErr { is_network_conn_err: true })))`. Match `Err(UpgradeErr::HTTPErr(_))`.
-4. `reconcile_impl_returns_storage_err_when_reset_fails` — force `storage::setup::reset` to fail by pre-creating a **directory** at `layout.device()`. The mechanism is deterministic: `setup::reset` (`agent/agent/src/storage/setup.rs:21–25`) runs `device_file.write_json(...)` first after creating the auth dir; an atomic JSON write cannot replace an existing directory and returns `Err(StorageErr::FileSysErr(_))`. Steps in the test: after `prepare_layout` (which wrote a file at `layout.device()`), delete that file and call `tokio::fs::create_dir_all(&layout.device()).await.unwrap()`. Match `Err(UpgradeErr::StorageErr(_))`.
+4. `reconcile_impl_returns_storage_err_when_reset_fails` — force `storage::setup::reset` to fail by pre-creating a **directory** at `layout.device()`. The mechanism is deterministic: see the `reset` function in `agent/src/storage/setup.rs`, which runs `device_file.write_json(...)` first after creating the auth dir; an atomic JSON write cannot replace an existing directory and returns `Err(StorageErr::FileSysErr(_))`. Steps in the test: after `prepare_layout` (which wrote a file at `layout.device()`), remove the file then create a directory at the same path:
+
+        tokio::fs::remove_file(layout.device().path()).await.unwrap();
+        tokio::fs::create_dir_all(layout.device().path()).await.unwrap();
+
+   Note `Layout::device()` returns `filesys::File`; use `.path()` to get the underlying `&Path` for `tokio::fs` calls. Match `Err(UpgradeErr::StorageErr(_))`. If the test fails to surface `UpgradeErr::StorageErr` on first run, log the actual error variant and record it in Surprises & Discoveries before adjusting the failure-injection mechanism.
 5. `reconcile_impl_returns_http_err_when_update_device_fails` — happy `get_device`, but `mock.set_update_device(|| Err(HTTPErr::MockErr(HTTPMockErr { is_network_conn_err: true })))`. Match `Err(UpgradeErr::HTTPErr(_))`. Importantly: **the marker has already been written by `setup::reset` before `update_device` runs**, so also assert `storage::agent_version::read(&layout.agent_version()).await.unwrap() == Some(version.to_string())` to lock in the documented "marker last in setup::reset, but update_device is after setup::reset and can fail leaving the marker in place" property of `reconcile_impl`.
 
 ### M4 — `reconcile` retry-loop tests
 
 Three already exist (`reconcile_is_noop_when_marker_matches`, `reconcile_rebootstraps_when_marker_missing`, `reconcile_rebootstraps_when_marker_version_differs`, `reconcile_retries_until_get_device_succeeds`). Keep them. Add one more:
 
-1. `reconcile_uses_injected_sleep_and_recovers_after_repeated_failures` — `prepare_layout`. Use `make_mock_client`. Configure `set_get_device` to fail `N = 4` consecutive times then succeed. Inject a counting no-op sleep. Note: `tests/app/upgrade.rs` already imports `chrono::Duration`, so the sleep-fn parameter must use a disambiguated name. Add `use std::time::Duration as StdDuration;` near the top of the file, and write the closure parameter as `StdDuration`:
+1. `reconcile_uses_injected_sleep_and_recovers_after_repeated_failures` — `prepare_layout`. Use `make_mock_client`. Configure `set_get_device` to fail `N = 4` consecutive times then succeed. Inject a counting no-op sleep. Note: `tests/app/upgrade.rs` already imports `chrono::Duration`, so the sleep-fn parameter must use a disambiguated name. Add `use std::time::Duration as StdDuration;` near the top of the file, and write the closure parameter as `StdDuration`. `reconcile`'s bound is `Fn(Duration) -> impl Future<Output = ()> + Send` (not `FnMut`); show the closure as `move |_: StdDuration| { counter.fetch_add(1, Ordering::SeqCst); async {} }`. `Arc<AtomicUsize>::fetch_add` takes `&self`, so the bare `Fn` bound is satisfiable.
 
         let sleep_count = Arc::new(AtomicUsize::new(0));
         let counter = sleep_count.clone();
@@ -159,7 +168,7 @@ Three already exist (`reconcile_is_noop_when_marker_matches`, `reconcile_reboots
             async {}
         };
         reconcile(&layout, mock.as_ref(), "v9.9.9", sleep_fn).await;
-        assert!(sleep_count.load(Ordering::SeqCst) >= 4, "expected at least 4 sleeps, got {}", sleep_count.load(Ordering::SeqCst));
+        assert_eq!(sleep_count.load(Ordering::SeqCst), 4, "expected exactly 4 sleeps for 4 injected failures");
         assert_eq!(mock.num_update_device_calls(), 1);
 
 This proves the backoff branch is exercised under the injected `sleep_fn` and the loop ultimately terminates.
@@ -281,7 +290,7 @@ must all exit `0` with no warnings emitted by clippy and no failed or ignored te
 
 Acceptance behavior:
 
-- A novice running `cargo test -p miru-agent --test mod` in `agent/agent/` after pulling this branch sees 14 upgrade tests run, all pass (count is post-deletion of the broken test); before the branch the file did not compile.
+- A novice running `cargo test -p miru-agent --test mod` in `agent/agent/` after pulling this branch sees 14 upgrade tests run, all pass; before the branch the file did not compile.
 - The `agent/src/app/upgrade.rs` file has the same public API and same line count it did before this work — there are zero source-code changes; only test files change.
 
 ## Idempotence and Recovery
