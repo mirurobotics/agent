@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
 use backend_api::models as backend_client;
-use miru_agent::app::upgrade::{needs_upgrade, reconcile};
+use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
@@ -231,5 +231,108 @@ async fn needs_upgrade_returns_true_when_read_errors() {
         .await
         .unwrap();
     assert!(needs_upgrade(&layout, "v1.0.0").await);
+}
+
+#[tokio::test]
+async fn reconcile_impl_happy_path_writes_marker_and_updates_backend() {
+    let (layout, _dir) = prepare_layout("reconcile_impl_happy", "dvc_ri1").await;
+    let mock = make_mock_client(backend_device("dvc_ri1", "happy"));
+
+    let version = "v3.4.5";
+    reconcile_impl(mock.as_ref(), &layout, version).await.unwrap();
+
+    let marker = storage::agent_version::read(&layout.agent_version())
+        .await
+        .unwrap();
+    assert_eq!(marker, Some(version.to_string()));
+    assert_eq!(mock.num_update_device_calls(), 1);
+    assert!(mock.num_get_device_calls() >= 1);
+    assert!(mock.call_count(Call::IssueDeviceToken) >= 1);
+}
+
+#[tokio::test]
+async fn reconcile_impl_returns_filesys_err_when_private_key_missing() {
+    let (layout, _dir) = prepare_layout("reconcile_impl_no_pk", "dvc_ri2").await;
+    tokio::fs::remove_file(layout.auth().private_key().path())
+        .await
+        .unwrap();
+
+    let mock = make_mock_client(backend_device("dvc_ri2", "no_pk"));
+    let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+        .await
+        .expect_err("expected FileSysErr from missing private key");
+    match err {
+        UpgradeErr::FileSysErr(_) => {}
+        other => panic!("expected UpgradeErr::FileSysErr, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_impl_returns_http_err_when_get_device_fails() {
+    let (layout, _dir) = prepare_layout("reconcile_impl_get_fail", "dvc_ri3").await;
+    let mock = make_mock_client(backend_device("dvc_ri3", "get_fail"));
+    mock.set_get_device(|| {
+        Err(HTTPErr::MockErr(HTTPMockErr {
+            is_network_conn_err: true,
+        }))
+    });
+
+    let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+        .await
+        .expect_err("expected HTTPErr from get_device failure");
+    match err {
+        UpgradeErr::HTTPErr(_) => {}
+        other => panic!("expected UpgradeErr::HTTPErr, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_impl_returns_storage_err_when_reset_fails() {
+    let (layout, _dir) = prepare_layout("reconcile_impl_reset_fail", "dvc_ri4").await;
+    // Replace device.json (a regular file) with a directory of the same name.
+    // setup::reset writes device.json via an atomic write that cannot replace
+    // a directory, so reset returns StorageErr::FileSysErr(_).
+    tokio::fs::remove_file(layout.device().path())
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(layout.device().path())
+        .await
+        .unwrap();
+
+    let mock = make_mock_client(backend_device("dvc_ri4", "reset_fail"));
+    let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+        .await
+        .expect_err("expected StorageErr from reset failure");
+    match err {
+        UpgradeErr::StorageErr(_) => {}
+        other => panic!("expected UpgradeErr::StorageErr, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_impl_returns_http_err_when_update_device_fails() {
+    let (layout, _dir) = prepare_layout("reconcile_impl_update_fail", "dvc_ri5").await;
+    let mock = make_mock_client(backend_device("dvc_ri5", "update_fail"));
+    mock.set_update_device(|| {
+        Err(HTTPErr::MockErr(HTTPMockErr {
+            is_network_conn_err: true,
+        }))
+    });
+
+    let version = "v7.8.9";
+    let err = reconcile_impl(mock.as_ref(), &layout, version)
+        .await
+        .expect_err("expected HTTPErr from update_device failure");
+    match err {
+        UpgradeErr::HTTPErr(_) => {}
+        other => panic!("expected UpgradeErr::HTTPErr, got {other:?}"),
+    }
+
+    // setup::reset wrote the marker before update_device ran, so the marker
+    // reflects the new version even though update_device failed.
+    let marker = storage::agent_version::read(&layout.agent_version())
+        .await
+        .unwrap();
+    assert_eq!(marker, Some(version.to_string()));
 }
 
