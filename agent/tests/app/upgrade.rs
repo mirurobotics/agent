@@ -1,5 +1,7 @@
 // standard crates
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration as StdDuration;
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
@@ -336,3 +338,43 @@ async fn reconcile_impl_returns_http_err_when_update_device_fails() {
     assert_eq!(marker, Some(version.to_string()));
 }
 
+#[tokio::test]
+async fn reconcile_uses_injected_sleep_and_recovers_after_repeated_failures() {
+    let (layout, _dir) = prepare_layout("reconcile_counted_sleep", "dvc_cs1").await;
+    let device = backend_device("dvc_cs1", "counted");
+    let mock = make_mock_client(device.clone());
+
+    // Fail get_device 4 times, then succeed. The reconcile loop should sleep
+    // exactly 4 times via the injected counting sleep_fn before the 5th
+    // attempt succeeds.
+    let call_counter = Arc::new(Mutex::new(0u32));
+    let counter_clone = call_counter.clone();
+    let device_clone = device.clone();
+    mock.set_get_device(move || {
+        let mut n = counter_clone.lock().unwrap();
+        *n += 1;
+        if *n <= 4 {
+            Err(HTTPErr::MockErr(HTTPMockErr {
+                is_network_conn_err: true,
+            }))
+        } else {
+            Ok(device_clone.clone())
+        }
+    });
+
+    let sleep_count = Arc::new(AtomicUsize::new(0));
+    let counter = sleep_count.clone();
+    let sleep_fn = move |_: StdDuration| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        async {}
+    };
+
+    reconcile(&layout, mock.as_ref(), "v9.9.9", sleep_fn).await;
+
+    assert_eq!(
+        sleep_count.load(Ordering::SeqCst),
+        4,
+        "expected exactly 4 sleeps for 4 injected failures"
+    );
+    assert_eq!(mock.num_update_device_calls(), 1);
+}
