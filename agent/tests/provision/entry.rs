@@ -55,7 +55,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let device = provision::provision(
+        let outcome = provision::provision(
             &mock,
             &layout,
             &settings,
@@ -64,6 +64,8 @@ pub mod provision_fn {
         )
         .await
         .unwrap();
+        assert!(!outcome.is_provisioned);
+        let device = outcome.device;
 
         assert_eq!(device.id, DEVICE_ID);
         assert_eq!(device.name, device_name);
@@ -149,9 +151,11 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "first"))),
             ..MockClient::default()
         };
-        provision::provision(&mock1, &layout, &settings, &token, Some("first".into()))
-            .await
-            .unwrap();
+        let outcome =
+            provision::provision(&mock1, &layout, &settings, &token, Some("first".into()))
+                .await
+                .unwrap();
+        assert!(!outcome.is_provisioned);
 
         let device_json: serde_json::Value =
             serde_json::from_str(&layout.device().read_string().await.unwrap()).unwrap();
@@ -165,10 +169,12 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "second"))),
             ..MockClient::default()
         };
-        let device =
+        let outcome =
             provision::provision(&mock2, &layout, &settings, &token, Some("second".into()))
                 .await
                 .unwrap();
+        assert!(outcome.is_provisioned);
+        let device = outcome.device;
 
         // returned device matches the originally provisioned identity
         assert_eq!(device.id, DEVICE_ID);
@@ -209,9 +215,11 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
-            .await
-            .unwrap();
+        let outcome =
+            provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+                .await
+                .unwrap();
+        assert!(!outcome.is_provisioned);
 
         let priv_bytes_before = auth_layout.private_key().read_string().await.unwrap();
 
@@ -225,7 +233,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let device = provision::provision(
+        let outcome = provision::provision(
             &mock_poison,
             &layout,
             &settings,
@@ -234,6 +242,8 @@ pub mod provision_fn {
         )
         .await
         .unwrap();
+        assert!(outcome.is_provisioned);
+        let device = outcome.device;
 
         // returned device matches the originally provisioned identity
         assert_eq!(device.id, DEVICE_ID);
@@ -287,7 +297,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "after-fallthrough"))),
             ..MockClient::default()
         };
-        let device = provision::provision(
+        let outcome = provision::provision(
             &mock,
             &layout,
             &settings,
@@ -296,6 +306,8 @@ pub mod provision_fn {
         )
         .await
         .unwrap();
+        assert!(!outcome.is_provisioned);
+        let device = outcome.device;
 
         assert_eq!(device.name, "after-fallthrough");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
@@ -325,7 +337,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        provision::provision(
+        let outcome = provision::provision(
             &mock_initial,
             &layout,
             &settings,
@@ -334,6 +346,7 @@ pub mod provision_fn {
         )
         .await
         .unwrap();
+        assert!(!outcome.is_provisioned);
 
         // corrupt the device file
         layout
@@ -348,10 +361,12 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "recovered"))),
             ..MockClient::default()
         };
-        let device =
+        let outcome =
             provision::provision(&mock, &layout, &settings, &token, Some("recovered".into()))
                 .await
                 .unwrap();
+        assert!(!outcome.is_provisioned);
+        let device = outcome.device;
 
         assert_eq!(device.name, "recovered");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
@@ -384,9 +399,11 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
-            .await
-            .unwrap();
+        let outcome =
+            provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+                .await
+                .unwrap();
+        assert!(!outcome.is_provisioned);
 
         // capture every persisted blob byte-for-byte
         let device_bytes = layout.device().read_string().await.unwrap();
@@ -407,10 +424,10 @@ pub mod provision_fn {
             ..MockClient::default()
         };
         let result = provision::provision(&mock_fail, &layout, &settings, &token, None).await;
-        assert!(
-            result.is_ok(),
-            "expected idempotent provision to short-circuit, got {result:?}"
-        );
+        match &result {
+            Ok(outcome) => assert!(outcome.is_provisioned),
+            Err(_) => panic!("expected idempotent provision to short-circuit, got {result:?}"),
+        }
         assert_eq!(mock_fail.call_count(mock::Call::ProvisionDevice), 0);
 
         // every captured blob is byte-identical

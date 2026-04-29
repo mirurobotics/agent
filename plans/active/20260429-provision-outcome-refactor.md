@@ -52,11 +52,11 @@ User-visible behavior change is purely the wording on the no-op branch; the full
 
 ## Progress
 
-- [ ] (YYYY-MM-DD) M1: Add `ProvisionOutcome` struct in `agent/src/provision/entry.rs`.
-- [ ] (YYYY-MM-DD) M2: Change `provision()` return type to `Result<ProvisionOutcome, ProvisionErr>` and rewrite the short-circuit comment.
-- [ ] (YYYY-MM-DD) M3: Confirm `reprovision()` is unchanged (no edits).
-- [ ] (YYYY-MM-DD) M4: Update `main.rs` `handle_provision_result` to branch on `outcome.is_provisioned`.
-- [ ] (YYYY-MM-DD) M5: Update integration tests in `agent/tests/provision/entry.rs` (`provision_fn::*`).
+- [x] (2026-04-29) M1: Add `ProvisionOutcome` struct in `agent/src/provision/entry.rs`.
+- [x] (2026-04-29) M2: Change `provision()` return type to `Result<ProvisionOutcome, ProvisionErr>` and rewrite the short-circuit comment.
+- [x] (2026-04-29) M3: Confirm `reprovision()` is unchanged (no edits).
+- [x] (2026-04-29) M4: Update `main.rs` `handle_provision_result` to branch on `outcome.is_provisioned`.
+- [x] (2026-04-29) M5: Update integration tests in `agent/tests/provision/entry.rs` (`provision_fn::*`).
 - [ ] (YYYY-MM-DD) M6: Coverage check (`agent/src/provision/.covgate`); add coverage if dropped, never lower the threshold.
 - [ ] (YYYY-MM-DD) M7: Validation — `./scripts/preflight.sh` reports `Preflight clean`.
 
@@ -64,11 +64,12 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Surprises & Discoveries
 
-(Capture anything the implementation reveals that the plan did not anticipate.)
+- (2026-04-29) `ProvisionOutcome` needed `#[derive(Debug)]` because `http_error_on_reprovision_preserves_existing_storage` formats the `Result<ProvisionOutcome, ProvisionErr>` value via `{result:?}` on the failure-path panic message. Without `Debug` the test file fails to compile. The plan did not call this out. The underlying `backend_client::Device` is generated and already implements `Debug`, so deriving on the wrapper is a one-line addition with no further fan-out.
+- (2026-04-29) For `http_error_on_reprovision_preserves_existing_storage`, the existing assertion was a single `assert!(result.is_ok(), ...)` on the un-bound `Result`. Adding `assert!(outcome.is_provisioned)` requires either binding `outcome` (which then can't be re-used in the same `assert!` formatter) or matching against `&result`. I used a `match &result` on the `Ok`/`Err` arms so the `Err` arm can still format `{result:?}` for the panic message. The runtime confirmed `is_provisioned == true` on the second call — the second call short-circuits via `assert_activated` + a parseable `device.json`, never reaching the failing mock.
 
 ## Decision Log
 
-(Record non-obvious choices made during implementation.)
+- (2026-04-29) Derived `Debug` on `ProvisionOutcome` rather than refactoring the test panic message away from `{result:?}`. Reason: the test's diagnostic value comes from printing the unexpected value; `Debug` on a public data wrapper is conventional in this codebase and adds no public-API surface beyond what the `device` field already exposes.
 
 ## Outcomes & Retrospective
 
