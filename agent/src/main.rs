@@ -57,7 +57,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
     };
     let _guard = logs::init(options)?;
 
-    let settings = provision::determine_settings(&args);
+    let settings = provision::determine_settings(&args)?;
     let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
