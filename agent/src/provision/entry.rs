@@ -16,24 +16,43 @@ use backend_api::models as backend_client;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
+/// The result of a `provision()` call.
+///
+/// `is_provisioned` is `true` when the machine was already provisioned
+/// before this call — i.e., the call was a no-op and `device` is the
+/// cached state read from `device.json`. It is `false` when this call
+/// performed the full provisioning flow (keypair gen, backend POST,
+/// bootstrap), in which case `device` is the freshly-issued backend
+/// record.
+#[derive(Debug)]
+pub struct ProvisionOutcome {
+    pub is_provisioned: bool,
+    pub device: backend_client::Device,
+}
+
 pub async fn provision<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &storage::Layout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
-) -> Result<backend_client::Device, ProvisionErr> {
-    // Idempotency short-circuit: if the machine is fully activated AND the
-    // cached device file is readable, return that device unchanged. Any
-    // partial state (missing keys, unparseable device.json) falls through to
-    // the full provisioning flow so the box can recover.
+) -> Result<ProvisionOutcome, ProvisionErr> {
+    // Idempotency short-circuit: if the machine is already activated and
+    // device.json is parseable, return the cached device with `is_provisioned`
+    // set so the caller can render an "already provisioned" message. We need
+    // device.json to populate the outcome's device field. If it's missing
+    // despite keys being present, the bootstrap was interrupted mid-way; fall
+    // through and let the backend tell us whether re-provisioning is possible.
     if storage::assert_activated(layout).await.is_ok() {
         if let Ok(local_device) = layout.device().read_json::<models::Device>().await {
-            return Ok(backend_client::Device {
-                id: local_device.id,
-                name: local_device.name,
-                session_id: local_device.session_id,
-                ..backend_client::Device::default()
+            return Ok(ProvisionOutcome {
+                is_provisioned: true,
+                device: backend_client::Device {
+                    id: local_device.id,
+                    name: local_device.name,
+                    session_id: local_device.session_id,
+                    ..backend_client::Device::default()
+                },
             });
         }
     }
@@ -58,7 +77,10 @@ pub async fn provision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        Ok(device)
+        Ok(ProvisionOutcome {
+            is_provisioned: false,
+            device,
+        })
     }
     .await;
 
