@@ -4,7 +4,7 @@ use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::HTTPErr;
-use miru_agent::provision::{self, errors::*};
+use miru_agent::provisioning::{self, errors::*};
 use miru_agent::storage::{Layout, Settings};
 
 // external crates
@@ -55,7 +55,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let outcome = provision::provision(
+        let outcome = provisioning::provision(
             &mock,
             &layout,
             &settings,
@@ -118,7 +118,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let result = provision::provision(&mock, &layout, &settings, &token, None).await;
+        let result = provisioning::provision(&mock, &layout, &settings, &token, None).await;
 
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
 
@@ -152,7 +152,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
         let outcome =
-            provision::provision(&mock1, &layout, &settings, &token, Some("first".into()))
+            provisioning::provision(&mock1, &layout, &settings, &token, Some("first".into()))
                 .await
                 .unwrap();
         assert!(!outcome.is_provisioned);
@@ -170,7 +170,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
         let outcome =
-            provision::provision(&mock2, &layout, &settings, &token, Some("second".into()))
+            provisioning::provision(&mock2, &layout, &settings, &token, Some("second".into()))
                 .await
                 .unwrap();
         assert!(outcome.is_provisioned);
@@ -216,7 +216,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
         let outcome =
-            provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+            provisioning::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
                 .await
                 .unwrap();
         assert!(!outcome.is_provisioned);
@@ -233,7 +233,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
 
-        let outcome = provision::provision(
+        let outcome = provisioning::provision(
             &mock_poison,
             &layout,
             &settings,
@@ -297,7 +297,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "after-fallthrough"))),
             ..MockClient::default()
         };
-        let outcome = provision::provision(
+        let outcome = provisioning::provision(
             &mock,
             &layout,
             &settings,
@@ -337,7 +337,7 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        let outcome = provision::provision(
+        let outcome = provisioning::provision(
             &mock_initial,
             &layout,
             &settings,
@@ -362,7 +362,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
         let outcome =
-            provision::provision(&mock, &layout, &settings, &token, Some("recovered".into()))
+            provisioning::provision(&mock, &layout, &settings, &token, Some("recovered".into()))
                 .await
                 .unwrap();
         assert!(!outcome.is_provisioned);
@@ -400,7 +400,7 @@ pub mod provision_fn {
             ..MockClient::default()
         };
         let outcome =
-            provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+            provisioning::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
                 .await
                 .unwrap();
         assert!(!outcome.is_provisioned);
@@ -423,7 +423,7 @@ pub mod provision_fn {
             }),
             ..MockClient::default()
         };
-        let result = provision::provision(&mock_fail, &layout, &settings, &token, None).await;
+        let result = provisioning::provision(&mock_fail, &layout, &settings, &token, None).await;
         match &result {
             Ok(outcome) => assert!(outcome.is_provisioned),
             Err(_) => panic!("expected idempotent provision to short-circuit, got {result:?}"),
@@ -476,7 +476,7 @@ pub mod reprovision_fn {
             ..MockClient::default()
         };
 
-        let device = provision::reprovision(&mock, &layout, &settings, &token)
+        let device = provisioning::reprovision(&mock, &layout, &settings, &token)
             .await
             .unwrap();
 
@@ -549,7 +549,7 @@ pub mod reprovision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+        provisioning::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
             .await
             .unwrap();
 
@@ -569,7 +569,7 @@ pub mod reprovision_fn {
             }),
             ..MockClient::default()
         };
-        let result = provision::reprovision(&mock_fail, &layout, &settings, &token).await;
+        let result = provisioning::reprovision(&mock_fail, &layout, &settings, &token).await;
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
 
         // every captured blob is byte-identical
@@ -615,7 +615,7 @@ pub mod reprovision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "initial"))),
             ..MockClient::default()
         };
-        provision::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
+        provisioning::provision(&mock_ok, &layout, &settings, &token, Some("initial".into()))
             .await
             .unwrap();
 
@@ -626,7 +626,7 @@ pub mod reprovision_fn {
             reprovision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "after-reprovision"))),
             ..MockClient::default()
         };
-        provision::reprovision(&mock_reprovision, &layout, &settings, &token)
+        provisioning::reprovision(&mock_reprovision, &layout, &settings, &token)
             .await
             .unwrap();
 

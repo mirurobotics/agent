@@ -3,7 +3,7 @@ use crate::cli;
 use crate::crypt::rsa;
 use crate::filesys::{self, Overwrite};
 use crate::http;
-use crate::provision::errors::*;
+use crate::provisioning::errors::*;
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;

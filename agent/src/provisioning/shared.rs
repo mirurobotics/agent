@@ -3,7 +3,7 @@ use std::env;
 
 // internal crates
 use crate::filesys;
-use crate::provision::errors::*;
+use crate::provisioning::errors::*;
 use crate::storage::settings;
 
 // external crates
