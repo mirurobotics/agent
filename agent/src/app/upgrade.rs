@@ -14,6 +14,11 @@ use crate::storage::{self, Layout, Settings};
 // external crates
 use tracing::{error, info, warn};
 
+pub struct Outcome {
+    pub upgraded: bool,
+    pub attempts: u32,
+}
+
 /// Reconcile on-disk state with the running version. No-op if the marker matches;
 /// otherwise wipes per-version state and rebootstraps from the backend. Blocks
 /// indefinitely on network failure to avoid leaving a half-wiped device.
@@ -22,39 +27,48 @@ pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(
     http_client: &HTTPClientT,
     version: &str,
     sleep_fn: F,
-) where
+) -> Result<Outcome, UpgradeErr> where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
 {
+    validate_layout(layout).await?;
+
     let backoff = cooldown::Backoff {
         base_secs: 1,
         growth_factor: 2,
         max_secs: 60,
     };
-    let mut err_streak: u32 = 0;
+    let mut attempts: u32 = 0;
 
     loop {
         if !needs_upgrade(layout, version).await {
-            return;
+            return Ok(Outcome {
+                upgraded: false,
+                attempts,
+            });
         }
         info!("resetting miru agent state to use version '{}'", version);
 
         match reconcile_impl(http_client, layout, version).await {
-            Ok(_) => break,
+            Ok(_) => {
+                info!(
+                    "upgrade: resetting storage state for version '{}' complete",
+                    version
+                );
+                return Ok(Outcome {
+                    upgraded: true,
+                    attempts,
+                });
+            }
             Err(e) => {
                 warn!("updating agent version storage failed: {e}");
-                err_streak = err_streak.saturating_add(1);
-                let wait = cooldown::calc(&backoff, err_streak);
-                warn!("retrying in {wait} seconds (error streak: {err_streak})");
+                attempts = attempts.saturating_add(1);
+                let wait = cooldown::calc(&backoff, attempts);
+                warn!("retrying in {wait} seconds (attempts: {attempts})");
                 sleep_fn(Duration::from_secs(wait as u64)).await;
             }
         }
     }
-
-    info!(
-        "upgrade: resetting storage state for version '{}' complete",
-        version
-    );
 }
 
 pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
@@ -82,6 +96,13 @@ pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
     }
 }
 
+pub async fn validate_layout(layout: &Layout) -> Result<(), UpgradeErr> {
+    let auth_dir = layout.auth();
+    auth_dir.private_key().assert_exists()?;
+    auth_dir.public_key().assert_exists()?;
+    Ok(())
+}
+
 pub async fn reconcile_impl<HTTPClientT: ClientI>(
     http_client: &HTTPClientT,
     layout: &Layout,
@@ -100,9 +121,7 @@ async fn issue_token<HTTPClientT: ClientI>(
 ) -> Result<Token, UpgradeErr> {
     let auth_dir = layout.auth();
     let private_key_file = auth_dir.private_key();
-    private_key_file.assert_exists()?;
     let public_key_file = auth_dir.public_key();
-    public_key_file.assert_exists()?;
     let token = authn::issue_token(http_client, &private_key_file, &public_key_file).await?;
     Ok(token)
 }

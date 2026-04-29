@@ -90,7 +90,14 @@ async fn run_agent() {
     // initialize logging with default options for reconciliation
     let _guard = logs::init(logs::Options::default());
 
-    // use the
+    // check the agent has been activated
+    if let Err(e) = storage::assert_activated(&layout).await {
+        error!("Device is not yet activated: {}", e);
+        return;
+    }
+
+    // reconcile the agent package version to ensure the file system storage state
+    // is compatible with the running version
     let url = get_bootstrap_base_url().await;
     let bootstrap_http_client = match http::Client::new(&url) {
         Ok(c) => c,
@@ -99,19 +106,14 @@ async fn run_agent() {
             return;
         }
     };
-
-    upgrade::reconcile(
+    if let Err(e) = upgrade::reconcile(
         &layout,
         &bootstrap_http_client,
         version::VERSION,
         tokio::time::sleep,
     )
-    .await;
-
-    // check the agent has been activated
-    let device_file = layout.device();
-    if let Err(e) = storage::assert_activated(&device_file).await {
-        error!("Device is not yet activated: {}", e);
+    .await {
+        error!("upgrade: failed to reconcile agent package version: {e}");
         return;
     }
 

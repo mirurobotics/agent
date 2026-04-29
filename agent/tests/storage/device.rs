@@ -11,59 +11,63 @@ use chrono::{Duration, Utc};
 pub mod assert_activated {
     use super::*;
 
-    #[tokio::test]
-    async fn file_does_not_exist() {
+    async fn fresh_layout() -> (Layout, filesys::Dir) {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let device_file = dir.file("device.json");
-
-        let result = assert_activated(&device_file).await.unwrap_err();
-        assert!(matches!(result, StorageErr::FileSysErr { .. }));
+        let layout = Layout::new(dir.clone());
+        layout.auth().root.create_if_absent().await.unwrap();
+        (layout, dir)
     }
 
     #[tokio::test]
-    async fn invalid_file_contents() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let device_file = dir.file("device.json");
-        device_file
-            .write_string("not a valid device", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+    async fn returns_err_when_both_keys_missing() {
+        let (layout, _dir) = fresh_layout().await;
 
-        let result = assert_activated(&device_file).await.unwrap_err();
-        assert!(matches!(result, StorageErr::FileSysErr { .. }));
+        let result = assert_activated(&layout).await.unwrap_err();
+        assert!(matches!(result, StorageErr::DeviceNotActivatedErr(_)));
     }
 
     #[tokio::test]
-    async fn device_not_activated() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let device_file = dir.file("device.json");
-        let device = Device {
-            activated: false,
-            ..Default::default()
-        };
-        device_file
-            .write_json(&device, WriteOptions::OVERWRITE_ATOMIC)
+    async fn returns_err_when_private_key_missing() {
+        let (layout, _dir) = fresh_layout().await;
+        layout
+            .auth()
+            .public_key()
+            .write_string("public", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
-        let result = assert_activated(&device_file).await.unwrap_err();
-        assert!(matches!(result, StorageErr::DeviceNotActivatedErr { .. }));
+        let result = assert_activated(&layout).await.unwrap_err();
+        assert!(matches!(result, StorageErr::DeviceNotActivatedErr(_)));
     }
 
     #[tokio::test]
-    async fn device_activated() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        let device_file = dir.file("device.json");
-        let device = Device {
-            activated: true,
-            ..Default::default()
-        };
-        device_file
-            .write_json(&device, WriteOptions::OVERWRITE_ATOMIC)
+    async fn returns_err_when_public_key_missing() {
+        let (layout, _dir) = fresh_layout().await;
+        layout
+            .auth()
+            .private_key()
+            .write_string("private", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
-        assert_activated(&device_file).await.unwrap();
+        let result = assert_activated(&layout).await.unwrap_err();
+        assert!(matches!(result, StorageErr::DeviceNotActivatedErr(_)));
+    }
+
+    #[tokio::test]
+    async fn returns_ok_when_both_keys_present() {
+        let (layout, _dir) = fresh_layout().await;
+        let auth = layout.auth();
+        auth.private_key()
+            .write_string("private", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        auth.public_key()
+            .write_string("public", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        assert_activated(&layout).await.unwrap();
     }
 }
 
