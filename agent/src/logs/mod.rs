@@ -105,6 +105,8 @@ impl crate::errors::Error for LogsErr {}
 
 type ReloadHandle = reload::Handle<EnvFilter, Registry>;
 
+pub type BoxedLogLayer = Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync + 'static>;
+
 pub struct LoggingGuard {
     _worker: WorkerGuard,
     reload_handle: ReloadHandle,
@@ -133,7 +135,7 @@ impl LoggingGuard {
     }
 }
 
-pub fn init(options: Options) -> Result<LoggingGuard, LogsErr> {
+pub fn build_layers(options: Options) -> (BoxedLogLayer, WorkerGuard, ReloadHandle, bool) {
     // initialize the file appender for logging
     let file_appender = tracing_appender::rolling::hourly(options.log_dir, "miru.log");
     let (non_blocking, worker_guard) = tracing_appender::non_blocking(file_appender);
@@ -146,14 +148,13 @@ pub fn init(options: Options) -> Result<LoggingGuard, LogsErr> {
 
     let (reload_layer, reload_handle) = reload::Layer::new(env_filter);
 
-    if options.stdout {
+    let composite: BoxedLogLayer = if options.stdout {
         let fmt_layer = fmt::layer()
             .with_file(true)
             .with_line_number(true)
             .with_thread_ids(true)
             .with_thread_names(true);
-        let subscriber = Registry::default().with(reload_layer).with(fmt_layer);
-        tracing::subscriber::set_global_default(subscriber)?;
+        reload_layer.and_then(fmt_layer).boxed()
     } else {
         let fmt_layer = fmt::layer()
             .with_writer(non_blocking)
@@ -162,10 +163,16 @@ pub fn init(options: Options) -> Result<LoggingGuard, LogsErr> {
             .with_line_number(true)
             .with_thread_ids(true)
             .with_thread_names(true);
-        let subscriber = Registry::default().with(reload_layer).with(fmt_layer);
-        tracing::subscriber::set_global_default(subscriber)?;
-    }
+        reload_layer.and_then(fmt_layer).boxed()
+    };
 
+    (composite, worker_guard, reload_handle, env_filter_locked)
+}
+
+pub fn init(options: Options) -> Result<LoggingGuard, LogsErr> {
+    let (layers, worker_guard, reload_handle, env_filter_locked) = build_layers(options);
+    let subscriber = Registry::default().with(layers);
+    tracing::subscriber::set_global_default(subscriber)?;
     Ok(LoggingGuard {
         _worker: worker_guard,
         reload_handle,
