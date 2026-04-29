@@ -452,10 +452,15 @@ pub mod reset {
 
         // pre-create something under events/
         let stale = layout.events_dir().file("events.jsonl");
-        stale.write_string("{}", WriteOptions::OVERWRITE_ATOMIC).await.unwrap();
+        stale
+            .write_string("{}", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
         assert!(stale.exists());
 
-        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0").await.unwrap();
+        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+            .await
+            .unwrap();
 
         assert!(!stale.exists());
         assert!(layout.events_dir().exists());

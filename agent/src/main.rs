@@ -112,7 +112,8 @@ async fn run_agent() {
         version::VERSION,
         tokio::time::sleep,
     )
-    .await {
+    .await
+    {
         error!("upgrade: failed to reconcile agent package version: {e}");
         return;
     }

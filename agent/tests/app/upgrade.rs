@@ -94,7 +94,9 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_1", "alpha"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep).await.unwrap();
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep)
+            .await
+            .unwrap();
 
         assert!(!outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -111,7 +113,9 @@ mod reconcile {
         let (priv_before, pub_before) = read_keys(&layout).await;
 
         let mock = make_mock_client(backend_device("dvc_2", "beta"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep).await.unwrap();
+        let outcome = reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep)
+            .await
+            .unwrap();
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -146,7 +150,9 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_3", "gamma"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep).await.unwrap();
+        let outcome = reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep)
+            .await
+            .unwrap();
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -181,7 +187,9 @@ mod reconcile {
             }
         });
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep).await.unwrap();
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep)
+            .await
+            .unwrap();
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 2);
@@ -218,7 +226,9 @@ mod reconcile {
             }
         });
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep).await.unwrap();
+        let outcome = reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep)
+            .await
+            .unwrap();
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 4);

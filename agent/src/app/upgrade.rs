@@ -27,7 +27,8 @@ pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(
     http_client: &HTTPClientT,
     version: &str,
     sleep_fn: F,
-) -> Result<Outcome, UpgradeErr> where
+) -> Result<Outcome, UpgradeErr>
+where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
 {
