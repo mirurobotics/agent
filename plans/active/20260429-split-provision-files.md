@@ -16,21 +16,24 @@ This plan lives in `plans/backlog/` of the agent repo. The orchestrator promotes
 
 ## Progress
 
-- [ ] (YYYY-MM-DD) M1: Create `agent/src/provision/shared.rs` with `cleanup_temp_dir`, `build_settings`, `read_token_from_env`, `TOKEN_ENV_VAR`, and the `read_token_from_env` test submodule.
-- [ ] (YYYY-MM-DD) M2: Create `agent/src/provision/provision.rs` with `ProvisionOutcome`, `provision`, `provision_with_backend`, `determine_settings`, and the `determine_settings` test submodule.
-- [ ] (YYYY-MM-DD) M3: Create `agent/src/provision/reprovision.rs` with `reprovision`, `reprovision_with_backend`, `determine_reprovision_settings`, and the `determine_reprovision_settings` test submodule.
-- [ ] (YYYY-MM-DD) M4: Update `agent/src/provision/mod.rs` to declare the new modules and re-export. Delete `agent/src/provision/entry.rs`.
-- [ ] (YYYY-MM-DD) M5: Validation — `cargo build -p miru-agent --features test`, `cargo build -p miru-agent`, then `./scripts/preflight.sh` reports `Preflight clean`.
+- [x] (2026-04-29) M1: Create `agent/src/provision/shared.rs` with `cleanup_temp_dir`, `build_settings`, `read_token_from_env`, `TOKEN_ENV_VAR`, and the `read_token_from_env` test submodule.
+- [x] (2026-04-29) M2: Create `agent/src/provision/provision.rs` with `ProvisionOutcome`, `provision`, `provision_with_backend`, `determine_settings`, and the `determine_settings` test submodule.
+- [x] (2026-04-29) M3: Create `agent/src/provision/reprovision.rs` with `reprovision`, `reprovision_with_backend`, `determine_reprovision_settings`, and the `determine_reprovision_settings` test submodule.
+- [x] (2026-04-29) M4: Update `agent/src/provision/mod.rs` to declare the new modules and re-export. Delete `agent/src/provision/entry.rs`.
+- [ ] (YYYY-MM-DD) M5: Validation — `cargo build -p miru-agent --features test`, `cargo build -p miru-agent`, then `./scripts/preflight.sh` reports `Preflight clean`. (Implementation-stage validation passed: both builds clean, full `cargo test --features test` shows 1267 passed; preflight handoff to next stage.)
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
 
 ## Surprises & Discoveries
 
-(Record anything unexpected here as work proceeds.)
+- (2026-04-29) The working tree on `refactor/provision-outcome` had uncommitted modifications to `agent/src/main.rs` and `agent/src/provision/entry.rs` (changing `device: backend_client::Device` back to `Option<backend_client::Device>` and adapting the call site) when the implementation stage started. These changes contradicted the committed shape on this branch (HEAD had `pub device: backend_client::Device` plus an idempotency short-circuit that fabricates a `Device` from `crate::models::Device`) and broke the integration tests in `agent/tests/provision/entry.rs`, which still asserted `device.id`/`device.name` directly. Resolution: discarded the working-tree modifications to `main.rs`, used the HEAD-committed `entry.rs` as the verbatim source for the split, and left `main.rs` untouched per the orchestrator instructions.
+- (2026-04-29) The HEAD `entry.rs` `provision()` body imports `crate::models` for the `read_json::<models::Device>()` call. That import had to come along with `provision()` into `provision.rs`; it was previously absorbed into the entry-file-wide imports.
 
 ## Decision Log
 
-(Record any deviations from the plan here, with reasoning.)
+- (2026-04-29) Trusted the source file (HEAD-committed `entry.rs`) over the plan prose for the `ProvisionOutcome.device` field shape, per orchestrator guidance. Final file uses `pub device: backend_client::Device` with the doc comment, matching what `agent/tests/provision/entry.rs` and `agent/src/main.rs` already expect.
+- (2026-04-29) Added `use crate::models;` to `provision.rs` (only) — `reprovision.rs` doesn't need it because reprovision has no idempotency short-circuit.
+- (2026-04-29) Did not need `#[allow(clippy::module_inception)]` on `pub mod provision;` — `cargo build` was clean without it. Preflight may surface this lint and require adding it; deferred to that stage.
 
 ## Outcomes & Retrospective
 

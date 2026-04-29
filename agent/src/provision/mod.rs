@@ -1,6 +1,11 @@
 pub mod display;
-pub mod entry;
 pub mod errors;
 
-pub use self::entry::*;
+pub mod provision;
+pub mod reprovision;
+mod shared;
+
 pub use self::errors::ProvisionErr;
+pub use self::provision::*;
+pub use self::reprovision::*;
+pub use self::shared::read_token_from_env;
