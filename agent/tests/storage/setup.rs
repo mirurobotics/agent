@@ -7,6 +7,8 @@ use miru_agent::storage::{self, Layout, Settings};
 pub mod bootstrap {
     use super::*;
 
+    const AGENT_VERSION: &str = "v0.0.0";
+
     async fn validate_storage(layout: &Layout) {
         // agent file
         let device_file = layout.device();
@@ -38,6 +40,13 @@ pub mod bootstrap {
         // events directory
         let events_dir = layout.events_dir();
         assert!(events_dir.exists());
+
+        // marker file
+        let marker = storage::agent_version::read(&layout.agent_version())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(marker, AGENT_VERSION);
     }
 
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
@@ -74,7 +83,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap_err();
@@ -98,7 +107,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap_err();
@@ -121,19 +130,13 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap();
 
         // validate the storage
         validate_storage(&layout).await;
-
-        // marker file records the version passed to bootstrap
-        let marker = storage::agent_version::read(&layout.agent_version())
-            .await
-            .expect("marker read should succeed");
-        assert_eq!(marker.as_deref(), Some("v0.0.0"));
     }
 
     #[tokio::test]
@@ -160,7 +163,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap();
@@ -190,7 +193,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap();
@@ -216,7 +219,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap();
@@ -242,7 +245,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap();
@@ -315,7 +318,7 @@ pub mod bootstrap {
             &settings,
             &private_key_file,
             &public_key_file,
-            "v0.0.0",
+            AGENT_VERSION,
         )
         .await
         .unwrap();
@@ -439,6 +442,24 @@ pub mod reset {
 
         assert!(!stale.exists());
         assert!(!layout.resources().exists());
+    }
+
+    #[tokio::test]
+    async fn wipes_events_subtree() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        write_existing_keys(&layout).await;
+
+        // pre-create something under events/
+        let stale = layout.events_dir().file("events.jsonl");
+        stale.write_string("{}", WriteOptions::OVERWRITE_ATOMIC).await.unwrap();
+        assert!(stale.exists());
+
+        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0").await.unwrap();
+
+        assert!(!stale.exists());
+        assert!(layout.events_dir().exists());
+        assert!(!layout.events_dir().file("events.jsonl").exists());
     }
 
     #[tokio::test]
