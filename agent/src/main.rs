@@ -46,7 +46,9 @@ async fn main() {
     run_agent().await;
 }
 
-async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Device, ProvisionErr> {
+async fn run_provision(
+    args: cli::ProvisionArgs,
+) -> Result<provision::ProvisionOutcome, ProvisionErr> {
     // initialize logging
     let tmp_dir = Dir::create_temp_dir("miru-agent-provision-logs").await?;
     let options = logs::Options {
@@ -73,12 +75,19 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Devic
     result
 }
 
-fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>) {
+fn handle_provision_result(result: Result<provision::ProvisionOutcome, ProvisionErr>) {
     match result {
-        Ok(device) => {
+        Ok(outcome) if outcome.is_provisioned => {
+            let msg = format!(
+                "Device is already provisioned as {}!",
+                display::color(&outcome.device.name, display::Colors::Green)
+            );
+            println!("{}", display::format_info(msg.as_str()));
+        }
+        Ok(outcome) => {
             let msg = format!(
                 "Successfully provisioned this device as {}!",
-                display::color(&device.name, display::Colors::Green)
+                display::color(&outcome.device.name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }
