@@ -1,6 +1,7 @@
 // internal crates
 use crate::mocks::http_client::{self as mock, MockClient};
 use backend_api::models::Device;
+use miru_agent::cli;
 use miru_agent::crypt::base64;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::HTTPErr;
@@ -248,5 +249,88 @@ pub mod provision_fn {
         );
 
         root.delete().await.unwrap();
+    }
+}
+
+pub mod determine_settings {
+    use super::*;
+
+    #[test]
+    fn accepts_allowed_backend_host() {
+        let args = cli::ProvisionArgs {
+            backend_host: Some("https://api.mirurobotics.com".to_string()),
+            ..Default::default()
+        };
+        let settings = provision::determine_settings(&args).unwrap();
+        assert_eq!(
+            settings.backend.base_url,
+            "https://api.mirurobotics.com/agent/v1"
+        );
+    }
+
+    #[test]
+    fn rejects_disallowed_backend_host() {
+        let args = cli::ProvisionArgs {
+            backend_host: Some("https://evilmirurobotics.com".to_string()),
+            ..Default::default()
+        };
+        let err = provision::determine_settings(&args).unwrap_err();
+        let inner = match err {
+            ProvisionErr::InvalidSettingsErr(e) => e,
+            other => panic!("expected InvalidSettingsErr, got: {other:?}"),
+        };
+        assert!(
+            inner.msg.contains("evilmirurobotics.com"),
+            "expected host name in message, got: {}",
+            inner.msg
+        );
+    }
+
+    #[test]
+    fn rejects_http_non_loopback_backend_host() {
+        let args = cli::ProvisionArgs {
+            backend_host: Some("http://api.mirurobotics.com".to_string()),
+            ..Default::default()
+        };
+        let err = provision::determine_settings(&args).unwrap_err();
+        assert!(matches!(err, ProvisionErr::InvalidSettingsErr(_)));
+    }
+
+    #[test]
+    fn accepts_loopback_backend_host() {
+        let args = cli::ProvisionArgs {
+            backend_host: Some("http://localhost:8080".to_string()),
+            ..Default::default()
+        };
+        let settings = provision::determine_settings(&args).unwrap();
+        assert_eq!(settings.backend.base_url, "http://localhost:8080/agent/v1");
+    }
+
+    #[test]
+    fn accepts_allowed_mqtt_host() {
+        let args = cli::ProvisionArgs {
+            mqtt_broker_host: Some("mqtt.mirurobotics.com".to_string()),
+            ..Default::default()
+        };
+        let settings = provision::determine_settings(&args).unwrap();
+        assert_eq!(settings.mqtt_broker.host, "mqtt.mirurobotics.com");
+    }
+
+    #[test]
+    fn rejects_disallowed_mqtt_host() {
+        let args = cli::ProvisionArgs {
+            mqtt_broker_host: Some("evilmirurobotics.com".to_string()),
+            ..Default::default()
+        };
+        let err = provision::determine_settings(&args).unwrap_err();
+        let inner = match err {
+            ProvisionErr::InvalidSettingsErr(e) => e,
+            other => panic!("expected InvalidSettingsErr, got: {other:?}"),
+        };
+        assert!(
+            inner.msg.contains("evilmirurobotics.com"),
+            "expected host name in message, got: {}",
+            inner.msg
+        );
     }
 }

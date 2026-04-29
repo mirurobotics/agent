@@ -132,3 +132,68 @@ fn deserialize_mqtt_broker() {
     // invalid JSON
     assert!(serde_json::from_str::<MQTTBroker>("invalid-json").is_err());
 }
+
+#[test]
+fn deserialize_backend_rejects_disallowed_host() {
+    let input = json!({"base_url": "https://evilmirurobotics.com"});
+    let err = serde_json::from_value::<Backend>(input).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("backend.base_url"),
+        "expected field prefix in message, got: {msg}"
+    );
+    assert!(
+        msg.contains("evilmirurobotics.com"),
+        "expected disallowed host name in message, got: {msg}"
+    );
+}
+
+#[test]
+fn deserialize_backend_accepts_allowed_host() {
+    let input = json!({"base_url": "https://api.mirurobotics.com/agent/v1"});
+    let backend = serde_json::from_value::<Backend>(input).unwrap();
+    assert_eq!(backend.base_url, "https://api.mirurobotics.com/agent/v1");
+}
+
+#[test]
+fn deserialize_backend_rejects_http_non_loopback() {
+    let input = json!({"base_url": "http://api.mirurobotics.com"});
+    assert!(serde_json::from_value::<Backend>(input).is_err());
+}
+
+#[test]
+fn deserialize_mqtt_broker_rejects_disallowed_host() {
+    let input = json!({"host": "evilmirurobotics.com"});
+    let err = serde_json::from_value::<MQTTBroker>(input).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("mqtt_broker.host"),
+        "expected field prefix in message, got: {msg}"
+    );
+    assert!(
+        msg.contains("evilmirurobotics.com"),
+        "expected disallowed host name in message, got: {msg}"
+    );
+}
+
+#[test]
+fn deserialize_mqtt_broker_accepts_allowed_host() {
+    let input = json!({"host": "mqtt.mirurobotics.com"});
+    let mqtt_broker = serde_json::from_value::<MQTTBroker>(input).unwrap();
+    assert_eq!(mqtt_broker.host, "mqtt.mirurobotics.com");
+}
+
+#[test]
+fn deserialize_settings_with_invalid_backend_url_fails() {
+    let input = json!({
+        "log_level": "info",
+        "backend": {"base_url": "https://evilmirurobotics.com"},
+        "mqtt_broker": {"host": "mqtt.mirurobotics.com"},
+        "is_persistent": true,
+        "enable_socket_server": true,
+        "enable_mqtt_worker": true,
+        "enable_poller": true,
+    });
+    // Must hard-error rather than silently fall back to the default base_url.
+    assert!(serde_json::from_value::<Settings>(input).is_err());
+}
