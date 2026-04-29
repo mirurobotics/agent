@@ -20,7 +20,7 @@ use miru_agent::workers::mqtt;
 
 // external crates
 use tokio::signal::unix::signal;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() {
@@ -143,15 +143,24 @@ async fn run_agent() {
 
     // build and validate the broker address before handing it to the MQTT
     // worker. validate() enforces both the allowed-domain host rule and the
-    // SSL-unless-loopback rule.
+    // SSL-unless-loopback rule. If validation fails we warn and fall back to
+    // the default address rather than refusing to start — the daemon stays
+    // running on the known-good production broker.
     let broker_address = ConnectAddress {
         broker: settings.mqtt_broker.host,
         ..Default::default()
     };
-    if let Err(e) = broker_address.validate() {
-        error!("Invalid MQTT connect address: {e}");
-        return;
-    }
+    let broker_address = match broker_address.validate() {
+        Ok(()) => broker_address,
+        Err(e) => {
+            let fallback = ConnectAddress::default();
+            warn!(
+                "Invalid MQTT connect address ({e}); falling back to default broker `{}`",
+                fallback.broker
+            );
+            fallback
+        }
+    };
 
     // run the server
     let options = AppOptions {
