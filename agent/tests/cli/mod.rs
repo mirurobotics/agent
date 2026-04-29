@@ -91,10 +91,7 @@ mod args_parse {
 
     #[test]
     fn ignores_reprovision_options_without_reprovision_flag() {
-        let inputs = to_inputs(&[
-            "miru-agent",
-            "--backend-host=https://backend.example.com",
-        ]);
+        let inputs = to_inputs(&["miru-agent", "--backend-host=https://backend.example.com"]);
 
         let args = Args::parse(&inputs);
 

@@ -62,11 +62,15 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     }
     .await;
 
+    cleanup_temp_dir(&temp_dir).await;
+    result
+}
+
+async fn cleanup_temp_dir(temp_dir: &filesys::Dir) {
     if let Err(e) = temp_dir.delete().await {
         debug_assert!(false, "failed to clean up temp dir: {e}");
         warn!("failed to clean up temp dir: {e}");
     }
-    result
 }
 
 const TOKEN_ENV_VAR: &str = "MIRU_PROVISIONING_TOKEN";
@@ -134,10 +138,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     }
     .await;
 
-    if let Err(e) = temp_dir.delete().await {
-        debug_assert!(false, "failed to clean up temp dir: {e}");
-        warn!("failed to clean up temp dir: {e}");
-    }
+    cleanup_temp_dir(&temp_dir).await;
     result
 }
 

@@ -165,15 +165,10 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "second"))),
             ..MockClient::default()
         };
-        let device = provision::provision(
-            &mock2,
-            &layout,
-            &settings,
-            &token,
-            Some("second".into()),
-        )
-        .await
-        .unwrap();
+        let device =
+            provision::provision(&mock2, &layout, &settings, &token, Some("second".into()))
+                .await
+                .unwrap();
 
         // returned device matches the originally provisioned identity
         assert_eq!(device.id, DEVICE_ID);
@@ -343,10 +338,7 @@ pub mod provision_fn {
         // corrupt the device file
         layout
             .device()
-            .write_string(
-                "not valid json{",
-                WriteOptions::OVERWRITE_ATOMIC,
-            )
+            .write_string("not valid json{", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -356,15 +348,10 @@ pub mod provision_fn {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "recovered"))),
             ..MockClient::default()
         };
-        let device = provision::provision(
-            &mock,
-            &layout,
-            &settings,
-            &token,
-            Some("recovered".into()),
-        )
-        .await
-        .unwrap();
+        let device =
+            provision::provision(&mock, &layout, &settings, &token, Some("recovered".into()))
+                .await
+                .unwrap();
 
         assert_eq!(device.name, "recovered");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
@@ -468,9 +455,7 @@ pub mod reprovision_fn {
         let settings = Settings::default();
 
         let mock = MockClient {
-            reprovision_device_fn: Box::new(move || {
-                Ok(new_device(DEVICE_ID, "after-reprovision"))
-            }),
+            reprovision_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, "after-reprovision"))),
             ..MockClient::default()
         };
 
@@ -513,10 +498,7 @@ pub mod reprovision_fn {
             .iter()
             .find(|r| r.call == mock::Call::ReprovisionDevice)
             .expect("expected a reprovision request");
-        let body = captured
-            .body
-            .as_ref()
-            .expect("expected body to be present");
+        let body = captured.body.as_ref().expect("expected body to be present");
         let body_value: serde_json::Value = serde_json::from_str(body).unwrap();
         assert!(
             body_value.get("public_key_pem").is_some(),
