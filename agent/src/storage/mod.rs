@@ -12,6 +12,7 @@ pub mod layout;
 pub mod releases;
 pub mod settings;
 pub mod setup;
+pub mod validation;
 
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
@@ -21,6 +22,7 @@ pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings};
+pub use self::validation::{is_loopback_host, validate_backend_url, validate_mqtt_host};
 
 use self::device::Device as DeviceStorage;
 use self::errors::StorageErr as StorErr;
