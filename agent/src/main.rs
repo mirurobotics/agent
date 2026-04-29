@@ -128,6 +128,13 @@ async fn run_agent() {
         }
     };
 
+    // initialize the logging
+    let log_options = logs::Options {
+        log_level: settings.log_level,
+        ..Default::default()
+    };
+    let _guard = logs::init(log_options);
+
     // run the server
     let options = AppOptions {
         lifecycle: LifecycleOptions {
