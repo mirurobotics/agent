@@ -183,6 +183,9 @@ where
 
         // prune by last accessed time
         let mut entries = self.entries().await?;
+        if entries.len() <= capacity {
+            return Ok(());
+        }
         entries.sort_by_key(|entry| entry.last_accessed);
         let num_delete = entries.len() - capacity;
         for entry in entries.into_iter().take(num_delete) {

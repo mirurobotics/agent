@@ -87,6 +87,7 @@ pub mod concurrent {
 
 pub mod single_thread {
     use super::*;
+    use miru_agent::cache::single_thread::SingleThreadCache;
 
     type TestCache = SingleThreadDirCache<String, String>;
 
@@ -116,4 +117,48 @@ pub mod single_thread {
     }
 
     single_thread_cache_tests!(new_cache, new_cache_with_capacity);
+
+    #[tokio::test]
+    async fn prune_invalid_entries_reduces_below_capacity() {
+        let dir = filesys::Dir::create_temp_dir("testing")
+            .await
+            .unwrap()
+            .subdir(PathBuf::from("cache"));
+        let mut cache = TestCache::new(dir.clone(), 5).await.unwrap();
+
+        // write 3 valid entries
+        for i in 0..3 {
+            let key = format!("key{i}");
+            let value = format!("value{i}");
+            cache
+                .write(key, value, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+        }
+
+        // inject 3 invalid (non-JSON) files to push size to 6 (> capacity 5)
+        for i in 0..3 {
+            let invalid_file = dir.file(&format!("invalid{i}.json"));
+            invalid_file
+                .write_string("not valid json", WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+        }
+
+        // size should now be 6
+        assert_eq!(cache.size().await.unwrap(), 6);
+
+        // prune should not panic or delete valid entries
+        cache.prune().await.unwrap();
+
+        // all 3 valid entries should still be readable
+        for i in 0..3 {
+            let key = format!("key{i}");
+            let value = cache.read(&key).await.unwrap();
+            assert_eq!(value, format!("value{i}"));
+        }
+
+        // total size should be 3 (invalid files removed, valid entries kept)
+        assert_eq!(cache.size().await.unwrap(), 3);
+    }
 }
