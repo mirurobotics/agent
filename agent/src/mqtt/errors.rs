@@ -107,6 +107,15 @@ pub struct SerdeErr {
 impl crate::errors::Error for SerdeErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("invalid mqtt connect address: {msg}")]
+pub struct InvalidConnectAddressErr {
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidConnectAddressErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("Mock MQTT error (is authentication error: {is_authentication_error}, is network connection error: {is_network_conn_err})")]
 pub struct MockErr {
     pub is_authentication_error: bool,

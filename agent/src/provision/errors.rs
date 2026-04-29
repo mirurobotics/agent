@@ -17,9 +17,20 @@ pub struct MissingEnvVarErr {
 impl crate::errors::Error for MissingEnvVarErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("invalid settings: {msg}")]
+pub struct InvalidSettingsErr {
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidSettingsErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum ProvisionErr {
     #[error(transparent)]
     MissingEnvVarErr(MissingEnvVarErr),
+    #[error(transparent)]
+    InvalidSettingsErr(InvalidSettingsErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
     #[error(transparent)]
@@ -70,8 +81,15 @@ impl From<StorageErr> for ProvisionErr {
     }
 }
 
+impl From<InvalidSettingsErr> for ProvisionErr {
+    fn from(e: InvalidSettingsErr) -> Self {
+        Self::InvalidSettingsErr(e)
+    }
+}
+
 crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
+    InvalidSettingsErr,
     AuthnErr,
     CryptErr,
     FileSysErr,
@@ -144,6 +162,16 @@ mod tests {
             let err = logs::LogsErr::ReloadFailed("test".to_string());
             let install_err = ProvisionErr::from(err);
             assert!(matches!(install_err, ProvisionErr::LogsErr(_)));
+        }
+
+        #[test]
+        fn from_invalid_settings_err() {
+            let err = InvalidSettingsErr {
+                msg: "test".to_string(),
+                trace: crate::trace!(),
+            };
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::InvalidSettingsErr(_)));
         }
     }
 }
