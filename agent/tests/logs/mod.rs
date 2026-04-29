@@ -1,9 +1,13 @@
 // standard crates
 use std::collections::HashSet;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::filesys::PathExt;
-use miru_agent::logs::{self, LogLevel, Options};
+use miru_agent::logs::{LogLevel, Options};
+
+// external crates
+use tracing_subscriber::{fmt, prelude::*, registry::Registry, reload, EnvFilter};
 
 // ========================= deserialize ========================= //
 
@@ -204,32 +208,64 @@ fn test_log_level_variants() {
     assert_eq!(variants[4], LogLevel::Error);
 }
 
-// ========================= init ================================ //
+// Note: tests that call `logs::init` (which installs a global tracing
+// subscriber) live in dedicated integration-test binaries under
+// `agent/tests/logs_init_*.rs` so that each test runs in its own process and
+// cannot collide on the process-wide global subscriber.
 
-#[tokio::test]
-async fn test_init_stdout() {
-    let dir = miru_agent::filesys::Dir::create_temp_dir("miru_test_logs_stdout")
-        .await
-        .unwrap();
-    let options = Options {
-        stdout: true,
-        log_level: LogLevel::Debug,
-        log_dir: dir.path().clone(),
-    };
-    let guard = logs::init(options).expect("init should succeed");
-    drop(guard);
+// ========================= reload =============================== //
+
+#[derive(Clone, Default)]
+struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for CapturingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
-#[tokio::test]
-async fn test_init_file_only() {
-    let dir = miru_agent::filesys::Dir::create_temp_dir("miru_test_logs_file")
-        .await
-        .unwrap();
-    let options = Options {
-        stdout: false,
-        log_level: LogLevel::Warn,
-        log_dir: dir.path().clone(),
-    };
-    let guard = logs::init(options).expect("init should succeed");
-    drop(guard);
+impl<'a> fmt::MakeWriter<'a> for CapturingWriter {
+    type Writer = CapturingWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
 }
+
+#[test]
+fn test_reload_level_changes_filter() {
+    // Build a fresh subscriber with a captured-buffer writer and install it
+    // thread-locally via `set_default`. This is hermetic against any global
+    // subscriber installed by other tests.
+    let buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let writer = CapturingWriter(buf.clone());
+
+    let (filter_layer, handle) = reload::Layer::new(EnvFilter::new("warn"));
+    let subscriber = Registry::default()
+        .with(filter_layer)
+        .with(fmt::layer().with_writer(writer));
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    tracing::debug!("before-reload");
+    handle
+        .reload(EnvFilter::new("debug"))
+        .expect("reload should succeed");
+    tracing::debug!("after-reload");
+
+    let captured = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+    assert!(
+        !captured.contains("before-reload"),
+        "pre-reload debug event should be filtered out: {captured}"
+    );
+    assert!(
+        captured.contains("after-reload"),
+        "post-reload debug event should be emitted: {captured}"
+    );
+}
+
+// `test_reload_level_no_op_when_env_filter_locked` lives in
+// `agent/tests/logs_init_locked.rs` because it calls `logs::init`, which
+// installs a process-global subscriber.
