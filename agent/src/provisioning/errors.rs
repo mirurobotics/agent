@@ -163,5 +163,15 @@ mod tests {
             let install_err = ProvisionErr::from(err);
             assert!(matches!(install_err, ProvisionErr::LogsErr(_)));
         }
+
+        #[test]
+        fn from_invalid_settings_err() {
+            let err = InvalidSettingsErr {
+                msg: "test".to_string(),
+                trace: crate::trace!(),
+            };
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::InvalidSettingsErr(_)));
+        }
     }
 }
