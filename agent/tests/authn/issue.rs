@@ -1,11 +1,16 @@
 // internal crates
+use crate::mocks::http_client::{Call, MockClient};
+use backend_api::models::TokenResponse;
 use miru_agent::authn::errors::AuthnErr;
-use miru_agent::authn::issue::{encode_part, mint_jwt};
+use miru_agent::authn::issue::{encode_part, issue_token, mint_jwt};
+use miru_agent::authn::Token;
 use miru_agent::crypt::{base64, rsa};
 use miru_agent::filesys::{self, Overwrite};
+use miru_agent::http::errors::MockErr;
+use miru_agent::http::HTTPErr;
 
 // external crates
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::sign::Verifier;
@@ -160,4 +165,93 @@ async fn mint_jwt_returns_err_when_private_key_file_is_missing() {
     let result = mint_jwt(&private_key_file, &public_key_file).await;
 
     assert!(result.is_err());
+}
+
+// ================================ issue_token tests =============================== //
+
+#[tokio::test]
+async fn issue_token_happy_path_returns_token_and_records_one_call() {
+    let (_dir, private_key_file, public_key_file) = generate_keys().await;
+    let expires_at = Utc::now() + Duration::days(1);
+    let mock_client = MockClient {
+        issue_device_token_fn: Box::new(move || {
+            Ok(TokenResponse {
+                token: "issued-token".to_string(),
+                expires_at: expires_at.to_rfc3339(),
+            })
+        }),
+        ..Default::default()
+    };
+
+    let token: Token = issue_token(&mock_client, &private_key_file, &public_key_file)
+        .await
+        .unwrap();
+
+    assert_eq!(token.token, "issued-token");
+    assert!((token.expires_at - expires_at).num_seconds().abs() <= 1);
+    assert_eq!(mock_client.call_count(Call::IssueDeviceToken), 1);
+
+    let requests = mock_client.requests();
+    let captured = requests
+        .iter()
+        .find(|r| r.call == Call::IssueDeviceToken)
+        .unwrap();
+    let bearer = captured.token.as_ref().unwrap();
+    assert_eq!(bearer.split('.').count(), 3);
+}
+
+#[tokio::test]
+async fn issue_token_invalid_rfc3339_returns_timestamp_conversion_err() {
+    let (_dir, private_key_file, public_key_file) = generate_keys().await;
+    let mock_client = MockClient {
+        issue_device_token_fn: Box::new(|| {
+            Ok(TokenResponse {
+                token: "token".to_string(),
+                expires_at: "not-a-timestamp".to_string(),
+            })
+        }),
+        ..Default::default()
+    };
+
+    let result = issue_token(&mock_client, &private_key_file, &public_key_file).await;
+
+    assert!(matches!(result, Err(AuthnErr::TimestampConversionErr(_))));
+    assert_eq!(mock_client.call_count(Call::IssueDeviceToken), 1);
+}
+
+#[tokio::test]
+async fn issue_token_bubbles_http_err_from_backend() {
+    let (_dir, private_key_file, public_key_file) = generate_keys().await;
+    let mock_client = MockClient {
+        issue_device_token_fn: Box::new(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        }),
+        ..Default::default()
+    };
+
+    let result = issue_token(&mock_client, &private_key_file, &public_key_file).await;
+
+    assert!(matches!(result, Err(AuthnErr::HTTPErr(_))));
+    assert_eq!(mock_client.call_count(Call::IssueDeviceToken), 1);
+}
+
+#[tokio::test]
+async fn issue_token_bubbles_filesys_err_when_public_key_missing() {
+    let dir = filesys::Dir::create_temp_dir("authn_issue_test")
+        .await
+        .unwrap();
+    let private_key_file = dir.file("private_key.pem");
+    let public_key_file = dir.file("public_key.pem");
+    rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
+        .await
+        .unwrap();
+    public_key_file.delete().await.unwrap();
+    let mock_client = MockClient::default();
+
+    let result = issue_token(&mock_client, &private_key_file, &public_key_file).await;
+
+    assert!(result.is_err());
+    assert_eq!(mock_client.call_count(Call::IssueDeviceToken), 0);
 }
