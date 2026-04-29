@@ -49,7 +49,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Devic
         log_dir: tmp_dir.path().to_path_buf(),
         ..Default::default()
     };
-    let _guard = logs::init(options);
+    let _guard = logs::init(options)?;
 
     let settings = provision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
@@ -87,8 +87,16 @@ fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>)
 async fn run_agent() {
     let layout = storage::Layout::default();
 
-    // initialize logging with default options for reconciliation
-    let _guard = logs::init(logs::Options::default());
+    // initialize logging early so reconciliation and pre-settings activity are
+    // observable. The level is reloaded once settings are read below.
+    let log_guard = match logs::init(logs::Options::default()) {
+        Ok(g) => g,
+        Err(e) => {
+            // tracing is not yet installed if init failed, so use eprintln!
+            eprintln!("Failed to initialize logging: {e}");
+            return;
+        }
+    };
 
     // check the agent has been activated
     if let Err(e) = storage::assert_activated(&layout).await {
@@ -128,12 +136,11 @@ async fn run_agent() {
         }
     };
 
-    // initialize the logging
-    let log_options = logs::Options {
-        log_level: settings.log_level,
-        ..Default::default()
-    };
-    let _guard = logs::init(log_options);
+    // apply the configured log level to the running subscriber. Failure here is
+    // non-fatal: a misconfigured log level should not crash the agent.
+    if let Err(e) = log_guard.reload_level(settings.log_level.clone()) {
+        tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
+    }
 
     // run the server
     let options = AppOptions {
