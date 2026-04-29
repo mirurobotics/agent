@@ -1,6 +1,10 @@
 // standard crates
 use std::time::Duration;
 
+// internal crates
+use crate::mqtt::errors::InvalidConnectAddressErr;
+use crate::storage::validation;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Protocol {
     TCP,
@@ -21,6 +25,30 @@ impl Default for ConnectAddress {
             broker: "mqtt.mirurobotics.com".to_string(),
             port: 8883,
         }
+    }
+}
+
+impl ConnectAddress {
+    /// Enforces both the allowed-domain host rule (delegated to
+    /// [`validation::validate_mqtt_host`]) and the SSL-unless-loopback rule.
+    /// Construct an invalid address freely; this gate prevents handing one to
+    /// `MqttOptions`.
+    pub fn validate(&self) -> Result<(), InvalidConnectAddressErr> {
+        let loopback = validation::is_loopback_host(&self.broker);
+        validation::validate_mqtt_host(&self.broker).map_err(|msg| InvalidConnectAddressErr {
+            msg: format!("broker `{}`: {msg}", self.broker),
+            trace: crate::trace!(),
+        })?;
+        if !loopback && !matches!(self.protocol, Protocol::SSL) {
+            return Err(InvalidConnectAddressErr {
+                msg: format!(
+                    "non-loopback broker `{}` requires Protocol::SSL",
+                    self.broker
+                ),
+                trace: crate::trace!(),
+            });
+        }
+        Ok(())
     }
 }
 

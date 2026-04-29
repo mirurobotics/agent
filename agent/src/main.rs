@@ -199,6 +199,18 @@ async fn run_agent() {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
 
+    // build and validate the broker address before handing it to the MQTT
+    // worker. validate() enforces both the allowed-domain host rule and the
+    // SSL-unless-loopback rule.
+    let broker_address = ConnectAddress {
+        broker: settings.mqtt_broker.host,
+        ..Default::default()
+    };
+    if let Err(e) = broker_address.validate() {
+        error!("Invalid MQTT connect address: {e}");
+        return;
+    }
+
     // run the server
     let options = AppOptions {
         lifecycle: LifecycleOptions {
@@ -210,10 +222,7 @@ async fn run_agent() {
         enable_mqtt_worker: settings.enable_mqtt_worker,
         enable_poller: settings.enable_poller,
         mqtt_worker: mqtt::Options {
-            broker_address: ConnectAddress {
-                broker: settings.mqtt_broker.host,
-                ..Default::default()
-            },
+            broker_address,
             ..Default::default()
         },
         ..Default::default()
