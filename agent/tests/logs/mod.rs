@@ -4,7 +4,8 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::logs::{LogLevel, Options};
+use miru_agent::errors::{Code, Error, HTTPCode};
+use miru_agent::logs::{LogLevel, LogsErr, Options};
 
 // external crates
 use tracing_subscriber::{fmt, prelude::*, registry::Registry, reload, EnvFilter};
@@ -269,3 +270,30 @@ fn test_reload_level_changes_filter() {
 // `test_reload_level_no_op_when_env_filter_locked` lives in
 // `agent/tests/logs_init_locked.rs` because it calls `logs::init`, which
 // installs a process-global subscriber.
+
+// ========================= LogsErr ============================== //
+
+#[test]
+fn test_logs_err_reload_failed_display() {
+    let err = LogsErr::ReloadFailed("handle dropped".to_string());
+    let s = format!("{err}");
+    assert!(
+        s.contains("failed to reload tracing filter"),
+        "Display should include the prefix, got: {s}"
+    );
+    assert!(
+        s.contains("handle dropped"),
+        "Display should include the inner message, got: {s}"
+    );
+}
+
+#[test]
+fn test_logs_err_uses_default_error_trait() {
+    // LogsErr only implements Error to opt into the project's error machinery;
+    // it relies on the trait defaults.
+    let err = LogsErr::ReloadFailed("anything".to_string());
+    assert_eq!(err.code().as_str(), Code::InternalServerError.as_str());
+    assert_eq!(err.http_status(), HTTPCode::INTERNAL_SERVER_ERROR);
+    assert!(err.params().is_none());
+    assert!(!err.is_network_conn_err());
+}

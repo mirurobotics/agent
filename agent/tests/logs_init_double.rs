@@ -11,9 +11,7 @@ use serial_test::serial;
 #[tokio::test]
 #[serial]
 async fn test_init_returns_error_on_double_install() {
-    let dir = Dir::create_temp_dir("miru_test_logs_double")
-        .await
-        .unwrap();
+    let dir = Dir::create_temp_dir("miru_test_logs_double").await.unwrap();
 
     let options = Options {
         stdout: false,

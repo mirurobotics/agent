@@ -11,9 +11,7 @@ async fn test_reload_level_no_op_when_env_filter_locked() {
     // branch is taken and reload_level is a no-op. The contract we assert
     // here is that env_filter_locked() reports the lock; emission semantics
     // are exercised by test_reload_level_changes_filter in tests/logs/mod.rs.
-    let dir = Dir::create_temp_dir("miru_test_logs_locked")
-        .await
-        .unwrap();
+    let dir = Dir::create_temp_dir("miru_test_logs_locked").await.unwrap();
     let options = Options {
         stdout: false,
         log_level: LogLevel::Info,

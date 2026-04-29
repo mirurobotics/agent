@@ -138,5 +138,12 @@ mod tests {
             let install_err = ProvisionErr::from(err);
             assert!(matches!(install_err, ProvisionErr::StorageErr(_)));
         }
+
+        #[test]
+        fn from_logs_err() {
+            let err = logs::LogsErr::ReloadFailed("test".to_string());
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::LogsErr(_)));
+        }
     }
 }
