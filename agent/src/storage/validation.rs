@@ -13,7 +13,7 @@ pub fn is_loopback_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
-fn is_allowed_domain(host: &str) -> bool {
+fn is_allowed_host(host: &str) -> bool {
     host == ALLOWED_DOMAIN || host.ends_with(ALLOWED_DOMAIN_SUFFIX)
 }
 
@@ -65,7 +65,7 @@ pub fn validate_backend_url(raw: &str) -> Result<Url, String> {
         ("http", false) => return Err("non-loopback URL must use https".into()),
         (other, _) => return Err(format!("scheme `{other}` not allowed")),
     }
-    if !loopback && !is_allowed_domain(bare_host) {
+    if !loopback && !is_allowed_host(bare_host) {
         return Err(format!("host `{bare_host}` is not allowed"));
     }
     // Defence in depth: any non-loopback IP that somehow slipped past the
@@ -79,7 +79,7 @@ pub fn validate_backend_url(raw: &str) -> Result<Url, String> {
 /// A host is allowed iff it is a loopback literal or matches the allowed-domain
 /// suffix rule.
 pub fn validate_mqtt_host(host: &str) -> Result<(), String> {
-    if is_loopback_host(host) || is_allowed_domain(host) {
+    if is_loopback_host(host) || is_allowed_host(host) {
         Ok(())
     } else {
         Err(format!("MQTT host `{host}` is not allowed"))

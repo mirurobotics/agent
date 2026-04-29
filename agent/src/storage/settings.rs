@@ -5,7 +5,7 @@ use crate::storage::validation;
 
 // external crates
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Settings {
@@ -124,8 +124,16 @@ impl<'de> Deserialize<'de> for Backend {
         let base_url = result
             .base_url
             .unwrap_or_else(|| deserialize_warn!("backend", "base_url", default.base_url));
-        validation::validate_backend_url(&base_url)
-            .map_err(|msg| serde::de::Error::custom(format!("backend.base_url: {msg}")))?;
+        let base_url = match validation::validate_backend_url(&base_url) {
+            Ok(_) => base_url,
+            Err(msg) => {
+                let fallback = Backend::default().base_url;
+                warn!(
+                    "backend.base_url `{base_url}` rejected ({msg}); falling back to default `{fallback}`"
+                );
+                fallback
+            }
+        };
         Ok(Backend { base_url })
     }
 }
@@ -166,8 +174,16 @@ impl<'de> Deserialize<'de> for MQTTBroker {
         let host = result
             .host
             .unwrap_or_else(|| deserialize_warn!("mqtt_broker", "host", default.host));
-        validation::validate_mqtt_host(&host)
-            .map_err(|msg| serde::de::Error::custom(format!("mqtt_broker.host: {msg}")))?;
+        let host = match validation::validate_mqtt_host(&host) {
+            Ok(()) => host,
+            Err(msg) => {
+                let fallback = MQTTBroker::default().host;
+                warn!(
+                    "mqtt_broker.host `{host}` rejected ({msg}); falling back to default `{fallback}`"
+                );
+                fallback
+            }
+        };
         Ok(MQTTBroker { host })
     }
 }
