@@ -134,18 +134,13 @@ fn deserialize_mqtt_broker() {
 }
 
 #[test]
-fn deserialize_backend_rejects_disallowed_host() {
+fn deserialize_backend_falls_back_on_disallowed_host() {
+    // Invalid hosts must not refuse the daemon's startup. Deserialization
+    // succeeds with the default base_url so the agent still talks to prod
+    // (and the operator sees a warning in the logs).
     let input = json!({"base_url": "https://evilmirurobotics.com"});
-    let err = serde_json::from_value::<Backend>(input).unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("backend.base_url"),
-        "expected field prefix in message, got: {msg}"
-    );
-    assert!(
-        msg.contains("evilmirurobotics.com"),
-        "expected disallowed host name in message, got: {msg}"
-    );
+    let backend = serde_json::from_value::<Backend>(input).unwrap();
+    assert_eq!(backend, Backend::default());
 }
 
 #[test]
@@ -156,24 +151,17 @@ fn deserialize_backend_accepts_allowed_host() {
 }
 
 #[test]
-fn deserialize_backend_rejects_http_non_loopback() {
+fn deserialize_backend_falls_back_on_http_non_loopback() {
     let input = json!({"base_url": "http://api.mirurobotics.com"});
-    assert!(serde_json::from_value::<Backend>(input).is_err());
+    let backend = serde_json::from_value::<Backend>(input).unwrap();
+    assert_eq!(backend, Backend::default());
 }
 
 #[test]
-fn deserialize_mqtt_broker_rejects_disallowed_host() {
+fn deserialize_mqtt_broker_falls_back_on_disallowed_host() {
     let input = json!({"host": "evilmirurobotics.com"});
-    let err = serde_json::from_value::<MQTTBroker>(input).unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("mqtt_broker.host"),
-        "expected field prefix in message, got: {msg}"
-    );
-    assert!(
-        msg.contains("evilmirurobotics.com"),
-        "expected disallowed host name in message, got: {msg}"
-    );
+    let mqtt_broker = serde_json::from_value::<MQTTBroker>(input).unwrap();
+    assert_eq!(mqtt_broker, MQTTBroker::default());
 }
 
 #[test]
@@ -184,16 +172,20 @@ fn deserialize_mqtt_broker_accepts_allowed_host() {
 }
 
 #[test]
-fn deserialize_settings_with_invalid_backend_url_fails() {
+fn deserialize_settings_with_invalid_backend_url_falls_back() {
     let input = json!({
         "log_level": "info",
         "backend": {"base_url": "https://evilmirurobotics.com"},
-        "mqtt_broker": {"host": "mqtt.mirurobotics.com"},
+        "mqtt_broker": {"host": "evilmirurobotics.com"},
         "is_persistent": true,
         "enable_socket_server": true,
         "enable_mqtt_worker": true,
         "enable_poller": true,
     });
-    // Must hard-error rather than silently fall back to the default base_url.
-    assert!(serde_json::from_value::<Settings>(input).is_err());
+    // The daemon must keep starting on a tampered settings file: invalid
+    // backend/mqtt entries silently fall back to the defaults (with a
+    // warning logged at deserialize time).
+    let settings = serde_json::from_value::<Settings>(input).unwrap();
+    assert_eq!(settings.backend, Backend::default());
+    assert_eq!(settings.mqtt_broker, MQTTBroker::default());
 }
