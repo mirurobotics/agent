@@ -1,13 +1,19 @@
 // internal crates
 use crate::http::{errors::HTTPErr, request, ClientI};
 use backend_api::models::{
-    Device, ProvisionDeviceRequest, TokenResponse, UpdateDeviceFromAgentRequest,
+    Device, ProvisionDeviceRequest, ReprovisionDeviceRequest, TokenResponse,
+    UpdateDeviceFromAgentRequest,
 };
 
 // ================================ PARAM STRUCTS ================================== //
 
 pub struct ProvisionParams<'a> {
     pub payload: &'a ProvisionDeviceRequest,
+    pub token: &'a str,
+}
+
+pub struct ReprovisionParams<'a> {
+    pub payload: &'a ReprovisionDeviceRequest,
     pub token: &'a str,
 }
 
@@ -27,6 +33,16 @@ pub async fn provision(
     params: ProvisionParams<'_>,
 ) -> Result<Device, HTTPErr> {
     let url = format!("{}/devices/provision", client.base_url());
+    let request = request::Params::post(&url, request::marshal_json(params.payload)?)
+        .with_token(params.token);
+    super::client::fetch(client, request).await
+}
+
+pub async fn reprovision(
+    client: &impl ClientI,
+    params: ReprovisionParams<'_>,
+) -> Result<Device, HTTPErr> {
+    let url = format!("{}/devices/reprovision", client.base_url());
     let request = request::Params::post(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
     super::client::fetch(client, request).await
