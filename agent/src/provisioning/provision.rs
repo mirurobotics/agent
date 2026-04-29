@@ -4,12 +4,13 @@ use crate::crypt::rsa;
 use crate::filesys::{self, Overwrite};
 use crate::http;
 use crate::models;
-use crate::provisioning::errors::*;
+use crate::provisioning::{
+    errors::*,
+    shared::{build_settings, cleanup_temp_dir},
+};
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;
-
-use super::shared::{build_settings, cleanup_temp_dir};
 
 // external crates
 #[allow(unused_imports)]
