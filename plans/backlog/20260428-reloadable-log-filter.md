@@ -37,11 +37,23 @@ After this change, an operator running the agent binary sees:
 
 ## Decision Log
 
-(Add entries as you go.)
+- Decision: Use `tracing_subscriber::reload` to wrap the `EnvFilter` layer.
+  Rationale: It is the standard mechanism in `tracing-subscriber` for runtime-mutable filtering, already part of the locked workspace dependency, and lets us keep the existing `WorkerGuard`/non-blocking writer alive across a level change. Alternatives (atomic `LevelFilter` swap, rebuilding the entire subscriber) either restrict expressiveness or require re-entering `set_global_default`, which is one-shot per process.
+  Date/Author: 2026-04-28, ben@miruml.com.
 
-- Decision: …
-  Rationale: …
-  Date/Author: …
+- Decision: `RUST_LOG` wins over both `options.log_level` at init and `settings.log_level` at reload.
+  Rationale: Preserves today's environment-overrides-everything precedence and matches operator expectation. `reload_level` becomes a no-op when the env filter was used at init.
+  Date/Author: 2026-04-28, ben@miruml.com.
+
+- Decision: Reload changes the filter/level only — not the writer/destination.
+  Rationale: `tracing_subscriber::reload` is per-layer; swapping destinations requires reinstalling the subscriber, which we cannot do once `set_global_default` has succeeded. Destination reload is out of scope.
+  Date/Author: 2026-04-28, ben@miruml.com.
+
+- Decision: `run_provision` keeps its single-`init` shape; reload is wired into `run_agent` only.
+  Rationale: Provisioning has no settings-file load step that would warrant a level change; complicating it offers no observable benefit.
+  Date/Author: 2026-04-28, ben@miruml.com.
+
+(Add further entries as work proceeds.)
 
 ## Outcomes & Retrospective
 
@@ -86,21 +98,20 @@ In `agent/src/logs/mod.rs`:
 
    Implementing `crate::errors::Error` for it (with default trait method bodies) keeps it consistent with repo conventions.
 
-2. Define `LoggingGuard`:
+2. Define `LoggingGuard`. Anchor the subscriber stack on `Registry` so the reload-handle type is fully spellable; alias it for readability:
+
+       use tracing_subscriber::{registry::Registry, reload, EnvFilter};
+
+       type ReloadHandle = reload::Handle<EnvFilter, Registry>;
 
        pub struct LoggingGuard {
            _worker: tracing_appender::non_blocking::WorkerGuard,
-           reload_handle: tracing_subscriber::reload::Handle<
-               tracing_subscriber::EnvFilter,
-               // Inner subscriber type is the fmt Layered stack; we hide it behind a generic
-               // bound on Subscriber to keep the public type small.
-               tracing::Subscriber + Send + Sync,
-           >,
-           // record whether RUST_LOG was set at init time so reload_level can preserve precedence
+           reload_handle: ReloadHandle,
+           // True if RUST_LOG provided the initial filter; reload_level becomes a no-op.
            env_filter_locked: bool,
        }
 
-   Implementation note: the concrete generic parameters on `reload::Handle` are awkward to spell. The pragmatic approach is to build a `Registry`-based stack — `tracing_subscriber::registry().with(reload_layer).with(fmt_layer)` — which gives a fully spellable type, OR to store the handle as `reload::Handle<EnvFilter, Registry>` because the `S` type parameter on `Handle` is the **subscriber the layer is layered onto**, which (for our composition) is `Registry`. Resolve the exact type signature during implementation; if the spelled-out type is ergonomically prohibitive, use a type alias near the struct definition. The handle does NOT need to expose the inner subscriber type to callers — only `LoggingGuard::reload_level` consumes it.
+   The handle's second type parameter is the subscriber the reload layer is layered onto. With `tracing_subscriber::registry().with(reload_layer).with(fmt_layer)`, that anchor is `Registry`. The fmt layer composes on top and does not appear in the handle's type.
 
 3. Change `init`:
 
@@ -116,7 +127,9 @@ In `agent/src/logs/mod.rs`:
    - Compose `tracing_subscriber::registry().with(reload_layer).with(fmt_layer)` and call `tracing::subscriber::set_global_default(...)`. Propagate errors via `?` (no more `let _ =`).
    - Return `LoggingGuard { _worker: worker_guard, reload_handle, env_filter_locked }`.
 
-4. Add `LoggingGuard::reload_level`:
+4. Update the existing tests in `agent/tests/logs/mod.rs` (`test_init_stdout`, `test_init_file_only`) so the test target keeps compiling at the M1 commit — switch each `let guard = logs::init(options);` to `let guard = logs::init(options).expect("init should succeed");`.
+
+5. Add `LoggingGuard::reload_level`:
 
        impl LoggingGuard {
            pub fn reload_level(&self, level: LogLevel) -> Result<(), LogsErr> {
@@ -151,32 +164,19 @@ In `agent/src/main.rs::run_agent`:
 
 2. Delete the second `logs::init(log_options)` block (current lines 131–136).
 
-3. After the `settings` is read successfully (current line 129), add:
+3. After `settings` is read successfully (current line 129), add a non-fatal reload call. Reload failure leaves the agent on the early default level — intentional, since logging-config errors should not crash a running agent.
 
        if let Err(e) = log_guard.reload_level(settings.log_level.clone()) {
            tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
        }
 
-   `LogLevel` is `Clone`; if reload fails the agent still runs with the early default — this is intentional (logging-config errors are non-fatal at runtime).
+4. In `agent/src/provision/errors.rs`, add a `From<logs::LogsErr>` impl on `ProvisionErr` (mirroring the other `From` impls in that file). Then in `run_provision` change `let _guard = logs::init(options);` to `let _guard = logs::init(options)?;` — propagating the error consistently with the rest of the structured-error codebase.
 
-4. Confirm `run_provision` continues to compile. Its call becomes `let _guard = logs::init(options)?` style — but `run_provision` returns `Result<.., ProvisionErr>`. Adapt: convert via `let _guard = logs::init(options).map_err(|e| ProvisionErr::from(...))?`, or — simpler — change to `let _guard = logs::init(options).expect("failed to initialize provisioning logger");` since provisioning is an interactive one-shot where panicking on logger setup is acceptable. **Decision to confirm during implementation; default is `expect` with a clear message.** Either path is acceptable — record the choice in the Decision Log.
+### Milestone 3 — New tests
 
-### Milestone 3 — Tests
+Existing tests were updated in M1 step 4. This milestone adds three new tests.
 
-Edit `agent/tests/logs/mod.rs`:
-
-1. Update the existing `test_init_stdout` and `test_init_file_only` to handle the new `Result` return:
-
-       let guard = logs::init(options).expect("init should succeed");
-       drop(guard);
-
-   Note that because `set_global_default` succeeds at most once per process, only the *first* test of these two that runs in a given test binary will actually install. Both tests still exercise the construction and worker-guard lifecycle. Add `#[serial]` (`use serial_test::serial;`) if interleaving with other init tests becomes flaky.
-
-2. Add `test_reload_level_changes_filter`:
-
-   This test does NOT use `logs::init` (which installs a global subscriber). Instead, it builds the same composition `logs::init` builds — `registry().with(reload_layer).with(fmt_layer)` — using a custom in-memory writer, and confirms that `reload_handle.reload(EnvFilter::new("debug"))` causes `tracing::debug!` events to start appearing in the captured buffer.
-
-   Approach (sketch):
+1. Add `test_reload_level_changes_filter` to `agent/tests/logs/mod.rs`. This test does NOT call `logs::init` (which installs a global subscriber). Instead, it rebuilds the same composition (`registry().with(reload_layer).with(fmt_layer)`) with a captured-buffer writer, scopes it via `tracing::subscriber::set_default` (thread-local — hermetic against other tests' globals), then asserts that `handle.reload(EnvFilter::new("debug"))` flips a `debug!` event from filtered-out to emitted. Sketch:
 
        use std::sync::{Arc, Mutex};
        use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter};
@@ -186,10 +186,9 @@ Edit `agent/tests/logs/mod.rs`:
 
        impl std::io::Write for CapturingWriter { ... }
 
-       // build subscriber with reload layer, capturing writer
        let (filter_layer, handle) = reload::Layer::new(EnvFilter::new("warn"));
        let buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
-       let writer = ...; // make_writer cloning a CapturingWriter wrapper around buf
+       let writer = /* MakeWriter that clones CapturingWriter(buf.clone()) */;
        let subscriber = tracing_subscriber::registry()
            .with(filter_layer)
            .with(fmt::layer().with_writer(writer));
@@ -203,21 +202,9 @@ Edit `agent/tests/logs/mod.rs`:
        assert!(!captured.contains("before-reload"));
        assert!(captured.contains("after-reload"));
 
-   Use `set_default` (thread-scoped) rather than `set_global_default` so this test is hermetic against other tests' subscribers. The reload-handle API is the unit under test; the surrounding subscriber wiring mirrors what `logs::init` does.
+2. Add `test_reload_level_no_op_when_env_filter_locked`. Add a `pub fn env_filter_locked(&self) -> bool` accessor on `LoggingGuard` (in M1 if not already there), call `logs::init(Options::default())`, and assert `guard.env_filter_locked() == true`. `scripts/test.sh` sets `RUST_LOG=off` process-wide, so the locked branch is naturally exercised. The locked-flag check is the contract — emission semantics are covered by the previous test.
 
-3. Add `test_reload_level_no_op_when_env_filter_locked`:
-
-   Set `std::env::set_var("RUST_LOG", "warn")` before calling `logs::init` (using a fresh test process is impractical; instead, expose the `env_filter_locked` flag via a `pub fn` on `LoggingGuard` such as `pub fn env_filter_locked(&self) -> bool` and assert it returns `true` when `RUST_LOG` is set). Skip end-to-end emission in this test — the locked-flag check is the contract.
-
-   Note: `RUST_LOG` is set process-wide for the test binary by `scripts/test.sh` to `off`. That means the locked branch is what runs by default. The locked-flag assertion will be true. To confirm the *unlocked* path, also add a unit-level test inside `agent/src/logs/mod.rs` (under `#[cfg(test)] mod tests`) that constructs the same logic by calling a private helper `decide_initial_filter(options: &Options) -> (EnvFilter, bool)` directly, with controlled env (`std::env::remove_var` then `std::env::set_var`). Run such tests with `#[serial]` because env mutation is process-global. Alternatively (simpler), refactor `init` to take an `env_lookup: impl Fn() -> Option<String>` and unit-test the helper without env mutation.
-
-   **Pick the env-injection approach during implementation; record in Decision Log.**
-
-4. Add `test_init_returns_error_on_double_install`:
-
-   Call `logs::init(Options::default())` twice in the same test (use a fresh tokio runtime test like the existing ones). The second call must return `Err(LogsErr::SetGlobalDefault(_))`. Mark `#[serial]`.
-
-   Caveat: other tests may already have installed a subscriber. To make this test reliable, gate it behind a check that detects installed subscriber state, OR run it as the only test in its own integration test binary. The straightforward path: put it in its own integration test file `agent/tests/logs_init_double.rs` so it runs in a dedicated test binary where it's guaranteed to be the only `init` caller.
+3. Add `test_init_returns_error_on_double_install` in a dedicated integration-test binary `agent/tests/logs_init_double.rs` (separate file = separate test binary, so it cannot collide with subscribers installed by other tests). Inside, call `logs::init(Options::default())` twice and assert the second call returns `Err(LogsErr::SetGlobalDefault(_))`. Mark `#[serial]` for safety.
 
 ### Milestone 4 — Validation and finalize
 
@@ -230,77 +217,66 @@ All commands run from the agent repo root: `/home/ben/miru/workbench2/repos/agen
 ### Milestone 1 — Refactor `logs::init`
 
 1. Edit `agent/src/logs/mod.rs` per "Plan of Work / Milestone 1": add `LogsErr`, `LoggingGuard`, change `init` to return `Result<LoggingGuard, LogsErr>`, add `reload_level`. Remove all `let _ =` around `set_global_default`.
-2. Compile-check just the lib:
+2. Update the two existing test calls in `agent/tests/logs/mod.rs` (`test_init_stdout`, `test_init_file_only`) to `.expect(...)` the `Result`, so the test target keeps compiling.
 
-       cargo check --package miru-agent --features test
+3. Compile-check the package including tests:
 
-   Expected: clean compile. If type errors on the reload handle's generic parameters appear, introduce a `type ReloadHandle = ...` alias near the struct.
+       cargo check --package miru-agent --features test --tests
 
-3. Run logs-only tests to catch the immediate breakage in `tests/logs/mod.rs` from changing the return type:
-
-       RUST_LOG=off cargo test --features test --package miru-agent --test mod logs::
-
-   (existing tests will fail to compile until step 4 of Milestone 3 is done; that is fine for now — proceed to Milestone 2 and update tests in Milestone 3.)
+   Expected: clean compile.
 
 4. Commit:
 
-       git add agent/src/logs/mod.rs
+       git add agent/src/logs/mod.rs agent/tests/logs/mod.rs
        git commit -m "feat(logs): add reloadable filter handle and propagate init errors"
 
 ### Milestone 2 — Wire main.rs
 
-1. Edit `agent/src/main.rs::run_agent`: keep the early `logs::init(Options::default())`, handle the new `Result`, delete the second init block, add `log_guard.reload_level(settings.log_level.clone())` after settings read. Adjust `run_provision` to handle the new `Result` (use `expect` with a clear message; record decision).
-2. Compile:
+1. Edit `agent/src/main.rs::run_agent`: handle the new `Result` from the early `logs::init`, delete the second init block, add `log_guard.reload_level(settings.log_level.clone())` after settings read.
+2. Edit `agent/src/provision/errors.rs` to add `From<logs::LogsErr> for ProvisionErr`. Edit `agent/src/main.rs::run_provision` to use `?` on the `logs::init` call.
+3. Compile:
 
-       cargo check --package miru-agent --features test
-
-3. Commit:
-
-       git add agent/src/main.rs
-       git commit -m "refactor(main): init logs early and reload level after settings load"
-
-### Milestone 3 — Tests
-
-1. Update `agent/tests/logs/mod.rs` to match the new `Result` return, add `test_reload_level_changes_filter`, add `test_reload_level_no_op_when_env_filter_locked` (or its decided alternative), add unit tests for the env-filter helper if that path is chosen.
-2. Add `agent/tests/logs_init_double.rs` if needed for the double-install test.
-3. Run:
-
-       ./scripts/test.sh
-
-   Expected final line includes `test result: ok.` for the agent test target.
+       cargo check --package miru-agent --features test --tests
 
 4. Commit:
 
-       git add agent/tests/logs/ agent/tests/logs_init_double.rs agent/src/logs/mod.rs
+       git add agent/src/main.rs agent/src/provision/errors.rs
+       git commit -m "refactor(main): init logs early and reload level after settings load"
+
+### Milestone 3 — New tests
+
+1. Add the three new tests as described in Plan of Work / Milestone 3:
+   - `test_reload_level_changes_filter` in `agent/tests/logs/mod.rs`
+   - `test_reload_level_no_op_when_env_filter_locked` in `agent/tests/logs/mod.rs` (requires `pub fn env_filter_locked` accessor; add it to `agent/src/logs/mod.rs` if not added in M1)
+   - `test_init_returns_error_on_double_install` in a new file `agent/tests/logs_init_double.rs`
+
+2. Run:
+
+       ./scripts/test.sh
+
+   Expected: final line includes `test result: ok.` for the agent test target.
+
+3. Commit:
+
+       git add agent/tests/logs/mod.rs agent/tests/logs_init_double.rs agent/src/logs/mod.rs
        git commit -m "test(logs): cover reload_level filter change and double-install error"
 
-   (Include `agent/src/logs/mod.rs` in this commit only if private helpers like `decide_initial_filter` were added for testability.)
+   (Include `agent/src/logs/mod.rs` only if the `env_filter_locked` accessor was added in this milestone.)
 
 ### Milestone 4 — Preflight and validation
 
-1. Refresh deps if Cargo.lock changed:
-
-       ./scripts/update-deps.sh
-
-2. Run preflight:
+1. Run preflight:
 
        ./scripts/preflight.sh
 
-   Expected: process exits 0 and final line is `Preflight clean`. If any of the four sub-jobs fails (lint / tests / tools lint / tools tests), read the corresponding section of the printed output, fix, and re-run. **Do not advance past this gate until preflight is clean.**
+   Expected: exit 0 and final line `Preflight clean`. If any sub-job (lint / tests / tools lint / tools tests) fails, read the printed output, fix, and re-run. **Do not advance past this gate until preflight is clean.**
 
-3. If `agent/src/logs/.covgate` threshold needs adjustment (because new code is uncovered or because added tests bumped coverage), edit it in the same milestone-4 commit and re-run `./scripts/covgate.sh` to confirm.
+2. If `agent/src/logs/.covgate` threshold trips, prefer adding a covering test over loosening the number; if the number must move, edit the file and re-run `./scripts/covgate.sh` to confirm. Commit any covgate change separately:
 
-4. Final commit (only if preflight produced changes):
-
-       git add -- <files>
+       git add agent/src/logs/.covgate
        git commit -m "chore(logs): adjust covgate threshold after reload changes"
 
-5. Move plan file:
-
-       git mv plans/backlog/20260428-reloadable-log-filter.md plans/active/20260428-reloadable-log-filter.md
-       # ... or to plans/completed/ at the end
-
-   (The implement skill drives this lifecycle; do not pre-move during authoring.)
+3. Plan-file lifecycle moves are handled by the implement skill — do not pre-move the file during authoring.
 
 ## Validation and Acceptance
 
@@ -318,13 +294,13 @@ Acceptance is verified by behaviors, not implementation details. From the agent 
 
    Expected: all tests under the `logs` integration test target pass; no regressions in the rest of the suite.
 
-3. **Reload behavior is observable in the test added in Milestone 3:** The test `test_reload_level_changes_filter` fails on `main` (function does not exist) and passes after this change. Confirm by reverting just that test in a scratch worktree and re-running — it should not compile (because `LoggingGuard::reload_level` does not yet exist on `main`).
+3. **Reload behavior is observable:** `test_reload_level_changes_filter` passes after this change. The test exercises `reload::Handle::reload(...)` end-to-end against a captured-buffer writer and asserts the captured output transitions from filtered-out to emitted across the reload call.
 
 4. **Manual smoke (optional but recommended):** Set `RUST_LOG=info,miru_agent=debug` in a shell, run the agent binary against a test layout up to settings-load, observe that pre-settings reconciliation logs at `debug` already appear (because env filter beats the default `Info`), and that they continue at `debug` after settings parse even if `settings.log_level = "warn"`. Then unset `RUST_LOG`, re-run, and observe that `settings.log_level = "warn"` is honored after reload (only `warn`+ events appear after the settings-read line).
 
 5. **Error path:** Calling `logs::init` twice in the same process produces a real `Err`. Verified by `test_init_returns_error_on_double_install`.
 
-6. **`RUST_LOG` precedence is preserved:** Verified by `test_reload_level_no_op_when_env_filter_locked` (or the env-helper unit test variant chosen during implementation).
+6. **`RUST_LOG` precedence is preserved:** Verified by `test_reload_level_no_op_when_env_filter_locked` — under `scripts/test.sh`'s `RUST_LOG=off`, `LoggingGuard::env_filter_locked()` returns `true`, so `reload_level` will short-circuit.
 
 ## Idempotence and Recovery
 
@@ -332,4 +308,4 @@ Acceptance is verified by behaviors, not implementation details. From the agent 
 - Test additions are append-only; if a test is flaky in CI, mark it `#[serial]` and re-run. None of the changes touch on-disk state, network, or external systems, so there is no rollback hazard beyond a normal `git revert`.
 - The double-install test mutates global subscriber state. Isolating it into its own integration test binary (`agent/tests/logs_init_double.rs`) is the rollback for any cross-test contamination it might cause; revert that file and rerun the suite if interactions surface.
 - If covgate threshold is bumped down (loosened) in Milestone 4, that is a non-destructive numeric change in `agent/src/logs/.covgate`; revert with `git checkout -- agent/src/logs/.covgate`. Prefer adding tests over loosening the threshold whenever practical.
-- All commits are atomic per milestone; `git revert <sha>` of any single milestone leaves the tree in a working state (Milestone 1's revert undoes the lib change but `main.rs` would no longer compile — in that recovery case revert M2 and M3 too, in reverse order).
+- Commits are atomic per milestone and each one leaves the tree compiling: M1 includes the trivial test-call updates needed to keep `agent/tests/logs/mod.rs` building. Reverts work in reverse order (M3, M2, M1).
