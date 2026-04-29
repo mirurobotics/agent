@@ -23,6 +23,13 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
         .await
         .unwrap();
 
+    // create a public key file
+    let public_key_file = layout.auth().public_key();
+    public_key_file
+        .write_string("test", WriteOptions::default())
+        .await
+        .unwrap();
+
     // create the device file
     let device_file = layout.device();
     let device = Device::default();
@@ -43,7 +50,7 @@ async fn invalid_app_state_initialization() {
         ..Default::default()
     };
     tokio::time::timeout(Duration::from_secs(5), async move {
-        run(Device::default().agent_version, options, async {
+        run(options, async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
@@ -76,7 +83,7 @@ async fn max_runtime_reached() {
 
     // should safely run and shutdown in about 100ms
     tokio::time::timeout(Duration::from_secs(5), async move {
-        run(Device::default().agent_version, options, async {
+        run(options, async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
@@ -109,7 +116,7 @@ async fn is_persistent() {
     };
 
     tokio::time::timeout(2 * max_runtime, async move {
-        run(Device::default().agent_version, options, async {
+        run(options, async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
@@ -145,7 +152,7 @@ async fn idle_timeout_reached() {
 
     // idle timeout triggers after ~100ms; shutdown may take up to max_shutdown_delay (5s)
     tokio::time::timeout(Duration::from_secs(15), async move {
-        run(Device::default().agent_version, options, async {
+        run(options, async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
@@ -180,7 +187,7 @@ async fn shutdown_signal_received() {
 
     // Spawn the server in a task
     let server_handle = tokio::spawn(async move {
-        run(Device::default().agent_version, options, async {
+        run(options, async {
             let _ = rx.await;
         })
         .await

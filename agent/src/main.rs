@@ -3,8 +3,11 @@ use std::env;
 
 // internal crates
 use backend_api::models as backend_client;
-use miru_agent::app::options::{AppOptions, LifecycleOptions};
 use miru_agent::app::run::run;
+use miru_agent::app::{
+    options::{AppOptions, LifecycleOptions},
+    upgrade,
+};
 use miru_agent::cli;
 use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
@@ -46,7 +49,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Devic
         log_dir: tmp_dir.path().to_path_buf(),
         ..Default::default()
     };
-    let _guard = logs::init(options);
+    let _guard = logs::init(options)?;
 
     let settings = provision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
@@ -82,11 +85,44 @@ fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>)
 }
 
 async fn run_agent() {
-    // check the agent has been activated
     let layout = storage::Layout::default();
-    let device_file = layout.device();
-    if let Err(e) = storage::assert_activated(&device_file).await {
+
+    // initialize logging early so reconciliation and pre-settings activity are
+    // observable. The level is reloaded once settings are read below.
+    let log_guard = match logs::init(logs::Options::default()) {
+        Ok(g) => g,
+        Err(e) => {
+            // tracing is not yet installed if init failed, so use eprintln!
+            eprintln!("Failed to initialize logging: {e}");
+            return;
+        }
+    };
+
+    // check the agent has been activated
+    if let Err(e) = storage::assert_activated(&layout).await {
         error!("Device is not yet activated: {}", e);
+        return;
+    }
+
+    // reconcile the agent package version to ensure the file system storage state
+    // is compatible with the running version
+    let url = get_bootstrap_base_url().await;
+    let bootstrap_http_client = match http::Client::new(&url) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("upgrade: failed to construct http client: {e}");
+            return;
+        }
+    };
+    if let Err(e) = upgrade::reconcile(
+        &layout,
+        &bootstrap_http_client,
+        version::VERSION,
+        tokio::time::sleep,
+    )
+    .await
+    {
+        error!("upgrade: failed to reconcile agent package version: {e}");
         return;
     }
 
@@ -100,12 +136,10 @@ async fn run_agent() {
         }
     };
 
-    // initialize the logging
-    let log_options = logs::Options {
-        log_level: settings.log_level,
-        ..Default::default()
-    };
-    let _guard = logs::init(log_options);
+    // apply the configured log level to the running subscriber
+    if let Err(e) = log_guard.reload_level(settings.log_level.clone()) {
+        tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
+    }
 
     // run the server
     let options = AppOptions {
@@ -127,15 +161,19 @@ async fn run_agent() {
         ..Default::default()
     };
     info!("Running the server with options: {:?}", options);
-    let result = run(
-        version::VERSION.to_string(),
-        options,
-        await_shutdown_signal(),
-    )
-    .await;
+    let result = run(options, await_shutdown_signal()).await;
     if let Err(e) = result {
         error!("Failed to run the server: {e}");
     }
+}
+
+async fn get_bootstrap_base_url() -> String {
+    let settings_file = storage::Layout::default().settings();
+    if let Ok(settings) = settings_file.read_json::<storage::Settings>().await {
+        return settings.backend.base_url;
+    }
+
+    storage::Backend::default().base_url
 }
 
 async fn await_shutdown_signal() {

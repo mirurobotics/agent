@@ -12,6 +12,29 @@ use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::Rsa;
 use openssl::sign::{Signer, Verifier};
 use secrecy::ExposeSecret;
+use serde::Serialize;
+
+/// JSON Web Key (RFC 7517) representation of an RSA public key.
+///
+/// Field order on the wire is `kty`, `n`, `e` because `serde_json` preserves
+/// struct field declaration order; the server parses the JSON without caring
+/// about order, but tests assert stability for fingerprinting.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct Jwk {
+    pub kty: &'static str,
+    pub n: String,
+    pub e: String,
+}
+
+/// Serialize an RSA public key as a JWK (RFC 7517) with `n` and `e` as big-endian
+/// base64url-no-pad-encoded byte strings.
+pub fn pub_key_to_jwk(key: &Rsa<Public>) -> Jwk {
+    Jwk {
+        kty: "RSA",
+        n: crate::crypt::base64::encode_bytes_url_safe_no_pad(&key.n().to_vec()),
+        e: crate::crypt::base64::encode_bytes_url_safe_no_pad(&key.e().to_vec()),
+    }
+}
 
 /// Maps an `openssl::error::ErrorStack` to a `CryptErr` variant. The variant name and
 /// inner struct name must match (e.g. `SignDataErr` maps to `CryptErr::SignDataErr(SignDataErr { .. })`).
@@ -100,19 +123,34 @@ pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Publ
     )
 }
 
-/// Create a signature from the provided data using the private key stored in the
-/// specified file
-pub async fn sign(private_key_file: &filesys::File, data: &[u8]) -> Result<Vec<u8>, CryptErr> {
+async fn sign(
+    private_key_file: &filesys::File,
+    data: &[u8],
+    digest: MessageDigest,
+) -> Result<Vec<u8>, CryptErr> {
     let rsa_private_key = read_private_key(private_key_file).await?;
     let private_key = ssl_err!(RSAToPKeyErr, PKey::from_rsa(rsa_private_key))?;
 
-    let mut signer = ssl_err!(
-        SignDataErr,
-        Signer::new(MessageDigest::sha256(), &private_key)
-    )?;
+    let mut signer = ssl_err!(SignDataErr, Signer::new(digest, &private_key))?;
     ssl_err!(SignDataErr, signer.update(data))?;
     let signature = ssl_err!(SignDataErr, signer.sign_to_vec())?;
     Ok(signature)
+}
+
+/// Create an RSASSA-PKCS1-v1_5 (RFC 7518 §3.2) signature using SHA-256.
+pub async fn sign_rs256(
+    private_key_file: &filesys::File,
+    data: &[u8],
+) -> Result<Vec<u8>, CryptErr> {
+    sign(private_key_file, data, MessageDigest::sha256()).await
+}
+
+/// Create an RSASSA-PKCS1-v1_5 (RFC 7518 §3.3) signature using SHA-512.
+pub async fn sign_rs512(
+    private_key_file: &filesys::File,
+    data: &[u8],
+) -> Result<Vec<u8>, CryptErr> {
+    sign(private_key_file, data, MessageDigest::sha512()).await
 }
 
 /// Verify a signature using the public key stored in the specified file

@@ -4,6 +4,7 @@ use crate::crypt;
 use crate::errors::Trace;
 use crate::filesys;
 use crate::http;
+use crate::logs;
 use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +28,8 @@ pub enum ProvisionErr {
     FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
     HTTPErr(http::HTTPErr),
+    #[error(transparent)]
+    LogsErr(logs::LogsErr),
     #[error(transparent)]
     StorageErr(StorageErr),
 }
@@ -55,6 +58,12 @@ impl From<http::HTTPErr> for ProvisionErr {
     }
 }
 
+impl From<logs::LogsErr> for ProvisionErr {
+    fn from(e: logs::LogsErr) -> Self {
+        Self::LogsErr(e)
+    }
+}
+
 impl From<StorageErr> for ProvisionErr {
     fn from(e: StorageErr) -> Self {
         Self::StorageErr(e)
@@ -67,6 +76,7 @@ crate::impl_error!(ProvisionErr {
     CryptErr,
     FileSysErr,
     HTTPErr,
+    LogsErr,
     StorageErr,
 });
 
@@ -127,6 +137,13 @@ mod tests {
             });
             let install_err = ProvisionErr::from(err);
             assert!(matches!(install_err, ProvisionErr::StorageErr(_)));
+        }
+
+        #[test]
+        fn from_logs_err() {
+            let err = logs::LogsErr::ReloadFailed("test".to_string());
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::LogsErr(_)));
         }
     }
 }

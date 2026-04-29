@@ -25,7 +25,6 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 pub async fn run(
-    agent_version: String,
     options: AppOptions,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerErr> {
@@ -37,14 +36,7 @@ pub async fn run(
     let mut shutdown_manager = ShutdownManager::new(shutdown_tx.clone(), options.lifecycle);
 
     // initialize the app (and shutdown if failures occur)
-    let app_state = match init(
-        agent_version,
-        &options,
-        shutdown_tx.clone(),
-        &mut shutdown_manager,
-    )
-    .await
-    {
+    let app_state = match init(&options, shutdown_tx.clone(), &mut shutdown_manager).await {
         Ok(state) => state,
         Err(e) => {
             error!("Failed to start server: {}", e);
@@ -116,12 +108,11 @@ async fn await_max_runtime(max_runtime: Duration) -> Result<(), ServerErr> {
 
 // =============================== INITIALIZATION ================================== //
 async fn init(
-    agent_version: String,
     options: &AppOptions,
     shutdown_tx: broadcast::Sender<()>,
     shutdown_manager: &mut ShutdownManager,
 ) -> Result<Arc<AppState>, ServerErr> {
-    let app_state = init_app_state(agent_version, options, shutdown_manager).await?;
+    let app_state = init_app_state(options, shutdown_manager).await?;
 
     init_token_refresh_worker(
         app_state.token_mngr.clone(),
@@ -166,12 +157,10 @@ async fn init(
 }
 
 async fn init_app_state(
-    agent_version: String,
     options: &AppOptions,
     shutdown_manager: &mut ShutdownManager,
 ) -> Result<Arc<AppState>, ServerErr> {
     let (app_state, app_state_handle) = AppState::init(
-        agent_version,
         &options.storage.layout,
         options.storage.capacities,
         Arc::new(http::Client::new(&options.backend_base_url)?),

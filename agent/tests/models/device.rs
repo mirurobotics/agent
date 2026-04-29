@@ -40,11 +40,6 @@ impl ModelFixture for Device {
                 default_value: json!("placeholder"),
             },
             OptionalField {
-                key: "agent_version",
-                value: json!("v1.0.0"),
-                default_value: json!("placeholder"),
-            },
-            OptionalField {
                 key: "activated",
                 value: json!(true),
                 default_value: json!(false),
@@ -83,7 +78,6 @@ fn defaults() {
         id: "placeholder".to_string(),
         session_id: "placeholder".to_string(),
         name: "placeholder".to_string(),
-        agent_version: "placeholder".to_string(),
         activated: false,
         status: DeviceStatus::Offline,
         last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -171,7 +165,6 @@ fn merge_empty() {
         id: "123".to_string(),
         session_id: "123".to_string(),
         name: "test".to_string(),
-        agent_version: "v1.0.0".to_string(),
         activated: true,
         status: DeviceStatus::Online,
         last_synced_at: Utc::now(),
@@ -191,7 +184,6 @@ fn merge_all() {
         id: "123".to_string(),
         session_id: "123".to_string(),
         name: "test".to_string(),
-        agent_version: "v1.0.0".to_string(),
         activated: true,
         status: DeviceStatus::Online,
         last_synced_at: Utc::now(),
@@ -202,7 +194,6 @@ fn merge_all() {
         id: Some("456".to_string()),
         name: Some("test2".to_string()),
         activated: Some(false),
-        agent_version: Some("v1.0.1".to_string()),
         status: Some(DeviceStatus::Offline),
         last_synced_at: Some(Utc::now() + Duration::days(1)),
         last_connected_at: Some(Utc::now() + Duration::days(1)),
@@ -212,7 +203,6 @@ fn merge_all() {
         id: updates.id.clone().unwrap(),
         session_id: initial.session_id.clone(),
         name: updates.name.clone().unwrap(),
-        agent_version: updates.agent_version.clone().unwrap(),
         activated: updates.activated.unwrap(),
         status: updates.status.clone().unwrap(),
         last_synced_at: updates.last_synced_at.unwrap(),
@@ -231,7 +221,6 @@ fn updates_empty() {
     let expected = Updates {
         id: None,
         name: None,
-        agent_version: None,
         activated: None,
         status: None,
         last_synced_at: None,
@@ -274,14 +263,4 @@ fn updates_connected() {
         ..Updates::empty()
     };
     assert_eq!(actual, expected);
-}
-
-#[test]
-fn updates_set_agent_version() {
-    let updates = Updates::set_agent_version("v2.0.0".to_string());
-    let expected = Updates {
-        agent_version: Some("v2.0.0".to_string()),
-        ..Updates::empty()
-    };
-    assert_eq!(updates, expected);
 }

@@ -40,13 +40,18 @@ pub async fn create_token_manager(
         .write_string("private_key", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
+    let public_key_file = dir.file("public_key.pem");
+    public_key_file
+        .write_string("public_key", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
 
     TokenManager::spawn(
         32,
-        "device_id".to_string(),
         http_client.clone(),
         token_file,
         private_key_file,
+        public_key_file,
     )
     .unwrap()
 }
@@ -120,10 +125,6 @@ impl Fixture {
     }
 
     async fn new_with_backoff(name: &str, backoff: cooldown::Backoff) -> Self {
-        Self::new_with_opts(name, backoff, Device::default().agent_version).await
-    }
-
-    async fn new_with_opts(name: &str, backoff: cooldown::Backoff, agent_version: String) -> Self {
         let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
@@ -146,7 +147,6 @@ impl Fixture {
                     retry_policy: fsm::RetryPolicy::default(),
                 },
                 backoff,
-                agent_version,
                 event_hub,
             },
         )
@@ -245,7 +245,6 @@ pub mod shutdown {
                     growth_factor: 2,
                     max_secs: 12 * 60 * 60,
                 },
-                agent_version: Device::default().agent_version,
                 event_hub,
             },
         )
@@ -323,39 +322,6 @@ pub mod get_last_attempted_sync_at {
 
 pub mod sync_success {
     use super::*;
-
-    #[tokio::test]
-    async fn agent_version() {
-        let new_agent_version = "v1.0.1".to_string();
-        let f = Fixture::new_with_opts(
-            "sync_agent_version",
-            cooldown::Backoff {
-                base_secs: 10,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-            new_agent_version.clone(),
-        )
-        .await;
-
-        let before = Utc::now();
-        f.syncer.sync().await.unwrap();
-        let after = Utc::now();
-
-        // check the device file has the correct version
-        let device = f.storage.device.read().await.unwrap();
-        assert_eq!(device.agent_version, new_agent_version);
-
-        // check the sync state
-        let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(
-            f.syncer.get_cooldown_ends_at().await.unwrap(),
-            state.cooldown_ends_at
-        );
-        let window = StateAssert::new(before, after);
-        let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
-        window.assert_success(&state, base_cooldown, 0);
-    }
 
     #[tokio::test]
     async fn deployments() {
@@ -476,42 +442,6 @@ pub mod sync_failure {
         // no HTTP calls should have been made (sync_impl exits early)
         assert_eq!(f.http_client.call_count(Call::ListDeployments), 0);
         assert_eq!(f.http_client.call_count(Call::UpdateDevice), 0);
-    }
-
-    #[tokio::test]
-    async fn agent_version_push_failure_does_not_block_sync() {
-        let f = Fixture::new_with_opts(
-            "sync_agent_ver_push_fail",
-            cooldown::Backoff {
-                base_secs: 10,
-                growth_factor: 2,
-                max_secs: 12 * 60 * 60,
-            },
-            "v99.0.0".to_string(), // different from default to trigger push
-        )
-        .await;
-
-        // Configure update_device to fail with a non-network error
-        f.http_client.set_update_device(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: false,
-            }))
-        });
-
-        // sync should succeed despite agent version push failure
-        f.syncer.sync().await.unwrap();
-
-        // update_device was called (and failed), but deployment sync continued
-        assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
-        assert_eq!(
-            f.http_client.call_count(Call::ListDeployments),
-            1,
-            "deployment sync should proceed despite agent version push failure"
-        );
-
-        // err_streak should be 0 (sync succeeded overall)
-        let state = f.syncer.get_sync_state().await.unwrap();
-        assert_eq!(state.err_streak, 0);
     }
 
     #[tokio::test]

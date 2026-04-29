@@ -23,6 +23,7 @@ pub enum Call {
     ProvisionDevice,
     IssueDeviceToken,
     UpdateDevice,
+    GetDevice,
     ListDeployments,
     GetDeployment,
     UpdateDeployment,
@@ -52,11 +53,13 @@ type SingleReleaseFn = Mutex<Box<dyn Fn() -> Result<BackendRelease, HTTPErr> + S
 type SingleGitCommitFn = Mutex<Box<dyn Fn() -> Result<BackendGitCommit, HTTPErr> + Send + Sync>>;
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
+type GetDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
     pub issue_device_token_fn: Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>,
     pub update_device_fn: UpdateDeviceFn,
+    pub get_device_fn: GetDeviceFn,
     pub list_deployments_fn: ListDeploymentsFn,
     pub get_deployment_fn: SingleDeploymentFn,
     pub update_deployment_fn: SingleDeploymentFn,
@@ -72,6 +75,7 @@ impl Default for MockClient {
             provision_device_fn: Box::new(|| Ok(Device::default())),
             issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
             update_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
+            get_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
             list_deployments_fn: Mutex::new(Box::new(|| Ok(DeploymentList::default()))),
             get_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             update_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
@@ -89,6 +93,13 @@ impl MockClient {
         F: Fn() -> Result<Device, HTTPErr> + Send + Sync + 'static,
     {
         *self.update_device_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_get_device<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Device, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_device_fn.lock().unwrap() = Box::new(f);
     }
 
     pub fn set_list_all_deployments<F>(&self, f: F)
@@ -160,6 +171,10 @@ impl MockClient {
         self.call_count(Call::UpdateDevice)
     }
 
+    pub fn num_get_device_calls(&self) -> usize {
+        self.call_count(Call::GetDevice)
+    }
+
     pub fn requests(&self) -> Vec<CapturedRequest> {
         self.requests.lock().unwrap().clone()
     }
@@ -178,8 +193,9 @@ impl MockClient {
         use reqwest::Method;
         match (method, path) {
             (m, p) if *m == Method::POST && p == "/devices/provision" => Call::ProvisionDevice,
-            (m, p) if *m == Method::POST && p.ends_with("/issue_token") => Call::IssueDeviceToken,
+            (m, p) if *m == Method::POST && p.ends_with("/devices/token") => Call::IssueDeviceToken,
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
+            (m, p) if *m == Method::GET && p == "/device" => Call::GetDevice,
             (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
             (m, p)
                 if *m == Method::GET
@@ -203,6 +219,7 @@ impl MockClient {
             Call::ProvisionDevice => json(&(self.provision_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
             Call::UpdateDevice => json(&(self.update_device_fn.lock().unwrap())()?),
+            Call::GetDevice => json(&(self.get_device_fn.lock().unwrap())()?),
             Call::ListDeployments => {
                 let list = (self.list_deployments_fn.lock().unwrap())()?;
                 json(&list)

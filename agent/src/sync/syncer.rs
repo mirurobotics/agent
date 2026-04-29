@@ -10,7 +10,7 @@ use crate::errors::*;
 use crate::events;
 use crate::http;
 use crate::storage;
-use crate::sync::{agent_version, deployments, errors::*};
+use crate::sync::{deployments, errors::*};
 use crate::trace;
 
 // external crates
@@ -55,7 +55,6 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub token_mngr: Arc<TokenManagerT>,
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
-    pub agent_version: String,
     pub event_hub: events::EventHub,
 }
 
@@ -89,7 +88,6 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     storage: Arc<storage::Storage>,
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
-    agent_version: String,
     event_hub: events::EventHub,
 
     // subscribers
@@ -110,7 +108,6 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             token_mngr: args.token_mngr,
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
-            agent_version: args.agent_version,
             event_hub: args.event_hub,
             state: State::default(),
             subscriber_tx,
@@ -234,17 +231,6 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
 
     async fn sync_impl(&mut self) -> Result<Option<chrono::TimeDelta>, SyncErr> {
         let token = self.token_mngr.get_token().await?;
-
-        if let Err(e) = agent_version::push(
-            self.storage.device.as_ref(),
-            self.http_client.as_ref(),
-            &token.token,
-            self.agent_version.clone(),
-        )
-        .await
-        {
-            error!("failed to push agent version to backend: {:?}", e);
-        }
 
         let storage_ref = self.storage.as_ref();
         let sync_storage = deployments::Storage {

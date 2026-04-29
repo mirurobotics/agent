@@ -1,8 +1,7 @@
 // internal crates
 use crate::http::{errors::HTTPErr, request, ClientI};
 use backend_api::models::{
-    Device, IssueDeviceTokenRequest, ProvisionDeviceRequest, TokenResponse,
-    UpdateDeviceFromAgentRequest,
+    Device, ProvisionDeviceRequest, TokenResponse, UpdateDeviceFromAgentRequest,
 };
 
 // ================================ PARAM STRUCTS ================================== //
@@ -13,8 +12,7 @@ pub struct ProvisionParams<'a> {
 }
 
 pub struct IssueTokenParams<'a> {
-    pub id: &'a str,
-    pub payload: &'a IssueDeviceTokenRequest,
+    pub token: &'a str,
 }
 
 pub struct UpdateParams<'a> {
@@ -24,7 +22,6 @@ pub struct UpdateParams<'a> {
 }
 
 // ================================ FREE FUNCTIONS ================================= //
-
 pub async fn provision(
     client: &impl ClientI,
     params: ProvisionParams<'_>,
@@ -39,8 +36,8 @@ pub async fn issue_token(
     client: &impl ClientI,
     params: IssueTokenParams<'_>,
 ) -> Result<TokenResponse, HTTPErr> {
-    let url = format!("{}/devices/{}/issue_token", client.base_url(), params.id);
-    let request = request::Params::post(&url, request::marshal_json(params.payload)?);
+    let url = format!("{}/devices/token", client.base_url());
+    let request = request::Params::post(&url, String::new()).with_token(params.token);
     super::client::fetch(client, request).await
 }
 
@@ -48,5 +45,11 @@ pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<D
     let url = format!("{}/devices/{}", client.base_url(), params.id);
     let request = request::Params::patch(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
+    super::client::fetch(client, request).await
+}
+
+pub async fn get(client: &impl ClientI, token: &str) -> Result<Device, HTTPErr> {
+    let url = format!("{}/device", client.base_url());
+    let request = request::Params::get(&url).with_token(token);
     super::client::fetch(client, request).await
 }

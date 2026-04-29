@@ -6,16 +6,54 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-next
+  x-release-version: v0.3.0-beta.4
   x-git-commit:
-    sha: 2abd3035b6b2d7ff9f4da7c5fd8e183b58e9ab64
-    url: https://github.com/mirurobotics/openapi/commit/2abd3035b6b2d7ff9f4da7c5fd8e183b58e9ab64
-    message: 'fix(api): clarify provisioning target device'
-    author: Benjamin Smidt
-    branch: feat/provision-token
-    dirty: true
+    sha: 89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
+    url: https://github.com/mirurobotics/openapi/commit/89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
+    message: 'refactor(agent): rename POST /devices/issue_token to /devices/token
+      (#37)
+
+
+      ## Summary
+
+      - Rename agent endpoint `POST /devices/issue_token` to `POST
+
+      /devices/token` to drop the verb-in-URL antipattern; HTTP method already
+
+      conveys "create" and the `/devices/` grouping is retained because the
+
+      `DeviceKeyJWT` auth scheme is device-specific.
+
+      - Update path key in `apis/apps/backend-server/agent/paths/devices.yaml`
+
+      and the description prose plus path ref in
+
+      `apis/apps/backend-server/agent/openapi.yaml`; regenerate
+
+      `apis/apps/backend-server/agent/openapi.gen.yaml` via
+
+      `scripts/regen.sh`.
+
+      - Preserve `operationId: issueDeviceToken` and summary `Issue Token` so
+
+      generated client method names remain stable.
+
+      - Safe pre-release rename: zero deployed clients other than the open
+
+      `mirurobotics/agent#48` PR against the unreleased v0.3.0-beta.3 spec.
+
+      - Includes the rename plan under `plans/` for traceability.
+
+
+      ---------
+
+
+      Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+    author: ben-miru
+    branch: HEAD
+    dirty: false
   x-build:
-    built_at: '2026-04-24T23:16:39.541835+00:00'
+    built_at: '2026-04-27T21:31:19.844963+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -24,7 +62,7 @@ servers:
 - url: https://api.mirurobotics.com/agent/v1
   description: Production
 security:
-- ClerkAuth: []
+- DeviceSessionToken: []
 paths:
   /version:
     parameters:
@@ -173,6 +211,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GitCommit'
+  /device:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Devices
+      summary: Get Self
+      operationId: getDeviceSelf
+      description: 'Retrieve the calling device''s own record. The device is identified
+        by the bearer session token from the `DeviceSessionToken` security scheme.
+
+        '
+      responses:
+        '200':
+          description: Successfully retrieved the calling device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
   /devices/{device_id}:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -205,9 +262,7 @@ paths:
       - Devices
       summary: Provision
       operationId: provisionDevice
-      description: Provision a device. With `create` tokens this creates a new device;
-        with `activate` or `reactivate` tokens the request must include `device_id`
-        to target an existing device.
+      description: Provision a device.
       requestBody:
         required: true
         content:
@@ -221,7 +276,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Device'
-  /devices/{device_id}/issue_token:
+  /devices/token:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
     post:
@@ -229,15 +284,46 @@ paths:
       - Devices
       summary: Issue Token
       operationId: issueDeviceToken
-      description: Issue a device authentication token.
-      parameters:
-      - $ref: '#/components/parameters/device_id'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/IssueDeviceTokenRequest'
+      security:
+      - DeviceKeyJWT: []
+      description: 'Issue a device session token. The device authenticates by sending
+        an `Authorization: Bearer <jwt>` header carrying a JWT it has self-signed
+        with its own RSA private key. The server identifies the device by computing
+        the SHA-256 fingerprint of the public key embedded in the JWT header (`jwk`
+        parameter, RFC 7517) and looking up the matching device record; it then verifies
+        the JWT signature against that same `header.jwk`, enforces the `exp` and `jti`
+        payload claims, and returns a session token.
+
+
+        JWT contract:
+
+        - Header MUST contain `alg: RS512` (RSA-PKCS1-v1_5 with SHA-512). Other algorithms
+        — including `none`, HS*, RS256, RS384, ES*, PS* — MUST be rejected.
+
+        - Header MUST contain `jwk` (the device''s RSA public key as a JSON Web Key,
+        RFC 7517).
+
+        - Payload MUST contain `jti` (a unique nonce per request, used for replay
+        protection) and `exp` (expiration, RFC 7519 numeric date).
+
+        - Payload SHOULD contain `iat` (issued-at, RFC 7519 numeric date).
+
+
+        Failure modes:
+
+        - The JWT is malformed or the `alg` is not `RS512`.
+
+        - Signature verification against `header.jwk` fails.
+
+        - `exp` is in the past.
+
+        - `jti` has already been seen (replay).
+
+        - No device is registered for the public key embedded in `header.jwk`.
+
+        - The device exists but is inactive.
+
+        '
       responses:
         '200':
           description: Successfully issued the device token.
@@ -316,10 +402,26 @@ paths:
                 $ref: '#/components/schemas/Pong'
 components:
   securitySchemes:
-    ClerkAuth:
+    DeviceSessionToken:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: 'Server-issued device session token. Obtained by the device from
+        `POST /devices/token` (defined in this spec) using its `DeviceKeyJWT` bootstrap
+        credential, then sent as `Authorization: Bearer <token>` on every other agent
+        endpoint. The token identifies the calling device to the backend.
+
+        '
+    DeviceKeyJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Device-self-signed JWT used to bootstrap a session token. The
+        device signs a JWT with its own RSA private key; the server identifies the
+        device by computing the SHA-256 fingerprint of the public key embedded in
+        the JWT header (`jwk` parameter) and looking up the matching device record.
+
+        '
   schemas:
     APIVersion:
       type: string
@@ -331,7 +433,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - dirty-2abd3035b6b2d7ff9f4da7c5fd8e183b58e9ab64
+      - 89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -952,14 +1054,6 @@ components:
           description: Independent historical watermark recording the last time the
             agent transitioned this deployment to Archived. The current state is determined
             by activity_status, not by which timestamp is present. Set by the agent.
-    UpdateDeviceFromAgentRequest:
-      title: Update Device From Agent Request
-      type: object
-      properties:
-        agent_version:
-          type: string
-          description: The version of the agent the device is running.
-          example: v1.0.0
     DeviceStatus:
       type: string
       description: 'The status of the device.
@@ -1069,6 +1163,14 @@ components:
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
         session_id: dvc_sess_123
+    UpdateDeviceFromAgentRequest:
+      title: Update Device From Agent Request
+      type: object
+      properties:
+        agent_version:
+          type: string
+          description: The version of the agent the device is running.
+          example: v1.0.0
     ProvisionDeviceRequest:
       title: Provision Device Request
       type: object
@@ -1091,40 +1193,9 @@ components:
         name:
           type: string
           example: Robot 1
-          description: The name to assign to the device.
-    IssueDeviceClaims:
-      title: Issue Device Claims
-      type: object
-      required:
-      - device_id
-      - nonce
-      - expiration
-      properties:
-        device_id:
-          type: string
-          description: The device ID.
-          example: dvc_123
-        nonce:
-          type: string
-          description: The nonce value for the token request.
-        expiration:
-          type: string
-          format: date-time
-          description: The expiration timestamp for the token.
-          example: '2021-01-01T00:00:00Z'
-    IssueDeviceTokenRequest:
-      title: Issue Device Token Request
-      type: object
-      required:
-      - claims
-      - signature
-      properties:
-        claims:
-          $ref: '#/components/schemas/IssueDeviceClaims'
-        signature:
-          type: string
-          description: The cryptographic signature of the claims.
-          example: MEUCIQDxCBtmFsd4Qohw+V6viyF8IpIjxA5oXNd64IUunURTTQIgcG80h+xGhY6kqtv9wHvU8M5aHfhXHwjiLB0OVZTPJSQ=
+          description: The name to assign to the device. Only meaningful for the `create`
+            capability; ignored by `activate` and `reactivate` because the device
+            already has a name.
     TokenResponse:
       title: Token Response
       type: object

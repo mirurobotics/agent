@@ -18,7 +18,7 @@ pub struct ProvisionDeviceRequest {
     /// The version of the agent the device is running.
     #[serde(rename = "agent_version")]
     pub agent_version: String,
-    /// The name to assign to the device.
+    /// The name to assign to the device. Only meaningful for the `create` capability; ignored by `activate` and `reactivate` because the device already has a name.
     #[serde(rename = "name", skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }

@@ -25,12 +25,17 @@ async fn setup(mock_client: MockClient) -> (filesys::Dir, TokenManager, JoinHand
         .write_string("private_key", WriteOptions::default())
         .await
         .unwrap();
+    let public_key_file = dir.file("public_key.pem");
+    public_key_file
+        .write_string("public_key", WriteOptions::default())
+        .await
+        .unwrap();
     let (token_mngr, worker_handle) = TokenManager::spawn(
         32,
-        "device_id".to_string(),
         Arc::new(mock_client),
         token_file,
         private_key_file,
+        public_key_file,
     )
     .unwrap();
     (dir, token_mngr, worker_handle)
@@ -49,10 +54,10 @@ async fn setup_with_rsa(mock_client: MockClient) -> (filesys::Dir, TokenManager,
         .unwrap();
     let (token_mngr, worker_handle) = TokenManager::spawn(
         32,
-        "device_id".to_string(),
         Arc::new(mock_client),
         token_file,
         private_key_file,
+        public_key_file,
     )
     .unwrap();
     (dir, token_mngr, worker_handle)
@@ -73,14 +78,19 @@ pub mod spawn {
             .write_string("private_key", WriteOptions::default())
             .await
             .unwrap();
+        let public_key_file = dir.file("public_key.pem");
+        public_key_file
+            .write_string("public_key", WriteOptions::default())
+            .await
+            .unwrap();
 
         let http_client = http::Client::new("doesntmatter").unwrap();
         let result = TokenManager::spawn(
             32,
-            "device_id".to_string(),
             Arc::new(http_client),
             token_file,
             private_key_file,
+            public_key_file,
         )
         .unwrap_err();
         assert!(matches!(result, AuthnErr::FileSysErr(_)));
@@ -92,14 +102,43 @@ pub mod spawn {
         let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
             .await
             .unwrap();
+        let public_key_file = dir.file("public_key.pem");
+        public_key_file
+            .write_string("public_key", WriteOptions::default())
+            .await
+            .unwrap();
 
         let http_client = http::Client::new("doesntmatter").unwrap();
         let result = TokenManager::spawn(
             32,
-            "device_id".to_string(),
             Arc::new(http_client),
             token_file,
             dir.file("private_key.pem"),
+            public_key_file,
+        )
+        .unwrap_err();
+        assert!(matches!(result, AuthnErr::FileSysErr(_)));
+    }
+
+    #[tokio::test]
+    async fn public_key_file_does_not_exist() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
+            .await
+            .unwrap();
+        let private_key_file = dir.file("private_key.pem");
+        private_key_file
+            .write_string("private_key", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let http_client = http::Client::new("doesntmatter").unwrap();
+        let result = TokenManager::spawn(
+            32,
+            Arc::new(http_client),
+            token_file,
+            private_key_file,
+            dir.file("public_key.pem"),
         )
         .unwrap_err();
         assert!(matches!(result, AuthnErr::FileSysErr(_)));

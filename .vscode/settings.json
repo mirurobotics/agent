@@ -6,5 +6,7 @@
         "mngr",
         "mqtt",
         "syncer"
-    ]
+    ],
+    "rust-analyzer.cargo.features": ["test"],
+    "rust-analyzer.check.features": ["test"]
 }

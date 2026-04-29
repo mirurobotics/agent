@@ -11,7 +11,7 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
 use miru_agent::server::ServerErr;
-use miru_agent::storage::{Capacities, Layout};
+use miru_agent::storage::{Capacities, Layout, StorageErr};
 
 // external crates
 use chrono::Utc;
@@ -24,7 +24,37 @@ pub mod init {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
         let result = AppState::init(
-            Device::default().agent_version,
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+        )
+        .await;
+        match result {
+            Err(ServerErr::FileSysErr(e)) => {
+                assert!(matches!(e, FileSysErr::PathDoesNotExistErr(_)));
+            }
+            Err(e) => {
+                panic!("Expected FileSysErr not {e:?}");
+            }
+            Ok(_) => {
+                panic!("expected error from initializing server state");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn fail_missing_public_key_file() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        // create a private key file (but no public key file)
+        let private_key_file = layout.auth().private_key();
+        private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let result = AppState::init(
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -54,16 +84,24 @@ pub mod init {
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
 
         let result = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
         )
         .await;
-        assert!(matches!(result, Err(ServerErr::MissingDeviceIDErr(_))));
+        assert!(matches!(
+            result,
+            Err(ServerErr::StorageErr(StorageErr::ResolveDeviceIDErr(_)))
+        ));
     }
 
     #[tokio::test]
@@ -75,6 +113,13 @@ pub mod init {
         // create a private key file
         let private_key_file = layout.auth().private_key();
         private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
             .write_string("test", WriteOptions::default())
             .await
             .unwrap();
@@ -91,7 +136,6 @@ pub mod init {
             .unwrap();
 
         let (state, _) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -129,6 +173,13 @@ pub mod init {
             .await
             .unwrap();
 
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
@@ -138,7 +189,6 @@ pub mod init {
             .unwrap();
 
         let (state, _) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -169,6 +219,13 @@ pub mod init {
             .await
             .unwrap();
 
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
         // create the device file
         let device_file = layout.device();
         let device = Device {
@@ -183,7 +240,6 @@ pub mod init {
             .unwrap();
 
         let _ = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -214,6 +270,13 @@ pub mod shutdown {
             .await
             .unwrap();
 
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
@@ -223,7 +286,6 @@ pub mod shutdown {
             .unwrap();
 
         let (state, state_handle) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
@@ -253,6 +315,13 @@ pub mod shutdown {
             .await
             .unwrap();
 
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
@@ -263,7 +332,6 @@ pub mod shutdown {
 
         let before_shutdown = Utc::now();
         let (state, state_handle) = AppState::init(
-            Device::default().agent_version,
             &layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
