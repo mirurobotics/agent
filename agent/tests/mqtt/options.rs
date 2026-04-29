@@ -16,6 +16,105 @@ mod connect_address {
     }
 }
 
+mod validate {
+    use super::*;
+
+    #[test]
+    fn accepts_default() {
+        ConnectAddress::default().validate().unwrap();
+    }
+
+    #[test]
+    fn accepts_loopback_tcp() {
+        let addr = ConnectAddress {
+            protocol: Protocol::TCP,
+            broker: "localhost".into(),
+            port: 1883,
+        };
+        addr.validate().unwrap();
+    }
+
+    #[test]
+    fn accepts_loopback_ssl() {
+        let addr = ConnectAddress {
+            protocol: Protocol::SSL,
+            broker: "127.0.0.1".into(),
+            port: 8883,
+        };
+        addr.validate().unwrap();
+    }
+
+    #[test]
+    fn accepts_allowed_host_ssl() {
+        let addr = ConnectAddress {
+            protocol: Protocol::SSL,
+            broker: "mqtt.mirurobotics.com".into(),
+            port: 8883,
+        };
+        addr.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_allowed_host_tcp() {
+        let addr = ConnectAddress {
+            protocol: Protocol::TCP,
+            broker: "mqtt.mirurobotics.com".into(),
+            port: 1883,
+        };
+        let err = addr.validate().unwrap_err();
+        assert!(
+            err.msg.contains("Protocol::SSL"),
+            "expected SSL-rule message, got: {}",
+            err.msg
+        );
+    }
+
+    #[test]
+    fn rejects_disallowed_host_ssl() {
+        let addr = ConnectAddress {
+            protocol: Protocol::SSL,
+            broker: "evilmirurobotics.com".into(),
+            port: 8883,
+        };
+        let err = addr.validate().unwrap_err();
+        assert!(
+            err.msg.contains("evilmirurobotics.com"),
+            "expected host name in message, got: {}",
+            err.msg
+        );
+    }
+
+    #[test]
+    fn rejects_suffix_attack() {
+        let addr = ConnectAddress {
+            protocol: Protocol::SSL,
+            broker: "mqtt.mirurobotics.com.attacker.com".into(),
+            port: 8883,
+        };
+        let err = addr.validate().unwrap_err();
+        assert!(
+            err.msg.contains("attacker.com"),
+            "expected attacker host in message, got: {}",
+            err.msg
+        );
+    }
+
+    #[test]
+    fn rejects_private_ip() {
+        let addr = ConnectAddress {
+            protocol: Protocol::SSL,
+            broker: "192.168.1.1".into(),
+            port: 8883,
+        };
+        let err = addr.validate().unwrap_err();
+        assert!(
+            err.msg.contains("192.168.1.1"),
+            "expected IP in message, got: {}",
+            err.msg
+        );
+    }
+}
+
 mod credentials {
     use super::*;
 
