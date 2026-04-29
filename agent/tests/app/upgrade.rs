@@ -299,7 +299,7 @@ mod reconcile_impl {
     }
 
     #[tokio::test]
-    async fn returns_filesys_err_when_private_key_missing() {
+    async fn returns_authn_err_when_private_key_missing() {
         let (layout, _dir) = prepare_layout("reconcile_impl_no_pk").await;
         tokio::fs::remove_file(layout.auth().private_key().path())
             .await
@@ -308,10 +308,10 @@ mod reconcile_impl {
         let mock = make_mock_client(backend_device("dvc_ri2", "no_pk"));
         let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
             .await
-            .expect_err("expected FileSysErr from missing private key");
+            .expect_err("expected AuthnErr from missing private key");
         match err {
-            UpgradeErr::FileSysErr(_) => {}
-            other => panic!("expected UpgradeErr::FileSysErr, got {other:?}"),
+            UpgradeErr::AuthnErr(_) => {}
+            other => panic!("expected UpgradeErr::AuthnErr, got {other:?}"),
         }
     }
 
@@ -337,12 +337,9 @@ mod reconcile_impl {
     #[tokio::test]
     async fn returns_storage_err_when_reset_fails() {
         let (layout, _dir) = prepare_layout("reconcile_impl_reset_fail").await;
-        // Replace device.json (a regular file) with a directory of the same name.
-        // setup::reset writes device.json via an atomic write that cannot replace
-        // a directory, so reset returns StorageErr::FileSysErr(_).
-        tokio::fs::remove_file(layout.device().path())
-            .await
-            .unwrap();
+        // Place a directory at the device.json path so setup::reset's atomic
+        // write of device.json cannot replace it and returns
+        // StorageErr::FileSysErr(_).
         tokio::fs::create_dir_all(layout.device().path())
             .await
             .unwrap();
