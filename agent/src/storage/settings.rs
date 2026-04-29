@@ -1,6 +1,7 @@
 // internal crates
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
+use crate::storage::validation;
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -120,11 +121,12 @@ impl<'de> Deserialize<'de> for Backend {
             }
         };
 
-        Ok(Backend {
-            base_url: result
-                .base_url
-                .unwrap_or_else(|| deserialize_warn!("backend", "base_url", default.base_url)),
-        })
+        let base_url = result
+            .base_url
+            .unwrap_or_else(|| deserialize_warn!("backend", "base_url", default.base_url));
+        validation::validate_backend_url(&base_url)
+            .map_err(|msg| serde::de::Error::custom(format!("backend.base_url: {msg}")))?;
+        Ok(Backend { base_url })
     }
 }
 
@@ -161,10 +163,11 @@ impl<'de> Deserialize<'de> for MQTTBroker {
             }
         };
 
-        Ok(MQTTBroker {
-            host: result
-                .host
-                .unwrap_or_else(|| deserialize_warn!("mqtt_broker", "host", default.host)),
-        })
+        let host = result
+            .host
+            .unwrap_or_else(|| deserialize_warn!("mqtt_broker", "host", default.host));
+        validation::validate_mqtt_host(&host)
+            .map_err(|msg| serde::de::Error::custom(format!("mqtt_broker.host: {msg}")))?;
+        Ok(MQTTBroker { host })
     }
 }

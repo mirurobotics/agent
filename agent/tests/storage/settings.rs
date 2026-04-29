@@ -14,10 +14,10 @@ fn serialize_deserialize_settings() {
         enable_mqtt_worker: false,
         enable_poller: false,
         backend: Backend {
-            base_url: "http://arglebargle.com/agent/v1".to_string(),
+            base_url: "https://staging.mirurobotics.com/agent/v1".to_string(),
         },
         mqtt_broker: MQTTBroker {
-            host: "mqtt.arglebargle.com".to_string(),
+            host: "mqtt.staging.mirurobotics.com".to_string(),
         },
     };
     let serialized = serde_json::to_string(&settings).unwrap();
@@ -31,10 +31,10 @@ fn deserialize_settings() {
     let settings = Settings {
         log_level: LogLevel::Debug,
         backend: Backend {
-            base_url: "http://arglebargle.com/agent/v1".to_string(),
+            base_url: "https://staging.mirurobotics.com/agent/v1".to_string(),
         },
         mqtt_broker: MQTTBroker {
-            host: "mqtt.arglebargle.com".to_string(),
+            host: "mqtt.staging.mirurobotics.com".to_string(),
         },
         is_persistent: false,
         enable_socket_server: false,
@@ -68,7 +68,7 @@ fn deserialize_settings() {
 #[test]
 fn serialize_deserialize_backend() {
     let backend = Backend {
-        base_url: "http://arglebargle.com/agent/v1".to_string(),
+        base_url: "https://staging.mirurobotics.com/agent/v1".to_string(),
     };
     let serialized = serde_json::to_string(&backend).unwrap();
     let deserialized = serde_json::from_str::<Backend>(&serialized).unwrap();
@@ -79,7 +79,7 @@ fn serialize_deserialize_backend() {
 fn deserialize_backend() {
     // valid deserialization
     let backend = Backend {
-        base_url: "http://arglebargle.com/agent/v1".to_string(),
+        base_url: "https://staging.mirurobotics.com/agent/v1".to_string(),
     };
     let valid_input = json!({
         "base_url": backend.base_url,
@@ -102,7 +102,7 @@ fn deserialize_backend() {
 #[test]
 fn serialize_deserialize_mqtt_broker() {
     let mqtt_broker = MQTTBroker {
-        host: "mqtt.arglebargle.com".to_string(),
+        host: "mqtt.staging.mirurobotics.com".to_string(),
     };
     let serialized = serde_json::to_string(&mqtt_broker).unwrap();
     let deserialized = serde_json::from_str::<MQTTBroker>(&serialized).unwrap();
@@ -113,7 +113,7 @@ fn serialize_deserialize_mqtt_broker() {
 fn deserialize_mqtt_broker() {
     // valid deserialization
     let mqtt_broker = MQTTBroker {
-        host: "mqtt.arglebargle.com".to_string(),
+        host: "mqtt.staging.mirurobotics.com".to_string(),
     };
     let valid_input = json!({
         "host": mqtt_broker.host,
