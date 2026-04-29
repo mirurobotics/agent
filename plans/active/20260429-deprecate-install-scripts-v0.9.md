@@ -35,7 +35,7 @@ User-visible behavior to verify:
 - [x] M3: Same partial rejects the `--version` unset + `--from-pkg` unset case ("latest" path) without contacting the GitHub releases API. (2026-04-29)
 - [x] M4: Re-rendered the six install scripts via `scripts/jinja/render.sh` and committed the regenerated `scripts/install/*.sh` together with the template change. (2026-04-29)
 - [x] M5: Ran the test scenarios from "Validation and Acceptance" (transcripts captured under "Artifacts and Notes"). (2026-04-29)
-- [ ] Final: preflight clean (formatting, lint, tests). Preflight MUST report `clean` before changes are published.
+- [x] Final: preflight clean (formatting, lint, tests). Confirmed `Preflight clean` from `./scripts/preflight.sh` (lint=0 tests=0 tools_lint=0 tools_tests=0). (2026-04-29)
 
 Use timestamps when you complete steps.
 
