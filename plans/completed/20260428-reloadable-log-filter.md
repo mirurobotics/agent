@@ -21,17 +21,42 @@ This plan lives in `agent/plans/backlog/` because all code edits are in the agen
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) Milestone 1 — Refactor `logs::init` to return a reloadable guard.
-- [ ] (YYYY-MM-DD HH:MMZ) Milestone 2 — Wire `main::run_agent` to init early and reload after settings.
-- [ ] (YYYY-MM-DD HH:MMZ) Milestone 3 — Add tests for reload behavior and `RUST_LOG` precedence.
-- [ ] (YYYY-MM-DD HH:MMZ) Milestone 4 — Preflight clean and finalize.
+- [x] (2026-04-29 03:15Z) Milestone 1 — Refactor `logs::init` to return a reloadable guard.
+- [x] (2026-04-29 03:18Z) Milestone 2 — Wire `main::run_agent` to init early and reload after settings.
+- [x] (2026-04-29 03:21Z) Milestone 3 — Add tests for reload behavior and `RUST_LOG` precedence.
+- [x] (2026-04-29 03:23Z) Milestone 4 — Preflight clean and finalize.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- Observation: With `init` now propagating `SetGlobalDefaultError`, the two
+  pre-existing `test_init_stdout` / `test_init_file_only` tests started
+  failing because they share the integration-test binary `tests/mod.rs`
+  with one another. Cargo runs all tests in a single binary in the same
+  process, so the second/third `init` call legitimately observes "subscriber
+  already installed."
+  Evidence: `test result: FAILED. 1245 passed; 3 failed` after the M2 commit
+  with the message `SetGlobalDefault(SetGlobalDefaultError("a global default
+  trace dispatcher has already been set"))`.
+  Resolution: Each test that calls `logs::init` now lives in its own
+  integration-test binary (`agent/tests/logs_init_stdout.rs`,
+  `logs_init_file_only.rs`, `logs_init_locked.rs`, `logs_init_double.rs`,
+  `logs_init_reload.rs`). Cargo runs each `tests/<name>.rs` as a separate
+  binary, so each test gets a fresh process and a fresh global subscriber.
+  This matches the plan's "Idempotence and Recovery" guidance for
+  global-subscriber interactions.
 
-- Observation: …
-  Evidence: …
+- Observation: Coverage gates in `agent/src/logs/.covgate` (93.47%) and
+  `agent/src/provision/.covgate` tripped after the new code landed. The
+  not-locked branch of `LoggingGuard::reload_level`, the `LogsErr` Display
+  formatting, the `errors::Error` defaults on `LogsErr`, and
+  `From<LogsErr> for ProvisionErr` were uncovered.
+  Evidence: covgate report showed `logs: 84.92% (requires 93.47%)` and
+  `provision: 95.06% (requires 95.66%)`.
+  Resolution: Added `tests/logs_init_reload.rs` (clears `RUST_LOG`,
+  exercises non-locked `reload_level`), `test_logs_err_reload_failed_display`
+  and `test_logs_err_uses_default_error_trait` in `tests/logs/mod.rs`, and
+  `from_logs_err` in `provision/errors.rs::tests::from_conversions`. Logs
+  coverage rose to 94.44%, provision to 95.85%; thresholds left unchanged.
 
 ## Decision Log
 
@@ -55,7 +80,23 @@ This plan lives in `agent/plans/backlog/` because all code edits are in the agen
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+- All four milestones complete. Preflight is clean (`Preflight clean` from
+  `scripts/preflight.sh`). The agent test target reports
+  `1247 passed; 0 failed` plus five single-test integration binaries that
+  each report `1 passed`.
+- The reloadable filter behaves as specified: `LoggingGuard::reload_level`
+  swaps the active `EnvFilter` in place when not env-locked, is a no-op when
+  `RUST_LOG` was set at init, and `RUST_LOG` precedence is preserved for
+  both the early default and the post-settings reload.
+- `init` now returns `Result<LoggingGuard, LogsErr>`. `run_agent` exits
+  cleanly via `eprintln!` if init fails (because tracing isn't installed
+  yet); `run_provision` propagates the error through `ProvisionErr`.
+- Reload failure after settings load is non-fatal: the agent logs a `warn`
+  via the running subscriber and keeps the early default level. This is
+  intentional — a misconfigured log level should not crash a running agent.
+- Global-subscriber test isolation is now accomplished by giving each
+  init-calling test its own integration-test binary, matching the plan's
+  resolution guidance for global-state interactions.
 
 ## Context and Orientation
 
