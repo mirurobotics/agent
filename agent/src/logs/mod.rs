@@ -4,10 +4,11 @@ use std::path::PathBuf;
 
 // external crates
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{fmt, prelude::*, registry::Registry, reload, EnvFilter};
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -92,34 +93,82 @@ impl Default for Options {
     }
 }
 
-pub fn init(options: Options) -> WorkerGuard {
+#[derive(Debug, Error)]
+pub enum LogsErr {
+    #[error("failed to install global tracing subscriber: {0}")]
+    SetGlobalDefault(#[from] tracing::subscriber::SetGlobalDefaultError),
+    #[error("failed to reload tracing filter: {0}")]
+    ReloadFailed(String),
+}
+
+impl crate::errors::Error for LogsErr {}
+
+type ReloadHandle = reload::Handle<EnvFilter, Registry>;
+
+pub struct LoggingGuard {
+    _worker: WorkerGuard,
+    reload_handle: ReloadHandle,
+    // True if RUST_LOG provided the initial filter; reload_level becomes a no-op.
+    env_filter_locked: bool,
+}
+
+impl LoggingGuard {
+    /// Reload the active log-level filter.
+    ///
+    /// If `RUST_LOG` was set at process startup, this is a no-op; the env filter wins.
+    /// Adjusts filter/level only — does not change the log destination.
+    pub fn reload_level(&self, level: LogLevel) -> Result<(), LogsErr> {
+        if self.env_filter_locked {
+            return Ok(());
+        }
+        let new_filter = EnvFilter::new(level.to_string());
+        self.reload_handle
+            .reload(new_filter)
+            .map_err(|e| LogsErr::ReloadFailed(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn env_filter_locked(&self) -> bool {
+        self.env_filter_locked
+    }
+}
+
+pub fn init(options: Options) -> Result<LoggingGuard, LogsErr> {
     // initialize the file appender for logging
     let file_appender = tracing_appender::rolling::hourly(options.log_dir, "miru.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, worker_guard) = tracing_appender::non_blocking(file_appender);
 
     // respect RUST_LOG environment variable if set, otherwise use provided log level
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(options.log_level.to_string()));
+    let (env_filter, env_filter_locked) = match EnvFilter::try_from_default_env() {
+        Ok(f) => (f, true),
+        Err(_) => (EnvFilter::new(options.log_level.to_string()), false),
+    };
+
+    let (reload_layer, reload_handle) = reload::Layer::new(env_filter);
 
     if options.stdout {
-        let subscriber = fmt()
-            .with_env_filter(env_filter)
+        let fmt_layer = fmt::layer()
             .with_file(true)
             .with_line_number(true)
             .with_thread_ids(true)
             .with_thread_names(true);
-        let _ = tracing::subscriber::set_global_default(subscriber.finish());
-        guard
+        let subscriber = Registry::default().with(reload_layer).with(fmt_layer);
+        tracing::subscriber::set_global_default(subscriber)?;
     } else {
-        let subscriber = fmt()
-            .with_env_filter(env_filter)
+        let fmt_layer = fmt::layer()
             .with_writer(non_blocking)
             .with_file(true)
             .with_ansi(false)
             .with_line_number(true)
             .with_thread_ids(true)
             .with_thread_names(true);
-        let _ = tracing::subscriber::set_global_default(subscriber.finish());
-        guard
+        let subscriber = Registry::default().with(reload_layer).with(fmt_layer);
+        tracing::subscriber::set_global_default(subscriber)?;
     }
+
+    Ok(LoggingGuard {
+        _worker: worker_guard,
+        reload_handle,
+        env_filter_locked,
+    })
 }

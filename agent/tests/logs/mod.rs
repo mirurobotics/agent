@@ -216,7 +216,7 @@ async fn test_init_stdout() {
         log_level: LogLevel::Debug,
         log_dir: dir.path().clone(),
     };
-    let guard = logs::init(options);
+    let guard = logs::init(options).expect("init should succeed");
     drop(guard);
 }
 
@@ -230,6 +230,6 @@ async fn test_init_file_only() {
         log_level: LogLevel::Warn,
         log_dir: dir.path().clone(),
     };
-    let guard = logs::init(options);
+    let guard = logs::init(options).expect("init should succeed");
     drop(guard);
 }
