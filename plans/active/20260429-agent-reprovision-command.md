@@ -34,23 +34,25 @@ User-visible behavior change is additive only: existing `provision` behavior is 
 
 ## Progress
 
-- [ ] (YYYY-MM-DD) M1: Extend `cli` with `ReprovisionArgs` and `Args::reprovision_args`; route `reprovision` verb through `Args::parse`.
-- [ ] (YYYY-MM-DD) M2: Add `http::devices::reprovision` + `ReprovisionParams` mirroring `provision`.
-- [ ] (YYYY-MM-DD) M3: Tighten `provision::entry::provision()` to no-op on activated state with a cached device file.
-- [ ] (YYYY-MM-DD) M4: Add `provision::entry::reprovision()` plus a `determine_reprovision_settings` helper that shares a body with `determine_settings`.
-- [ ] (YYYY-MM-DD) M5: Wire `main.rs` dispatch + `run_reprovision` + `handle_reprovision_result`.
-- [ ] (YYYY-MM-DD) M6: Tests — CLI, settings determination, http wrapper, `provision()` idempotency, `reprovision()` happy-path bootstrap.
+- [x] (2026-04-29) M1: Extend `cli` with `ReprovisionArgs` and `Args::reprovision_args`; route `reprovision` verb through `Args::parse`.
+- [x] (2026-04-29) M2: Add `http::devices::reprovision` + `ReprovisionParams` mirroring `provision`.
+- [x] (2026-04-29) M3: Tighten `provision::entry::provision()` to no-op on activated state with a cached device file.
+- [x] (2026-04-29) M4: Add `provision::entry::reprovision()` plus a `determine_reprovision_settings` helper that shares a body with `determine_settings`.
+- [x] (2026-04-29) M5: Wire `main.rs` dispatch + `run_reprovision` + `handle_reprovision_result`.
+- [x] (2026-04-29) M6: Tests — CLI, settings determination, http wrapper, `provision()` idempotency, `reprovision()` happy-path bootstrap.
 - [ ] (YYYY-MM-DD) M7: Validation — `./scripts/preflight.sh` reports `Preflight clean`.
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
 
 ## Surprises & Discoveries
 
-(Add entries as you go. Keep one line per observation with a pointer to the evidence — file:line, command output, or test name.)
+- 2026-04-29: On-disk `device.json` is the local `crate::models::Device` (field `device_id` via `#[serde(rename)]`), not `backend_api::models::Device` (field `id`). Reading the cached device into `backend_client::Device` as the plan literally specified would always fail because the field name and required-field shape do not match. Implemented the short-circuit by reading `crate::models::Device` and constructing a minimal `backend_client::Device { id, name, session_id, ..Default::default() }` to return.
+- 2026-04-29: Renamed `provision_fn::reprovision_overwrites_existing_storage` to `provision_fn::provision_is_idempotent_on_second_call` with inverted assertions (per plan M3): asserts that the second `provision` call is a no-op, mock is not invoked, keys are byte-identical.
+- 2026-04-29: The sibling existing test `provision_fn::http_error_on_reprovision_preserves_existing_storage` also broke under the new short-circuit: it ran two sequential `provision()` calls expecting the second to fail with HTTPErr, but the second now short-circuits before reaching the failing mock. Updated in place to assert idempotent no-op (Ok result, mock call_count == 0) while still verifying every persisted blob is byte-identical. The reprovision-flow failure case is now covered by the new `reprovision_fn::http_error_preserves_existing_storage` test.
 
 ## Decision Log
 
-(Capture decisions made during implementation. The plan author has not pre-filled this section. At minimum, after M3 the implementor should record why the idempotency check uses `layout.device().read_json::<backend_client::Device>()` for the cached-device read rather than `storage::resolve_device_id` or `storage::Device::spawn`.)
+- 2026-04-29: Idempotency check reads the cached device via `layout.device().read_json::<crate::models::Device>()` (not `backend_client::Device` as the plan literally specified, and not `storage::resolve_device_id` / `storage::Device::spawn`). Rationale: the on-disk `device.json` schema is the local model, so the backend type cannot deserialize it. `storage::resolve_device_id` would silently fall back to the JWT in `auth/token.json` — which would let a corrupt `device.json` no-op when it should re-provision. `storage::Device::spawn` is a `ConcurrentCachedFile` actor and is heavier than needed for a one-shot read at boot. A minimal `read_json::<models::Device>` is the cheapest local signal that's also sensitive to corruption, which is the exact behavior we want. The local `Device` is then projected onto a default `backend_client::Device` populated with `id`, `name`, and `session_id` for the return value (the caller in `main.rs` only reads `device.name`).
 
 ## Outcomes & Retrospective
 

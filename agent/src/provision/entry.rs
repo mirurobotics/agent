@@ -6,6 +6,7 @@ use crate::cli;
 use crate::crypt::rsa;
 use crate::filesys::{self, Overwrite};
 use crate::http;
+use crate::models;
 use crate::provision::errors::*;
 use crate::storage::{self, settings};
 use crate::version;
@@ -22,6 +23,21 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     token: &str,
     device_name: Option<String>,
 ) -> Result<backend_client::Device, ProvisionErr> {
+    // Idempotency short-circuit: if the machine is fully activated AND the
+    // cached device file is readable, return that device unchanged. Any
+    // partial state (missing keys, unparseable device.json) falls through to
+    // the full provisioning flow so the box can recover.
+    if storage::assert_activated(layout).await.is_ok() {
+        if let Ok(local_device) = layout.device().read_json::<models::Device>().await {
+            return Ok(backend_client::Device {
+                id: local_device.id,
+                name: local_device.name,
+                session_id: local_device.session_id,
+                ..backend_client::Device::default()
+            });
+        }
+    }
+
     let temp_dir = layout.temp_dir();
 
     let result = async {
@@ -87,15 +103,87 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
     Ok(http::devices::provision(http_client, params).await?)
 }
 
-pub fn determine_settings(args: &cli::ProvisionArgs) -> settings::Settings {
-    let mut settings = settings::Settings::default();
-    if let Some(backend_host) = &args.backend_host {
-        settings.backend.base_url = format!("{}/agent/v1", backend_host);
+pub async fn reprovision<HTTPClientT: http::ClientI>(
+    http_client: &HTTPClientT,
+    layout: &storage::Layout,
+    settings: &settings::Settings,
+    token: &str,
+) -> Result<backend_client::Device, ProvisionErr> {
+    let temp_dir = layout.temp_dir();
+
+    let result = async {
+        // generate new public and private keys in a temporary directory which
+        // will become the device's new authentication if reprovisioning
+        // succeeds. Reprovision always rotates keys and always runs the full
+        // bootstrap — there is no idempotency short-circuit.
+        let private_key_file = temp_dir.file("private.key");
+        let public_key_file = temp_dir.file("public.key");
+        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
+
+        let device = reprovision_with_backend(http_client, &public_key_file, token).await?;
+        storage::setup::bootstrap(
+            layout,
+            &(&device).into(),
+            settings,
+            &private_key_file,
+            &public_key_file,
+            version::VERSION,
+        )
+        .await?;
+        Ok(device)
     }
-    if let Some(mqtt_broker_host) = &args.mqtt_broker_host {
-        settings.mqtt_broker.host = mqtt_broker_host.to_string();
+    .await;
+
+    if let Err(e) = temp_dir.delete().await {
+        debug_assert!(false, "failed to clean up temp dir: {e}");
+        warn!("failed to clean up temp dir: {e}");
+    }
+    result
+}
+
+async fn reprovision_with_backend<HTTPClientT: http::ClientI>(
+    http_client: &HTTPClientT,
+    public_key_file: &filesys::File,
+    token: &str,
+) -> Result<backend_client::Device, ProvisionErr> {
+    let public_key_pem = public_key_file.read_string().await?;
+    let payload = backend_client::ReprovisionDeviceRequest {
+        public_key_pem,
+        agent_version: version::VERSION.to_string(),
+    };
+    let params = http::devices::ReprovisionParams {
+        payload: &payload,
+        token,
+    };
+    Ok(http::devices::reprovision(http_client, params).await?)
+}
+
+fn build_settings(
+    backend_host: Option<&str>,
+    mqtt_broker_host: Option<&str>,
+) -> settings::Settings {
+    let mut settings = settings::Settings::default();
+    if let Some(host) = backend_host {
+        settings.backend.base_url = format!("{}/agent/v1", host);
+    }
+    if let Some(host) = mqtt_broker_host {
+        settings.mqtt_broker.host = host.to_string();
     }
     settings
+}
+
+pub fn determine_settings(args: &cli::ProvisionArgs) -> settings::Settings {
+    build_settings(
+        args.backend_host.as_deref(),
+        args.mqtt_broker_host.as_deref(),
+    )
+}
+
+pub fn determine_reprovision_settings(args: &cli::ReprovisionArgs) -> settings::Settings {
+    build_settings(
+        args.backend_host.as_deref(),
+        args.mqtt_broker_host.as_deref(),
+    )
 }
 
 #[cfg(test)]
@@ -186,6 +274,48 @@ mod tests {
             let defaults = settings::Settings::default();
 
             let settings = determine_settings(&args);
+
+            assert_eq!(settings.backend.base_url, defaults.backend.base_url);
+            assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
+        }
+    }
+
+    mod determine_reprovision_settings {
+        use super::*;
+
+        #[test]
+        fn backend_host_appends_agent_v1_suffix() {
+            let args = cli::ReprovisionArgs {
+                backend_host: Some("https://custom.example.com".to_string()),
+                ..Default::default()
+            };
+
+            let settings = determine_reprovision_settings(&args);
+
+            assert_eq!(
+                settings.backend.base_url,
+                "https://custom.example.com/agent/v1"
+            );
+        }
+
+        #[test]
+        fn mqtt_broker_host_override() {
+            let args = cli::ReprovisionArgs {
+                mqtt_broker_host: Some("mqtt.custom.example.com".to_string()),
+                ..Default::default()
+            };
+
+            let settings = determine_reprovision_settings(&args);
+
+            assert_eq!(settings.mqtt_broker.host, "mqtt.custom.example.com");
+        }
+
+        #[test]
+        fn no_overrides_preserves_defaults() {
+            let args = cli::ReprovisionArgs::default();
+            let defaults = settings::Settings::default();
+
+            let settings = determine_reprovision_settings(&args);
 
             assert_eq!(settings.backend.base_url, defaults.backend.base_url);
             assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
