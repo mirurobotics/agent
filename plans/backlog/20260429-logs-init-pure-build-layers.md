@@ -40,8 +40,8 @@ Use timestamps when you complete steps. Split partially completed work into "don
   Rationale: Cargo's integration-test scope (`agent/tests/`) is a separate crate from the library, so `pub(crate)` would not be reachable from `tests/logs/mod.rs`. The `logs` module is already `pub mod logs;` in `agent/src/lib.rs`; exposing one more pub function is consistent with how the rest of the module surface (`init`, `Options`, `LogLevel`, `LoggingGuard`, `LogsErr`) is already public for the same reason.
   Date/Author: 2026-04-29, ben@miruml.com.
 
-- Decision: `build_layers` returns `(BoxedLayer, WorkerGuard, reload::Handle<EnvFilter, Registry>, bool)`, where `BoxedLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>` (i.e. `tracing_subscriber::Layer::boxed()`-style erased composite) and the trailing `bool` is `env_filter_locked`.
-  Rationale: Returning a single composite layer keeps the `init` body trivially `Registry::default().with(layers)`. Boxing erases the divergent stdout/file-appender layer types so the function has a single signature regardless of `options.stdout`. The `bool` plumbs through to `LoggingGuard.env_filter_locked` without exposing internal state. If the implementer prefers, they may instead return `(reload_layer, BoxedLayer /* fmt */, WorkerGuard, ReloadHandle, bool)` and let `init` compose — both compile cleanly; the boxed-composite form is shorter at the call site.
+- Decision: `build_layers` returns one boxed composite layer plus the worker guard, reload handle, and the `env_filter_locked` flag.
+  Rationale: Boxing the composite (`Box<dyn Layer<Registry> + Send + Sync + 'static>`) erases the divergent stdout/file fmt-layer types so the function has a single return type regardless of `options.stdout`, and keeps `init`'s body to `Registry::default().with(layers)` plus `set_global_default`. Implementation alternatives are documented in Plan of Work § Milestone 1.
   Date/Author: 2026-04-29, ben@miruml.com.
 
 - Decision: Keep two top-level binaries — `logs_init_smoke.rs` (covers a successful global install + `LogsErr::SetGlobalDefault` on second install, both inside one `#[serial]`-tagged test that runs to completion in the same binary, which is fine because the binary's process-global subscriber state is fresh) and `logs_init_locked.rs` (RUST_LOG-locked branch through real `init`).
@@ -247,6 +247,10 @@ All commands assume working directory `agent/` (the repo root) unless stated oth
 
 Milestone 1:
 
+    # 0. Capture the pre-refactor SHA so Validation §6 can diff against it later.
+    git rev-parse HEAD
+    # Expected: <40-char SHA>; record it in the Decision Log or a scratch note.
+
     # 1. Edit agent/src/logs/mod.rs to add build_layers and rewrite init.
     #    (Use your editor; see Plan of Work § Milestone 1 for code.)
 
@@ -272,7 +276,11 @@ Milestone 2:
 
 Milestone 3:
 
-    # 1. Create agent/tests/logs_init_smoke.rs with the combined smoke + double-install test.
+    # 1. Create agent/tests/logs_init_smoke.rs with the combined smoke + double-install
+    #    test. Verify it compiles and passes BEFORE deleting the old binaries, so that
+    #    the global-install coverage never drops to zero during the work.
+    cargo test --package miru-agent --features test --test logs_init_smoke
+    # Expected: test result: ok. 1 passed; 0 failed.
 
     git rm agent/tests/logs_init_double.rs
     git rm agent/tests/logs_init_stdout.rs
@@ -308,9 +316,9 @@ The change is complete when **all** of the following are observably true.
 1. From `agent/`, `cargo build --package miru-agent --features test` succeeds with no warnings.
 2. From `agent/`, `./scripts/test.sh` reports `test result: ok. 0 failed` for every binary it runs.
 3. The directory listing `ls agent/tests/logs_init_*.rs` shows exactly two files: `logs_init_locked.rs` and `logs_init_smoke.rs`.
-4. `agent/tests/logs/mod.rs` contains, at minimum, these new test functions: `test_build_layers_stdout_debug`, `test_build_layers_file_only_warn`, `test_build_layers_respects_rust_log_when_set`, `test_build_layers_uses_options_when_rust_log_unset`, `test_build_layers_reload_handle_changes_filter`. Each has a corresponding `cargo test --package miru-agent --features test logs::<name>` line (replace `logs::` with the actual integration-binary path) that runs and passes.
+4. `agent/tests/logs/mod.rs` contains, at minimum, these new test functions: `test_build_layers_stdout_debug`, `test_build_layers_file_only_warn`, `test_build_layers_respects_rust_log_when_set`, `test_build_layers_uses_options_when_rust_log_unset`, `test_build_layers_reload_handle_changes_filter`. From `agent/`, running `cargo test --package miru-agent --features test --test mod test_build_layers_` runs all five and reports `5 passed; 0 failed`. (Cargo's integration-test binary name is `mod` because it's compiled from `tests/mod.rs`; `--test mod` selects only that binary.)
 5. `agent/src/logs/mod.rs::init` is at most ~10 lines of body (the worker/handle wiring lives entirely inside `build_layers`).
-6. `agent/src/main.rs` is unmodified — `git diff main -- agent/src/main.rs` from the repo root shows no changes touching `logs::init` or `log_guard`.
+6. `agent/src/main.rs` is unmodified by this refactor. From `agent/`, run `git diff <pre-refactor-sha> -- agent/src/main.rs` where `<pre-refactor-sha>` is the SHA of HEAD immediately before Milestone 1's commit (capture it with `git rev-parse HEAD` before starting M1). The diff must be empty.
 7. Public API surface is unchanged: `LoggingGuard::reload_level`, `LoggingGuard::env_filter_locked`, `LogsErr` variants, `From<LogsErr> for ProvisionErr`. `cargo public-api` would show one addition (`build_layers` and the `BoxedLogLayer` alias) and no removals or modifications.
 8. **Preflight gate.** `./scripts/preflight.sh` from `agent/` ends with the literal line `Preflight clean`. **This must report `clean` before the changes are published.** A `Preflight FAILED` run is not acceptance — fix and rerun.
 
