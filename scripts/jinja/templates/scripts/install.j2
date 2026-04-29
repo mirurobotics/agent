@@ -17,6 +17,10 @@ DEB_ARCH=$ARCH{{- "\n" -}}
 # -------------------- #
 {% include 'partials/utils/parse-from-pkg.sh' %}{{- "\n\n" -}}
 
+# DEPRECATION GATE (v0.9.0) #
+# ------------------------- #
+{% include 'partials/utils/deprecation-gate.sh' %}{{- "\n\n" -}}
+
 # DETERMINE THE VERSION #
 # --------------------- #
 {% include 'partials/utils/version.sh' %}{{- "\n\n" -}}

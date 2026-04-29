@@ -30,11 +30,11 @@ User-visible behavior to verify:
 
 ## Progress
 
-- [ ] M1: Confirm the rendering pipeline, baseline behavior, and the file that owns the version gate.
-- [ ] M2: Update `scripts/jinja/templates/partials/utils/version.sh` to add the v0.9.0 deprecation gate (semver compare on `MAJOR`/`MINOR`).
-- [ ] M3: Update `scripts/jinja/templates/partials/utils/version.sh` (or add a new partial) to reject the case where the user supplied no `--version` (i.e. the scripts would have to resolve "latest" / "latest pre-release" themselves), printing the deprecation error instead of fetching from GitHub.
-- [ ] M4: Re-render the six install scripts via `scripts/jinja/render.sh` and commit the regenerated `scripts/install/*.sh` alongside the template change.
-- [ ] M5: Add the test scenarios from "Validation and Acceptance" (run them manually; record transcripts under "Artifacts and Notes").
+- [x] M1: Confirm the rendering pipeline, baseline behavior, and the file that owns the version gate. (2026-04-29)
+- [x] M2: Add the v0.9.0 deprecation gate as a new partial `partials/utils/deprecation-gate.sh` (semver compare on `MAJOR`/`MINOR`). Placed in a new partial rather than `version.sh` so it can be hoisted ahead of the device-provisioning HTTP call in `provision.j2`. (2026-04-29)
+- [x] M3: Same partial rejects the `--version` unset + `--from-pkg` unset case ("latest" path) without contacting the GitHub releases API. (2026-04-29)
+- [x] M4: Re-rendered the six install scripts via `scripts/jinja/render.sh` and committed the regenerated `scripts/install/*.sh` together with the template change. (2026-04-29)
+- [x] M5: Ran the test scenarios from "Validation and Acceptance" (transcripts captured under "Artifacts and Notes"). (2026-04-29)
 - [ ] Final: preflight clean (formatting, lint, tests). Preflight MUST report `clean` before changes are published.
 
 Use timestamps when you complete steps.
@@ -370,4 +370,81 @@ Every step is idempotent:
 
 ## Artifacts and Notes
 
-(Populate during implementation with the actual transcripts of T1–T6.)
+Test transcripts captured 2026-04-29.
+
+**T1 — `--version=v0.8.5 --debug` passes the gate.**
+
+    $ sh scripts/install/install.sh --version=v0.8.5 --debug
+    ==> prerelease: 'false' (should be true or false)
+    ==> version: 'v0.8.5' (should be a semantic version string like 'v1.2.3')
+    ==> device-name: '' (should be the name of the device)
+    ==> from-pkg: '' (should be the path to the agent package on this machine)
+    ==> backend-host: 'https://api.mirurobotics.com' (should be the URL of the backend host)
+    ==> mqtt-broker-host: 'mqtt.mirurobotics.com' ()
+    ==> Version to install: 0.8.5
+    ==> Downloading version 0.8.5
+    curl: (22) The requested URL returned error: 404
+    Error: Failed to download miru-agent
+    exit=1
+
+The deprecation gate did not fire (no "deprecated as of agent v0.9.0" line). The pre-existing `>= v0.6.0` check inside `version.sh` printed `Version to install: 0.8.5`. The script then failed downstream on the 404 from GitHub releases, which is expected because v0.8.5 was never published — but importantly the failure is from `download.sh`, not from the new gate.
+
+**T2 — `--version=v0.9.0` is rejected.**
+
+    $ sh scripts/install/install.sh --version=v0.9.0
+    Error: These installation scripts are deprecated as of agent v0.9.0.
+    Error: You requested v0.9.0, which is v0.9.0 or newer.
+    Error: These scripts can only be used to install pre-v0.9.0 releases.
+    Error: See https://docs.mirurobotics.com/docs/agent-sdk for the supported installation method.
+    exit=1
+
+**T3 — `--version=0.9.0` (no `v` prefix) is rejected identically.**
+
+    $ sh scripts/install/install.sh --version=0.9.0
+    Error: These installation scripts are deprecated as of agent v0.9.0.
+    Error: You requested v0.9.0, which is v0.9.0 or newer.
+    Error: These scripts can only be used to install pre-v0.9.0 releases.
+    Error: See https://docs.mirurobotics.com/docs/agent-sdk for the supported installation method.
+    exit=1
+
+**T4 — `--version=v1.0.0` is rejected.**
+
+    $ sh scripts/install/install.sh --version=v1.0.0
+    Error: These installation scripts are deprecated as of agent v0.9.0.
+    Error: You requested v1.0.0, which is v0.9.0 or newer.
+    Error: These scripts can only be used to install pre-v0.9.0 releases.
+    Error: See https://docs.mirurobotics.com/docs/agent-sdk for the supported installation method.
+    exit=1
+
+**T5 — Missing `--version` (would resolve "latest") is rejected. No GitHub API call.**
+
+    $ sh scripts/install/install.sh
+    Error: These installation scripts are deprecated as of agent v0.9.0.
+    Error: Resolving the 'latest' release is no longer supported here because
+    Error: the latest release is v0.9.0 or newer.
+    Error: If you need a pre-v0.9.0 release, pass an explicit --version=vX.Y.Z (where X.Y.Z is < 0.9.0).
+    Error: Otherwise, see https://docs.mirurobotics.com/docs/agent-sdk for the supported installation method.
+    exit=1
+
+Verified with `--debug` that no `Fetching latest stable version...` log appears — `version.sh` is never reached because the gate runs first.
+
+**T6 — `provision.sh` rejects `v0.9.0` BEFORE any backend HTTP call.**
+
+    $ MIRU_API_KEY=fake sh scripts/install/provision.sh --version=v0.9.0 --device-name=test-host
+    Error: These installation scripts are deprecated as of agent v0.9.0.
+    Error: You requested v0.9.0, which is v0.9.0 or newer.
+    Error: These scripts can only be used to install pre-v0.9.0 releases.
+    Error: See https://docs.mirurobotics.com/docs/agent-sdk for the supported installation method.
+    exit=1
+
+No `Created device` or HTTP-failure log line — the new partial sits ahead of `partials/utils/provision.sh` in the rendered file (verified by `grep -n` for the section banners: USE PROVIDED PACKAGE @ line 167, DEPRECATION GATE @ line 188, PROVISION THE DEVICE @ line 220, DETERMINE THE VERSION @ line 303).
+
+**Verification: gate present in all six rendered scripts.**
+
+    $ grep -c "DEPRECATION GATE" scripts/install/*.sh
+    scripts/install/install.sh:1
+    scripts/install/provision.sh:1
+    scripts/install/staging-install.sh:1
+    scripts/install/staging-provision.sh:1
+    scripts/install/uat-install.sh:1
+    scripts/install/uat-provision.sh:1
