@@ -23,16 +23,16 @@ Operator/user-visible behavior is unchanged. The win is for the codebase: smalle
 
 ## Progress
 
-- [ ] Milestone 1 — Refactor `agent/src/logs/mod.rs` to expose `build_layers` and a thin `init`.
-- [ ] Milestone 2 — Migrate `build_layers` matrix and reload mechanics into `agent/tests/logs/mod.rs`.
-- [ ] Milestone 3 — Delete superseded top-level test binaries; keep the minimum needed for global-install coverage.
-- [ ] Milestone 4 — Run preflight; confirm `Preflight clean` before publishing.
+- [x] Milestone 1 — Refactor `agent/src/logs/mod.rs` to expose `build_layers` and a thin `init`. (2026-04-29, commit `1be848d`)
+- [x] Milestone 2 — Migrate `build_layers` matrix and reload mechanics into `agent/tests/logs/mod.rs`. (2026-04-29, commit `36fe50f`)
+- [x] Milestone 3 — Delete superseded top-level test binaries; keep the minimum needed for global-install coverage. (2026-04-29, commit `c2a03e8`)
+- [x] Milestone 4 — Run preflight; confirm `Preflight clean` before publishing. (2026-04-29, commit `d45f023` for coverage restoration; final preflight reports `Preflight clean`)
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- 2026-04-29: After deleting `logs_init_reload.rs`, the `logs` covgate threshold (93.47%) tripped because no remaining test exercised `LoggingGuard::reload_level`'s happy path (lines 125-130 of `agent/src/logs/mod.rs`). The `build_layers` matrix tests use the reload handle directly, but never go through the `LoggingGuard::reload_level` wrapper. The `test_reload_level_changes_filter` test in `tests/logs/mod.rs` builds a hand-crafted subscriber and exercises a fresh `reload::Handle`, but again does not call into `LoggingGuard::reload_level`. Resolution: extend `tests/logs_init_smoke.rs` to clear `RUST_LOG` before init and exercise the reload happy path through the real `LoggingGuard`. After the fix, `logs` coverage rose to 95.48% (above the 93.47% gate). This kept the binary count at two as the plan called for.
 
 ## Decision Log
 
@@ -50,7 +50,12 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+- 2026-04-29: All four milestones landed; preflight clean. Final layout:
+  - `agent/src/logs/mod.rs`: thin `init` (8 lines of body) plus pure `build_layers` (~30 lines). Public API additions: `pub fn build_layers(...)`, `pub type BoxedLogLayer = ...`. No removals, no signature changes to existing items. `agent/src/main.rs` is byte-for-byte unchanged.
+  - `agent/tests/logs/mod.rs`: 5 new tests under a `// build_layers` section, plus updated explanatory comments at the prior `tests that call logs::init` and `test_reload_level_no_op_when_env_filter_locked` notes.
+  - `agent/tests/logs_init_*.rs`: collapsed from 5 → 2 (`logs_init_smoke.rs`, `logs_init_locked.rs`). Smoke covers global install + non-locked `reload_level` happy path + `SetGlobalDefault` double-init error in one process. Locked covers the `RUST_LOG=off` env-locked branch.
+  - `logs` module coverage: 95.48% (gate 93.47%).
+  - Test count: 1247 → 1252 (5 new `build_layers` tests; net change is +1252 - 4 deleted single-test binaries - 1 collapsed double-init test in smoke = +5 net new asserts on top of the existing surface, recoded against `build_layers` rather than `init`).
 
 ## Context and Orientation
 
