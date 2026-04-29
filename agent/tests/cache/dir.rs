@@ -140,7 +140,7 @@ pub mod single_thread {
         for i in 0..3 {
             let invalid_file = dir.file(&format!("invalid{i}.json"));
             invalid_file
-                .write_string("not valid json", WriteOptions::OVERWRITE)
+                .write_string("not valid json", WriteOptions::OVERWRITE_ATOMIC)
                 .await
                 .unwrap();
         }
