@@ -12,14 +12,12 @@ This plan lives in `agent/plans/backlog/` because all code edits are in the agen
 
 ## Purpose / Big Picture
 
-Logs emitted between agent process start and settings-file load currently disappear: today `run_agent` initializes logging twice and the second `set_global_default` silently fails (`let _ =`), so the first install — done with default `Info` level — is the one that sticks, but only after the change in commit `077760d`. Before that commit logs were silently dropped until settings were parsed. We want one durable subscriber installed at process start (so reconciliation, settings-read, and any other early code logs visibly), and then the level updated in place once settings are read.
+`run_agent` currently calls `logs::init` twice — once early with defaults, once after settings load — and the second `set_global_default` silently fails. After this change, one subscriber is installed at process start and the level is updated in place once settings are read. Operator-visible result:
 
-After this change, an operator running the agent binary sees:
-
-- Reconciliation and pre-settings log lines in the configured destination from the first instant of process startup (currently `Info`-level by default).
-- Once settings are loaded, the active filter changes to whatever `settings.log_level` is, **without a second subscriber install** and without losing the file appender / non-blocking writer.
-- `RUST_LOG`, when set, continues to override both the early default and the post-settings reload (preserving today's precedence).
-- If subscriber installation fails, `run_agent` returns an error rather than silently soldiering on with no logging.
+- Reconciliation and pre-settings log lines appear from the first instant of process startup (default `Info`).
+- After settings load, the active filter switches to `settings.log_level` without a second subscriber install and without losing the non-blocking writer.
+- `RUST_LOG`, when set, continues to override both the early default and the post-settings reload.
+- If subscriber installation fails, `run_agent` exits cleanly instead of running silently.
 
 ## Progress
 
@@ -66,12 +64,12 @@ Key files:
 - `agent/src/logs/mod.rs` — defines `LogLevel`, `Options { stdout, log_level, log_dir }`, and `pub fn init(options: Options) -> WorkerGuard`. Uses `tracing_subscriber::fmt` + `EnvFilter` and discards `set_global_default` errors with `let _ =`. Same file for both stdout and file-only paths.
 - `agent/src/main.rs` — entry point. `run_agent()` (around line 87) currently calls `logs::init(Options::default())` early, then re-calls `logs::init(...)` after settings load (lines 132–136). The second call's `set_global_default` is silently a no-op because a subscriber is already installed. `run_provision()` (line 43) calls `logs::init` once and is unaffected by this work.
 - `agent/src/storage/settings.rs` — `Settings { log_level: LogLevel, .. }`; default is `LogLevel::Info`.
-- `agent/tests/logs/mod.rs` — existing tests cover serialize/deserialize and trivially exercise `logs::init` (stdout and file-only) with `drop(guard)`.
-- `Cargo.toml` (workspace) — `tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }` (locked at 0.3.23). The `tracing_subscriber::reload` module is part of the crate by default; no new feature is needed.
-- `scripts/test.sh` — runs `RUST_LOG=off cargo test --features test --package miru-agent`. Because `RUST_LOG` is forced to `off` for tests, any test that depends on the filter actually emitting events must either (a) build a subscriber locally that does NOT consult `RUST_LOG`, or (b) explicitly clear `RUST_LOG` for the test. We choose (a): the reload test constructs a subscriber via the public reload-handle API in isolation, decoupled from the global subscriber that `logs::init` installs.
+- `agent/tests/logs/mod.rs` — existing tests cover serialize/deserialize and trivially exercise `logs::init` with `drop(guard)`.
+- `Cargo.toml` (workspace) — `tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }` (locked at 0.3.23). The `tracing_subscriber::reload` module is part of the crate; no new feature needed.
+- `scripts/test.sh` — runs `RUST_LOG=off cargo test --features test --package miru-agent`. Because `RUST_LOG=off` is forced process-wide, the reload-emission test builds its own subscriber with `EnvFilter::new(...)` (RUST_LOG-independent) instead of going through `logs::init`.
 - `scripts/preflight.sh` — runs lint + tests + tools lint + tools tests in parallel, prints `Preflight clean` on success.
-- `agent/src/logs/.covgate` — current threshold `93.47`. New code must keep the module at or above this; if necessary the threshold can be updated in the same change.
-- Error convention: errors derive `thiserror::Error` and implement `crate::errors::Error` (in `agent/src/errors/mod.rs`). For `logs::init` we add a tiny `LogsErr` enum (single variant, install failure) following the same pattern.
+- `agent/src/logs/.covgate` — current threshold `93.47`.
+- Error convention: errors derive `thiserror::Error` and implement `crate::errors::Error` (in `agent/src/errors/mod.rs`).
 
 Defined terms:
 
@@ -86,7 +84,7 @@ Defined terms:
 
 In `agent/src/logs/mod.rs`:
 
-1. Add a `LogsErr` enum (in the same file or a sibling `errors.rs`; one file is fine here since the surface is small):
+1. Add a `LogsErr` enum (same file is fine; the surface is small) and impl `crate::errors::Error` with defaults:
 
        use thiserror::Error;
 
@@ -94,9 +92,9 @@ In `agent/src/logs/mod.rs`:
        pub enum LogsErr {
            #[error("failed to install global tracing subscriber: {0}")]
            SetGlobalDefault(#[from] tracing::subscriber::SetGlobalDefaultError),
+           #[error("failed to reload tracing filter: {0}")]
+           ReloadFailed(String),
        }
-
-   Implementing `crate::errors::Error` for it (with default trait method bodies) keeps it consistent with repo conventions.
 
 2. Define `LoggingGuard`. Anchor the subscriber stack on `Registry` so the reload-handle type is fully spellable; alias it for readability:
 
@@ -129,7 +127,7 @@ In `agent/src/logs/mod.rs`:
 
 4. Update the existing tests in `agent/tests/logs/mod.rs` (`test_init_stdout`, `test_init_file_only`) so the test target keeps compiling at the M1 commit — switch each `let guard = logs::init(options);` to `let guard = logs::init(options).expect("init should succeed");`.
 
-5. Add `LoggingGuard::reload_level`:
+5. Add `LoggingGuard::reload_level` (and a `pub fn env_filter_locked(&self) -> bool` accessor for testing):
 
        impl LoggingGuard {
            pub fn reload_level(&self, level: LogLevel) -> Result<(), LogsErr> {
@@ -140,11 +138,10 @@ In `agent/src/logs/mod.rs`:
                    .map_err(|e| LogsErr::ReloadFailed(e.to_string()))?;
                Ok(())
            }
+           pub fn env_filter_locked(&self) -> bool { self.env_filter_locked }
        }
 
-   Add a `ReloadFailed(String)` variant to `LogsErr` for `reload::Error`, since `reload::Error` is non-`Send + 'static`-friendly historically; stringify is fine.
-
-   Doc-comment `reload_level` explicitly: "If `RUST_LOG` was set at process startup, this is a no-op; the env filter wins. This method only adjusts the filter level — it cannot change the log destination (stdout vs file)."
+   Doc-comment `reload_level`: "If `RUST_LOG` was set at process startup, this is a no-op; the env filter wins. Adjusts filter/level only — does not change the log destination."
 
 ### Milestone 2 — Caller integration in `main.rs`
 
@@ -216,67 +213,40 @@ All commands run from the agent repo root: `/home/ben/miru/workbench2/repos/agen
 
 ### Milestone 1 — Refactor `logs::init`
 
-1. Edit `agent/src/logs/mod.rs` per "Plan of Work / Milestone 1": add `LogsErr`, `LoggingGuard`, change `init` to return `Result<LoggingGuard, LogsErr>`, add `reload_level`. Remove all `let _ =` around `set_global_default`.
-2. Update the two existing test calls in `agent/tests/logs/mod.rs` (`test_init_stdout`, `test_init_file_only`) to `.expect(...)` the `Result`, so the test target keeps compiling.
-
-3. Compile-check the package including tests:
-
-       cargo check --package miru-agent --features test --tests
-
-   Expected: clean compile.
-
-4. Commit:
+1. Apply the edits in Plan of Work / Milestone 1 to `agent/src/logs/mod.rs` and update the two existing test calls in `agent/tests/logs/mod.rs` to `.expect(...)` the `Result`.
+2. `cargo check --package miru-agent --features test --tests` — expect clean compile.
+3. Commit:
 
        git add agent/src/logs/mod.rs agent/tests/logs/mod.rs
        git commit -m "feat(logs): add reloadable filter handle and propagate init errors"
 
 ### Milestone 2 — Wire main.rs
 
-1. Edit `agent/src/main.rs::run_agent`: handle the new `Result` from the early `logs::init`, delete the second init block, add `log_guard.reload_level(settings.log_level.clone())` after settings read.
-2. Edit `agent/src/provision/errors.rs` to add `From<logs::LogsErr> for ProvisionErr`. Edit `agent/src/main.rs::run_provision` to use `?` on the `logs::init` call.
-3. Compile:
-
-       cargo check --package miru-agent --features test --tests
-
-4. Commit:
+1. Apply the edits in Plan of Work / Milestone 2 to `agent/src/main.rs` and add `From<logs::LogsErr> for ProvisionErr` in `agent/src/provision/errors.rs`.
+2. `cargo check --package miru-agent --features test --tests`.
+3. Commit:
 
        git add agent/src/main.rs agent/src/provision/errors.rs
        git commit -m "refactor(main): init logs early and reload level after settings load"
 
 ### Milestone 3 — New tests
 
-1. Add the three new tests as described in Plan of Work / Milestone 3:
-   - `test_reload_level_changes_filter` in `agent/tests/logs/mod.rs`
-   - `test_reload_level_no_op_when_env_filter_locked` in `agent/tests/logs/mod.rs` (requires `pub fn env_filter_locked` accessor; add it to `agent/src/logs/mod.rs` if not added in M1)
-   - `test_init_returns_error_on_double_install` in a new file `agent/tests/logs_init_double.rs`
-
-2. Run:
-
-       ./scripts/test.sh
-
-   Expected: final line includes `test result: ok.` for the agent test target.
-
+1. Add the three new tests per Plan of Work / Milestone 3 (two in `agent/tests/logs/mod.rs`, one in new file `agent/tests/logs_init_double.rs`).
+2. `./scripts/test.sh` — expect `test result: ok.` for the agent test target.
 3. Commit:
 
-       git add agent/tests/logs/mod.rs agent/tests/logs_init_double.rs agent/src/logs/mod.rs
+       git add agent/tests/logs/mod.rs agent/tests/logs_init_double.rs
        git commit -m "test(logs): cover reload_level filter change and double-install error"
-
-   (Include `agent/src/logs/mod.rs` only if the `env_filter_locked` accessor was added in this milestone.)
 
 ### Milestone 4 — Preflight and validation
 
-1. Run preflight:
-
-       ./scripts/preflight.sh
-
-   Expected: exit 0 and final line `Preflight clean`. If any sub-job (lint / tests / tools lint / tools tests) fails, read the printed output, fix, and re-run. **Do not advance past this gate until preflight is clean.**
-
-2. If `agent/src/logs/.covgate` threshold trips, prefer adding a covering test over loosening the number; if the number must move, edit the file and re-run `./scripts/covgate.sh` to confirm. Commit any covgate change separately:
+1. `./scripts/preflight.sh` — expect exit 0 and final line `Preflight clean`. If any sub-job fails, fix and re-run. **Do not advance past this gate until preflight is clean.**
+2. If `agent/src/logs/.covgate` trips, prefer adding a test; if the threshold must move, edit it, re-run `./scripts/covgate.sh`, and commit:
 
        git add agent/src/logs/.covgate
        git commit -m "chore(logs): adjust covgate threshold after reload changes"
 
-3. Plan-file lifecycle moves are handled by the implement skill — do not pre-move the file during authoring.
+3. Plan-file lifecycle moves (backlog → active → completed) are handled by the implement skill.
 
 ## Validation and Acceptance
 
@@ -288,11 +258,7 @@ Acceptance is verified by behaviors, not implementation details. From the agent 
 
    Last line must read exactly `Preflight clean`. This gate is mandatory.
 
-2. **Existing logs tests still pass:**
-
-       ./scripts/test.sh 2>&1 | tail -40
-
-   Expected: all tests under the `logs` integration test target pass; no regressions in the rest of the suite.
+2. **Existing logs tests still pass:** `./scripts/test.sh` shows `test result: ok.` for the agent test target with no regressions.
 
 3. **Reload behavior is observable:** `test_reload_level_changes_filter` passes after this change. The test exercises `reload::Handle::reload(...)` end-to-end against a captured-buffer writer and asserts the captured output transitions from filtered-out to emitted across the reload call.
 
@@ -304,8 +270,7 @@ Acceptance is verified by behaviors, not implementation details. From the agent 
 
 ## Idempotence and Recovery
 
-- Editing `agent/src/logs/mod.rs` and `agent/src/main.rs` is fully idempotent — re-running the edits produces identical results. If a step compiles partially, fix the offending lines and re-run `cargo check` before moving on.
-- Test additions are append-only; if a test is flaky in CI, mark it `#[serial]` and re-run. None of the changes touch on-disk state, network, or external systems, so there is no rollback hazard beyond a normal `git revert`.
-- The double-install test mutates global subscriber state. Isolating it into its own integration test binary (`agent/tests/logs_init_double.rs`) is the rollback for any cross-test contamination it might cause; revert that file and rerun the suite if interactions surface.
-- If covgate threshold is bumped down (loosened) in Milestone 4, that is a non-destructive numeric change in `agent/src/logs/.covgate`; revert with `git checkout -- agent/src/logs/.covgate`. Prefer adding tests over loosening the threshold whenever practical.
-- Commits are atomic per milestone and each one leaves the tree compiling: M1 includes the trivial test-call updates needed to keep `agent/tests/logs/mod.rs` building. Reverts work in reverse order (M3, M2, M1).
+- All edits are pure source changes; re-running them produces identical results. Each milestone commits with the tree compiling, so reverts work in reverse order (M3, M2, M1).
+- The double-install test mutates global subscriber state. It lives in its own integration-test binary (`agent/tests/logs_init_double.rs`) to isolate it from other tests; revert that file alone if cross-test interaction surfaces.
+- If `agent/src/logs/.covgate` is loosened in M4, revert via `git checkout -- agent/src/logs/.covgate`. Prefer covering tests over loosening the threshold.
+- Test flakiness from global-subscriber interactions: add `#[serial]` (`use serial_test::serial;`) to the offending test and re-run.
