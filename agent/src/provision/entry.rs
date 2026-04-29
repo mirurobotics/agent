@@ -87,15 +87,28 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
     Ok(http::devices::provision(http_client, params).await?)
 }
 
-pub fn determine_settings(args: &cli::ProvisionArgs) -> settings::Settings {
+pub fn determine_settings(args: &cli::ProvisionArgs) -> Result<settings::Settings, ProvisionErr> {
     let mut settings = settings::Settings::default();
     if let Some(backend_host) = &args.backend_host {
-        settings.backend.base_url = format!("{}/agent/v1", backend_host);
+        let candidate = format!("{}/agent/v1", backend_host);
+        storage::validation::validate_backend_url(&candidate).map_err(|msg| {
+            ProvisionErr::InvalidSettingsErr(InvalidSettingsErr {
+                msg: format!("backend.base_url `{candidate}`: {msg}"),
+                trace: crate::trace!(),
+            })
+        })?;
+        settings.backend.base_url = candidate;
     }
     if let Some(mqtt_broker_host) = &args.mqtt_broker_host {
+        storage::validation::validate_mqtt_host(mqtt_broker_host).map_err(|msg| {
+            ProvisionErr::InvalidSettingsErr(InvalidSettingsErr {
+                msg: format!("mqtt_broker.host `{mqtt_broker_host}`: {msg}"),
+                trace: crate::trace!(),
+            })
+        })?;
         settings.mqtt_broker.host = mqtt_broker_host.to_string();
     }
-    settings
+    Ok(settings)
 }
 
 #[cfg(test)]
@@ -156,28 +169,28 @@ mod tests {
         #[test]
         fn backend_host_appends_agent_v1_suffix() {
             let args = cli::ProvisionArgs {
-                backend_host: Some("https://custom.example.com".to_string()),
+                backend_host: Some("https://custom.mirurobotics.com".to_string()),
                 ..Default::default()
             };
 
-            let settings = determine_settings(&args);
+            let settings = determine_settings(&args).unwrap();
 
             assert_eq!(
                 settings.backend.base_url,
-                "https://custom.example.com/agent/v1"
+                "https://custom.mirurobotics.com/agent/v1"
             );
         }
 
         #[test]
         fn mqtt_broker_host_override() {
             let args = cli::ProvisionArgs {
-                mqtt_broker_host: Some("mqtt.custom.example.com".to_string()),
+                mqtt_broker_host: Some("mqtt.custom.mirurobotics.com".to_string()),
                 ..Default::default()
             };
 
-            let settings = determine_settings(&args);
+            let settings = determine_settings(&args).unwrap();
 
-            assert_eq!(settings.mqtt_broker.host, "mqtt.custom.example.com");
+            assert_eq!(settings.mqtt_broker.host, "mqtt.custom.mirurobotics.com");
         }
 
         #[test]
@@ -185,7 +198,7 @@ mod tests {
             let args = cli::ProvisionArgs::default();
             let defaults = settings::Settings::default();
 
-            let settings = determine_settings(&args);
+            let settings = determine_settings(&args).unwrap();
 
             assert_eq!(settings.backend.base_url, defaults.backend.base_url);
             assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
