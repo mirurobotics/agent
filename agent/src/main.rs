@@ -136,8 +136,7 @@ async fn run_agent() {
         }
     };
 
-    // apply the configured log level to the running subscriber. Failure here is
-    // non-fatal: a misconfigured log level should not crash the agent.
+    // apply the configured log level to the running subscriber
     if let Err(e) = log_guard.reload_level(settings.log_level.clone()) {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
