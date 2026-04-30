@@ -60,13 +60,14 @@ impl Env {
 
     /// Run a provision with a mock that returns `new_device(DEVICE_ID, name)`.
     /// Used as a setup helper to seed an already-provisioned state.
-    pub async fn seed_provision(&self, name: &'static str) {
+    pub async fn seed_provision(&self, name: impl Into<String>) {
+        let name = name.into();
         provision::provision(
-            &mock_ok_provision(name),
+            &mock_ok_provision(name.clone()),
             &self.layout,
             &self.settings,
             &self.token,
-            Some(name.to_string()),
+            Some(name),
         )
         .await
         .expect("seed provision must succeed");
@@ -78,9 +79,10 @@ impl Env {
 }
 
 /// MockClient that succeeds with a `Device` named `name` for `/devices/provision`.
-pub(super) fn mock_ok_provision(name: &'static str) -> MockClient {
+pub(super) fn mock_ok_provision(name: impl Into<String>) -> MockClient {
+    let name = name.into();
     MockClient {
-        provision_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, name))),
+        provision_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, &name))),
         ..MockClient::default()
     }
 }
@@ -94,9 +96,10 @@ pub(super) fn mock_failing_provision() -> MockClient {
 }
 
 /// MockClient that succeeds with a `Device` named `name` for `/devices/reprovision`.
-pub(super) fn mock_ok_reprovision(name: &'static str) -> MockClient {
+pub(super) fn mock_ok_reprovision(name: impl Into<String>) -> MockClient {
+    let name = name.into();
     MockClient {
-        reprovision_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, name))),
+        reprovision_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, &name))),
         ..MockClient::default()
     }
 }
@@ -109,9 +112,10 @@ pub(super) fn mock_failing_reprovision() -> MockClient {
     }
 }
 
-/// Asserts that a successful provision/reprovision left every persisted blob
-/// in place — `device.json`, `settings.json`, both keys, the token, and
-/// the temp dir is gone.
+/// Asserts that a successful provision/reprovision persisted every required
+/// blob (`device.json`, `settings.json`, both keys, the token), that the
+/// device record carries `DEVICE_ID` and `expected_name`, and that the temp
+/// dir was cleaned up.
 pub(super) async fn assert_storage_complete(layout: &Layout, expected_name: &str) {
     let device_file = layout.device();
     assert!(device_file.exists(), "device.json missing");
