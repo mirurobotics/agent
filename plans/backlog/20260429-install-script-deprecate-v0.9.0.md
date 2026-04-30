@@ -36,7 +36,7 @@ The big picture is: the install script becomes a one-way deprecation gate for v0
 Add entries as work proceeds. One entry per milestone, marked `[ ]` when planned, `[x]` when committed.
 
 - [ ] M1: Edit `scripts/jinja/templates/scripts/install.j2` to add the v0.9.0+ rejection gate.
-- [ ] M2: Run `scripts/jinja/render.sh` to regenerate the three install scripts; commit regenerated files together with the template change.
+- [ ] M2: Run `scripts/jinja/render.sh` to regenerate the three install scripts; commit regenerated install scripts in a separate commit from the template change.
 - [ ] M3: Run `scripts/preflight.sh`; resolve any findings.
 
 ## Surprises & Discoveries
@@ -45,7 +45,12 @@ Add entries as work proceeds.
 
 ## Decision Log
 
-- **2026-04-29 — Approach A chosen (inline gate in `install.j2`):** The new check is added inline in `install.j2` immediately after the `{% include 'partials/utils/version.sh' %}` line, reusing the `MAJOR` and `MINOR` shell variables already set by the included partial. This keeps the change install-only and avoids touching the shared `version.sh` partial (which is also used by the provision scripts that are out of scope). Approach B (creating a new `partials/utils/version-install.sh` wrapper) is a viable alternative if a future change needs to add more install-only logic; for a single gate, the inline approach is simpler.
+- Decision: Use Approach A (inline gate in `install.j2` after the `version.sh` include) for the v0.9.0+ rejection.
+  Rationale: Self-contained, install-only; reuses the MAJOR/MINOR shell variables already exported by the partial. No new files; minimal surface.
+  Date/Author: 2026-04-29 / authoring agent.
+- Decision: Approach B (new wrapper partial `partials/utils/version-install.sh`) considered and deferred.
+  Rationale: Approach B has cleaner separation but adds a new file for a single check. Reconsider if more install-only version logic is needed in the future.
+  Date/Author: 2026-04-29 / authoring agent.
 - **2026-04-29 — Pre-release tags handled implicitly:** The existing `PATCH=$(echo "$VERSION" | cut -d '.' -f 3 | sed 's/[^0-9].*//')` line in `version.sh` already strips suffixes like `-rc1` and `-beta`, so `0.9.0-rc1` parses to `MAJOR=0 MINOR=9 PATCH=0`. The new gate only needs to compare on `MAJOR` and `MINOR`; pre-release detection is not required.
 - **2026-04-29 — Unpinned ("latest") path covered uniformly:** `version.sh` resolves `VERSION` from the GitHub releases API when `--version` is not provided. Because the new gate runs after the include, it sees the resolved value regardless of how it was obtained.
 
@@ -146,7 +151,7 @@ Three milestones, executed in order. Each milestone ends with a commit so the PR
 
 1. **M1 — Add the rejection gate to the template.** Edit `scripts/jinja/templates/scripts/install.j2` to add the new gate immediately after the `version.sh` include. The gate uses the `MAJOR` and `MINOR` shell variables already set by `version.sh` and emits a fatal error matching the wording in Concrete Steps below. The provision template and the shared `version.sh` partial are not modified.
 
-2. **M2 — Regenerate the install scripts.** Run `scripts/jinja/render.sh` from inside `scripts/jinja/`. This regenerates all six scripts under `scripts/install/`. Verify by `git diff` that only the three install variants gained the new gate; the three provision variants must show only Build Timestamp changes (or no changes if they were not re-rendered). Commit the regenerated install scripts together with the template change as a single commit (option A) or as a separate "regenerate" commit (option B). **This plan picks option A — single combined commit** so reviewers can see the template diff and the resulting `.sh` diff side-by-side.
+2. **M2 — Regenerate the install scripts.** Run `scripts/jinja/render.sh` from inside `scripts/jinja/`. This regenerates all six scripts under `scripts/install/`. Verify by `git diff` that only the three install variants gained the new gate; the three provision variants must show only Build Timestamp changes (or no changes if they were not re-rendered). **This plan uses split commits per milestone (M1 template only, M2 regenerated scripts)** so reviewers can see the template diff and the resulting `.sh` diff as distinct, bisectable units.
 
 3. **M3 — Preflight.** Run `scripts/preflight.sh` from the repo root. Resolve any lint/test findings. Commit any cleanup needed to make preflight clean. If preflight is clean with no further edits, no additional commit is needed for this milestone.
 
@@ -197,12 +202,19 @@ Then commit with a message like:
 
 (Render is performed in M2; this commit is template-only on purpose so reviewers see the source-of-truth diff as one unit. M2 then commits the generated scripts.)
 
-If you prefer the combined-commit option (M1+M2 in a single commit), skip the commit at the end of M1 and proceed to M2. Either choice is acceptable; the rest of the plan assumes split commits for clarity.
-
 Commit (M1 only, template-only):
 
     git add scripts/jinja/templates/scripts/install.j2
-    git commit
+    git commit -m "$(cat <<'EOF'
+    feat(install-scripts): reject installs of agent v0.9.0+ in install.j2
+
+    Miru Agent v0.9.0 introduces an apt-based provisioning workflow. The
+    legacy install.sh family no longer supports v0.9.0+; the gate added in
+    install.j2 fails fast with a link to the new docs. version.sh and
+    provision.j2 are unchanged, so provision scripts keep their existing
+    behavior.
+    EOF
+    )"
 
 ### M2: Regenerate the three install scripts
 
@@ -211,9 +223,13 @@ From the repo root:
     cd scripts/jinja
     ./render.sh
 
-The renderer will create or reuse `.venv`, install `jinja2` and `pyyaml`, and write the regenerated scripts to `scripts/install/`. Then return to the repo root:
+The renderer will create or reuse `.venv`, install `jinja2` and `pyyaml`, and write the regenerated scripts to `scripts/install/`. Then return to the repo root and immediately restore the three provision scripts so they remain byte-identical to `origin/main`:
 
-    cd ../..
+    cd "$(git rev-parse --show-toplevel)"
+    git restore scripts/install/provision.sh scripts/install/staging-provision.sh scripts/install/uat-provision.sh
+
+render.sh regenerates all six scripts; restoring the three provision scripts keeps them byte-identical to origin/main, satisfying the UNCHANGED requirement.
+
     git status
     git diff scripts/install/install.sh
     git diff scripts/install/staging-install.sh
@@ -234,7 +250,7 @@ Commit the regenerated install scripts:
     git add scripts/install/install.sh scripts/install/staging-install.sh scripts/install/uat-install.sh
     git commit -m "chore(install): regenerate install scripts for v0.9.0+ rejection"
 
-If `git status` also shows Build-Timestamp-only changes to the provision scripts, decide based on repo norms whether to include them. The default in this plan: do **not** stage the provision scripts; their diff is purely cosmetic and unrelated to this change. (If lint/preflight insists on a clean tree and starts complaining, include them and explain in the commit message.)
+The provision scripts must be byte-identical to origin/main after this milestone — `git restore` undoes the timestamp-only diff that render.sh introduced. After the `git restore` step above, `git status` should show no pending changes for `scripts/install/provision.sh`, `staging-provision.sh`, or `uat-provision.sh`. If any are still listed as modified, re-run the restore command before committing.
 
 ### M3: Preflight
 
@@ -253,7 +269,22 @@ Resolve any findings. If preflight is clean, no further commit is needed. If you
 
 - preflight (`scripts/preflight.sh`) must report clean before changes are published.
 - `scripts/lint.sh` must pass (it is part of preflight; calling it out separately for visibility).
-- `git diff origin/main -- scripts/install/provision.sh scripts/install/staging-provision.sh scripts/install/uat-provision.sh` must show only `# Build Timestamp:` changes (or no changes). The provision scripts must not contain the new fatal message or the new `if [ "$MAJOR" -gt 0 ]` block.
+- The three provision scripts must be byte-identical to `origin/main`. Run, from the repo root:
+
+        git diff --exit-code origin/main -- \
+            scripts/install/provision.sh \
+            scripts/install/staging-provision.sh \
+            scripts/install/uat-provision.sh
+
+    Expected: exit code 0 (no diff). Any output indicates a stray Build-Timestamp diff that M2's `git restore` step should have undone. The provision scripts must not contain the new fatal message or the new `if [ "$MAJOR" -gt 0 ]` block.
+
+- The shared partials and the provision template must also remain byte-identical to `origin/main`. Run, from the repo root:
+
+        git diff --exit-code origin/main -- \
+            scripts/jinja/templates/scripts/provision.j2 \
+            scripts/jinja/templates/partials/utils/version.sh
+
+    Expected: exit code 0. These files are out-of-scope; any diff indicates an accidental edit and must be reverted before the PR is merged.
 
 ### Manual test cases (run against the regenerated `scripts/install/install.sh` from M2)
 
@@ -269,23 +300,19 @@ Test cases:
 2. **`--version=0.9.0` → script exits with the new fatal message before any download.** Expected output contains: `Version v0.9.0 cannot be installed with this script. Miru Agent v0.9.0 and later use a new apt-based provisioning workflow. See https://docs.mirurobotics.com/docs/developers/agent/install for instructions.` Exit code is non-zero. No download attempt is made (no `curl` to the releases artifacts).
 3. **`--version=0.9.0-rc1` → script exits with the new fatal message before any download.** Same expected output and exit-code as case 2, with `0.9.0-rc1` substituted into the version string.
 4. **`--version=1.0.0` → script exits with the new fatal message before any download.** Same expected output and exit-code as case 2, with `1.0.0` substituted into the version string.
-5. **Unpinned ("latest") path with no `--version` flag, when latest resolves to v0.9.0+.** Two acceptable ways to exercise this:
+5. **Unpinned ("latest") path with no `--version` flag, when latest resolves to v0.9.0+.** Mock `curl` as below; do not skip this case. Create a temporary directory with a stub `curl` script that returns a fake `releases/latest` JSON whose `tag_name` is `v0.9.0`. Prepend that directory to `PATH` and re-invoke the install script with no `--version` flag. The script should exit with the new fatal message. Sketch:
 
-    - **Mocking option:** Create a temporary directory with a stub `curl` script that returns a fake `releases/latest` JSON whose `tag_name` is `v0.9.0`. Prepend that directory to `PATH` and re-invoke the install script with no `--version` flag. The script should exit with the new fatal message. Sketch:
-
-            mkdir -p /tmp/fakebin
-            cat >/tmp/fakebin/curl <<'EOF'
-            #!/bin/sh
-            # Pretend the latest release is v0.9.0
-            case "$*" in
-                *releases/latest*) echo '"tag_name": "v0.9.0"' ;;
-                *) echo "" ;;
-            esac
-            EOF
-            chmod +x /tmp/fakebin/curl
-            PATH="/tmp/fakebin:$PATH" sh scripts/install/install.sh
-
-    - **Defer-until-real-release option:** If the GitHub `latest` release tag is currently `< v0.9.0`, the unpinned path will simply install the current latest, which is fine for now. Once v0.9.0 ships, re-run the script unpinned and confirm it now exits with the new fatal message. Document in Surprises & Discoveries which option was used.
+        mkdir -p /tmp/fakebin
+        cat >/tmp/fakebin/curl <<'EOF'
+        #!/bin/sh
+        # Pretend the latest release is v0.9.0
+        case "$*" in
+            *releases/latest*) echo '"tag_name": "v0.9.0"' ;;
+            *) echo "" ;;
+        esac
+        EOF
+        chmod +x /tmp/fakebin/curl
+        PATH="/tmp/fakebin:$PATH" sh scripts/install/install.sh
 
 ### Documentation pointer
 
