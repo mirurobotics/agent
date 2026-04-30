@@ -31,9 +31,9 @@ will fatal-exit before any download with:
 
 One entry per milestone, marked `[ ]` when planned, `[x]` when committed.
 
-- [ ] M1: Edit `scripts/jinja/templates/scripts/install.j2` to add the v0.9.0+ rejection gate.
-- [ ] M2: Run `scripts/jinja/render.sh`; commit regenerated install scripts separately from the template change.
-- [ ] M3: Run `scripts/preflight.sh`; resolve any findings.
+- [x] M1: Edit `scripts/jinja/templates/scripts/install.j2` to add the v0.9.0+ rejection gate. (commit `e67c014`)
+- [x] M2: Run `scripts/jinja/render.sh`; commit regenerated install scripts separately from the template change. (commit `5073571`)
+- [x] M3: Run `scripts/preflight.sh`; resolve any findings. (clean — no fix commit needed)
 
 ## Surprises & Discoveries
 
@@ -51,7 +51,9 @@ Add entries as work proceeds.
 
 ## Outcomes & Retrospective
 
-Add entries as work proceeds.
+- Implemented as planned: 6 lines added to `install.j2`; three install variants regenerated; provision scripts and `version.sh` unchanged.
+- All five manual test cases passed: `--version=0.8.0` proceeds past the gate; `--version=0.9.0`, `--version=0.9.0-rc1`, `--version=1.0.0` all exit non-zero with the new fatal containing the docs URL; mocked-`curl` unpinned/latest path also rejected.
+- `scripts/preflight.sh` reported clean on the first run — no follow-up commit needed.
 
 ## Context and Orientation
 
