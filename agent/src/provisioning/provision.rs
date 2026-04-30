@@ -24,7 +24,7 @@ use tracing::{debug, error, info, warn};
 #[derive(Debug)]
 pub struct Outcome {
     pub is_provisioned: bool,
-    pub device: backend_client::Device,
+    pub device_name: String,
 }
 
 pub async fn provision<HTTPClientT: http::ClientI>(
@@ -34,24 +34,19 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     token: &str,
     device_name: Option<String>,
 ) -> Result<Outcome, ProvisionErr> {
-    // Idempotency short-circuit: if the machine is already activated and
-    // device.json is parseable, return the cached device with `is_provisioned`
-    // set so the caller can render an "already provisioned" message. We need
-    // device.json to populate the outcome's device field. If it's missing
-    // despite keys being present, the bootstrap was interrupted mid-way; fall
-    // through and let the backend tell us whether re-provisioning is possible.
+    // if a machine has already been provisioned, then just return the device's name
     if storage::assert_activated(layout).await.is_ok() {
-        if let Ok(local_device) = layout.device().read_json::<models::Device>().await {
-            return Ok(Outcome {
-                is_provisioned: true,
-                device: backend_client::Device {
-                    id: local_device.id,
-                    name: local_device.name,
-                    session_id: local_device.session_id,
-                    ..backend_client::Device::default()
-                },
-            });
-        }
+        let device_name = match layout.device().read_json::<models::Device>().await {
+            Ok(device) => device.name,
+            Err(e) => {
+                error!("unable to read device.json: {e}");
+                "unknown".to_string()
+            }
+        };
+        return Ok(Outcome {
+            is_provisioned: true,
+            device_name,
+        });
     }
 
     let temp_dir = layout.temp_dir();
@@ -76,7 +71,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
         .await?;
         Ok(Outcome {
             is_provisioned: false,
-            device,
+            device_name: device.name,
         })
     }
     .await;

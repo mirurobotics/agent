@@ -16,22 +16,23 @@ This plan lives in `plans/backlog/` of the agent repo. The orchestrator promotes
 
 ## Progress
 
-- [ ] (YYYY-MM-DD) M1: Update `agent/src/main.rs` `handle_provision_result` to read `outcome.device_name`.
-- [ ] (YYYY-MM-DD) M2: Update `agent/tests/provisioning/provision.rs` `provision_fn::*` tests for the new field shape; rewrite the corrupt-device-file test to match the new contract.
-- [ ] (YYYY-MM-DD) M3: Confirm `agent/tests/provisioning/reprovision.rs` is unchanged (`reprovision()` returns `Result<backend_client::Device, ProvisionErr>`, not `Outcome`).
-- [ ] (YYYY-MM-DD) M4: Confirm `agent/src/provisioning/provision.rs::tests` is unchanged (only tests `determine_settings`).
-- [ ] (YYYY-MM-DD) M5: Coverage check — if `agent/src/provisioning/.covgate` (95.66) trips on the unhit `Err(e)` arm in the short-circuit, add a test exercising it.
+- [x] (2026-04-30) M1: Update `agent/src/main.rs` `handle_provision_result` to read `outcome.device_name`.
+- [x] (2026-04-30) M2: Update `agent/tests/provisioning/provision.rs` `provision_fn::*` tests for the new field shape; rewrite the corrupt-device-file test to match the new contract.
+- [x] (2026-04-30) M3: Confirm `agent/tests/provisioning/reprovision.rs` is unchanged (`reprovision()` returns `Result<backend_client::Device, ProvisionErr>`, not `Outcome`).
+- [x] (2026-04-30) M4: Confirm `agent/src/provisioning/provision.rs::tests` is unchanged (only tests `determine_settings`).
+- [x] (2026-04-30) M5: Coverage check — `agent/src/provisioning/` line coverage is 96.3% (above the 95.66 floor); the rewritten `is_noop_when_device_file_corrupt` test exercises the `Err(e)` arm of the short-circuit, so no additional test was needed.
 - [ ] (YYYY-MM-DD) M6: Validation — `./scripts/preflight.sh` reports `Preflight clean`; commit and push to update PR #52.
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
 
 ## Surprises & Discoveries
 
-(Fill in as discoveries are made.)
+- (2026-04-30) `agent/tests/provisioning/reprovision.rs` is clean of `outcome.device` / `provision::Outcome` references, confirming reprovision tests are decoupled from `Outcome`.
+- (2026-04-30) Preflight passes on the first run; the rewritten `is_noop_when_device_file_corrupt` test alone is sufficient to keep `agent/src/provisioning/` line coverage at 96.3% (above the 95.66 floor). No additional `short_circuits_with_unknown_when_device_file_missing` test was required.
 
 ## Decision Log
 
-(Fill in as decisions are made.)
+- (2026-04-30) In `is_noop_when_already_activated`, replaced the dropped `assert_eq!(device.id, DEVICE_ID);` with `assert_eq!(outcome.device_name, "initial");` per the plan's per-test table to preserve the test's semantic intent (verify the cached identity surfaces, not the poison-mock identity) now that `Outcome` no longer exposes `device.id`.
 
 ## Outcomes & Retrospective
 

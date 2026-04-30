@@ -35,10 +35,7 @@ pub mod provision_fn {
         .await
         .unwrap();
         assert!(!outcome.is_provisioned);
-        let device = outcome.device;
-
-        assert_eq!(device.id, DEVICE_ID);
-        assert_eq!(device.name, device_name);
+        assert_eq!(outcome.device_name, device_name);
 
         // device file was written
         let device_file = layout.device();
@@ -144,11 +141,9 @@ pub mod provision_fn {
                 .await
                 .unwrap();
         assert!(outcome.is_provisioned);
-        let device = outcome.device;
 
         // returned device matches the originally provisioned identity
-        assert_eq!(device.id, DEVICE_ID);
-        assert_eq!(device.name, "first");
+        assert_eq!(outcome.device_name, "first");
 
         // device file is unchanged — still "first"
         let device_json: serde_json::Value =
@@ -213,10 +208,9 @@ pub mod provision_fn {
         .await
         .unwrap();
         assert!(outcome.is_provisioned);
-        let device = outcome.device;
 
         // returned device matches the originally provisioned identity
-        assert_eq!(device.id, DEVICE_ID);
+        assert_eq!(outcome.device_name, "initial");
 
         // backend was never called
         assert_eq!(mock_poison.call_count(mock::Call::ProvisionDevice), 0);
@@ -277,9 +271,7 @@ pub mod provision_fn {
         .await
         .unwrap();
         assert!(!outcome.is_provisioned);
-        let device = outcome.device;
-
-        assert_eq!(device.name, "after-fallthrough");
+        assert_eq!(outcome.device_name, "after-fallthrough");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
 
         // keys were created
@@ -290,7 +282,7 @@ pub mod provision_fn {
     }
 
     #[tokio::test]
-    async fn falls_through_when_device_file_corrupt() {
+    async fn is_noop_when_device_file_corrupt() {
         use miru_agent::filesys::WriteOptions;
 
         let token = new_jwt(DEVICE_ID);
@@ -325,8 +317,13 @@ pub mod provision_fn {
             .await
             .unwrap();
 
-        // run provision again — short-circuit must fall through because the
-        // device file does not parse, and the corrupt file must be overwritten
+        // capture the corrupt bytes immediately after the corruption write so
+        // the post-call comparison is byte-exact
+        let device_bytes = layout.device().read_string().await.unwrap();
+
+        // run provision again — short-circuit must still take effect because
+        // the keys are present; the unreadable device.json triggers the
+        // "unknown" fallback rather than falling through to the full flow
         let mock = MockClient {
             provision_device_fn: Box::new(|| Ok(new_device(DEVICE_ID, "recovered"))),
             ..MockClient::default()
@@ -335,18 +332,17 @@ pub mod provision_fn {
             provision::provision(&mock, &layout, &settings, &token, Some("recovered".into()))
                 .await
                 .unwrap();
-        assert!(!outcome.is_provisioned);
-        let device = outcome.device;
+        assert!(outcome.is_provisioned);
+        assert_eq!(outcome.device_name, "unknown");
 
-        assert_eq!(device.name, "recovered");
-        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
+        // backend was never called — short-circuit means the mock is not reached
+        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
 
-        // device file was overwritten with valid content
-        let device_json: serde_json::Value =
-            serde_json::from_str(&layout.device().read_string().await.unwrap()).unwrap();
-        assert_eq!(device_json["name"], "recovered");
+        // corrupt bytes are NOT overwritten — the full flow (which would have
+        // called bootstrap) is never run
+        assert_eq!(layout.device().read_string().await.unwrap(), device_bytes);
 
-        // keys still present (and rotated)
+        // keys still present
         assert!(auth_layout.private_key().exists());
         assert!(auth_layout.public_key().exists());
 

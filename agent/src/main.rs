@@ -78,14 +78,14 @@ fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
         Ok(outcome) if outcome.is_provisioned => {
             let msg = format!(
                 "Device is already provisioned as {}!",
-                display::color(&outcome.device.name, display::Colors::Green)
+                display::color(&outcome.device_name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }
         Ok(outcome) => {
             let msg = format!(
                 "Successfully provisioned this device as {}!",
-                display::color(&outcome.device.name, display::Colors::Green)
+                display::color(&outcome.device_name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }
