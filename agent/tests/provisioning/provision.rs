@@ -1,11 +1,10 @@
 // internal crates
+use super::shared::{new_device, new_jwt, DEVICE_ID};
 use crate::mocks::http_client::{self as mock, MockClient};
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::HTTPErr;
-use miru_agent::provisioning::{provision, errors::*};
+use miru_agent::provisioning::{errors::*, provision};
 use miru_agent::storage::{Layout, Settings};
-
-use super::shared::{new_device, new_jwt, DEVICE_ID};
 
 pub mod provision_fn {
     use super::*;
