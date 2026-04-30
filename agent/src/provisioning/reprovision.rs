@@ -22,9 +22,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
 
     let result = async {
         // generate new public and private keys in a temporary directory which
-        // will become the device's new authentication if reprovisioning
-        // succeeds. Reprovision always rotates keys and always runs the full
-        // bootstrap — there is no idempotency short-circuit.
+        // will become the device's new authentication if successful
         let private_key_file = temp_dir.file("private.key");
         let public_key_file = temp_dir.file("public.key");
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;

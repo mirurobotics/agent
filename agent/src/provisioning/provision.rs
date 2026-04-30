@@ -13,17 +13,9 @@ use backend_api::models as backend_client;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
-/// The result of a `provision()` call.
-///
-/// `is_provisioned` is `true` when the machine was already provisioned
-/// before this call — i.e., the call was a no-op and `device` is the
-/// cached state read from `device.json`. It is `false` when this call
-/// performed the full provisioning flow (keypair gen, backend POST,
-/// bootstrap), in which case `device` is the freshly-issued backend
-/// record.
 #[derive(Debug)]
 pub struct Outcome {
-    pub is_provisioned: bool,
+    pub already_provisioned: bool,
     pub device_name: String,
 }
 
@@ -44,7 +36,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
             }
         };
         return Ok(Outcome {
-            is_provisioned: true,
+            already_provisioned: true,
             device_name,
         });
     }
@@ -70,7 +62,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
         )
         .await?;
         Ok(Outcome {
-            is_provisioned: false,
+            already_provisioned: false,
             device_name: device.name,
         })
     }

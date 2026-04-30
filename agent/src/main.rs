@@ -75,7 +75,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
 
 fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
     match result {
-        Ok(outcome) if outcome.is_provisioned => {
+        Ok(outcome) if outcome.already_provisioned => {
             let msg = format!(
                 "Device is already provisioned as {}!",
                 display::color(&outcome.device_name, display::Colors::Green)
@@ -91,7 +91,7 @@ fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
         }
         Err(e) => {
             error!("Provisioning failed: {:?}", e);
-            println!("An error occurred during provisioning. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            println!("An error occurred during provisioning.\n\nError: {e}\n");
             std::process::exit(1);
         }
     }
@@ -136,7 +136,7 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
         }
         Err(e) => {
             error!("Reprovisioning failed: {:?}", e);
-            println!("An error occurred during reprovisioning. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            println!("An error occurred during reprovisioning.\n\nError: {e}\n");
             std::process::exit(1);
         }
     }
