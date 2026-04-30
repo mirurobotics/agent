@@ -13,7 +13,7 @@ use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
-use miru_agent::provisioning::{self, display, errors::*};
+use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
 use miru_agent::workers::mqtt;
@@ -46,9 +46,7 @@ async fn main() {
     run_agent().await;
 }
 
-async fn run_provision(
-    args: cli::ProvisionArgs,
-) -> Result<provisioning::ProvisionOutcome, ProvisionErr> {
+async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
     // initialize logging
     let tmp_dir = Dir::create_temp_dir("miru-agent-provision-logs").await?;
     let options = logs::Options {
@@ -59,13 +57,13 @@ async fn run_provision(
     };
     let _guard = logs::init(options)?;
 
-    let settings = provisioning::determine_settings(&args);
+    let settings = provision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
     let result =
-        provisioning::provision(&http_client, &layout, &settings, &token, args.device_name).await;
+        provision::provision(&http_client, &layout, &settings, &token, args.device_name).await;
 
     drop(_guard);
     if let Err(e) = tmp_dir.delete().await {
@@ -75,7 +73,7 @@ async fn run_provision(
     result
 }
 
-fn handle_provision_result(result: Result<provisioning::ProvisionOutcome, ProvisionErr>) {
+fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
     match result {
         Ok(outcome) if outcome.is_provisioned => {
             let msg = format!(
@@ -112,12 +110,12 @@ async fn run_reprovision(
     };
     let _guard = logs::init(options)?;
 
-    let settings = provisioning::determine_reprovision_settings(&args);
+    let settings = reprovision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
-    let result = provisioning::reprovision(&http_client, &layout, &settings, &token).await;
+    let result = reprovision::reprovision(&http_client, &layout, &settings, &token).await;
 
     drop(_guard);
     if let Err(e) = tmp_dir.delete().await {

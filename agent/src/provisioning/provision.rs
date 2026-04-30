@@ -4,10 +4,7 @@ use crate::crypt::rsa;
 use crate::filesys::{self, Overwrite};
 use crate::http;
 use crate::models;
-use crate::provisioning::{
-    errors::*,
-    shared::{build_settings, cleanup_temp_dir},
-};
+use crate::provisioning::{errors::*, shared};
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;
@@ -25,7 +22,7 @@ use tracing::{debug, error, info, warn};
 /// bootstrap), in which case `device` is the freshly-issued backend
 /// record.
 #[derive(Debug)]
-pub struct ProvisionOutcome {
+pub struct Outcome {
     pub is_provisioned: bool,
     pub device: backend_client::Device,
 }
@@ -36,7 +33,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
-) -> Result<ProvisionOutcome, ProvisionErr> {
+) -> Result<Outcome, ProvisionErr> {
     // Idempotency short-circuit: if the machine is already activated and
     // device.json is parseable, return the cached device with `is_provisioned`
     // set so the caller can render an "already provisioned" message. We need
@@ -45,7 +42,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     // through and let the backend tell us whether re-provisioning is possible.
     if storage::assert_activated(layout).await.is_ok() {
         if let Ok(local_device) = layout.device().read_json::<models::Device>().await {
-            return Ok(ProvisionOutcome {
+            return Ok(Outcome {
                 is_provisioned: true,
                 device: backend_client::Device {
                     id: local_device.id,
@@ -77,14 +74,14 @@ pub async fn provision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        Ok(ProvisionOutcome {
+        Ok(Outcome {
             is_provisioned: false,
             device,
         })
     }
     .await;
 
-    cleanup_temp_dir(&temp_dir).await;
+    shared::cleanup_temp_dir(&temp_dir).await;
     result
 }
 
@@ -108,7 +105,7 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
 }
 
 pub fn determine_settings(args: &cli::ProvisionArgs) -> settings::Settings {
-    build_settings(
+    shared::determine_settings(
         args.backend_host.as_deref(),
         args.mqtt_broker_host.as_deref(),
     )

@@ -3,10 +3,7 @@ use crate::cli;
 use crate::crypt::rsa;
 use crate::filesys::{self, Overwrite};
 use crate::http;
-use crate::provisioning::{
-    errors::*,
-    shared::{build_settings, cleanup_temp_dir},
-};
+use crate::provisioning::{errors::*, shared};
 use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;
@@ -46,7 +43,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     }
     .await;
 
-    cleanup_temp_dir(&temp_dir).await;
+    shared::cleanup_temp_dir(&temp_dir).await;
     result
 }
 
@@ -67,8 +64,8 @@ async fn reprovision_with_backend<HTTPClientT: http::ClientI>(
     Ok(http::devices::reprovision(http_client, params).await?)
 }
 
-pub fn determine_reprovision_settings(args: &cli::ReprovisionArgs) -> settings::Settings {
-    build_settings(
+pub fn determine_settings(args: &cli::ReprovisionArgs) -> settings::Settings {
+    shared::determine_settings(
         args.backend_host.as_deref(),
         args.mqtt_broker_host.as_deref(),
     )
@@ -88,7 +85,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let settings = determine_reprovision_settings(&args);
+            let settings = determine_settings(&args);
 
             assert_eq!(
                 settings.backend.base_url,
@@ -103,7 +100,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let settings = determine_reprovision_settings(&args);
+            let settings = determine_settings(&args);
 
             assert_eq!(settings.mqtt_broker.host, "mqtt.custom.example.com");
         }
@@ -113,7 +110,7 @@ mod tests {
             let args = cli::ReprovisionArgs::default();
             let defaults = settings::Settings::default();
 
-            let settings = determine_reprovision_settings(&args);
+            let settings = determine_settings(&args);
 
             assert_eq!(settings.backend.base_url, defaults.backend.base_url);
             assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);

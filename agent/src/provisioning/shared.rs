@@ -32,7 +32,7 @@ pub(super) async fn cleanup_temp_dir(temp_dir: &filesys::Dir) {
     }
 }
 
-pub(super) fn build_settings(
+pub(super) fn determine_settings(
     backend_host: Option<&str>,
     mqtt_broker_host: Option<&str>,
 ) -> settings::Settings {
