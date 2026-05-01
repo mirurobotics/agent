@@ -1,4 +1,4 @@
-BACKEND_FILE := specs/backend/v03.yaml
+BACKEND_FILE := specs/backend/v04.yaml
 BACKEND_CODEGEN_DIR := codegen/backend
 DEVICE_FILE := specs/device/v02.yaml
 DEVICE_CODEGEN_DIR := codegen/device

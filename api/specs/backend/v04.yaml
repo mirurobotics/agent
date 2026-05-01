@@ -2,50 +2,49 @@ openapi: 3.0.3
 info:
   title: Miru Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.3
+  version: v0.4
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-beta.4
+  x-release-version: v0.4.0-beta.2
   x-git-commit:
-    sha: 89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
-    url: https://github.com/mirurobotics/openapi/commit/89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
-    message: 'refactor(agent): rename POST /devices/issue_token to /devices/token
-      (#37)
+    sha: 803226887930f13c669dbd98fc108b3ebfc2c443
+    url: https://github.com/mirurobotics/openapi/commit/803226887930f13c669dbd98fc108b3ebfc2c443
+    message: 'feat(agent): add reprovision endpoint and ProvisioningToken auth (#40)
 
 
       ## Summary
 
-      - Rename agent endpoint `POST /devices/issue_token` to `POST
+      - Add `POST /devices/reprovision` (and `ReprovisionDeviceRequest`) for
 
-      /devices/token` to drop the verb-in-URL antipattern; HTTP method already
+      rebinding an existing device record to a different physical machine —
 
-      conveys "create" and the `/devices/` grouping is retained because the
+      invalidates prior session, registers the new public key, redeploys
 
-      `DeviceKeyJWT` auth scheme is device-specific.
+      current deployment; deployment history preserved.
 
-      - Update path key in `apis/apps/backend-server/agent/paths/devices.yaml`
+      - Add a `ProvisioningToken` bearer security scheme and apply it to both
 
-      and the description prose plus path ref in
+      `/devices/provision` and `/devices/reprovision`, overriding the global
 
-      `apis/apps/backend-server/agent/openapi.yaml`; regenerate
+      `DeviceSessionToken` default that those bootstrap endpoints can''t
 
-      `apis/apps/backend-server/agent/openapi.gen.yaml` via
+      satisfy by definition.
 
-      `scripts/regen.sh`.
+      - Drop the stale `reactivate` capability mention from
 
-      - Preserve `operationId: issueDeviceToken` and summary `Issue Token` so
+      `ProvisionDeviceRequest.name`''s description; under the new endpoint
 
-      generated client method names remain stable.
-
-      - Safe pre-release rename: zero deployed clients other than the open
-
-      `mirurobotics/agent#48` PR against the unreleased v0.3.0-beta.3 spec.
-
-      - Includes the rename plan under `plans/` for traceability.
+      split, reactivate semantics live behind `/devices/reprovision`.
 
 
-      ---------
+      ## Notes
+
+      `reactivate` is still wired in elsewhere as a token capability
+
+      (frontend/platform specs, legacy api-key docs). Migrating those to the
+
+      new model is follow-up work outside this PR''s scope.
 
 
       Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
@@ -53,7 +52,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-04-27T21:31:19.844963+00:00'
+    built_at: '2026-04-29T17:29:11.826923+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -262,6 +261,8 @@ paths:
       - Devices
       summary: Provision
       operationId: provisionDevice
+      security:
+      - ProvisioningToken: []
       description: Provision a device.
       requestBody:
         required: true
@@ -272,6 +273,36 @@ paths:
       responses:
         '200':
           description: Successfully provisioned the device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+  /devices/reprovision:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+      - Devices
+      summary: Reprovision
+      operationId: reprovisionDevice
+      security:
+      - ProvisioningToken: []
+      description: 'Reprovision an existing device — rebind the device record to the
+        calling physical machine. Invalidates any prior session, registers the new
+        public key from the request body, and triggers a redeploy of the device''s
+        current deployment. Deployment history is preserved across the swap. The target
+        device is identified by the provisioning token, not by name.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReprovisionDeviceRequest'
+      responses:
+        '200':
+          description: Successfully reprovisioned the device.
           content:
             application/json:
               schema:
@@ -422,18 +453,31 @@ components:
         the JWT header (`jwk` parameter) and looking up the matching device record.
 
         '
+    ProvisioningToken:
+      type: http
+      scheme: bearer
+      description: 'Short-lived (5-minute) provisioning token used to bootstrap a
+        device''s identity on `POST /devices/provision` and `POST /devices/reprovision`.
+        Minted from the Miru dashboard (programmatic minting via the Platform API
+        is forthcoming) and sent as `Authorization: Bearer <token>`. A provisioning
+        token may be either device-bound (issued for a specific pre-created device
+        record, used by the dashboard activate/reprovision flow) or workspace-bound
+        (used for bulk provisioning, where the target device is selected or created
+        by `name` in the request body).
+
+        '
   schemas:
     APIVersion:
       type: string
       enum:
-      - v0.3
+      - v0.4
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 89b9ceb6f867793abdad6f3bd74b5d69b6de3d49
+      - 803226887930f13c669dbd98fc108b3ebfc2c443
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1194,8 +1238,31 @@ components:
           type: string
           example: Robot 1
           description: The name to assign to the device. Only meaningful for the `create`
-            capability; ignored by `activate` and `reactivate` because the device
-            already has a name.
+            capability; ignored by `activate` because the device already has a name.
+    ReprovisionDeviceRequest:
+      title: Reprovision Device Request
+      type: object
+      description: 'Reprovision an existing device. Reprovisioning rebinds the device
+        record to the calling physical machine: it invalidates any prior session,
+        registers the new public key, and triggers a redeploy of the device''s current
+        deployment. Deployment history is preserved across the swap. The device''s
+        name is not provided here because the target device record already has a name;
+        the device is identified by the provisioning token.'
+      required:
+      - public_key_pem
+      - agent_version
+      properties:
+        public_key_pem:
+          type: string
+          description: The public key in PEM format.
+          example: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END
+            PUBLIC KEY-----
+
+            '
+        agent_version:
+          type: string
+          description: The version of the agent the device is running.
+          example: v1.0.0
     TokenResponse:
       title: Token Response
       type: object
@@ -1291,7 +1358,7 @@ components:
       required: true
       schema:
         type: string
-        example: v0.3
+        example: v0.4
       description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id

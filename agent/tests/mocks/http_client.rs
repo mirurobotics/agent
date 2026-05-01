@@ -21,6 +21,7 @@ use tokio::time::Duration;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Call {
     ProvisionDevice,
+    ReprovisionDevice,
     IssueDeviceToken,
     UpdateDevice,
     GetDevice,
@@ -57,6 +58,7 @@ type GetDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
+    pub reprovision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
     pub issue_device_token_fn: Box<dyn Fn() -> Result<TokenResponse, HTTPErr> + Send + Sync>,
     pub update_device_fn: UpdateDeviceFn,
     pub get_device_fn: GetDeviceFn,
@@ -73,6 +75,7 @@ impl Default for MockClient {
     fn default() -> Self {
         Self {
             provision_device_fn: Box::new(|| Ok(Device::default())),
+            reprovision_device_fn: Box::new(|| Ok(Device::default())),
             issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
             update_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
             get_device_fn: Mutex::new(Box::new(|| Ok(Device::default()))),
@@ -193,6 +196,7 @@ impl MockClient {
         use reqwest::Method;
         match (method, path) {
             (m, p) if *m == Method::POST && p == "/devices/provision" => Call::ProvisionDevice,
+            (m, p) if *m == Method::POST && p == "/devices/reprovision" => Call::ReprovisionDevice,
             (m, p) if *m == Method::POST && p.ends_with("/devices/token") => Call::IssueDeviceToken,
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
             (m, p) if *m == Method::GET && p == "/device" => Call::GetDevice,
@@ -217,6 +221,7 @@ impl MockClient {
     fn handle_route(&self, call: &Call, path: &str) -> Result<String, HTTPErr> {
         match call {
             Call::ProvisionDevice => json(&(self.provision_device_fn)()?),
+            Call::ReprovisionDevice => json(&(self.reprovision_device_fn)()?),
             Call::IssueDeviceToken => json(&(self.issue_device_token_fn)()?),
             Call::UpdateDevice => json(&(self.update_device_fn.lock().unwrap())()?),
             Call::GetDevice => json(&(self.get_device_fn.lock().unwrap())()?),

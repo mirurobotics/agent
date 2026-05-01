@@ -1,9 +1,12 @@
 // internal crates
 use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
 use backend_api::models::{
-    Device, ProvisionDeviceRequest, TokenResponse, UpdateDeviceFromAgentRequest,
+    Device, ProvisionDeviceRequest, ReprovisionDeviceRequest, TokenResponse,
+    UpdateDeviceFromAgentRequest,
 };
-use miru_agent::http::devices::{self, IssueTokenParams, ProvisionParams, UpdateParams};
+use miru_agent::http::devices::{
+    self, IssueTokenParams, ProvisionParams, ReprovisionParams, UpdateParams,
+};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::HTTPErr;
 
@@ -64,6 +67,66 @@ pub mod provision {
         let result = devices::provision(
             &mock,
             ProvisionParams {
+                payload: &payload,
+                token: "test-token",
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(HTTPErr::MockErr(_))));
+    }
+}
+
+pub mod reprovision {
+    use super::*;
+
+    #[tokio::test]
+    async fn success() {
+        let mock = MockClient::default();
+
+        let payload = ReprovisionDeviceRequest {
+            public_key_pem: "test-pem".to_string(),
+            agent_version: "v0.0.0".to_string(),
+        };
+        let expected_body = serde_json::to_string(&payload).unwrap();
+
+        let result = devices::reprovision(
+            &mock,
+            ReprovisionParams {
+                payload: &payload,
+                token: "test-token",
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, Device::default());
+        assert_eq!(mock.call_count(Call::ReprovisionDevice), 1);
+        assert_eq!(
+            mock.requests(),
+            vec![CapturedRequest {
+                call: Call::ReprovisionDevice,
+                method: reqwest::Method::POST,
+                path: "/devices/reprovision".into(),
+                url: "http://mock/devices/reprovision".into(),
+                query: vec![],
+                body: Some(expected_body),
+                token: Some("test-token".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mock = MockClient {
+            reprovision_device_fn: Box::new(|| Err(mock_err())),
+            ..MockClient::default()
+        };
+
+        let payload = ReprovisionDeviceRequest::default();
+        let result = devices::reprovision(
+            &mock,
+            ReprovisionParams {
                 payload: &payload,
                 token: "test-token",
             },
