@@ -12,30 +12,46 @@ This plan lives in `plans/backlog/` of the agent repo because all code changes a
 
 ## Purpose / Big Picture
 
-After this change, the agent refuses to talk to backend or MQTT servers outside the `mirurobotics.com` family (with a loopback exception for local development). Today both endpoints are user-controlled at provisioning time and through the on-disk settings file with no validation, so a stolen settings file or a tampered provisioning command can silently redirect a device to an attacker-controlled host. After the change, an operator who runs `miru-agent --provision --backend-host=https://attacker.com ...` sees a clear error and exits non-zero, and an attacker who edits `settings.json` to contain `"base_url": "https://evilmirurobotics.com"` causes the agent to fail to read the file rather than connect to the wrong host. The validation rule applies symmetrically at both entry points (CLI and disk) and is implemented once in a shared helper.
+After this change, the agent refuses to talk to backend or MQTT servers outside the `mirurobotics.com` family (with a loopback exception for local development). Today both endpoints are user-controlled at provisioning time and through the on-disk settings file with no validation, so a stolen settings file or a tampered provisioning command can silently redirect a device to an attacker-controlled host. After the change, an operator who runs `miru-agent --provision --backend-host=https://attacker.com ...` sees a clear error and exits non-zero. An attacker who edits `settings.json` to contain `"base_url": "https://evilmirurobotics.com"` does **not** crash the daemon — instead, deserialization logs a warning and silently falls back to the trusted default, keeping the agent reachable on the known-good production host (see Decision Log entry on the late refactor). The validation rule applies symmetrically at both entry points (CLI and disk) and is implemented once in a shared helper.
 
 ## Progress
 
-- [ ] M1: Add the `url` crate to the workspace and to `agent/Cargo.toml`.
-- [ ] M2: Implement the shared validation module `agent/src/storage/validation.rs` with backend-URL and MQTT-host validators.
-- [ ] M3: Wire validation into `provision::entry::determine_settings`; surface errors via a new `ProvisionErr::InvalidSettingsErr` variant.
-- [ ] M4: Wire validation into the `Backend` and `MQTTBroker` `Deserialize` impls in `agent/src/storage/settings.rs` so a tampered settings file fails to deserialize.
-- [ ] M5: Add `ConnectAddress::validate` to enforce the `Protocol::SSL`-unless-loopback rule, called from `agent/src/main.rs::run_agent` before constructing `MqttOptions`.
-- [ ] M6: Run preflight; iterate until it reports `Preflight clean`.
-
-Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
+- [x] M1: Add the `url` crate to the workspace and to `agent/Cargo.toml`. (2026-04-28, commit `d4aa68e`)
+- [x] M2: Implement the shared validation module `agent/src/storage/validation.rs` with backend-URL and MQTT-host validators. (2026-04-28, commit `b7cecee`; defence-in-depth IP branch tested in `4a7c3ee`)
+- [x] M3: Wire validation into `provision::entry::determine_settings`; surface errors via a new `ProvisionErr::InvalidSettingsErr` variant. (2026-04-28, commit `de0f505`)
+- [x] M4: Wire validation into the `Backend` and `MQTTBroker` `Deserialize` impls in `agent/src/storage/settings.rs`. (2026-04-28, commits `c308f08` and `19ee1ac`. Behaviour changed late from hard-fail to silent-fallback-with-warning — see Decision Log.)
+- [x] M5: Add `ConnectAddress::validate` to enforce the `Protocol::SSL`-unless-loopback rule, called from `agent/src/main.rs::run_agent` before constructing `MqttOptions`. (2026-04-28, commit `cafa8ef`; later refactored in `19ee1ac` to fall back to the default broker on validation failure rather than `return`-aborting `run_agent`.)
+- [x] M6: Run preflight; iterate until it reports `Preflight clean`. (2026-04-28; tests in `ba6bbda`, `4a7c3ee`.)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The `url` crate was already present in `Cargo.lock` transitively, so M1 was effectively a declaration-only change with no resolution churn.
+- `Url::host_str()` preserves IPv6 brackets (e.g. `[::1]`), so the validator strips them before comparing against the loopback string set.
+- For the `https://attacker.com@api.mirurobotics.com` confusion attack, the `url` crate parses `attacker.com` as the **username** (no password). The userinfo check (`!username.is_empty() || password.is_some()`) catches it cleanly.
+- The defence-in-depth IP rejection inside `validate_backend_url` is unreachable through the public entry point today (any non-loopback IP is rejected by the allowed-domain check that runs first). It is exercised directly in unit tests so the guard stays correct if a future allowlist edit makes it reachable.
 
 ## Decision Log
 
-(Add entries as you go.)
+- **Late refactor: fall back instead of crash on invalid persisted settings (commit `19ee1ac`).** The original Milestone 4 design used `serde::de::Error::custom` to hard-fail deserialization, which would have caused `run_agent` to bail on a tampered `settings.json`. We changed this to log a warning and substitute the trusted default value because (a) the deserialize layer cannot meaningfully recover from a hard error — `run_agent` simply exits — leaving the device offline, and (b) the trusted defaults already point at the correct production hosts. The same reasoning applies to the runtime `ConnectAddress::validate` gate, which now warns and falls back to `ConnectAddress::default()` rather than `return`-aborting `run_agent`. The CLI provisioning path (`determine_settings`) still hard-fails on a disallowed override, because there the operator is interactively present and a loud error is the correct UX.
+- **`validate_mqtt_host` is intentionally thin (no URL parse).** MQTT broker host is a bare hostname, not a URL, so the helper only runs the loopback/allowed-domain string checks. The defence-in-depth IP rejection is duplicated implicitly: a non-loopback IP literal fails both `is_loopback_host` and `is_allowed_host`, which is enough.
+- **Defence-in-depth IP check kept despite being unreachable.** `reject_non_loopback_ip` runs after `is_allowed_host` succeeds; today no `mirurobotics.com` host parses as an IP, so the branch is dead. We kept it (and unit-tested it directly via `pub(crate)`) as a guard against future allowlist edits that admit literal IPs.
+- **Symmetric error message format.** All three entry points (`determine_settings`, `Backend`/`MQTTBroker` deserialize, `ConnectAddress::validate`) include the offending value verbatim in the error/warning message so operators can grep logs and identify the bad host.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Shipped:
+
+- A single shared `agent/src/storage/validation.rs` module with `validate_backend_url`, `validate_mqtt_host`, `is_loopback_host`, and `reject_non_loopback_ip` (`pub(crate)` for direct testing).
+- Three entry-point gates: provisioning CLI override (hard-fail), persisted settings deserialize (warn + fallback), runtime MQTT `ConnectAddress` (warn + fallback). All three reuse the same shared helpers.
+- Symmetric test coverage in `agent/tests/storage/validation.rs`, `agent/tests/storage/settings.rs`, `agent/tests/provision/entry.rs`, and `agent/tests/mqtt/options.rs`, including suffix-defeat (`evilmirurobotics.com`, `mqtt.mirurobotics.com.attacker.com`), userinfo-confusion, and private-IP cases.
+- New error types `ProvisionErr::InvalidSettingsErr` and `mqtt::errors::InvalidConnectAddressErr` following the existing `thiserror` + `crate::errors::Error` pattern.
+
+Preflight: clean.
+
+Lessons:
+
+- For settings loaded from disk, "fail loud" is the wrong default in a daemon: it converts a tampered or partially-corrupted config into a complete outage. "Warn + fall back to known-good default" preserves uptime while still surfacing the issue in logs. We did not catch this until after the initial implementation landed and ended up reworking M4/M5 (commit `19ee1ac`).
+- For an interactive CLI path (`miru-agent --provision`), the opposite is correct: hard-fail with a clear message so the operator notices immediately.
 
 ## Context and Orientation
 
