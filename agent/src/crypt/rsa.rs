@@ -10,31 +10,9 @@ use crate::trace;
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::Rsa;
+use openssl::sha::sha256;
 use openssl::sign::{Signer, Verifier};
 use secrecy::ExposeSecret;
-use serde::Serialize;
-
-/// JSON Web Key (RFC 7517) representation of an RSA public key.
-///
-/// Field order on the wire is `kty`, `n`, `e` because `serde_json` preserves
-/// struct field declaration order; the server parses the JSON without caring
-/// about order, but tests assert stability for fingerprinting.
-#[derive(Serialize, Debug, PartialEq, Eq)]
-pub struct Jwk {
-    pub kty: &'static str,
-    pub n: String,
-    pub e: String,
-}
-
-/// Serialize an RSA public key as a JWK (RFC 7517) with `n` and `e` as big-endian
-/// base64url-no-pad-encoded byte strings.
-pub fn pub_key_to_jwk(key: &Rsa<Public>) -> Jwk {
-    Jwk {
-        kty: "RSA",
-        n: crate::crypt::base64::encode_bytes_url_safe_no_pad(&key.n().to_vec()),
-        e: crate::crypt::base64::encode_bytes_url_safe_no_pad(&key.e().to_vec()),
-    }
-}
 
 /// Maps an `openssl::error::ErrorStack` to a `CryptErr` variant. The variant name and
 /// inner struct name must match (e.g. `SignDataErr` maps to `CryptErr::SignDataErr(SignDataErr { .. })`).
@@ -121,6 +99,19 @@ pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Publ
         ReadKeyErr,
         Rsa::public_key_from_pem(public_key_pem.expose_secret())
     )
+}
+
+/// Canonical fingerprint of an RSA public key: lowercase hex SHA-256 over the
+/// DER-encoded SubjectPublicKeyInfo
+pub fn fingerprint(key: &Rsa<Public>) -> Result<String, CryptErr> {
+    let der = ssl_err!(ConvertPublicKeyToDERErr, key.public_key_to_der())?;
+    let digest = sha256(&der);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+    }
+    Ok(out)
 }
 
 async fn sign(

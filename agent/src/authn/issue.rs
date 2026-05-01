@@ -17,7 +17,7 @@ use uuid::Uuid;
 struct JwtHeader {
     alg: &'static str,
     typ: &'static str,
-    jwk: rsa::Jwk,
+    kid: String,
 }
 
 #[derive(Serialize)]
@@ -56,18 +56,20 @@ pub async fn issue_token(
 }
 
 /// Build a self-signed RS512 JWT (RFC 7519) whose header carries the device's public
-/// key as a JWK (RFC 7517). The payload contains a unique `jti`, the current `iat`, and
-/// an `exp` two minutes in the future.
+/// key fingerprint as `kid` (RFC 7515 §4.1.4). The backend looks up the enrolled device
+/// by this fingerprint and verifies the signature with the stored public key. The
+/// payload contains a unique `jti`, the current `iat`, and an `exp` two minutes in the
+/// future.
 pub async fn mint_jwt(private_key_file: &File, public_key_file: &File) -> Result<String, AuthnErr> {
-    // load the public key and serialize it as a JWK
+    // load the public key and compute its canonical fingerprint
     let public_key = rsa::read_public_key(public_key_file).await?;
-    let jwk = rsa::pub_key_to_jwk(&public_key);
+    let kid = rsa::fingerprint(&public_key)?;
 
     // build header and payload
     let header = JwtHeader {
         alg: "RS512",
         typ: "JWT",
-        jwk,
+        kid,
     };
     let now = Utc::now();
     let exp = now + Duration::minutes(2);

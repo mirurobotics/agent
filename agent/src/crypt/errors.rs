@@ -57,6 +57,15 @@ pub struct ConvertPublicKeyToPEMErr {
 impl crate::errors::Error for ConvertPublicKeyToPEMErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("Convert public key to DER error: {source}")]
+pub struct ConvertPublicKeyToDERErr {
+    pub source: openssl::error::ErrorStack,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ConvertPublicKeyToDERErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("Generate RSA key pair error: {source}")]
 pub struct GenerateRSAKeyPairErr {
     pub source: openssl::error::ErrorStack,
@@ -118,6 +127,8 @@ pub enum CryptErr {
     #[error(transparent)]
     ConvertPublicKeyToPEMErr(ConvertPublicKeyToPEMErr),
     #[error(transparent)]
+    ConvertPublicKeyToDERErr(ConvertPublicKeyToDERErr),
+    #[error(transparent)]
     GenerateRSAKeyPairErr(GenerateRSAKeyPairErr),
     #[error(transparent)]
     ReadKeyErr(ReadKeyErr),
@@ -143,6 +154,7 @@ crate::impl_error!(CryptErr {
     ConvertBytesToStringErr,
     ConvertPrivateKeyToPEMErr,
     ConvertPublicKeyToPEMErr,
+    ConvertPublicKeyToDERErr,
     GenerateRSAKeyPairErr,
     ReadKeyErr,
     RSAToPKeyErr,

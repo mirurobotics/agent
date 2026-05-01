@@ -154,7 +154,7 @@ mod mint_jwt {
     }
 
     #[tokio::test]
-    async fn header_decodes_to_rs512_with_jwk() {
+    async fn header_decodes_to_rs512_with_kid() {
         let (_dir, private_key_file, public_key_file) = generate_keys().await;
         let jwt = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();
@@ -163,9 +163,14 @@ mod mint_jwt {
 
         assert_eq!("RS512", header["alg"]);
         assert_eq!("JWT", header["typ"]);
-        assert_eq!("RSA", header["jwk"]["kty"]);
-        assert!(!header["jwk"]["n"].as_str().unwrap().is_empty());
-        assert!(!header["jwk"]["e"].as_str().unwrap().is_empty());
+
+        // kid is the SHA-256 of DER PKIX SPKI bytes as 64-char lowercase hex.
+        // The backend uses this to look up the enrolled device.
+        let kid = header["kid"].as_str().unwrap();
+        let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
+        let expected_kid = rsa::fingerprint(&public_key).unwrap();
+        assert_eq!(kid, expected_kid);
+        assert_eq!(kid.len(), 64);
     }
 
     #[tokio::test]

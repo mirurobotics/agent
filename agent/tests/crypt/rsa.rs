@@ -5,9 +5,9 @@ use std::os::unix::fs::PermissionsExt;
 use miru_agent::crypt::{rsa, CryptErr};
 use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 
-pub mod pub_key_to_jwk {
+pub mod fingerprint {
     use super::*;
-    use miru_agent::crypt::rsa::pub_key_to_jwk;
+    use miru_agent::crypt::rsa::fingerprint;
 
     #[tokio::test]
     async fn success_deterministic_for_known_key() {
@@ -22,40 +22,38 @@ pub mod pub_key_to_jwk {
             .unwrap();
 
         let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
-        let jwk_a = pub_key_to_jwk(&public_key);
-        let jwk_b = pub_key_to_jwk(&public_key);
+        let fp_a = fingerprint(&public_key).unwrap();
+        let fp_b = fingerprint(&public_key).unwrap();
 
-        // deterministic: two calls yield the same struct
-        assert_eq!(jwk_a, jwk_b);
+        // deterministic: two calls yield the same fingerprint
+        assert_eq!(fp_a, fp_b);
 
-        // shape: kty is RSA, n and e are non-empty url-safe-no-pad strings
-        assert_eq!(jwk_a.kty, "RSA");
-        assert!(!jwk_a.n.is_empty());
-        assert!(!jwk_a.e.is_empty());
-        let url_safe = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-        assert!(jwk_a.n.chars().all(url_safe));
-        assert!(jwk_a.e.chars().all(url_safe));
+        // shape: 64-char lowercase hex
+        assert_eq!(fp_a.len(), 64);
+        assert!(fp_a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[tokio::test]
-    async fn serialized_json_field_order() {
+    async fn differs_across_keys() {
         let crypt_dir = filesys::Dir::create_temp_dir("crypt_rsa_test")
             .await
             .unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
-
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
+        let priv1 = filesys::File::new(crypt_dir.path().join("priv1.pem"));
+        let pub1 = filesys::File::new(crypt_dir.path().join("pub1.pem"));
+        rsa::gen_key_pair(2048, &priv1, &pub1, Overwrite::Allow)
+            .await
+            .unwrap();
+        let priv2 = filesys::File::new(crypt_dir.path().join("priv2.pem"));
+        let pub2 = filesys::File::new(crypt_dir.path().join("pub2.pem"));
+        rsa::gen_key_pair(2048, &priv2, &pub2, Overwrite::Allow)
             .await
             .unwrap();
 
-        let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
-        let jwk = pub_key_to_jwk(&public_key);
-        let serialized = serde_json::to_string(&jwk).unwrap();
-
-        assert!(serialized.contains(r#""kty":"RSA""#));
-        assert!(serialized.contains(r#""n":"#));
-        assert!(serialized.contains(r#""e":"#));
+        let key1 = rsa::read_public_key(&pub1).await.unwrap();
+        let key2 = rsa::read_public_key(&pub2).await.unwrap();
+        assert_ne!(fingerprint(&key1).unwrap(), fingerprint(&key2).unwrap());
     }
 }
 
