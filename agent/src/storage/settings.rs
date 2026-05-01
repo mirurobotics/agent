@@ -1,7 +1,7 @@
 // internal crates
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
-use crate::storage::validation;
+use crate::storage::validation::{BackendUrl, MqttHost};
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -90,13 +90,13 @@ impl<'de> Deserialize<'de> for Settings {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Backend {
-    pub base_url: String,
+    pub base_url: BackendUrl,
 }
 
 impl Default for Backend {
     fn default() -> Self {
         Self {
-            base_url: "https://api.mirurobotics.com/agent/v1".to_string(),
+            base_url: BackendUrl::default(),
         }
     }
 }
@@ -108,6 +108,9 @@ impl<'de> Deserialize<'de> for Backend {
     {
         #[derive(Deserialize)]
         struct DeserializeBackend {
+            // The on-disk shape is a string; we run the validating constructor
+            // ourselves below so that an invalid value warns and falls back to
+            // the default rather than failing the whole deserialize.
             base_url: Option<String>,
         }
 
@@ -121,15 +124,15 @@ impl<'de> Deserialize<'de> for Backend {
             }
         };
 
-        let base_url = result
-            .base_url
-            .unwrap_or_else(|| deserialize_warn!("backend", "base_url", default.base_url));
-        let base_url = match validation::validate_backend_url(&base_url) {
-            Ok(_) => base_url,
+        let raw = result.base_url.unwrap_or_else(|| {
+            deserialize_warn!("backend", "base_url", default.base_url.as_str().to_string())
+        });
+        let base_url = match BackendUrl::new(&raw) {
+            Ok(url) => url,
             Err(msg) => {
-                let fallback = Backend::default().base_url;
+                let fallback = BackendUrl::default();
                 warn!(
-                    "backend.base_url `{base_url}` rejected ({msg}); falling back to default `{fallback}`"
+                    "backend.base_url `{raw}` rejected ({msg}); falling back to default `{fallback}`"
                 );
                 fallback
             }
@@ -140,13 +143,13 @@ impl<'de> Deserialize<'de> for Backend {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct MQTTBroker {
-    pub host: String,
+    pub host: MqttHost,
 }
 
 impl Default for MQTTBroker {
     fn default() -> Self {
         Self {
-            host: "mqtt.mirurobotics.com".to_string(),
+            host: MqttHost::default(),
         }
     }
 }
@@ -158,6 +161,9 @@ impl<'de> Deserialize<'de> for MQTTBroker {
     {
         #[derive(Deserialize)]
         struct DeserializeMQTTBroker {
+            // The on-disk shape is a string; we run the validating constructor
+            // ourselves below so that an invalid value warns and falls back to
+            // the default rather than failing the whole deserialize.
             host: Option<String>,
         }
 
@@ -171,15 +177,15 @@ impl<'de> Deserialize<'de> for MQTTBroker {
             }
         };
 
-        let host = result
-            .host
-            .unwrap_or_else(|| deserialize_warn!("mqtt_broker", "host", default.host));
-        let host = match validation::validate_mqtt_host(&host) {
-            Ok(()) => host,
+        let raw = result.host.unwrap_or_else(|| {
+            deserialize_warn!("mqtt_broker", "host", default.host.as_str().to_string())
+        });
+        let host = match MqttHost::new(&raw) {
+            Ok(host) => host,
             Err(msg) => {
-                let fallback = MQTTBroker::default().host;
+                let fallback = MqttHost::default();
                 warn!(
-                    "mqtt_broker.host `{host}` rejected ({msg}); falling back to default `{fallback}`"
+                    "mqtt_broker.host `{raw}` rejected ({msg}); falling back to default `{fallback}`"
                 );
                 fallback
             }

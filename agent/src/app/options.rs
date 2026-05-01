@@ -4,7 +4,7 @@ use std::time::Duration;
 // internal crates
 use crate::deploy::fsm;
 use crate::server;
-use crate::storage::{Capacities, Layout};
+use crate::storage::{validation::BackendUrl, Capacities, Layout};
 use crate::workers::{mqtt, poller, token_refresh::TokenRefreshWorkerOptions};
 
 #[derive(Debug, Clone, Copy)]
@@ -42,7 +42,7 @@ pub struct AppOptions {
     pub token_refresh_worker: TokenRefreshWorkerOptions,
     pub dpl_retry_policy: fsm::RetryPolicy,
 
-    pub backend_base_url: String,
+    pub backend_base_url: BackendUrl,
 
     pub enable_socket_server: bool,
     pub server: server::Options,
@@ -63,7 +63,7 @@ impl Default for AppOptions {
             token_refresh_worker: TokenRefreshWorkerOptions::default(),
             dpl_retry_policy: fsm::RetryPolicy::default(),
 
-            backend_base_url: "https://api.mirurobotics.com/agent/v1".to_string(),
+            backend_base_url: BackendUrl::default(),
 
             enable_socket_server: true,
             server: server::Options::default(),
