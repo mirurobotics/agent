@@ -305,6 +305,7 @@ mod poll_error_classification {
     use super::*;
     use miru_agent::mqtt::client::poll;
     use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol};
+    use miru_agent::storage::validation::MqttHost;
 
     // poll() classifies ConnectionError variants into MQTTError types.
     // We can't inject errors into an EventLoop directly, but we can
@@ -319,7 +320,7 @@ mod poll_error_classification {
         })
         .with_connect_address(ConnectAddress {
             protocol: Protocol::TCP,
-            broker: "127.0.0.1".to_string(),
+            broker: MqttHost::new("127.0.0.1").unwrap(),
             port: 1, // unlikely to have anything listening
         });
 

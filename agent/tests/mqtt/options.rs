@@ -3,6 +3,7 @@ use std::time::Duration;
 
 // internal crates
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
+use miru_agent::storage::validation::MqttHost;
 
 mod connect_address {
     use super::*;
@@ -11,105 +12,48 @@ mod connect_address {
     fn default() {
         let addr = ConnectAddress::default();
         assert!(matches!(addr.protocol, Protocol::SSL));
-        assert_eq!(addr.broker, "mqtt.mirurobotics.com");
+        assert_eq!(addr.broker.as_str(), "mqtt.mirurobotics.com");
         assert_eq!(addr.port, 8883);
     }
 }
 
-mod validate {
+mod connect_address_new {
     use super::*;
 
-    #[test]
-    fn accepts_default() {
-        ConnectAddress::default().validate().unwrap();
-    }
+    // Host validity is statically guaranteed by `MqttHost`. The constructor
+    // exists to enforce the residual SSL-unless-loopback rule.
 
     #[test]
     fn accepts_loopback_tcp() {
-        let addr = ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: "localhost".into(),
-            port: 1883,
-        };
-        addr.validate().unwrap();
+        ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
     }
 
     #[test]
     fn accepts_loopback_ssl() {
-        let addr = ConnectAddress {
-            protocol: Protocol::SSL,
-            broker: "127.0.0.1".into(),
-            port: 8883,
-        };
-        addr.validate().unwrap();
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::SSL, 8883).unwrap();
     }
 
     #[test]
     fn accepts_allowed_host_ssl() {
-        let addr = ConnectAddress {
-            protocol: Protocol::SSL,
-            broker: "mqtt.mirurobotics.com".into(),
-            port: 8883,
-        };
-        addr.validate().unwrap();
+        ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::SSL,
+            8883,
+        )
+        .unwrap();
     }
 
     #[test]
     fn rejects_allowed_host_tcp() {
-        let addr = ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: "mqtt.mirurobotics.com".into(),
-            port: 1883,
-        };
-        let err = addr.validate().unwrap_err();
+        let err = ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::TCP,
+            1883,
+        )
+        .unwrap_err();
         assert!(
             err.msg.contains("Protocol::SSL"),
             "expected SSL-rule message, got: {}",
-            err.msg
-        );
-    }
-
-    #[test]
-    fn rejects_disallowed_host_ssl() {
-        let addr = ConnectAddress {
-            protocol: Protocol::SSL,
-            broker: "evilmirurobotics.com".into(),
-            port: 8883,
-        };
-        let err = addr.validate().unwrap_err();
-        assert!(
-            err.msg.contains("evilmirurobotics.com"),
-            "expected host name in message, got: {}",
-            err.msg
-        );
-    }
-
-    #[test]
-    fn rejects_suffix_attack() {
-        let addr = ConnectAddress {
-            protocol: Protocol::SSL,
-            broker: "mqtt.mirurobotics.com.attacker.com".into(),
-            port: 8883,
-        };
-        let err = addr.validate().unwrap_err();
-        assert!(
-            err.msg.contains("attacker.com"),
-            "expected attacker host in message, got: {}",
-            err.msg
-        );
-    }
-
-    #[test]
-    fn rejects_private_ip() {
-        let addr = ConnectAddress {
-            protocol: Protocol::SSL,
-            broker: "192.168.1.1".into(),
-            port: 8883,
-        };
-        let err = addr.validate().unwrap_err();
-        assert!(
-            err.msg.contains("192.168.1.1"),
-            "expected IP in message, got: {}",
             err.msg
         );
     }
@@ -189,12 +133,12 @@ mod opts {
     fn with_connect_address() {
         let addr = ConnectAddress {
             protocol: Protocol::TCP,
-            broker: "local".to_string(),
+            broker: MqttHost::new("localhost").unwrap(),
             port: 1883,
         };
         let opts = Options::default().with_connect_address(addr);
         assert!(matches!(opts.connect_address.protocol, Protocol::TCP));
-        assert_eq!(opts.connect_address.broker, "local");
+        assert_eq!(opts.connect_address.broker.as_str(), "localhost");
         assert_eq!(opts.connect_address.port, 1883);
     }
 
