@@ -7,6 +7,7 @@ use crate::mocks::mqtt_client as mock;
 use miru_agent::errors::Error;
 use miru_agent::mqtt::client::{poll, Publish};
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
+use miru_agent::storage::validation::MqttHost;
 use miru_agent::mqtt::{Client, ClientI, MQTTError};
 
 // external crates
@@ -24,7 +25,7 @@ async fn test_mqtt_client() {
     })
     .with_connect_address(ConnectAddress {
         protocol: Protocol::TCP,
-        broker: "127.0.0.1".to_string(),
+        broker: MqttHost::new("127.0.0.1").unwrap(),
         port: 18831,
     });
 
@@ -62,8 +63,11 @@ async fn invalid_broker_url() {
     })
     .with_connect_address(ConnectAddress {
         protocol: Protocol::TCP,
-        broker: "192.0.2.1".to_string(),
-        port: 1883,
+        // Loopback on a port nothing's listening on — exercises the network
+        // connection error path without needing an external unreachable IP
+        // (which the `MqttHost` newtype would reject anyway).
+        broker: MqttHost::new("127.0.0.1").unwrap(),
+        port: 1,
     });
 
     // create the client and subscribe to the device sync topic
@@ -87,7 +91,7 @@ async fn invalid_username_or_password() {
     })
     .with_connect_address(ConnectAddress {
         protocol: Protocol::TCP,
-        broker: "127.0.0.1".to_string(),
+        broker: MqttHost::new("127.0.0.1").unwrap(),
         port: 18832,
     });
 
@@ -106,7 +110,7 @@ fn mqtt_options() -> Options {
     })
     .with_connect_address(ConnectAddress {
         protocol: Protocol::TCP,
-        broker: "127.0.0.1".to_string(),
+        broker: MqttHost::new("127.0.0.1").unwrap(),
         port: 1,
     })
 }

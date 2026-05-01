@@ -1,32 +1,32 @@
 // internal crates
-use miru_agent::storage::validation::{validate_backend_url, validate_mqtt_host};
+use miru_agent::storage::validation::{BackendUrl, MqttHost};
 
-mod validate_backend_url {
+mod backend_url_new {
     use super::*;
 
     #[test]
     fn accepts_https_allowed_domain_with_path() {
-        validate_backend_url("https://api.mirurobotics.com/agent/v1").unwrap();
+        BackendUrl::new("https://api.mirurobotics.com/agent/v1").unwrap();
     }
 
     #[test]
     fn accepts_https_subdomain() {
-        validate_backend_url("https://staging.mirurobotics.com/x").unwrap();
+        BackendUrl::new("https://staging.mirurobotics.com/x").unwrap();
     }
 
     #[test]
     fn accepts_http_loopback_localhost() {
-        validate_backend_url("http://localhost:8080").unwrap();
+        BackendUrl::new("http://localhost:8080").unwrap();
     }
 
     #[test]
     fn accepts_http_loopback_ipv4() {
-        validate_backend_url("http://127.0.0.1:8080").unwrap();
+        BackendUrl::new("http://127.0.0.1:8080").unwrap();
     }
 
     #[test]
     fn rejects_http_non_loopback() {
-        let err = validate_backend_url("http://api.mirurobotics.com").unwrap_err();
+        let err = BackendUrl::new("http://api.mirurobotics.com").unwrap_err();
         assert!(
             err.contains("https"),
             "expected scheme-rule message, got: {err}"
@@ -35,7 +35,7 @@ mod validate_backend_url {
 
     #[test]
     fn rejects_suffix_attack_no_leading_dot() {
-        let err = validate_backend_url("https://evilmirurobotics.com").unwrap_err();
+        let err = BackendUrl::new("https://evilmirurobotics.com").unwrap_err();
         assert!(
             err.contains("evilmirurobotics.com"),
             "expected host name in message, got: {err}"
@@ -44,7 +44,7 @@ mod validate_backend_url {
 
     #[test]
     fn rejects_suffix_attack_wrong_end() {
-        let err = validate_backend_url("https://api.mirurobotics.com.attacker.com").unwrap_err();
+        let err = BackendUrl::new("https://api.mirurobotics.com.attacker.com").unwrap_err();
         assert!(
             err.contains("attacker.com"),
             "expected attacker host in message, got: {err}"
@@ -53,7 +53,7 @@ mod validate_backend_url {
 
     #[test]
     fn rejects_userinfo_explicit() {
-        let err = validate_backend_url("https://user:pass@api.mirurobotics.com").unwrap_err();
+        let err = BackendUrl::new("https://user:pass@api.mirurobotics.com").unwrap_err();
         assert!(
             err.contains("userinfo"),
             "expected userinfo message, got: {err}"
@@ -64,7 +64,7 @@ mod validate_backend_url {
     fn rejects_userinfo_confusion() {
         // The Url crate parses host=`api.mirurobotics.com`, username=`attacker.com`
         // (no password). The userinfo check still rejects on non-empty username.
-        let err = validate_backend_url("https://attacker.com@api.mirurobotics.com").unwrap_err();
+        let err = BackendUrl::new("https://attacker.com@api.mirurobotics.com").unwrap_err();
         assert!(
             err.contains("userinfo"),
             "expected userinfo message, got: {err}"
@@ -73,7 +73,7 @@ mod validate_backend_url {
 
     #[test]
     fn rejects_private_ip() {
-        let err = validate_backend_url("https://192.168.1.1").unwrap_err();
+        let err = BackendUrl::new("https://192.168.1.1").unwrap_err();
         assert!(
             err.contains("192.168.1.1"),
             "expected IP host in message, got: {err}"
@@ -82,52 +82,86 @@ mod validate_backend_url {
 
     #[test]
     fn rejects_disallowed_scheme() {
-        let err = validate_backend_url("ftp://api.mirurobotics.com").unwrap_err();
+        let err = BackendUrl::new("ftp://api.mirurobotics.com").unwrap_err();
         assert!(err.contains("ftp"), "expected scheme name, got: {err}");
     }
 
     #[test]
     fn rejects_unparseable_url() {
         // Not a valid URL at all — the Url crate fails to parse it.
-        let err = validate_backend_url("not a url").unwrap_err();
+        let err = BackendUrl::new("not a url").unwrap_err();
         assert!(
             err.contains("invalid URL"),
             "expected parse error message, got: {err}"
         );
     }
+
+    #[test]
+    fn default_is_valid_production_url() {
+        // The Default impl uses `expect`; this test fails loudly if the
+        // default constant ever stops being valid.
+        let url = BackendUrl::default();
+        assert_eq!(url.as_str(), "https://api.mirurobotics.com/agent/v1");
+    }
+
+    #[test]
+    fn deserialize_accepts_valid_url() {
+        let url: BackendUrl =
+            serde_json::from_str("\"https://api.mirurobotics.com/agent/v1\"").unwrap();
+        assert_eq!(url.as_str(), "https://api.mirurobotics.com/agent/v1");
+    }
+
+    #[test]
+    fn deserialize_rejects_invalid_url() {
+        // The newtype's own Deserialize is strict. The warn-and-fall-back
+        // semantics live one layer up in `Backend::deserialize`.
+        let err =
+            serde_json::from_str::<BackendUrl>("\"https://evilmirurobotics.com\"").unwrap_err();
+        assert!(
+            err.to_string().contains("evilmirurobotics.com"),
+            "expected host in message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn serialize_round_trip() {
+        let url = BackendUrl::new("https://staging.mirurobotics.com/x").unwrap();
+        let json = serde_json::to_string(&url).unwrap();
+        assert_eq!(json, "\"https://staging.mirurobotics.com/x\"");
+    }
 }
 
-mod validate_mqtt_host {
+mod mqtt_host_new {
     use super::*;
 
     #[test]
     fn accepts_subdomain() {
-        validate_mqtt_host("mqtt.mirurobotics.com").unwrap();
+        MqttHost::new("mqtt.mirurobotics.com").unwrap();
     }
 
     #[test]
     fn accepts_localhost() {
-        validate_mqtt_host("localhost").unwrap();
+        MqttHost::new("localhost").unwrap();
     }
 
     #[test]
     fn accepts_loopback_ipv4() {
-        validate_mqtt_host("127.0.0.1").unwrap();
+        MqttHost::new("127.0.0.1").unwrap();
     }
 
     #[test]
     fn accepts_loopback_ipv6() {
-        validate_mqtt_host("::1").unwrap();
+        MqttHost::new("::1").unwrap();
     }
 
     #[test]
     fn accepts_exact_allowed_domain() {
-        validate_mqtt_host("mirurobotics.com").unwrap();
+        MqttHost::new("mirurobotics.com").unwrap();
     }
 
     #[test]
     fn rejects_suffix_attack_no_leading_dot() {
-        let err = validate_mqtt_host("evilmirurobotics.com").unwrap_err();
+        let err = MqttHost::new("evilmirurobotics.com").unwrap_err();
         assert!(
             err.contains("evilmirurobotics.com"),
             "expected host in message, got: {err}"
@@ -136,7 +170,7 @@ mod validate_mqtt_host {
 
     #[test]
     fn rejects_suffix_attack_wrong_end() {
-        let err = validate_mqtt_host("mqtt.mirurobotics.com.attacker.com").unwrap_err();
+        let err = MqttHost::new("mqtt.mirurobotics.com.attacker.com").unwrap_err();
         assert!(
             err.contains("attacker.com"),
             "expected attacker host in message, got: {err}"
@@ -145,10 +179,39 @@ mod validate_mqtt_host {
 
     #[test]
     fn rejects_private_ip() {
-        let err = validate_mqtt_host("192.168.1.1").unwrap_err();
+        let err = MqttHost::new("192.168.1.1").unwrap_err();
         assert!(
             err.contains("192.168.1.1"),
             "expected IP in message, got: {err}"
         );
+    }
+
+    #[test]
+    fn default_is_valid_production_host() {
+        let host = MqttHost::default();
+        assert_eq!(host.as_str(), "mqtt.mirurobotics.com");
+    }
+
+    #[test]
+    fn deserialize_accepts_valid_host() {
+        let host: MqttHost = serde_json::from_str("\"mqtt.mirurobotics.com\"").unwrap();
+        assert_eq!(host.as_str(), "mqtt.mirurobotics.com");
+    }
+
+    #[test]
+    fn deserialize_rejects_invalid_host() {
+        // Newtype Deserialize is strict; settings-layer impls handle fall-back.
+        let err = serde_json::from_str::<MqttHost>("\"evilmirurobotics.com\"").unwrap_err();
+        assert!(
+            err.to_string().contains("evilmirurobotics.com"),
+            "expected host in message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn serialize_round_trip() {
+        let host = MqttHost::new("mqtt.mirurobotics.com").unwrap();
+        let json = serde_json::to_string(&host).unwrap();
+        assert_eq!(json, "\"mqtt.mirurobotics.com\"");
     }
 }

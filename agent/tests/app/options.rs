@@ -51,7 +51,7 @@ pub mod app_options_default {
     #[test]
     fn backend_base_url() {
         assert_eq!(
-            AppOptions::default().backend_base_url,
+            AppOptions::default().backend_base_url.as_str(),
             "https://api.mirurobotics.com/agent/v1"
         );
     }
