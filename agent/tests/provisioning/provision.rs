@@ -38,10 +38,14 @@ pub mod provision_fn {
         let env = Env::new("provision-test").await;
         let mock = mock_failing_provision();
 
-        let result = provision::provision(&mock, &env.layout, &env.settings, &env.token, None).await;
+        let result =
+            provision::provision(&mock, &env.layout, &env.settings, &env.token, None).await;
 
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
-        assert!(!env.layout.device().exists(), "device.json should not exist");
+        assert!(
+            !env.layout.device().exists(),
+            "device.json should not exist"
+        );
         assert!(!env.layout.temp_dir().exists(), "temp dir not cleaned");
 
         env.cleanup().await;
@@ -162,6 +166,33 @@ pub mod provision_fn {
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
         snapshot.assert_unchanged(&env.layout).await;
         assert!(!env.layout.temp_dir().exists(), "temp dir not cleaned");
+
+        env.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn short_circuit_with_unparseable_device_json_returns_unknown_name() {
+        let env = Env::new("provision-test").await;
+        env.seed_provision("initial").await;
+
+        // corrupt device.json so read_json fails, but keep the keys intact so
+        // assert_activated still succeeds and the short-circuit branch runs
+        env.layout
+            .device()
+            .write_string("not valid json", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // a failing mock — short-circuit must still fire even when device.json
+        // is unreadable, so the backend should never be called
+        let mock = mock_failing_provision();
+        let outcome = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
+            .await
+            .unwrap();
+
+        assert!(outcome.already_provisioned);
+        assert_eq!(outcome.device_name, "unknown");
+        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
 
         env.cleanup().await;
     }

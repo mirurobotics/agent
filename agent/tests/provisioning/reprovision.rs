@@ -32,9 +32,18 @@ pub mod reprovision_fn {
             .expect("expected a reprovision request");
         let body = captured.body.as_ref().expect("expected body to be present");
         let body_value: serde_json::Value = serde_json::from_str(body).unwrap();
-        assert!(body_value.get("public_key_pem").is_some(), "missing public_key_pem in {body}");
-        assert!(body_value.get("agent_version").is_some(), "missing agent_version in {body}");
-        assert!(body_value.get("name").is_none(), "unexpected name field in {body}");
+        assert!(
+            body_value.get("public_key_pem").is_some(),
+            "missing public_key_pem in {body}"
+        );
+        assert!(
+            body_value.get("agent_version").is_some(),
+            "missing agent_version in {body}"
+        );
+        assert!(
+            body_value.get("name").is_none(),
+            "unexpected name field in {body}"
+        );
 
         env.cleanup().await;
     }
@@ -67,7 +76,10 @@ pub mod reprovision_fn {
             .unwrap();
 
         let priv_after = env.layout.auth().private_key().read_string().await.unwrap();
-        assert_ne!(priv_before, priv_after, "expected fresh keypair after reprovision");
+        assert_ne!(
+            priv_before, priv_after,
+            "expected fresh keypair after reprovision"
+        );
 
         env.cleanup().await;
     }

@@ -90,7 +90,11 @@ pub(super) fn mock_ok_provision(name: impl Into<String>) -> MockClient {
 /// MockClient that returns a network-flagged HTTP error for `/devices/provision`.
 pub(super) fn mock_failing_provision() -> MockClient {
     MockClient {
-        provision_device_fn: Box::new(|| Err(HTTPErr::MockErr(MockErr { is_network_conn_err: true }))),
+        provision_device_fn: Box::new(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        }),
         ..MockClient::default()
     }
 }
@@ -107,7 +111,11 @@ pub(super) fn mock_ok_reprovision(name: impl Into<String>) -> MockClient {
 /// MockClient that returns a network-flagged HTTP error for `/devices/reprovision`.
 pub(super) fn mock_failing_reprovision() -> MockClient {
     MockClient {
-        reprovision_device_fn: Box::new(|| Err(HTTPErr::MockErr(MockErr { is_network_conn_err: true }))),
+        reprovision_device_fn: Box::new(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        }),
         ..MockClient::default()
     }
 }
@@ -159,9 +167,18 @@ impl StorageSnapshot {
     pub async fn assert_unchanged(&self, layout: &Layout) {
         let auth = layout.auth();
         assert_eq!(layout.device().read_string().await.unwrap(), self.device);
-        assert_eq!(layout.settings().read_string().await.unwrap(), self.settings);
-        assert_eq!(auth.private_key().read_string().await.unwrap(), self.private_key);
-        assert_eq!(auth.public_key().read_string().await.unwrap(), self.public_key);
+        assert_eq!(
+            layout.settings().read_string().await.unwrap(),
+            self.settings
+        );
+        assert_eq!(
+            auth.private_key().read_string().await.unwrap(),
+            self.private_key
+        );
+        assert_eq!(
+            auth.public_key().read_string().await.unwrap(),
+            self.public_key
+        );
         assert_eq!(auth.token().read_string().await.unwrap(), self.token);
     }
 }
