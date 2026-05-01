@@ -18,14 +18,9 @@ User-visible behavior is unchanged. The `19ee1ac` warn-and-fall-back semantics f
 
 ## Progress
 
-- [ ] M1: Introduce `BackendUrl` and `MqttHost` newtypes in `agent/src/storage/validation.rs`, with constructors that own the existing validator bodies. Add Serialize/Deserialize impls.
-- [ ] M2: Replace `Backend.base_url: String` and `MQTTBroker.host: String` with the new types in `agent/src/storage/settings.rs`; rewrite the manual `Deserialize` impls to delegate to the newtype's deserialize plus warn-and-fallback.
-- [ ] M3: Replace `ConnectAddress.broker: String` with `MqttHost` in `agent/src/mqtt/options.rs`; delete `ConnectAddress::validate` and `mqtt::errors::InvalidConnectAddressErr`. Update all `ConnectAddress { broker: ..., ... }` literals.
-- [ ] M4: Update `provision::entry::determine_settings` to construct the newtypes directly (replacing the validator + assignment dance). Update CLI/main wiring.
-- [ ] M5: Update tests: move/rename validator tests onto the newtype constructors, delete tests that are now redundant (storage-layer IP rejection, `ConnectAddress::validate` cases), add new tests for direct construction guarantees.
-- [ ] M6: Run `./scripts/preflight.sh` from `/home/ben/miru/workbench2/repos/agent/`; iterate until it reports `Preflight clean`. Verify per-module coverage gates still pass.
-
-Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
+- [x] M1–M4 (combined commit c535244, 2026-04-30): Introduced `BackendUrl` and `MqttHost` newtypes in `agent/src/storage/validation.rs`; replaced `Backend.base_url: String` and `MQTTBroker.host: String` with the newtypes; replaced `ConnectAddress.broker: String` with `MqttHost`, deleted `ConnectAddress::validate`, and added a gated `ConnectAddress::new` constructor that enforces only the residual SSL-unless-loopback rule (host validity is type-enforced); kept `InvalidConnectAddressErr` (option (a)); propagated `BackendUrl` into `AppOptions::backend_base_url` (option (b)); updated `provision::determine_settings` to construct the newtypes directly. The orchestrator opted for one combined source-side commit rather than four micro-commits because main.rs touches all four milestones and per-milestone HEAD states would not all compile.
+- [x] M5 (commit 22072f5, 2026-04-30): Renamed validator test modules (`backend_url_new`, `mqtt_host_new`); replaced `mod validate` for `ConnectAddress` with smaller `mod connect_address_new`; updated all `ConnectAddress` literals to construct via `MqttHost::new(...)`. Added `Default::default` smoke tests for both newtypes plus deserialize-strictness tests. Switched `mqtt/client.rs::invalid_broker_url` from `192.0.2.1` (no longer constructable) to a closed loopback port to preserve the network-error path.
+- [x] M6 (commit c5de76a, 2026-04-30): Preflight clean. Storage covgate (94.21%) was breached after M5 (drop to 92.99%) because the refactor mechanically moved lines around; added `display_matches_as_str` and `rejects_url_without_host` tests to bring it back to 94.89% without lowering the threshold. One flaky `app::run::shutdown_signal_received` timeout under llvm-cov instrumentation; passed on rerun.
 
 ## Surprises & Discoveries
 
@@ -33,15 +28,25 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Decision Log
 
-(Add entries as you go.)
+- Decision: Take option (a) for `ConnectAddress` — keep `InvalidConnectAddressErr` and add a gated `ConnectAddress::new` constructor that enforces only the SSL-unless-loopback rule.
+  Rationale: Preserves the invariant added in cafa8ef. Host validity is now statically guaranteed by `MqttHost`, leaving only the SSL-unless-loopback rule. The constructor is small and worth keeping.
+  Date/Author: 2026-04-30 / Claude (implementation subagent)
 
-- Decision: …
-  Rationale: …
-  Date/Author: …
+- Decision: Propagate `BackendUrl` into `AppOptions::backend_base_url` (option (b) under M2).
+  Rationale: Pushes the type-level invariant one layer further into runtime; no boxing or stringification needed at the boundary, only `as_str()` when handing off to `http::Client::new`.
+  Date/Author: 2026-04-30 / Claude (implementation subagent)
+
+- Decision: Keep `ConnectAddress` fields `pub` (option (i) under M3 field-visibility).
+  Rationale: Tests routinely build literals; the SSL-unless-loopback rule is a soft preference rather than a security boundary, so enforcement at `ConnectAddress::new` is sufficient. Documented on the type.
+  Date/Author: 2026-04-30 / Claude (implementation subagent)
+
+- Decision: Combine M1–M4 source edits into one commit rather than four per-milestone commits.
+  Rationale: `main.rs` has changes spanning M2, M3, and M4. Splitting per milestone would produce HEAD states that fail to compile (e.g. M1 alone removes free functions still used by M2's consumers), breaking bisectability. One combined refactor commit + one tests commit + one preflight-fixup commit is cleaner.
+  Date/Author: 2026-04-30 / Claude (implementation subagent)
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+2026-04-30 — Refactor complete. Preflight clean (storage covgate 94.89% > 94.21%). User-visible behavior unchanged; the new property is a compile-time guarantee that `Settings`, `Backend`, `MQTTBroker`, and `ConnectAddress` cannot be constructed with a disallowed host. `main.rs` lost ~14 lines (the validate-and-fall-back block for `ConnectAddress`); `mqtt/options.rs` has a smaller, more focused `new` constructor in place of the multi-rule `validate`. Total commits: 3 (source refactor, tests, preflight follow-up).
 
 ## Context and Orientation
 
