@@ -124,7 +124,7 @@ pub(super) fn mock_failing_reprovision() -> MockClient {
 /// blob (`device.json`, `settings.json`, both keys, the token), that the
 /// device record carries `DEVICE_ID` and `expected_name`, and that the temp
 /// dir was cleaned up.
-pub(super) async fn assert_storage_complete(layout: &Layout, expected_name: &str) {
+pub(super) async fn validate_storage(layout: &Layout, expected_name: &str) {
     let device_file = layout.device();
     assert!(device_file.exists(), "device.json missing");
     let device_json: serde_json::Value =
@@ -145,40 +145,40 @@ pub(super) async fn assert_storage_complete(layout: &Layout, expected_name: &str
 /// Byte-exact snapshot of every persisted blob, used to verify a failing
 /// provision/reprovision doesn't mutate on-disk state.
 pub(super) struct StorageSnapshot {
-    device: String,
-    settings: String,
-    private_key: String,
-    public_key: String,
-    token: String,
+    device: Option<String>,
+    settings: Option<String>,
+    private_key: Option<String>,
+    public_key: Option<String>,
+    token: Option<String>,
 }
 
 impl StorageSnapshot {
     pub async fn capture(layout: &Layout) -> Self {
         let auth = layout.auth();
         Self {
-            device: layout.device().read_string().await.unwrap(),
-            settings: layout.settings().read_string().await.unwrap(),
-            private_key: auth.private_key().read_string().await.unwrap(),
-            public_key: auth.public_key().read_string().await.unwrap(),
-            token: auth.token().read_string().await.unwrap(),
+            device: layout.device().read_string().await.ok(),
+            settings: layout.settings().read_string().await.ok(),
+            private_key: auth.private_key().read_string().await.ok(),
+            public_key: auth.public_key().read_string().await.ok(),
+            token: auth.token().read_string().await.ok(),
         }
     }
 
     pub async fn assert_unchanged(&self, layout: &Layout) {
         let auth = layout.auth();
-        assert_eq!(layout.device().read_string().await.unwrap(), self.device);
+        assert_eq!(layout.device().read_string().await.ok(), self.device);
         assert_eq!(
-            layout.settings().read_string().await.unwrap(),
+            layout.settings().read_string().await.ok(),
             self.settings
         );
         assert_eq!(
-            auth.private_key().read_string().await.unwrap(),
+            auth.private_key().read_string().await.ok(),
             self.private_key
         );
         assert_eq!(
-            auth.public_key().read_string().await.unwrap(),
+            auth.public_key().read_string().await.ok(),
             self.public_key
         );
-        assert_eq!(auth.token().read_string().await.unwrap(), self.token);
+        assert_eq!(auth.token().read_string().await.ok(), self.token);
     }
 }

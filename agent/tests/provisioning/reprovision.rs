@@ -1,6 +1,6 @@
 // internal crates
 use super::shared::{
-    assert_storage_complete, mock_failing_reprovision, mock_ok_reprovision, Env, StorageSnapshot,
+    validate_storage, mock_failing_reprovision, mock_ok_reprovision, Env, StorageSnapshot,
 };
 use crate::mocks::http_client as mock;
 use miru_agent::filesys::PathExt;
@@ -21,7 +21,7 @@ pub mod reprovision_fn {
         assert_eq!(device.name, "after-reprovision");
         assert_eq!(mock.call_count(mock::Call::ReprovisionDevice), 1);
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
-        assert_storage_complete(&env.layout, "after-reprovision").await;
+        validate_storage(&env.layout, "after-reprovision").await;
 
         // load-bearing wire-format invariant: the captured POST body has
         // public_key_pem and agent_version but NO name field

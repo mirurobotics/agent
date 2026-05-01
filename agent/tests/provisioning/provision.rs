@@ -1,6 +1,6 @@
 // internal crates
 use super::shared::{
-    assert_storage_complete, mock_failing_provision, mock_ok_provision, Env, StorageSnapshot,
+    validate_storage, mock_failing_provision, mock_ok_provision, Env, StorageSnapshot,
     DEVICE_ID,
 };
 use crate::mocks::http_client as mock;
@@ -28,7 +28,7 @@ pub mod provision_fn {
         assert!(!outcome.already_provisioned);
         assert_eq!(outcome.device_name, "test-device");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
-        assert_storage_complete(&env.layout, "test-device").await;
+        validate_storage(&env.layout, "test-device").await;
 
         env.cleanup().await;
     }
@@ -144,7 +144,7 @@ pub mod provision_fn {
         assert!(!outcome.already_provisioned);
         assert_eq!(outcome.device_name, "after-fallthrough");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
-        assert_storage_complete(&env.layout, "after-fallthrough").await;
+        validate_storage(&env.layout, "after-fallthrough").await;
 
         env.cleanup().await;
     }
@@ -153,17 +153,21 @@ pub mod provision_fn {
     async fn http_error_preserves_existing_storage() {
         let env = Env::new("provision-test").await;
         env.seed_provision("initial").await;
+
+        // delete the public key to trigger provisioning
+        env.layout.auth().public_key().delete().await.unwrap();
+
         let snapshot = StorageSnapshot::capture(&env.layout).await;
 
         // a failing mock — but provision short-circuits before reaching it
         // because the device is already activated, so storage is preserved
         let mock = mock_failing_provision();
-        let outcome = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
+        let err = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(matches!(err, ProvisionErr::HTTPErr(_)));
 
-        assert!(outcome.already_provisioned);
-        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
+        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
         snapshot.assert_unchanged(&env.layout).await;
         assert!(!env.layout.temp_dir().exists(), "temp dir not cleaned");
 
