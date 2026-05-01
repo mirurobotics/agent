@@ -88,17 +88,9 @@ impl<'de> Deserialize<'de> for Settings {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, Default)]
 pub struct Backend {
     pub base_url: BackendUrl,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Self {
-            base_url: BackendUrl::default(),
-        }
-    }
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -141,17 +133,9 @@ impl<'de> Deserialize<'de> for Backend {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, Default)]
 pub struct MQTTBroker {
     pub host: MqttHost,
-}
-
-impl Default for MQTTBroker {
-    fn default() -> Self {
-        Self {
-            host: MqttHost::default(),
-        }
-    }
 }
 
 impl<'de> Deserialize<'de> for MQTTBroker {

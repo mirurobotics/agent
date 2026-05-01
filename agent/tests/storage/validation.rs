@@ -97,6 +97,24 @@ mod backend_url_new {
     }
 
     #[test]
+    fn rejects_url_without_host() {
+        // `data:` URLs parse but expose no host. Exercises the
+        // `URL must contain a host` branch.
+        let err = BackendUrl::new("data:text/plain,hello").unwrap_err();
+        assert!(
+            err.contains("host"),
+            "expected host-missing message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn display_matches_as_str() {
+        let url = BackendUrl::new("https://api.mirurobotics.com/agent/v1").unwrap();
+        assert_eq!(format!("{url}"), "https://api.mirurobotics.com/agent/v1");
+        assert_eq!(format!("{url}"), url.as_str());
+    }
+
+    #[test]
     fn default_is_valid_production_url() {
         // The Default impl uses `expect`; this test fails loudly if the
         // default constant ever stops being valid.
@@ -184,6 +202,13 @@ mod mqtt_host_new {
             err.contains("192.168.1.1"),
             "expected IP in message, got: {err}"
         );
+    }
+
+    #[test]
+    fn display_matches_as_str() {
+        let host = MqttHost::new("mqtt.mirurobotics.com").unwrap();
+        assert_eq!(format!("{host}"), "mqtt.mirurobotics.com");
+        assert_eq!(format!("{host}"), host.as_str());
     }
 
     #[test]
