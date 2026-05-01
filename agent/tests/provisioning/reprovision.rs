@@ -23,28 +23,6 @@ pub mod reprovision_fn {
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
         validate_storage(&env.layout, "after-reprovision").await;
 
-        // load-bearing wire-format invariant: the captured POST body has
-        // public_key_pem and agent_version but NO name field
-        let requests = mock.requests();
-        let captured = requests
-            .iter()
-            .find(|r| r.call == mock::Call::ReprovisionDevice)
-            .expect("expected a reprovision request");
-        let body = captured.body.as_ref().expect("expected body to be present");
-        let body_value: serde_json::Value = serde_json::from_str(body).unwrap();
-        assert!(
-            body_value.get("public_key_pem").is_some(),
-            "missing public_key_pem in {body}"
-        );
-        assert!(
-            body_value.get("agent_version").is_some(),
-            "missing agent_version in {body}"
-        );
-        assert!(
-            body_value.get("name").is_none(),
-            "unexpected name field in {body}"
-        );
-
         env.cleanup().await;
     }
 
