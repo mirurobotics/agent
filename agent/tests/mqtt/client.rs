@@ -8,7 +8,7 @@ use miru_agent::errors::Error;
 use miru_agent::mqtt::client::{poll, Publish};
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
 use miru_agent::mqtt::{Client, ClientI, MQTTError};
-use miru_agent::storage::validation::MqttHost;
+use miru_agent::network::MqttHost;
 
 // external crates
 use rumqttc::QoS;

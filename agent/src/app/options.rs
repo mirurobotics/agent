@@ -3,8 +3,9 @@ use std::time::Duration;
 
 // internal crates
 use crate::deploy::fsm;
+use crate::network::BackendUrl;
 use crate::server;
-use crate::storage::{validation::BackendUrl, Capacities, Layout};
+use crate::storage::{Capacities, Layout};
 use crate::workers::{mqtt, poller, token_refresh::TokenRefreshWorkerOptions};
 
 #[derive(Debug, Clone, Copy)]
