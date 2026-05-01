@@ -163,7 +163,7 @@ async fn init_app_state(
     let (app_state, app_state_handle) = AppState::init(
         &options.storage.layout,
         options.storage.capacities,
-        Arc::new(http::Client::new(&options.backend_base_url)?),
+        Arc::new(http::Client::new(options.backend_base_url.as_str())?),
         options.dpl_retry_policy,
     )
     .await?;

@@ -20,7 +20,7 @@ use miru_agent::workers::mqtt;
 
 // external crates
 use tokio::signal::unix::signal;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() {
@@ -58,7 +58,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
     let _guard = logs::init(options)?;
 
     let settings = provision::determine_settings(&args)?;
-    let http_client = http::Client::new(&settings.backend.base_url)?;
+    let http_client = http::Client::new(settings.backend.base_url.as_str())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
@@ -111,7 +111,7 @@ async fn run_reprovision(
     let _guard = logs::init(options)?;
 
     let settings = reprovision::determine_settings(&args);
-    let http_client = http::Client::new(&settings.backend.base_url)?;
+    let http_client = http::Client::new(&settings.backend.base_url.as_str())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
@@ -165,7 +165,7 @@ async fn run_agent() {
     // reconcile the agent package version to ensure the file system storage state
     // is compatible with the running version
     let url = get_bootstrap_base_url().await;
-    let bootstrap_http_client = match http::Client::new(&url) {
+    let bootstrap_http_client = match http::Client::new(url.as_str()) {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
@@ -199,25 +199,14 @@ async fn run_agent() {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
 
-    // build and validate the broker address before handing it to the MQTT
-    // worker. validate() enforces both the allowed-domain host rule and the
-    // SSL-unless-loopback rule. If validation fails we warn and fall back to
-    // the default address rather than refusing to start — the daemon stays
-    // running on the known-good production broker.
+    // Build the broker address. Host validity is guaranteed by the
+    // `MqttHost` newtype (any in-memory `MqttHost` is a loopback literal or
+    // matches the allowed-domain rule). The SSL-unless-loopback rule is
+    // satisfied because we hardcode `Protocol::SSL` via `Default`, so no
+    // runtime validation step is needed here.
     let broker_address = ConnectAddress {
         broker: settings.mqtt_broker.host,
         ..Default::default()
-    };
-    let broker_address = match broker_address.validate() {
-        Ok(()) => broker_address,
-        Err(e) => {
-            let fallback = ConnectAddress::default();
-            warn!(
-                "Invalid MQTT connect address ({e}); falling back to default broker `{}`",
-                fallback.broker
-            );
-            fallback
-        }
     };
 
     // run the server
@@ -243,7 +232,7 @@ async fn run_agent() {
     }
 }
 
-async fn get_bootstrap_base_url() -> String {
+async fn get_bootstrap_base_url() -> BackendUrl {
     let settings_file = storage::Layout::default().settings();
     if let Ok(settings) = settings_file.read_json::<storage::Settings>().await {
         return settings.backend.base_url;

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mqtt::errors::InvalidConnectAddressErr;
-use crate::storage::validation;
+use crate::storage::validation::{is_loopback_host, MqttHost};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Protocol {
@@ -11,10 +11,20 @@ pub enum Protocol {
     SSL,
 }
 
+/// An MQTT connect address.
+///
+/// Host validity is enforced by the [`MqttHost`] type: a `ConnectAddress`
+/// always carries a loopback or allowed-domain broker host. The
+/// SSL-unless-loopback rule (non-loopback brokers must use `Protocol::SSL`)
+/// is enforced by [`ConnectAddress::new`]. The fields remain `pub` for
+/// ergonomic construction in tests; the SSL rule is therefore only enforced
+/// at the constructor, which is acceptable because the rule is a soft
+/// preference for the production environment and tests routinely use
+/// `Protocol::TCP` with loopback brokers.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnectAddress {
     pub protocol: Protocol,
-    pub broker: String,
+    pub broker: MqttHost,
     pub port: u16,
 }
 
@@ -22,33 +32,34 @@ impl Default for ConnectAddress {
     fn default() -> Self {
         Self {
             protocol: Protocol::SSL,
-            broker: "mqtt.mirurobotics.com".to_string(),
+            broker: MqttHost::default(),
             port: 8883,
         }
     }
 }
 
 impl ConnectAddress {
-    /// Enforces both the allowed-domain host rule (delegated to
-    /// [`validation::validate_mqtt_host`]) and the SSL-unless-loopback rule.
-    /// Construct an invalid address freely; this gate prevents handing one to
-    /// `MqttOptions`.
-    pub fn validate(&self) -> Result<(), InvalidConnectAddressErr> {
-        let loopback = validation::is_loopback_host(&self.broker);
-        validation::validate_mqtt_host(&self.broker).map_err(|msg| InvalidConnectAddressErr {
-            msg: format!("broker `{}`: {msg}", self.broker),
-            trace: crate::trace!(),
-        })?;
-        if !loopback && !matches!(self.protocol, Protocol::SSL) {
+    /// Constructs a `ConnectAddress`, enforcing the SSL-unless-loopback rule.
+    /// Host validity is already guaranteed by the `MqttHost` type.
+    pub fn new(
+        broker: MqttHost,
+        protocol: Protocol,
+        port: u16,
+    ) -> Result<Self, InvalidConnectAddressErr> {
+        if !is_loopback_host(broker.as_str()) && !matches!(protocol, Protocol::SSL) {
             return Err(InvalidConnectAddressErr {
                 msg: format!(
                     "non-loopback broker `{}` requires Protocol::SSL",
-                    self.broker
+                    broker.as_str()
                 ),
                 trace: crate::trace!(),
             });
         }
-        Ok(())
+        Ok(Self {
+            protocol,
+            broker,
+            port,
+        })
     }
 }
 
