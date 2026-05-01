@@ -13,7 +13,7 @@ use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
-use miru_agent::provision::{self, display, errors::*};
+use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
 use miru_agent::workers::mqtt;
@@ -46,9 +46,7 @@ async fn main() {
     run_agent().await;
 }
 
-async fn run_provision(
-    args: cli::ProvisionArgs,
-) -> Result<provision::ProvisionOutcome, ProvisionErr> {
+async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
     // initialize logging
     let tmp_dir = Dir::create_temp_dir("miru-agent-provision-logs").await?;
     let options = logs::Options {
@@ -62,7 +60,7 @@ async fn run_provision(
     let settings = provision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = storage::Layout::default();
-    let token = provision::read_token_from_env()?;
+    let token = provisioning::read_token_from_env()?;
 
     let result =
         provision::provision(&http_client, &layout, &settings, &token, args.device_name).await;
@@ -75,25 +73,25 @@ async fn run_provision(
     result
 }
 
-fn handle_provision_result(result: Result<provision::ProvisionOutcome, ProvisionErr>) {
+fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
     match result {
-        Ok(outcome) if outcome.is_provisioned => {
+        Ok(outcome) if outcome.already_provisioned => {
             let msg = format!(
                 "Device is already provisioned as {}!",
-                display::color(&outcome.device.name, display::Colors::Green)
+                display::color(&outcome.device_name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }
         Ok(outcome) => {
             let msg = format!(
                 "Successfully provisioned this device as {}!",
-                display::color(&outcome.device.name, display::Colors::Green)
+                display::color(&outcome.device_name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }
         Err(e) => {
             error!("Provisioning failed: {:?}", e);
-            println!("An error occurred during provisioning. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            println!("An error occurred during provisioning.\n\nError: {e}\n");
             std::process::exit(1);
         }
     }
@@ -112,12 +110,12 @@ async fn run_reprovision(
     };
     let _guard = logs::init(options)?;
 
-    let settings = provision::determine_reprovision_settings(&args);
+    let settings = reprovision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.base_url)?;
     let layout = storage::Layout::default();
-    let token = provision::read_token_from_env()?;
+    let token = provisioning::read_token_from_env()?;
 
-    let result = provision::reprovision(&http_client, &layout, &settings, &token).await;
+    let result = reprovision::reprovision(&http_client, &layout, &settings, &token).await;
 
     drop(_guard);
     if let Err(e) = tmp_dir.delete().await {
@@ -138,7 +136,7 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
         }
         Err(e) => {
             error!("Reprovisioning failed: {:?}", e);
-            println!("An error occurred during reprovisioning. Contact us at ben@mirurobotics.com for immediate support.\n\nError: {e}\n");
+            println!("An error occurred during reprovisioning.\n\nError: {e}\n");
             std::process::exit(1);
         }
     }
