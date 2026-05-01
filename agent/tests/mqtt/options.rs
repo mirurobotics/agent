@@ -3,7 +3,7 @@ use std::time::Duration;
 
 // internal crates
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
-use miru_agent::storage::validation::MqttHost;
+use miru_agent::network::MqttHost;
 
 mod connect_address {
     use super::*;

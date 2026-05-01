@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::storage::validation::{BackendUrl, MqttHost};
+use miru_agent::network::{BackendUrl, MqttHost};
 
 mod backend_url_new {
     use super::*;
@@ -88,7 +88,7 @@ mod backend_url_new {
 
     #[test]
     fn rejects_unparseable_url() {
-        // Not a valid URL at all — the Url crate fails to parse it.
+        // Not a valid URL at all; the Url crate fails to parse it.
         let err = BackendUrl::new("not a url").unwrap_err();
         assert!(
             err.contains("invalid URL"),

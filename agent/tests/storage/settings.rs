@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::logs::LogLevel;
-use miru_agent::storage::validation::{BackendUrl, MqttHost};
+use miru_agent::network::{BackendUrl, MqttHost};
 use miru_agent::storage::{Backend, MQTTBroker, Settings};
 
 // external crates

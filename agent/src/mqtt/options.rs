@@ -3,7 +3,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mqtt::errors::InvalidConnectAddressErr;
-use crate::storage::validation::{is_loopback_host, MqttHost};
+use crate::network::{is_loopback_host, MqttHost};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Protocol {

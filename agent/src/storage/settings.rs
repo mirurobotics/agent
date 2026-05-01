@@ -1,7 +1,7 @@
 // internal crates
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
-use crate::storage::validation::{BackendUrl, MqttHost};
+use crate::network::{BackendUrl, MqttHost};
 
 // external crates
 use serde::{Deserialize, Serialize};
