@@ -1,7 +1,6 @@
 // internal crates
 use super::shared::{
-    validate_storage, mock_failing_provision, mock_ok_provision, Env, StorageSnapshot,
-    DEVICE_ID,
+    mock_failing_provision, mock_ok_provision, validate_storage, Env, StorageSnapshot, DEVICE_ID,
 };
 use crate::mocks::http_client as mock;
 use miru_agent::filesys::{PathExt, WriteOptions};
