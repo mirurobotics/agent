@@ -13,6 +13,7 @@ use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::ConnectAddress;
+use miru_agent::network::BackendUrl;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
@@ -57,7 +58,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
     };
     let _guard = logs::init(options)?;
 
-    let settings = provision::determine_settings(&args)?;
+    let settings = provision::determine_settings(&args);
     let http_client = http::Client::new(settings.backend.base_url.as_str())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
