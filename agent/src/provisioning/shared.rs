@@ -4,6 +4,7 @@ use std::env;
 // internal crates
 use crate::filesys;
 use crate::provisioning::errors::*;
+use crate::network::{BackendUrl, MqttHost};
 use crate::storage::settings;
 
 // external crates
@@ -38,10 +39,23 @@ pub(super) fn determine_settings(
 ) -> settings::Settings {
     let mut settings = settings::Settings::default();
     if let Some(host) = backend_host {
-        settings.backend.base_url = format!("{}/agent/v1", host);
+        let raw = format!("{host}/agent/v1");
+        settings.backend.base_url = BackendUrl::new(&raw).unwrap_or_else(|msg| {
+            let fallback = BackendUrl::default();
+            warn!(
+                "backend host override `{raw}` rejected ({msg}); falling back to default `{fallback}`"
+            );
+            fallback
+        });
     }
     if let Some(host) = mqtt_broker_host {
-        settings.mqtt_broker.host = host.to_string();
+        settings.mqtt_broker.host = MqttHost::new(host).unwrap_or_else(|msg| {
+            let fallback = MqttHost::default();
+            warn!(
+                "mqtt broker host override `{host}` rejected ({msg}); falling back to default `{fallback}`"
+            );
+            fallback
+        });
     }
     settings
 }
