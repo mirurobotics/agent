@@ -3,8 +3,8 @@ use std::env;
 
 // internal crates
 use crate::filesys;
-use crate::provisioning::errors::*;
 use crate::network::{BackendUrl, MqttHost};
+use crate::provisioning::errors::*;
 use crate::storage::settings;
 
 // external crates
