@@ -6,53 +6,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.4.0-beta.2
+  x-release-version: v0.4.0-beta.4
   x-git-commit:
-    sha: 803226887930f13c669dbd98fc108b3ebfc2c443
-    url: https://github.com/mirurobotics/openapi/commit/803226887930f13c669dbd98fc108b3ebfc2c443
-    message: 'feat(agent): add reprovision endpoint and ProvisioningToken auth (#40)
-
-
-      ## Summary
-
-      - Add `POST /devices/reprovision` (and `ReprovisionDeviceRequest`) for
-
-      rebinding an existing device record to a different physical machine —
-
-      invalidates prior session, registers the new public key, redeploys
-
-      current deployment; deployment history preserved.
-
-      - Add a `ProvisioningToken` bearer security scheme and apply it to both
-
-      `/devices/provision` and `/devices/reprovision`, overriding the global
-
-      `DeviceSessionToken` default that those bootstrap endpoints can''t
-
-      satisfy by definition.
-
-      - Drop the stale `reactivate` capability mention from
-
-      `ProvisionDeviceRequest.name`''s description; under the new endpoint
-
-      split, reactivate semantics live behind `/devices/reprovision`.
-
-
-      ## Notes
-
-      `reactivate` is still wired in elsewhere as a token capability
-
-      (frontend/platform specs, legacy api-key docs). Migrating those to the
-
-      new model is follow-up work outside this PR''s scope.
-
-
-      Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+    sha: 8101e8f82ab113f70c2f7a03c805bc56e204e245
+    url: https://github.com/mirurobotics/openapi/commit/8101e8f82ab113f70c2f7a03c805bc56e204e245
+    message: 'refactor: require name for provision device request (#48)'
     author: ben-miru
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-04-29T17:29:11.826923+00:00'
+    built_at: '2026-05-01T23:39:53.750521+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -319,40 +282,35 @@ paths:
       - DeviceKeyJWT: []
       description: 'Issue a device session token. The device authenticates by sending
         an `Authorization: Bearer <jwt>` header carrying a JWT it has self-signed
-        with its own RSA private key. The server identifies the device by computing
-        the SHA-256 fingerprint of the public key embedded in the JWT header (`jwk`
-        parameter, RFC 7517) and looking up the matching device record; it then verifies
-        the JWT signature against that same `header.jwk`, enforces the `exp` and `jti`
-        payload claims, and returns a session token.
+        with its own RSA private key (already enrolled at provisioning time via `public_key_pem`).
+        The server reads the JWT header''s `kid` parameter, looks up the device whose
+        registered public-key fingerprint equals `kid`, and verifies the JWT signature
+        against that stored public key. `kid` is a lookup hint only — the security
+        boundary is "the signature verifies against the stored public key for the
+        device with this fingerprint".
+
+
+        Public-key fingerprint: the input is the device''s registered RSA public key.
+        Serialize it as DER-encoded `SubjectPublicKeyInfo` (PKIX SPKI, RFC 5280 §4.1
+        — the same byte sequence that `-----BEGIN PUBLIC KEY-----` PEM decodes to),
+        SHA-256 the bytes, and lowercase-hex encode the digest. The result is exactly
+        64 hex characters.
 
 
         JWT contract:
 
-        - Header MUST contain `alg: RS512` (RSA-PKCS1-v1_5 with SHA-512). Other algorithms
-        — including `none`, HS*, RS256, RS384, ES*, PS* — MUST be rejected.
+        - Header MUST contain `alg: RS512` (RSA-PKCS1-v1_5 with SHA-512).
 
-        - Header MUST contain `jwk` (the device''s RSA public key as a JSON Web Key,
-        RFC 7517).
+        - Header MUST contain `kid` (the 64-character lowercase hex public-key fingerprint).
 
-        - Payload MUST contain `jti` (a unique nonce per request, used for replay
-        protection) and `exp` (expiration, RFC 7519 numeric date).
+        - Header MUST NOT embed the public key as a JWT header parameter. Servers
+        MAY reject the request if such an embedded-key header parameter is present.
 
-        - Payload SHOULD contain `iat` (issued-at, RFC 7519 numeric date).
+        - Payload MUST contain `jti` (unique per request, used for replay protection),
+        `iat` (issued-at, RFC 7519 numeric date), and `exp` (expiration, RFC 7519
+        numeric date). Lifetime is 2 minutes (`exp = iat + 120`).
 
-
-        Failure modes:
-
-        - The JWT is malformed or the `alg` is not `RS512`.
-
-        - Signature verification against `header.jwk` fails.
-
-        - `exp` is in the past.
-
-        - `jti` has already been seen (replay).
-
-        - No device is registered for the public key embedded in `header.jwk`.
-
-        - The device exists but is inactive.
+        - Signing input is `base64url(header) . base64url(payload)` per RFC 7515 §5.1.
 
         '
       responses:
@@ -449,8 +407,10 @@ components:
       bearerFormat: JWT
       description: 'Device-self-signed JWT used to bootstrap a session token. The
         device signs a JWT with its own RSA private key; the server identifies the
-        device by computing the SHA-256 fingerprint of the public key embedded in
-        the JWT header (`jwk` parameter) and looking up the matching device record.
+        device by reading the `kid` header (the SHA-256 fingerprint of the device''s
+        registered public key, as DER-encoded SubjectPublicKeyInfo, lowercase hex)
+        and verifies the JWT signature against the stored public key for that device.
+        See `POST /devices/token` for the full JWT contract.
 
         '
     ProvisioningToken:
@@ -477,7 +437,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 803226887930f13c669dbd98fc108b3ebfc2c443
+      - 8101e8f82ab113f70c2f7a03c805bc56e204e245
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -947,7 +907,7 @@ components:
         filepath:
           type: string
           example: /srv/miru/configs/v1/motion-control.json
-          description: The absolute filesystem path where this config instance is
+          description: The absolute file system path where this config instance is
             written.
         created_at:
           type: string
@@ -1222,6 +1182,7 @@ components:
       required:
       - public_key_pem
       - agent_version
+      - name
       properties:
         public_key_pem:
           type: string
@@ -1237,8 +1198,7 @@ components:
         name:
           type: string
           example: Robot 1
-          description: The name to assign to the device. Only meaningful for the `create`
-            capability; ignored by `activate` because the device already has a name.
+          description: The name to assign to the device.
     ReprovisionDeviceRequest:
       title: Reprovision Device Request
       type: object

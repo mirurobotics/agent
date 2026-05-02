@@ -20,7 +20,7 @@ pub struct ConfigInstance {
     /// The name of the config type.
     #[serde(rename = "config_type_name")]
     pub config_type_name: String,
-    /// The absolute filesystem path where this config instance is written.
+    /// The absolute file system path where this config instance is written.
     #[serde(rename = "filepath")]
     pub filepath: String,
     /// The timestamp of when the config instance was created.
