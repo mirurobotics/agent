@@ -113,10 +113,10 @@ mod tests {
                 ..Default::default()
             };
 
-            let settings = determine_settings(&args).unwrap();
+            let settings = determine_settings(&args);
 
             assert_eq!(
-                settings.backend.base_url,
+                settings.backend.base_url.as_str(),
                 "https://custom.mirurobotics.com/agent/v1"
             );
         }
@@ -128,9 +128,9 @@ mod tests {
                 ..Default::default()
             };
 
-            let settings = determine_settings(&args).unwrap();
+            let settings = determine_settings(&args);
 
-            assert_eq!(settings.mqtt_broker.host, "mqtt.custom.mirurobotics.com");
+            assert_eq!(settings.mqtt_broker.host.as_str(), "mqtt.custom.mirurobotics.com");
         }
 
         #[test]
@@ -138,7 +138,7 @@ mod tests {
             let args = cli::ProvisionArgs::default();
             let defaults = settings::Settings::default();
 
-            let settings = determine_settings(&args).unwrap();
+            let settings = determine_settings(&args);
 
             assert_eq!(settings.backend.base_url, defaults.backend.base_url);
             assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);

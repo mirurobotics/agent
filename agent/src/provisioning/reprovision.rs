@@ -79,28 +79,31 @@ mod tests {
         #[test]
         fn backend_host_appends_agent_v1_suffix() {
             let args = cli::ReprovisionArgs {
-                backend_host: Some("https://custom.example.com".to_string()),
+                backend_host: Some("https://custom.mirurobotics.com".to_string()),
                 ..Default::default()
             };
 
             let settings = determine_settings(&args);
 
             assert_eq!(
-                settings.backend.base_url,
-                "https://custom.example.com/agent/v1"
+                settings.backend.base_url.as_str(),
+                "https://custom.mirurobotics.com/agent/v1"
             );
         }
 
         #[test]
         fn mqtt_broker_host_override() {
             let args = cli::ReprovisionArgs {
-                mqtt_broker_host: Some("mqtt.custom.example.com".to_string()),
+                mqtt_broker_host: Some("mqtt.custom.mirurobotics.com".to_string()),
                 ..Default::default()
             };
 
             let settings = determine_settings(&args);
 
-            assert_eq!(settings.mqtt_broker.host, "mqtt.custom.example.com");
+            assert_eq!(
+                settings.mqtt_broker.host.as_str(),
+                "mqtt.custom.mirurobotics.com"
+            );
         }
 
         #[test]

@@ -19,7 +19,7 @@ After this change, `cargo check --package miru-agent --features test --all-targe
 ## Progress
 
 - [x] (2026-05-01 implement) Milestone 1: fix `agent/src/provisioning/shared.rs` so it compiles cleanly with the new newtype constructors and falls back to defaults on invalid CLI overrides.
-- [ ] Milestone 2: fix `agent/src/provisioning/reprovision.rs` test comparisons that still target bare `&str`.
+- [x] (2026-05-01 implement) Milestone 2: fix `agent/src/provisioning/reprovision.rs` test comparisons that still target bare `&str`.
 - [ ] Milestone 3: drop the spurious `?` on the `provision::determine_settings(&args)` call in `agent/src/main.rs:60` so it matches the bare-`Settings` signature.
 - [ ] Milestone 4: run `cargo check --package miru-agent --features test --all-targets` and `bash scripts/preflight.sh` from the agent repo root and confirm both report success ("Preflight clean").
 
