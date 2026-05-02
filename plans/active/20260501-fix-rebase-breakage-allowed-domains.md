@@ -20,7 +20,7 @@ After this change, `cargo check --package miru-agent --features test --all-targe
 
 - [x] (2026-05-01 implement) Milestone 1: fix `agent/src/provisioning/shared.rs` so it compiles cleanly with the new newtype constructors and falls back to defaults on invalid CLI overrides.
 - [x] (2026-05-01 implement) Milestone 2: fix `agent/src/provisioning/reprovision.rs` test comparisons that still target bare `&str`.
-- [ ] Milestone 3: drop the spurious `?` on the `provision::determine_settings(&args)` call in `agent/src/main.rs:60` so it matches the bare-`Settings` signature.
+- [x] (2026-05-01 implement) Milestone 3: drop the spurious `?` on the `provision::determine_settings(&args)` call in `agent/src/main.rs:60` so it matches the bare-`Settings` signature; also add the missing `use miru_agent::network::BackendUrl;` import (required by `get_bootstrap_base_url`'s return type — see Surprises).
 - [ ] Milestone 4: run `cargo check --package miru-agent --features test --all-targets` and `bash scripts/preflight.sh` from the agent repo root and confirm both report success ("Preflight clean").
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
