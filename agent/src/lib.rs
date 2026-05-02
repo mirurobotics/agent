@@ -13,6 +13,7 @@ pub mod http;
 pub mod logs;
 pub mod models;
 pub mod mqtt;
+pub mod network;
 pub mod provisioning;
 pub mod server;
 pub mod services;

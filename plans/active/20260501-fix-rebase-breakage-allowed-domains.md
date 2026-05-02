@@ -18,7 +18,7 @@ After this change, `cargo check --package miru-agent --features test --all-targe
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) Milestone 1: fix `agent/src/provisioning/shared.rs` so it compiles cleanly with the new newtype constructors and falls back to defaults on invalid CLI overrides.
+- [x] (2026-05-01 implement) Milestone 1: fix `agent/src/provisioning/shared.rs` so it compiles cleanly with the new newtype constructors and falls back to defaults on invalid CLI overrides.
 - [ ] Milestone 2: fix `agent/src/provisioning/reprovision.rs` test comparisons that still target bare `&str`.
 - [ ] Milestone 3: drop the spurious `?` on the `provision::determine_settings(&args)` call in `agent/src/main.rs:60` so it matches the bare-`Settings` signature.
 - [ ] Milestone 4: run `cargo check --package miru-agent --features test --all-targets` and `bash scripts/preflight.sh` from the agent repo root and confirm both report success ("Preflight clean").
@@ -27,7 +27,7 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- 2026-05-01 (Milestone 1 verify): `cargo check --package miru-agent --features test` after applying the `shared.rs` fix surfaces an additional pre-existing rebase breakage in `agent/src/main.rs`: `get_bootstrap_base_url() -> BackendUrl` (line 235) is missing an import for `miru_agent::network::BackendUrl`. The plan only called out the `?` removal at line 60 for Milestone 3. Fix decision: bundle the missing-import fix into Milestone 3's `main.rs` commit since it is the same file and the same root cause (rebase artefact). Without it, milestone-3 verification (`--all-targets` reporting zero errors) cannot pass.
 
 ## Decision Log
 
