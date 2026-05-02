@@ -116,5 +116,35 @@ mod tests {
             assert_eq!(settings.backend.base_url, defaults.backend.base_url);
             assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
         }
+
+        #[test]
+        fn invalid_backend_host_falls_back_to_default() {
+            // `http://...` (non-loopback) is rejected by `BackendUrl::new`.
+            // The override must fall back to the default rather than panic.
+            let args = cli::ReprovisionArgs {
+                backend_host: Some("http://evil.example.com".to_string()),
+                ..Default::default()
+            };
+            let defaults = settings::Settings::default();
+
+            let settings = determine_settings(&args);
+
+            assert_eq!(settings.backend.base_url, defaults.backend.base_url);
+        }
+
+        #[test]
+        fn invalid_mqtt_broker_host_falls_back_to_default() {
+            // A host that isn't loopback and isn't in the allowed-domain set
+            // is rejected by `MqttHost::new` and must fall back to the default.
+            let args = cli::ReprovisionArgs {
+                mqtt_broker_host: Some("evil.example.com".to_string()),
+                ..Default::default()
+            };
+            let defaults = settings::Settings::default();
+
+            let settings = determine_settings(&args);
+
+            assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
+        }
     }
 }
