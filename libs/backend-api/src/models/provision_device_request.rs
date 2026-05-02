@@ -18,18 +18,18 @@ pub struct ProvisionDeviceRequest {
     /// The version of the agent the device is running.
     #[serde(rename = "agent_version")]
     pub agent_version: String,
-    /// The name to assign to the device. Only meaningful for the `create` capability; ignored by `activate` because the device already has a name.
-    #[serde(rename = "name", skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    /// The name to assign to the device.
+    #[serde(rename = "name")]
+    pub name: String,
 }
 
 impl ProvisionDeviceRequest {
     /// Provision a device using a provisioning token.
-    pub fn new(public_key_pem: String, agent_version: String) -> ProvisionDeviceRequest {
+    pub fn new(public_key_pem: String, agent_version: String, name: String) -> ProvisionDeviceRequest {
         ProvisionDeviceRequest {
             public_key_pem,
             agent_version,
-            name: None,
+            name,
         }
     }
 }

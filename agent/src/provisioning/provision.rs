@@ -6,6 +6,7 @@ use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
 use crate::storage::{self, settings};
+use crate::telemetry;
 use crate::version;
 use backend_api::models as backend_client;
 
@@ -82,7 +83,7 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
     let payload = backend_client::ProvisionDeviceRequest {
         public_key_pem,
         agent_version: version::VERSION.to_string(),
-        name: device_name,
+        name: device_name.unwrap_or_else(telemetry::SystemInfo::host_name),
     };
     let params = http::devices::ProvisionParams {
         payload: &payload,
