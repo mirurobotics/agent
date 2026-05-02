@@ -193,3 +193,32 @@ fn deserialize_settings_with_invalid_backend_url_falls_back() {
     assert_eq!(settings.backend, Backend::default());
     assert_eq!(settings.mqtt_broker, MQTTBroker::default());
 }
+
+// The fallback tests above all go through `serde_json::from_value`, which is
+// a distinct deserializer instantiation from `from_str`. Re-exercise the
+// fallback path through `from_str` so the string-deserializer instantiation
+// of the validating closures is also covered.
+#[test]
+fn deserialize_backend_falls_back_on_disallowed_host_via_str() {
+    let input = r#"{"base_url": "https://evilmirurobotics.com"}"#;
+    let backend = serde_json::from_str::<Backend>(input).unwrap();
+    assert_eq!(backend, Backend::default());
+}
+
+#[test]
+fn deserialize_mqtt_broker_falls_back_on_disallowed_host_via_str() {
+    let input = r#"{"host": "evilmirurobotics.com"}"#;
+    let mqtt_broker = serde_json::from_str::<MQTTBroker>(input).unwrap();
+    assert_eq!(mqtt_broker, MQTTBroker::default());
+}
+
+#[test]
+fn deserialize_settings_falls_back_on_invalid_hosts_via_str() {
+    let input = r#"{
+        "backend": {"base_url": "https://evilmirurobotics.com"},
+        "mqtt_broker": {"host": "evilmirurobotics.com"}
+    }"#;
+    let settings = serde_json::from_str::<Settings>(input).unwrap();
+    assert_eq!(settings.backend, Backend::default());
+    assert_eq!(settings.mqtt_broker, MQTTBroker::default());
+}
