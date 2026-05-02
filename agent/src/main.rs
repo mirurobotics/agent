@@ -112,7 +112,7 @@ async fn run_reprovision(
     let _guard = logs::init(options)?;
 
     let settings = reprovision::determine_settings(&args);
-    let http_client = http::Client::new(&settings.backend.base_url.as_str())?;
+    let http_client = http::Client::new(settings.backend.base_url.as_str())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 

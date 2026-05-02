@@ -130,7 +130,10 @@ mod tests {
 
             let settings = determine_settings(&args);
 
-            assert_eq!(settings.mqtt_broker.host.as_str(), "mqtt.custom.mirurobotics.com");
+            assert_eq!(
+                settings.mqtt_broker.host.as_str(),
+                "mqtt.custom.mirurobotics.com"
+            );
         }
 
         #[test]
