@@ -314,15 +314,14 @@ mod poll_error_classification {
     #[tokio::test]
     async fn unreachable_host_is_network_conn_err() {
         // Connect to a port that refuses connections
+        // unlikely to have anything listening on port 1
         let opts = Options::new(Credentials {
             username: "test".to_string(),
             password: "test".to_string(),
         })
-        .with_connect_address(ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: MqttHost::new("127.0.0.1").unwrap(),
-            port: 1, // unlikely to have anything listening
-        });
+        .with_connect_address(
+            ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
+        );
 
         let (_, mut eventloop) = miru_agent::mqtt::Client::new(&opts).await;
 

@@ -12,7 +12,7 @@ use miru_agent::cli;
 use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
-use miru_agent::mqtt::options::ConnectAddress;
+use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendUrl;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
@@ -202,13 +202,10 @@ async fn run_agent() {
 
     // Build the broker address. Host validity is guaranteed by the
     // `MqttHost` newtype (any in-memory `MqttHost` is a loopback literal or
-    // matches the allowed-domain rule). The SSL-unless-loopback rule is
-    // satisfied because we hardcode `Protocol::SSL` via `Default`, so no
-    // runtime validation step is needed here.
-    let broker_address = ConnectAddress {
-        broker: settings.mqtt_broker.host,
-        ..Default::default()
-    };
+    // matches the allowed-domain rule), and `Protocol::SSL` satisfies the
+    // SSL-unless-loopback rule the constructor enforces.
+    let broker_address = ConnectAddress::new(settings.mqtt_broker.host, Protocol::SSL, 8883)
+        .expect("MqttHost guarantees an allowed host; SSL satisfies the SSL-unless-loopback rule");
 
     // run the server
     let options = AppOptions {

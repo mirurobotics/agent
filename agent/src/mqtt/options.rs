@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::mqtt::errors::InvalidConnectAddressErr;
 use crate::network::{is_loopback_host, MqttHost};
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Protocol {
     TCP,
     SSL,
@@ -16,16 +16,12 @@ pub enum Protocol {
 /// Host validity is enforced by the [`MqttHost`] type: a `ConnectAddress`
 /// always carries a loopback or allowed-domain broker host. The
 /// SSL-unless-loopback rule (non-loopback brokers must use `Protocol::SSL`)
-/// is enforced by [`ConnectAddress::new`]. The fields remain `pub` for
-/// ergonomic construction in tests; the SSL rule is therefore only enforced
-/// at the constructor, which is acceptable because the rule is a soft
-/// preference for the production environment and tests routinely use
-/// `Protocol::TCP` with loopback brokers.
+/// is enforced by [`ConnectAddress::new`], the only construction path.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnectAddress {
-    pub protocol: Protocol,
-    pub broker: MqttHost,
-    pub port: u16,
+    protocol: Protocol,
+    broker: MqttHost,
+    port: u16,
 }
 
 impl Default for ConnectAddress {
@@ -60,6 +56,18 @@ impl ConnectAddress {
             broker,
             port,
         })
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    pub fn broker(&self) -> &MqttHost {
+        &self.broker
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
     }
 }
 

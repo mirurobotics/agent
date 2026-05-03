@@ -11,9 +11,9 @@ mod connect_address {
     #[test]
     fn default() {
         let addr = ConnectAddress::default();
-        assert!(matches!(addr.protocol, Protocol::SSL));
-        assert_eq!(addr.broker.as_str(), "mqtt.mirurobotics.com");
-        assert_eq!(addr.port, 8883);
+        assert!(matches!(addr.protocol(), Protocol::SSL));
+        assert_eq!(addr.broker().as_str(), "mqtt.mirurobotics.com");
+        assert_eq!(addr.port(), 8883);
     }
 }
 
@@ -118,7 +118,7 @@ mod opts {
             timeouts: Timeouts::default(),
             capacity: 64,
         };
-        assert!(matches!(actual.connect_address.protocol, Protocol::SSL));
+        assert!(matches!(actual.connect_address.protocol(), Protocol::SSL));
         assert_eq!(actual, expected);
     }
 
@@ -131,15 +131,12 @@ mod opts {
 
     #[test]
     fn with_connect_address() {
-        let addr = ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: MqttHost::new("localhost").unwrap(),
-            port: 1883,
-        };
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
         let opts = Options::default().with_connect_address(addr);
-        assert!(matches!(opts.connect_address.protocol, Protocol::TCP));
-        assert_eq!(opts.connect_address.broker.as_str(), "localhost");
-        assert_eq!(opts.connect_address.port, 1883);
+        assert!(matches!(opts.connect_address.protocol(), Protocol::TCP));
+        assert_eq!(opts.connect_address.broker().as_str(), "localhost");
+        assert_eq!(opts.connect_address.port(), 1883);
     }
 
     #[test]

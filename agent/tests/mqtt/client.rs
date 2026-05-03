@@ -23,11 +23,9 @@ async fn test_mqtt_client() {
         username: "test_user".to_string(),
         password: "test_pass".to_string(),
     })
-    .with_connect_address(ConnectAddress {
-        protocol: Protocol::TCP,
-        broker: MqttHost::new("127.0.0.1").unwrap(),
-        port: 18831,
-    });
+    .with_connect_address(
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 18831).unwrap(),
+    );
 
     // create the client and subscribe to the device sync topic
     let (client, mut eventloop) = Client::new(&options).await;
@@ -57,18 +55,16 @@ async fn test_mqtt_client() {
 
 #[tokio::test]
 async fn invalid_broker_url() {
+    // Loopback on a port nothing's listening on — exercises the network
+    // connection error path without needing an external unreachable IP
+    // (which the `MqttHost` newtype would reject anyway).
     let options = Options::new(Credentials {
         username: "test".to_string(),
         password: "test".to_string(),
     })
-    .with_connect_address(ConnectAddress {
-        protocol: Protocol::TCP,
-        // Loopback on a port nothing's listening on — exercises the network
-        // connection error path without needing an external unreachable IP
-        // (which the `MqttHost` newtype would reject anyway).
-        broker: MqttHost::new("127.0.0.1").unwrap(),
-        port: 1,
-    });
+    .with_connect_address(
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
+    );
 
     // create the client and subscribe to the device sync topic
     let (_, mut eventloop) = Client::new(&options).await;
@@ -89,11 +85,9 @@ async fn invalid_username_or_password() {
         username: "wrong_user".to_string(),
         password: "wrong_pass".to_string(),
     })
-    .with_connect_address(ConnectAddress {
-        protocol: Protocol::TCP,
-        broker: MqttHost::new("127.0.0.1").unwrap(),
-        port: 18832,
-    });
+    .with_connect_address(
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 18832).unwrap(),
+    );
 
     let (_, mut eventloop) = Client::new(&options).await;
 
@@ -108,11 +102,9 @@ fn mqtt_options() -> Options {
         username: "test".to_string(),
         password: "test".to_string(),
     })
-    .with_connect_address(ConnectAddress {
-        protocol: Protocol::TCP,
-        broker: MqttHost::new("127.0.0.1").unwrap(),
-        port: 1,
-    })
+    .with_connect_address(
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
+    )
 }
 
 #[tokio::test]
