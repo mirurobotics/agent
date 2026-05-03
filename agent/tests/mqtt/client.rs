@@ -57,7 +57,7 @@ async fn test_mqtt_client() {
 async fn invalid_broker_url() {
     // Loopback on a port nothing's listening on — exercises the network
     // connection error path without needing an external unreachable IP
-    // (which the `MqttHost` newtype would reject anyway).
+    // (which the `MqttHost` would reject anyway).
     let options = Options::new(Credentials {
         username: "test".to_string(),
         password: "test".to_string(),
