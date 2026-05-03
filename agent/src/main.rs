@@ -200,12 +200,12 @@ async fn run_agent() {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
 
-    // Build the broker address. Host validity is guaranteed by the
-    // `MqttHost` newtype (any in-memory `MqttHost` is a loopback literal or
-    // matches the allowed-domain rule), and `Protocol::SSL` satisfies the
-    // SSL-unless-loopback rule the constructor enforces.
-    let broker_address = ConnectAddress::new(settings.mqtt_broker.host, Protocol::SSL, 8883)
-        .expect("MqttHost guarantees an allowed host; SSL satisfies the SSL-unless-loopback rule");
+    let broker_address = ConnectAddress::new_or(
+        settings.mqtt_broker.host,
+        Protocol::SSL,
+        8883,
+        ConnectAddress::default(),
+    );
 
     // run the server
     let options = AppOptions {
