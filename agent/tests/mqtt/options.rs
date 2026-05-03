@@ -3,6 +3,21 @@ use std::time::Duration;
 
 // internal crates
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
+use miru_agent::network::MqttHost;
+
+mod protocol_display {
+    use super::*;
+
+    #[test]
+    fn tcp_renders_lowercase() {
+        assert_eq!(format!("{}", Protocol::TCP), "tcp");
+    }
+
+    #[test]
+    fn ssl_renders_lowercase() {
+        assert_eq!(format!("{}", Protocol::SSL), "ssl");
+    }
+}
 
 mod connect_address {
     use super::*;
@@ -10,9 +25,125 @@ mod connect_address {
     #[test]
     fn default() {
         let addr = ConnectAddress::default();
-        assert!(matches!(addr.protocol, Protocol::SSL));
-        assert_eq!(addr.broker, "mqtt.mirurobotics.com");
-        assert_eq!(addr.port, 8883);
+        assert!(matches!(addr.protocol(), Protocol::SSL));
+        assert_eq!(addr.broker().as_str(), "mqtt.mirurobotics.com");
+        assert_eq!(addr.port(), 8883);
+    }
+
+    #[test]
+    fn protocol_returns_constructed_protocol() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert!(matches!(addr.protocol(), Protocol::TCP));
+    }
+
+    #[test]
+    fn broker_returns_reference_to_constructed_host() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert_eq!(addr.broker().as_str(), "localhost");
+    }
+
+    #[test]
+    fn port_returns_constructed_port() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert_eq!(addr.port(), 1883);
+    }
+}
+
+mod connect_address_new {
+    use super::*;
+
+    // Host validity is statically guaranteed by `MqttHost`. The constructor
+    // exists to enforce the residual SSL-unless-loopback rule.
+
+    #[test]
+    fn accepts_loopback_tcp() {
+        ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+    }
+
+    #[test]
+    fn accepts_loopback_ssl() {
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::SSL, 8883).unwrap();
+    }
+
+    #[test]
+    fn accepts_allowed_host_ssl() {
+        ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::SSL,
+            8883,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_allowed_host_tcp() {
+        let err = ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::TCP,
+            1883,
+        )
+        .unwrap_err();
+        assert!(
+            err.msg.contains("Protocol::SSL"),
+            "expected SSL-rule message, got: {}",
+            err.msg
+        );
+    }
+}
+
+mod connect_address_new_or {
+    use super::*;
+
+    #[test]
+    fn returns_constructed_address_on_valid_input() {
+        let fallback = ConnectAddress::default();
+        let addr = ConnectAddress::new_or(
+            MqttHost::new("localhost").unwrap(),
+            Protocol::TCP,
+            1883,
+            fallback,
+        );
+        assert_eq!(addr.broker().as_str(), "localhost");
+        assert_eq!(addr.port(), 1883);
+        assert!(matches!(addr.protocol(), Protocol::TCP));
+    }
+
+    #[test]
+    fn returns_fallback_when_ssl_rule_rejects() {
+        // Non-loopback host with TCP violates the SSL-unless-loopback rule.
+        let fallback = ConnectAddress::default();
+        let addr = ConnectAddress::new_or(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::TCP,
+            1883,
+            fallback.clone(),
+        );
+        assert_eq!(addr, fallback);
+    }
+}
+
+mod connect_address_display {
+    use super::*;
+
+    #[test]
+    fn renders_tcp_loopback() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert_eq!(format!("{addr}"), "tcp://localhost:1883");
+    }
+
+    #[test]
+    fn renders_ssl_allowed_domain() {
+        let addr = ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::SSL,
+            8883,
+        )
+        .unwrap();
+        assert_eq!(format!("{addr}"), "ssl://mqtt.mirurobotics.com:8883");
     }
 }
 
@@ -75,7 +206,7 @@ mod opts {
             timeouts: Timeouts::default(),
             capacity: 64,
         };
-        assert!(matches!(actual.connect_address.protocol, Protocol::SSL));
+        assert!(matches!(actual.connect_address.protocol(), Protocol::SSL));
         assert_eq!(actual, expected);
     }
 
@@ -88,15 +219,12 @@ mod opts {
 
     #[test]
     fn with_connect_address() {
-        let addr = ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: "local".to_string(),
-            port: 1883,
-        };
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
         let opts = Options::default().with_connect_address(addr);
-        assert!(matches!(opts.connect_address.protocol, Protocol::TCP));
-        assert_eq!(opts.connect_address.broker, "local");
-        assert_eq!(opts.connect_address.port, 1883);
+        assert!(matches!(opts.connect_address.protocol(), Protocol::TCP));
+        assert_eq!(opts.connect_address.broker().as_str(), "localhost");
+        assert_eq!(opts.connect_address.port(), 1883);
     }
 
     #[test]

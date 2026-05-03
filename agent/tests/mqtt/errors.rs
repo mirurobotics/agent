@@ -305,6 +305,7 @@ mod poll_error_classification {
     use super::*;
     use miru_agent::mqtt::client::poll;
     use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol};
+    use miru_agent::network::MqttHost;
 
     // poll() classifies ConnectionError variants into MQTTError types.
     // We can't inject errors into an EventLoop directly, but we can
@@ -313,15 +314,14 @@ mod poll_error_classification {
     #[tokio::test]
     async fn unreachable_host_is_network_conn_err() {
         // Connect to a port that refuses connections
+        // unlikely to have anything listening on port 1
         let opts = Options::new(Credentials {
             username: "test".to_string(),
             password: "test".to_string(),
         })
-        .with_connect_address(ConnectAddress {
-            protocol: Protocol::TCP,
-            broker: "127.0.0.1".to_string(),
-            port: 1, // unlikely to have anything listening
-        });
+        .with_connect_address(
+            ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
+        );
 
         let (_, mut eventloop) = miru_agent::mqtt::Client::new(&opts).await;
 

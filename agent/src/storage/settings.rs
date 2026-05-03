@@ -1,6 +1,7 @@
 // internal crates
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
+use crate::network::{BackendUrl, MqttHost};
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -87,17 +88,9 @@ impl<'de> Deserialize<'de> for Settings {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, PartialEq, Eq)]
 pub struct Backend {
-    pub base_url: String,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Self {
-            base_url: "https://api.mirurobotics.com/agent/v1".to_string(),
-        }
-    }
+    pub base_url: BackendUrl,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -120,25 +113,18 @@ impl<'de> Deserialize<'de> for Backend {
             }
         };
 
+        let raw = result.base_url.unwrap_or_else(|| {
+            deserialize_warn!("backend", "base_url", default.base_url.as_str().to_string())
+        });
         Ok(Backend {
-            base_url: result
-                .base_url
-                .unwrap_or_else(|| deserialize_warn!("backend", "base_url", default.base_url)),
+            base_url: BackendUrl::new_or(&raw, default.base_url),
         })
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, Default)]
 pub struct MQTTBroker {
-    pub host: String,
-}
-
-impl Default for MQTTBroker {
-    fn default() -> Self {
-        Self {
-            host: "mqtt.mirurobotics.com".to_string(),
-        }
-    }
+    pub host: MqttHost,
 }
 
 impl<'de> Deserialize<'de> for MQTTBroker {
@@ -156,15 +142,15 @@ impl<'de> Deserialize<'de> for MQTTBroker {
         let result = match DeserializeMQTTBroker::deserialize(deserializer) {
             Ok(mqtt_broker) => mqtt_broker,
             Err(e) => {
-                error!("Error deserializing mqtt broker: {}", e);
+                error!("error deserializing mqtt broker: {}", e);
                 return Err(e);
             }
         };
 
-        Ok(MQTTBroker {
-            host: result
-                .host
-                .unwrap_or_else(|| deserialize_warn!("mqtt_broker", "host", default.host)),
-        })
+        let raw = result.host.unwrap_or_else(|| {
+            deserialize_warn!("mqtt_broker", "host", default.host.as_str().to_string())
+        });
+        let host = MqttHost::new_or(&raw, default.host);
+        Ok(MQTTBroker { host })
     }
 }

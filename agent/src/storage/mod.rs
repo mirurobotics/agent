@@ -21,6 +21,7 @@ pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings};
+pub use crate::network::{BackendUrl, MqttHost};
 
 use self::device::Device as DeviceStorage;
 use self::errors::StorageErr as StorErr;

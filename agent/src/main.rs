@@ -12,7 +12,8 @@ use miru_agent::cli;
 use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
-use miru_agent::mqtt::options::ConnectAddress;
+use miru_agent::mqtt::options::{ConnectAddress, Protocol};
+use miru_agent::network::BackendUrl;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
@@ -58,7 +59,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
     let _guard = logs::init(options)?;
 
     let settings = provision::determine_settings(&args);
-    let http_client = http::Client::new(&settings.backend.base_url)?;
+    let http_client = http::Client::new(settings.backend.base_url.as_str())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
@@ -111,7 +112,7 @@ async fn run_reprovision(
     let _guard = logs::init(options)?;
 
     let settings = reprovision::determine_settings(&args);
-    let http_client = http::Client::new(&settings.backend.base_url)?;
+    let http_client = http::Client::new(settings.backend.base_url.as_str())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
@@ -165,7 +166,7 @@ async fn run_agent() {
     // reconcile the agent package version to ensure the file system storage state
     // is compatible with the running version
     let url = get_bootstrap_base_url().await;
-    let bootstrap_http_client = match http::Client::new(&url) {
+    let bootstrap_http_client = match http::Client::new(url.as_str()) {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
@@ -199,6 +200,13 @@ async fn run_agent() {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
 
+    let broker_address = ConnectAddress::new_or(
+        settings.mqtt_broker.host,
+        Protocol::SSL,
+        8883,
+        ConnectAddress::default(),
+    );
+
     // run the server
     let options = AppOptions {
         lifecycle: LifecycleOptions {
@@ -210,10 +218,7 @@ async fn run_agent() {
         enable_mqtt_worker: settings.enable_mqtt_worker,
         enable_poller: settings.enable_poller,
         mqtt_worker: mqtt::Options {
-            broker_address: ConnectAddress {
-                broker: settings.mqtt_broker.host,
-                ..Default::default()
-            },
+            broker_address,
             ..Default::default()
         },
         ..Default::default()
@@ -225,7 +230,7 @@ async fn run_agent() {
     }
 }
 
-async fn get_bootstrap_base_url() -> String {
+async fn get_bootstrap_base_url() -> BackendUrl {
     let settings_file = storage::Layout::default().settings();
     if let Ok(settings) = settings_file.read_json::<storage::Settings>().await {
         return settings.backend.base_url;

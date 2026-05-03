@@ -44,14 +44,14 @@ impl Client {
     pub async fn new(options: &Options) -> (Self, EventLoop) {
         let mut mqtt_options = MqttOptions::new(
             &options.client_id,
-            &options.connect_address.broker,
-            options.connect_address.port,
+            options.connect_address.broker().as_str(),
+            options.connect_address.port(),
         );
 
         mqtt_options.set_keep_alive(options.keep_alive);
         mqtt_options.set_credentials(&options.credentials.username, &options.credentials.password);
 
-        match options.connect_address.protocol {
+        match options.connect_address.protocol() {
             Protocol::TCP => {
                 mqtt_options.set_transport(Transport::Tcp);
             }

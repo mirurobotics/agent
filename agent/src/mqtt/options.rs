@@ -1,26 +1,103 @@
 // standard crates
+use std::fmt;
 use std::time::Duration;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+// internal crates
+use crate::mqtt::errors::InvalidConnectAddressErr;
+use crate::network::{is_loopback_host, MqttHost};
+
+// external crates
+use tracing::warn;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Protocol {
     TCP,
     SSL,
 }
 
+impl fmt::Display for Protocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Protocol::TCP => f.write_str("tcp"),
+            Protocol::SSL => f.write_str("ssl"),
+        }
+    }
+}
+
+/// An MQTT connect address.
+///
+/// Host validity is enforced by the [`MqttHost`] type: a `ConnectAddress`
+/// always carries a loopback or allowed-domain broker host. The
+/// SSL-unless-loopback rule (non-loopback brokers must use `Protocol::SSL`)
+/// is enforced by [`ConnectAddress::new`], the only construction path.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnectAddress {
-    pub protocol: Protocol,
-    pub broker: String,
-    pub port: u16,
+    protocol: Protocol,
+    broker: MqttHost,
+    port: u16,
 }
 
 impl Default for ConnectAddress {
     fn default() -> Self {
         Self {
             protocol: Protocol::SSL,
-            broker: "mqtt.mirurobotics.com".to_string(),
+            broker: MqttHost::default(),
             port: 8883,
         }
+    }
+}
+
+impl ConnectAddress {
+    /// Constructs a `ConnectAddress`, enforcing the SSL-unless-loopback rule.
+    /// Host validity is already guaranteed by the `MqttHost` type.
+    pub fn new(
+        broker: MqttHost,
+        protocol: Protocol,
+        port: u16,
+    ) -> Result<Self, InvalidConnectAddressErr> {
+        if !is_loopback_host(broker.as_str()) && !matches!(protocol, Protocol::SSL) {
+            return Err(InvalidConnectAddressErr {
+                msg: format!(
+                    "non-loopback broker `{}` requires Protocol::SSL",
+                    broker.as_str()
+                ),
+                trace: crate::trace!(),
+            });
+        }
+        Ok(Self {
+            protocol,
+            broker,
+            port,
+        })
+    }
+
+    pub fn new_or(broker: MqttHost, protocol: Protocol, port: u16, fallback: Self) -> Self {
+        match Self::new(broker.clone(), protocol, port) {
+            Ok(addr) => addr,
+            Err(err) => {
+                warn!("`{broker}` is not a valid MQTT connect address: {err}");
+                warn!("falling back to default `{fallback}`");
+                fallback
+            }
+        }
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    pub fn broker(&self) -> &MqttHost {
+        &self.broker
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl fmt::Display for ConnectAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}://{}:{}", self.protocol, self.broker, self.port)
     }
 }
 
