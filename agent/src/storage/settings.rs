@@ -5,7 +5,7 @@ use crate::network::{BackendUrl, MqttHost};
 
 // external crates
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::error;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Settings {
@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for Settings {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, Default)]
+#[derive(Debug, Default, Serialize, PartialEq, Eq)]
 pub struct Backend {
     pub base_url: BackendUrl,
 }
@@ -100,9 +100,6 @@ impl<'de> Deserialize<'de> for Backend {
     {
         #[derive(Deserialize)]
         struct DeserializeBackend {
-            // The on-disk shape is a string; we run the validating constructor
-            // ourselves below so that an invalid value warns and falls back to
-            // the default rather than failing the whole deserialize.
             base_url: Option<String>,
         }
 
@@ -119,17 +116,9 @@ impl<'de> Deserialize<'de> for Backend {
         let raw = result.base_url.unwrap_or_else(|| {
             deserialize_warn!("backend", "base_url", default.base_url.as_str().to_string())
         });
-        let base_url = match BackendUrl::new(&raw) {
-            Ok(url) => url,
-            Err(msg) => {
-                let fallback = BackendUrl::default();
-                warn!(
-                    "backend.base_url `{raw}` rejected ({msg}); falling back to default `{fallback}`"
-                );
-                fallback
-            }
-        };
-        Ok(Backend { base_url })
+        Ok(Backend {
+            base_url: BackendUrl::new_or(&raw, default.base_url),
+        })
     }
 }
 
@@ -145,9 +134,6 @@ impl<'de> Deserialize<'de> for MQTTBroker {
     {
         #[derive(Deserialize)]
         struct DeserializeMQTTBroker {
-            // The on-disk shape is a string; we run the validating constructor
-            // ourselves below so that an invalid value warns and falls back to
-            // the default rather than failing the whole deserialize.
             host: Option<String>,
         }
 
@@ -156,7 +142,7 @@ impl<'de> Deserialize<'de> for MQTTBroker {
         let result = match DeserializeMQTTBroker::deserialize(deserializer) {
             Ok(mqtt_broker) => mqtt_broker,
             Err(e) => {
-                error!("Error deserializing mqtt broker: {}", e);
+                error!("error deserializing mqtt broker: {}", e);
                 return Err(e);
             }
         };
@@ -164,16 +150,7 @@ impl<'de> Deserialize<'de> for MQTTBroker {
         let raw = result.host.unwrap_or_else(|| {
             deserialize_warn!("mqtt_broker", "host", default.host.as_str().to_string())
         });
-        let host = match MqttHost::new(&raw) {
-            Ok(host) => host,
-            Err(msg) => {
-                let fallback = MqttHost::default();
-                warn!(
-                    "mqtt_broker.host `{raw}` rejected ({msg}); falling back to default `{fallback}`"
-                );
-                fallback
-            }
-        };
+        let host = MqttHost::new_or(&raw, default.host);
         Ok(MQTTBroker { host })
     }
 }

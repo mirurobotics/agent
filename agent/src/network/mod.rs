@@ -3,12 +3,9 @@ use std::fmt;
 
 // external crates
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+#[allow(unused_imports)]
+use tracing::warn;
 use url::Url;
-
-const ALLOWED_DOMAIN: &str = "mirurobotics.com";
-const ALLOWED_DOMAIN_SUFFIX: &str = ".mirurobotics.com";
-const DEFAULT_BACKEND_URL: &str = "https://api.mirurobotics.com/agent/v1";
-const DEFAULT_MQTT_HOST: &str = "mqtt.mirurobotics.com";
 
 /// Returns true for the literal loopback hostnames we accept.
 pub fn is_loopback_host(host: &str) -> bool {
@@ -16,6 +13,8 @@ pub fn is_loopback_host(host: &str) -> bool {
 }
 
 fn is_allowed_host(host: &str) -> bool {
+    const ALLOWED_DOMAIN: &str = "mirurobotics.com";
+    const ALLOWED_DOMAIN_SUFFIX: &str = ".mirurobotics.com";
     host == ALLOWED_DOMAIN || host.ends_with(ALLOWED_DOMAIN_SUFFIX)
 }
 
@@ -61,6 +60,17 @@ impl BackendUrl {
         Ok(Self(url))
     }
 
+    pub fn new_or(raw: &str, fallback: Self) -> Self {
+        match BackendUrl::new(raw) {
+            Ok(url) => url,
+            Err(msg) => {
+                warn!("`{raw}` is not a valid backend URL: {msg})");
+                warn!("falling back to default `{fallback}`");
+                fallback
+            }
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -68,6 +78,7 @@ impl BackendUrl {
 
 impl Default for BackendUrl {
     fn default() -> Self {
+        const DEFAULT_BACKEND_URL: &str = "https://api.mirurobotics.com/agent/v1";
         Self::new(DEFAULT_BACKEND_URL).expect("default backend URL must be valid")
     }
 }
@@ -111,6 +122,16 @@ impl MqttHost {
         }
     }
 
+    pub fn new_or(host: &str, fallback: Self) -> Self {
+        match MqttHost::new(host) {
+            Ok(host) => host,
+            Err(msg) => {
+                warn!("`{host}` is not a valid MQTT host: {msg})");
+                warn!("falling back to default `{fallback}`");
+                fallback
+            }
+        }
+    }
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -118,7 +139,7 @@ impl MqttHost {
 
 impl Default for MqttHost {
     fn default() -> Self {
-        Self::new(DEFAULT_MQTT_HOST).expect("default MQTT host must be valid")
+        Self::new("mqtt.mirurobotics.com").expect("default MQTT host must be valid")
     }
 }
 

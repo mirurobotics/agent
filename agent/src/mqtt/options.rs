@@ -1,14 +1,24 @@
 // standard crates
 use std::time::Duration;
+use std::fmt;
 
 // internal crates
 use crate::mqtt::errors::InvalidConnectAddressErr;
 use crate::network::{is_loopback_host, MqttHost};
 
+// external crates
+use tracing::warn;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Protocol {
     TCP,
     SSL,
+}
+
+impl fmt::Display for Protocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 /// An MQTT connect address.
@@ -58,6 +68,17 @@ impl ConnectAddress {
         })
     }
 
+    pub fn new_or(broker: MqttHost, protocol: Protocol, port: u16, fallback: Self) -> Self {
+        match Self::new(broker.clone(), protocol, port) {
+            Ok(addr) => addr,
+            Err(err) => {
+                warn!("`{broker}` is not a valid MQTT host: {err})");
+                warn!("falling back to default `{fallback}`");
+                fallback
+            }
+        }
+    }
+
     pub fn protocol(&self) -> Protocol {
         self.protocol
     }
@@ -68,6 +89,12 @@ impl ConnectAddress {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+}
+
+impl fmt::Display for ConnectAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}://{}:{}", self.protocol, self.broker, self.port)
     }
 }
 
