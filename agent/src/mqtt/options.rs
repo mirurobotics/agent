@@ -1,6 +1,6 @@
 // standard crates
-use std::time::Duration;
 use std::fmt;
+use std::time::Duration;
 
 // internal crates
 use crate::mqtt::errors::InvalidConnectAddressErr;
@@ -17,7 +17,10 @@ pub enum Protocol {
 
 impl fmt::Display for Protocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Protocol::TCP => f.write_str("tcp"),
+            Protocol::SSL => f.write_str("ssl"),
+        }
     }
 }
 
@@ -72,7 +75,7 @@ impl ConnectAddress {
         match Self::new(broker.clone(), protocol, port) {
             Ok(addr) => addr,
             Err(err) => {
-                warn!("`{broker}` is not a valid MQTT host: {err})");
+                warn!("`{broker}` is not a valid MQTT connect address: {err}");
                 warn!("falling back to default `{fallback}`");
                 fallback
             }

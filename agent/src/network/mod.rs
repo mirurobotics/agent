@@ -3,7 +3,6 @@ use std::fmt;
 
 // external crates
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-#[allow(unused_imports)]
 use tracing::warn;
 use url::Url;
 
@@ -64,7 +63,7 @@ impl BackendUrl {
         match BackendUrl::new(raw) {
             Ok(url) => url,
             Err(msg) => {
-                warn!("`{raw}` is not a valid backend URL: {msg})");
+                warn!("`{raw}` is not a valid backend URL: {msg}");
                 warn!("falling back to default `{fallback}`");
                 fallback
             }
@@ -126,12 +125,13 @@ impl MqttHost {
         match MqttHost::new(host) {
             Ok(host) => host,
             Err(msg) => {
-                warn!("`{host}` is not a valid MQTT host: {msg})");
+                warn!("`{host}` is not a valid MQTT host: {msg}");
                 warn!("falling back to default `{fallback}`");
                 fallback
             }
         }
     }
+
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
