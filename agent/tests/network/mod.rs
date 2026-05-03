@@ -147,6 +147,20 @@ mod backend_url_new {
         let json = serde_json::to_string(&url).unwrap();
         assert_eq!(json, "\"https://staging.mirurobotics.com/x\"");
     }
+
+    #[test]
+    fn new_or_returns_constructed_url_on_valid_input() {
+        let fallback = BackendUrl::default();
+        let url = BackendUrl::new_or("https://staging.mirurobotics.com/x", fallback);
+        assert_eq!(url.as_str(), "https://staging.mirurobotics.com/x");
+    }
+
+    #[test]
+    fn new_or_returns_fallback_on_invalid_input() {
+        let fallback = BackendUrl::new("https://api.mirurobotics.com/agent/v1").unwrap();
+        let url = BackendUrl::new_or("https://evilmirurobotics.com", fallback.clone());
+        assert_eq!(url, fallback);
+    }
 }
 
 mod mqtt_host_new {
@@ -238,5 +252,19 @@ mod mqtt_host_new {
         let host = MqttHost::new("mqtt.mirurobotics.com").unwrap();
         let json = serde_json::to_string(&host).unwrap();
         assert_eq!(json, "\"mqtt.mirurobotics.com\"");
+    }
+
+    #[test]
+    fn new_or_returns_constructed_host_on_valid_input() {
+        let fallback = MqttHost::default();
+        let host = MqttHost::new_or("mqtt.mirurobotics.com", fallback);
+        assert_eq!(host.as_str(), "mqtt.mirurobotics.com");
+    }
+
+    #[test]
+    fn new_or_returns_fallback_on_invalid_input() {
+        let fallback = MqttHost::new("mqtt.mirurobotics.com").unwrap();
+        let host = MqttHost::new_or("evilmirurobotics.com", fallback.clone());
+        assert_eq!(host, fallback);
     }
 }

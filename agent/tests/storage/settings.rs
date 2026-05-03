@@ -77,6 +77,12 @@ fn serialize_deserialize_backend() {
 }
 
 #[test]
+fn backend_default_uses_backend_url_default() {
+    let backend = Backend::default();
+    assert_eq!(backend.base_url, BackendUrl::default());
+}
+
+#[test]
 fn deserialize_backend() {
     // valid deserialization
     let backend = Backend {
