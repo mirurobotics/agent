@@ -8,7 +8,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 |-----------|--------|-------------|
 | `agent/` | read-write | Add a deprecation gate to the six legacy install scripts in `scripts/install/` and to the Jinja partial that generates them. |
 
-This plan lives in `agent/plans/backlog/` because all changes are to scripts owned by this repo. No other repo is read or modified.
+This plan lives in `agent/plans/active/` because all changes are to scripts owned by this repo. No other repo is read or modified.
 
 ## Purpose / Big Picture
 
