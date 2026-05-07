@@ -4,8 +4,6 @@
 
 Single repository: `agent/` only. Target branch is `release/v0.8`; the working branch is `fix/mqtt-resubscribe-on-reconnect`, branched from `release/v0.8`. All edits live under the `agent/` crate (Rust workspace member at `/home/ben/miru/workbench5/repos/agent/agent/`). No other repos are read or written.
 
-Cherry-picking this fix to `main` is out of scope — that is a separate follow-up PR.
-
 ## Purpose / Big Picture
 
 A device running the agent loses MQTT command reception after a transient broker-side disconnect, and stays in that broken state until the agent process is restarted. Field log evidence shows v0.7.0 devices stuck like this for 6+ days. The bug exists in v0.6.0, v0.7.0, and current `main`.
@@ -75,7 +73,7 @@ Background a beginner needs:
 
 Three milestones. Each ends in one signed git commit. The commits should be reviewable in isolation.
 
-**Milestone 1 — defensive re-subscribe.** In `handle_event`, after the existing log line and storage patch in the `ConnAck::Success` path, call `mqtt::device::subscribe_sync` and `mqtt::device::subscribe_ping` exactly the way `init_client` does. Same error strings. Subscribe failures are logged but do not change the returned `err_streak` (no need to drive the cooldown; the next reconnect will retry). This alone fixes the bug for the rumqttc auto-reconnect path even on brokers that do not honor `clean_session = false`.
+**Milestone 1 — defensive re-subscribe.** In `handle_event`, after the existing log line and storage patch in the `ConnAck::Success` path, call `mqtt::device::subscribe_sync` and `mqtt::device::subscribe_ping` exactly the way `init_client` does. Same error strings. Subscribe failures are logged but do not change the returned `err_streak` (no need to drive the cooldown; the next reconnect will retry). This alone fixes the bug per the root-cause analysis in Purpose, even on brokers that do not honor `clean_session = false`.
 
 **Milestone 2 — durable broker session.** In `mqtt::Options`, add a `clean_session: bool` field defaulting to `false`. In `Client::new`, propagate it to `MqttOptions::set_clean_session`. With a stable, non-empty `client_id` (which we always have — it is the device id) this asks the broker to keep our subscriptions and queued messages across disconnects, providing a second line of defense and reducing message loss during the gap.
 
@@ -85,11 +83,7 @@ Three milestones. Each ends in one signed git commit. The commits should be revi
 
   Counting on every Success ConnAck (not just reconnects) is intentional — connection #1 is the initial connect; counts ≥2 are reconnects. That mapping makes log forensics obvious.
 
-### Why these three specifically and in this order
-
-- Milestone 1 fixes the user-visible bug. If milestones 2 and 3 are deferred for any reason, the hotfix is still complete.
-- Milestone 2 hardens the fix and reduces message loss during the gap, but only matters if the broker honors `clean_session=false` — Milestone 1 must therefore not depend on it.
-- Milestone 3 is observability. It is dependent on neither 1 nor 2 and is small, but it carries a signature change to `handle_event` that touches every existing test in `agent/tests/workers/mqtt.rs`. Doing it last keeps those test edits out of the milestones whose own tests are easiest to read.
+Order rationale: M3 last because its `handle_event` signature change forces edits to every existing test in `agent/tests/workers/mqtt.rs`; doing it last keeps M1 and M2 diffs reviewable.
 
 ### Test strategy per milestone
 
@@ -107,7 +101,7 @@ Three milestones. Each ends in one signed git commit. The commits should be revi
 
 ### Non-negotiable: import order
 
-Every Rust source file in this repo follows a strict 3-block import order: `std` first, then `crate::*` internal imports, then external crates, each block separated by a blank line and an inline comment. New tests and edits must preserve this. See existing files in `agent/src/workers/mqtt.rs` and `agent/tests/workers/mqtt.rs` lines 1–21 for canonical examples.
+Preserve the 3-block import order described in `AGENTS.md` when adding new tests. See `agent/tests/workers/mqtt.rs` lines 1–21 for a canonical example.
 
 ## Concrete Steps
 
@@ -269,7 +263,7 @@ Edit `agent/src/mqtt/client.rs`. In `Client::new`, after `set_credentials` and b
 
     mqtt_options.set_clean_session(options.clean_session);
 
-Add one new unit test in `agent/tests/mqtt/options.rs` (the file already exists). Use the existing imports as a guide; if `Credentials` and `Options` aren't already imported there, add them in the proper import block:
+Add one new unit test in `agent/tests/mqtt/options.rs` (the file already exists). Place the new test inside `mod opts` (alongside `new_defaults` / `default`), so it inherits the existing `use super::*;` imports. If `Credentials` and `Options` aren't already imported in that mod's scope, add them in the proper import block:
 
     #[test]
     fn default_options_have_persistent_session() {
@@ -401,9 +395,9 @@ Run preflight (the `preflight` skill) and confirm it reports `clean` before push
 
 **Acceptance is behavioral, not just "tests pass":**
 
-1. Without milestone 1's edit, `connack_success_resubscribes_to_sync_and_ping` and `connack_subscribe_error_does_not_change_err_streak` fail. After milestone 1, both pass. Verify by checking out the file before edit, running `./scripts/test.sh`, observing the failures, then reverting.
-2. Without milestone 2's edit, `default_options_have_persistent_session` fails. After milestone 2, it passes.
-3. Without milestone 3's edit, `connack_success_increments_connect_count` does not compile (no counter argument exists). After milestone 3, it passes and prints `connection #1` then `connection #2` on two successive Success ConnAcks.
+1. After milestone 1, the `Incoming::ConnAck(Success)` arm of `handle_event` invokes `subscribe_sync` and `subscribe_ping` exactly once per call — observable as `MockClient::num_subscribe_calls_to("cmd/devices/device_id/sync") == 1` and `... ("v1/cmd/devices/device_id/ping") == 1` after a single Success ConnAck (test `connack_success_resubscribes_to_sync_and_ping`). Non-Success ConnAcks produce zero subscribe calls (test `connack_non_success_does_not_subscribe`). A subscribe failure on the ConnAck arm does not change `err_streak` (test `connack_subscribe_error_does_not_change_err_streak`). Code audit: `init_client`'s startup subscribes at `agent/src/workers/mqtt.rs:181,184` remain in place, so a running device performs two subscribes per topic on the second connect (one at startup via `init_client`, one per ConnAck via the new arm).
+2. After milestone 2, both `Options::new(...)` and `Options::default()` produce a struct with `clean_session == false`, and `Client::new` propagates that to `MqttOptions::set_clean_session(false)` (audit by reading the diff in `agent/src/mqtt/client.rs`).
+3. After milestone 3, on two successive `ConnAck::Success` events through `handle_event`, the threaded `connect_count` advances `0 → 1 → 2` and the INFO log line reads `Established connection to mqtt broker (connection #1)` then `... (connection #2)`.
 4. `./scripts/test.sh` exits zero with all new tests included.
 5. Preflight reports `clean`.
 6. Manual reconnect smoke test (optional but strongly recommended before tagging v0.8.1): run the agent against a local `rumqttd` (or staging broker), confirm "connection #1" log, kill the broker connection, confirm a "connection #2" log appears with no agent restart, then trigger a sync command from the backend and confirm the agent processes it.
