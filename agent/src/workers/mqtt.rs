@@ -228,6 +228,16 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
             }
             info!("Established connection to mqtt broker");
             let _ = device_stor.patch(device::Updates::connected()).await;
+
+            // Re-subscribe on every successful (re)connect. rumqttc auto-reconnects
+            // internally without replaying subscribes, and the broker may have
+            // discarded session state, so we must restate our subscriptions here.
+            if let Err(e) = mqtt::device::subscribe_sync(mqtt_client, device_id).await {
+                error!("error subscribing to device synchronization updates: {e:?}");
+            };
+            if let Err(e) = mqtt::device::subscribe_ping(mqtt_client, device_id).await {
+                error!("error subscribing to device ping updates: {e:?}");
+            };
         }
         // update the device connection status on successful disconnections
         Event::Incoming(Incoming::Disconnect) => {
