@@ -72,8 +72,16 @@ pub mod handle_connection_events {
         }));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(syncer.num_sync_calls(), 0);
@@ -102,9 +110,17 @@ pub mod handle_connection_events {
         }));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
+        let mut connect_count: u32 = 0;
         let before_event = Utc::now();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         let device = device_file.read().await.unwrap();
@@ -129,7 +145,16 @@ pub mod handle_connection_events {
         }));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let _ = handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        let mut connect_count: u32 = 0;
+        let _ = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
 
         assert_eq!(
             mqtt_client.num_subscribe_calls_to(&topics::device_sync("device_id")),
@@ -157,8 +182,16 @@ pub mod handle_connection_events {
         }));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(
@@ -195,9 +228,57 @@ pub mod handle_connection_events {
             ..Default::default()
         };
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
+    }
+
+    #[tokio::test]
+    async fn connack_success_increments_connect_count() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+
+        let event = Event::Incoming(Incoming::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false,
+        }));
+        let mqtt_client = MockClient::default();
+        let syncer = MockSyncer::default();
+        let mut connect_count: u32 = 0;
+
+        let _ = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
+        assert_eq!(connect_count, 1);
+
+        let _ = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
+        assert_eq!(connect_count, 2);
     }
 
     #[tokio::test]
@@ -220,9 +301,17 @@ pub mod handle_connection_events {
         let event = Event::Incoming(Incoming::Disconnect);
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
+        let mut connect_count: u32 = 0;
         let before_event = Utc::now();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            "device_id",
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         let device = device_file.read().await.unwrap();
@@ -253,8 +342,16 @@ pub mod handle_sync_events {
         )));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            &device.id,
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(syncer.num_sync_calls(), 1);
@@ -280,8 +377,16 @@ pub mod handle_sync_events {
         )));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            &device.id,
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(syncer.num_sync_calls(), 0);
@@ -307,8 +412,16 @@ pub mod handle_sync_events {
         )));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            &device.id,
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(syncer.num_sync_calls(), 1);
@@ -339,8 +452,16 @@ pub mod handle_sync_events {
                 is_network_conn_err: false,
             }))
         });
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            &device.id,
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(syncer.num_sync_calls(), 1);
@@ -368,8 +489,16 @@ pub mod handle_ping_events {
         )));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            &device.id,
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(
@@ -401,8 +530,16 @@ pub mod handle_ping_events {
         )));
         let mqtt_client = MockClient::default();
         let syncer = MockSyncer::default();
-        let err_streak =
-            handle_event(&event, &mqtt_client, &syncer, &device.id, &device_file).await;
+        let mut connect_count: u32 = 0;
+        let err_streak = handle_event(
+            &event,
+            &mqtt_client,
+            &syncer,
+            &device.id,
+            &device_file,
+            &mut connect_count,
+        )
+        .await;
         assert_eq!(err_streak, 0);
 
         assert_eq!(
@@ -450,6 +587,7 @@ pub mod handle_mqtt_error {
             client,
             eventloop,
             err_streak: 2,
+            connect_count: 0,
         };
         let state = handle_error(
             state,
@@ -509,6 +647,7 @@ pub mod handle_mqtt_error {
             client,
             eventloop,
             err_streak: 5,
+            connect_count: 0,
         };
         let state = handle_error(
             state,
@@ -571,6 +710,7 @@ pub mod handle_mqtt_error {
             client,
             eventloop,
             err_streak: 1,
+            connect_count: 0,
         };
         let state = handle_error(
             state,
