@@ -4,13 +4,8 @@ use std::ffi::CString;
 pub mod errors;
 pub(crate) mod system;
 pub use self::errors::PrivilegeErr;
-use self::system::{RealSystem, System};
+use self::system::{RealSystem, System, User, Errno};
 use crate::trace;
-
-// external crates
-use nix::errno::Errno;
-
-pub(crate) type User = nix::unistd::User;
 
 /// If running as root, drop to the user named `name`. If already running as
 /// that user, no-op. Otherwise, return `WrongUser`.

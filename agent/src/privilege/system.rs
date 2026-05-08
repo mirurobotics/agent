@@ -1,9 +1,12 @@
 // standard crates
 use std::ffi::CStr;
 
-// external crates
-use nix::errno::Errno;
-use nix::unistd::{Gid, ResGid, ResUid, Uid, User};
+pub(crate) type Gid = nix::unistd::Gid;
+pub(crate) type ResGid = nix::unistd::ResGid;
+pub(crate) type ResUid = nix::unistd::ResUid;
+pub(crate) type Uid = nix::unistd::Uid;
+pub(crate) type User = nix::unistd::User;
+pub(crate) type Errno = nix::errno::Errno;
 
 /// Seam for every external interaction in the privilege module.
 ///
