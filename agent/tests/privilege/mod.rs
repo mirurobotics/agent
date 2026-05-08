@@ -17,7 +17,6 @@ fn target_user_and_target_group_are_miru() {
     assert_eq!(privilege::TARGET_GROUP, "miru");
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn lookup_user_returns_root_for_root() {
     let info = privilege::lookup_user("root").expect("root should always be present");
@@ -38,7 +37,6 @@ fn lookup_user_returns_user_not_found_for_nonexistent() {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn ensure_dropped_or_already_unprivileged_when_running_as_self_is_ok() {
     // The CI runner / dev machine is not root and is not the `miru` user,
@@ -70,7 +68,6 @@ fn ensure_dropped_or_already_unprivileged_when_running_as_self_is_ok() {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn lookup_user_returns_user_not_found_when_name_contains_null_byte() {
     // Embedded NULs make CString::new fail; the helper should map that to
