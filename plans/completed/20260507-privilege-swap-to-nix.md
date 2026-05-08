@@ -36,7 +36,7 @@ User-visible acceptance: `sudo MIRU_PROVISIONING_TOKEN=... miru-agent provision 
 - [x] M2: Rewrite `agent/agent/src/privilege/mod.rs` against `nix::unistd`. No `unsafe` blocks. Public surface (`TARGET_USER`, `TARGET_GROUP`, `UserInfo`, `PrivilegeErr` and all variants, `lookup_user`, `ensure_dropped_or_already_unprivileged`) is unchanged. Inline doc comment about `setuid` not touching env vars is kept verbatim. (2026-05-07 — file shrunk from 271 to 211 lines; zero `unsafe` blocks; all 7 privilege tests pass. One surprise logged re: Errno::ENOENT mapping for nonexistent-user lookup.)
 - [x] M3: Re-measure coverage and update `agent/agent/src/privilege/.covgate`. Current value `45`. Target: a realistic value reflecting the new (smaller) code shape, not a regression. (2026-05-07 — measured 33.67% / 42.31% line; lowered gate to 30 with 3-point cushion. See Surprises & Discoveries for full justification.)
 - [x] M4: Run `./scripts/preflight.sh`; confirm final line is `Preflight clean`. (Mandatory verification gate before pushing to the open PR.) (2026-05-07 — `Preflight clean` confirmed; all lints/audit/clippy/covgate/tests passed.)
-- [ ] M5: Push the branch update to the existing PR `mirurobotics/agent#62`. No new PR is opened.
+- [x] M5: Push the branch update to the existing PR `mirurobotics/agent#62`. No new PR is opened. (2026-05-07)
 
 Use timestamps when you complete steps.
 
