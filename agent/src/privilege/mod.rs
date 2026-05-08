@@ -4,7 +4,7 @@ use std::ffi::CString;
 pub mod errors;
 pub(crate) mod system;
 pub use self::errors::PrivilegeErr;
-use self::system::{RealSystem, System, User, Errno};
+use self::system::{Errno, Gid, RealSystem, System, Uid, User};
 use crate::trace;
 
 /// If running as root, drop to the user named `name`. If already running as
@@ -14,9 +14,10 @@ pub fn run_as(name: &str) -> Result<(), PrivilegeErr> {
 }
 
 pub(crate) fn run_as_with<S: System>(sys: &S, name: &str) -> Result<(), PrivilegeErr> {
-    let euid = sys.geteuid().as_raw();
-    if !is_root_user(euid) {
-        verify_effective_user(sys, name)
+    let euid = sys.geteuid();
+    let egid = sys.getegid();
+    if !is_root_user(euid.as_raw()) {
+        verify_effective_user(sys, name, euid, egid)
     } else {
         let target = lookup_user(sys, name)?;
         drop_to(sys, &target)
@@ -46,13 +47,18 @@ pub(crate) fn lookup_user<S: System>(sys: &S, name: &str) -> Result<User, Privil
     }
 }
 
-fn verify_effective_user<S: System>(sys: &S, name: &str) -> Result<(), PrivilegeErr> {
+fn verify_effective_user<S: System>(
+    sys: &S,
+    name: &str,
+    euid: Uid,
+    egid: Gid,
+) -> Result<(), PrivilegeErr> {
     let user = lookup_user(sys, name)?;
-    if user.uid != sys.geteuid() || user.gid != sys.getegid() {
+    if user.uid != euid || user.gid != egid {
         return Err(PrivilegeErr::WrongUser {
             expected: name.to_string(),
-            actual_uid: sys.geteuid().as_raw(),
-            actual_gid: sys.getegid().as_raw(),
+            actual_uid: euid.as_raw(),
+            actual_gid: egid.as_raw(),
             expected_uid: user.uid.as_raw(),
             expected_gid: user.gid.as_raw(),
             argv0: sys.argv0(),
