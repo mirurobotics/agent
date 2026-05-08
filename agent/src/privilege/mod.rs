@@ -128,10 +128,106 @@ fn drop_to<S: System>(sys: &S, target: &User) -> Result<(), PrivilegeErr> {
 
 #[cfg(test)]
 mod tests {
+    // standard crates
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString};
+    use std::path::PathBuf;
+
+    // internal crates
     use super::*;
+
+    // external crates
+    use nix::unistd::{Gid, ResGid, ResUid, Uid};
+
+    /// In-memory state machine that drives the [`System`] trait deterministically.
+    ///
+    /// Models `setres*` by mutating `euid` / `egid` cells; `getresuid` /
+    /// `getresgid` report the same value for real, effective, and saved (the
+    /// post-drop state, which is the only state we model).
+    struct FakeSystem {
+        euid: RefCell<u32>,
+        egid: RefCell<u32>,
+        users: Vec<User>,
+        argv0: String,
+    }
+
+    impl FakeSystem {
+        fn new(euid: u32, egid: u32, users: Vec<User>) -> Self {
+            Self {
+                euid: RefCell::new(euid),
+                egid: RefCell::new(egid),
+                users,
+                argv0: "miru-agent".into(),
+            }
+        }
+    }
+
+    impl System for FakeSystem {
+        fn geteuid(&self) -> Uid {
+            Uid::from_raw(*self.euid.borrow())
+        }
+
+        fn getegid(&self) -> Gid {
+            Gid::from_raw(*self.egid.borrow())
+        }
+
+        fn getresuid(&self) -> Result<ResUid, Errno> {
+            let u = Uid::from_raw(*self.euid.borrow());
+            Ok(ResUid {
+                real: u,
+                effective: u,
+                saved: u,
+            })
+        }
+
+        fn getresgid(&self) -> Result<ResGid, Errno> {
+            let g = Gid::from_raw(*self.egid.borrow());
+            Ok(ResGid {
+                real: g,
+                effective: g,
+                saved: g,
+            })
+        }
+
+        fn setresuid(&self, _real: Uid, eff: Uid, _saved: Uid) -> Result<(), Errno> {
+            *self.euid.borrow_mut() = eff.as_raw();
+            Ok(())
+        }
+
+        fn setresgid(&self, _real: Gid, eff: Gid, _saved: Gid) -> Result<(), Errno> {
+            *self.egid.borrow_mut() = eff.as_raw();
+            Ok(())
+        }
+
+        fn initgroups(&self, _user: &CStr, _primary_gid: Gid) -> Result<(), Errno> {
+            Ok(())
+        }
+
+        fn lookup_user(&self, name: &str) -> Result<Option<User>, Errno> {
+            Ok(self.users.iter().find(|u| u.name == name).cloned())
+        }
+
+        fn argv0(&self) -> String {
+            self.argv0.clone()
+        }
+    }
+
+    fn fixture_user(name: &str, uid: u32, gid: u32) -> User {
+        User {
+            name: name.to_string(),
+            passwd: CString::new("x").unwrap(),
+            uid: Uid::from_raw(uid),
+            gid: Gid::from_raw(gid),
+            gecos: CString::new("").unwrap(),
+            dir: PathBuf::from("/nonexistent"),
+            shell: PathBuf::from("/bin/false"),
+        }
+    }
 
     #[test]
     fn lookup_user_returns_root_for_root() {
+        // Exercises the production `RealSystem` path against the host passwd
+        // database; root is guaranteed present on every Linux system.
         let user = lookup_user(&RealSystem, "root").expect("root should always be present");
         assert_eq!(user.uid.as_raw(), 0);
         assert_eq!(user.gid.as_raw(), 0);
@@ -140,13 +236,22 @@ mod tests {
 
     #[test]
     fn lookup_user_returns_user_not_found_for_nonexistent() {
-        let err = lookup_user(&RealSystem, "nonexistent_user_xyz_123_miru_test")
-            .expect_err("a clearly bogus user must not resolve");
+        let fake = FakeSystem::new(1000, 1000, Vec::new());
+        let err = lookup_user(&fake, "nonexistent_user_xyz_123_miru_test")
+            .expect_err("an empty fake passwd table must reject any name");
         match err {
             PrivilegeErr::UserNotFound { name, .. } => {
                 assert_eq!(name, "nonexistent_user_xyz_123_miru_test");
             }
             other => panic!("expected UserNotFound, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn run_as_with_drops_to_target_when_root() {
+        let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 1234)]);
+        run_as_with(&fake, "miru").expect("drop succeeds");
+        assert_eq!(*fake.euid.borrow(), 1234);
+        assert_eq!(*fake.egid.borrow(), 1234);
     }
 }
