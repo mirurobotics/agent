@@ -42,8 +42,8 @@ Public observable behavior:
 
 - [x] M1: Create `agent/src/app/wait_for_activation.rs` with `WaitOutcome`, `should_log`, and `wait_for_activation` (sleep-fn injected, shutdown-future raced via `tokio::select!`). Register the module in `agent/src/app/mod.rs`. `cargo build` clean. _Done 2026-05-08; 6 unit tests pass._
 - [x] M2: Wire `run_agent()` to call `wait_for_activation` instead of early-returning. Pass `await_shutdown_signal()` as the shutdown future and `tokio::time::sleep` as the sleep fn (mirrors the `upgrade::reconcile` call site three lines below). _Done 2026-05-08; build clean. `error!` import retained — still used by 6 other call sites in `main.rs`._
-- [ ] M3: Add unit tests for `should_log` covering 0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047, 2048, 3071, 3072, 4096, plus a sweep of off-cycle values.
-- [ ] M4: Add integration tests in `agent/tests/app/wait_for_activation.rs`: activates immediately, activates after N cycles, shutdown during wait, shutdown wins when keys appear simultaneously.
+- [x] M3: Add unit tests for `should_log` covering 0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047, 2048, 3071, 3072, 4096, plus a sweep of off-cycle values. _Done as part of M1; the unit tests live in `#[cfg(test)] mod tests` at the bottom of the new module._
+- [x] M4: Add integration tests in `agent/tests/app/wait_for_activation.rs`: activates immediately, activates after N cycles, shutdown during wait, shutdown wins when keys appear simultaneously. _Done 2026-05-08; 5 integration tests pass under `./scripts/test.sh -- app::wait_for_activation`._
 - [ ] M5: Final preflight (`scripts/test.sh`, `scripts/lint.sh`, `scripts/covgate.sh`) clean.
 
 Use timestamps when you complete steps.
