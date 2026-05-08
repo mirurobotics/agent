@@ -15,6 +15,7 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendUrl;
+use miru_agent::privilege;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
@@ -31,6 +32,15 @@ async fn main() {
     if cli_args.display_version {
         println!("{}", version::format());
         return;
+    }
+
+    // Drop privileges before any I/O so the agent is never running as root
+    // when it touches /var/lib/miru, /var/log/miru, or the network. The
+    // helper is a no-op when the binary is already running as the `miru`
+    // user (e.g. when started by systemd via `User=miru`).
+    if let Err(e) = privilege::ensure_dropped_or_already_unprivileged() {
+        eprintln!("miru-agent: {e}");
+        std::process::exit(1);
     }
 
     if let Some(provision_args) = cli_args.provision_args {
