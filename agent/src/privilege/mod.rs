@@ -126,6 +126,20 @@ fn drop_to<S: System>(sys: &S, target: &User) -> Result<(), PrivilegeErr> {
         });
     }
 
+    // After `initgroups` ran for a non-root target, no supplementary group
+    // should still be 0. A privileged gid lingering here would let the dropped
+    // process re-acquire root-equivalent group permissions on filesystems
+    // that grant access via gid 0.
+    let groups = sys.getgroups().map_err(|e| syscall("getgroups", e))?;
+    for g in groups {
+        if g.as_raw() == 0 {
+            return Err(PrivilegeErr::PrivilegedSupplementaryGroup {
+                gid: g.as_raw(),
+                trace: trace!(),
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -374,6 +388,42 @@ mod tests {
                     assert_eq!(actual_sgid, 202);
                 }
                 other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_returns_privileged_supplementary_group_when_gid_zero_present() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.set_supplementary_groups(vec![Gid::from_raw(0), Gid::from_raw(100)]);
+            let err = run_as_with(&fake, "miru")
+                .expect_err("gid 0 in supplementary list must abort the drop");
+            match err {
+                PrivilegeErr::PrivilegedSupplementaryGroup { gid, .. } => {
+                    assert_eq!(gid, 0);
+                }
+                other => panic!("expected PrivilegedSupplementaryGroup, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_accepts_unprivileged_supplementary_groups() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.set_supplementary_groups(vec![Gid::from_raw(100), Gid::from_raw(200)]);
+            run_as_with(&fake, "miru")
+                .expect("non-empty supplementary group list without gid 0 must succeed");
+        }
+
+        #[test]
+        fn drop_to_propagates_getgroups_errno() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.inject_errno("getgroups", Errno::EIO);
+            let err = run_as_with(&fake, "miru").expect_err("getgroups failure must propagate");
+            match err {
+                PrivilegeErr::Syscall { call, errno, .. } => {
+                    assert_eq!(call, "getgroups");
+                    assert_eq!(errno, Errno::EIO);
+                }
+                other => panic!("expected Syscall, got {other:?}"),
             }
         }
     }

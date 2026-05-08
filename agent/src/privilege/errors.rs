@@ -47,6 +47,12 @@ pub enum PrivilegeErr {
         actual_sgid: u32,
         trace: Box<Trace>,
     },
+
+    #[error(
+        "post-drop verification failed: supplementary group list still contains \
+         privileged gid {gid} after dropping to the target user"
+    )]
+    PrivilegedSupplementaryGroup { gid: u32, trace: Box<Trace> },
 }
 
 impl crate::errors::Error for PrivilegeErr {}

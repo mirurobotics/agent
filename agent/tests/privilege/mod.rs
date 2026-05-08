@@ -96,6 +96,14 @@ fn privilege_err_display_messages_are_human_readable() {
     assert!(s.contains("rgid=3"));
     assert!(s.contains("egid=4"));
     assert!(s.contains("sgid=5"));
+
+    let priv_supp = PrivilegeErr::PrivilegedSupplementaryGroup {
+        gid: 0,
+        trace: dummy_trace(),
+    };
+    let s = format!("{priv_supp}");
+    assert!(s.contains("privileged gid 0"));
+    assert!(s.contains("supplementary"));
 }
 
 #[test]

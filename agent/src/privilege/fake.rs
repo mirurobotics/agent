@@ -23,6 +23,7 @@ pub(super) struct FakeSystem {
     pub(super) errno_on: RefCell<HashMap<&'static str, Errno>>,
     pub(super) getresuid_override: RefCell<Option<ResUid>>,
     pub(super) getresgid_override: RefCell<Option<ResGid>>,
+    pub(super) supplementary_groups: RefCell<Vec<Gid>>,
     pub(super) calls: RefCell<Vec<&'static str>>,
 }
 
@@ -36,6 +37,7 @@ impl FakeSystem {
             errno_on: RefCell::new(HashMap::new()),
             getresuid_override: RefCell::new(None),
             getresgid_override: RefCell::new(None),
+            supplementary_groups: RefCell::new(Vec::new()),
             calls: RefCell::new(Vec::new()),
         }
     }
@@ -67,6 +69,10 @@ impl FakeSystem {
 
     pub(super) fn recorded_calls(&self) -> Vec<&'static str> {
         self.calls.borrow().clone()
+    }
+
+    pub(super) fn set_supplementary_groups(&self, groups: Vec<Gid>) {
+        *self.supplementary_groups.borrow_mut() = groups;
     }
 }
 
@@ -137,6 +143,14 @@ impl System for FakeSystem {
             return Err(e);
         }
         Ok(())
+    }
+
+    fn getgroups(&self) -> Result<Vec<Gid>, Errno> {
+        self.calls.borrow_mut().push("getgroups");
+        if let Some(&e) = self.errno_on.borrow().get("getgroups") {
+            return Err(e);
+        }
+        Ok(self.supplementary_groups.borrow().clone())
     }
 
     fn lookup_user(&self, name: &str) -> Result<Option<User>, Errno> {

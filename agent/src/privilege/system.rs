@@ -23,6 +23,7 @@ pub(crate) trait System {
     fn setresuid(&self, real: Uid, eff: Uid, saved: Uid) -> Result<(), Errno>;
     fn setresgid(&self, real: Gid, eff: Gid, saved: Gid) -> Result<(), Errno>;
     fn initgroups(&self, user: &CStr, primary_gid: Gid) -> Result<(), Errno>;
+    fn getgroups(&self) -> Result<Vec<Gid>, Errno>;
     fn lookup_user(&self, name: &str) -> Result<Option<User>, Errno>;
     fn argv0(&self) -> String;
 }
@@ -60,6 +61,10 @@ impl System for RealSystem {
         nix::unistd::initgroups(user, primary_gid)
     }
 
+    fn getgroups(&self) -> Result<Vec<Gid>, Errno> {
+        nix::unistd::getgroups()
+    }
+
     fn lookup_user(&self, name: &str) -> Result<Option<User>, Errno> {
         User::from_name(name)
     }
@@ -94,6 +99,10 @@ mod tests {
         let egid = sys.getegid();
         let resgid = sys.getresgid().expect("getresgid must succeed");
         assert_eq!(resgid.effective, egid);
+
+        // getgroups returns the supplementary-group list; semantics are
+        // host-specific so we only assert the call succeeds.
+        let _ = sys.getgroups().expect("getgroups must succeed");
 
         // argv0 always returns something — under cargo test it's the test
         // binary path; the env::args fallback to "miru-agent" guarantees
