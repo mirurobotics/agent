@@ -86,7 +86,7 @@ pub fn should_log(cycle: u64) -> bool {
     if cycle <= 1024 {
         return cycle.is_power_of_two();
     }
-    cycle % 1024 == 0
+    cycle.is_multiple_of(1024)
 }
 
 #[cfg(test)]

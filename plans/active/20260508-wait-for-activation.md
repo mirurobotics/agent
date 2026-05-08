@@ -44,13 +44,16 @@ Public observable behavior:
 - [x] M2: Wire `run_agent()` to call `wait_for_activation` instead of early-returning. Pass `await_shutdown_signal()` as the shutdown future and `tokio::time::sleep` as the sleep fn (mirrors the `upgrade::reconcile` call site three lines below). _Done 2026-05-08; build clean. `error!` import retained — still used by 6 other call sites in `main.rs`._
 - [x] M3: Add unit tests for `should_log` covering 0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2047, 2048, 3071, 3072, 4096, plus a sweep of off-cycle values. _Done as part of M1; the unit tests live in `#[cfg(test)] mod tests` at the bottom of the new module._
 - [x] M4: Add integration tests in `agent/tests/app/wait_for_activation.rs`: activates immediately, activates after N cycles, shutdown during wait, shutdown wins when keys appear simultaneously. _Done 2026-05-08; 5 integration tests pass under `./scripts/test.sh -- app::wait_for_activation`._
-- [ ] M5: Final preflight (`scripts/test.sh`, `scripts/lint.sh`, `scripts/covgate.sh`) clean.
+- [x] M5: Final preflight (`scripts/test.sh`, `scripts/lint.sh`, `scripts/covgate.sh`) clean. _Done 2026-05-08; 1330 passed, lint clean, all covgates pass._
 
 Use timestamps when you complete steps.
 
 ## Surprises & Discoveries
 
-(Empty — will be populated during implementation.)
+- 2026-05-08: Clippy (`-D warnings`) flags `cycle % 1024 == 0` in favor of the newly-stable `u64::is_multiple_of` (Rust 1.89+). Auto-fixed during `lint.sh`. Behaviour identical.
+- 2026-05-08: With `// external crates` empty in `agent/tests/app/wait_for_activation.rs` (stdlib + `tokio::sync::oneshot`/`tokio::sync::Mutex` already covered by the dev-dep `tokio`'s macros), clippy's auto-fix removed the empty group header entirely. Kept the `// internal crates` group header — that block is non-empty.
+- 2026-05-08: Plan's example test code passed `#[serial]` was unnecessary and was already excluded by Decision Log entry; verified that no new test touches a fixed path. All four integration tests use distinct `create_temp_dir` names.
+- 2026-05-08: One unrelated test (`app::run::max_runtime_reached`) flaked on the first `./scripts/test.sh -- app::wait_for_activation` run with a tokio `Elapsed` timeout, then passed cleanly on the next run and on the full preflight. Pre-existing flake, not caused by this branch.
 
 ## Decision Log
 
@@ -96,7 +99,21 @@ Use timestamps when you complete steps.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+- **Preflight (2026-05-08)**:
+  - `./scripts/test.sh`: 1330 passed, 0 failed, 0 ignored.
+  - `./scripts/lint.sh`: clean (clippy auto-applied 2 fixes; no remaining warnings; fmt, machete, audit, import-linter all green).
+  - `./scripts/covgate.sh`: every per-module gate passes. `agent/src/app/`: **90.38%** vs floor **88.62%** — comfortable margin even though we added a new module. The new code is exercised by 6 unit tests (`should_log` schedule) and 5 integration tests (the four `wait_for_activation` branches plus the public-API path of `should_log`).
+- **Files changed**:
+  - `agent/agent/src/app/wait_for_activation.rs` (new; 139 lines)
+  - `agent/agent/src/app/mod.rs` (registered the new module)
+  - `agent/agent/src/main.rs` (replaced 5-line early-return with 4-line `match` on `WaitOutcome`; added one import)
+  - `agent/agent/tests/app/wait_for_activation.rs` (new; 178 lines)
+  - `agent/agent/tests/app/mod.rs` (registered)
+- **Notes for reviewers**:
+  - The shutdown-future is consumed by value (`S: Future<Output = ()> + Send`) and pinned inside the helper. Tests pass `std::future::pending::<()>()`, `std::future::ready(())`, or a closed-over `oneshot::Receiver` — nothing real to clean up.
+  - `biased; shutdown` ordering is deliberate and load-bearing for the `shutdown_wins_when_already_signaled_at_entry` test; do not flip without revisiting the contract.
+  - The activation log (`"Device activated; starting agent."`) is emitted before returning `WaitOutcome::Activated`; the production caller in `main.rs` does not log a duplicate.
+  - `error!` is still imported in `main.rs` because 6 other call sites use it; the new code only logs at `info!`.
 
 ## Context and Orientation
 

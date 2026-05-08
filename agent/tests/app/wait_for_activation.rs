@@ -8,7 +8,6 @@ use miru_agent::app::wait_for_activation::{should_log, wait_for_activation, Wait
 use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::storage::Layout;
 
-// external crates
 // (none — stdlib + tokio macros)
 
 // ============================ TEST HARNESS ============================ //
