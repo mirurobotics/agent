@@ -392,6 +392,140 @@ mod tests {
         }
 
         #[test]
+        fn drop_to_returns_post_drop_mismatch_when_ruid_real_differs() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.override_getresuid(9999, 1234, 1234);
+            let err = run_as_with(&fake, "miru").expect_err("real ruid mismatch must propagate");
+            match err {
+                PrivilegeErr::PostDropMismatch {
+                    expected_uid,
+                    expected_gid,
+                    actual_ruid,
+                    actual_euid,
+                    ..
+                } => {
+                    assert_eq!(expected_uid, 1234);
+                    assert_eq!(expected_gid, 5678);
+                    assert_eq!(actual_ruid, 9999);
+                    assert_eq!(actual_euid, 1234);
+                }
+                other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_returns_post_drop_mismatch_when_ruid_effective_differs() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.override_getresuid(1234, 9999, 1234);
+            let err =
+                run_as_with(&fake, "miru").expect_err("effective ruid mismatch must propagate");
+            match err {
+                PrivilegeErr::PostDropMismatch {
+                    expected_uid,
+                    expected_gid,
+                    actual_euid,
+                    actual_ruid,
+                    ..
+                } => {
+                    assert_eq!(expected_uid, 1234);
+                    assert_eq!(expected_gid, 5678);
+                    assert_eq!(actual_euid, 9999);
+                    assert_eq!(actual_ruid, 1234);
+                }
+                other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_returns_post_drop_mismatch_when_ruid_saved_differs() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.override_getresuid(1234, 1234, 9999);
+            let err = run_as_with(&fake, "miru").expect_err("saved ruid mismatch must propagate");
+            match err {
+                PrivilegeErr::PostDropMismatch {
+                    expected_uid,
+                    expected_gid,
+                    actual_suid,
+                    actual_ruid,
+                    ..
+                } => {
+                    assert_eq!(expected_uid, 1234);
+                    assert_eq!(expected_gid, 5678);
+                    assert_eq!(actual_suid, 9999);
+                    assert_eq!(actual_ruid, 1234);
+                }
+                other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_returns_post_drop_mismatch_when_rgid_real_differs() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.override_getresgid(9999, 5678, 5678);
+            let err = run_as_with(&fake, "miru").expect_err("real rgid mismatch must propagate");
+            match err {
+                PrivilegeErr::PostDropMismatch {
+                    expected_uid,
+                    expected_gid,
+                    actual_rgid,
+                    actual_egid,
+                    ..
+                } => {
+                    assert_eq!(expected_uid, 1234);
+                    assert_eq!(expected_gid, 5678);
+                    assert_eq!(actual_rgid, 9999);
+                    assert_eq!(actual_egid, 5678);
+                }
+                other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_returns_post_drop_mismatch_when_rgid_effective_differs() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.override_getresgid(5678, 9999, 5678);
+            let err =
+                run_as_with(&fake, "miru").expect_err("effective rgid mismatch must propagate");
+            match err {
+                PrivilegeErr::PostDropMismatch {
+                    expected_uid,
+                    expected_gid,
+                    actual_egid,
+                    actual_rgid,
+                    ..
+                } => {
+                    assert_eq!(expected_uid, 1234);
+                    assert_eq!(expected_gid, 5678);
+                    assert_eq!(actual_egid, 9999);
+                    assert_eq!(actual_rgid, 5678);
+                }
+                other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn drop_to_returns_post_drop_mismatch_when_rgid_saved_differs() {
+            let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
+            fake.override_getresgid(5678, 5678, 9999);
+            let err = run_as_with(&fake, "miru").expect_err("saved rgid mismatch must propagate");
+            match err {
+                PrivilegeErr::PostDropMismatch {
+                    expected_uid,
+                    expected_gid,
+                    actual_sgid,
+                    actual_rgid,
+                    ..
+                } => {
+                    assert_eq!(expected_uid, 1234);
+                    assert_eq!(expected_gid, 5678);
+                    assert_eq!(actual_sgid, 9999);
+                    assert_eq!(actual_rgid, 5678);
+                }
+                other => panic!("expected PostDropMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
         fn drop_to_returns_privileged_supplementary_group_when_gid_zero_present() {
             let fake = FakeSystem::new(0, 0, vec![fixture_user("miru", 1234, 5678)]);
             fake.set_supplementary_groups(vec![Gid::from_raw(0), Gid::from_raw(100)]);
