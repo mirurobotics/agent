@@ -108,7 +108,6 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
         client: mqtt_client,
         eventloop,
         err_streak: 0,
-        connect_count: 0,
     };
 
     loop {
@@ -133,7 +132,6 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
                             syncer,
                             &device.id,
                             device_stor,
-                            &mut state.connect_count,
                         ).await;
                     }
                     Err(e) => {
@@ -216,7 +214,6 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
     syncer: &SyncerT,
     device_id: &str,
     device_stor: &storage::Device,
-    connect_count: &mut u32,
 ) -> ErrStreak {
     let err_streak = 0;
 
@@ -226,11 +223,7 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
             if connack.code != ConnectReturnCode::Success {
                 return err_streak;
             }
-            *connect_count = connect_count.saturating_add(1);
-            info!(
-                "Established connection to mqtt broker (connection #{count})",
-                count = *connect_count
-            );
+            info!("Established connection to mqtt broker");
             let _ = device_stor.patch(device::Updates::connected()).await;
 
             // Re-subscribe on every successful (re)connect. rumqttc auto-reconnects
@@ -310,7 +303,6 @@ pub struct State {
     pub client: mqtt::Client,
     pub eventloop: EventLoop,
     pub err_streak: ErrStreak,
-    pub connect_count: u32,
 }
 
 pub async fn handle_error<TokenManagerT: TokenManagerExt>(
