@@ -6,6 +6,14 @@ use miru_agent::privilege::PrivilegeErr;
 // external crates
 use nix::unistd::{Gid, Uid};
 
+// `drop_to`'s privileged path (actually running as root and dropping to the
+// `miru` user) is exercised by shell-driven smoke-test steps documented in:
+//   - plans/completed/20260507-self-privilege-drop.md
+//   - plans/completed/20260507-privilege-swap-to-nix.md
+//   - plans/completed/20260507-privilege-drop-cfg-gating.md
+// We deliberately do not duplicate that here because spawning a privileged
+// subprocess inside `cargo test` is fragile and CI runners are unprivileged.
+
 fn dummy_trace() -> Box<Trace> {
     Box::new(Trace {
         file: file!(),
@@ -104,4 +112,28 @@ fn privilege_err_display_messages_are_human_readable() {
     let s = format!("{post_drop}");
     assert!(s.contains("expected uid=100"));
     assert!(s.contains("got uid=0"));
+}
+
+#[test]
+fn run_as_is_noop_when_already_target_user() {
+    // Resolve the current effective user from the passwd database. If the
+    // runner has no passwd entry for its euid (rare — minimal containers,
+    // chroots) we skip rather than fail, since we have nothing to verify
+    // against.
+    let euid = nix::unistd::geteuid();
+    let user = match nix::unistd::User::from_uid(euid) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            eprintln!("skipping: no passwd entry for euid {}", euid.as_raw());
+            return;
+        }
+        Err(e) => {
+            eprintln!(
+                "skipping: User::from_uid({}) failed: {e}",
+                euid.as_raw(),
+            );
+            return;
+        }
+    };
+    privilege::run_as(&user.name).expect("run_as on current effective user is a no-op");
 }
