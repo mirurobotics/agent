@@ -14,6 +14,12 @@ pub type SyncDevice = backend_api::models::SyncDevice;
 pub type Ping = backend_api::models::Ping;
 pub type Pong = backend_api::models::Pong;
 
+pub async fn subscribe_all(client: &impl ClientI, device_id: &str) -> Result<(), MQTTError> {
+    subscribe_sync(client, device_id).await?;
+    subscribe_ping(client, device_id).await?;
+    Ok(())
+}
+
 pub async fn subscribe_sync(client: &impl ClientI, device_id: &str) -> Result<(), MQTTError> {
     let topic = device_sync(device_id);
     client.subscribe(&topic, QoS::AtLeastOnce).await
