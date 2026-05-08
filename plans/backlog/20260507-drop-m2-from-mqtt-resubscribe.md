@@ -29,7 +29,7 @@ Drop M2 (`fix(mqtt): set clean_session=false ...`, sha `5cdd092`) from the v0.8.
 
 ## Context and Orientation
 
-The branch `fix/mqtt-resubscribe-on-reconnect` is already pushed and has PR #60 open against `release/v0.8`. It currently carries three M-commits — M1 `41e89c8` (re-subscribe on ConnAck), M2 `5cdd092` (clean_session=false, to drop), M3 `635efc5` (connection counter, keep) — plus three plan-related commits and `f5d5f41` ("plan: mark mqtt-resubscribe hotfix complete"), totalling 7 commits over `origin/release/v0.8`.
+The branch `fix/mqtt-resubscribe-on-reconnect` is already pushed and has PR #60 open against `release/v0.8`. It currently carries three M-commits — M1 `41e89c8` (re-subscribe on ConnAck), M2 `5cdd092` (clean_session=false, to drop), M3 `635efc5` (connection counter, keep) — plus three pre-implementation plan commits, `f5d5f41` ("plan: mark mqtt-resubscribe hotfix complete"), and `9cc8054` ("plan: draft drop-m2 plan for v0.8.1 hotfix" — this very plan), totalling 8 commits over `origin/release/v0.8`.
 
 M2 touches `agent/src/mqtt/options.rs`, `agent/src/mqtt/client.rs`, and `agent/tests/mqtt/options.rs`. M3 touches `agent/src/workers/mqtt.rs` and `agent/tests/workers/mqtt.rs`. The file sets are disjoint so the rebase that drops M2 will replay M3 cleanly. No `clean_session` references exist outside M2's files, so dropping M2 cannot break callers.
 
@@ -51,9 +51,9 @@ No new commit added — the rebase rewrites M3 onto M1 directly.
 
     cd /home/ben/miru/workbench5/repos/agent
     git branch --show-current   # expect: fix/mqtt-resubscribe-on-reconnect
-    git log --oneline origin/release/v0.8..HEAD   # baseline: 7 commits
+    git log --oneline origin/release/v0.8..HEAD   # baseline: 8 commits
     git rebase --onto 41e89c8 5cdd092 fix/mqtt-resubscribe-on-reconnect
-    git log --oneline origin/release/v0.8..HEAD   # expect: 6 commits, no 5cdd092
+    git log --oneline origin/release/v0.8..HEAD   # expect: 7 commits, no 5cdd092
     git diff --stat origin/release/v0.8...HEAD    # expect: only workers/mqtt.rs, tests/workers/mqtt.rs, plans/...
     ./scripts/test.sh   # expect: all tests pass
 
@@ -69,8 +69,8 @@ No new commit added — the rebase rewrites M3 onto M1 directly.
 
 ## Validation and Acceptance
 
-1. `git log --oneline origin/release/v0.8..HEAD` shows 6 commits, none with sha `5cdd092` and none whose subject mentions `clean_session`. M1 and M3 subjects (`re-subscribe on every successful ConnAck`, `log mqtt reconnects with a connection counter`) are present.
-2. `git diff --name-only origin/release/v0.8...HEAD` lists only `agent/src/workers/mqtt.rs`, `agent/tests/workers/mqtt.rs`, and `plans/completed/20260507-mqtt-resubscribe-on-reconnect.md`.
+1. After the rebase + plan-doc edit commit, `git log --oneline origin/release/v0.8..HEAD` shows 8 commits, none with sha `5cdd092` and none whose subject mentions `clean_session`. M1 and M3 subjects (`re-subscribe on every successful ConnAck`, `log mqtt reconnects with a connection counter`) are present.
+2. `git diff --name-only origin/release/v0.8...HEAD` lists only `agent/src/workers/mqtt.rs`, `agent/tests/workers/mqtt.rs`, `plans/backlog/20260507-drop-m2-from-mqtt-resubscribe.md`, and `plans/completed/20260507-mqtt-resubscribe-on-reconnect.md`.
 3. `./scripts/test.sh` exits zero.
 4. `./scripts/preflight.sh` reports `Preflight clean`. **This is the gate** — preflight must report clean before changes are pushed.
 5. The plan doc no longer references the M2 milestone in Plan of Work, Concrete Steps, or Validation; the Decision Log includes the drop entry.
