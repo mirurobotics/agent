@@ -19,6 +19,7 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 libc = { workspace = true }
+nix = { workspace = true }
 backend-api = { workspace = true }
 device-api = { workspace = true }
 openssl = { workspace = true }
