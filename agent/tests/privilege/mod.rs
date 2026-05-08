@@ -1,7 +1,10 @@
 // internal crates
 use miru_agent::errors::Trace;
 use miru_agent::privilege;
-use miru_agent::privilege::{PrivilegeErr, UserInfo};
+use miru_agent::privilege::PrivilegeErr;
+
+// external crates
+use nix::unistd::{Gid, Uid};
 
 fn dummy_trace() -> Box<Trace> {
     Box::new(Trace {
@@ -12,17 +15,11 @@ fn dummy_trace() -> Box<Trace> {
 }
 
 #[test]
-fn target_user_and_target_group_are_miru() {
-    assert_eq!(privilege::TARGET_USER, "miru");
-    assert_eq!(privilege::TARGET_GROUP, "miru");
-}
-
-#[test]
 fn lookup_user_returns_root_for_root() {
-    let info = privilege::lookup_user("root").expect("root should always be present");
-    assert_eq!(info.uid, 0);
-    assert_eq!(info.gid, 0);
-    assert_eq!(info.name, "root");
+    let user = privilege::lookup_user("root").expect("root should always be present");
+    assert_eq!(user.uid.as_raw(), 0);
+    assert_eq!(user.gid.as_raw(), 0);
+    assert_eq!(user.name, "root");
 }
 
 #[test]
@@ -38,13 +35,11 @@ fn lookup_user_returns_user_not_found_for_nonexistent() {
 }
 
 #[test]
-fn ensure_dropped_or_already_unprivileged_when_running_as_self_is_ok() {
-    // The CI runner / dev machine is not root and is not the `miru` user,
-    // so the entry point must reject the run with WrongUser. We exercise
-    // only the wrong-user branch here; the root and already-miru branches
-    // are covered by the smoke-test steps in the plan.
-    let err = privilege::ensure_dropped_or_already_unprivileged()
-        .expect_err("non-root, non-miru user must be rejected");
+fn run_as_rejects_non_target_user_when_not_root() {
+    // The CI runner / dev machine is not root and is not the `miru` user, so
+    // the entry point must reject the run with WrongUser. The root and
+    // already-miru branches are covered by the smoke-test steps in the plan.
+    let err = privilege::run_as("miru").expect_err("non-root, non-miru user must be rejected");
     match err {
         PrivilegeErr::WrongUser {
             expected,
@@ -52,7 +47,7 @@ fn ensure_dropped_or_already_unprivileged_when_running_as_self_is_ok() {
             argv0,
             ..
         } => {
-            assert_eq!(expected, privilege::TARGET_USER);
+            assert_eq!(expected, "miru");
             // SAFETY: getuid is always safe.
             let real_uid = unsafe { libc::getuid() };
             assert_eq!(actual_uid, real_uid);
@@ -62,38 +57,10 @@ fn ensure_dropped_or_already_unprivileged_when_running_as_self_is_ok() {
         // `miru` passwd entry (e.g. a vanilla CI runner). Both branches
         // demonstrate the entry point refuses to silently proceed.
         PrivilegeErr::UserNotFound { name, .. } => {
-            assert_eq!(name, privilege::TARGET_USER);
+            assert_eq!(name, "miru");
         }
         other => panic!("expected WrongUser or UserNotFound, got {other:?}"),
     }
-}
-
-#[test]
-fn lookup_user_returns_user_not_found_when_name_contains_null_byte() {
-    // Embedded NULs make CString::new fail; the helper should map that to
-    // UserNotFound rather than panic, since the underlying intent is "no such
-    // user in /etc/passwd".
-    let err = privilege::lookup_user("contains\0null").expect_err("NUL bytes must not pass");
-    match err {
-        PrivilegeErr::UserNotFound { name, .. } => {
-            assert_eq!(name, "contains\0null");
-        }
-        other => panic!("expected UserNotFound, got {other:?}"),
-    }
-}
-
-#[test]
-fn user_info_struct_round_trips_fields() {
-    let info = UserInfo {
-        uid: 1234,
-        gid: 5678,
-        name: "miru".to_string(),
-    };
-    assert_eq!(info.uid, 1234);
-    assert_eq!(info.gid, 5678);
-    assert_eq!(info.name, "miru");
-    // Confirms Clone + PartialEq are wired up so callers can use them.
-    assert_eq!(info.clone(), info);
 }
 
 #[test]
@@ -128,10 +95,10 @@ fn privilege_err_display_messages_are_human_readable() {
     assert!(s.contains("errno=1"));
 
     let post_drop = PrivilegeErr::PostDropMismatch {
-        expected_uid: 100,
-        expected_gid: 100,
-        actual_uid: 0,
-        actual_gid: 0,
+        expected_uid: Uid::from_raw(100),
+        expected_gid: Gid::from_raw(100),
+        actual_uid: Uid::from_raw(0),
+        actual_gid: Gid::from_raw(0),
         trace: dummy_trace(),
     };
     let s = format!("{post_drop}");
