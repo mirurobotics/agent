@@ -14,7 +14,7 @@ This plan lives in `agent/plans/` because every file changed is in this repo.
 
 Today users configure the agent's backend with a full URL — `https://api.mirurobotics.com/agent/v1` — but the validator already forces every component except the host. Scheme is determined by whether the host is loopback; the path is fixed by the API contract in `libs/backend-api/`. That gives users two extra ways to misconfigure (wrong scheme, wrong path) without any real choice.
 
-After this refactor the public surface is a bare hostname (optionally `host:port`), mirroring the existing `MqttHost` newtype in the same module. Scheme and path move inside the new `BackendHost` type as derived/hardcoded values. The CLI flag `--backend-host` is already host-shaped, so the only externally visible change is the on-disk `settings.json` field rename `backend.base_url` → `backend.host`. Behavior a user can observe: the agent runs against `api.mirurobotics.com` configured as a hostname; an old settings file with the legacy `base_url` field is treated as missing and the default is used (with a warn-log), exactly the same fallback pattern used today for any invalid backend value.
+After this refactor the public surface is a bare hostname (optionally `host:port`), mirroring the existing `MqttHost` newtype in the same module. Scheme and path move inside the new `BackendHost` type as derived/hardcoded values. The CLI flag `--backend-host` is already host-shaped, so the main externally visible change is the on-disk `settings.json` field rename `backend.base_url` → `backend.host` (with one further CLI behavior change noted below). Behavior a user can observe: the agent runs against `api.mirurobotics.com` configured as a hostname; an old settings file with the legacy `base_url` field is treated as missing and the default is used (with a warn-log), exactly the same fallback pattern used today for any invalid backend value. The CLI flag `--backend-host` is already documented as a hostname, but the previous `BackendUrl` validator silently accepted scheme-prefixed values such as `https://api.mirurobotics.com`. Under the new validator those inputs are rejected and the default is used (with a warn-log), so any user or script passing a full URL via `--backend-host` must drop the scheme and path. This is the same reject-and-warn pattern the validator applies to disallowed domains today.
 
 ## Progress
 
@@ -35,7 +35,15 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 ## Decision Log
 
 - Decision: Hard rename of the settings field (`base_url` → `host`); no `#[serde(alias = "base_url")]`, no migration code.
-  Rationale: `Backend::deserialize` in `agent/src/storage/settings.rs` already treats a missing or invalid backend value as "use default and warn-log" — that path covers existing on-disk files automatically. A serde alias would feed a full URL string into `BackendHost::new`, which rejects URLs (only hosts allowed), so the alias would not actually accept legacy data without extra URL-parsing logic; that is strictly more code than the warn-and-default path. The prior plan that introduced `BackendUrl` (`plans/completed/20260501-allowed-domains-newtypes.md`) used the same warn-and-default approach, so this is consistent.
+  Rationale: `Backend::deserialize` in `agent/src/storage/settings.rs` already treats a missing or invalid backend value as "use default and warn-log" — that path covers existing on-disk files automatically. A serde alias would feed a full URL string into `BackendHost::new`, which rejects URLs (only hosts allowed), so the alias would not actually accept legacy data without extra URL-parsing logic; that is strictly more code than the warn-and-default path. The prior plan that introduced `BackendUrl` (`plans/completed/20260501-allowed-domains-newtypes.md`) used the same warn-and-default approach, so this is consistent. Note: after the rename, the warn-log message refers to the missing `host` field, not to the legacy `base_url` field — the legacy field is silently treated as an unknown key. If legacy-warning ergonomics matter, `Backend::deserialize` can additionally detect `base_url` presence and emit a more informative warning; this is out of scope for the rename itself but recorded here as a follow-up.
+  Date/Author: 2026-05-08 / ben.
+
+- Decision: `Backend::deserialize` continues to use the warn-and-default path; legacy on-disk `base_url` is treated as an unknown key, the missing `host` triggers a warn-log, and the default `BackendHost` is used.
+  Rationale: matches the existing pattern for any invalid backend value, avoids a serde alias that would require URL-parsing logic, and keeps the deserialize impl shape identical to today's.
+  Date/Author: 2026-05-08 / ben.
+
+- Decision: The `/agent/v1` API-version path is hardcoded inside `BackendHost::as_url()` rather than being part of the on-disk or CLI surface.
+  Rationale: the path is fixed by the API contract in `libs/backend-api/`; exposing it to users provides no real choice and is a frequent source of misconfiguration today.
   Date/Author: 2026-05-08 / ben.
 
 (Add further entries as decisions arise.)
@@ -58,13 +66,13 @@ Key files for this plan, all paths relative to `agent/`:
 - `src/app/options.rs` — `AppOptions { pub backend_base_url: BackendUrl }` at line 46, with default at line 67.
 - `src/app/run.rs:166` — passes the URL to `http::Client::new`.
 - `src/provisioning/shared.rs` lines 36-49 — `determine_settings` currently does `let raw = format!("{host}/agent/v1"); BackendUrl::new_or(&raw, BackendUrl::default())`, which is the only place the `/agent/v1` suffix is appended at runtime today.
-- `src/provisioning/provision.rs` (~lines 110-162) and `src/provisioning/reprovision.rs` (~lines 89-132) — tests assert on `defaults.backend.base_url`. `provision.rs` has a test named `backend_host_appends_agent_v1_suffix` that pins this concatenation behavior.
+- `src/provisioning/provision.rs` (~lines 110-162) and `src/provisioning/reprovision.rs` (~lines 80-132) — tests assert on `defaults.backend.base_url`. Both files contain a test named `backend_host_appends_agent_v1_suffix` that pins this concatenation behavior, and an `invalid_backend_host_falls_back_to_default` test that exercises the warn-and-default path.
 - `src/cli/mod.rs` — already exposes `--backend-host=<hostname>` (no scheme, no path). No CLI changes needed.
 - `src/http/client.rs:71` — `http::Client::new(base_url: &str)` stores the string and downstream callers (`releases.rs`, `git_commits.rs`, `config_instances.rs`, `devices.rs`, `deployments.rs`) do `format!("{}/<resource>", client.base_url())`. The full URL passed in must therefore end at `/agent/v1` with no trailing slash.
 - `tests/network/mod.rs` lines 4-164 — `mod backend_url_new`, ~19 tests covering validation. To be replaced with `mod backend_host_new`.
 - `tests/storage/settings.rs` — fixtures at lines 18, 35, 72, 80, 89, and 144-161 build `BackendUrl` and reference the `base_url` field. The test `deserialize_backend_falls_back_on_disallowed_host` (line 144) exercises the warn-and-default path.
 - `tests/app/options.rs` — constructs `AppOptions` with `backend_base_url`.
-- `tests/provisioning/provision.rs` and `tests/provisioning/reprovision.rs` — assertions and the suffix test mentioned above.
+- `tests/provisioning/{provision,reprovision}.rs` — integration tests for the provisioning flow; they do not currently reference `backend.base_url` directly, so the migration touches them only if a backend-shaped fixture is added.
 
 Repo conventions to follow (see `agent/AGENTS.md`):
 
@@ -119,9 +127,9 @@ Splitting host from port: there are two reasonable approaches. Pick one and note
 - Path: always `/agent/v1`.
 - No trailing slash, so existing callers can `format!("{}/<resource>", base)` (see `agent/src/http/client.rs` and its consumers).
 
-Trait impls: `Display` (writes the same string the user typed — host or `host:port`), `Serialize` as that string, `Deserialize` that calls `Self::new` and propagates errors via `serde::de::Error::custom`, and `Default` returning `Self::new("api.mirurobotics.com").expect(...)` (mirrors `MqttHost::default`).
+Trait impls: `Display` (writes the same string the user typed — host or `host:port`), `Serialize` as that string, `Deserialize` that calls `Self::new` and propagates errors via `serde::de::Error::custom`, and `Default` returning `Self::new("api.mirurobotics.com").expect("default backend host must be valid")` (mirrors `MqttHost::default`).
 
-Add `BackendHost` to the `pub use` re-export in `agent/src/storage/mod.rs:24` (replacing `BackendUrl`).
+In Milestone 2, update the `pub use` in `agent/src/storage/mod.rs:24` to add `BackendHost` alongside `BackendUrl` so call-site fixtures can import either type during migration. In Milestone 3, drop `BackendUrl` from that re-export when its definition is removed.
 
 ### Call-site migration
 
@@ -145,7 +153,7 @@ Add `BackendHost` to the `pub use` re-export in `agent/src/storage/mod.rs:24` (r
   - Lines 36-49 (`determine_settings`): replace `let raw = format!("{host}/agent/v1"); BackendUrl::new_or(&raw, BackendUrl::default())` with `BackendHost::new_or(host, BackendHost::default())`. The `/agent/v1` suffix is now produced by `BackendHost::as_url()`.
 - `agent/src/provisioning/provision.rs` and `reprovision.rs`:
   - Update test assertions that compare against `defaults.backend.base_url` to compare against `defaults.backend.host`.
-  - Repurpose `backend_host_appends_agent_v1_suffix` (around lines 110-120 of `provision.rs`): assert that `result.backend.host.as_url()` ends with `/agent/v1` after `determine_settings` is called. If the new `BackendHost` unit tests already cover this, delete the test outright and note the deletion in the Decision Log.
+  - Repurpose `backend_host_appends_agent_v1_suffix` in both `provision.rs` (lines ~110-120) and `reprovision.rs` (lines ~80-90): change the existing input `Some("https://custom.mirurobotics.com".to_string())` to a bare hostname `Some("custom.mirurobotics.com".to_string())` (the new `BackendHost::new` rejects scheme-prefixed inputs), then assert that `result.backend.host.as_url()` ends with `/agent/v1` after `determine_settings` is called. If the new `BackendHost` unit tests already cover this, delete both tests outright and note the deletion in the Decision Log. Also review the `invalid_backend_host_falls_back_to_default` tests: the current input rejects on disallowed-domain; under the new validator the input may also be rejected for containing `://`. Update the test comment to reflect whichever rule the test is meant to exercise.
 
 ### Test changes
 
@@ -166,7 +174,7 @@ Add `BackendHost` to the `pub use` re-export in `agent/src/storage/mod.rs:24` (r
   - `as_url()` output: non-loopback → `https://<host>/agent/v1`; loopback (`localhost`, `127.0.0.1`, `::1`) → `http://<host>/agent/v1`; with port → `https://<host>:<port>/agent/v1` and `http://<host>:<port>/agent/v1`.
 - `agent/tests/storage/settings.rs`: update fixtures at lines 18, 35, 72, 80, 89, and 144-161 to construct `BackendHost::new("api.mirurobotics.com")` and use the field name `host`. Reframe `deserialize_backend_falls_back_on_disallowed_host` (line 144) to also serve as the regression for legacy on-disk files: a JSON object containing only `{ "base_url": "https://api.mirurobotics.com/agent/v1" }` should deserialize to the default `Backend` (because the new code reads `host`, the legacy field is just an unknown key).
 - `agent/tests/app/options.rs`: update the `AppOptions` fixture to use `backend_host` of type `BackendHost`.
-- `agent/tests/provisioning/provision.rs` and `tests/provisioning/reprovision.rs`: update assertions to use `backend.host`; repurpose or delete `backend_host_appends_agent_v1_suffix` per the Plan of Work above.
+- `agent/src/provisioning/provision.rs` and `src/provisioning/reprovision.rs` (inline `#[cfg(test)] mod tests`): update assertions to use `backend.host`; repurpose or delete `backend_host_appends_agent_v1_suffix` per the Plan of Work above.
 
 Watch for the import linter's "field-by-field-assert" rule when any test grows past 3 `assert_eq!` calls on the same value. Suppress with `// lint:allow(field-by-field-assert)` if intentional.
 
@@ -176,11 +184,11 @@ After call sites compile and tests pass, delete the `BackendUrl` definition (lin
 
 ## Concrete Steps
 
-All commands run from `agent/` (i.e., `cd /home/ben/miru/workbench2/repos/agent`). The branch `refactor/backend-host` is already checked out off `main`.
+All commands run from the agent crate directory: `cd /home/ben/miru/workbench2/repos/agent/agent`. The branch `refactor/backend-host` is already checked out off `main`.
 
 ### Milestone 1 — Add `BackendHost`
 
-1. Edit `src/network/mod.rs` to add the `BackendHost` type, its impls (`new`, `new_or`, `as_url`, `Display`, `Serialize`, `Deserialize`, `Default`), keeping `BackendUrl` intact for now.
+1. Edit `src/network/mod.rs` to add the `BackendHost` type, its impls (`new`, `new_or`, `as_url`, `Display`, `Serialize`, `Deserialize`, `Default`), keeping `BackendUrl` intact for now. Do not yet touch the `pub use` in `src/storage/mod.rs`; the re-export update lands in Milestone 2.
 2. Add `mod backend_host_new` (and any sibling modules for serde/Default/`as_url` round-trips) in `tests/network/mod.rs`. Leave `mod backend_url_new` in place.
 3. Run the gates:
 
@@ -208,9 +216,9 @@ All commands run from `agent/` (i.e., `cd /home/ben/miru/workbench2/repos/agent`
    Expected: build clean, all tests pass. After this milestone the source tree compiles only because `BackendUrl` is unused — no caller references it anymore. (clippy may warn about `dead_code` on `BackendUrl` itself; suppress with `#[allow(dead_code)]` only if needed to keep clippy clean before Milestone 3, and remove the suppression in Milestone 3.)
 3. Verify the call-site migration is complete:
 
-       rg -n 'backend_base_url|base_url' src/ tests/
+       rg -n 'BackendUrl|backend_base_url|backend\.base_url' src/ tests/
 
-   Expect zero hits in production code paths and tests, except inside the `BackendUrl` definition itself (still present, removed in Milestone 3).
+   Expect hits only inside the `BackendUrl` definition itself in `src/network/mod.rs` (still present, removed in Milestone 3) and any `mod backend_url_new` block remaining in `tests/network/mod.rs`. Unrelated `base_url` symbols (`http::Client.base_url`, mock `server.base_url`, `invalid_base_url_returns_error`) are not migration targets.
 4. Commit:
 
        git add -A
@@ -228,7 +236,7 @@ All commands run from `agent/` (i.e., `cd /home/ben/miru/workbench2/repos/agent`
 
        ./scripts/preflight.sh
 
-   Expected: clean. This includes `./scripts/lint.sh` (custom import linter, fmt, clippy, machete, rustsec), `./scripts/covgate.sh` (storage threshold ≥94.21%), and the tools lint and tests.
+   Expected: clean. This includes `./scripts/lint.sh` (custom import linter, fmt, clippy, machete, rustsec), `./scripts/covgate.sh` (storage threshold ≥94.21%), and the tools lint and tests. If `covgate.sh` reports a coverage dip on `agent/src/storage/` (threshold ≥94.21%), the most likely cause is that the renamed `Backend::deserialize` warn-and-default branch is no longer exercised end-to-end; restore coverage by adjusting fixtures in `tests/storage/settings.rs` rather than lowering the threshold.
 4. Commit:
 
        git add -A
@@ -240,7 +248,7 @@ If preflight surfaced findings (clippy nags, fmt drift, covgate dip on `src/stor
 
 ## Validation and Acceptance
 
-The acceptance gate is the four canonical commands plus preflight, all run from `agent/`:
+The acceptance gate is the four canonical commands plus preflight, all run from the agent crate directory (`/home/ben/miru/workbench2/repos/agent/agent`):
 
 - `cargo build` — succeeds with no warnings.
 - `cargo fmt -p miru-agent -- --check` — exits 0.
@@ -257,7 +265,7 @@ Behavioral checks a reader can confirm by inspection of the test output:
 - `BackendHost::new("api.mirurobotics.com/agent/v1")` returns `Err`.
 - A test in `tests/storage/settings.rs` asserts that deserializing `{"backend": {"base_url": "https://api.mirurobotics.com/agent/v1"}, ...}` yields `Backend::default()` and emits a warn-log about the missing `host` field.
 
-A regression check: before the refactor the test `backend_host_appends_agent_v1_suffix` in `tests/provisioning/provision.rs` exercised the `format!("{host}/agent/v1")` concatenation. After the refactor that test should either (a) be reframed to assert `result.backend.host.as_url().ends_with("/agent/v1")` or (b) be deleted as redundant once `BackendHost::as_url()` is unit-tested. State whichever is chosen in the Decision Log.
+A regression check: before the refactor the `backend_host_appends_agent_v1_suffix` test in both `src/provisioning/provision.rs` and `src/provisioning/reprovision.rs` exercised the `format!("{host}/agent/v1")` concatenation. After the refactor those tests should either (a) be reframed to assert `result.backend.host.as_url().ends_with("/agent/v1")` or (b) be deleted as redundant once `BackendHost::as_url()` is unit-tested. State whichever is chosen in the Decision Log.
 
 ## Idempotence and Recovery
 
