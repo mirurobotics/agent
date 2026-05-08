@@ -10,7 +10,7 @@ use crate::trace;
 #[cfg(target_os = "linux")]
 use nix::errno::Errno;
 #[cfg(target_os = "linux")]
-use nix::unistd::{Gid, Uid, User, getegid, geteuid, initgroups, setgid, setuid};
+use nix::unistd::{getegid, geteuid, initgroups, setgid, setuid, Gid, Uid, User};
 
 /// The system user the agent runs as in production. Created by the `.deb`
 /// `postinst` script (`useradd -r -g miru -s /bin/false miru`).
