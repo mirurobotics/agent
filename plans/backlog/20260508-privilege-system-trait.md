@@ -172,7 +172,7 @@ Two new ideas to introduce, then one in-place refactor:
         fn argv0(&self) -> String { std::env::args().next().unwrap_or_else(|| "miru-agent".into()) }
     }
 
-Add `mod system;` to `mod.rs`. Trait + struct are `pub(crate)` only.
+Add `pub(crate) mod system;` to `mod.rs`. Trait + struct are `pub(crate)` only.
 
 **2. Refactor `mod.rs` to thread `&impl System` through every helper.** Pseudo-diff (literal target shape, not a copy-paste):
 
@@ -249,9 +249,9 @@ Implement `System` for `&FakeSystem` (or `FakeSystem` with `&self`), with `getre
 
 Then:
 
-- `lookup_user_returns_root_for_root` — keep as-is, but call `lookup_user(&RealSystem, "root")`. Add a comment that this is the one host-coupled test (asserts the real passwd database has a root entry).
+- `lookup_user_returns_root_for_root` — keep using `lookup_user(&RealSystem, "root")`. This is the one host-coupled test (asserts the real passwd database has a root entry); add a one-line comment saying so.
 - `lookup_user_returns_user_not_found_for_nonexistent` — convert to use a `FakeSystem` with no users registered; assert `lookup_user(&fake, "anything").unwrap_err()` is `UserNotFound`.
-- Add **one** new tiny smoke test, e.g. `run_as_with_drops_to_target_when_root`: build a `FakeSystem` with euid=0, register a `User { name: "miru", uid: 1234, gid: 1234, ... }`, call `run_as_with(&fake, "miru")`, assert `Ok(())` and that the fake's euid is now 1234. This proves the seam end-to-end.
+- Add **one** new tiny smoke test `run_as_with_drops_to_target_when_root`: build a `FakeSystem` with `euid=0`, `egid=0`, register `fixture_user("miru", 1234, 1234)`, call `run_as_with(&fake, "miru")`, assert it returns `Ok(())` and that the fake's `euid`/`egid` cells now contain 1234. This proves the seam end-to-end.
 
 Constructing a `nix::unistd::User` for the fake passwd table requires populating all fields. We use the canonical fixture pattern: a small helper inside the test module:
 
