@@ -2,6 +2,7 @@
 use std::ffi::CString;
 
 pub mod errors;
+pub(crate) mod system;
 pub use self::errors::PrivilegeErr;
 use crate::trace;
 
