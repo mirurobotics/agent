@@ -1,5 +1,4 @@
 // standard crates
-#[cfg(target_os = "linux")]
 use std::ffi::CString;
 
 // internal crates
@@ -7,9 +6,7 @@ use crate::errors::Trace;
 use crate::trace;
 
 // external crates
-#[cfg(target_os = "linux")]
 use nix::errno::Errno;
-#[cfg(target_os = "linux")]
 use nix::unistd::{getegid, geteuid, initgroups, setgid, setuid, Gid, Uid, User};
 
 /// The system user the agent runs as in production. Created by the `.deb`
@@ -70,10 +67,8 @@ impl crate::errors::Error for PrivilegeErr {}
 /// `Err(PrivilegeErr::UserNotFound)` if the user is not present in the system
 /// passwd database.
 ///
-/// On non-Linux targets (e.g. macOS dev machines) this is a stub that always
-/// returns `UserNotFound` so cross-platform `cargo test` keeps compiling. The
-/// agent only ships on Linux.
-#[cfg(target_os = "linux")]
+/// Production deploys to Linux. The implementation works on any POSIX system
+/// that exposes `getpwnam_r` via the libc backing of `nix::unistd::User::from_name`.
 pub fn lookup_user(name: &str) -> Result<UserInfo, PrivilegeErr> {
     // Pre-check NUL bytes. `nix::unistd::User::from_name` takes `&str` and
     // builds a CString internally; an embedded NUL would otherwise turn into
@@ -112,16 +107,6 @@ pub fn lookup_user(name: &str) -> Result<UserInfo, PrivilegeErr> {
     }
 }
 
-/// Non-Linux stub: the binary does not ship on these platforms, but tests
-/// must compile. Always reports the user as not found.
-#[cfg(not(target_os = "linux"))]
-pub fn lookup_user(name: &str) -> Result<UserInfo, PrivilegeErr> {
-    Err(PrivilegeErr::UserNotFound {
-        name: name.to_string(),
-        trace: trace!(),
-    })
-}
-
 /// If running as root, drop privileges to `TARGET_USER`. If already running
 /// as that user, no-op. Otherwise, return `WrongUser`.
 ///
@@ -130,7 +115,6 @@ pub fn lookup_user(name: &str) -> Result<UserInfo, PrivilegeErr> {
 /// set before this call (e.g. `MIRU_PROVISIONING_TOKEN`) remain readable
 /// afterwards via `std::env::var`. Do not introduce explicit env preservation
 /// logic — there is nothing to preserve.
-#[cfg(target_os = "linux")]
 pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
     let euid = geteuid().as_raw();
 
@@ -197,12 +181,5 @@ pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
         });
     }
 
-    Ok(())
-}
-
-/// Non-Linux stub: privilege drop is a no-op on platforms the agent does not
-/// ship on. Production behavior is unaffected.
-#[cfg(not(target_os = "linux"))]
-pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
     Ok(())
 }
