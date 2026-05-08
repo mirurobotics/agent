@@ -27,9 +27,9 @@ User-visible acceptance: `sudo MIRU_PROVISIONING_TOKEN=... miru-agent provision 
 
 ## Progress
 
-- [ ] M1: Delete `cfg(target_os = "linux")` attributes and the non-Linux stub functions in `agent/agent/src/privilege/mod.rs`. Replace inline doc comments that reference "non-Linux ... stub" with comments reflecting the new POSIX-on-Linux reality. Verify with `cargo build -p miru-agent` from `/home/ben/miru/workbench1/repos/agent`.
-- [ ] M2: Decide and apply the test-side cfg policy in `agent/agent/tests/privilege/mod.rs` (drop the three `#[cfg(target_os = "linux")]` gates per Decision Log "Test-side cfg gates"). Run `./scripts/test.sh -- privilege` and confirm 7 tests pass.
-- [ ] M3: Re-measure coverage on `agent/src/privilege` via `./scripts/preflight.sh`. Update `.covgate` only if the measured value drops below the current `30`; otherwise leave the gate alone (do NOT regress the gate; do NOT pre-emptively raise it as part of this plan). Run `./scripts/preflight.sh` and confirm the final line is `Preflight clean`.
+- [x] M1 (2026-05-07): Deleted five `cfg(target_os = "linux")` attributes and the two non-Linux stub functions in `agent/agent/src/privilege/mod.rs`. Rewrote the `lookup_user` doc comment to describe the POSIX-on-Linux reality. The `ensure_dropped_or_already_unprivileged` doc comment kept its verbatim "Note on environment" paragraph (it had no non-Linux references to remove). `cargo build -p miru-agent` clean. `grep -nE 'cfg\(target_os' agent/src/privilege/mod.rs` produces no output.
+- [x] M2 (2026-05-07): Deleted three `#[cfg(target_os = "linux")]` gates above `lookup_user_returns_root_for_root`, `ensure_dropped_or_already_unprivileged_when_running_as_self_is_ok`, and `lookup_user_returns_user_not_found_when_name_contains_null_byte`. Test bodies untouched. `./scripts/test.sh -- privilege` reports all 7 tests pass; full suite is 1326 passed / 0 failed.
+- [x] M3 (2026-05-07): `./scripts/preflight.sh` reports `privilege: 33.67% (requires 30%)` and the final line is `Preflight clean`. The deletion of stub functions raised the measured percent slightly (no longer counting their uncovered lines). Per Decision Log "Coverage policy", `.covgate` is left at `30` — no pre-emptive ratchet. Acceptance grep checks (`cfg(target_os` on source/tests, `macOS|non-Linux|cross-platform` in source) all return no output.
 
 Use timestamps when you complete steps.
 
@@ -62,7 +62,23 @@ Use timestamps when you complete steps.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+**2026-05-07 — Plan complete.** All three milestones landed in two commits on `feat/self-privilege-drop`:
+
+- `a991edb refactor(privilege): drop cfg(target_os = linux) gates and non-Linux stubs` — M1.
+- `5081b01 chore(privilege): drop test-side cfg gates after source-side gate removal` — M2.
+
+M3 produced no commit on the clean run, as the plan permitted.
+
+**Outcomes:**
+
+- `agent/src/privilege/mod.rs` shrank by 23 lines (`-25 +2` per `git show --stat`); `agent/tests/privilege/mod.rs` shrank by 3 lines.
+- Privilege module coverage is now `33.67%` (up from ~33% pre-change because the deleted stub bodies are no longer counted as uncovered).
+- Preflight is clean: fmt, machete, audit, clippy `-D warnings`, covgate, and the full 1326-test suite all pass.
+- The 7-test privilege suite continues to pass with no body changes; the three previously-gated tests now run unconditionally.
+
+**No surprises.** The plan-write-time inventory of cfg attributes (five source-side, three test-side) and the `nix` crate's macOS-gating story were correct. Nothing in the implementation deviated from the plan.
+
+**Retrospective:** the small-diff fast path in the implement skill applied — both commits were single-file mechanical edits, so a refine cycle would have added cost without value. The final preflight gate confirmed no fmt/lint/coverage drift.
 
 ## Context and Orientation
 
