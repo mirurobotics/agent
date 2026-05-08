@@ -7,12 +7,16 @@ pub enum PrivilegeErr {
     UserNotFound { name: String, trace: Box<Trace> },
 
     #[error(
-        "miru-agent must be run as root or the '{expected}' user, but is running as uid \
-         {actual_uid}.\nTry: sudo {argv0} ..."
+        "miru-agent must be run as root or the '{expected}' user, but is running as \
+         uid {actual_uid} gid {actual_gid} (expected uid {expected_uid} gid \
+         {expected_gid}).\nTry: sudo {argv0} ..."
     )]
     WrongUser {
         expected: String,
         actual_uid: u32,
+        actual_gid: u32,
+        expected_uid: u32,
+        expected_gid: u32,
         argv0: String,
         trace: Box<Trace>,
     },

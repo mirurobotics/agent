@@ -84,12 +84,18 @@ fn privilege_err_display_messages_are_human_readable() {
     let wrong_user = PrivilegeErr::WrongUser {
         expected: "miru".to_string(),
         actual_uid: 1000,
+        actual_gid: 1001,
+        expected_uid: 999,
+        expected_gid: 998,
         argv0: "/usr/sbin/miru-agent".to_string(),
         trace: dummy_trace(),
     };
     let s = format!("{wrong_user}");
     assert!(s.contains("miru"));
-    assert!(s.contains("1000"));
+    assert!(s.contains("uid 1000"));
+    assert!(s.contains("gid 1001"));
+    assert!(s.contains("expected uid 999"));
+    assert!(s.contains("gid 998"));
     assert!(s.contains("/usr/sbin/miru-agent"));
     assert!(s.contains("sudo"));
 

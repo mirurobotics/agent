@@ -51,19 +51,18 @@ pub fn lookup_user(name: &str) -> Result<User, PrivilegeErr> {
 }
 
 fn verify_effective_user(name: &str) -> Result<(), PrivilegeErr> {
-    let matches_effective_user = match lookup_user(name) {
-        Ok(user) => user.uid == geteuid(),
-        Err(PrivilegeErr::UserNotFound { .. }) => false,
-        Err(e) => return Err(e),
-    };
-    if !matches_effective_user {
+    let user = lookup_user(name)?;
+    if user.uid != geteuid() || user.gid != getegid() {
         return Err(PrivilegeErr::WrongUser {
             expected: name.to_string(),
             actual_uid: geteuid().as_raw(),
+            actual_gid: getegid().as_raw(),
+            expected_uid: user.uid.as_raw(),
+            expected_gid: user.gid.as_raw(),
             argv0: std::env::args().next().unwrap_or_else(|| "miru-agent".into()),
             trace: trace!(),
-        })
-    } 
+        });
+    }
     Ok(())
 }
 
