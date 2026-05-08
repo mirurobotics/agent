@@ -69,12 +69,12 @@ fn privilege_err_display_messages_are_human_readable() {
 
     let syscall = PrivilegeErr::Syscall {
         call: "setuid",
-        errno: 1,
+        errno: nix::errno::Errno::EPERM,
         trace: dummy_trace(),
     };
     let s = format!("{syscall}");
     assert!(s.contains("setuid"));
-    assert!(s.contains("errno=1"));
+    assert!(s.contains("EPERM"));
 
     let post_drop = PrivilegeErr::PostDropMismatch {
         expected_uid: 100,

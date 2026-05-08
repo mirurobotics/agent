@@ -41,7 +41,7 @@ pub(crate) fn lookup_user<S: System>(sys: &S, name: &str) -> Result<User, Privil
         Ok(None) | Err(Errno::ENOENT | Errno::ESRCH) => Err(not_found()),
         Err(e) => Err(PrivilegeErr::Syscall {
             call: "getpwnam_r",
-            errno: e as i32,
+            errno: e,
             trace: trace!(),
         }),
     }
@@ -83,7 +83,7 @@ fn drop_to<S: System>(sys: &S, target: &User) -> Result<(), PrivilegeErr> {
 
     let syscall = |call: &'static str, e: Errno| PrivilegeErr::Syscall {
         call,
-        errno: e as i32,
+        errno: e,
         trace: trace!(),
     };
 
@@ -369,7 +369,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "getpwnam_r");
-                assert_eq!(errno, Errno::EIO as i32);
+                assert_eq!(errno, Errno::EIO);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }
@@ -412,7 +412,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "initgroups");
-                assert_eq!(errno, Errno::EPERM as i32);
+                assert_eq!(errno, Errno::EPERM);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }
@@ -437,7 +437,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "setresgid");
-                assert_eq!(errno, Errno::EPERM as i32);
+                assert_eq!(errno, Errno::EPERM);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }
@@ -456,7 +456,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "setresuid");
-                assert_eq!(errno, Errno::EPERM as i32);
+                assert_eq!(errno, Errno::EPERM);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }
@@ -474,7 +474,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "getresuid");
-                assert_eq!(errno, Errno::EIO as i32);
+                assert_eq!(errno, Errno::EIO);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }
@@ -488,7 +488,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "getresgid");
-                assert_eq!(errno, Errno::EIO as i32);
+                assert_eq!(errno, Errno::EIO);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }
@@ -624,7 +624,7 @@ mod tests {
         match err {
             PrivilegeErr::Syscall { call, errno, .. } => {
                 assert_eq!(call, "getpwnam_r");
-                assert_eq!(errno, Errno::EIO as i32);
+                assert_eq!(errno, Errno::EIO);
             }
             other => panic!("expected Syscall, got {other:?}"),
         }

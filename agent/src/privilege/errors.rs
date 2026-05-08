@@ -1,6 +1,9 @@
 // internal crates
 use crate::errors::Trace;
 
+// external crates
+use nix::errno::Errno;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PrivilegeErr {
     #[error("user '{name}' not found in /etc/passwd; is the miru .deb installed?")]
@@ -24,7 +27,7 @@ pub enum PrivilegeErr {
     #[error("syscall '{call}' failed: errno={errno}")]
     Syscall {
         call: &'static str,
-        errno: i32,
+        errno: Errno,
         trace: Box<Trace>,
     },
 
