@@ -30,13 +30,18 @@ pub enum PrivilegeErr {
 
     #[error(
         "post-drop verification failed: expected uid={expected_uid} gid={expected_gid}, got \
-         uid={actual_uid} gid={actual_gid}"
+         ruid={actual_ruid} euid={actual_euid} suid={actual_suid} \
+         rgid={actual_rgid} egid={actual_egid} sgid={actual_sgid}"
     )]
     PostDropMismatch {
-        expected_uid: nix::unistd::Uid,
-        expected_gid: nix::unistd::Gid,
-        actual_uid: nix::unistd::Uid,
-        actual_gid: nix::unistd::Gid,
+        expected_uid: u32,
+        expected_gid: u32,
+        actual_ruid: u32,
+        actual_euid: u32,
+        actual_suid: u32,
+        actual_rgid: u32,
+        actual_egid: u32,
+        actual_sgid: u32,
         trace: Box<Trace>,
     },
 }

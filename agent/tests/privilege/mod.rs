@@ -3,9 +3,6 @@ use miru_agent::errors::Trace;
 use miru_agent::privilege;
 use miru_agent::privilege::PrivilegeErr;
 
-// external crates
-use nix::unistd::{Gid, Uid};
-
 // `drop_to`'s privileged path (actually running as root and dropping to the
 // `miru` user) is exercised by shell-driven smoke-test steps documented in:
 //   - plans/completed/20260507-self-privilege-drop.md
@@ -109,15 +106,25 @@ fn privilege_err_display_messages_are_human_readable() {
     assert!(s.contains("errno=1"));
 
     let post_drop = PrivilegeErr::PostDropMismatch {
-        expected_uid: Uid::from_raw(100),
-        expected_gid: Gid::from_raw(100),
-        actual_uid: Uid::from_raw(0),
-        actual_gid: Gid::from_raw(0),
+        expected_uid: 100,
+        expected_gid: 200,
+        actual_ruid: 0,
+        actual_euid: 1,
+        actual_suid: 2,
+        actual_rgid: 3,
+        actual_egid: 4,
+        actual_sgid: 5,
         trace: dummy_trace(),
     };
     let s = format!("{post_drop}");
     assert!(s.contains("expected uid=100"));
-    assert!(s.contains("got uid=0"));
+    assert!(s.contains("gid=200"));
+    assert!(s.contains("ruid=0"));
+    assert!(s.contains("euid=1"));
+    assert!(s.contains("suid=2"));
+    assert!(s.contains("rgid=3"));
+    assert!(s.contains("egid=4"));
+    assert!(s.contains("sgid=5"));
 }
 
 #[test]

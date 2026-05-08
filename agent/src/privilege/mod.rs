@@ -8,15 +8,16 @@ use crate::trace;
 
 // external crates
 use nix::errno::Errno;
-use nix::unistd::{getegid, geteuid, initgroups, setgid, setuid};
+use nix::unistd::{getegid, geteuid, getresgid, getresuid, initgroups, setresgid, setresuid};
 
 pub type User = nix::unistd::User;
 
 /// If running as root, drop to the user named `name`. If already running as
 /// that user, no-op. Otherwise, return `WrongUser`.
 ///
-/// `setuid(2)`/`setgid(2)` only mutate process credentials — they don't touch the
-/// environ block — so env vars set before this call remain readable after the drop.
+/// `setresuid(2)`/`setresgid(2)` only mutate process credentials — they don't
+/// touch the environ block — so env vars set before this call remain readable
+/// after the drop.
 pub fn run_as(name: &str) -> Result<(), PrivilegeErr> {
     let euid = geteuid().as_raw();
     if !is_root_user(euid) {
@@ -66,7 +67,16 @@ fn verify_effective_user(name: &str) -> Result<(), PrivilegeErr> {
     Ok(())
 }
 
+/// Drop the current process from root to `target`.
+///
+/// Caller invariant: `geteuid() == 0`. Enforced by `debug_assert!` in debug
+/// builds.
 fn drop_to(target: &User) -> Result<(), PrivilegeErr> {
+    debug_assert!(
+        geteuid() == nix::unistd::Uid::from_raw(0),
+        "drop_to requires euid=0",
+    );
+
     let c_name =
         CString::new(target.name.as_str()).expect("passwd entry name cannot contain NUL bytes");
 
@@ -77,20 +87,35 @@ fn drop_to(target: &User) -> Result<(), PrivilegeErr> {
     };
 
     // Drop order matters: supplementary groups and gid first (still root, can
-    // read /etc/group), then uid (irreversible after).
+    // read /etc/group), then uid (irreversible after). `setresgid`/`setresuid`
+    // set real, effective, and saved ids in one syscall — using `setgid`/
+    // `setuid` would leave the saved uid as 0, allowing a later `setuid(0)` to
+    // re-acquire root.
     initgroups(&c_name, target.gid).map_err(|e| syscall("initgroups", e))?;
-    setgid(target.gid).map_err(|e| syscall("setgid", e))?;
-    setuid(target.uid).map_err(|e| syscall("setuid", e))?;
+    setresgid(target.gid, target.gid, target.gid).map_err(|e| syscall("setresgid", e))?;
+    setresuid(target.uid, target.uid, target.uid).map_err(|e| syscall("setresuid", e))?;
 
-    // setuid succeeding while euid stays 0 would be a kernel bug, but the
-    // failure mode (still root) is catastrophic enough to be worth two
-    // verifying syscalls.
-    if geteuid() != target.uid || getegid() != target.gid {
+    // The drop syscalls succeeding without all three uids/gids matching would
+    // be a kernel bug, but the failure mode (still partially root) is
+    // catastrophic enough to be worth two verifying syscalls.
+    let ruid = getresuid().map_err(|e| syscall("getresuid", e))?;
+    let rgid = getresgid().map_err(|e| syscall("getresgid", e))?;
+    if ruid.real != target.uid
+        || ruid.effective != target.uid
+        || ruid.saved != target.uid
+        || rgid.real != target.gid
+        || rgid.effective != target.gid
+        || rgid.saved != target.gid
+    {
         return Err(PrivilegeErr::PostDropMismatch {
-            expected_uid: target.uid,
-            expected_gid: target.gid,
-            actual_uid: geteuid(),
-            actual_gid: getegid(),
+            expected_uid: target.uid.as_raw(),
+            expected_gid: target.gid.as_raw(),
+            actual_ruid: ruid.real.as_raw(),
+            actual_euid: ruid.effective.as_raw(),
+            actual_suid: ruid.saved.as_raw(),
+            actual_rgid: rgid.real.as_raw(),
+            actual_egid: rgid.effective.as_raw(),
+            actual_sgid: rgid.saved.as_raw(),
             trace: trace!(),
         });
     }
