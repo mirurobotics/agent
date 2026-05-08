@@ -3,14 +3,6 @@ use miru_agent::errors::Trace;
 use miru_agent::privilege;
 use miru_agent::privilege::PrivilegeErr;
 
-// `drop_to`'s privileged path (actually running as root and dropping to the
-// `miru` user) is exercised by shell-driven smoke-test steps documented in:
-//   - plans/completed/20260507-self-privilege-drop.md
-//   - plans/completed/20260507-privilege-swap-to-nix.md
-//   - plans/completed/20260507-privilege-drop-cfg-gating.md
-// We deliberately do not duplicate that here because spawning a privileged
-// subprocess inside `cargo test` is fragile and CI runners are unprivileged.
-
 fn dummy_trace() -> Box<Trace> {
     Box::new(Trace {
         file: file!(),
