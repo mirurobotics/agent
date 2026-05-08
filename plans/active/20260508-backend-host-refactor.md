@@ -27,8 +27,8 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 
 - [x] Milestone 1 — Add `BackendHost` type and unit tests. (2026-05-08T00:00:00Z UTC)
 - [x] Milestone 2 — Migrate every call site and integration test. (2026-05-08T00:00:00Z UTC)
-- [ ] Milestone 3 — Delete `BackendUrl` and confirm no stale references.
-- [ ] Final preflight pass (only if Milestone 3 leaves residue).
+- [x] Milestone 3 — Delete `BackendUrl` and confirm no stale references. (2026-05-08T00:00:00Z UTC)
+- [x] Final preflight pass — clean. (2026-05-08T00:00:00Z UTC)
 
 (Add timestamps and split partial work as implementation proceeds.)
 
@@ -36,6 +36,9 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 
 - Observation: `url::Url::parse("http://::1")` rejects an unbracketed IPv6 literal with `empty host`.
   Evidence: First test run failed `accepts_loopback_ipv6` and `as_url_http_for_loopback_ipv6` until `BackendHost::new` was taught to wrap the literal `::1` as `[::1]` before handing it to `Url::parse`. The bare `::1` form is still what the user types and what `as_str` returns; the bracket form is an internal parsing detail and the URL-emission detail in `as_url`.
+
+- Observation: The `app::run::max_runtime_reached` integration test is timing-flaky on a busy machine; it failed with `Elapsed(())` once during Milestone 2 validation but passed on every subsequent run.
+  Evidence: The failing assertion is `agent/tests/app/run.rs:93`, deep in a tokio `select!` waiting for a real wallclock-driven `max_runtime` shutdown. The path under test does not touch any of the backend-host code; the flake is unrelated to this refactor. Re-running `./scripts/test.sh` and `./scripts/preflight.sh` produced clean results.
 
 ## Decision Log
 
@@ -66,7 +69,19 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Achieved (2026-05-08):
+
+- `BackendHost` introduced in `agent/src/network/mod.rs` with the same shape as `MqttHost`: `new` / `new_or` / `as_str` / `as_url` / `Display` / `Serialize` / `Deserialize` / `Default`. The on-disk and CLI surfaces are now bare hostnames; scheme (`http` for loopback, `https` otherwise) and the `/agent/v1` path are emitted by `as_url()` only.
+- `Backend.base_url: BackendUrl` renamed to `Backend.host: BackendHost` on the `Settings` struct; the on-disk JSON key `backend.base_url` is now `backend.host`. Legacy `base_url` files silently fall back to the default with a warn-log, matching the pattern used for any invalid backend value today.
+- All call sites migrated: `main.rs`, `app/run.rs`, `app/options.rs`, `provisioning/shared.rs`, `provisioning/provision.rs`, `provisioning/reprovision.rs`, plus the `agent/tests/{network,app,storage}/*` fixtures.
+- Old `BackendUrl` deleted from `network/mod.rs` and `storage/mod.rs`; `tests/network/mod.rs` no longer carries `mod backend_url_new`.
+- 28 new unit tests in `mod backend_host_new` cover allowed-domain rules, loopback, host:port, scheme/userinfo/path rejection, `as_url` output for both schemes (with and without port and IPv6), and serde / Display / Default / `new_or` round-trips.
+- Final preflight clean: lint, covgate (storage 94.83% ≥ 94.21%), tools lint, tools tests all green.
+
+Remaining items / follow-ups:
+
+- The plan's "follow-up" idea of a friendlier warn-log when a legacy `base_url` field is encountered (instead of letting it be silently treated as unknown) was deliberately left out of scope per the existing Decision Log entry.
+- The `app::run::max_runtime_reached` integration test is timing-flaky and unrelated to this refactor — see Surprises & Discoveries.
 
 ## Context and Orientation
 
