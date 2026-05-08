@@ -67,3 +67,52 @@ impl System for RealSystem {
             .unwrap_or_else(|| "miru-agent".into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Smoke test for the read-only methods of `RealSystem`. The mutating
+    /// methods (`setresuid`, `setresgid`, `initgroups`) are deliberately
+    /// excluded — invoking them in the test process would actually drop
+    /// privileges or rewrite supplementary groups, and there is no safe way
+    /// to recover. Their behavior is exercised by the shell-driven smoke
+    /// tests in `plans/completed/20260507-self-privilege-drop.md`.
+    #[test]
+    fn real_system_read_only_methods_are_self_consistent() {
+        let sys = RealSystem;
+
+        // euid/getresuid agree.
+        let euid = sys.geteuid();
+        let resuid = sys.getresuid().expect("getresuid must succeed");
+        assert_eq!(resuid.effective, euid);
+
+        // egid/getresgid agree.
+        let egid = sys.getegid();
+        let resgid = sys.getresgid().expect("getresgid must succeed");
+        assert_eq!(resgid.effective, egid);
+
+        // argv0 always returns something — under cargo test it's the test
+        // binary path; the env::args fallback to "miru-agent" guarantees
+        // non-empty even in degenerate environments.
+        assert!(!sys.argv0().is_empty());
+
+        // lookup_user resolves root (guaranteed present on every Linux host).
+        let root = sys
+            .lookup_user("root")
+            .expect("getpwnam_r succeeds")
+            .expect("root is in /etc/passwd");
+        assert_eq!(root.name, "root");
+        assert_eq!(root.uid.as_raw(), 0);
+
+        // lookup_user reports missing entries via Ok(None) on glibc; some
+        // libcs use Err(ENOENT|ESRCH) which the caller in mod.rs maps the
+        // same way. Either outcome is acceptable here.
+        let missing = sys.lookup_user("nonexistent_user_xyz_123_miru_test");
+        match missing {
+            Ok(None) => {}
+            Err(Errno::ENOENT | Errno::ESRCH) => {}
+            other => panic!("expected Ok(None) or ENOENT/ESRCH, got {other:?}"),
+        }
+    }
+}
