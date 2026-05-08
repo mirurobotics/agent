@@ -1,7 +1,6 @@
 // standard crates
 use std::ffi::CString;
 
-// internal crates
 pub mod errors;
 pub use self::errors::PrivilegeErr;
 use crate::trace;
@@ -60,7 +59,9 @@ fn verify_effective_user(name: &str) -> Result<(), PrivilegeErr> {
             actual_gid: getegid().as_raw(),
             expected_uid: user.uid.as_raw(),
             expected_gid: user.gid.as_raw(),
-            argv0: std::env::args().next().unwrap_or_else(|| "miru-agent".into()),
+            argv0: std::env::args()
+                .next()
+                .unwrap_or_else(|| "miru-agent".into()),
             trace: trace!(),
         });
     }
@@ -147,4 +148,3 @@ mod tests {
         }
     }
 }
-

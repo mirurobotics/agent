@@ -120,10 +120,7 @@ fn run_as_is_noop_when_already_target_user() {
             return;
         }
         Err(e) => {
-            eprintln!(
-                "skipping: User::from_uid({}) failed: {e}",
-                euid.as_raw(),
-            );
+            eprintln!("skipping: User::from_uid({}) failed: {e}", euid.as_raw(),);
             return;
         }
     };
