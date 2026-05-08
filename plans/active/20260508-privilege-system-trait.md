@@ -20,16 +20,16 @@ A user runs `./scripts/test.sh` after the change and observes the existing privi
 
 ## Progress
 
-- [ ] M1 — Add `agent/agent/src/privilege/system.rs` with `pub(crate) trait System` + `pub(crate) struct RealSystem`, build-clean, no callers yet.
-- [ ] M2 — Refactor `mod.rs` to call through the trait: introduce `run_as_with<S: System>`, route `lookup_user`, `is_root_user`, `verify_effective_user`, `drop_to` through `&S`, keep `pub fn run_as(name: &str)` as a thin wrapper that constructs `RealSystem`.
-- [ ] M3 — Convert the inline unit tests in `mod.rs` to use `FakeSystem`; add one tiny `FakeSystem` smoke test that demonstrates a successful `run_as_with` drop sequence updates fake uid/gid state. Keep `lookup_user_returns_root_for_root` using `RealSystem` explicitly.
-- [ ] M4 — Preflight clean: `scripts/preflight.sh` reports `Preflight clean`. Coverage gate at `agent/agent/src/privilege/.covgate` (44.58) still passes.
+- [x] M1 — Add `agent/agent/src/privilege/system.rs` with `pub(crate) trait System` + `pub(crate) struct RealSystem`, build-clean, no callers yet. (2026-05-08, commit `7ec174e`)
+- [x] M2 — Refactor `mod.rs` to call through the trait: introduce `run_as_with<S: System>`, route `lookup_user`, `is_root_user`, `verify_effective_user`, `drop_to` through `&S`, keep `pub fn run_as(name: &str)` as a thin wrapper that constructs `RealSystem`. (2026-05-08, commit `0866fd3`)
+- [x] M3 — Convert the inline unit tests in `mod.rs` to use `FakeSystem`; add one tiny `FakeSystem` smoke test that demonstrates a successful `run_as_with` drop sequence updates fake uid/gid state. Keep `lookup_user_returns_root_for_root` using `RealSystem` explicitly. (2026-05-08, commit `f6b745b`)
+- [x] M4 — Preflight clean: `scripts/preflight.sh` reports `Preflight clean`. Coverage gate at `agent/agent/src/privilege/.covgate` (44.58) still passes. (2026-05-08; privilege module coverage rose to 74.41% with the new smoke test)
 
 Use timestamps when you complete steps.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- 2026-05-08 — In M1, after creating `system.rs` and adding `pub(crate) mod system;` to `mod.rs`, `cargo build` warned that `trait System` and `struct RealSystem` were never used (they aren't called yet — that's the M2 step). The plan's "if the dead-code lint fires, add `#[allow(dead_code)]` temporarily" guidance applied. The annotations were removed in M2 once the call sites landed, leaving the M1 commit free of warnings without needing a follow-up cleanup commit.
 
 ## Decision Log
 
@@ -55,7 +55,9 @@ Use timestamps when you complete steps.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+- 2026-05-08 — Refactor delivered across three commits (`7ec174e`, `0866fd3`, `f6b745b`). The seam landed cleanly: `pub fn run_as(name: &str)` is byte-for-byte unchanged at the public boundary, `main.rs` and `agent/agent/src/privilege/errors.rs` were not touched, and the integration tests in `agent/agent/tests/privilege/mod.rs` continue to pass without any edits.
+- Coverage of the privilege module rose from the 44.58 gate (kept untouched per scope) to 74.41%, because the new `FakeSystem` smoke test now exercises the `drop_to` success path that was previously untestable without root.
+- The build was clean at every commit boundary; only one minor deviation from the plan was needed — see Surprises & Discoveries.
 
 ## Context and Orientation
 
