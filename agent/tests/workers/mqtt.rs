@@ -112,6 +112,93 @@ pub mod handle_connection_events {
     }
 
     #[tokio::test]
+    async fn connack_success_resubscribes_to_sync_and_ping() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+
+        let event = Event::Incoming(Incoming::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false,
+        }));
+        let mqtt_client = MockClient::default();
+        let syncer = MockSyncer::default();
+        let _ = handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+
+        assert_eq!(
+            mqtt_client.num_subscribe_calls_to(&topics::device_sync("device_id")),
+            1
+        );
+        assert_eq!(
+            mqtt_client.num_subscribe_calls_to(&topics::device_ping("device_id")),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn connack_non_success_does_not_subscribe() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+
+        let event = Event::Incoming(Incoming::ConnAck(ConnAck {
+            code: ConnectReturnCode::BadUserNamePassword,
+            session_present: false,
+        }));
+        let mqtt_client = MockClient::default();
+        let syncer = MockSyncer::default();
+        let err_streak =
+            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        assert_eq!(err_streak, 0);
+
+        assert_eq!(
+            mqtt_client.num_subscribe_calls_to(&topics::device_sync("device_id")),
+            0
+        );
+        assert_eq!(
+            mqtt_client.num_subscribe_calls_to(&topics::device_ping("device_id")),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn connack_subscribe_error_does_not_change_err_streak() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let (device_file, _) =
+            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+
+        let event = Event::Incoming(Incoming::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false,
+        }));
+        let mqtt_client = MockClient {
+            subscribe_fn: Box::new(|| {
+                Err(Box::new(MQTTError::MockErr(MockErr {
+                    is_authentication_error: false,
+                    is_network_conn_err: false,
+                })))
+            }),
+            ..Default::default()
+        };
+        let syncer = MockSyncer::default();
+        let err_streak =
+            handle_event(&event, &mqtt_client, &syncer, "device_id", &device_file).await;
+        assert_eq!(err_streak, 0);
+    }
+
+    #[tokio::test]
     async fn disconnect_event() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
