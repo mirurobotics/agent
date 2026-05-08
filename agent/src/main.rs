@@ -14,8 +14,7 @@ use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
-use miru_agent::network::BackendUrl;
-use miru_agent::privilege;
+use miru_agent::network::BackendHost;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
@@ -66,7 +65,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
     let _guard = logs::init(options)?;
 
     let settings = provision::determine_settings(&args);
-    let http_client = http::Client::new(settings.backend.base_url.as_str())?;
+    let http_client = http::Client::new(&settings.backend.host.as_url())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
@@ -119,7 +118,7 @@ async fn run_reprovision(
     let _guard = logs::init(options)?;
 
     let settings = reprovision::determine_settings(&args);
-    let http_client = http::Client::new(settings.backend.base_url.as_str())?;
+    let http_client = http::Client::new(&settings.backend.host.as_url())?;
     let layout = storage::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
@@ -172,8 +171,8 @@ async fn run_agent() {
 
     // reconcile the agent package version to ensure the file system storage state
     // is compatible with the running version
-    let url = get_bootstrap_base_url().await;
-    let bootstrap_http_client = match http::Client::new(url.as_str()) {
+    let host = get_bootstrap_backend_host().await;
+    let bootstrap_http_client = match http::Client::new(&host.as_url()) {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
@@ -220,7 +219,7 @@ async fn run_agent() {
             is_persistent: settings.is_persistent,
             ..Default::default()
         },
-        backend_base_url: settings.backend.base_url,
+        backend_host: settings.backend.host,
         enable_socket_server: settings.enable_socket_server,
         enable_mqtt_worker: settings.enable_mqtt_worker,
         enable_poller: settings.enable_poller,
@@ -237,13 +236,13 @@ async fn run_agent() {
     }
 }
 
-async fn get_bootstrap_base_url() -> BackendUrl {
+async fn get_bootstrap_backend_host() -> BackendHost {
     let settings_file = storage::Layout::default().settings();
     if let Ok(settings) = settings_file.read_json::<storage::Settings>().await {
-        return settings.backend.base_url;
+        return settings.backend.host;
     }
 
-    storage::Backend::default().base_url
+    storage::Backend::default().host
 }
 
 async fn await_shutdown_signal() {

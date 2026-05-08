@@ -26,7 +26,7 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 ## Progress
 
 - [x] Milestone 1 — Add `BackendHost` type and unit tests. (2026-05-08T00:00:00Z UTC)
-- [ ] Milestone 2 — Migrate every call site and integration test.
+- [x] Milestone 2 — Migrate every call site and integration test. (2026-05-08T00:00:00Z UTC)
 - [ ] Milestone 3 — Delete `BackendUrl` and confirm no stale references.
 - [ ] Final preflight pass (only if Milestone 3 leaves residue).
 
@@ -53,6 +53,13 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 
 - Decision: `BackendHost` stores a pre-formatted `formatted: String` field alongside `host` and `port`, so `as_str()` returns `&str` (matching `MqttHost::as_str`) without per-call allocation. `as_url()` rebuilds the URL each call (cheap; called at startup, not in a hot loop).
   Rationale: the plan's recommended `as_str()` signature returns `&str` and is used by `deserialize_warn!` in `storage/settings.rs`; we cannot return `&str` to a transient `format!` result. Storing the formatted form once at construction time costs one extra String per `BackendHost` and keeps the call-site ergonomics identical to the legacy type.
+  Date/Author: 2026-05-08 / claude.
+
+- Decision: Reframed the `backend_host_appends_agent_v1_suffix` test in both `provision.rs` and `reprovision.rs` (instead of deleting it) so the regression remains observable at the call-site layer.
+  Rationale: deleting the test would make the assertion-suite at the boundary purely structural (`backend.host == defaults.host`); reframing keeps an end-to-end check that a CLI override flows through `determine_settings` and produces the expected URL via `as_url()`. The unit-level coverage in `mod backend_host_new` is independent.
+  Date/Author: 2026-05-08 / claude.
+
+- Decision: Reframed `deserialize_backend_falls_back_on_disallowed_host` (in `agent/tests/storage/settings.rs`) to also serve as the legacy-on-disk regression. The test now asserts both that a disallowed `host` value falls back to default and that a JSON object containing only the legacy `base_url` field deserializes to default (the legacy key is silently treated as unknown; the missing `host` field triggers the warn-and-default path). This implements the plan's recommendation directly.
   Date/Author: 2026-05-08 / claude.
 
 (Add further entries as decisions arise.)

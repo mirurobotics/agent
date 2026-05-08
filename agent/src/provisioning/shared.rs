@@ -3,7 +3,7 @@ use std::env;
 
 // internal crates
 use crate::filesys;
-use crate::network::{BackendUrl, MqttHost};
+use crate::network::{BackendHost, MqttHost};
 use crate::provisioning::errors::*;
 use crate::storage::settings;
 
@@ -39,8 +39,7 @@ pub(super) fn determine_settings(
 ) -> settings::Settings {
     let mut settings = settings::Settings::default();
     if let Some(host) = backend_host {
-        let raw = format!("{host}/agent/v1");
-        settings.backend.base_url = BackendUrl::new_or(&raw, BackendUrl::default());
+        settings.backend.host = BackendHost::new_or(host, BackendHost::default());
     }
     if let Some(host) = mqtt_broker_host {
         settings.mqtt_broker.host = MqttHost::new_or(host, MqttHost::default());

@@ -49,10 +49,10 @@ pub mod app_options_default {
     use super::*;
 
     #[test]
-    fn backend_base_url() {
+    fn backend_host() {
         assert_eq!(
-            AppOptions::default().backend_base_url.as_str(),
-            "https://api.mirurobotics.com/agent/v1"
+            AppOptions::default().backend_host.as_str(),
+            "api.mirurobotics.com"
         );
     }
 
