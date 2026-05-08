@@ -16,7 +16,7 @@ The privilege module owns a security-critical syscall sequence (`initgroups` →
 
 After this change the module funnels every external interaction through one trait, `System`, with two implementations: `RealSystem` (production, delegates to `nix::unistd` + `std::env::args()`) and a fake the test code can drive. The public entry point `pub fn privilege::run_as(name: &str)` keeps the same signature and behavior — `main.rs` is unchanged. What is gained is a seam: a follow-up `/write-tests` pass can deterministically exercise every branch of `run_as`, `verify_effective_user`, and `drop_to` (e.g. supplementary group failure, post-drop mismatch, partial errno propagation) against a `FakeSystem` in-memory state machine, without root and without flake.
 
-A user runs `cargo test -p miru-agent --features test --test mod` after the change and observes the existing privilege tests (both inline unit tests in `mod.rs` and the three integration tests in `agent/tests/privilege/mod.rs`) pass, plus one new tiny smoke test that demonstrates the `FakeSystem` seam works end-to-end.
+A user runs `./scripts/test.sh` after the change and observes the existing privilege tests (both inline unit tests in `mod.rs` and the three integration tests in `agent/agent/tests/privilege/mod.rs`) pass, plus one new tiny smoke test that demonstrates the `FakeSystem` seam works end-to-end.
 
 ## Progress
 
@@ -177,7 +177,7 @@ Add `mod system;` to `mod.rs`. Trait + struct are `pub(crate)` only.
 **2. Refactor `mod.rs` to thread `&impl System` through every helper.** Pseudo-diff (literal target shape, not a copy-paste):
 
     pub mod errors;
-    pub mod system;       // new — pub(crate) items only
+    pub(crate) mod system;
     pub use self::errors::PrivilegeErr;
     use self::system::{RealSystem, System};
 
@@ -285,17 +285,15 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
 
    Expected: build succeeds with no new warnings. The trait is unused at this point — Rust's `dead_code` lint does not fire on `pub(crate)` items in a library crate, but if it does add `#[allow(dead_code)]` temporarily on `RealSystem` and remove it in M2.
 
-4. Commit:
+4. Commit (working directory `/home/ben/miru/workbench1/repos/agent`, the agent repo root; the crate lives at the nested `agent/agent/` path):
 
-        git add agent/src/privilege/system.rs agent/src/privilege/mod.rs
+        git add agent/agent/src/privilege/system.rs agent/agent/src/privilege/mod.rs
         git commit -m "feat(privilege): introduce System trait seam with RealSystem impl"
-
-   (Run from `agent/` because that's the repo root; `agent/agent/` is the crate path.)
 
 ### M2 — Route every helper through `&impl System`
 
 1. Edit `agent/agent/src/privilege/mod.rs`:
-   - Add `use self::system::{RealSystem, System};` to the existing import block (external-crates group).
+   - Add `use self::system::{RealSystem, System};` to the internal-crates import group (per `AGENTS.md`, `self::*` belongs with `crate::*` imports under the `// internal crates` header).
    - Change `pub fn run_as(name: &str)` to delegate to a new `pub(crate) fn run_as_with<S: System>(sys: &S, name: &str)` that contains the original logic but calls `sys.geteuid()`.
    - Add `<S: System>` and `sys: &S` parameter to `lookup_user`, `verify_effective_user`, `drop_to`. Replace every `geteuid()`, `getegid()`, `getresuid()`, `getresgid()`, `setresuid(...)`, `setresgid(...)`, `initgroups(...)`, `User::from_name(...)`, and `std::env::args().next()...` call with the corresponding `sys.<method>(...)` call.
    - Remove the now-unused `use nix::unistd::{getegid, geteuid, getresgid, getresuid, initgroups, setresgid, setresuid};` items. Keep `use nix::errno::Errno;` (still referenced by the `Errno::ENOENT | Errno::ESRCH` match arm). Keep `use nix::unistd::Uid` if needed for the `Uid::from_raw(0)` literal in the `debug_assert!`.
@@ -314,7 +312,7 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
    At this point the inline unit tests still call `lookup_user(name)` with a single argument, which no longer compiles. Either make them temporarily use `lookup_user(&RealSystem, name)` here, or do the M3 conversion in the same edit pass to avoid a broken intermediate state. Recommended: do M2 + M3 changes in two separate commits but in the same working session — first edit saves a broken-test intermediate, second edit fixes it. If preferred, fold M3 into M2 and skip the broken intermediate (acceptable; only the final commit boundary matters).
 4. Commit:
 
-        git add agent/src/privilege/mod.rs
+        git add agent/agent/src/privilege/mod.rs
         git commit -m "refactor(privilege): route helpers through System trait"
 
 ### M3 — Convert inline tests; add one FakeSystem smoke test
@@ -323,7 +321,7 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
    - Add the `FakeSystem` struct, `fixture_user` helper, and `impl System for FakeSystem` as described in Plan of Work section 3.
    - `lookup_user_returns_root_for_root`: change `lookup_user("root")` to `lookup_user(&RealSystem, "root")`. Document that this test exercises the production `RealSystem` against the host passwd database.
    - `lookup_user_returns_user_not_found_for_nonexistent`: build a `FakeSystem` with an empty user list and call `lookup_user(&fake, "nonexistent_user_xyz_123_miru_test")`. Assert `UserNotFound { name }` matches the input name. The test is now host-independent.
-   - Add `run_as_with_drops_to_target_when_root`: `FakeSystem { euid: 0, egid: 0, users: vec![fixture_user("miru", 1234, 1234)], inject_errno: None, argv0: "miru-agent".into() }`, then `run_as_with(&fake, "miru").expect("drop succeeds"); assert_eq!(fake.euid_now(), 1234); assert_eq!(fake.egid_now(), 1234);`. This proves the seam works for the success path.
+   - Add `run_as_with_drops_to_target_when_root`: build the fake with `euid` and `egid` cells set to 0, register `fixture_user("miru", 1234, 1234)` in its user list, leave `inject_errno: None` and `argv0: "miru-agent".into()`, then `run_as_with(&fake, "miru").expect("drop succeeds")` and assert the fake's `euid` and `egid` cells now contain 1234. The fake's fields are accessible directly (same module as the test), so the assertions are `assert_eq!(*fake.euid.borrow(), 1234); assert_eq!(*fake.egid.borrow(), 1234);` — no extra accessor method needed. This proves the seam works for the success path.
 2. Build and test:
 
         cargo build --package miru-agent --tests --features test
@@ -332,7 +330,7 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
    Expected: 4 inline unit tests pass (2 converted + 1 untouched in spirit + 1 new) and the 3 integration tests pass.
 3. Commit:
 
-        git add agent/src/privilege/mod.rs
+        git add agent/agent/src/privilege/mod.rs
         git commit -m "test(privilege): use FakeSystem for inline tests; add seam smoke test"
 
 ### M4 — Preflight
@@ -350,7 +348,7 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
 3. If `covgate.sh` reports the privilege threshold (`44.58`) is no longer met, investigate before committing. Coverage should not drop because: (a) the FakeSystem smoke test exercises a previously-untested code path (`drop_to` success), and (b) the converted `lookup_user_returns_user_not_found_for_nonexistent` still hits the same lines in `lookup_user`. If coverage paradoxically drops, do **not** edit `.covgate` — instead diagnose what coverage was lost. (See Idempotence and Recovery.)
 4. If preflight is clean and there are uncommitted formatting fixups from `cargo fmt`:
 
-        git add -A agent/src/privilege/
+        git add -A agent/agent/src/privilege/
         git commit -m "chore(privilege): apply rustfmt after System trait refactor"
 
    (Only run this if `cargo fmt --check` reported anything; usually the developer ran `cargo fmt` already.)
