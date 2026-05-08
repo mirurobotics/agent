@@ -35,17 +35,19 @@ and observe the same provisioning success message they get today with `sudo -u m
 
 ## Progress
 
-- [ ] M1: Add the privilege-drop helper (new module `agent/agent/src/privilege/mod.rs`) with constants, lookup, drop, and a public entry point. No call sites yet.
-- [ ] M2: Wire `privilege::ensure_dropped_or_already_unprivileged()` into `agent/agent/src/main.rs` immediately after the `--version` early-return and before any `provision` / `reprovision` / `run_agent` dispatch.
-- [ ] M3: Update install scripts (`scripts/install/*.sh` and `scripts/jinja/templates/partials/utils/activate.sh`) to drop `sudo -u miru -E env ...` and use `sudo ...` instead.
-- [ ] M4: Update agent docs (`README.md`, `ARCHITECTURE.md` if it documents the invocation, and any other markdown referencing `sudo -u miru`).
+- [x] M1: Add the privilege-drop helper (new module `agent/agent/src/privilege/mod.rs`) with constants, lookup, drop, and a public entry point. No call sites yet. (2026-05-07)
+- [x] M2: Wire `privilege::ensure_dropped_or_already_unprivileged()` into `agent/agent/src/main.rs` immediately after the `--version` early-return and before any `provision` / `reprovision` / `run_agent` dispatch. (2026-05-07)
+- [x] M3: Update install scripts (`scripts/install/*.sh` and `scripts/jinja/templates/partials/utils/activate.sh`) to drop `sudo -u miru -E env ...` and use `sudo ...` instead. (2026-05-07)
+- [x] M4: Update agent docs (`README.md`, `ARCHITECTURE.md` if it documents the invocation, and any other markdown referencing `sudo -u miru`). No-op: pre-implementation grep confirmed neither file contains `sudo -u miru`; only matches under `plans/active/` (historical) remain. (2026-05-07)
 - [ ] M5: Run `./scripts/preflight.sh` and confirm it reports `Preflight clean` (mandatory verification gate before publishing).
 
 Use timestamps when you complete steps.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- 2026-05-07 (impl): The `errno` field in `PrivilegeErr::Syscall` was originally specified to be sourced via `*libc::__errno_location()` directly inline; pulled it into a tiny private `errno_now()` helper to keep the three syscall-failure sites readable. Behavior unchanged.
+- 2026-05-07 (impl): Plan said the install/activate scripts had matching content, and they did — all 7 lines were verbatim identical. Replaced uniformly. The exit-code numbering on lines 291 vs 382 is just a position artifact (different scripts).
+- 2026-05-07 (impl): M4 (docs) found no occurrences of `sudo -u miru` outside of `plans/active/`. Ran the pre-condition grep against `agent/`; only the two historical-plan files matched, both of which the plan instructs to leave untouched. M4 commits no changes.
 
 ## Decision Log
 
