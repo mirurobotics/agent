@@ -1,10 +1,16 @@
 // standard crates
 #[cfg(target_os = "linux")]
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 
 // internal crates
 use crate::errors::Trace;
 use crate::trace;
+
+// external crates
+#[cfg(target_os = "linux")]
+use nix::errno::Errno;
+#[cfg(target_os = "linux")]
+use nix::unistd::{Gid, Uid, User, getegid, geteuid, initgroups, setgid, setuid};
 
 /// The system user the agent runs as in production. Created by the `.deb`
 /// `postinst` script (`useradd -r -g miru -s /bin/false miru`).
@@ -69,87 +75,40 @@ impl crate::errors::Error for PrivilegeErr {}
 /// agent only ships on Linux.
 #[cfg(target_os = "linux")]
 pub fn lookup_user(name: &str) -> Result<UserInfo, PrivilegeErr> {
-    let c_name = CString::new(name).map_err(|_| PrivilegeErr::UserNotFound {
-        name: name.to_string(),
-        trace: trace!(),
-    })?;
-
-    // Start with a 1 KiB buffer; double on ERANGE up to a sane cap. Most
-    // passwd entries fit in 256 bytes; the cap protects against a pathological
-    // /etc/passwd.
-    let mut buf_len: usize = 1024;
-    const MAX_BUF_LEN: usize = 64 * 1024;
-
-    loop {
-        let mut buf: Vec<libc::c_char> = vec![0; buf_len];
-        // SAFETY: passwd is filled in by getpwnam_r. We treat it as
-        // uninitialized until the call returns 0 with a non-null result.
-        let mut passwd: libc::passwd = unsafe { std::mem::zeroed() };
-        let mut result_ptr: *mut libc::passwd = std::ptr::null_mut();
-
-        // SAFETY: c_name is a valid NUL-terminated string. buf has length
-        // buf_len, and we pass that length to getpwnam_r. result_ptr is set
-        // by the function on success.
-        let rc = unsafe {
-            libc::getpwnam_r(
-                c_name.as_ptr(),
-                &mut passwd,
-                buf.as_mut_ptr(),
-                buf_len,
-                &mut result_ptr,
-            )
-        };
-
-        if rc == 0 {
-            if result_ptr.is_null() {
-                // No entry found, no error.
-                return Err(PrivilegeErr::UserNotFound {
-                    name: name.to_string(),
-                    trace: trace!(),
-                });
-            }
-            // SAFETY: result_ptr is non-null and points at `passwd`, whose
-            // string fields point into `buf`. Both live until the end of this
-            // iteration. We copy the name out before `buf` is dropped.
-            let resolved_name = unsafe {
-                CStr::from_ptr((*result_ptr).pw_name)
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            return Ok(UserInfo {
-                uid: passwd.pw_uid as u32,
-                gid: passwd.pw_gid as u32,
-                name: resolved_name,
-            });
-        }
-
-        if rc == libc::ERANGE {
-            buf_len = buf_len.saturating_mul(2);
-            if buf_len > MAX_BUF_LEN {
-                return Err(PrivilegeErr::Syscall {
-                    call: "getpwnam_r",
-                    errno: libc::ERANGE,
-                    trace: trace!(),
-                });
-            }
-            continue;
-        }
-
-        // POSIX says non-ERANGE non-zero rc means an actual error. ENOENT /
-        // ESRCH / 0-return-with-null-result all mean "not found"; some libc
-        // implementations may return them as rc instead of via result_ptr.
-        if rc == libc::ENOENT || rc == libc::ESRCH {
-            return Err(PrivilegeErr::UserNotFound {
-                name: name.to_string(),
-                trace: trace!(),
-            });
-        }
-
-        return Err(PrivilegeErr::Syscall {
-            call: "getpwnam_r",
-            errno: rc,
+    // Pre-check NUL bytes. `nix::unistd::User::from_name` takes `&str` and
+    // builds a CString internally; an embedded NUL would otherwise turn into
+    // an opaque error variant. The intent is "no such user in /etc/passwd",
+    // which maps onto `UserNotFound`.
+    if name.contains('\0') {
+        return Err(PrivilegeErr::UserNotFound {
+            name: name.to_string(),
             trace: trace!(),
         });
+    }
+
+    match User::from_name(name) {
+        Ok(Some(u)) => Ok(UserInfo {
+            uid: u.uid.as_raw(),
+            gid: u.gid.as_raw(),
+            name: u.name,
+        }),
+        Ok(None) => Err(PrivilegeErr::UserNotFound {
+            name: name.to_string(),
+            trace: trace!(),
+        }),
+        // Some libc implementations surface "no such user" via ENOENT/ESRCH on
+        // the return path rather than a null result pointer. Treat those as
+        // `UserNotFound` to match the previous libc-direct behavior and the
+        // semantic intent ("no entry in /etc/passwd").
+        Err(Errno::ENOENT | Errno::ESRCH) => Err(PrivilegeErr::UserNotFound {
+            name: name.to_string(),
+            trace: trace!(),
+        }),
+        Err(e) => Err(PrivilegeErr::Syscall {
+            call: "getpwnam_r",
+            errno: e as i32,
+            trace: trace!(),
+        }),
     }
 }
 
@@ -173,8 +132,7 @@ pub fn lookup_user(name: &str) -> Result<UserInfo, PrivilegeErr> {
 /// logic — there is nothing to preserve.
 #[cfg(target_os = "linux")]
 pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
-    // SAFETY: geteuid is always safe to call.
-    let euid = unsafe { libc::geteuid() };
+    let euid = geteuid().as_raw();
 
     if euid != 0 {
         // Non-root: tolerate only the case where we are already running as
@@ -206,42 +164,29 @@ pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
         trace: trace!(),
     })?;
 
-    // SAFETY: c_name is a valid NUL-terminated string; gid is a valid gid.
-    let rc = unsafe { libc::initgroups(c_name.as_ptr(), info.gid as libc::gid_t) };
-    if rc != 0 {
-        return Err(PrivilegeErr::Syscall {
-            call: "initgroups",
-            errno: errno_now(),
-            trace: trace!(),
-        });
-    }
+    initgroups(&c_name, Gid::from_raw(info.gid)).map_err(|e| PrivilegeErr::Syscall {
+        call: "initgroups",
+        errno: e as i32,
+        trace: trace!(),
+    })?;
 
-    // SAFETY: setgid is always safe to call; we check the return value.
-    let rc = unsafe { libc::setgid(info.gid as libc::gid_t) };
-    if rc != 0 {
-        return Err(PrivilegeErr::Syscall {
-            call: "setgid",
-            errno: errno_now(),
-            trace: trace!(),
-        });
-    }
+    setgid(Gid::from_raw(info.gid)).map_err(|e| PrivilegeErr::Syscall {
+        call: "setgid",
+        errno: e as i32,
+        trace: trace!(),
+    })?;
 
-    // SAFETY: setuid is always safe to call; we check the return value.
-    let rc = unsafe { libc::setuid(info.uid as libc::uid_t) };
-    if rc != 0 {
-        return Err(PrivilegeErr::Syscall {
-            call: "setuid",
-            errno: errno_now(),
-            trace: trace!(),
-        });
-    }
+    setuid(Uid::from_raw(info.uid)).map_err(|e| PrivilegeErr::Syscall {
+        call: "setuid",
+        errno: e as i32,
+        trace: trace!(),
+    })?;
 
     // Verify that the drop took effect. setuid succeeding with EUID still 0
-    // would be a kernel bug, but the cost of checking is one syscall and the
+    // would be a kernel bug, but the cost of checking is two syscalls and the
     // failure mode (still root after we expected to drop) is catastrophic.
-    // SAFETY: geteuid / getegid are always safe to call.
-    let actual_uid = unsafe { libc::geteuid() };
-    let actual_gid = unsafe { libc::getegid() };
+    let actual_uid = geteuid().as_raw();
+    let actual_gid = getegid().as_raw();
     if actual_uid != info.uid || actual_gid != info.gid {
         return Err(PrivilegeErr::PostDropMismatch {
             expected_uid: info.uid,
@@ -260,11 +205,4 @@ pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
 #[cfg(not(target_os = "linux"))]
 pub fn ensure_dropped_or_already_unprivileged() -> Result<(), PrivilegeErr> {
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn errno_now() -> i32 {
-    // SAFETY: __errno_location is always safe to call and returns a pointer
-    // to thread-local storage.
-    unsafe { *libc::__errno_location() }
 }

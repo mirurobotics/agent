@@ -32,7 +32,7 @@ User-visible acceptance: `sudo MIRU_PROVISIONING_TOKEN=... miru-agent provision 
 
 ## Progress
 
-- [ ] M1: Add `nix` as a workspace dep in `Cargo.toml` and to the `miru-agent` `[dependencies]` in `agent/Cargo.toml`. Run `cargo build -p miru-agent` to seed `Cargo.lock`.
+- [x] M1: Add `nix` as a workspace dep in `Cargo.toml` and to the `miru-agent` `[dependencies]` in `agent/Cargo.toml`. Run `cargo build -p miru-agent` to seed `Cargo.lock`. (2026-05-07 — pinned to `nix = "0.31.2"` with `default-features = false, features = ["user"]`. Build clean; only `nix v0.31.2` added to `Cargo.lock`.)
 - [ ] M2: Rewrite `agent/agent/src/privilege/mod.rs` against `nix::unistd`. No `unsafe` blocks. Public surface (`TARGET_USER`, `TARGET_GROUP`, `UserInfo`, `PrivilegeErr` and all variants, `lookup_user`, `ensure_dropped_or_already_unprivileged`) is unchanged. Inline doc comment about `setuid` not touching env vars is kept verbatim.
 - [ ] M3: Re-measure coverage and update `agent/agent/src/privilege/.covgate`. Current value `45`. Target: a realistic value reflecting the new (smaller) code shape, not a regression.
 - [ ] M4: Run `./scripts/preflight.sh`; confirm final line is `Preflight clean`. (Mandatory verification gate before pushing to the open PR.)
@@ -42,7 +42,7 @@ Use timestamps when you complete steps.
 
 ## Surprises & Discoveries
 
-(Empty at plan time. Append entries here as they arise during implementation.)
+- 2026-05-07: `nix::unistd::User::from_name("nonexistent_user_xyz_123_miru_test")` returns `Err(Errno::ENOENT)`, not `Ok(None)`, on this Linux host (glibc-based). The previous `libc::getpwnam_r` path observed `rc == 0 && result_ptr.is_null()` for the same input and returned `UserNotFound`. The plan's M2 sketch only mapped `Ok(None) -> UserNotFound` and `Err(_) -> Syscall`, which made `lookup_user_returns_user_not_found_for_nonexistent` fail with `Syscall { errno: 2 }`. Fix: in the `Err(e)` arm, treat `Errno::ENOENT` and `Errno::ESRCH` as `UserNotFound` (mirrors the existing fallback the libc path already had at lines 141–145 of the pre-swap module). Other errnos still map to `Syscall`. No test edit. Test now passes.
 
 ## Decision Log
 
