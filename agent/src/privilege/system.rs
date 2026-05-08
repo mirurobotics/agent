@@ -12,7 +12,6 @@ use nix::unistd::{Gid, ResGid, ResUid, Uid, User};
 /// against in-memory state, allowing branches like `WrongUser`,
 /// `PostDropMismatch`, and per-syscall errno propagation to be exercised
 /// deterministically without root.
-#[allow(dead_code)] // wired up in M2 of the System trait refactor
 pub(crate) trait System {
     fn geteuid(&self) -> Uid;
     fn getegid(&self) -> Gid;
@@ -27,7 +26,6 @@ pub(crate) trait System {
 
 /// Production implementation of [`System`] that delegates to `nix::unistd`
 /// and `std::env::args()`.
-#[allow(dead_code)] // wired up in M2 of the System trait refactor
 pub(crate) struct RealSystem;
 
 impl System for RealSystem {
