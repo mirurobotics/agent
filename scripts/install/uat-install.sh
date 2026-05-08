@@ -288,5 +288,5 @@ fi
 sudo chown -R miru:miru /srv/miru
 
 # Execute the installer
-sudo MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
+sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
 exit 0
