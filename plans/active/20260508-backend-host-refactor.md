@@ -25,7 +25,7 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 
 ## Progress
 
-- [ ] Milestone 1 — Add `BackendHost` type and unit tests.
+- [x] Milestone 1 — Add `BackendHost` type and unit tests. (2026-05-08T00:00:00Z UTC)
 - [ ] Milestone 2 — Migrate every call site and integration test.
 - [ ] Milestone 3 — Delete `BackendUrl` and confirm no stale references.
 - [ ] Final preflight pass (only if Milestone 3 leaves residue).
@@ -34,10 +34,8 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
-
-- Observation: …
-  Evidence: …
+- Observation: `url::Url::parse("http://::1")` rejects an unbracketed IPv6 literal with `empty host`.
+  Evidence: First test run failed `accepts_loopback_ipv6` and `as_url_http_for_loopback_ipv6` until `BackendHost::new` was taught to wrap the literal `::1` as `[::1]` before handing it to `Url::parse`. The bare `::1` form is still what the user types and what `as_str` returns; the bracket form is an internal parsing detail and the URL-emission detail in `as_url`.
 
 ## Decision Log
 
@@ -48,6 +46,14 @@ After this refactor the public surface is a bare hostname (optionally `host:port
 - Decision: The `/agent/v1` API-version path is hardcoded inside `BackendHost::as_url()` rather than being part of the on-disk or CLI surface.
   Rationale: the path is fixed by the API contract in `libs/backend-api/`; exposing it to users provides no real choice and is a frequent source of misconfiguration today.
   Date/Author: 2026-05-08 / ben.
+
+- Decision: Use approach 1 from the plan (parse via `Url::parse(&format!("http://{raw}"))`) for host:port splitting.
+  Rationale: it handles IPv6 brackets, port range checks, and `host_str()` extraction for free. The one edge case — `Url::parse` rejecting unbracketed `::1` — is handled by a single special-case at the top of `BackendHost::new`. Hand-rolling a "split on last colon" parser would have to re-implement port range validation and the IPv6 detection, for negligible code savings.
+  Date/Author: 2026-05-08 / claude.
+
+- Decision: `BackendHost` stores a pre-formatted `formatted: String` field alongside `host` and `port`, so `as_str()` returns `&str` (matching `MqttHost::as_str`) without per-call allocation. `as_url()` rebuilds the URL each call (cheap; called at startup, not in a hot loop).
+  Rationale: the plan's recommended `as_str()` signature returns `&str` and is used by `deserialize_warn!` in `storage/settings.rs`; we cannot return `&str` to a transient `format!` result. Storing the formatted form once at construction time costs one extra String per `BackendHost` and keeps the call-site ergonomics identical to the legacy type.
+  Date/Author: 2026-05-08 / claude.
 
 (Add further entries as decisions arise.)
 
