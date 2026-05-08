@@ -15,6 +15,7 @@ pub mod mocks;
 pub mod models;
 pub mod mqtt;
 pub mod network;
+pub mod privilege;
 pub mod provisioning;
 pub mod server;
 pub mod services;

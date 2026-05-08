@@ -6,8 +6,6 @@ use std::ffi::{CStr, CString};
 use crate::errors::Trace;
 use crate::trace;
 
-// external crates
-
 /// The system user the agent runs as in production. Created by the `.deb`
 /// `postinst` script (`useradd -r -g miru -s /bin/false miru`).
 pub const TARGET_USER: &str = "miru";
