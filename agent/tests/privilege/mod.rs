@@ -20,26 +20,6 @@ fn dummy_trace() -> Box<Trace> {
 }
 
 #[test]
-fn lookup_user_returns_root_for_root() {
-    let user = privilege::lookup_user("root").expect("root should always be present");
-    assert_eq!(user.uid.as_raw(), 0);
-    assert_eq!(user.gid.as_raw(), 0);
-    assert_eq!(user.name, "root");
-}
-
-#[test]
-fn lookup_user_returns_user_not_found_for_nonexistent() {
-    let err = privilege::lookup_user("nonexistent_user_xyz_123_miru_test")
-        .expect_err("a clearly bogus user must not resolve");
-    match err {
-        PrivilegeErr::UserNotFound { name, .. } => {
-            assert_eq!(name, "nonexistent_user_xyz_123_miru_test");
-        }
-        other => panic!("expected UserNotFound, got {other:?}"),
-    }
-}
-
-#[test]
 fn run_as_rejects_non_target_user_when_not_root() {
     // The CI runner / dev machine is not root and is not the `miru` user, so
     // the entry point must reject the run with WrongUser. The root and
@@ -53,8 +33,7 @@ fn run_as_rejects_non_target_user_when_not_root() {
             ..
         } => {
             assert_eq!(expected, "miru");
-            // SAFETY: getuid is always safe.
-            let real_uid = unsafe { libc::getuid() };
+            let real_uid = nix::unistd::getuid().as_raw();
             assert_eq!(actual_uid, real_uid);
             assert!(!argv0.is_empty());
         }

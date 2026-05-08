@@ -10,7 +10,7 @@ use crate::trace;
 use nix::errno::Errno;
 use nix::unistd::{getegid, geteuid, getresgid, getresuid, initgroups, setresgid, setresuid};
 
-pub type User = nix::unistd::User;
+pub(crate) type User = nix::unistd::User;
 
 /// If running as root, drop to the user named `name`. If already running as
 /// that user, no-op. Otherwise, return `WrongUser`.
@@ -28,11 +28,11 @@ pub fn run_as(name: &str) -> Result<(), PrivilegeErr> {
     }
 }
 
-pub fn is_root_user(uid: u32) -> bool {
+pub(crate) fn is_root_user(uid: u32) -> bool {
     uid == 0
 }
 
-pub fn lookup_user(name: &str) -> Result<User, PrivilegeErr> {
+pub(crate) fn lookup_user(name: &str) -> Result<User, PrivilegeErr> {
     let not_found = || PrivilegeErr::UserNotFound {
         name: name.to_string(),
         trace: trace!(),
@@ -121,5 +121,30 @@ fn drop_to(target: &User) -> Result<(), PrivilegeErr> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_user_returns_root_for_root() {
+        let user = lookup_user("root").expect("root should always be present");
+        assert_eq!(user.uid.as_raw(), 0);
+        assert_eq!(user.gid.as_raw(), 0);
+        assert_eq!(user.name, "root");
+    }
+
+    #[test]
+    fn lookup_user_returns_user_not_found_for_nonexistent() {
+        let err = lookup_user("nonexistent_user_xyz_123_miru_test")
+            .expect_err("a clearly bogus user must not resolve");
+        match err {
+            PrivilegeErr::UserNotFound { name, .. } => {
+                assert_eq!(name, "nonexistent_user_xyz_123_miru_test");
+            }
+            other => panic!("expected UserNotFound, got {other:?}"),
+        }
+    }
 }
 
