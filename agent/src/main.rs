@@ -25,8 +25,7 @@ use miru_agent::workers::mqtt;
 use tokio::signal::unix::signal;
 use tracing::{error, info};
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli_args = cli::Args::parse(&env::args().collect::<Vec<String>>());
 
     if cli_args.display_version {
@@ -39,6 +38,20 @@ async fn main() {
         std::process::exit(1);
     }
 
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("miru-agent: failed to build tokio runtime: {e}");
+            std::process::exit(1);
+        }
+    };
+    runtime.block_on(run_main(cli_args));
+}
+
+async fn run_main(cli_args: cli::Args) {
     if let Some(provision_args) = cli_args.provision_args {
         let result = run_provision(provision_args).await;
         handle_provision_result(result);
