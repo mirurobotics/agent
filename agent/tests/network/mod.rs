@@ -229,6 +229,32 @@ mod backend_host_new {
         let host = BackendHost::new("localhost:8080").unwrap();
         assert_eq!(host.as_url(), "http://localhost:8080/agent/v1");
     }
+
+    #[test]
+    fn accepts_loopback_ipv6_with_port() {
+        let host = BackendHost::new("[::1]:8080").unwrap();
+        assert_eq!(host.as_str(), "[::1]:8080");
+    }
+
+    #[test]
+    fn as_url_http_loopback_ipv6_with_port() {
+        let host = BackendHost::new("[::1]:8080").unwrap();
+        assert_eq!(host.as_url(), "http://[::1]:8080/agent/v1");
+    }
+
+    #[test]
+    fn preserves_explicit_port_80_for_loopback() {
+        let host = BackendHost::new("localhost:80").unwrap();
+        assert_eq!(host.as_str(), "localhost:80");
+        assert_eq!(host.as_url(), "http://localhost:80/agent/v1");
+    }
+
+    #[test]
+    fn preserves_explicit_port_80_for_allowed_host() {
+        let host = BackendHost::new("api.mirurobotics.com:80").unwrap();
+        assert_eq!(host.as_str(), "api.mirurobotics.com:80");
+        assert_eq!(host.as_url(), "https://api.mirurobotics.com:80/agent/v1");
+    }
 }
 
 mod mqtt_host_new {

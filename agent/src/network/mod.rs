@@ -17,6 +17,25 @@ fn is_allowed_host(host: &str) -> bool {
     host == ALLOWED_DOMAIN || host.ends_with(ALLOWED_DOMAIN_SUFFIX)
 }
 
+/// Returns the trailing `:NNN` port from a host string, ignoring colons
+/// inside `[...]` IPv6 brackets. Returns `None` if no port suffix is
+/// present or the suffix is not a valid `u16`.
+fn explicit_port(raw: &str) -> Option<u16> {
+    let scan_from = match raw.rfind(']') {
+        Some(close) => close + 1,
+        None => 0,
+    };
+    let tail = &raw[scan_from..];
+    let colon = tail.rfind(':')?;
+    // For unbracketed input, ensure this colon isn't part of an IPv6
+    // literal (more than one `:` in `tail` means it's IPv6 without
+    // brackets, which can't have a port without brackets).
+    if scan_from == 0 && tail.matches(':').count() > 1 {
+        return None;
+    }
+    tail[colon + 1..].parse::<u16>().ok()
+}
+
 /// A bare backend hostname (optionally with a port) whose only constructor
 /// enforces the allowed-domain rule. Any in-memory `BackendHost` is a
 /// validated host plus optional port; the scheme and `/agent/v1` path are
@@ -97,7 +116,10 @@ impl BackendHost {
             return Err(format!("host `{bare_host}` is not allowed"));
         }
 
-        let port = parsed.port();
+        // `parsed.port()` returns None for the scheme-default port (80 for
+        // `http://`), which would silently drop a user-typed `:80`. Fall back
+        // to scanning `raw` so the stored port matches what the user supplied.
+        let port = parsed.port().or_else(|| explicit_port(raw));
         let host_is_ipv6 = bare_host.contains(':');
         let formatted = match (port, host_is_ipv6) {
             (Some(p), true) => format!("[{bare_host}]:{p}"),
@@ -165,7 +187,7 @@ impl fmt::Display for BackendHost {
 
 impl Serialize for BackendHost {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(self.formatted.as_str())
     }
 }
 
