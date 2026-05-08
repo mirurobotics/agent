@@ -12,8 +12,8 @@ use nix::unistd::{getegid, geteuid, initgroups, setgid, setuid};
 
 pub type User = nix::unistd::User;
 
-/// If running as root, drop to `MIRU_USER`. If already running as that user, no-op.
-/// Otherwise, return `WrongUser`.
+/// If running as root, drop to the user named `name`. If already running as
+/// that user, no-op. Otherwise, return `WrongUser`.
 ///
 /// `setuid(2)`/`setgid(2)` only mutate process credentials — they don't touch the
 /// environ block — so env vars set before this call remain readable after the drop.
