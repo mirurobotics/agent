@@ -16,6 +16,77 @@ fn mock_error() -> MQTTError {
     })
 }
 
+mod subscribe_all {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn happy_path() {
+        let client = MockClient::default();
+        device::subscribe_all(&client, "dvc_123").await.unwrap();
+
+        let calls = client.get_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(matches!(
+            &calls[0],
+            MockCall::Subscribe { topic, qos }
+                if topic == "cmd/devices/dvc_123/sync" && *qos == QoS::AtLeastOnce
+        ));
+        assert!(matches!(
+            &calls[1],
+            MockCall::Subscribe { topic, qos }
+                if topic == "v1/cmd/devices/dvc_123/ping" && *qos == QoS::AtLeastOnce
+        ));
+    }
+
+    #[tokio::test]
+    async fn subscribe_sync_error_short_circuits() {
+        let client = MockClient {
+            subscribe_fn: Box::new(|| Err(Box::new(mock_error()))),
+            ..Default::default()
+        };
+        let result = device::subscribe_all(&client, "dvc_123").await;
+        assert!(result.is_err());
+
+        // The `?` after subscribe_sync must short-circuit before subscribe_ping,
+        // so only the sync subscribe was attempted.
+        let calls = client.get_calls();
+        assert_eq!(calls.len(), 1);
+        assert!(matches!(
+            &calls[0],
+            MockCall::Subscribe { topic, .. } if topic == "cmd/devices/dvc_123/sync"
+        ));
+    }
+
+    #[tokio::test]
+    async fn subscribe_ping_error_propagates() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_for_fn = counter.clone();
+        let client = MockClient {
+            subscribe_fn: Box::new(move || {
+                if counter_for_fn.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(())
+                } else {
+                    Err(Box::new(mock_error()))
+                }
+            }),
+            ..Default::default()
+        };
+        let result = device::subscribe_all(&client, "dvc_123").await;
+        assert!(result.is_err());
+
+        // sync succeeded, ping was attempted and failed — both calls recorded.
+        let calls = client.get_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(matches!(
+            &calls[1],
+            MockCall::Subscribe { topic, .. } if topic == "v1/cmd/devices/dvc_123/ping"
+        ));
+    }
+}
+
 mod subscribe_sync {
     use super::*;
 
