@@ -102,6 +102,7 @@ In `agent/src/network/mod.rs`, add `BackendHost` next to `MqttHost`. Recommended
     impl BackendHost {
         pub fn new(raw: &str) -> Result<Self, String> { ... }
         pub fn new_or(raw: &str, fallback: Self) -> Self { ... }
+        pub fn as_str(&self) -> &str { ... }   // bare host or "host:port" — what the user typed
         pub fn as_url(&self) -> String { ... } // owned String, built per call
     }
 
@@ -130,7 +131,7 @@ Splitting host from port: there are two reasonable approaches. Pick one and note
 - Path: always `/agent/v1`.
 - No trailing slash, so existing callers can `format!("{}/<resource>", base)` (see `agent/src/http/client.rs` and its consumers).
 
-Trait impls: `Display` (writes the same string the user typed — host or `host:port`), `Serialize` as that string, `Deserialize` that calls `Self::new` and propagates errors via `serde::de::Error::custom`, and `Default` returning `Self::new("api.mirurobotics.com").expect("default backend host must be valid")` (mirrors `MqttHost::default`).
+Trait impls: `Display` (writes the same string the user typed — host or `host:port`), `Serialize` as that string, `Deserialize` that calls `Self::new` and propagates errors via `serde::de::Error::custom`, and `Default` returning `Self::new("api.mirurobotics.com").expect("default backend host must be valid")` (mirrors `MqttHost::default`). `as_str()` mirrors `MqttHost::as_str()` and returns the bare hostname or `host:port` form — the same string `Display` writes — used by `deserialize_warn!` in `agent/src/storage/settings.rs` to log the default fallback value.
 
 In Milestone 2, update the `pub use` in `agent/src/storage/mod.rs:24` to add `BackendHost` alongside `BackendUrl` so call-site fixtures can import either type during migration. In Milestone 3, drop `BackendUrl` from that re-export when its definition is removed.
 
@@ -175,7 +176,7 @@ In Milestone 2, update the `pub use` in `agent/src/storage/mod.rs:24` to add `Ba
   - serde round-trip (string ⇄ `BackendHost`);
   - `new_or` returns the fallback on invalid input;
   - `as_url()` output: non-loopback → `https://<host>/agent/v1`; loopback (`localhost`, `127.0.0.1`, `::1`) → `http://<host>/agent/v1`; with port → `https://<host>:<port>/agent/v1` and `http://<host>:<port>/agent/v1`.
-- `agent/tests/storage/settings.rs`: update fixtures at lines 18, 35, 72, 82, 89, and 144-161 to construct `BackendHost::new("api.mirurobotics.com")` and use the field name `host`. Reframe `deserialize_backend_falls_back_on_disallowed_host` (line 144) to also serve as the regression for legacy on-disk files: a JSON object containing only `{ "base_url": "https://api.mirurobotics.com/agent/v1" }` should deserialize to the default `Backend` (because the new code reads `host`, the legacy field is just an unknown key).
+- `agent/tests/storage/settings.rs`: update fixtures at lines 18, 35, 72, 82, 89, and 144-161 to construct `BackendHost::new("api.mirurobotics.com")` and use the Rust field name `host`. Inside any `json!({...})` macro, also rename the JSON key — positive-path tests (e.g. `deserialize_backend`, `deserialize_backend_accepts_allowed_host` at ~line 154) must change `"base_url": "https://..."` to `"host": "api.mirurobotics.com"` (bare hostname value), or they will hit the unknown-key fallback path and assert against the wrong value. Reframe `deserialize_backend_falls_back_on_disallowed_host` (line 144) to also serve as the regression for legacy on-disk files: a JSON object containing only `{ "base_url": "https://api.mirurobotics.com/agent/v1" }` (the legacy field name, kept as-is in this single test) should deserialize to the default `Backend` because the new code reads `host` and the legacy key is silently ignored.
 - `agent/tests/app/options.rs`: update the `AppOptions` fixture to use `backend_host` of type `BackendHost`.
 - `agent/src/provisioning/provision.rs` and `agent/src/provisioning/reprovision.rs` (inline `#[cfg(test)] mod tests`): update assertions to use `backend.host`; repurpose or delete `backend_host_appends_agent_v1_suffix` per the Plan of Work above.
 
@@ -191,7 +192,7 @@ All commands run from the repo root: `cd /home/ben/miru/workbench2/repos/agent`.
 
 ### Milestone 1 — Add `BackendHost`
 
-1. Edit `agent/src/network/mod.rs` to add the `BackendHost` type, its impls (`new`, `new_or`, `as_url`, `Display`, `Serialize`, `Deserialize`, `Default`), keeping `BackendUrl` intact for now. Do not yet touch the `pub use` in `agent/src/storage/mod.rs`; the re-export update lands in Milestone 2.
+1. Edit `agent/src/network/mod.rs` to add the `BackendHost` type, its impls (`new`, `new_or`, `as_str`, `as_url`, `Display`, `Serialize`, `Deserialize`, `Default`), keeping `BackendUrl` intact for now. Do not yet touch the `pub use` in `agent/src/storage/mod.rs`; the re-export update lands in Milestone 2.
 2. Add `mod backend_host_new` (and any sibling modules for serde/Default/`as_url` round-trips) in `agent/tests/network/mod.rs`. Leave `mod backend_url_new` in place.
 3. Run the gates:
 
