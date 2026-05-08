@@ -34,10 +34,6 @@ async fn main() {
         return;
     }
 
-    // Drop privileges before any I/O so the agent is never running as root
-    // when it touches /var/lib/miru, /var/log/miru, or the network. The
-    // helper is a no-op when the binary is already running as the `miru`
-    // user (e.g. when started by systemd via `User=miru`).
     if let Err(e) = privilege::run_as("miru") {
         eprintln!("miru-agent: {e}");
         std::process::exit(1);

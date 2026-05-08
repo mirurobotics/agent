@@ -13,10 +13,6 @@ pub(crate) type User = nix::unistd::User;
 
 /// If running as root, drop to the user named `name`. If already running as
 /// that user, no-op. Otherwise, return `WrongUser`.
-///
-/// `setresuid(2)`/`setresgid(2)` only mutate process credentials — they don't
-/// touch the environ block — so env vars set before this call remain readable
-/// after the drop.
 pub fn run_as(name: &str) -> Result<(), PrivilegeErr> {
     let euid = geteuid().as_raw();
     if !is_root_user(euid) {
