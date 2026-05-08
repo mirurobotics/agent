@@ -23,7 +23,7 @@ A user runs `./scripts/test.sh` after the change and observes the existing privi
 - [ ] M1 — Add `agent/agent/src/privilege/system.rs` with `pub(crate) trait System` + `pub(crate) struct RealSystem`, build-clean, no callers yet.
 - [ ] M2 — Refactor `mod.rs` to call through the trait: introduce `run_as_with<S: System>`, route `lookup_user`, `is_root_user`, `verify_effective_user`, `drop_to` through `&S`, keep `pub fn run_as(name: &str)` as a thin wrapper that constructs `RealSystem`.
 - [ ] M3 — Convert the inline unit tests in `mod.rs` to use `FakeSystem`; add one tiny `FakeSystem` smoke test that demonstrates a successful `run_as_with` drop sequence updates fake uid/gid state. Keep `lookup_user_returns_root_for_root` using `RealSystem` explicitly.
-- [ ] M4 — Preflight clean: `scripts/preflight.sh` reports `Preflight clean`. Coverage gate at `agent/src/privilege/.covgate` (44.58) still passes.
+- [ ] M4 — Preflight clean: `scripts/preflight.sh` reports `Preflight clean`. Coverage gate at `agent/agent/src/privilege/.covgate` (44.58) still passes.
 
 Use timestamps when you complete steps.
 
@@ -38,7 +38,7 @@ Use timestamps when you complete steps.
   Date/Author: 2026-05-08 / plan author.
 
 - Decision: Trait visibility is `pub(crate)`. `RealSystem` and `System` are not exposed in the `agent` crate's public API.
-  Rationale: `AGENTS.md` calls out that `#[cfg(feature = "test")]` is reserved for production code paths that must still compile in test mode (mocks, state setters), but these privilege helpers are crate-internal and only need to be reachable from the `#[cfg(test)] mod tests` block in the same file. `pub(crate)` keeps the seam invisible from `agent/tests/privilege/mod.rs` (which only consumes `pub` items) while letting the inline unit tests in `mod.rs` see it via `use super::*;`.
+  Rationale: `AGENTS.md` calls out that `#[cfg(feature = "test")]` is reserved for production code paths that must still compile in test mode (mocks, state setters), but these privilege helpers are crate-internal and only need to be reachable from the `#[cfg(test)] mod tests` block in the same file. `pub(crate)` keeps the seam invisible from `agent/agent/tests/privilege/mod.rs` (which only consumes `pub` items) while letting the inline unit tests in `mod.rs` see it via `use super::*;`.
   Date/Author: 2026-05-08 / plan author.
 
 - Decision: Trait method return types use the same `nix` types (`Uid`, `Gid`, `ResUid`, `ResGid`, `User`, `Errno`) that `mod.rs` uses today.
@@ -128,7 +128,7 @@ All three call only `privilege::run_as`, `PrivilegeErr`, and `Trace` — none of
 - The `--features test` flag is required when running the test suite (it gates test-only mocks). Even though the privilege module itself does not use `#[cfg(feature = "test")]` today, the canonical command is `./scripts/test.sh` which already passes the flag.
 - Coverage: each module has a `.covgate` minimum coverage percentage; `scripts/covgate.sh` enforces. The privilege gate is `44.58`. We are not adding test coverage in this plan (out of scope), so the gate must continue to pass with whatever coverage the existing tests provide.
 
-**Preflight commands** (from `agent/scripts/`):
+**Preflight commands** (from `scripts/` at the repo root):
 
 - `./scripts/test.sh` runs `cargo test --package miru-agent --features test` with `RUST_LOG=off`.
 - `./scripts/lint.sh` runs the import linter, `cargo fmt --check`, `cargo clippy --all-features -- -D warnings`, machete, diet, audit.
@@ -298,18 +298,13 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
    - Add `<S: System>` and `sys: &S` parameter to `lookup_user`, `verify_effective_user`, `drop_to`. Replace every `geteuid()`, `getegid()`, `getresuid()`, `getresgid()`, `setresuid(...)`, `setresgid(...)`, `initgroups(...)`, `User::from_name(...)`, and `std::env::args().next()...` call with the corresponding `sys.<method>(...)` call.
    - Remove the now-unused `use nix::unistd::{getegid, geteuid, getresgid, getresuid, initgroups, setresgid, setresuid};` items. Keep `use nix::errno::Errno;` (still referenced by the `Errno::ENOENT | Errno::ESRCH` match arm). Keep `use nix::unistd::Uid` if needed for the `Uid::from_raw(0)` literal in the `debug_assert!`.
    - `is_root_user` is unchanged — still takes `u32`.
-2. Build:
+2. Patch the two inline unit tests so the crate still compiles after the signature change: in the `#[cfg(test)] mod tests` block, change both `lookup_user("...")` calls to `lookup_user(&RealSystem, "...")` (add `use super::system::RealSystem;` inside the test module). M3 will replace the second call with a `FakeSystem`-based test; this temporary edit just keeps the build green at the M2 commit boundary.
+3. Build and run the full test suite:
 
         cargo build --package miru-agent
-
-   Expected: clean build. If clippy/format check is wanted earlier, run `cargo clippy --package miru-agent --all-features -- -D warnings`.
-3. Run the integration tests to confirm the public behavior is unchanged:
-
         ./scripts/test.sh
 
-   Expected: all three tests in `agent/agent/tests/privilege/mod.rs` pass; the two pre-existing inline tests in `mod.rs` also still pass (they still call `lookup_user` directly — see M3).
-
-   At this point the inline unit tests still call `lookup_user(name)` with a single argument, which no longer compiles. Either make them temporarily use `lookup_user(&RealSystem, name)` here, or do the M3 conversion in the same edit pass to avoid a broken intermediate state. Recommended: do M2 + M3 changes in two separate commits but in the same working session — first edit saves a broken-test intermediate, second edit fixes it. If preferred, fold M3 into M2 and skip the broken intermediate (acceptable; only the final commit boundary matters).
+   Expected: clean build with no warnings; all three integration tests in `agent/agent/tests/privilege/mod.rs` pass and both pre-existing inline tests still pass against the real system.
 4. Commit:
 
         git add agent/agent/src/privilege/mod.rs
@@ -319,15 +314,15 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
 
 1. In the `#[cfg(test)] mod tests` block at the bottom of `agent/agent/src/privilege/mod.rs`:
    - Add the `FakeSystem` struct, `fixture_user` helper, and `impl System for FakeSystem` as described in Plan of Work section 3.
-   - `lookup_user_returns_root_for_root`: change `lookup_user("root")` to `lookup_user(&RealSystem, "root")`. Document that this test exercises the production `RealSystem` against the host passwd database.
-   - `lookup_user_returns_user_not_found_for_nonexistent`: build a `FakeSystem` with an empty user list and call `lookup_user(&fake, "nonexistent_user_xyz_123_miru_test")`. Assert `UserNotFound { name }` matches the input name. The test is now host-independent.
+   - `lookup_user_returns_root_for_root`: leave the call as `lookup_user(&RealSystem, "root")` (already patched in M2 step 2). Add a one-line comment that this test exercises the production `RealSystem` against the host passwd database.
+   - `lookup_user_returns_user_not_found_for_nonexistent`: replace the M2-patched call with a `FakeSystem` constructed with an empty user list, then call `lookup_user(&fake, "nonexistent_user_xyz_123_miru_test")`. Assert `UserNotFound { name }` matches the input name. The test is now host-independent.
    - Add `run_as_with_drops_to_target_when_root`: build the fake with `euid` and `egid` cells set to 0, register `fixture_user("miru", 1234, 1234)` in its user list, leave `inject_errno: None` and `argv0: "miru-agent".into()`, then `run_as_with(&fake, "miru").expect("drop succeeds")` and assert the fake's `euid` and `egid` cells now contain 1234. The fake's fields are accessible directly (same module as the test), so the assertions are `assert_eq!(*fake.euid.borrow(), 1234); assert_eq!(*fake.egid.borrow(), 1234);` — no extra accessor method needed. This proves the seam works for the success path.
 2. Build and test:
 
         cargo build --package miru-agent --tests --features test
         ./scripts/test.sh
 
-   Expected: 4 inline unit tests pass (2 converted + 1 untouched in spirit + 1 new) and the 3 integration tests pass.
+   Expected: 3 inline unit tests pass (1 retained `RealSystem` test + 1 converted `FakeSystem` test + 1 new smoke test) and the 3 integration tests pass.
 3. Commit:
 
         git add agent/agent/src/privilege/mod.rs
@@ -365,7 +360,7 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
    - `privilege::run_as_rejects_non_target_user_when_not_root` (integration).
    - `privilege::privilege_err_display_messages_are_human_readable` (integration — unchanged file content, must still pass).
    - `privilege::run_as_is_noop_when_already_target_user` (integration).
-3. `./scripts/preflight.sh` final line reads `Preflight clean` (the script's own success marker; see `agent/scripts/preflight.sh`).
+3. `./scripts/preflight.sh` final line reads `Preflight clean` (the script's own success marker; see `scripts/preflight.sh`).
 4. `agent/agent/src/main.rs` is **unchanged** — the public signature `pub fn privilege::run_as(name: &str) -> Result<(), PrivilegeErr>` is preserved.
 5. `agent/agent/src/privilege/errors.rs` is **unchanged** — the integration test that asserts on `Display` substrings continues to pass with no edits.
 6. `agent/agent/src/privilege/.covgate` is **unchanged** (still contains `44.58`).
@@ -382,7 +377,7 @@ Working directory for every step is `/home/ben/miru/workbench1/repos/agent` unle
 ## Idempotence and Recovery
 
 - **All edits are confined to two files** (`mod.rs` and the new `system.rs`). Each milestone ends with a commit, so any breakage can be reverted by `git revert <sha>` or `git reset --soft HEAD~1` (non-destructive — restores changes to the working tree).
-- **Broken intermediate state in M2**: if the build is committed before M3, the inline unit tests will not compile because they still call the old `lookup_user(name)` signature. Either fold M3 into the M2 working session before committing, or make the M2 edit pre-emptively patch the two test calls to `lookup_user(&RealSystem, name)` (then M3 only adds the `FakeSystem` and the new smoke test). Either is acceptable; do not push a commit where `cargo test` fails.
+- **Avoiding a broken intermediate state in M2**: the inline unit tests call `lookup_user(name)` with a single argument; that no longer compiles after the signature change. M2 step 2 patches both calls to `lookup_user(&RealSystem, name)` so the M2 commit is build-green; M3 then replaces the second call with the `FakeSystem`-based test. If a developer skips the patch step, `cargo build --tests` fails with "this function takes 2 arguments but 1 was supplied" — apply the patch and rerun.
 - **`User` struct field mismatch** when constructing `fixture_user`: if the workspace's pinned `nix` version exposes a different field set on `nix::unistd::User`, the build will fail with a clear "missing field X" or "no field Y" error. Fix by reading the resolved version's `User` struct (e.g. `cargo doc --open -p nix` or look at `~/.cargo/registry/src/.../nix-*/src/unistd.rs`) and adjusting the fixture. This is purely mechanical.
 - **Coverage drop**: if `./scripts/covgate.sh` reports the `44.58` gate failed after M4, do NOT lower the threshold. Run `./scripts/coverage.sh` to get the per-line report, identify which lines are no longer covered, and either (a) drop the fake's coverage of the same lines and re-test, or (b) add a single targeted assertion in the existing smoke test. Lowering `.covgate` is explicitly out of scope.
 - **Reverting the entire refactor**: `git revert -n <m1>..<m4>` and `git commit` will return the privilege module to its pre-refactor state. `main.rs` is untouched throughout, so a revert never affects the binary entry point.
