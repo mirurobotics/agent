@@ -63,8 +63,24 @@ fn verify(
 
 #[cfg(test)]
 mod tests {
+    // standard crates
+    use std::ffi::CString;
+    use std::path::PathBuf;
+
     // internal crates
     use super::*;
+
+    fn fixture_user(name: &str, uid: u32, gid: u32) -> User {
+        User {
+            name: name.to_string(),
+            passwd: CString::new("x").unwrap(),
+            uid: Uid::from_raw(uid),
+            gid: Gid::from_raw(gid),
+            gecos: CString::new("").unwrap(),
+            dir: PathBuf::from("/nonexistent"),
+            shell: PathBuf::from("/bin/false"),
+        }
+    }
 
     #[test]
     fn lookup_user_returns_root_for_root() {
@@ -74,5 +90,99 @@ mod tests {
         assert_eq!(user.uid.as_raw(), 0);
         assert_eq!(user.gid.as_raw(), 0);
         assert_eq!(user.name, "root");
+    }
+
+    #[test]
+    fn lookup_user_returns_user_not_found_for_missing_name() {
+        // Exercises the `Ok(None)` / ENOENT branch against the host passwd
+        // database. The name is constructed so that no real account collides
+        // (NUL bytes in passwd entries are forbidden, so a deliberately long
+        // unlikely name is used).
+        let err = lookup_user("__miru_nonexistent_user_for_tests__")
+            .expect_err("synthetic name must not resolve");
+        let PrivilegeErr::UserNotFound { name, .. } = err else {
+            panic!("expected UserNotFound, got {err:?}");
+        };
+        assert_eq!(name, "__miru_nonexistent_user_for_tests__");
+    }
+
+    #[test]
+    fn run_as_returns_user_not_found_when_name_is_missing() {
+        // Drives the `pub fn run_as` entry point through the lookup-failure
+        // path so the early-return `?` branch is exercised.
+        let err = run_as("__miru_nonexistent_user_for_tests__")
+            .expect_err("synthetic name must not resolve");
+        let PrivilegeErr::UserNotFound { name, .. } = err else {
+            panic!("expected UserNotFound, got {err:?}");
+        };
+        assert_eq!(name, "__miru_nonexistent_user_for_tests__");
+    }
+
+    #[test]
+    fn verify_returns_ok_when_euid_and_egid_match() {
+        let user = fixture_user("miru", 1234, 5678);
+        let result = verify(
+            Uid::from_raw(1234),
+            Gid::from_raw(5678),
+            &user,
+            "miru",
+            "miru-agent".to_string(),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn verify_returns_wrong_user_when_uid_mismatches() {
+        let user = fixture_user("miru", 1234, 5678);
+        let err = verify(
+            Uid::from_raw(2000),
+            Gid::from_raw(5678),
+            &user,
+            "miru",
+            "/usr/sbin/test-agent".to_string(),
+        )
+        .expect_err("uid mismatch must produce WrongUser");
+        let PrivilegeErr::WrongUser {
+            expected,
+            actual_uid,
+            actual_gid,
+            expected_uid,
+            expected_gid,
+            argv0,
+            ..
+        } = err
+        else {
+            panic!("expected WrongUser, got {err:?}");
+        };
+        // lint:allow(field-by-field-assert)
+        assert_eq!(expected, "miru");
+        assert_eq!(actual_uid, 2000);
+        assert_eq!(actual_gid, 5678);
+        assert_eq!(expected_uid, 1234);
+        assert_eq!(expected_gid, 5678);
+        assert_eq!(argv0, "/usr/sbin/test-agent");
+    }
+
+    #[test]
+    fn verify_returns_wrong_user_when_gid_mismatches() {
+        let user = fixture_user("miru", 1234, 5678);
+        let err = verify(
+            Uid::from_raw(1234),
+            Gid::from_raw(9999),
+            &user,
+            "miru",
+            "miru-agent".to_string(),
+        )
+        .expect_err("gid mismatch must produce WrongUser");
+        let PrivilegeErr::WrongUser {
+            actual_uid,
+            actual_gid,
+            ..
+        } = err
+        else {
+            panic!("expected WrongUser, got {err:?}");
+        };
+        assert_eq!(actual_uid, 1234);
+        assert_eq!(actual_gid, 9999);
     }
 }
