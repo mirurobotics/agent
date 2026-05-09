@@ -406,7 +406,10 @@ mod reconcile_impl {
             .unwrap();
 
         let on_disk = layout.settings().read_json::<Settings>().await.unwrap();
-        assert_eq!(on_disk.backend.host.as_str(), "staging.api.mirurobotics.com");
+        assert_eq!(
+            on_disk.backend.host.as_str(),
+            "staging.api.mirurobotics.com"
+        );
         assert_eq!(
             on_disk.mqtt_broker.host.as_str(),
             "staging.mqtt.mirurobotics.com"
