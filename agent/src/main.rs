@@ -3,8 +3,8 @@ use std::env;
 
 // internal crates
 use backend_api::models as backend_client;
-use miru_agent::app::run::run;
 use miru_agent::app::await_activation::{await_activation, Outcome};
+use miru_agent::app::run::run;
 use miru_agent::app::{
     options::{AppOptions, LifecycleOptions},
     upgrade,
