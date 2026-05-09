@@ -16,7 +16,8 @@ fn verify_effective_user_rejects_non_target_user_when_not_root() {
     // The CI runner / dev machine is not root and is not the `miru` user, so
     // the entry point must reject the run with WrongUser. The root and
     // already-miru branches are covered by the smoke-test steps in the plan.
-    let err = privilege::verify_effective_user("miru").expect_err("non-root, non-miru user must be rejected");
+    let err = privilege::verify_effective_user("miru")
+        .expect_err("non-root, non-miru user must be rejected");
     match err {
         PrivilegeErr::WrongUser {
             expected,
@@ -57,7 +58,8 @@ fn verify_effective_user_is_noop_when_already_target_user() {
             return;
         }
     };
-    privilege::verify_effective_user(&user.name).expect("run_as on current effective user is a no-op");
+    privilege::verify_effective_user(&user.name)
+        .expect("run_as on current effective user is a no-op");
 }
 
 #[test]
