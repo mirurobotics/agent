@@ -234,6 +234,30 @@ mod backend_host_new {
     }
 
     #[test]
+    fn rejects_port_only_input() {
+        // `:8080` rsplits to ("", Some(8080)) — the empty-host branch must
+        // be rejected explicitly so we never construct a `BackendHost`
+        // with a blank authority.
+        let err = BackendHost::new(":8080").unwrap_err();
+        assert!(
+            err.contains("no host"),
+            "expected no-host message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn deserialize_rejects_non_string_input() {
+        // The inner `String::deserialize` fails before validation runs,
+        // so a numeric JSON literal must surface as a deserialize error
+        // rather than panic.
+        let err = serde_json::from_str::<BackendHost>("123").unwrap_err();
+        assert!(
+            err.is_data() || err.to_string().contains("string"),
+            "expected string-type error, got: {err}"
+        );
+    }
+
+    #[test]
     fn preserves_explicit_port_80_for_loopback() {
         let host = BackendHost::new("localhost:80").unwrap();
         assert_eq!(host.as_str(), "localhost:80");
@@ -333,6 +357,17 @@ mod mqtt_host_new {
         assert!(
             err.to_string().contains("evilmirurobotics.com"),
             "expected host in message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn deserialize_rejects_non_string_input() {
+        // Mirrors the BackendHost case: a non-string JSON literal must
+        // surface from `String::deserialize` rather than panic.
+        let err = serde_json::from_str::<MqttHost>("42").unwrap_err();
+        assert!(
+            err.is_data() || err.to_string().contains("string"),
+            "expected string-type error, got: {err}"
         );
     }
 
