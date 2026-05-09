@@ -12,11 +12,11 @@ fn dummy_trace() -> Box<Trace> {
 }
 
 #[test]
-fn run_as_rejects_non_target_user_when_not_root() {
+fn verify_effective_user_rejects_non_target_user_when_not_root() {
     // The CI runner / dev machine is not root and is not the `miru` user, so
     // the entry point must reject the run with WrongUser. The root and
     // already-miru branches are covered by the smoke-test steps in the plan.
-    let err = privilege::run_as("miru").expect_err("non-root, non-miru user must be rejected");
+    let err = privilege::verify_effective_user("miru").expect_err("non-root, non-miru user must be rejected");
     match err {
         PrivilegeErr::WrongUser {
             expected,
@@ -37,6 +37,27 @@ fn run_as_rejects_non_target_user_when_not_root() {
         }
         other => panic!("expected WrongUser or UserNotFound, got {other:?}"),
     }
+}
+
+#[test]
+fn verify_effective_user_is_noop_when_already_target_user() {
+    // Resolve the current effective user from the passwd database. If the
+    // runner has no passwd entry for its euid (rare — minimal containers,
+    // chroots) we skip rather than fail, since we have nothing to verify
+    // against.
+    let euid = nix::unistd::geteuid();
+    let user = match nix::unistd::User::from_uid(euid) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            eprintln!("skipping: no passwd entry for euid {}", euid.as_raw());
+            return;
+        }
+        Err(e) => {
+            eprintln!("skipping: User::from_uid({}) failed: {e}", euid.as_raw(),);
+            return;
+        }
+    };
+    privilege::verify_effective_user(&user.name).expect("run_as on current effective user is a no-op");
 }
 
 #[test]
@@ -75,25 +96,4 @@ fn privilege_err_display_messages_are_human_readable() {
     let s = format!("{syscall}");
     assert!(s.contains("setuid"));
     assert!(s.contains("EPERM"));
-}
-
-#[test]
-fn run_as_is_noop_when_already_target_user() {
-    // Resolve the current effective user from the passwd database. If the
-    // runner has no passwd entry for its euid (rare — minimal containers,
-    // chroots) we skip rather than fail, since we have nothing to verify
-    // against.
-    let euid = nix::unistd::geteuid();
-    let user = match nix::unistd::User::from_uid(euid) {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            eprintln!("skipping: no passwd entry for euid {}", euid.as_raw());
-            return;
-        }
-        Err(e) => {
-            eprintln!("skipping: User::from_uid({}) failed: {e}", euid.as_raw(),);
-            return;
-        }
-    };
-    privilege::run_as(&user.name).expect("run_as on current effective user is a no-op");
 }

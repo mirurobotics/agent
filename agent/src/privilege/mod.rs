@@ -11,7 +11,7 @@ use nix::unistd::{Gid, Uid, User};
 /// `Ok(())` on match. Returns `WrongUser` if euid or egid does not match,
 /// `UserNotFound` if `name` has no passwd entry, or `Syscall` if the
 /// passwd lookup itself fails.
-pub fn run_as(name: &str) -> Result<(), PrivilegeErr> {
+pub fn verify_effective_user(name: &str) -> Result<(), PrivilegeErr> {
     let user = lookup_user(name)?;
     let euid = nix::unistd::geteuid();
     let egid = nix::unistd::getegid();
@@ -110,7 +110,7 @@ mod tests {
     fn run_as_returns_user_not_found_when_name_is_missing() {
         // Drives the `pub fn run_as` entry point through the lookup-failure
         // path so the early-return `?` branch is exercised.
-        let err = run_as("__miru_nonexistent_user_for_tests__")
+        let err = verify_effective_user("__miru_nonexistent_user_for_tests__")
             .expect_err("synthetic name must not resolve");
         let PrivilegeErr::UserNotFound { name, .. } = err else {
             panic!("expected UserNotFound, got {err:?}");

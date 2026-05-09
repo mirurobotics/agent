@@ -34,7 +34,7 @@ async fn main() {
         return;
     }
 
-    if let Err(e) = privilege::run_as("miru") {
+    if let Err(e) = privilege::verify_effective_user("miru") {
         eprintln!("miru-agent: {e}");
         std::process::exit(1);
     }
