@@ -1,3 +1,4 @@
+pub mod await_activation;
 pub mod errors;
 pub mod options;
 pub mod run;
