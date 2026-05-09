@@ -37,16 +37,9 @@ Use UTC timestamps when checking off steps. Split partially completed milestones
 
 (Add entries as you go.)
 
-- Observation: …
-  Evidence: …
-
 ## Decision Log
 
 (Add entries as you go.)
-
-- Decision: …
-  Rationale: …
-  Date/Author: …
 
 ## Outcomes & Retrospective
 
@@ -111,7 +104,7 @@ In `agent/agent/src/main.rs`:
   3. `if let Err(e) = privilege::run_as("miru") { eprintln!("miru-agent: {e}"); std::process::exit(1); }`
   4. The original async body that today lives in `run_main`: the two `if let Some(...)` arms for provision / reprovision and the trailing `run_agent().await;`.
 - The helper functions `run_provision`, `handle_provision_result`, `run_reprovision`, `handle_reprovision_result`, `run_agent`, `get_bootstrap_base_url`, `await_shutdown_signal` are unchanged.
-- The `#[tokio::main]` attribute defaults to a multi-threaded runtime with all features enabled — equivalent to today's `Builder::new_multi_thread().enable_all().build()`. The workspace `tokio` features include `rt-multi-thread`, `fs`, `signal` (verified at `Cargo.toml` workspace-deps level), so `#[tokio::main]` compiles.
+- The `#[tokio::main]` attribute expands to a `Builder::new_multi_thread().enable_all().build()` runtime — equivalent to today's hand-rolled construction. The macro itself requires the `macros` feature on `tokio`; see Idempotence and Recovery for the feature-flag check before editing. The workspace `tokio` features include `rt-multi-thread`, `fs`, `signal` (verified at `Cargo.toml` workspace-deps level); `enable_all()` activates `time`, `io`, etc. behind those features.
 - Ordering rationale: `display_version` short-circuits before `privilege::run_as` so a stub user (e.g. CI without a `miru` passwd entry) can still print `--version` for diagnostics. This matches today's order in `fn main()`.
 
 ### M2 — Collapse `privilege/mod.rs` to pure user verification (commit 2)
@@ -193,11 +186,21 @@ Rewrite `agent/agent/src/privilege/mod.rs` to the following exact shape (target 
 
     #[cfg(test)]
     mod tests {
-        // (test module body filled in by M4 — leave it empty here, or add a
-        // placeholder `#[test] fn lookup_user_returns_root_for_root() { ... }`
-        // so the module is not entirely empty before M4. See M4's instruction
-        // for the recommended single test to seed here.)
+        // internal crates
+        use super::*;
+
+        #[test]
+        fn lookup_user_returns_root_for_root() {
+            // Exercises the production path against the host passwd database;
+            // root is guaranteed present on every Linux system.
+            let user = lookup_user("root").expect("root should always be present");
+            assert_eq!(user.uid.as_raw(), 0);
+            assert_eq!(user.gid.as_raw(), 0);
+            assert_eq!(user.name, "root");
+        }
     }
+
+This `mod tests` block is the seed for M2; M4 expands it with three more `verify`-targeted tests. The seed test alone keeps the module non-empty so the file compiles cleanly under `cargo test --features test` at M2's tip.
 
 In `agent/agent/src/privilege/errors.rs`:
 
@@ -220,24 +223,6 @@ In `agent/agent/src/privilege/errors.rs`:
   Two changes: drop "or root" from the prose (root is no longer an accepted invocation; root must explicitly use `sudo -u miru ...`), and switch the suggestion from `sudo {argv0}` to `sudo -u {expected} {argv0}`.
 
 - The `PostDropMismatch` and `PrivilegedSupplementaryGroup` variants stay in this commit (they are removed in M3). The `Syscall` variant is unchanged. The `UserNotFound` variant is unchanged.
-
-Seed the `mod tests` block in the rewritten `mod.rs` with one test so the module is non-empty and the file compiles cleanly under `cargo test --features test`:
-
-    #[cfg(test)]
-    mod tests {
-        // internal crates
-        use super::*;
-
-        #[test]
-        fn lookup_user_returns_root_for_root() {
-            // Exercises the production path against the host passwd database;
-            // root is guaranteed present on every Linux system.
-            let user = lookup_user("root").expect("root should always be present");
-            assert_eq!(user.uid.as_raw(), 0);
-            assert_eq!(user.gid.as_raw(), 0);
-            assert_eq!(user.name, "root");
-        }
-    }
 
 The integration tests in `agent/agent/tests/privilege/mod.rs` continue to assert the existing five-variant Display behavior in this commit — this temporarily passes because the variants still exist. M3 removes the variants and M4 prunes the integration assertions in the same commit. The intermediate state at M2's tip is therefore: source compiles, tests pass, two `PrivilegeErr` variants remain unused (the compiler does not warn on unused enum variants without an explicit lint).
 
@@ -404,11 +389,10 @@ All commands run from `/home/ben/miru/workbench1/repos/agent` unless otherwise s
 
     Expected: final line `Preflight clean`. **Caveat**: covgate enforcement may fail because the test suite shrank dramatically. If it does, **stop**, record under Surprises & Discoveries with the exact percentage covgate reports, and consult the user before proceeding. Per the user brief, `.covgate` must not be modified. Possible recovery options to discuss: (a) accept the failure and lower the gate (out of scope per the brief), (b) reintroduce a tiny stub fake to recover coverage (against the spirit of the simplification), (c) defer the simplification PR until the coverage policy is revisited. Default: stop and ask.
 
-14. Commit M2:
+14. Commit M2. The deletions of `system.rs` and `fake.rs` are already staged by `git rm` in step 7 and ride along automatically:
 
         git add agent/agent/src/privilege/mod.rs agent/agent/src/privilege/errors.rs
-        git rm --cached agent/agent/src/privilege/system.rs agent/agent/src/privilege/fake.rs 2>/dev/null || true
-        # The two `git rm` commands in step 7 already staged the deletions; this is belt-and-suspenders.
+        git status   # expected: deleted system.rs, deleted fake.rs, modified mod.rs, modified errors.rs
         git commit -m "refactor(privilege): collapse module to pure user verification"
 
 ### M3 — Drop `PostDropMismatch` and `PrivilegedSupplementaryGroup`
@@ -493,7 +477,7 @@ The plan is complete when **all** of the following hold from `/home/ben/miru/wor
   - Inline (`agent/agent/src/privilege/mod.rs::tests`): `lookup_user_returns_root_for_root`, `verify_returns_ok_when_euid_and_egid_match`, `verify_returns_wrong_user_when_uid_mismatches`, `verify_returns_wrong_user_when_gid_mismatches`.
   - Integration (`agent/agent/tests/privilege/mod.rs`): `run_as_rejects_non_target_user_when_not_root`, `privilege_err_display_messages_are_human_readable`, `run_as_is_noop_when_already_target_user`.
 - `cargo build -p miru-agent` succeeds with no warnings.
-- `cargo fmt --check` exits 0 from the workspace root.
+- `cargo fmt -p miru-agent -- --check` exits 0 from the workspace root (matches what `./scripts/lint.sh` runs).
 - `cargo clippy --all-features --package miru-agent -- -D warnings` exits 0.
 - `git log --oneline origin/feat/self-privilege-drop..HEAD` shows exactly four new commits, in this order:
   1. `refactor(main): revert to #[tokio::main] entry point`
@@ -527,5 +511,5 @@ The plan is complete when **all** of the following hold from `/home/ben/miru/wor
 - **M2 ripple risk — `nix` features**: the pure-`verify` rewrite uses `nix::unistd::User::from_name`, `nix::unistd::geteuid`, `nix::unistd::getegid`, `nix::errno::Errno`. All four are already enabled in the workspace `nix` features (as evidenced by today's working code). No `Cargo.toml` change.
 - **M3 ripple risk**: deleting variants from a `pub enum` is a breaking change. Run `grep -rn "PostDropMismatch\|PrivilegedSupplementaryGroup" --include="*.rs"` and confirm the only matches are inside `errors.rs` and the integration test (both edited in M3). If any source file constructs or matches these variants, the build will fail — fix in place.
 - **M4 ripple risk**: the `User` struct constructor in `fixture_user` requires every field (`passwd`, `gecos`, `dir`, `shell`) to be present. The exact field set comes from `nix = "0.31.2"`; if the `nix` version pins differently, `cargo build` after step 21 fails with "missing field `<name>`". Fix by reading the current `nix::unistd::User` definition (`cargo doc -p nix --open` or `target/doc/nix/unistd/struct.User.html`) and matching every field.
-- **Reverting the entire simplification**: `git revert -n <m1>..<m4>` and `git commit` returns the privilege module and `main.rs` to the state at HEAD `e1cc7ab`. The earlier System-trait refactor is restored.
+- **Reverting the entire simplification**: `git revert --no-commit <m1-sha>^..<m4-sha>` applies four inverse patches into the working tree (review with `git diff --staged`); then `git commit -m "revert: privilege simplification"` lands a single revert commit that returns the privilege module and `main.rs` to the state at HEAD `e1cc7ab`. The earlier System-trait refactor is restored.
 - **Re-running a milestone**: every command shown is idempotent (`cargo build`, `cargo test`, `./scripts/preflight.sh`). Source edits are absolute (specific functions and lines), not appended, so re-applying after `git reset --soft HEAD~1` is safe.
