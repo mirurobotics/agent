@@ -4,7 +4,7 @@ use std::env;
 // internal crates
 use backend_api::models as backend_client;
 use miru_agent::app::run::run;
-use miru_agent::app::wait_for_activation::{wait_for_activation, WaitOutcome};
+use miru_agent::app::wait_for_activation::{await_activation, Outcome};
 use miru_agent::app::{
     options::{AppOptions, LifecycleOptions},
     upgrade,
@@ -159,9 +159,9 @@ async fn run_agent() {
     };
 
     // wait for the device to be activated (or a shutdown signal)
-    match wait_for_activation(&layout, tokio::time::sleep, await_shutdown_signal()).await {
-        WaitOutcome::Activated => {}
-        WaitOutcome::ShutdownRequested => return,
+    match await_activation(&layout, tokio::time::sleep, await_shutdown_signal()).await {
+        Outcome::Activated => {}
+        Outcome::ShutdownRequested => return,
     }
 
     // reconcile the agent package version to ensure the file system storage state

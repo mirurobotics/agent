@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 // internal crates
-use miru_agent::app::wait_for_activation::{should_log, wait_for_activation, WaitOutcome};
+use miru_agent::app::wait_for_activation::{await_activation, Outcome};
 use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::storage::Layout;
 
@@ -49,9 +49,9 @@ async fn activates_immediately_when_keys_already_present() {
 
     let shutdown = std::future::pending::<()>();
 
-    let outcome = wait_for_activation(&layout, sleep_fn, shutdown).await;
+    let outcome = await_activation(&layout, sleep_fn, shutdown).await;
 
-    assert_eq!(outcome, WaitOutcome::Activated);
+    assert_eq!(outcome, Outcome::Activated);
     assert_eq!(
         sleep_count.load(Ordering::SeqCst),
         0,
@@ -91,9 +91,9 @@ async fn activates_after_n_cycles() {
     };
 
     let shutdown = std::future::pending::<()>();
-    let outcome = wait_for_activation(&layout, sleep_fn, shutdown).await;
+    let outcome = await_activation(&layout, sleep_fn, shutdown).await;
 
-    assert_eq!(outcome, WaitOutcome::Activated);
+    assert_eq!(outcome, Outcome::Activated);
     assert_eq!(
         sleep_count.load(Ordering::SeqCst),
         activate_after,
@@ -130,9 +130,9 @@ async fn shutdown_during_wait_returns_shutdown_requested() {
         let _ = shutdown_rx.await;
     };
 
-    let outcome = wait_for_activation(&layout, sleep_fn, shutdown).await;
+    let outcome = await_activation(&layout, sleep_fn, shutdown).await;
 
-    assert_eq!(outcome, WaitOutcome::ShutdownRequested);
+    assert_eq!(outcome, Outcome::ShutdownRequested);
     // Sleep count is "≥ 5" not "== 5" because tokio::select! polls both
     // arms; a final sleep_fn invocation may have started before shutdown won.
     assert!(
@@ -157,21 +157,10 @@ async fn shutdown_wins_when_already_signaled_at_entry() {
 
     let shutdown = std::future::ready(());
 
-    let outcome = wait_for_activation(&layout, sleep_fn, shutdown).await;
+    let outcome = await_activation(&layout, sleep_fn, shutdown).await;
 
-    assert_eq!(outcome, WaitOutcome::ShutdownRequested);
+    assert_eq!(outcome, Outcome::ShutdownRequested);
     // `biased; shutdown` first means we should not have slept at all:
     // the first `tokio::select!` iteration sees `shutdown` ready and wins.
     assert_eq!(sleep_count.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn should_log_is_publicly_reachable_and_matches_unit_schedule() {
-    // The full schedule is covered in unit tests next to the source.
-    // This test just locks in the public-API path.
-    assert!(!should_log(0));
-    assert!(should_log(2));
-    assert!(should_log(1024));
-    assert!(should_log(2048));
-    assert!(!should_log(2049));
 }

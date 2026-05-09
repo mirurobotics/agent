@@ -9,39 +9,25 @@ use crate::storage::{self, Layout};
 use tokio::pin;
 use tracing::info;
 
-/// Outcome of a `wait_for_activation` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WaitOutcome {
-    /// The auth keys appeared on disk and the agent should proceed.
+pub enum Outcome {
     Activated,
-    /// A shutdown signal was received before activation completed.
     ShutdownRequested,
 }
 
-/// Block until the device is activated (auth keys exist on disk) or a shutdown
-/// signal is received. Polls `storage::assert_activated` once per cycle using
-/// the injected `sleep_fn` (1-second cycles in production), throttling logs
-/// via [`should_log`]. The shutdown future is consumed once and races every
-/// poll cycle via `tokio::select!`.
-///
-/// `biased` ordering on the select makes the shutdown branch win on a tie, so
-/// a SIGTERM that arrives in the same poll iteration as the keys appearing
-/// still results in a clean shutdown.
-pub async fn wait_for_activation<F, Fut, S>(
+pub async fn await_activation<F, Fut, S>(
     layout: &Layout,
     sleep_fn: F,
     shutdown: S,
-) -> WaitOutcome
+) -> Outcome
 where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
     S: Future<Output = ()> + Send,
 {
-    // Fast path: already activated. Avoid the "not yet activated" log entirely
-    // so a normal start-up on an already-provisioned device is silent here.
     if storage::assert_activated(layout).await.is_ok() {
         info!("Device activated; starting agent.");
-        return WaitOutcome::Activated;
+        return Outcome::Activated;
     }
 
     info!("Device is not yet activated; waiting for provisioning...");
@@ -54,12 +40,12 @@ where
             biased;
             _ = &mut shutdown => {
                 info!("Shutdown received while waiting for activation");
-                return WaitOutcome::ShutdownRequested;
+                return Outcome::ShutdownRequested;
             }
             _ = sleep_fn(Duration::from_secs(1)) => {
                 if storage::assert_activated(layout).await.is_ok() {
                     info!("Device activated; starting agent.");
-                    return WaitOutcome::Activated;
+                    return Outcome::Activated;
                 }
                 if should_log(cycle) {
                     info!("Still waiting for activation (waited {cycle}s)...");
@@ -70,15 +56,6 @@ where
     }
 }
 
-/// Returns `true` if the wait-for-activation loop should emit a heartbeat log
-/// at the given 1-based cycle counter (i.e. seconds elapsed since the
-/// initial "not yet activated" log).
-///
-/// Logs fire at cycles 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, then every
-/// 1024 cycles thereafter. Cycle 0's first log is emitted by the caller
-/// before entering the loop, so this fn returns `false` for 0; cycle 1 is
-/// intentionally silent — `1.is_power_of_two()` is `true` but the spec
-/// excludes it.
 pub fn should_log(cycle: u64) -> bool {
     if cycle < 2 {
         return false;
@@ -95,8 +72,6 @@ mod tests {
 
     #[test]
     fn cycle_zero_is_silent_caller_logs_first_miss() {
-        // Cycle 0 logging happens outside the loop in `wait_for_activation`,
-        // so `should_log(0) == false` — otherwise we'd double-log.
         assert!(!should_log(0));
     }
 
