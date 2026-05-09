@@ -59,7 +59,7 @@ fn verify_effective_user_is_noop_when_already_target_user() {
         }
     };
     privilege::verify_effective_user(&user.name)
-        .expect("run_as on current effective user is a no-op");
+        .expect("verify_effective_user on current effective user is a no-op");
 }
 
 #[test]

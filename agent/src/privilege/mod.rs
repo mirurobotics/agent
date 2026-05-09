@@ -107,9 +107,9 @@ mod tests {
     }
 
     #[test]
-    fn run_as_returns_user_not_found_when_name_is_missing() {
-        // Drives the `pub fn run_as` entry point through the lookup-failure
-        // path so the early-return `?` branch is exercised.
+    fn verify_effective_user_returns_user_not_found_when_name_is_missing() {
+        // Drives the `pub fn verify_effective_user` entry point through the
+        // lookup-failure path so the early-return `?` branch is exercised.
         let err = verify_effective_user("__miru_nonexistent_user_for_tests__")
             .expect_err("synthetic name must not resolve");
         let PrivilegeErr::UserNotFound { name, .. } = err else {
