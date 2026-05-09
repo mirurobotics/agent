@@ -8,10 +8,10 @@ use backend_api::models as backend_client;
 use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
-use miru_agent::filesys::{self, Overwrite, PathExt};
+use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
-use miru_agent::storage::{self, Layout};
+use miru_agent::storage::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
 
 // external crates
 use chrono::{Duration, Utc};
@@ -379,5 +379,69 @@ mod reconcile_impl {
             .await
             .unwrap();
         assert_eq!(marker, Some(version.to_string()));
+    }
+
+    #[tokio::test]
+    async fn preserves_customized_settings() {
+        let (layout, _dir) = prepare_layout("reconcile_impl_preserves_settings").await;
+
+        let staging = Settings {
+            backend: Backend {
+                host: BackendHost::new("staging.api.mirurobotics.com").unwrap(),
+            },
+            mqtt_broker: MQTTBroker {
+                host: MqttHost::new("staging.mqtt.mirurobotics.com").unwrap(),
+            },
+            ..Settings::default()
+        };
+        layout
+            .settings()
+            .write_json(&staging, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let mock = make_mock_client(backend_device("dvc_ps1", "preserves"));
+        reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+            .await
+            .unwrap();
+
+        let on_disk = layout.settings().read_json::<Settings>().await.unwrap();
+        assert_eq!(on_disk.backend.host.as_str(), "staging.api.mirurobotics.com");
+        assert_eq!(
+            on_disk.mqtt_broker.host.as_str(),
+            "staging.mqtt.mirurobotics.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_defaults_when_settings_missing() {
+        let (layout, _dir) = prepare_layout("reconcile_impl_settings_missing").await;
+
+        let mock = make_mock_client(backend_device("dvc_sm1", "missing"));
+        reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+            .await
+            .unwrap();
+
+        let on_disk = layout.settings().read_json::<Settings>().await.unwrap();
+        assert_eq!(on_disk, Settings::default());
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_defaults_when_settings_corrupt() {
+        let (layout, _dir) = prepare_layout("reconcile_impl_settings_corrupt").await;
+
+        layout
+            .settings()
+            .write_string("not-json", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let mock = make_mock_client(backend_device("dvc_sc1", "corrupt"));
+        reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+            .await
+            .unwrap();
+
+        let on_disk = layout.settings().read_json::<Settings>().await.unwrap();
+        assert_eq!(on_disk, Settings::default());
     }
 }
