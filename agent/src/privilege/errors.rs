@@ -30,29 +30,6 @@ pub enum PrivilegeErr {
         errno: Errno,
         trace: Box<Trace>,
     },
-
-    #[error(
-        "post-drop verification failed: expected uid={expected_uid} gid={expected_gid}, got \
-         ruid={actual_ruid} euid={actual_euid} suid={actual_suid} \
-         rgid={actual_rgid} egid={actual_egid} sgid={actual_sgid}"
-    )]
-    PostDropMismatch {
-        expected_uid: u32,
-        expected_gid: u32,
-        actual_ruid: u32,
-        actual_euid: u32,
-        actual_suid: u32,
-        actual_rgid: u32,
-        actual_egid: u32,
-        actual_sgid: u32,
-        trace: Box<Trace>,
-    },
-
-    #[error(
-        "post-drop verification failed: supplementary group list still contains \
-         privileged gid {gid} after dropping to the target user"
-    )]
-    PrivilegedSupplementaryGroup { gid: u32, trace: Box<Trace> },
 }
 
 impl crate::errors::Error for PrivilegeErr {}

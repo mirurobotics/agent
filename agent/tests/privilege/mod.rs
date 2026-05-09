@@ -65,7 +65,7 @@ fn privilege_err_display_messages_are_human_readable() {
     assert!(s.contains("expected uid 999"));
     assert!(s.contains("gid 998"));
     assert!(s.contains("/usr/sbin/miru-agent"));
-    assert!(s.contains("sudo"));
+    assert!(s.contains("sudo -u miru /usr/sbin/miru-agent"));
 
     let syscall = PrivilegeErr::Syscall {
         call: "setuid",
@@ -75,35 +75,6 @@ fn privilege_err_display_messages_are_human_readable() {
     let s = format!("{syscall}");
     assert!(s.contains("setuid"));
     assert!(s.contains("EPERM"));
-
-    let post_drop = PrivilegeErr::PostDropMismatch {
-        expected_uid: 100,
-        expected_gid: 200,
-        actual_ruid: 0,
-        actual_euid: 1,
-        actual_suid: 2,
-        actual_rgid: 3,
-        actual_egid: 4,
-        actual_sgid: 5,
-        trace: dummy_trace(),
-    };
-    let s = format!("{post_drop}");
-    assert!(s.contains("expected uid=100"));
-    assert!(s.contains("gid=200"));
-    assert!(s.contains("ruid=0"));
-    assert!(s.contains("euid=1"));
-    assert!(s.contains("suid=2"));
-    assert!(s.contains("rgid=3"));
-    assert!(s.contains("egid=4"));
-    assert!(s.contains("sgid=5"));
-
-    let priv_supp = PrivilegeErr::PrivilegedSupplementaryGroup {
-        gid: 0,
-        trace: dummy_trace(),
-    };
-    let s = format!("{priv_supp}");
-    assert!(s.contains("privileged gid 0"));
-    assert!(s.contains("supplementary"));
 }
 
 #[test]
