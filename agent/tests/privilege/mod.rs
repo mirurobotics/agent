@@ -16,27 +16,6 @@ fn run_as_rejects_non_target_user_when_not_root() {
     // The CI runner / dev machine is not root and is not the `miru` user, so
     // the entry point must reject the run with WrongUser. The root and
     // already-miru branches are covered by the smoke-test steps in the plan.
-    //
-    // On a hypothetical host whose euid happens to resolve to a passwd entry
-    // named `miru`, this test would otherwise hit the no-op success path and
-    // fall through to `expect_err`. Skip in that case rather than panic.
-    let euid = nix::unistd::geteuid();
-    match nix::unistd::User::from_uid(euid) {
-        Ok(Some(u)) if u.name == "miru" => {
-            eprintln!(
-                "skipping: euid {} resolves to 'miru'; this test asserts the \
-                 non-miru rejection path",
-                euid.as_raw(),
-            );
-            return;
-        }
-        Ok(Some(_)) | Ok(None) => {}
-        Err(e) => {
-            eprintln!("skipping: User::from_uid({}) failed: {e}", euid.as_raw());
-            return;
-        }
-    }
-
     let err = privilege::run_as("miru").expect_err("non-root, non-miru user must be rejected");
     match err {
         PrivilegeErr::WrongUser {

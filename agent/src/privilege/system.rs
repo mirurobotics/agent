@@ -8,13 +8,6 @@ pub(crate) type Uid = nix::unistd::Uid;
 pub(crate) type User = nix::unistd::User;
 pub(crate) type Errno = nix::errno::Errno;
 
-/// Seam for every external interaction in the privilege module.
-///
-/// Production code constructs [`RealSystem`] which delegates to `nix::unistd`
-/// and `std::env::args()`. Tests construct a fake that drives the same trait
-/// against in-memory state, allowing branches like `WrongUser`,
-/// `PostDropMismatch`, and per-syscall errno propagation to be exercised
-/// deterministically without root.
 pub(crate) trait System {
     fn geteuid(&self) -> Uid;
     fn getegid(&self) -> Gid;
