@@ -23,22 +23,23 @@ After this change:
 
 ## Progress
 
-- [ ] Decide Option A vs Option B (see Decision Log) before touching code.
-- [ ] Edit `agent/src/network/mod.rs` per Plan of Work.
-- [ ] Edit `agent/tests/network/mod.rs` per Plan of Work (delete five IPv6 tests; add three rejection tests).
-- [ ] If Option B: drop `url = { workspace = true }` from `agent/Cargo.toml`, run `scripts/update-deps.sh`.
-- [ ] `cargo build` passes.
-- [ ] `cargo fmt -p miru-agent -- --check` produces no diff.
-- [ ] `cargo clippy --package miru-agent --all-features -- -D warnings` reports no warnings.
-- [ ] `./scripts/test.sh` passes (new `rejects_loopback_ipv6*` tests pin the behavior change).
-- [ ] `./scripts/lint.sh` passes (includes `cargo machete` — important under Option B).
-- [ ] `./scripts/covgate.sh` passes (storage and mqtt covgates depend on the network module indirectly; the network module itself has no `.covgate` file).
-- [ ] Commit `refactor(network): drop IPv6 loopback support` (or two commits if Option B — see Branch and Commit Guidance).
-- [ ] `./scripts/preflight.sh` reports clean. **Required before publishing.**
+- [x] Decide Option A vs Option B (see Decision Log) before touching code.
+- [x] Edit `agent/src/network/mod.rs` per Plan of Work.
+- [x] Edit `agent/tests/network/mod.rs` per Plan of Work (delete five IPv6 tests; add three rejection tests).
+- [x] If Option B: drop `url = { workspace = true }` from `agent/Cargo.toml`, run `scripts/update-deps.sh`.
+- [x] `cargo build` passes.
+- [x] `cargo fmt -p miru-agent -- --check` produces no diff.
+- [x] `cargo clippy --package miru-agent --all-features -- -D warnings` reports no warnings.
+- [x] `./scripts/test.sh` passes (new `rejects_loopback_ipv6*` tests pin the behavior change).
+- [x] `./scripts/lint.sh` passes (includes `cargo machete` — important under Option B).
+- [ ] `./scripts/covgate.sh` passes (storage and mqtt covgates depend on the network module indirectly; the network module itself has no `.covgate` file). See Surprises — pre-existing timing flakes under llvm-cov instrumentation, unrelated to this diff.
+- [x] Commit `refactor(network): drop IPv6 loopback support` (or two commits if Option B — see Branch and Commit Guidance).
+- [ ] `./scripts/preflight.sh` reports clean. **Required before publishing.** (Owned by the preflight subagent in the next step.)
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- `Cargo.lock` is gitignored (see `.gitignore` line 8). Running `scripts/update-deps.sh` does refresh the lock on disk — and `cargo update` did pull in many unrelated dep bumps as a side effect — but none of those changes are tracked by git, so they aren't part of the commit and don't need to be reverted. The commit therefore contains only `agent/src/network/mod.rs`, `agent/tests/network/mod.rs`, `agent/Cargo.toml`, and the plan file. (Date/Author: 2026-05-09 / implementer.)
+- `./scripts/covgate.sh` failed with two pre-existing timing flakes under llvm-cov instrumentation (`app::run::max_runtime_reached` — 5 s timeout wrapper, panicked with `Elapsed(())`; `filesys::file::last_modified::success` — `elapsed < 1 sec` assertion). Both tests are unrelated to the network module (no covgate file exists for `agent/src/network/`, and `as_url` shape is unchanged). The plain `./scripts/test.sh` passed all 1340 tests including the three new `rejects_loopback_ipv6*` / `rejects_bracketed_ipv6_loopback` cases. Treating the covgate flakes as pre-existing infra issues; the orchestrator's preflight subagent will retry as needed. (Date/Author: 2026-05-09 / implementer.)
 
 ## Decision Log
 
@@ -48,6 +49,10 @@ After this change:
   - **Default recommendation: Option B.** Once IPv6 is gone the `Url::parse` "wraps the host in `http://` to lean on a URL parser" trick adds no value — there is no userinfo or path that the upstream `contains("://") / contains('@') / contains('/')` checks miss. The only behavior difference is the exact error message text for an out-of-range port (`url::Url`'s "invalid port number" vs Rust's `<u16 as FromStr>::Err` message), and the existing `rejects_non_numeric_port` / `rejects_out_of_range_port` tests assert on a permissive substring (`"invalid"` or `"port"`) that both forms satisfy.
   - The implementer must record their choice and rationale in this section before editing.
   Date/Author: 2026-05-09 / planner.
+
+- Decision: **Option B chosen** — drop `Url::parse` and the agent-side `url = { workspace = true }` declaration.
+  Rationale: Verified via `grep -rn "use url::\|url::Url" agent/src libs/` that `agent/src/network/mod.rs` is the only file in the agent crate importing `url::*` (the only other matches are in `libs/backend-api/` and `libs/device-api/`, which declare their own `url` deps and are out of scope). With IPv6 gone, the synthetic-scheme dance and the post-parse userinfo/path/query/fragment guards add no value over a direct `rsplit_once(':')` split — the upstream `contains("://") / contains('@') / contains('/')` checks already cover the same surface. The existing port-error tests assert on permissive substrings (`"invalid"` or `"port"`) that both `url::Url`'s and Rust's `<u16 as FromStr>` messages satisfy.
+  Date/Author: 2026-05-09 / implementer.
 
 - Decision: 127.0.0.1 is intentionally retained.
   Rationale: Local development against the agent commonly uses `127.0.0.1` (curl, `nc`, raw socket binds in `agent/tests/http/` and `agent/tests/mocks/`). Narrowing further to `localhost`-only was previously drafted (`plans/backlog/20260508-localhost-only-network.md`, deleted 2026-05-09 in commit `50b73af`) and explicitly rejected on the grounds that it offered no real shrinkage of the type once IPv6 was already gone — the bracket and multi-colon code paths are entirely an IPv6 concern, not a 127.0.0.1 concern — while imposing a mechanical rename on six MQTT-test fixtures and tightening the SSL-unless-loopback rule for an MQTT broker configured at `127.0.0.1` (a configuration that has no operator workflow but is still measurably tighter than today). The plan recorded here keeps `127.0.0.1`.
@@ -59,7 +64,9 @@ After this change:
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+- Option B executed end-to-end. Net source-side change: `agent/src/network/mod.rs` shrank from 257 to 207 lines (the entire `Url::parse` block, the `explicit_port` helper, the `host_is_ipv6` flag, the bracket-strip, and the synthetic-scheme dance are gone). `agent/Cargo.toml` lost the `url = { workspace = true }` declaration; `cargo machete` confirms the agent crate no longer depends on `url`.
+- All five IPv6 unit tests deleted and three rejection tests added; the plain `./scripts/test.sh` reports 1340 passing including the new rejection cases. Build, fmt, clippy, and lint gates all clean. The only failing gate (`covgate.sh`) tripped on two pre-existing timing-flaky tests in `app::run` and `filesys::file` — both well outside this diff's blast radius and recorded under Surprises for the preflight subagent to retry.
+- One single commit on `refactor/backend-host`; the optional second commit (splitting the `Url::parse` removal from the IPv6 narrowing) was not used since the changes are tightly coupled and the combined diff stays small.
 
 ## Context and Orientation
 

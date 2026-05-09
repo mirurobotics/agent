@@ -4,36 +4,16 @@ use std::fmt;
 // external crates
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::warn;
-use url::Url;
 
-/// Returns true for the literal loopback hostnames we accept.
+/// Returns true for `localhost` and `127.0.0.1`.
 pub fn is_loopback_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+    matches!(host, "localhost" | "127.0.0.1")
 }
 
 fn is_allowed_host(host: &str) -> bool {
     const ALLOWED_DOMAIN: &str = "mirurobotics.com";
     const ALLOWED_DOMAIN_SUFFIX: &str = ".mirurobotics.com";
     host == ALLOWED_DOMAIN || host.ends_with(ALLOWED_DOMAIN_SUFFIX)
-}
-
-/// Returns the trailing `:NNN` port from a host string, ignoring colons
-/// inside `[...]` IPv6 brackets. Returns `None` if no port suffix is
-/// present or the suffix is not a valid `u16`.
-fn explicit_port(raw: &str) -> Option<u16> {
-    let scan_from = match raw.rfind(']') {
-        Some(close) => close + 1,
-        None => 0,
-    };
-    let tail = &raw[scan_from..];
-    let colon = tail.rfind(':')?;
-    // For unbracketed input, ensure this colon isn't part of an IPv6
-    // literal (more than one `:` in `tail` means it's IPv6 without
-    // brackets, which can't have a port without brackets).
-    if scan_from == 0 && tail.matches(':').count() > 1 {
-        return None;
-    }
-    tail[colon + 1..].parse::<u16>().ok()
 }
 
 /// A bare backend hostname (optionally with a port) whose only constructor
@@ -43,12 +23,11 @@ fn explicit_port(raw: &str) -> Option<u16> {
 /// public surface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackendHost {
-    /// Bare hostname (no brackets for IPv6 literals).
+    /// Bare hostname.
     host: String,
     /// Optional port from the input.
     port: Option<u16>,
-    /// Pre-formatted authority — `host` or `host:port` (with brackets
-    /// around IPv6 hosts when a port is present). Identical to what
+    /// Pre-formatted authority — `host` or `host:port`. Identical to what
     /// `Display` writes; exposed via `as_str`.
     formatted: String,
 }
@@ -64,9 +43,6 @@ impl BackendHost {
     /// - the host is neither loopback (per [`is_loopback_host`]) nor an
     ///   allowed mirurobotics domain (per `is_allowed_host`),
     /// - the port is non-numeric or out of range.
-    ///
-    /// IPv6 host+port form requires brackets (e.g. `[::1]:8080`); bare IPv6
-    /// loopback (`::1`) is accepted port-less.
     pub fn new(raw: &str) -> Result<Self, String> {
         if raw.is_empty() {
             return Err("backend host must not be empty".into());
@@ -81,54 +57,30 @@ impl BackendHost {
             return Err("backend host must not contain a path".into());
         }
 
-        // Parse via url::Url with a synthetic scheme. This handles IPv6
-        // bracket form (`[::1]:8080`) and surfaces port parse errors.
-        // url::Url requires IPv6 hosts to be bracketed; the literal `::1`
-        // is the one unbracketed form we accept, so wrap it before parsing.
-        let url_input = if raw == "::1" {
-            "http://[::1]".to_string()
-        } else {
-            format!("http://{raw}")
+        let (host, port) = match raw.rsplit_once(':') {
+            Some((h, p)) => (
+                h,
+                Some(
+                    p.parse::<u16>()
+                        .map_err(|e| format!("invalid port in `{raw}`: {e}"))?,
+                ),
+            ),
+            None => (raw, None),
         };
-        let parsed =
-            Url::parse(&url_input).map_err(|e| format!("invalid backend host `{raw}`: {e}"))?;
-
-        if !parsed.username().is_empty() || parsed.password().is_some() {
-            return Err("backend host must not contain userinfo".into());
+        if host.is_empty() {
+            return Err(format!("backend host `{raw}` has no host"));
         }
-        if parsed.path() != "" && parsed.path() != "/" {
-            return Err("backend host must not contain a path".into());
-        }
-        if parsed.query().is_some() {
-            return Err("backend host must not contain a query".into());
-        }
-        if parsed.fragment().is_some() {
-            return Err("backend host must not contain a fragment".into());
+        if !is_loopback_host(host) && !is_allowed_host(host) {
+            return Err(format!("host `{host}` is not allowed"));
         }
 
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| format!("backend host `{raw}` has no host"))?;
-        // host_str() preserves IPv6 brackets; strip them so the loopback
-        // literal "::1" matches our string set.
-        let bare_host = host.trim_start_matches('[').trim_end_matches(']');
-        if !is_loopback_host(bare_host) && !is_allowed_host(bare_host) {
-            return Err(format!("host `{bare_host}` is not allowed"));
-        }
-
-        // `parsed.port()` returns None for the scheme-default port (80 for
-        // `http://`), which would silently drop a user-typed `:80`. Fall back
-        // to scanning `raw` so the stored port matches what the user supplied.
-        let port = parsed.port().or_else(|| explicit_port(raw));
-        let host_is_ipv6 = bare_host.contains(':');
-        let formatted = match (port, host_is_ipv6) {
-            (Some(p), true) => format!("[{bare_host}]:{p}"),
-            (Some(p), false) => format!("{bare_host}:{p}"),
-            (None, _) => bare_host.to_string(),
+        let formatted = match port {
+            Some(p) => format!("{host}:{p}"),
+            None => host.to_string(),
         };
 
         Ok(Self {
-            host: bare_host.to_string(),
+            host: host.to_string(),
             port,
             formatted,
         })
@@ -146,7 +98,7 @@ impl BackendHost {
     }
 
     /// Returns the host (or `host:port`) form — the same string `Display`
-    /// writes. IPv6 hosts are bracketed when a port is present.
+    /// writes.
     pub fn as_str(&self) -> &str {
         self.formatted.as_str()
     }
@@ -160,14 +112,9 @@ impl BackendHost {
         } else {
             "https"
         };
-        // IPv6 hosts must be bracketed inside a URL even when port-less,
-        // unlike the `as_str` form which mirrors what the user typed.
-        let host_is_ipv6 = self.host.contains(':');
-        let authority = match (self.port, host_is_ipv6) {
-            (Some(port), true) => format!("[{}]:{port}", self.host),
-            (Some(port), false) => format!("{}:{port}", self.host),
-            (None, true) => format!("[{}]", self.host),
-            (None, false) => self.host.clone(),
+        let authority = match self.port {
+            Some(port) => format!("{}:{port}", self.host),
+            None => self.host.clone(),
         };
         format!("{scheme}://{authority}/agent/v1")
     }

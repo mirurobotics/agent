@@ -30,11 +30,6 @@ mod backend_host_new {
     }
 
     #[test]
-    fn accepts_loopback_ipv6() {
-        BackendHost::new("::1").unwrap();
-    }
-
-    #[test]
     fn accepts_host_with_port() {
         let host = BackendHost::new("api.mirurobotics.com:8443").unwrap();
         assert_eq!(host.as_str(), "api.mirurobotics.com:8443");
@@ -213,12 +208,6 @@ mod backend_host_new {
     }
 
     #[test]
-    fn as_url_http_for_loopback_ipv6() {
-        let host = BackendHost::new("::1").unwrap();
-        assert_eq!(host.as_url(), "http://[::1]/agent/v1");
-    }
-
-    #[test]
     fn as_url_https_with_port() {
         let host = BackendHost::new("api.mirurobotics.com:8443").unwrap();
         assert_eq!(host.as_url(), "https://api.mirurobotics.com:8443/agent/v1");
@@ -231,15 +220,17 @@ mod backend_host_new {
     }
 
     #[test]
-    fn accepts_loopback_ipv6_with_port() {
-        let host = BackendHost::new("[::1]:8080").unwrap();
-        assert_eq!(host.as_str(), "[::1]:8080");
+    fn rejects_loopback_ipv6() {
+        let err = BackendHost::new("::1").unwrap_err();
+        assert!(
+            err.contains("::1") || err.contains("not allowed"),
+            "expected host-not-allowed message, got: {err}"
+        );
     }
 
     #[test]
-    fn as_url_http_loopback_ipv6_with_port() {
-        let host = BackendHost::new("[::1]:8080").unwrap();
-        assert_eq!(host.as_url(), "http://[::1]:8080/agent/v1");
+    fn rejects_bracketed_ipv6_loopback() {
+        BackendHost::new("[::1]:8080").unwrap_err();
     }
 
     #[test]
@@ -276,13 +267,17 @@ mod mqtt_host_new {
     }
 
     #[test]
-    fn accepts_loopback_ipv6() {
-        MqttHost::new("::1").unwrap();
+    fn accepts_exact_allowed_domain() {
+        MqttHost::new("mirurobotics.com").unwrap();
     }
 
     #[test]
-    fn accepts_exact_allowed_domain() {
-        MqttHost::new("mirurobotics.com").unwrap();
+    fn rejects_loopback_ipv6() {
+        let err = MqttHost::new("::1").unwrap_err();
+        assert!(
+            err.contains("::1") || err.contains("not allowed"),
+            "expected host-not-allowed message, got: {err}"
+        );
     }
 
     #[test]
