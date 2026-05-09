@@ -15,6 +15,7 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendHost;
+use miru_agent::privilege;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
