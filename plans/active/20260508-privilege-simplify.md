@@ -26,16 +26,18 @@ A reviewer who runs `./scripts/preflight.sh` from the agent repo root sees `Pref
 
 ## Progress
 
-- [ ] M1 — Revert `agent/src/main.rs` to `#[tokio::main] async fn main()`
-- [ ] M2 — Collapse `privilege/mod.rs` to pure user verification (delete `system.rs`, `fake.rs`, `drop_to`, `is_root_user`, `run_as_with`, `System` trait, `RealSystem`, `FakeSystem`, all FakeSystem-driven inline tests; rewrite `mod.rs`; update `WrongUser` Display message)
-- [ ] M3 — Drop `PostDropMismatch` and `PrivilegedSupplementaryGroup` from `PrivilegeErr`
-- [ ] M4 — Replace fake-driven inline tests with pure `verify()` unit tests; update integration Display assertions
+- [x] M1 — Revert `agent/src/main.rs` to `#[tokio::main] async fn main()` — 2026-05-08 (`e7d1a23`)
+- [x] M2 — Collapse `privilege/mod.rs` to pure user verification (delete `system.rs`, `fake.rs`, `drop_to`, `is_root_user`, `run_as_with`, `System` trait, `RealSystem`, `FakeSystem`, all FakeSystem-driven inline tests; rewrite `mod.rs`; update `WrongUser` Display message) — 2026-05-08 (`4edb171`)
+- [x] M3 — Drop `PostDropMismatch` and `PrivilegedSupplementaryGroup` from `PrivilegeErr` — 2026-05-08 (`12c36c7`)
+- [x] M4 — Replace fake-driven inline tests with pure `verify()` unit tests; update integration Display assertions — 2026-05-08
 
 Use UTC timestamps when checking off steps. Split partially completed milestones into "done" and "remaining."
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- **2026-05-08 — `tokio` `macros` feature absent.** `#[tokio::main]` requires the `macros` feature, which the workspace `tokio` features list (`["rt-multi-thread", "fs", "signal"]`) did not include. Added `"macros"` to the workspace tokio features in `Cargo.toml` as part of M1 (anticipated under "M1 ripple risk" in Idempotence and Recovery).
+- **2026-05-08 — covgate dips at M2/M3 tip, recovers at M4.** As anticipated, `./scripts/preflight.sh` reports `privilege: 83.82% (requires 93.88%)` at M2's tip — the FakeSystem-driven inline tests are gone but the new `verify()` unit tests don't land until M4. Coverage returns above the gate at M4. No `.covgate` change made (per user directive). Build, lint, machete, audit, clippy, and all tests pass; only the coverage gate fails between M2 and M4. M4's commit boundary is the canonical "preflight clean" gate.
+- **2026-05-08 — M4 added two extra `lookup_user` tests beyond the plan.** The plan specified four inline tests (1 seed + 3 `verify`), but two more were needed to clear covgate at M4: `lookup_user_returns_user_not_found_for_missing_name` (exercises `Ok(None)` / ENOENT → `UserNotFound`) and `run_as_returns_user_not_found_when_name_is_missing` (drives `run_as`'s `?` early-return through the lookup-failure path). Both use a synthetic name that cannot collide with any real account. The `Err(other) → Syscall` branch in `lookup_user` remains uncovered — covgate passes without it.
 
 ## Decision Log
 
@@ -43,7 +45,14 @@ Use UTC timestamps when checking off steps. Split partially completed milestones
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+**Completed 2026-05-08.** All four milestones landed on `feat/self-privilege-drop`:
+
+- `e7d1a23` — M1: `#[tokio::main]` entry point restored; explicit `Builder` runtime removed; `tokio` `macros` feature added to workspace.
+- `4edb171` — M2: `privilege/mod.rs` collapsed to `lookup_user` + `verify`; `system.rs` and `fake.rs` deleted; `WrongUser` Display now suggests `sudo -u {expected} {argv0}`.
+- `12c36c7` — M3: `PostDropMismatch` and `PrivilegedSupplementaryGroup` variants removed from `PrivilegeErr`; integration Display test trimmed.
+- M4: six inline tests on `mod.rs` (`lookup_user_returns_root_for_root`, `lookup_user_returns_user_not_found_for_missing_name`, `run_as_returns_user_not_found_when_name_is_missing`, three `verify_*`); integration tests untouched.
+
+Validation: `./scripts/preflight.sh` clean at M4's tip (privilege: 94.08% ≥ 93.88%); `./scripts/test.sh` reports 1332 passed; `cargo run -p miru-agent -- --version` exits 0. Public API surface (`pub fn run_as`, `pub use PrivilegeErr`) preserved at signature level; the enum narrowed from five to three variants — only consumer is `main.rs` via `Display`.
 
 ## Context and Orientation
 
