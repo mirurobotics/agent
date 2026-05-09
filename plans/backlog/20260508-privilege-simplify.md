@@ -293,7 +293,7 @@ A small helper to build the `User` fixture keeps each test focused:
         }
     }
 
-The `lookup_user_returns_root_for_root` test from M2 stays and exercises the production `User::from_name` call against the host passwd database (root is guaranteed present on every Linux system). The errno-funnel branches in `lookup_user` (ENOENT/ESRCH → `UserNotFound`, other → `Syscall`) lose unit coverage in this collapse — they are exercised end-to-end only via the integration test on hosts where the `miru` passwd entry is missing. This is the explicit tradeoff documented in the user brief: pure-function design, smallest correct implementation.
+The `lookup_user_returns_root_for_root` test from M2 stays and exercises the production `User::from_name` call against the host passwd database (root is guaranteed present on every Linux system). The errno-funnel branches in `lookup_user` (`Err(ENOENT|ESRCH) → UserNotFound`, `Err(other) → Syscall`) lose all automated coverage in this collapse: the integration test only exercises `Ok(Some(_))` (WrongUser path) or `Ok(None)` (UserNotFound path), depending on whether the host has a `miru` passwd entry. This is the explicit tradeoff documented in the user brief: pure-function design, smallest correct implementation, even at the cost of automated coverage of two error mappings that effectively never fire in practice.
 
 In `agent/agent/tests/privilege/mod.rs`:
 
@@ -342,7 +342,7 @@ All commands run from `/home/ben/miru/workbench1/repos/agent` unless otherwise s
 5. Build and run scoped tests, lint, and preflight:
 
        cargo build -p miru-agent
-       ./scripts/test.sh -- privilege
+       ./scripts/test.sh
        ./scripts/preflight.sh
 
    Expected: clean build; privilege tests pass; final line `Preflight clean`. The privilege module is untouched in M1, so all existing privilege tests (including the FakeSystem-driven ones) still pass.
@@ -379,7 +379,7 @@ All commands run from `/home/ben/miru/workbench1/repos/agent` unless otherwise s
 12. Build and test:
 
         cargo build -p miru-agent
-        ./scripts/test.sh -- privilege
+        ./scripts/test.sh
 
     Expected: clean build; the seed test `lookup_user_returns_root_for_root` passes; the existing integration tests still pass (the two doomed variants are still constructed by the integration Display test — that's fine until M3).
 
@@ -408,7 +408,7 @@ All commands run from `/home/ben/miru/workbench1/repos/agent` unless otherwise s
 17. Build and test:
 
         cargo build -p miru-agent
-        ./scripts/test.sh -- privilege
+        ./scripts/test.sh
 
     Expected: clean build; all tests pass. The `WrongUser` Display test now asserts the `sudo -u miru /usr/sbin/miru-agent` substring.
 
@@ -439,7 +439,7 @@ All commands run from `/home/ben/miru/workbench1/repos/agent` unless otherwise s
 21. Build and test:
 
         cargo build -p miru-agent
-        ./scripts/test.sh -- privilege
+        ./scripts/test.sh
 
     Expected: four privilege unit tests pass (`lookup_user_returns_root_for_root`, `verify_returns_ok_when_euid_and_egid_match`, `verify_returns_wrong_user_when_uid_mismatches`, `verify_returns_wrong_user_when_gid_mismatches`). All three integration tests still pass.
 
@@ -473,7 +473,7 @@ All commands run from `/home/ben/miru/workbench1/repos/agent` unless otherwise s
 The plan is complete when **all** of the following hold from `/home/ben/miru/workbench1/repos/agent`:
 
 - `./scripts/preflight.sh` final line reads `Preflight clean`.
-- `./scripts/test.sh -- privilege` (or `RUST_LOG=off cargo test --features test -p miru-agent privilege`) passes — every test that exists post-rewrite:
+- `./scripts/test.sh` (which runs `RUST_LOG=off cargo test --features test --package miru-agent`; the script does not forward extra CLI arguments — for a name-filtered run use `RUST_LOG=off cargo test --features test -p miru-agent privilege` directly) passes — every test that exists post-rewrite:
   - Inline (`agent/agent/src/privilege/mod.rs::tests`): `lookup_user_returns_root_for_root`, `verify_returns_ok_when_euid_and_egid_match`, `verify_returns_wrong_user_when_uid_mismatches`, `verify_returns_wrong_user_when_gid_mismatches`.
   - Integration (`agent/agent/tests/privilege/mod.rs`): `run_as_rejects_non_target_user_when_not_root`, `privilege_err_display_messages_are_human_readable`, `run_as_is_noop_when_already_target_user`.
 - `cargo build -p miru-agent` succeeds with no warnings.
