@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::logs::LogLevel;
-use miru_agent::network::{BackendUrl, MqttHost};
+use miru_agent::network::{BackendHost, MqttHost};
 use miru_agent::storage::{Backend, MQTTBroker, Settings};
 
 // external crates
@@ -15,7 +15,7 @@ fn serialize_deserialize_settings() {
         enable_mqtt_worker: false,
         enable_poller: false,
         backend: Backend {
-            base_url: BackendUrl::new("https://staging.mirurobotics.com/agent/v1").unwrap(),
+            host: BackendHost::new("staging.mirurobotics.com").unwrap(),
         },
         mqtt_broker: MQTTBroker {
             host: MqttHost::new("mqtt.staging.mirurobotics.com").unwrap(),
@@ -32,7 +32,7 @@ fn deserialize_settings() {
     let settings = Settings {
         log_level: LogLevel::Debug,
         backend: Backend {
-            base_url: BackendUrl::new("https://staging.mirurobotics.com/agent/v1").unwrap(),
+            host: BackendHost::new("staging.mirurobotics.com").unwrap(),
         },
         mqtt_broker: MQTTBroker {
             host: MqttHost::new("mqtt.staging.mirurobotics.com").unwrap(),
@@ -69,7 +69,7 @@ fn deserialize_settings() {
 #[test]
 fn serialize_deserialize_backend() {
     let backend = Backend {
-        base_url: BackendUrl::new("https://staging.mirurobotics.com/agent/v1").unwrap(),
+        host: BackendHost::new("staging.mirurobotics.com").unwrap(),
     };
     let serialized = serde_json::to_string(&backend).unwrap();
     let deserialized = serde_json::from_str::<Backend>(&serialized).unwrap();
@@ -77,19 +77,19 @@ fn serialize_deserialize_backend() {
 }
 
 #[test]
-fn backend_default_uses_backend_url_default() {
+fn backend_default_uses_backend_host_default() {
     let backend = Backend::default();
-    assert_eq!(backend.base_url, BackendUrl::default());
+    assert_eq!(backend.host, BackendHost::default());
 }
 
 #[test]
 fn deserialize_backend() {
     // valid deserialization
     let backend = Backend {
-        base_url: BackendUrl::new("https://staging.mirurobotics.com/agent/v1").unwrap(),
+        host: BackendHost::new("staging.mirurobotics.com").unwrap(),
     };
     let valid_input = json!({
-        "base_url": backend.base_url,
+        "host": "staging.mirurobotics.com",
     });
     let deserialized = serde_json::from_value::<Backend>(valid_input).unwrap();
     assert_eq!(deserialized, backend);
@@ -143,19 +143,24 @@ fn deserialize_mqtt_broker() {
 #[test]
 fn deserialize_backend_falls_back_on_disallowed_host() {
     // Invalid hosts must not refuse the daemon's startup. Deserialization
-    // succeeds with the default base_url so the agent still talks to prod
-    // (and the operator sees a warning in the logs).
-    let input = json!({"base_url": "https://evilmirurobotics.com"});
+    // succeeds with the default host so the agent still talks to prod
+    // (and the operator sees a warning in the logs). This case also serves
+    // as the regression for legacy on-disk files: a JSON object containing
+    // only the legacy `base_url` field is silently ignored as an unknown
+    // key, the new `host` field is missing, and the warn-and-default path
+    // produces `Backend::default()`.
+    let input = json!({"host": "evilmirurobotics.com"});
     let backend = serde_json::from_value::<Backend>(input).unwrap();
     assert_eq!(backend, Backend::default());
+
+    let legacy_input = json!({"base_url": "https://api.mirurobotics.com/agent/v1"});
+    let legacy_backend = serde_json::from_value::<Backend>(legacy_input).unwrap();
+    assert_eq!(legacy_backend, Backend::default());
 }
 
 #[test]
 fn deserialize_backend_accepts_allowed_host() {
-    let input = json!({"base_url": "https://api.mirurobotics.com/agent/v1"});
+    let input = json!({"host": "api.mirurobotics.com"});
     let backend = serde_json::from_value::<Backend>(input).unwrap();
-    assert_eq!(
-        backend.base_url.as_str(),
-        "https://api.mirurobotics.com/agent/v1"
-    );
+    assert_eq!(backend.host.as_str(), "api.mirurobotics.com");
 }

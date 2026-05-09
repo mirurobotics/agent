@@ -1,7 +1,7 @@
 // internal crates
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
-use crate::network::{BackendUrl, MqttHost};
+use crate::network::{BackendHost, MqttHost};
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -90,7 +90,7 @@ impl<'de> Deserialize<'de> for Settings {
 
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
 pub struct Backend {
-    pub base_url: BackendUrl,
+    pub host: BackendHost,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -100,7 +100,7 @@ impl<'de> Deserialize<'de> for Backend {
     {
         #[derive(Deserialize)]
         struct DeserializeBackend {
-            base_url: Option<String>,
+            host: Option<String>,
         }
 
         let default = Backend::default();
@@ -113,11 +113,11 @@ impl<'de> Deserialize<'de> for Backend {
             }
         };
 
-        let raw = result.base_url.unwrap_or_else(|| {
-            deserialize_warn!("backend", "base_url", default.base_url.as_str().to_string())
+        let raw = result.host.unwrap_or_else(|| {
+            deserialize_warn!("backend", "host", default.host.as_str().to_string())
         });
         Ok(Backend {
-            base_url: BackendUrl::new_or(&raw, default.base_url),
+            host: BackendHost::new_or(&raw, default.host),
         })
     }
 }

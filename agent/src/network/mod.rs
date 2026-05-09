@@ -4,11 +4,10 @@ use std::fmt;
 // external crates
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::warn;
-use url::Url;
 
-/// Returns true for the literal loopback hostnames we accept.
+/// Returns true for `localhost` and `127.0.0.1`.
 pub fn is_loopback_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
+    matches!(host, "localhost" | "127.0.0.1")
 }
 
 fn is_allowed_host(host: &str) -> bool {
@@ -17,87 +16,129 @@ fn is_allowed_host(host: &str) -> bool {
     host == ALLOWED_DOMAIN || host.ends_with(ALLOWED_DOMAIN_SUFFIX)
 }
 
-/// A backend base URL whose only constructor enforces the allowed-domain rule.
-///
-/// Any in-memory `BackendUrl` is necessarily valid: parses as a URL, has no
-/// userinfo, has a host, uses `https` (or `http` for loopback only), and the
-/// host is either a loopback literal or in the allowed domain.
+/// A bare backend hostname (optionally with a port) whose only constructor
+/// enforces the allowed-domain rule. Any in-memory `BackendHost` is a
+/// validated host plus optional port; the scheme and `/agent/v1` path are
+/// derived per call by [`BackendHost::as_url`] and are not part of the
+/// public surface.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BackendUrl(Url);
+pub struct BackendHost {
+    /// Bare hostname.
+    host: String,
+    /// Optional port from the input.
+    port: Option<u16>,
+    /// Pre-formatted authority — `host` or `host:port`. Identical to what
+    /// `Display` writes; exposed via `as_str`.
+    formatted: String,
+}
 
-impl BackendUrl {
-    /// Validates `raw` and constructs a `BackendUrl`. See the type docs for
-    /// the rule set.
+impl BackendHost {
+    /// Validates `raw` and constructs a `BackendHost`.
     ///
-    /// Rules:
-    /// - Must parse as a URL.
-    /// - Must not contain userinfo (`user:pass@host`).
-    /// - Must contain a host.
-    /// - Scheme must be `https`, except `http` is permitted for loopback hosts.
-    /// - Host must be either a loopback literal or in the allowed domain.
+    /// Rules — `raw` is rejected if any of the following is true:
+    /// - empty input,
+    /// - contains `/` (a path is being passed, not a host),
+    /// - contains `@` (userinfo),
+    /// - contains `://` (a scheme; full URL was passed),
+    /// - the host is neither loopback (per [`is_loopback_host`]) nor an
+    ///   allowed mirurobotics domain (per `is_allowed_host`),
+    /// - the port is non-numeric or out of range.
     pub fn new(raw: &str) -> Result<Self, String> {
-        let url = Url::parse(raw).map_err(|e| format!("invalid URL: {e}"))?;
-        if !url.username().is_empty() || url.password().is_some() {
-            return Err("URL must not contain userinfo".into());
+        if raw.is_empty() {
+            return Err("backend host must not be empty".into());
         }
-        let host = url
-            .host_str()
-            .ok_or_else(|| "URL must contain a host".to_string())?;
-        // host_str() preserves IPv6 brackets; strip them so the loopback
-        // literal "::1" matches our string set.
-        let bare_host = host.trim_start_matches('[').trim_end_matches(']');
-        let loopback = is_loopback_host(bare_host);
-        match (url.scheme(), loopback) {
-            ("https", _) => {}
-            ("http", true) => {}
-            ("http", false) => return Err("non-loopback URL must use https".into()),
-            (other, _) => return Err(format!("scheme `{other}` not allowed")),
+        if raw.contains("://") {
+            return Err("backend host must not contain a scheme".into());
         }
-        if !loopback && !is_allowed_host(bare_host) {
-            return Err(format!("host `{bare_host}` is not allowed"));
+        if raw.contains('@') {
+            return Err("backend host must not contain userinfo".into());
         }
-        Ok(Self(url))
+        if raw.contains('/') {
+            return Err("backend host must not contain a path".into());
+        }
+
+        let (host, port) = match raw.rsplit_once(':') {
+            Some((h, p)) => (
+                h,
+                Some(
+                    p.parse::<u16>()
+                        .map_err(|e| format!("invalid port in `{raw}`: {e}"))?,
+                ),
+            ),
+            None => (raw, None),
+        };
+        if host.is_empty() {
+            return Err(format!("backend host `{raw}` has no host"));
+        }
+        if !is_loopback_host(host) && !is_allowed_host(host) {
+            return Err(format!("host `{host}` is not allowed"));
+        }
+
+        let formatted = match port {
+            Some(p) => format!("{host}:{p}"),
+            None => host.to_string(),
+        };
+
+        Ok(Self {
+            host: host.to_string(),
+            port,
+            formatted,
+        })
     }
 
     pub fn new_or(raw: &str, fallback: Self) -> Self {
-        match BackendUrl::new(raw) {
-            Ok(url) => url,
+        match BackendHost::new(raw) {
+            Ok(host) => host,
             Err(msg) => {
-                warn!("`{raw}` is not a valid backend URL: {msg}");
+                warn!("`{raw}` is not a valid backend host: {msg}");
                 warn!("falling back to default `{fallback}`");
                 fallback
             }
         }
     }
 
+    /// Returns the host (or `host:port`) form — the same string `Display`
+    /// writes.
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        self.formatted.as_str()
+    }
+
+    /// Builds the fully-qualified backend URL. Scheme is `http` for
+    /// loopback hosts and `https` otherwise; the path is always
+    /// `/agent/v1` with no trailing slash.
+    pub fn as_url(&self) -> String {
+        let scheme = if is_loopback_host(self.host.as_str()) {
+            "http"
+        } else {
+            "https"
+        };
+        let authority = match self.port {
+            Some(port) => format!("{}:{port}", self.host),
+            None => self.host.clone(),
+        };
+        format!("{scheme}://{authority}/agent/v1")
     }
 }
 
-impl Default for BackendUrl {
+impl Default for BackendHost {
     fn default() -> Self {
-        const DEFAULT_BACKEND_URL: &str = "https://api.mirurobotics.com/agent/v1";
-        Self::new(DEFAULT_BACKEND_URL).expect("default backend URL must be valid")
+        Self::new("api.mirurobotics.com").expect("default backend host must be valid")
     }
 }
 
-impl fmt::Display for BackendUrl {
+impl fmt::Display for BackendHost {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0.as_str())
+        f.write_str(self.formatted.as_str())
     }
 }
 
-// `url::Url` only implements `Serialize`/`Deserialize` when the `serde`
-// feature of the `url` crate is enabled. We don't enable it (cheaper to write
-// the small impls here than to flip the feature).
-impl Serialize for BackendUrl {
+impl Serialize for BackendHost {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.0.as_str())
+        serializer.serialize_str(self.formatted.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for BackendUrl {
+impl<'de> Deserialize<'de> for BackendHost {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
         Self::new(&raw).map_err(serde::de::Error::custom)

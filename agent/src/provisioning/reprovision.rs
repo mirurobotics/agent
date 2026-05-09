@@ -79,14 +79,14 @@ mod tests {
         #[test]
         fn backend_host_appends_agent_v1_suffix() {
             let args = cli::ReprovisionArgs {
-                backend_host: Some("https://custom.mirurobotics.com".to_string()),
+                backend_host: Some("custom.mirurobotics.com".to_string()),
                 ..Default::default()
             };
 
             let settings = determine_settings(&args);
 
             assert_eq!(
-                settings.backend.base_url.as_str(),
+                settings.backend.host.as_url(),
                 "https://custom.mirurobotics.com/agent/v1"
             );
         }
@@ -113,14 +113,16 @@ mod tests {
 
             let settings = determine_settings(&args);
 
-            assert_eq!(settings.backend.base_url, defaults.backend.base_url);
+            assert_eq!(settings.backend.host, defaults.backend.host);
             assert_eq!(settings.mqtt_broker.host, defaults.mqtt_broker.host);
         }
 
         #[test]
         fn invalid_backend_host_falls_back_to_default() {
-            // `http://...` (non-loopback) is rejected by `BackendUrl::new`.
-            // The override must fall back to the default rather than panic.
+            // A scheme-prefixed input is rejected by `BackendHost::new` (the
+            // `://` rule). The override must fall back to the default rather
+            // than panic. Disallowed-domain inputs are also rejected; either
+            // path exercises the warn-and-fall-back behavior.
             let args = cli::ReprovisionArgs {
                 backend_host: Some("http://evil.example.com".to_string()),
                 ..Default::default()
@@ -129,7 +131,7 @@ mod tests {
 
             let settings = determine_settings(&args);
 
-            assert_eq!(settings.backend.base_url, defaults.backend.base_url);
+            assert_eq!(settings.backend.host, defaults.backend.host);
         }
 
         #[test]
