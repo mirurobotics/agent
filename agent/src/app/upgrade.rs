@@ -111,7 +111,14 @@ pub async fn reconcile_impl<HTTPClientT: ClientI>(
 ) -> Result<(), UpgradeErr> {
     let token = issue_token(http_client, layout).await?;
     let device = fetch_device(http_client, &token).await?;
-    storage::setup::reset(layout, &device, &Settings::default(), version).await?;
+    let settings = match layout.settings().read_json::<Settings>().await {
+        Ok(settings) => settings,
+        Err(e) => {
+            warn!("unable to read settings.json; falling back to defaults: {e}");
+            Settings::default()
+        }
+    };
+    storage::setup::reset(layout, &device, &settings, version).await?;
     update_device(http_client, &device, version, &token).await?;
     Ok(())
 }
