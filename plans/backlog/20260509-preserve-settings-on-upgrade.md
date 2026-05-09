@@ -180,7 +180,7 @@ A representative skeleton for test 1 (the other two are simpler variations):
         };
         layout
             .settings()
-            .write_json(&staging, filesys::WriteOptions::OVERWRITE_ATOMIC)
+            .write_json(&staging, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
