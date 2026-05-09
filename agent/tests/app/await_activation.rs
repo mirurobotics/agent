@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 // internal crates
-use miru_agent::app::wait_for_activation::{await_activation, Outcome};
+use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::storage::Layout;
 

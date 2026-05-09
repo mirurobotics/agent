@@ -15,11 +15,7 @@ pub enum Outcome {
     ShutdownRequested,
 }
 
-pub async fn await_activation<F, Fut, S>(
-    layout: &Layout,
-    sleep_fn: F,
-    shutdown: S,
-) -> Outcome
+pub async fn await_activation<F, Fut, S>(layout: &Layout, sleep_fn: F, shutdown: S) -> Outcome
 where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
