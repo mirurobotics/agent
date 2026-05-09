@@ -1,0 +1,101 @@
+// internal crates
+use miru_agent::errors::Trace;
+use miru_agent::privilege;
+use miru_agent::privilege::PrivilegeErr;
+
+fn dummy_trace() -> Box<Trace> {
+    Box::new(Trace {
+        file: file!(),
+        line: line!(),
+        backtrace: std::backtrace::Backtrace::disabled(),
+    })
+}
+
+#[test]
+fn verify_effective_user_rejects_non_target_user_when_not_root() {
+    // The CI runner / dev machine is not root and is not the `miru` user, so
+    // the entry point must reject the run with WrongUser. The root and
+    // already-miru branches are covered by the smoke-test steps in the plan.
+    let err = privilege::verify_effective_user("miru")
+        .expect_err("non-root, non-miru user must be rejected");
+    match err {
+        PrivilegeErr::WrongUser {
+            expected,
+            actual_uid,
+            argv0,
+            ..
+        } => {
+            assert_eq!(expected, "miru");
+            let real_uid = nix::unistd::getuid().as_raw();
+            assert_eq!(actual_uid, real_uid);
+            assert!(!argv0.is_empty());
+        }
+        // `UserNotFound` is also acceptable on a Linux host that lacks a
+        // `miru` passwd entry (e.g. a vanilla CI runner). Both branches
+        // demonstrate the entry point refuses to silently proceed.
+        PrivilegeErr::UserNotFound { name, .. } => {
+            assert_eq!(name, "miru");
+        }
+        other => panic!("expected WrongUser or UserNotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn verify_effective_user_is_noop_when_already_target_user() {
+    // Resolve the current effective user from the passwd database. If the
+    // runner has no passwd entry for its euid (rare — minimal containers,
+    // chroots) we skip rather than fail, since we have nothing to verify
+    // against.
+    let euid = nix::unistd::geteuid();
+    let user = match nix::unistd::User::from_uid(euid) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            eprintln!("skipping: no passwd entry for euid {}", euid.as_raw());
+            return;
+        }
+        Err(e) => {
+            eprintln!("skipping: User::from_uid({}) failed: {e}", euid.as_raw(),);
+            return;
+        }
+    };
+    privilege::verify_effective_user(&user.name)
+        .expect("verify_effective_user on current effective user is a no-op");
+}
+
+#[test]
+fn privilege_err_display_messages_are_human_readable() {
+    let user_not_found = PrivilegeErr::UserNotFound {
+        name: "miru".to_string(),
+        trace: dummy_trace(),
+    };
+    let s = format!("{user_not_found}");
+    assert!(s.contains("miru"));
+    assert!(s.contains("not found"));
+
+    let wrong_user = PrivilegeErr::WrongUser {
+        expected: "miru".to_string(),
+        actual_uid: 1000,
+        actual_gid: 1001,
+        expected_uid: 999,
+        expected_gid: 998,
+        argv0: "/usr/sbin/miru-agent".to_string(),
+        trace: dummy_trace(),
+    };
+    let s = format!("{wrong_user}");
+    assert!(s.contains("miru"));
+    assert!(s.contains("uid 1000"));
+    assert!(s.contains("gid 1001"));
+    assert!(s.contains("expected uid 999"));
+    assert!(s.contains("gid 998"));
+    assert!(s.contains("/usr/sbin/miru-agent"));
+    assert!(s.contains("sudo -u miru /usr/sbin/miru-agent"));
+
+    let syscall = PrivilegeErr::Syscall {
+        call: "setuid",
+        errno: nix::errno::Errno::EPERM,
+        trace: dummy_trace(),
+    };
+    let s = format!("{syscall}");
+    assert!(s.contains("setuid"));
+    assert!(s.contains("EPERM"));
+}

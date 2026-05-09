@@ -23,6 +23,7 @@ base64 = "0.22.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
+nix = { version = "0.31.2", default-features = false, features = ["user"] }
 reqwest = { version = "0.13.1", features = ["query"] }
 backend-api = { path = "libs/backend-api" }
 device-api = { path = "libs/device-api" }
@@ -47,7 +48,7 @@ sha2 = "0.10"
 sysinfo = "0.38.0"
 tempfile = "3.25.0"
 thiserror = "2.0.18"
-tokio = { version = "1.41.1", features = ["rt-multi-thread", "fs", "signal"] }
+tokio = { version = "1.41.1", features = ["rt-multi-thread", "macros", "fs", "signal"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = "0.5.2"
 tower-http = { version = "0.6.2", features = ["trace"] }

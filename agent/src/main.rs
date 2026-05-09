@@ -15,6 +15,7 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendUrl;
+use miru_agent::privilege;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
 use miru_agent::storage;
 use miru_agent::version;
@@ -31,6 +32,11 @@ async fn main() {
     if cli_args.display_version {
         println!("{}", version::format());
         return;
+    }
+
+    if let Err(e) = privilege::verify_effective_user("miru") {
+        eprintln!("miru-agent: {e}");
+        std::process::exit(1);
     }
 
     if let Some(provision_args) = cli_args.provision_args {
