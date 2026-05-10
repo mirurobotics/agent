@@ -3,7 +3,7 @@ set -e
 
 # Script: staging-provision.sh
 # Jinja Template: provision.j2
-# Build Timestamp: 2026-04-29T21:17:38.799363
+# Build Timestamp: 2026-05-09T19:53:58.827613
 # Description: Provision a device & install the Miru Agent in the staging environment
 
 # DISPLAY #
@@ -296,6 +296,12 @@ else
     fi
 fi
 log "Version to install: ${VERSION}"
+
+# REJECT v0.9.0+ — INSTALL VIA APT INSTEAD #
+# ---------------------------------------- #
+if [ "$MAJOR" -gt 0 ] || { [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 9 ]; }; then
+    fatal "Version v$VERSION cannot be installed with this script. Miru Agent v0.9.0 and later use a new apt-based provisioning workflow. See https://docs.mirurobotics.com/docs/learn/devices/provision for instructions."
+fi
 
 # DOWNLOAD THE AGENT #
 # ------------------ #
