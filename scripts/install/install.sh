@@ -3,7 +3,7 @@ set -e
 
 # Script: install.sh
 # Jinja Template: install.j2
-# Build Timestamp: 2026-04-29T21:17:38.799363
+# Build Timestamp: 2026-05-09T19:53:58.827613
 # Description: Install the Miru Agent
 
 # DISPLAY #
