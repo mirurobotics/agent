@@ -6,16 +6,126 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.4.0-beta.4
+  x-release-version: v0.4.0
   x-git-commit:
-    sha: 8101e8f82ab113f70c2f7a03c805bc56e204e245
-    url: https://github.com/mirurobotics/openapi/commit/8101e8f82ab113f70c2f7a03c805bc56e204e245
-    message: 'refactor: require name for provision device request (#48)'
-    author: ben-miru
+    sha: 78f307f57a39fb447f9e6d3b73945dc1c13cf139
+    url: https://github.com/mirurobotics/openapi/commit/78f307f57a39fb447f9e6d3b73945dc1c13cf139
+    message: 'chore(deps): bump @protobufjs/utf8 from 1.1.0 to 1.1.1 (#63)
+
+
+      Bumps [@protobufjs/utf8](https://github.com/dcodeIO/protobuf.js) from
+
+      1.1.0 to 1.1.1.
+
+      <details>
+
+      <summary>Release notes</summary>
+
+      <p><em>Sourced from <a
+
+      href="https://github.com/dcodeIO/protobuf.js/releases">@​protobufjs/utf8''s
+
+      releases</a>.</em></p>
+
+      <blockquote>
+
+      <h2>protobufjs-cli: v1.1.1</h2>
+
+      <h2><a
+
+      href="https://github.com/protobufjs/protobuf.js/compare/protobufjs-cli-v1.1.0...protobufjs-cli-v1.1.1">1.1.1</a>
+
+      (2023-02-02)</h2>
+
+      <h3>Bug Fixes</h3>
+
+      <ul>
+
+      <li><strong>cli:</strong> fix relative path to Google pb files (<a
+
+      href="https://redirect.github.com/protobufjs/protobuf.js/issues/1859">#1859</a>)
+
+      (<a
+
+      href="https://github.com/protobufjs/protobuf.js/commit/e42eea4868b11f4a07934804a56683321ed191e2">e42eea4</a>)</li>
+
+      </ul>
+
+      </blockquote>
+
+      </details>
+
+      <details>
+
+      <summary>Commits</summary>
+
+      <ul>
+
+      <li><a
+
+      href="https://github.com/protobufjs/protobuf.js/commit/644d588c0495da6a570344248e1b5af901bc3b0c"><code>644d588</code></a>
+
+      chore: release master (<a
+
+      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1865">#1865</a>)</li>
+
+      <li><a
+
+      href="https://github.com/protobufjs/protobuf.js/commit/e42eea4868b11f4a07934804a56683321ed191e2"><code>e42eea4</code></a>
+
+      fix(cli): fix relative path to Google pb files (<a
+
+      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1859">#1859</a>)</li>
+
+      <li><a
+
+      href="https://github.com/protobufjs/protobuf.js/commit/dce9a2ef92d363752e40b295b0da9bd178f82e83"><code>dce9a2e</code></a>
+
+      fix: use bundled filename to fix common pb includes (<a
+
+      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1860">#1860</a>)</li>
+
+      <li><a
+
+      href="https://github.com/protobufjs/protobuf.js/commit/64e8936ad9f73c68b3fa1e57857dd38323b5a745"><code>64e8936</code></a>
+
+      fix: use ES5 style function syntax (<a
+
+      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1830">#1830</a>)</li>
+
+      <li><a
+
+      href="https://github.com/protobufjs/protobuf.js/commit/4489fa771464bcb49b57149760e9cc4131e8077e"><code>4489fa7</code></a>
+
+      Revert &quot;fix: error should be thrown (<a
+
+      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1817">#1817</a>)&quot;
+
+      (<a
+
+      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1864">#1864</a>)</li>
+
+      <li>See full diff in <a
+
+      href="https://github.com/dcodeIO/protobuf.js/compare/protobufjs-cli-v1.1.0...protobufjs-cli-v1.1.1">compare
+
+      view</a></li>
+
+      </ul>
+
+      </details>
+
+      <br />
+
+
+      Signed-off-by: dependabot[bot] <support@github.com>
+
+      Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>'
+    author: dependabot[bot]
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-05-01T23:39:53.750521+00:00'
+    built_at: '2026-05-12T23:40:18.310623+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -434,10 +544,17 @@ components:
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
+    ReleaseVersion:
+      type: string
+      enum:
+      - v0.4.0
+      x-enum-varnames:
+      - RELEASE_VERSION
+      x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 8101e8f82ab113f70c2f7a03c805bc56e204e245
+      - 78f307f57a39fb447f9e6d3b73945dc1c13cf139
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -465,6 +582,7 @@ components:
       - git_commit
       - api_version
       - api_git_commit
+      - api_release_version
       - go_version
       - build_date
       - os
@@ -486,6 +604,10 @@ components:
           type: string
           description: The git commit of the API.
           example: a1b2c3d4
+        api_release_version:
+          type: string
+          description: The API release version of the application.
+          example: 2026-02-24.yukon-beta.1
         go_version:
           type: string
           description: The version of Go.
@@ -508,6 +630,7 @@ components:
         git_commit: a1b2c3d4
         api_version: 2026-02-24.zion
         api_git_commit: a1b2c3d4
+        api_release_version: 2026-02-24.yukon-beta.1
         go_version: go1.20.0
         build_date: '2025-01-01T00:00:00Z'
         os: linux
@@ -930,9 +1053,11 @@ components:
       enum:
       - json
       - yaml
+      - jsonc
       x-enum-varnames:
       - INSTANCE_FORMAT_JSON
       - INSTANCE_FORMAT_YAML
+      - INSTANCE_FORMAT_JSONC
     InstanceContent:
       title: Instance Content
       type: object

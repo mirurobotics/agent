@@ -16,6 +16,8 @@ pub enum InstanceFormat {
     INSTANCE_FORMAT_JSON,
     #[serde(rename = "yaml")]
     INSTANCE_FORMAT_YAML,
+    #[serde(rename = "jsonc")]
+    INSTANCE_FORMAT_JSONC,
 
 }
 
@@ -24,6 +26,7 @@ impl std::fmt::Display for InstanceFormat {
         match self {
             Self::INSTANCE_FORMAT_JSON => write!(f, "json"),
             Self::INSTANCE_FORMAT_YAML => write!(f, "yaml"),
+            Self::INSTANCE_FORMAT_JSONC => write!(f, "jsonc"),
         }
     }
 }

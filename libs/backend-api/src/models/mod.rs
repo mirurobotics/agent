@@ -58,6 +58,8 @@ pub mod provision_device_request;
 pub use self::provision_device_request::ProvisionDeviceRequest;
 pub mod release;
 pub use self::release::Release;
+pub mod release_version;
+pub use self::release_version::ReleaseVersion;
 pub mod reprovision_device_request;
 pub use self::reprovision_device_request::ReprovisionDeviceRequest;
 pub mod sync_device;
