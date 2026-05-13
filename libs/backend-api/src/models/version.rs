@@ -23,6 +23,9 @@ pub struct Version {
     /// The git commit of the API.
     #[serde(rename = "api_git_commit")]
     pub api_git_commit: String,
+    /// The API release version of the application.
+    #[serde(rename = "api_release_version")]
+    pub api_release_version: String,
     /// The version of Go.
     #[serde(rename = "go_version")]
     pub go_version: String,
@@ -38,12 +41,13 @@ pub struct Version {
 }
 
 impl Version {
-    pub fn new(version: String, git_commit: String, api_version: String, api_git_commit: String, go_version: String, build_date: String, os: String, arch: String) -> Version {
+    pub fn new(version: String, git_commit: String, api_version: String, api_git_commit: String, api_release_version: String, go_version: String, build_date: String, os: String, arch: String) -> Version {
         Version {
             version,
             git_commit,
             api_version,
             api_git_commit,
+            api_release_version,
             go_version,
             build_date,
             os,

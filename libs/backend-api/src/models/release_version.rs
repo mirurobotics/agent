@@ -11,23 +11,23 @@ use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub enum ApiGitCommit {
-    #[serde(rename = "78f307f57a39fb447f9e6d3b73945dc1c13cf139")]
-    API_GIT_COMMIT,
+pub enum ReleaseVersion {
+    #[serde(rename = "v0.4.0")]
+    RELEASE_VERSION,
 
 }
 
-impl std::fmt::Display for ApiGitCommit {
+impl std::fmt::Display for ReleaseVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_GIT_COMMIT => write!(f, "78f307f57a39fb447f9e6d3b73945dc1c13cf139"),
+            Self::RELEASE_VERSION => write!(f, "v0.4.0"),
         }
     }
 }
 
-impl Default for ApiGitCommit {
-    fn default() -> ApiGitCommit {
-        Self::API_GIT_COMMIT
+impl Default for ReleaseVersion {
+    fn default() -> ReleaseVersion {
+        Self::RELEASE_VERSION
     }
 }
 
