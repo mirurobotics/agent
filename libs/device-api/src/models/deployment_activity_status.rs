@@ -26,6 +26,11 @@ pub enum DeploymentActivityStatus {
     #[serde(rename = "archived")]
     DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    DeploymentActivityStatusUnknownValue,
 }
 
 impl std::fmt::Display for DeploymentActivityStatus {
@@ -37,6 +42,7 @@ impl std::fmt::Display for DeploymentActivityStatus {
             Self::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => write!(f, "deployed"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_REMOVING => write!(f, "removing"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => write!(f, "archived"),
+            Self::DeploymentActivityStatusUnknownValue => write!(f, "unknown_value"),
         }
     }
 }

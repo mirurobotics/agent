@@ -9,7 +9,7 @@ gen: clean
 	make gen-device
 
 gen-backend: clean-backend
-	openapi-generator-cli generate \
+	npx --yes @openapitools/openapi-generator-cli generate \
 	-i ${BACKEND_FILE} \
 	-g rust \
 	-t ${RUST_TEMPLATES_DIR} \
@@ -17,7 +17,7 @@ gen-backend: clean-backend
 	--additional-properties=packageName=backend-api
 
 gen-device: clean-device
-	openapi-generator-cli generate \
+	npx --yes @openapitools/openapi-generator-cli generate \
 	-i ${DEVICE_FILE} \
 	-g rust \
 	-t ${RUST_TEMPLATES_DIR} \

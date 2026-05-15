@@ -60,6 +60,9 @@ impl Deployment {
 pub enum Object {
     #[serde(rename = "deployment")]
     Deployment,
+    /// Catch-all for values added by the API after this client was generated.
+    #[serde(other)]
+    ObjectUnknownValue,
 }
 
 impl Default for Object {

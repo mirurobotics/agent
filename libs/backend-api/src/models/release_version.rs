@@ -15,12 +15,18 @@ pub enum ReleaseVersion {
     #[serde(rename = "v0.4.0")]
     RELEASE_VERSION,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    ReleaseVersionUnknownValue,
 }
 
 impl std::fmt::Display for ReleaseVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::RELEASE_VERSION => write!(f, "v0.4.0"),
+            Self::ReleaseVersionUnknownValue => write!(f, "unknown_value"),
         }
     }
 }

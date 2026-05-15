@@ -21,14 +21,12 @@ pub enum DeviceStatus {
     DEVICE_STATUS_ONLINE,
     #[serde(rename = "offline")]
     DEVICE_STATUS_OFFLINE,
-    /// Catch-all for enum values added by the backend after this agent was
-    /// built. `#[serde(other)]` makes unrecognized strings deserialize here
-    /// instead of failing the entire payload (forward compatibility). This
-    /// variant is never serialized in practice; the agent only sends values
-    /// built from its own domain enums.
-    #[serde(other)]
-    DEVICE_STATUS_UNKNOWN_VALUE,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    DeviceStatusUnknownValue,
 }
 
 impl std::fmt::Display for DeviceStatus {
@@ -38,7 +36,7 @@ impl std::fmt::Display for DeviceStatus {
             Self::DEVICE_STATUS_ACTIVATING => write!(f, "activating"),
             Self::DEVICE_STATUS_ONLINE => write!(f, "online"),
             Self::DEVICE_STATUS_OFFLINE => write!(f, "offline"),
-            Self::DEVICE_STATUS_UNKNOWN_VALUE => write!(f, "unknown_value"),
+            Self::DeviceStatusUnknownValue => write!(f, "unknown_value"),
         }
     }
 }

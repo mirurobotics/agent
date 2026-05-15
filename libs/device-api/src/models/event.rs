@@ -44,6 +44,9 @@ impl Event {
 pub enum Object {
     #[serde(rename = "event")]
     Event,
+    /// Catch-all for values added by the API after this client was generated.
+    #[serde(other)]
+    ObjectUnknownValue,
 }
 
 impl Default for Object {

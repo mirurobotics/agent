@@ -18,14 +18,12 @@ pub enum GitRepositoryType {
     GIT_REPO_TYPE_GITLAB,
     #[serde(rename = "bitbucket")]
     GIT_REPO_TYPE_BITBUCKET,
-    /// Catch-all for enum values added by the backend after this agent was
-    /// built. `#[serde(other)]` makes unrecognized strings deserialize here
-    /// instead of failing the entire payload (forward compatibility). This
-    /// variant is never serialized in practice; the agent only sends values
-    /// built from its own domain enums.
-    #[serde(other)]
-    GIT_REPO_TYPE_UNKNOWN_VALUE,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    GitRepositoryTypeUnknownValue,
 }
 
 impl std::fmt::Display for GitRepositoryType {
@@ -34,7 +32,7 @@ impl std::fmt::Display for GitRepositoryType {
             Self::GIT_REPO_TYPE_GITHUB => write!(f, "github"),
             Self::GIT_REPO_TYPE_GITLAB => write!(f, "gitlab"),
             Self::GIT_REPO_TYPE_BITBUCKET => write!(f, "bitbucket"),
-            Self::GIT_REPO_TYPE_UNKNOWN_VALUE => write!(f, "unknown_value"),
+            Self::GitRepositoryTypeUnknownValue => write!(f, "unknown_value"),
         }
     }
 }

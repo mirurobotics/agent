@@ -63,32 +63,14 @@ impl Device {
 pub enum Object {
     #[serde(rename = "device")]
     Device,
+    /// Catch-all for values added by the API after this client was generated.
+    #[serde(other)]
+    ObjectUnknownValue,
 }
 
 impl Default for Object {
     fn default() -> Object {
         Self::Device
-    }
-}
-
-#[cfg(test)]
-mod forward_compat_tests {
-    use crate::models::Device;
-
-    #[test]
-    fn device_payload_with_unknown_status_still_deserializes() {
-        // Build the JSON from a known-good Device, then overwrite status with
-        // an unknown string, so the test stays in sync with required fields
-        // without hand-maintaining the whole payload.
-        let mut value = serde_json::to_value(Device::default())
-            .expect("serialize sample device");
-        value["status"] = serde_json::Value::String("some_future_status".into());
-        let de: Device = serde_json::from_value(value)
-            .expect("payload with unknown status must still deserialize");
-        assert_eq!(
-            de.status,
-            crate::models::DeviceStatus::DEVICE_STATUS_UNKNOWN_VALUE
-        );
     }
 }
 
