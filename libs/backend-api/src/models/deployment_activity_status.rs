@@ -25,6 +25,13 @@ pub enum DeploymentActivityStatus {
     DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
     #[serde(rename = "archived")]
     DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+    /// Catch-all for enum values added by the backend after this agent was
+    /// built. `#[serde(other)]` makes unrecognized strings deserialize here
+    /// instead of failing the entire payload (forward compatibility). This
+    /// variant is never serialized in practice; the agent only sends values
+    /// built from its own domain enums.
+    #[serde(other)]
+    DEPLOYMENT_ACTIVITY_STATUS_UNKNOWN_VALUE,
 
 }
 
@@ -37,6 +44,7 @@ impl std::fmt::Display for DeploymentActivityStatus {
             Self::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED => write!(f, "deployed"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_REMOVING => write!(f, "removing"),
             Self::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED => write!(f, "archived"),
+            Self::DEPLOYMENT_ACTIVITY_STATUS_UNKNOWN_VALUE => write!(f, "unknown_value"),
         }
     }
 }

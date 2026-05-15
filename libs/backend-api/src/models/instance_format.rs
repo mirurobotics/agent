@@ -18,6 +18,13 @@ pub enum InstanceFormat {
     INSTANCE_FORMAT_YAML,
     #[serde(rename = "jsonc")]
     INSTANCE_FORMAT_JSONC,
+    /// Catch-all for enum values added by the backend after this agent was
+    /// built. `#[serde(other)]` makes unrecognized strings deserialize here
+    /// instead of failing the entire payload (forward compatibility). This
+    /// variant is never serialized in practice; the agent only sends values
+    /// built from its own domain enums.
+    #[serde(other)]
+    INSTANCE_FORMAT_UNKNOWN_VALUE,
 
 }
 
@@ -27,6 +34,7 @@ impl std::fmt::Display for InstanceFormat {
             Self::INSTANCE_FORMAT_JSON => write!(f, "json"),
             Self::INSTANCE_FORMAT_YAML => write!(f, "yaml"),
             Self::INSTANCE_FORMAT_JSONC => write!(f, "jsonc"),
+            Self::INSTANCE_FORMAT_UNKNOWN_VALUE => write!(f, "unknown_value"),
         }
     }
 }

@@ -19,6 +19,13 @@ pub enum DeploymentErrorStatus {
     DEPLOYMENT_ERROR_STATUS_FAILED,
     #[serde(rename = "retrying")]
     DEPLOYMENT_ERROR_STATUS_RETRYING,
+    /// Catch-all for enum values added by the backend after this agent was
+    /// built. `#[serde(other)]` makes unrecognized strings deserialize here
+    /// instead of failing the entire payload (forward compatibility). This
+    /// variant is never serialized in practice; the agent only sends values
+    /// built from its own domain enums.
+    #[serde(other)]
+    DEPLOYMENT_ERROR_STATUS_UNKNOWN_VALUE,
 
 }
 
@@ -28,6 +35,7 @@ impl std::fmt::Display for DeploymentErrorStatus {
             Self::DEPLOYMENT_ERROR_STATUS_NONE => write!(f, "none"),
             Self::DEPLOYMENT_ERROR_STATUS_FAILED => write!(f, "failed"),
             Self::DEPLOYMENT_ERROR_STATUS_RETRYING => write!(f, "retrying"),
+            Self::DEPLOYMENT_ERROR_STATUS_UNKNOWN_VALUE => write!(f, "unknown_value"),
         }
     }
 }

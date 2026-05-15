@@ -75,6 +75,14 @@ macro_rules! impl_status_enum {
                     $(
                         $backend_value => $name::$variant,
                     )+
+                    other => {
+                        let default = $name::$default;
+                        $log_macro!(
+                            "{} backend value {:?} is not recognized, defaulting to {:?}",
+                            $label, other, default
+                        );
+                        default
+                    }
                 }
             }
         }
