@@ -351,6 +351,27 @@ mod stream {
     }
 
     #[tokio::test]
+    async fn sends_immediate_heartbeat_when_no_event_ready() {
+        let f = Fixture::new("sse_immediate_heartbeat").await;
+
+        // Connect with no events available — the client should still receive a
+        // heartbeat comment immediately rather than silence until the keep-alive
+        // interval elapses.
+        let req = Request::builder()
+            .uri("/v0.2/events")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body.contains(": heartbeat"),
+            "expected an immediate heartbeat comment on connect, body: {body}"
+        );
+    }
+
+    #[tokio::test]
     async fn cursor_zero_replays_all() {
         let f = Fixture::new("sse_cursor_zero_all").await;
 

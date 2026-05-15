@@ -78,6 +78,15 @@ async fn events_impl(
         }
     });
 
+    // Emit an immediate heartbeat comment so clients get a byte on the wire as
+    // soon as the connection is established, even when no event is ready yet.
+    // The periodic KeepAlive below only fires after an idle interval, leaving
+    // an otherwise silent gap at the start of the stream.
+    let initial_heartbeat = tokio_stream::once(Ok::<_, Infallible>(
+        SseEvent::default().comment("heartbeat"),
+    ));
+    let sse_stream = initial_heartbeat.chain(sse_stream);
+
     let mut shutdown_rx = state.shutdown_tx.subscribe();
     let sse_stream = futures::StreamExt::take_until(sse_stream, async move {
         let _ = shutdown_rx.recv().await;
