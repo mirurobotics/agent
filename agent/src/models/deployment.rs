@@ -394,16 +394,14 @@ mod backend_unknown_mapping_tests {
 
     #[test]
     fn unknown_backend_target_status_maps_to_domain_default() {
-        let backend =
-            backend_client::DeploymentTargetStatus::DeploymentTargetStatusUnknownValue;
+        let backend = backend_client::DeploymentTargetStatus::DeploymentTargetStatusUnknownValue;
         let domain: DplTarget = (&backend).into();
         assert_eq!(domain, DplTarget::Staged); // declared default
     }
 
     #[test]
     fn known_backend_target_status_maps_exactly() {
-        let backend =
-            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED;
+        let backend = backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED;
         let domain: DplTarget = (&backend).into();
         assert_eq!(domain, DplTarget::Deployed);
     }
@@ -426,8 +424,7 @@ mod backend_unknown_mapping_tests {
 
     #[test]
     fn known_backend_activity_status_maps_exactly() {
-        let backend =
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
+        let backend = backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
         let domain: DplActivity = (&backend).into();
         assert_eq!(domain, DplActivity::Deployed);
     }
@@ -442,16 +439,14 @@ mod backend_unknown_mapping_tests {
 
     #[test]
     fn unknown_backend_error_status_maps_to_domain_default() {
-        let backend =
-            backend_client::DeploymentErrorStatus::DeploymentErrorStatusUnknownValue;
+        let backend = backend_client::DeploymentErrorStatus::DeploymentErrorStatusUnknownValue;
         let domain: DplErrStatus = (&backend).into();
         assert_eq!(domain, DplErrStatus::None); // declared default
     }
 
     #[test]
     fn known_backend_error_status_maps_exactly() {
-        let backend =
-            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED;
+        let backend = backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED;
         let domain: DplErrStatus = (&backend).into();
         assert_eq!(domain, DplErrStatus::Failed);
     }
