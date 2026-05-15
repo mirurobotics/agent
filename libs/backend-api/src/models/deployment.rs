@@ -80,3 +80,24 @@ impl Default for Object {
     }
 }
 
+#[cfg(test)]
+mod forward_compat_tests {
+    use crate::models::Deployment;
+
+    #[test]
+    fn deployment_payload_with_unknown_activity_status_still_deserializes() {
+        // Build the JSON from a known-good Deployment, then overwrite
+        // activity_status with an unknown string, so the test stays in sync
+        // with required fields without hand-maintaining the whole payload.
+        let mut value = serde_json::to_value(Deployment::default())
+            .expect("serialize sample deployment");
+        value["activity_status"] = serde_json::Value::String("some_future_status".into());
+        let de: Deployment = serde_json::from_value(value)
+            .expect("payload with unknown activity_status must still deserialize");
+        assert_eq!(
+            de.activity_status,
+            crate::models::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_UNKNOWN_VALUE
+        );
+    }
+}
+

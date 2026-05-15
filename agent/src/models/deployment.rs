@@ -385,3 +385,24 @@ impl Patch<Updates> for Deployment {
         }
     }
 }
+
+#[cfg(test)]
+mod backend_unknown_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_backend_activity_status_maps_to_domain_default() {
+        let backend =
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_UNKNOWN_VALUE;
+        let domain: DplActivity = (&backend).into();
+        assert_eq!(domain, DplActivity::default()); // Drifted
+    }
+
+    #[test]
+    fn known_backend_activity_status_still_maps_exactly() {
+        let backend =
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
+        let domain: DplActivity = (&backend).into();
+        assert_eq!(domain, DplActivity::Deployed);
+    }
+}

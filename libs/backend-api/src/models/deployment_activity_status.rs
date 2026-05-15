@@ -55,3 +55,33 @@ impl Default for DeploymentActivityStatus {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_values_round_trip_identically() {
+        for (variant, wire) in [
+            (DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED, "drifted"),
+            (DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED, "staged"),
+            (DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED, "queued"),
+            (DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED, "deployed"),
+            (DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING, "removing"),
+            (DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED, "archived"),
+        ] {
+            let json = format!("\"{wire}\"");
+            let de: DeploymentActivityStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(de, variant);
+            assert_eq!(serde_json::to_string(&variant).unwrap(), json);
+            assert_eq!(variant.to_string(), wire);
+        }
+    }
+
+    #[test]
+    fn unknown_value_deserializes_into_catch_all_instead_of_erroring() {
+        let de: DeploymentActivityStatus =
+            serde_json::from_str("\"some_future_status\"").unwrap();
+        assert_eq!(de, DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_UNKNOWN_VALUE);
+    }
+}
+
