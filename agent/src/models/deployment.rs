@@ -390,18 +390,124 @@ impl Patch<Updates> for Deployment {
 mod backend_unknown_mapping_tests {
     use super::*;
 
+    // ---- DplTarget ----------------------------------------------------- //
+
+    #[test]
+    fn unknown_backend_target_status_maps_to_domain_default() {
+        let backend =
+            backend_client::DeploymentTargetStatus::DeploymentTargetStatusUnknownValue;
+        let domain: DplTarget = (&backend).into();
+        assert_eq!(domain, DplTarget::Staged); // declared default
+    }
+
+    #[test]
+    fn known_backend_target_status_maps_exactly() {
+        let backend =
+            backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED;
+        let domain: DplTarget = (&backend).into();
+        assert_eq!(domain, DplTarget::Deployed);
+    }
+
+    #[test]
+    fn unknown_target_status_string_deserializes_to_default() {
+        let domain: DplTarget = serde_json::from_str("\"some_future_status\"").unwrap();
+        assert_eq!(domain, DplTarget::Staged);
+    }
+
+    // ---- DplActivity --------------------------------------------------- //
+
     #[test]
     fn unknown_backend_activity_status_maps_to_domain_default() {
         let backend =
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_UNKNOWN_VALUE;
+            backend_client::DeploymentActivityStatus::DeploymentActivityStatusUnknownValue;
         let domain: DplActivity = (&backend).into();
         assert_eq!(domain, DplActivity::default()); // Drifted
     }
 
     #[test]
-    fn known_backend_activity_status_still_maps_exactly() {
-        let backend = backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
+    fn known_backend_activity_status_maps_exactly() {
+        let backend =
+            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
         let domain: DplActivity = (&backend).into();
         assert_eq!(domain, DplActivity::Deployed);
+    }
+
+    #[test]
+    fn unknown_activity_status_string_deserializes_to_default() {
+        let domain: DplActivity = serde_json::from_str("\"xyz\"").unwrap();
+        assert_eq!(domain, DplActivity::Drifted);
+    }
+
+    // ---- DplErrStatus -------------------------------------------------- //
+
+    #[test]
+    fn unknown_backend_error_status_maps_to_domain_default() {
+        let backend =
+            backend_client::DeploymentErrorStatus::DeploymentErrorStatusUnknownValue;
+        let domain: DplErrStatus = (&backend).into();
+        assert_eq!(domain, DplErrStatus::None); // declared default
+    }
+
+    #[test]
+    fn known_backend_error_status_maps_exactly() {
+        let backend =
+            backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED;
+        let domain: DplErrStatus = (&backend).into();
+        assert_eq!(domain, DplErrStatus::Failed);
+    }
+
+    #[test]
+    fn unknown_error_status_string_deserializes_to_default() {
+        let domain: DplErrStatus = serde_json::from_str("\"boom\"").unwrap();
+        assert_eq!(domain, DplErrStatus::None);
+    }
+
+    // ---- DplStatus ----------------------------------------------------- //
+
+    #[test]
+    fn unknown_backend_deployment_status_maps_to_domain_default() {
+        let backend = backend_client::DeploymentStatus::DeploymentStatusUnknownValue;
+        let domain: DplStatus = (&backend).into();
+        assert_eq!(domain, DplStatus::Drifted); // declared default
+    }
+
+    #[test]
+    fn known_backend_deployment_status_maps_exactly() {
+        let backend = backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED;
+        let domain: DplStatus = (&backend).into();
+        assert_eq!(domain, DplStatus::Deployed);
+    }
+
+    #[test]
+    fn unknown_deployment_status_string_deserializes_to_default() {
+        let domain: DplStatus = serde_json::from_str("\"nope\"").unwrap();
+        assert_eq!(domain, DplStatus::Drifted);
+    }
+
+    // ---- Full Deployment payload --------------------------------------- //
+
+    #[test]
+    fn deployment_payload_with_unknown_activity_status_still_deserializes() {
+        let payload = r#"{
+            "object": "deployment",
+            "id": "dpl-1",
+            "description": "test",
+            "status": "deployed",
+            "activity_status": "some_future_status",
+            "error_status": "none",
+            "target_status": "deployed",
+            "device_id": "dev-1",
+            "release_id": "rel-1",
+            "created_at": "2026-05-15T00:00:00Z",
+            "updated_at": "2026-05-15T00:00:00Z"
+        }"#;
+
+        let backend: backend_client::Deployment =
+            serde_json::from_str(payload).expect("unknown enum string must not fail the payload");
+
+        let deployment = Deployment::from_backend(backend, Vec::new());
+        assert_eq!(deployment.activity_status, DplActivity::Drifted);
+        assert_eq!(deployment.error_status, DplErrStatus::None);
+        assert_eq!(deployment.target_status, DplTarget::Deployed);
     }
 }

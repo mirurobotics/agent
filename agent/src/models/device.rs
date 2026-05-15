@@ -223,4 +223,47 @@ mod tests {
         assert_eq!(device.last_connected_at, DateTime::<Utc>::UNIX_EPOCH);
         assert_eq!(device.last_disconnected_at, DateTime::<Utc>::UNIX_EPOCH);
     }
+
+    #[test]
+    fn known_device_status_strings_map_exactly() {
+        let online: DeviceStatus = serde_json::from_str("\"online\"").unwrap();
+        let offline: DeviceStatus = serde_json::from_str("\"offline\"").unwrap();
+        assert_eq!(online, DeviceStatus::Online);
+        assert_eq!(offline, DeviceStatus::Offline);
+    }
+
+    #[test]
+    fn unknown_device_status_string_deserializes_to_default() {
+        // Exercises the @base Deserialize `status =>` wildcard arm for the
+        // DeviceStatus instantiation.
+        let status: DeviceStatus = serde_json::from_str("\"rebooting\"").unwrap();
+        assert_eq!(status, DeviceStatus::Offline); // declared default
+    }
+
+    #[test]
+    fn device_status_to_server_round_trips_known_values() {
+        let online: agent_server::DeviceStatus = (&DeviceStatus::Online).into();
+        let offline: agent_server::DeviceStatus = (&DeviceStatus::Offline).into();
+        assert_eq!(online, agent_server::DeviceStatus::DEVICE_STATUS_ONLINE);
+        assert_eq!(offline, agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE);
+    }
+
+    #[test]
+    fn device_payload_with_unknown_status_still_deserializes() {
+        let payload = r#"{
+            "device_id": "dev-123",
+            "session_id": "sess-456",
+            "name": "my-robot",
+            "activated": true,
+            "status": "rebooting",
+            "last_synced_at": "2026-05-15T00:00:00Z",
+            "last_connected_at": "2026-05-15T00:00:00Z",
+            "last_disconnected_at": "2026-05-15T00:00:00Z"
+        }"#;
+
+        let device: Device =
+            serde_json::from_str(payload).expect("unknown status must not fail the payload");
+        assert_eq!(device.status, DeviceStatus::Offline);
+        assert_eq!(device.id, "dev-123");
+    }
 }
