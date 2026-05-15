@@ -400,8 +400,7 @@ mod backend_unknown_mapping_tests {
 
     #[test]
     fn known_backend_activity_status_still_maps_exactly() {
-        let backend =
-            backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
+        let backend = backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED;
         let domain: DplActivity = (&backend).into();
         assert_eq!(domain, DplActivity::Deployed);
     }
