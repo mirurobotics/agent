@@ -28,7 +28,7 @@ impl_status_enum!(
     log: warn,
     agent_type: agent_server::DeploymentTargetStatus,
     backend_type: backend_client::DeploymentTargetStatus,
-    unknown_backend: backend_client::DeploymentTargetStatus::DeploymentTargetStatusUnknownValue,
+    unknown_backend: backend_client::DeploymentTargetStatus::DeploymentTargetStatusUnknown,
     mappings: [
         Staged => "staged" =>
             agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED =>
@@ -62,7 +62,7 @@ impl_status_enum!(
     log: warn,
     agent_type: agent_server::DeploymentActivityStatus,
     backend_type: backend_client::DeploymentActivityStatus,
-    unknown_backend: backend_client::DeploymentActivityStatus::DeploymentActivityStatusUnknownValue,
+    unknown_backend: backend_client::DeploymentActivityStatus::DeploymentActivityStatusUnknown,
     mappings: [
         Drifted => "drifted" =>
             agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED =>
@@ -102,7 +102,7 @@ impl_status_enum!(
     log: warn,
     agent_type: agent_server::DeploymentErrorStatus,
     backend_type: backend_client::DeploymentErrorStatus,
-    unknown_backend: backend_client::DeploymentErrorStatus::DeploymentErrorStatusUnknownValue,
+    unknown_backend: backend_client::DeploymentErrorStatus::DeploymentErrorStatusUnknown,
     mappings: [
         None => "none" =>
             agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE =>
@@ -158,7 +158,7 @@ impl_status_enum!(
     log: warn,
     agent_type: agent_server::DeploymentStatus,
     backend_type: backend_client::DeploymentStatus,
-    unknown_backend: backend_client::DeploymentStatus::DeploymentStatusUnknownValue,
+    unknown_backend: backend_client::DeploymentStatus::DeploymentStatusUnknown,
     mappings: [
         Drifted => "drifted" =>
             agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED =>
