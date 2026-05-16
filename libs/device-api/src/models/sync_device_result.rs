@@ -20,6 +20,11 @@ pub enum SyncDeviceResult {
     #[serde(rename = "in_cooldown")]
     SYNC_DEVICE_RESULT_IN_COOLDOWN,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    SyncDeviceResultUnknown,
 }
 
 impl std::fmt::Display for SyncDeviceResult {
@@ -28,6 +33,7 @@ impl std::fmt::Display for SyncDeviceResult {
             Self::SYNC_DEVICE_RESULT_SUCCESS => write!(f, "success"),
             Self::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR => write!(f, "network_connection_error"),
             Self::SYNC_DEVICE_RESULT_IN_COOLDOWN => write!(f, "in_cooldown"),
+            Self::SyncDeviceResultUnknown => write!(f, "unknown"),
         }
     }
 }

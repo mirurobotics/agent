@@ -63,6 +63,9 @@ impl BaseGitCommit {
 pub enum Object {
     #[serde(rename = "git_commit")]
     GitCommit,
+    /// Catch-all for values added by the API after this client was generated.
+    #[serde(other)]
+    ObjectUnknown,
 }
 
 impl Default for Object {

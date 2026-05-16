@@ -16,12 +16,18 @@ pub enum DplSearch {
     #[serde(rename = "activity_status")]
     DPL_SEARCH_ACTIVITY_STATUS,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    DplSearchUnknown,
 }
 
 impl std::fmt::Display for DplSearch {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::DPL_SEARCH_ACTIVITY_STATUS => write!(f, "activity_status"),
+            Self::DplSearchUnknown => write!(f, "unknown"),
         }
     }
 }

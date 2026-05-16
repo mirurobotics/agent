@@ -20,6 +20,11 @@ pub enum DeploymentErrorStatus {
     #[serde(rename = "retrying")]
     DEPLOYMENT_ERROR_STATUS_RETRYING,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    DeploymentErrorStatusUnknown,
 }
 
 impl std::fmt::Display for DeploymentErrorStatus {
@@ -28,6 +33,7 @@ impl std::fmt::Display for DeploymentErrorStatus {
             Self::DEPLOYMENT_ERROR_STATUS_NONE => write!(f, "none"),
             Self::DEPLOYMENT_ERROR_STATUS_FAILED => write!(f, "failed"),
             Self::DEPLOYMENT_ERROR_STATUS_RETRYING => write!(f, "retrying"),
+            Self::DeploymentErrorStatusUnknown => write!(f, "unknown"),
         }
     }
 }

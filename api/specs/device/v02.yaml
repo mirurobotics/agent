@@ -265,8 +265,9 @@ paths:
         example: '42'
       responses:
         '200':
-          description: SSE event stream. Each event is delivered as an SSE frame with
-            `id`, `event`, and `data` fields. A `: heartbeat` comment is sent
+          description: >-
+            SSE event stream. Each event is delivered as an SSE frame with
+            `id`, `event`, and `data` fields. A ": heartbeat" comment is sent
             immediately when the connection opens, and again every 30 seconds
             while the stream is idle. Comments carry no data and should be
             ignored by clients.

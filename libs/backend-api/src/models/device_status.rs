@@ -22,6 +22,11 @@ pub enum DeviceStatus {
     #[serde(rename = "offline")]
     DEVICE_STATUS_OFFLINE,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    DeviceStatusUnknown,
 }
 
 impl std::fmt::Display for DeviceStatus {
@@ -31,6 +36,7 @@ impl std::fmt::Display for DeviceStatus {
             Self::DEVICE_STATUS_ACTIVATING => write!(f, "activating"),
             Self::DEVICE_STATUS_ONLINE => write!(f, "online"),
             Self::DEVICE_STATUS_OFFLINE => write!(f, "offline"),
+            Self::DeviceStatusUnknown => write!(f, "unknown"),
         }
     }
 }

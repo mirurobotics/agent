@@ -17,6 +17,11 @@ pub enum DeploymentExpansion {
     #[serde(rename = "config_instances")]
     DEPLOYMENT_EXPAND_CONFIG_INSTANCES,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    DeploymentExpansionUnknown,
 }
 
 impl std::fmt::Display for DeploymentExpansion {
@@ -24,6 +29,7 @@ impl std::fmt::Display for DeploymentExpansion {
         match self {
             Self::DEPLOYMENT_EXPAND_RELEASE => write!(f, "release"),
             Self::DEPLOYMENT_EXPAND_CONFIG_INSTANCES => write!(f, "config_instances"),
+            Self::DeploymentExpansionUnknown => write!(f, "unknown"),
         }
     }
 }

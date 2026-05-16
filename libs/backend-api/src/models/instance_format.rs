@@ -19,6 +19,11 @@ pub enum InstanceFormat {
     #[serde(rename = "jsonc")]
     INSTANCE_FORMAT_JSONC,
 
+    /// Catch-all for values added by the API after this client was
+    /// generated. `#[serde(other)]` makes unrecognized strings
+    /// deserialize here instead of failing the whole payload.
+    #[serde(other)]
+    InstanceFormatUnknown,
 }
 
 impl std::fmt::Display for InstanceFormat {
@@ -27,6 +32,7 @@ impl std::fmt::Display for InstanceFormat {
             Self::INSTANCE_FORMAT_JSON => write!(f, "json"),
             Self::INSTANCE_FORMAT_YAML => write!(f, "yaml"),
             Self::INSTANCE_FORMAT_JSONC => write!(f, "jsonc"),
+            Self::InstanceFormatUnknown => write!(f, "unknown"),
         }
     }
 }
