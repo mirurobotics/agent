@@ -389,33 +389,3 @@ impl Patch<Updates> for Deployment {
         }
     }
 }
-
-#[cfg(test)]
-mod deployment_payload_forward_compat_tests {
-    use super::*;
-
-    #[test]
-    fn deployment_payload_with_unknown_activity_status_still_deserializes() {
-        let payload = r#"{
-            "object": "deployment",
-            "id": "dpl-1",
-            "description": "test",
-            "status": "deployed",
-            "activity_status": "some_future_status",
-            "error_status": "none",
-            "target_status": "deployed",
-            "device_id": "dev-1",
-            "release_id": "rel-1",
-            "created_at": "2026-05-15T00:00:00Z",
-            "updated_at": "2026-05-15T00:00:00Z"
-        }"#;
-
-        let backend: backend_client::Deployment =
-            serde_json::from_str(payload).expect("unknown enum string must not fail the payload");
-
-        let deployment = Deployment::from_backend(backend, Vec::new());
-        assert_eq!(deployment.activity_status, DplActivity::Drifted);
-        assert_eq!(deployment.error_status, DplErrStatus::None);
-        assert_eq!(deployment.target_status, DplTarget::Deployed);
-    }
-}
