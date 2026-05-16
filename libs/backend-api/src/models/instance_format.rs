@@ -23,7 +23,7 @@ pub enum InstanceFormat {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    InstanceFormatUnknownValue,
+    InstanceFormatUnknown,
 }
 
 impl std::fmt::Display for InstanceFormat {
@@ -32,7 +32,7 @@ impl std::fmt::Display for InstanceFormat {
             Self::INSTANCE_FORMAT_JSON => write!(f, "json"),
             Self::INSTANCE_FORMAT_YAML => write!(f, "yaml"),
             Self::INSTANCE_FORMAT_JSONC => write!(f, "jsonc"),
-            Self::InstanceFormatUnknownValue => write!(f, "unknown_value"),
+            Self::InstanceFormatUnknown => write!(f, "unknown"),
         }
     }
 }

@@ -34,7 +34,7 @@ pub enum DeploymentStatus {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    DeploymentStatusUnknownValue,
+    DeploymentStatusUnknown,
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -48,7 +48,7 @@ impl std::fmt::Display for DeploymentStatus {
             Self::DEPLOYMENT_STATUS_ARCHIVED => write!(f, "archived"),
             Self::DEPLOYMENT_STATUS_FAILED => write!(f, "failed"),
             Self::DEPLOYMENT_STATUS_RETRYING => write!(f, "retrying"),
-            Self::DeploymentStatusUnknownValue => write!(f, "unknown_value"),
+            Self::DeploymentStatusUnknown => write!(f, "unknown"),
         }
     }
 }

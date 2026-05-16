@@ -26,7 +26,7 @@ pub enum DeviceStatus {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    DeviceStatusUnknownValue,
+    DeviceStatusUnknown,
 }
 
 impl std::fmt::Display for DeviceStatus {
@@ -36,7 +36,7 @@ impl std::fmt::Display for DeviceStatus {
             Self::DEVICE_STATUS_ACTIVATING => write!(f, "activating"),
             Self::DEVICE_STATUS_ONLINE => write!(f, "online"),
             Self::DEVICE_STATUS_OFFLINE => write!(f, "offline"),
-            Self::DeviceStatusUnknownValue => write!(f, "unknown_value"),
+            Self::DeviceStatusUnknown => write!(f, "unknown"),
         }
     }
 }

@@ -24,7 +24,7 @@ pub enum SyncDeviceResult {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    SyncDeviceResultUnknownValue,
+    SyncDeviceResultUnknown,
 }
 
 impl std::fmt::Display for SyncDeviceResult {
@@ -33,7 +33,7 @@ impl std::fmt::Display for SyncDeviceResult {
             Self::SYNC_DEVICE_RESULT_SUCCESS => write!(f, "success"),
             Self::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR => write!(f, "network_connection_error"),
             Self::SYNC_DEVICE_RESULT_IN_COOLDOWN => write!(f, "in_cooldown"),
-            Self::SyncDeviceResultUnknownValue => write!(f, "unknown_value"),
+            Self::SyncDeviceResultUnknown => write!(f, "unknown"),
         }
     }
 }

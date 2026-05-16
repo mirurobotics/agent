@@ -53,7 +53,7 @@ pub enum Object {
     Device,
     /// Catch-all for values added by the API after this client was generated.
     #[serde(other)]
-    ObjectUnknownValue,
+    ObjectUnknown,
 }
 
 impl Default for Object {

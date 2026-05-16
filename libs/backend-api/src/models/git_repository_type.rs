@@ -23,7 +23,7 @@ pub enum GitRepositoryType {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    GitRepositoryTypeUnknownValue,
+    GitRepositoryTypeUnknown,
 }
 
 impl std::fmt::Display for GitRepositoryType {
@@ -32,7 +32,7 @@ impl std::fmt::Display for GitRepositoryType {
             Self::GIT_REPO_TYPE_GITHUB => write!(f, "github"),
             Self::GIT_REPO_TYPE_GITLAB => write!(f, "gitlab"),
             Self::GIT_REPO_TYPE_BITBUCKET => write!(f, "bitbucket"),
-            Self::GitRepositoryTypeUnknownValue => write!(f, "unknown_value"),
+            Self::GitRepositoryTypeUnknown => write!(f, "unknown"),
         }
     }
 }

@@ -55,7 +55,7 @@ pub enum {{{classname}}} {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    {{{classname}}}UnknownValue,
+    {{{classname}}}Unknown,
 }
 
 impl std::fmt::Display for {{{classname}}} {
@@ -66,7 +66,7 @@ impl std::fmt::Display for {{{classname}}} {
             Self::{{{name}}} => write!(f, "{{{value}}}"),
             {{/enumVars}}
             {{/allowableValues}}
-            Self::{{{classname}}}UnknownValue => write!(f, "unknown_value"),
+            Self::{{{classname}}}Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -217,7 +217,7 @@ pub enum {{{enumName}}} {
 {{/allowableValues}}
     /// Catch-all for values added by the API after this client was generated.
     #[serde(other)]
-    {{{enumName}}}UnknownValue,
+    {{{enumName}}}Unknown,
 }
 
 impl Default for {{{enumName}}} {

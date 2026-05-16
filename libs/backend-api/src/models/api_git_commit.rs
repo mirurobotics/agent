@@ -19,14 +19,14 @@ pub enum ApiGitCommit {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    ApiGitCommitUnknownValue,
+    ApiGitCommitUnknown,
 }
 
 impl std::fmt::Display for ApiGitCommit {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::API_GIT_COMMIT => write!(f, "78f307f57a39fb447f9e6d3b73945dc1c13cf139"),
-            Self::ApiGitCommitUnknownValue => write!(f, "unknown_value"),
+            Self::ApiGitCommitUnknown => write!(f, "unknown"),
         }
     }
 }

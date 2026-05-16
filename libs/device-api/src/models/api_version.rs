@@ -19,14 +19,14 @@ pub enum ApiVersion {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    ApiVersionUnknownValue,
+    ApiVersionUnknown,
 }
 
 impl std::fmt::Display for ApiVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::API_VERSION => write!(f, "v0.2"),
-            Self::ApiVersionUnknownValue => write!(f, "unknown_value"),
+            Self::ApiVersionUnknown => write!(f, "unknown"),
         }
     }
 }

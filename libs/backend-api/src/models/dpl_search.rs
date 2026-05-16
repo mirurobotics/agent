@@ -20,14 +20,14 @@ pub enum DplSearch {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    DplSearchUnknownValue,
+    DplSearchUnknown,
 }
 
 impl std::fmt::Display for DplSearch {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::DPL_SEARCH_ACTIVITY_STATUS => write!(f, "activity_status"),
-            Self::DplSearchUnknownValue => write!(f, "unknown_value"),
+            Self::DplSearchUnknown => write!(f, "unknown"),
         }
     }
 }

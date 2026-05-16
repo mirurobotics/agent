@@ -21,7 +21,7 @@ pub enum DeploymentExpansion {
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    DeploymentExpansionUnknownValue,
+    DeploymentExpansionUnknown,
 }
 
 impl std::fmt::Display for DeploymentExpansion {
@@ -29,7 +29,7 @@ impl std::fmt::Display for DeploymentExpansion {
         match self {
             Self::DEPLOYMENT_EXPAND_RELEASE => write!(f, "release"),
             Self::DEPLOYMENT_EXPAND_CONFIG_INSTANCES => write!(f, "config_instances"),
-            Self::DeploymentExpansionUnknownValue => write!(f, "unknown_value"),
+            Self::DeploymentExpansionUnknown => write!(f, "unknown"),
         }
     }
 }
