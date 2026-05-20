@@ -105,7 +105,9 @@ pub mod new_with_default {
             .unwrap();
 
         // ensure the contents is correct
-        let cached_file = SingleThreadTokenFile::new(file).await.unwrap();
+        let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+            .await
+            .unwrap();
         assert_eq!(cached_file.read().await.as_ref(), &token);
     }
 }

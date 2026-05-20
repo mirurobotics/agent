@@ -470,7 +470,7 @@ pub mod move_to {
 
         // overwrite true
         assert!(matches!(
-            file.move_to(&file, Overwrite::Deny).await.unwrap_err(),
+            file.move_to(&file, Overwrite::Allow).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
