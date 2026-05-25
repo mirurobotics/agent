@@ -89,6 +89,23 @@ pub fn routes(state: Arc<State>) -> Router {
             format!("/{api_version}/git_commits/{{git_commit_id}}").as_str(),
             get(handlers::get_git_commit),
         )
+        // =========================== CONFIG INSTANCES ============================ //
+        .route(
+            format!("/{api_version}/config_instances/{{config_instance_id}}").as_str(),
+            get(handlers::get_config_instance),
+        )
+        .route(
+            format!("/{api_version}/config_instances/{{config_instance_id}}/content").as_str(),
+            get(handlers::get_config_instance_content),
+        )
+        .route(
+            format!("/{api_version}/config_instances/{{config_instance_id}}/parameters").as_str(),
+            get(handlers::list_config_instance_parameters),
+        )
+        .route(
+            format!("/{api_version}/config_instances/{{config_instance_id}}/parameters/{{key}}").as_str(),
+            get(handlers::get_config_instance_parameter),
+        )
         // ============================== EVENTS =================================== //
         .route(
             format!("/{api_version}/events").as_str(),
