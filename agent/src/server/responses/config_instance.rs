@@ -2,13 +2,13 @@
 use crate::models;
 
 // external crates
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ========================== CONFIG INSTANCE ============================== //
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfigInstanceResponse {
-    pub object: &'static str,
+    pub object: String,
     pub id: String,
     pub config_type_name: String,
     pub filepath: String,
@@ -19,16 +19,16 @@ pub struct ConfigInstanceResponse {
     pub content: Option<ContentField>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ContentField {
-    pub format: &'static str,
+    pub format: String,
     pub data: String,
 }
 
 impl ConfigInstanceResponse {
     pub fn from_model(ci: &models::ConfigInstance, content: Option<ContentField>) -> Self {
         Self {
-            object: "config_instance",
+            object: "config_instance".to_string(),
             id: ci.id.clone(),
             config_type_name: ci.config_type_name.clone(),
             filepath: ci.filepath.clone(),
@@ -41,9 +41,9 @@ impl ConfigInstanceResponse {
 }
 
 // ============================ PARAMETER ================================== //
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ParameterResponse {
-    pub object: &'static str,
+    pub object: String,
     pub key: Vec<String>,
     pub value: Value,
 }
@@ -51,7 +51,7 @@ pub struct ParameterResponse {
 impl ParameterResponse {
     pub fn new(key: Vec<String>, value: Value) -> Self {
         Self {
-            object: "parameter",
+            object: "parameter".to_string(),
             key,
             value,
         }
@@ -59,16 +59,16 @@ impl ParameterResponse {
 }
 
 // ========================= PARAMETER LIST ================================ //
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ParameterListResponse {
-    pub object: &'static str,
+    pub object: String,
     pub data: Vec<ParameterResponse>,
 }
 
 impl ParameterListResponse {
     pub fn new(data: Vec<ParameterResponse>) -> Self {
         Self {
-            object: "list",
+            object: "list".to_string(),
             data,
         }
     }

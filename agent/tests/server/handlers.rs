@@ -468,4 +468,339 @@ pub mod routes {
             assert_eq!(actual.error.code, "internal_server_error");
         }
     }
+
+    mod config_instances {
+        use super::*;
+        use miru_agent::models::ConfigInstance;
+        use miru_agent::server::responses::config_instance::{
+            ConfigInstanceResponse, ParameterListResponse, ParameterResponse,
+        };
+
+        fn sample_ci(id: &str, filepath: &str) -> ConfigInstance {
+            ConfigInstance {
+                id: id.to_string(),
+                config_type_name: "robot_config".to_string(),
+                filepath: filepath.to_string(),
+                created_at: fixed_time(),
+                config_schema_id: "schema-1".to_string(),
+                config_type_id: "type-1".to_string(),
+            }
+        }
+
+        #[tokio::test]
+        async fn get_config_instance_returns_200() {
+            let f = Fixture::new("handler_get_ci").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+
+            let (status, bytes) = f.get("/v0.2/config_instances/ci-1").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: ConfigInstanceResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.object, "config_instance");
+            assert_eq!(actual.id, "ci-1");
+            assert!(actual.content.is_none());
+        }
+
+        #[tokio::test]
+        async fn get_config_instance_with_expand_content() {
+            let f = Fixture::new("handler_get_ci_expand").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    r#"{"key":"value"}"#.to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let (status, bytes) = f.get("/v0.2/config_instances/ci-1?expand=content").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: ConfigInstanceResponse = serde_json::from_slice(&bytes).unwrap();
+            assert!(actual.content.is_some());
+            let content = actual.content.unwrap();
+            assert_eq!(content.format, "json");
+            assert_eq!(content.data, r#"{"key":"value"}"#);
+        }
+
+        #[tokio::test]
+        async fn get_config_instance_returns_404_when_missing() {
+            let f = Fixture::new("handler_get_ci_404").await;
+
+            let (status, bytes) = f.get("/v0.2/config_instances/nonexistent").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "resource_not_found");
+        }
+
+        #[tokio::test]
+        async fn get_content_returns_200_with_json() {
+            let f = Fixture::new("handler_get_ci_content_json").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    r#"{"hello":"world"}"#.to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let response = f
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/v0.2/config_instances/ci-1/content")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get("content-type").unwrap(),
+                "application/json"
+            );
+            assert!(response
+                .headers()
+                .get("content-disposition")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("config.json"));
+
+            let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
+            assert_eq!(bytes.as_ref(), b"{\"hello\":\"world\"}");
+        }
+
+        #[tokio::test]
+        async fn get_content_returns_200_with_yaml() {
+            let f = Fixture::new("handler_get_ci_content_yaml").await;
+            let ci = sample_ci("ci-1", "/etc/miru/robot.yaml");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    "key: value\n".to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let response = f
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/v0.2/config_instances/ci-1/content")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get("content-type").unwrap(),
+                "application/x-yaml"
+            );
+            assert!(response
+                .headers()
+                .get("content-disposition")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("robot.yaml"));
+        }
+
+        #[tokio::test]
+        async fn get_content_returns_404_when_missing() {
+            let f = Fixture::new("handler_get_ci_content_404").await;
+
+            let (status, bytes) =
+                f.get("/v0.2/config_instances/nonexistent/content").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "resource_not_found");
+        }
+
+        #[tokio::test]
+        async fn get_parameter_returns_200() {
+            let f = Fixture::new("handler_get_ci_param").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    r#"{"network":{"timeout_ms":5000}}"#.to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let (status, bytes) = f
+                .get("/v0.2/config_instances/ci-1/parameters/network.timeout_ms")
+                .await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: ParameterResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.object, "parameter");
+            assert_eq!(actual.key, vec!["network", "timeout_ms"]);
+            assert_eq!(actual.value, serde_json::json!(5000));
+        }
+
+        #[tokio::test]
+        async fn get_parameter_returns_404_when_key_missing() {
+            let f = Fixture::new("handler_get_ci_param_404").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    r#"{"a":1}"#.to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let (status, bytes) = f
+                .get("/v0.2/config_instances/ci-1/parameters/nonexistent")
+                .await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "resource_not_found");
+        }
+
+        #[tokio::test]
+        async fn list_parameters_returns_200() {
+            let f = Fixture::new("handler_list_ci_params").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    r#"{"a":1,"b":{"c":2}}"#.to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let (status, bytes) =
+                f.get("/v0.2/config_instances/ci-1/parameters").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: ParameterListResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.object, "list");
+            assert_eq!(actual.data.len(), 2);
+        }
+
+        #[tokio::test]
+        async fn list_parameters_with_prefix_filter() {
+            let f = Fixture::new("handler_list_ci_params_prefix").await;
+            let ci = sample_ci("ci-1", "config.json");
+            f.state
+                .storage
+                .cfg_insts
+                .meta
+                .write("ci-1".to_string(), ci, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            f.state
+                .storage
+                .cfg_insts
+                .content
+                .write(
+                    "ci-1".to_string(),
+                    r#"{"a":1,"b":{"c":2,"d":3}}"#.to_string(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+
+            let (status, bytes) = f
+                .get("/v0.2/config_instances/ci-1/parameters?prefix=b")
+                .await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: ParameterListResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.data.len(), 2);
+            for p in &actual.data {
+                assert_eq!(p.key[0], "b");
+            }
+        }
+    }
 }

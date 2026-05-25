@@ -49,7 +49,7 @@ pub async fn get_response(
     let content = if expand_content {
         let raw = cfg_inst_content.read_optional(id).await?;
         raw.map(|data| ContentField {
-            format: infer_format(&ci.filepath),
+            format: infer_format(&ci.filepath).to_string(),
             data,
         })
     } else {
