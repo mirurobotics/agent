@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::errors::Error;
 use crate::server::{errors::*, state::State};
 use crate::services::{
-    config_instance as ci_svc, deployment as dpl_svc, device as dvc_svc,
-    git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
+    config_instance as ci_svc, deployment as dpl_svc, device as dvc_svc, git_commit as git_cmt_svc,
+    release as rls_svc, HttpBackend,
 };
 use crate::version;
 use device_api::models as device_server;
@@ -206,14 +206,8 @@ pub async fn get_config_instance_content(
             (
                 StatusCode::OK,
                 [
-                    (
-                        axum::http::header::CONTENT_TYPE,
-                        content_type.to_string(),
-                    ),
-                    (
-                        axum::http::header::CONTENT_DISPOSITION,
-                        disposition,
-                    ),
+                    (axum::http::header::CONTENT_TYPE, content_type.to_string()),
+                    (axum::http::header::CONTENT_DISPOSITION, disposition),
                 ],
                 content,
             )

@@ -103,7 +103,8 @@ pub fn routes(state: Arc<State>) -> Router {
             get(handlers::list_config_instance_parameters),
         )
         .route(
-            format!("/{api_version}/config_instances/{{config_instance_id}}/parameters/{{key}}").as_str(),
+            format!("/{api_version}/config_instances/{{config_instance_id}}/parameters/{{key}}")
+                .as_str(),
             get(handlers::get_config_instance_parameter),
         )
         // ============================== EVENTS =================================== //

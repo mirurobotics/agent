@@ -4,8 +4,10 @@ use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::models;
-use crate::services::config_instance::get::ConfigInstanceNotFoundErr;
-use crate::services::config_instance::parameter::{ContentParseErr, ParameterNotFoundErr};
+use crate::services::config_instance::{
+    get::ConfigInstanceNotFoundErr,
+    parameter::{ContentParseErr, ParameterNotFoundErr},
+};
 use crate::storage::StorageErr;
 use crate::sync;
 

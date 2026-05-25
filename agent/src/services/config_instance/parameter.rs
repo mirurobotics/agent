@@ -1,8 +1,7 @@
 // internal crates
 use crate::errors::Trace;
 use crate::server::responses::config_instance::{ParameterListResponse, ParameterResponse};
-use crate::services::config_instance::get;
-use crate::services::errors::ServiceErr;
+use crate::services::{config_instance::get, errors::ServiceErr};
 use crate::storage;
 
 // external crates
@@ -73,10 +72,7 @@ pub async fn list_parameters(
         let prefix_parts: Vec<&str> = prefix.split('.').collect();
         params.retain(|p| {
             p.key.len() >= prefix_parts.len()
-                && p.key
-                    .iter()
-                    .zip(prefix_parts.iter())
-                    .all(|(a, b)| a == b)
+                && p.key.iter().zip(prefix_parts.iter()).all(|(a, b)| a == b)
         });
     }
 

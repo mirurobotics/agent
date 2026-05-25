@@ -658,8 +658,7 @@ pub mod routes {
         async fn get_content_returns_404_when_missing() {
             let f = Fixture::new("handler_get_ci_content_404").await;
 
-            let (status, bytes) =
-                f.get("/v0.2/config_instances/nonexistent/content").await;
+            let (status, bytes) = f.get("/v0.2/config_instances/nonexistent/content").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
@@ -758,8 +757,7 @@ pub mod routes {
                 .await
                 .unwrap();
 
-            let (status, bytes) =
-                f.get("/v0.2/config_instances/ci-1/parameters").await;
+            let (status, bytes) = f.get("/v0.2/config_instances/ci-1/parameters").await;
             assert_eq!(status, StatusCode::OK);
 
             let actual: ParameterListResponse = serde_json::from_slice(&bytes).unwrap();

@@ -110,22 +110,12 @@ pub mod get_parameter_tests {
     #[tokio::test]
     async fn returns_array_element_by_index() {
         let (_dir, meta, content) = setup("ci_param_arr").await;
-        seed_json(
-            &meta,
-            &content,
-            "ci-1",
-            r#"{"items": ["a", "b", "c"]}"#,
-        )
-        .await;
+        seed_json(&meta, &content, "ci-1", r#"{"items": ["a", "b", "c"]}"#).await;
 
-        let resp = ci_svc::get_parameter(
-            &meta,
-            &content,
-            "ci-1".to_string(),
-            "items.1".to_string(),
-        )
-        .await
-        .unwrap();
+        let resp =
+            ci_svc::get_parameter(&meta, &content, "ci-1".to_string(), "items.1".to_string())
+                .await
+                .unwrap();
         assert_eq!(resp.value, json!("b"));
     }
 
@@ -148,13 +138,8 @@ pub mod get_parameter_tests {
     async fn returns_not_found_for_missing_config_instance() {
         let (_dir, meta, content) = setup("ci_param_no_ci").await;
 
-        let result = ci_svc::get_parameter(
-            &meta,
-            &content,
-            "missing".to_string(),
-            "key".to_string(),
-        )
-        .await;
+        let result =
+            ci_svc::get_parameter(&meta, &content, "missing".to_string(), "key".to_string()).await;
         assert!(matches!(
             result,
             Err(ServiceErr::ConfigInstanceNotFoundErr(_))
@@ -192,10 +177,9 @@ pub mod list_parameters_tests {
         )
         .await;
 
-        let resp =
-            ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), None)
-                .await
-                .unwrap();
+        let resp = ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), None)
+            .await
+            .unwrap();
         assert_eq!(resp.object, "list");
         assert_eq!(resp.data.len(), 3);
 
@@ -216,14 +200,10 @@ pub mod list_parameters_tests {
         )
         .await;
 
-        let resp = ci_svc::list_parameters(
-            &meta,
-            &content,
-            "ci-1".to_string(),
-            Some("b".to_string()),
-        )
-        .await
-        .unwrap();
+        let resp =
+            ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), Some("b".to_string()))
+                .await
+                .unwrap();
         assert_eq!(resp.data.len(), 2);
         for p in &resp.data {
             assert_eq!(p.key[0], "b");
@@ -232,29 +212,17 @@ pub mod list_parameters_tests {
 
     #[tokio::test]
     async fn handles_arrays_with_numeric_indices() {
+        // lint:allow(field-by-field-assert)
         let (_dir, meta, content) = setup("ci_list_arr").await;
-        seed_json(
-            &meta,
-            &content,
-            "ci-1",
-            r#"{"items": [10, 20]}"#,
-        )
-        .await;
+        seed_json(&meta, &content, "ci-1", r#"{"items": [10, 20]}"#).await;
 
-        let resp =
-            ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), None)
-                .await
-                .unwrap();
+        let resp = ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), None)
+            .await
+            .unwrap();
         assert_eq!(resp.data.len(), 2);
-        assert_eq!(
-            resp.data[0].key,
-            vec!["items".to_string(), "0".to_string()]
-        );
+        assert_eq!(resp.data[0].key, vec!["items".to_string(), "0".to_string()]);
         assert_eq!(resp.data[0].value, json!(10));
-        assert_eq!(
-            resp.data[1].key,
-            vec!["items".to_string(), "1".to_string()]
-        );
+        assert_eq!(resp.data[1].key, vec!["items".to_string(), "1".to_string()]);
         assert_eq!(resp.data[1].value, json!(20));
     }
 
@@ -263,14 +231,10 @@ pub mod list_parameters_tests {
         let (_dir, meta, content) = setup("ci_list_no_match").await;
         seed_json(&meta, &content, "ci-1", r#"{"a": 1}"#).await;
 
-        let resp = ci_svc::list_parameters(
-            &meta,
-            &content,
-            "ci-1".to_string(),
-            Some("z".to_string()),
-        )
-        .await
-        .unwrap();
+        let resp =
+            ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), Some("z".to_string()))
+                .await
+                .unwrap();
         assert_eq!(resp.data.len(), 0);
     }
 
@@ -278,8 +242,7 @@ pub mod list_parameters_tests {
     async fn returns_not_found_for_missing_config_instance() {
         let (_dir, meta, content) = setup("ci_list_no_ci").await;
 
-        let result =
-            ci_svc::list_parameters(&meta, &content, "missing".to_string(), None).await;
+        let result = ci_svc::list_parameters(&meta, &content, "missing".to_string(), None).await;
         assert!(matches!(
             result,
             Err(ServiceErr::ConfigInstanceNotFoundErr(_))
@@ -291,10 +254,9 @@ pub mod list_parameters_tests {
         let (_dir, meta, content) = setup("ci_list_yaml").await;
         seed_yaml(&meta, &content, "ci-1", "x: 1\ny:\n  z: 2\n").await;
 
-        let resp =
-            ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), None)
-                .await
-                .unwrap();
+        let resp = ci_svc::list_parameters(&meta, &content, "ci-1".to_string(), None)
+            .await
+            .unwrap();
         assert_eq!(resp.data.len(), 2);
     }
 }

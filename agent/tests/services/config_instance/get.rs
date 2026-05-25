@@ -37,9 +37,14 @@ pub mod get_config_instance {
     async fn returns_config_instance_by_id() {
         let (_dir, meta, _content) = setup("ci_get_by_id").await;
         let ci = sample_ci("ci-1", "config.json");
-        meta.write("ci-1".to_string(), ci.clone(), |_, _| false, Overwrite::Allow)
-            .await
-            .unwrap();
+        meta.write(
+            "ci-1".to_string(),
+            ci.clone(),
+            |_, _| false,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let result = ci_svc::get(&meta, "ci-1".to_string()).await.unwrap();
         assert_eq!(result.id, "ci-1");
