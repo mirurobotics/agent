@@ -4,6 +4,8 @@ use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::models;
+use crate::services::config_instance::get::ConfigInstanceNotFoundErr;
+use crate::services::config_instance::parameter::{ContentParseErr, ParameterNotFoundErr};
 use crate::storage::StorageErr;
 use crate::sync;
 
@@ -12,9 +14,15 @@ pub enum ServiceErr {
     #[error(transparent)]
     CacheErr(cache::CacheErr),
     #[error(transparent)]
+    ConfigInstanceNotFoundErr(ConfigInstanceNotFoundErr),
+    #[error(transparent)]
+    ContentParseErr(ContentParseErr),
+    #[error(transparent)]
     FileSysErr(filesys::FileSysErr),
     #[error(transparent)]
     ModelsErr(models::ModelsErr),
+    #[error(transparent)]
+    ParameterNotFoundErr(ParameterNotFoundErr),
     #[error(transparent)]
     StorageErr(StorageErr),
     #[error(transparent)]
@@ -31,6 +39,18 @@ impl From<cache::CacheErr> for ServiceErr {
     }
 }
 
+impl From<ConfigInstanceNotFoundErr> for ServiceErr {
+    fn from(e: ConfigInstanceNotFoundErr) -> Self {
+        Self::ConfigInstanceNotFoundErr(e)
+    }
+}
+
+impl From<ContentParseErr> for ServiceErr {
+    fn from(e: ContentParseErr) -> Self {
+        Self::ContentParseErr(e)
+    }
+}
+
 impl From<filesys::FileSysErr> for ServiceErr {
     fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
@@ -40,6 +60,12 @@ impl From<filesys::FileSysErr> for ServiceErr {
 impl From<models::ModelsErr> for ServiceErr {
     fn from(e: models::ModelsErr) -> Self {
         Self::ModelsErr(e)
+    }
+}
+
+impl From<ParameterNotFoundErr> for ServiceErr {
+    fn from(e: ParameterNotFoundErr) -> Self {
+        Self::ParameterNotFoundErr(e)
     }
 }
 
@@ -69,9 +95,12 @@ impl From<sync::SyncErr> for ServiceErr {
 
 crate::impl_error!(ServiceErr {
     CacheErr,
+    ConfigInstanceNotFoundErr,
+    ContentParseErr,
     EventsErr,
     FileSysErr,
     ModelsErr,
+    ParameterNotFoundErr,
     StorageErr,
     HTTPErr,
     SyncErr,
