@@ -10,4 +10,6 @@ export ASSERT_LINT_PATHS="$REPO_ROOT/agent/tests"
 export IMPORT_LINT_CONFIG="$REPO_ROOT/.lint-imports.toml"
 export RUN_DIET="1"
 
-exec "$REPO_ROOT/scripts/lib/lint.sh"
+"$REPO_ROOT/scripts/lib/lint.sh"
+
+"$REPO_ROOT/scripts/lint-surface.sh"
