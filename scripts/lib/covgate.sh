@@ -71,7 +71,7 @@ find "$SRC_DIR" -name '.covgate' -type f | sort > "$covgate_list"
 
 while read -r covgate_file; do
     module_path=$(dirname "$covgate_file")
-    module_display="${module_path#$SRC_DIR/}"
+    module_display="${module_path#"$SRC_DIR"/}"
     # If .covgate is directly in SRC_DIR, display as the directory name
     if [ "$module_display" = "$module_path" ]; then
         module_display=$(basename "$SRC_DIR")
