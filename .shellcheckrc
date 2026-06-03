@@ -1,0 +1,8 @@
+# Do not set a global `shell=` directive: the agent repo has mixed shebangs
+# (#!/bin/sh, #!/usr/bin/env bash, #!/bin/bash). Let shellcheck honor each
+# file's shebang so bash scripts (scripts/preflight.sh, api/regen.sh) are not
+# falsely flagged with SC3040 (pipefail undefined in POSIX sh).
+
+# SC1091: Not following sourced files. Several scripts source files shellcheck
+# cannot resolve (.venv/bin/activate, $HOME/.cargo/env, build/git-tags.sh).
+disable=SC1091

@@ -1,0 +1,7 @@
+# See: https://github.com/rhysd/actionlint/blob/main/docs/config.md
+# Register custom org-provided runner labels so actionlint does not flag them
+# as unknown. `ubuntu-latest-8c` is a larger GitHub-hosted runner used by the
+# release workflow.
+self-hosted-runner:
+  labels:
+    - ubuntu-latest-8c
