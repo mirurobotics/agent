@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2317 # cleanup() is invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329 # cleanup() is invoked indirectly via trap
 cleanup() {
     exit_code=$?
 

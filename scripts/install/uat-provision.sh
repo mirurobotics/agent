@@ -3,7 +3,7 @@ set -e
 
 # Script: uat-provision.sh
 # Jinja Template: provision.j2
-# Build Timestamp: 2026-06-03T19:03:43.199612
+# Build Timestamp: 2026-06-03T19:14:13.912548
 # Description: Provision a device & install the Miru Agent in the UAT environment
 
 # DISPLAY #
@@ -365,7 +365,7 @@ fi
 # ACTIVATE THE AGENT #
 # ------------------ #
 # shellcheck shell=sh
-# shellcheck disable=SC2317 # cleanup() is invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329 # cleanup() is invoked indirectly via trap
 cleanup() {
     exit_code=$?
 
