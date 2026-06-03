@@ -15,18 +15,14 @@ echo ""
 
 echo "shellcheck"
 echo "----------"
-# Exclude:
-#   - the .agents subtree (content owned by another repo);
-#   - the jinja template fragments under scripts/jinja/templates/ (shebang-less
-#     .sh partials concatenated by scripts/jinja/render.sh; shellcheck flags
-#     them SC2148 on their own);
-#   - the generated install scripts under scripts/install/ (rendered from the
-#     jinja templates by scripts/jinja/render.py — they are build artifacts, so
-#     findings must be fixed in the templates, not the generated output).
+# Exclude only the .agents subtree (content owned by another repo). Every other
+# .sh file — including the shebang-less jinja partials under
+# scripts/jinja/templates/ and the generated install scripts under
+# scripts/install/ — is linted here, mirroring the shared surface-lint workflow.
+# Findings in the generated scripts must still be fixed in the jinja templates,
+# not the rendered output.
 find . -name '*.sh' \
     ! -path './.agents/*' \
-    ! -path './scripts/jinja/templates/*' \
-    ! -path './scripts/install/*' \
     -exec shellcheck {} +
 echo ""
 

@@ -1,3 +1,5 @@
+# shellcheck shell=sh
+# shellcheck disable=SC2317 # cleanup() is invoked indirectly via trap
 cleanup() {
     exit_code=$?
 
@@ -5,7 +7,7 @@ cleanup() {
     log "Restarting the Miru Agent"
     sudo systemctl restart miru >/dev/null 2>&1
 
-    exit $exit_code
+    exit "$exit_code"
 }
 
 trap cleanup EXIT INT TERM QUIT HUP
@@ -32,4 +34,5 @@ fi
 sudo chown -R miru:miru /srv/miru
 
 # Execute the installer
+# shellcheck disable=SC2086 # word-splitting of the argument list is intentional
 sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args

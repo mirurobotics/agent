@@ -1,6 +1,8 @@
+# shellcheck shell=sh
 INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$AGENT_DEB_PKG_NAME" 2>/dev/null || echo "")
-# replace '~' with '-' 
+# replace '~' with '-'
 if [ -n "$INSTALLED_VERSION" ]; then
+    # shellcheck disable=SC2001 # POSIX sh lacks ${var//search/replace}; sed is required
     INSTALLED_VERSION=$(echo "$INSTALLED_VERSION" | sed 's/~/-/g')
 fi
 
