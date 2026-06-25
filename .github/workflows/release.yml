@@ -14,7 +14,7 @@ jobs:
 
   check-main:
     name: Verify tag is on main
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       on_main: ${{ steps.check.outputs.on_main }}
     steps:
@@ -49,7 +49,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   release:
-    runs-on: ubuntu-latest-8c
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [ci, check-main]
     if: needs.check-main.outputs.on_main == 'true'
     steps:
