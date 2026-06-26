@@ -2,146 +2,31 @@ openapi: 3.0.3
 info:
   title: Miru Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.4
+  version: v0.5.0-pre
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.4.0
+  x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: 78f307f57a39fb447f9e6d3b73945dc1c13cf139
-    url: https://github.com/mirurobotics/openapi/commit/78f307f57a39fb447f9e6d3b73945dc1c13cf139
-    message: 'chore(deps): bump @protobufjs/utf8 from 1.1.0 to 1.1.1 (#63)
-
-
-      Bumps [@protobufjs/utf8](https://github.com/dcodeIO/protobuf.js) from
-
-      1.1.0 to 1.1.1.
-
-      <details>
-
-      <summary>Release notes</summary>
-
-      <p><em>Sourced from <a
-
-      href="https://github.com/dcodeIO/protobuf.js/releases">@​protobufjs/utf8''s
-
-      releases</a>.</em></p>
-
-      <blockquote>
-
-      <h2>protobufjs-cli: v1.1.1</h2>
-
-      <h2><a
-
-      href="https://github.com/protobufjs/protobuf.js/compare/protobufjs-cli-v1.1.0...protobufjs-cli-v1.1.1">1.1.1</a>
-
-      (2023-02-02)</h2>
-
-      <h3>Bug Fixes</h3>
-
-      <ul>
-
-      <li><strong>cli:</strong> fix relative path to Google pb files (<a
-
-      href="https://redirect.github.com/protobufjs/protobuf.js/issues/1859">#1859</a>)
-
-      (<a
-
-      href="https://github.com/protobufjs/protobuf.js/commit/e42eea4868b11f4a07934804a56683321ed191e2">e42eea4</a>)</li>
-
-      </ul>
-
-      </blockquote>
-
-      </details>
-
-      <details>
-
-      <summary>Commits</summary>
-
-      <ul>
-
-      <li><a
-
-      href="https://github.com/protobufjs/protobuf.js/commit/644d588c0495da6a570344248e1b5af901bc3b0c"><code>644d588</code></a>
-
-      chore: release master (<a
-
-      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1865">#1865</a>)</li>
-
-      <li><a
-
-      href="https://github.com/protobufjs/protobuf.js/commit/e42eea4868b11f4a07934804a56683321ed191e2"><code>e42eea4</code></a>
-
-      fix(cli): fix relative path to Google pb files (<a
-
-      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1859">#1859</a>)</li>
-
-      <li><a
-
-      href="https://github.com/protobufjs/protobuf.js/commit/dce9a2ef92d363752e40b295b0da9bd178f82e83"><code>dce9a2e</code></a>
-
-      fix: use bundled filename to fix common pb includes (<a
-
-      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1860">#1860</a>)</li>
-
-      <li><a
-
-      href="https://github.com/protobufjs/protobuf.js/commit/64e8936ad9f73c68b3fa1e57857dd38323b5a745"><code>64e8936</code></a>
-
-      fix: use ES5 style function syntax (<a
-
-      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1830">#1830</a>)</li>
-
-      <li><a
-
-      href="https://github.com/protobufjs/protobuf.js/commit/4489fa771464bcb49b57149760e9cc4131e8077e"><code>4489fa7</code></a>
-
-      Revert &quot;fix: error should be thrown (<a
-
-      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1817">#1817</a>)&quot;
-
-      (<a
-
-      href="https://redirect.github.com/dcodeIO/protobuf.js/issues/1864">#1864</a>)</li>
-
-      <li>See full diff in <a
-
-      href="https://github.com/dcodeIO/protobuf.js/compare/protobufjs-cli-v1.1.0...protobufjs-cli-v1.1.1">compare
-
-      view</a></li>
-
-      </ul>
-
-      </details>
-
-      <br />
-
-
-      Signed-off-by: dependabot[bot] <support@github.com>
-
-      Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>'
-    author: dependabot[bot]
-    branch: HEAD
-    dirty: false
-  x-build:
-    built_at: '2026-05-12T23:40:18.310623+00:00'
+    sha: 4c92b71aa5ae84733ff799b9afc6ee975052c8a4
+    url: https://github.com/mirurobotics/openapi/commit/4c92b71aa5ae84733ff799b9afc6ee975052c8a4
+    message: 'feat(uploads): add upload_collection parent resource, re-parent upload rules (#144)'
 servers:
-- url: https://staging.api.mirurobotics.com/agent/v1
-  description: Staging
-- url: https://uat.api.mirurobotics.com/agent/v1
-  description: UAT
-- url: https://api.mirurobotics.com/agent/v1
-  description: Production
+  - url: https://staging.api.mirurobotics.com/agent/v1
+    description: Staging
+  - url: https://uat.api.mirurobotics.com/agent/v1
+    description: UAT
+  - url: https://api.mirurobotics.com/agent/v1
+    description: Production
 security:
-- DeviceSessionToken: []
+  - DeviceSessionToken: []
 paths:
   /version:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Version
+        - Version
       summary: Get
       description: Retrieve the version information of the application.
       operationId: getVersion
@@ -154,24 +39,22 @@ paths:
                 $ref: '#/components/schemas/Version'
   /config_instances/{config_instance_id}/content:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Config Instances
+        - Config Instances
       summary: Download Content
       description: Download the content of a config instance.
       operationId: getConfigInstanceContent
       parameters:
-      - $ref: '#/components/parameters/config_instance_id'
-      - $ref: '#/components/parameters/disposition'
+        - $ref: '#/components/parameters/config_instance_id'
+        - $ref: '#/components/parameters/disposition'
       responses:
         '200':
-          description: Successfully retrieved the config instance content. The Content-Type
-            header is set according to the instance format.
+          description: Successfully retrieved the config instance content. The Content-Type header is set according to the instance format.
           headers:
             Content-Disposition:
-              description: Header indicating whether the file is returned inline or
-                as an attachment.
+              description: Header indicating whether the file is returned inline or as an attachment.
               schema:
                 type: string
                 example: inline
@@ -188,18 +71,18 @@ paths:
                 description: The raw config instance content.
   /deployments:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Deployments
+        - Deployments
       summary: List
       operationId: listDeployments
       description: List all deployments.
       parameters:
-      - $ref: '#/components/parameters/offset'
-      - $ref: '#/components/parameters/limit'
-      - $ref: '#/components/parameters/deployment_list_expansions'
-      - $ref: '#/components/parameters/deployment_search_activity_status'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/deployment_list_expansions'
+        - $ref: '#/components/parameters/deployment_search_activity_status'
       responses:
         '200':
           description: Successfully listed the deployments.
@@ -209,15 +92,15 @@ paths:
                 $ref: '#/components/schemas/DeploymentList'
   /deployments/{deployment_id}:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Deployments
+        - Deployments
       summary: Get
       operationId: getDeployment
       description: Retrieve a deployment by its ID.
       parameters:
-      - $ref: '#/components/parameters/deployment_id'
+        - $ref: '#/components/parameters/deployment_id'
       responses:
         '200':
           description: Successfully retrieved the deployment.
@@ -227,13 +110,13 @@ paths:
                 $ref: '#/components/schemas/Deployment'
     patch:
       tags:
-      - Deployments
+        - Deployments
       summary: Update
       operationId: updateDeployment
       description: Update a deployment.
       parameters:
-      - $ref: '#/components/parameters/deployment_id'
-      - $ref: '#/components/parameters/deployment_expansions'
+        - $ref: '#/components/parameters/deployment_id'
+        - $ref: '#/components/parameters/deployment_expansions'
       requestBody:
         required: true
         content:
@@ -249,15 +132,15 @@ paths:
                 $ref: '#/components/schemas/Deployment'
   /releases/{release_id}:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Releases
+        - Releases
       summary: Get
       operationId: getRelease
       description: Retrieve a release by its ID.
       parameters:
-      - $ref: '#/components/parameters/release_id'
+        - $ref: '#/components/parameters/release_id'
       responses:
         '200':
           description: Successfully retrieved the release.
@@ -265,17 +148,77 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Release'
-  /git_commits/{git_commit_id}:
+  /upload_rules:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Git Commits
+        - Upload Rules
+      summary: List
+      operationId: getUploadRules
+      description: List the upload rules in the authenticated device's currently-deployed release.
+      responses:
+        '200':
+          description: Successfully retrieved the upload rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadRuleList'
+  /uploads:
+    parameters:
+      - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+        - Uploads
+      summary: Create
+      operationId: createUpload
+      description: |
+        Request an upload for a captured file. The backend verifies the calling
+        device from its session token, creates a ledger entry, and returns a
+        short-lived V4-presigned URL the device PUTs the file to. The device's
+        identity is derived from the token and is never read from the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUploadRequest'
+      responses:
+        '200':
+          description: Successfully created the upload and minted a presigned URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUpload'
+  /uploads/{upload_id}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+        - Uploads
+      summary: Confirm
+      operationId: confirmUpload
+      description: Confirm that the device durably wrote the upload to the destination bucket.
+      parameters:
+        - $ref: '#/components/parameters/upload_id'
+      responses:
+        '200':
+          description: Successfully confirmed the upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+  /git_commits/{git_commit_id}:
+    parameters:
+      - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+        - Git Commits
       summary: Get
       operationId: getGitCommit
       description: Retrieve a git commit by its ID.
       parameters:
-      - $ref: '#/components/parameters/git_commit_id'
+        - $ref: '#/components/parameters/git_commit_id'
       responses:
         '200':
           description: Successfully retrieved the git commit.
@@ -285,16 +228,14 @@ paths:
                 $ref: '#/components/schemas/GitCommit'
   /device:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - Devices
+        - Devices
       summary: Get Self
       operationId: getDeviceSelf
-      description: 'Retrieve the calling device''s own record. The device is identified
-        by the bearer session token from the `DeviceSessionToken` security scheme.
-
-        '
+      description: |
+        Retrieve the calling device's own record. The device is identified by the bearer session token from the `DeviceSessionToken` security scheme.
       responses:
         '200':
           description: Successfully retrieved the calling device.
@@ -304,15 +245,15 @@ paths:
                 $ref: '#/components/schemas/Device'
   /devices/{device_id}:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     patch:
       tags:
-      - Devices
+        - Devices
       summary: Update
       operationId: updateDeviceByAgent
       description: Update a device from the agent.
       parameters:
-      - $ref: '#/components/parameters/device_id'
+        - $ref: '#/components/parameters/device_id'
       requestBody:
         required: true
         content:
@@ -328,14 +269,14 @@ paths:
                 $ref: '#/components/schemas/Device'
   /devices/provision:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     post:
       tags:
-      - Devices
+        - Devices
       summary: Provision
       operationId: provisionDevice
       security:
-      - ProvisioningToken: []
+        - ProvisioningToken: []
       description: Provision a device.
       requestBody:
         required: true
@@ -352,21 +293,16 @@ paths:
                 $ref: '#/components/schemas/Device'
   /devices/reprovision:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     post:
       tags:
-      - Devices
+        - Devices
       summary: Reprovision
       operationId: reprovisionDevice
       security:
-      - ProvisioningToken: []
-      description: 'Reprovision an existing device — rebind the device record to the
-        calling physical machine. Invalidates any prior session, registers the new
-        public key from the request body, and triggers a redeploy of the device''s
-        current deployment. Deployment history is preserved across the swap. The target
-        device is identified by the provisioning token, not by name.
-
-        '
+        - ProvisioningToken: []
+      description: |
+        Reprovision an existing device — rebind the device record to the calling physical machine. Invalidates any prior session, registers the new public key from the request body, and triggers a redeploy of the device's current deployment. Deployment history is preserved across the swap. The target device is identified by the provisioning token, not by name.
       requestBody:
         required: true
         content:
@@ -382,47 +318,25 @@ paths:
                 $ref: '#/components/schemas/Device'
   /devices/token:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     post:
       tags:
-      - Devices
+        - Devices
       summary: Issue Token
       operationId: issueDeviceToken
       security:
-      - DeviceKeyJWT: []
-      description: 'Issue a device session token. The device authenticates by sending
-        an `Authorization: Bearer <jwt>` header carrying a JWT it has self-signed
-        with its own RSA private key (already enrolled at provisioning time via `public_key_pem`).
-        The server reads the JWT header''s `kid` parameter, looks up the device whose
-        registered public-key fingerprint equals `kid`, and verifies the JWT signature
-        against that stored public key. `kid` is a lookup hint only — the security
-        boundary is "the signature verifies against the stored public key for the
-        device with this fingerprint".
+        - DeviceKeyJWT: []
+      description: |
+        Issue a device session token. The device authenticates by sending an `Authorization: Bearer <jwt>` header carrying a JWT it has self-signed with its own RSA private key (already enrolled at provisioning time via `public_key_pem`). The server reads the JWT header's `kid` parameter, looks up the device whose registered public-key fingerprint equals `kid`, and verifies the JWT signature against that stored public key. `kid` is a lookup hint only — the security boundary is "the signature verifies against the stored public key for the device with this fingerprint".
 
-
-        Public-key fingerprint: the input is the device''s registered RSA public key.
-        Serialize it as DER-encoded `SubjectPublicKeyInfo` (PKIX SPKI, RFC 5280 §4.1
-        — the same byte sequence that `-----BEGIN PUBLIC KEY-----` PEM decodes to),
-        SHA-256 the bytes, and lowercase-hex encode the digest. The result is exactly
-        64 hex characters.
-
+        Public-key fingerprint: the input is the device's registered RSA public key. Serialize it as DER-encoded `SubjectPublicKeyInfo` (PKIX SPKI, RFC 5280 §4.1 — the same byte sequence that `-----BEGIN PUBLIC KEY-----` PEM decodes to), SHA-256 the bytes, and lowercase-hex encode the digest. The result is exactly 64 hex characters.
 
         JWT contract:
-
         - Header MUST contain `alg: RS512` (RSA-PKCS1-v1_5 with SHA-512).
-
         - Header MUST contain `kid` (the 64-character lowercase hex public-key fingerprint).
-
-        - Header MUST NOT embed the public key as a JWT header parameter. Servers
-        MAY reject the request if such an embedded-key header parameter is present.
-
-        - Payload MUST contain `jti` (unique per request, used for replay protection),
-        `iat` (issued-at, RFC 7519 numeric date), and `exp` (expiration, RFC 7519
-        numeric date). Lifetime is 2 minutes (`exp = iat + 120`).
-
+        - Header MUST NOT embed the public key as a JWT header parameter. Servers MAY reject the request if such an embedded-key header parameter is present.
+        - Payload MUST contain `jti` (unique per request, used for replay protection), `iat` (issued-at, RFC 7519 numeric date), and `exp` (expiration, RFC 7519 numeric date). Lifetime is 2 minutes (`exp = iat + 120`).
         - Signing input is `base64url(header) . base64url(payload)` per RFC 7515 §5.1.
-
-        '
       responses:
         '200':
           description: Successfully issued the device token.
@@ -432,17 +346,17 @@ paths:
                 $ref: '#/components/schemas/TokenResponse'
   /cmd/devices/{device_id}/sync:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - MQTT
+        - MQTT
       parameters:
-      - name: device_id
-        in: path
-        required: true
-        schema:
-          type: string
-          example: dvc_123
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: dvc_123
       summary: Sync
       operationId: syncDevice
       description: Send a sync command to a device.
@@ -455,17 +369,17 @@ paths:
                 $ref: '#/components/schemas/SyncDevice'
   /cmd/devices/{device_id}/ping:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - MQTT
+        - MQTT
       parameters:
-      - name: device_id
-        in: path
-        required: true
-        schema:
-          type: string
-          example: dvc_123
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: dvc_123
       summary: Ping
       operationId: pingDevice
       description: Send a ping command to a device.
@@ -478,17 +392,17 @@ paths:
                 $ref: '#/components/schemas/Ping'
   /resp/devices/{device_id}/pong:
     parameters:
-    - $ref: '#/components/parameters/MiruVersion'
+      - $ref: '#/components/parameters/MiruVersion'
     get:
       tags:
-      - MQTT
+        - MQTT
       parameters:
-      - name: device_id
-        in: path
-        required: true
-        schema:
-          type: string
-          example: dvc_123
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: dvc_123
       summary: Pong
       operationId: devicePong
       description: Receive a pong response from a device.
@@ -505,88 +419,69 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Server-issued device session token. Obtained by the device from
-        `POST /devices/token` (defined in this spec) using its `DeviceKeyJWT` bootstrap
-        credential, then sent as `Authorization: Bearer <token>` on every other agent
-        endpoint. The token identifies the calling device to the backend.
-
-        '
+      description: |
+        Server-issued device session token. Obtained by the device from `POST /devices/token` (defined in this spec) using its `DeviceKeyJWT` bootstrap credential, then sent as `Authorization: Bearer <token>` on every other agent endpoint. The token identifies the calling device to the backend.
     DeviceKeyJWT:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Device-self-signed JWT used to bootstrap a session token. The
-        device signs a JWT with its own RSA private key; the server identifies the
-        device by reading the `kid` header (the SHA-256 fingerprint of the device''s
-        registered public key, as DER-encoded SubjectPublicKeyInfo, lowercase hex)
-        and verifies the JWT signature against the stored public key for that device.
-        See `POST /devices/token` for the full JWT contract.
-
-        '
+      description: |
+        Device-self-signed JWT used to bootstrap a session token. The device signs a JWT with its own RSA private key; the server identifies the device by reading the `kid` header (the SHA-256 fingerprint of the device's registered public key, as DER-encoded SubjectPublicKeyInfo, lowercase hex) and verifies the JWT signature against the stored public key for that device. See `POST /devices/token` for the full JWT contract.
     ProvisioningToken:
       type: http
       scheme: bearer
-      description: 'Short-lived (5-minute) provisioning token used to bootstrap a
-        device''s identity on `POST /devices/provision` and `POST /devices/reprovision`.
-        Minted from the Miru dashboard (programmatic minting via the Platform API
-        is forthcoming) and sent as `Authorization: Bearer <token>`. A provisioning
-        token may be either device-bound (issued for a specific pre-created device
-        record, used by the dashboard activate/reprovision flow) or workspace-bound
-        (used for bulk provisioning, where the target device is selected or created
-        by `name` in the request body).
-
-        '
+      description: |
+        Short-lived (5-minute) provisioning token used to bootstrap a device's identity on `POST /devices/provision` and `POST /devices/reprovision`. Minted from the Miru dashboard (programmatic minting via the Platform API is forthcoming) and sent as `Authorization: Bearer <token>`. A provisioning token may be either device-bound (issued for a specific pre-created device record, used by the dashboard activate/reprovision flow) or workspace-bound (used for bulk provisioning, where the target device is selected or created by `name` in the request body).
   schemas:
     APIVersion:
       type: string
       enum:
-      - v0.4
+        - v0.5.0-pre
       x-enum-varnames:
-      - API_VERSION
+        - API_VERSION
       x-stainless-const: true
     ReleaseVersion:
       type: string
       enum:
-      - v0.4.0
+        - $RELEASE_VERSION$
       x-enum-varnames:
-      - RELEASE_VERSION
+        - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 78f307f57a39fb447f9e6d3b73945dc1c13cf139
+        - $API_GIT_COMMIT$
       x-enum-varnames:
-      - API_GIT_COMMIT
+        - API_GIT_COMMIT
       x-stainless-const: true
     ErrorResponse:
       type: object
       required:
-      - error
+        - error
       properties:
         error:
           $ref: '#/components/schemas/Error'
     DplSearch:
       type: string
-      description: '**Internal server use only**: an enum of possible search fields.
-
-        '
+      description: |
+        **Internal server use only**: an enum of possible search fields.
       enum:
-      - activity_status
+        - activity_status
       x-enum-varnames:
-      - DPL_SEARCH_ACTIVITY_STATUS
+        - DPL_SEARCH_ACTIVITY_STATUS
     Version:
       title: Version
       type: object
       required:
-      - version
-      - git_commit
-      - api_version
-      - api_git_commit
-      - api_release_version
-      - go_version
-      - build_date
-      - os
-      - arch
+        - version
+        - git_commit
+        - api_version
+        - api_git_commit
+        - api_release_version
+        - go_version
+        - build_date
+        - os
+        - arch
       properties:
         version:
           type: string
@@ -638,190 +533,156 @@ components:
     DeploymentListExpansion:
       type: string
       enum:
-      - total_count
-      - release
-      - config_instances
+        - total_count
+        - release
+        - config_instances
       x-enum-varnames:
-      - DEPLOYMENT_LIST_EXPAND_TOTAL_COUNT
-      - DEPLOYMENT_LIST_EXPAND_RELEASE
-      - DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES
+        - DEPLOYMENT_LIST_EXPAND_TOTAL_COUNT
+        - DEPLOYMENT_LIST_EXPAND_RELEASE
+        - DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES
     DeploymentActivityStatus:
       type: string
-      description: 'Last known activity state of the deployment.
+      description: |
+        Last known activity state of the deployment.
 
-
-        `drifted` means the device''s configurations have drifted since this deployment
-        was staged, and the deployment needs to be reviewed before it can be deployed.
-
+        `drifted` means the device's configurations have drifted since this deployment was staged, and the deployment needs to be reviewed before it can be deployed.
 
         `staged` means the deployment is ready to be deployed.
 
+        `queued` means the deployment's config instances are waiting to be received by the device and will be deployed as soon as the device is online.
 
-        `queued` means the deployment''s config instances are waiting to be received
-        by the device and will be deployed as soon as the device is online.
+        `deployed` means the deployment's config instances are currently available for consumption on the device.
 
+        `removing` means the deployment's config instances are being removed from the device.
 
-        `deployed` means the deployment''s config instances are currently available
-        for consumption on the device.
-
-
-        `removing` means the deployment''s config instances are being removed from
-        the device.
-
-
-        `archived` means the deployment is available for historical reference but
-        cannot be deployed and is not active on the device.
-
-        '
+        `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device.
       enum:
-      - drifted
-      - staged
-      - queued
-      - deployed
-      - removing
-      - archived
+        - drifted
+        - staged
+        - queued
+        - deployed
+        - removing
+        - archived
       x-enum-varnames:
-      - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
-      - DEPLOYMENT_ACTIVITY_STATUS_STAGED
-      - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
-      - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
-      - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
-      - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
+        - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
+        - DEPLOYMENT_ACTIVITY_STATUS_STAGED
+        - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
+        - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+        - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
+        - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
     PaginatedList:
       title: Paginated List
       type: object
       required:
-      - object
-      - limit
-      - offset
-      - has_more
+        - object
+        - limit
+        - offset
+        - has_more
       properties:
         object:
           type: string
           enum:
-          - list
+            - list
           example: list
           x-stainless-const: true
           description: The object type, which is always `list`.
         total_count:
           type: integer
           format: int64
-          description: The total number of items in the list. By default the total
-            count is not returned. The total count must be expanded (using expand=total_count)
-            to get the total number of items in the list.
+          description: The total number of items in the list. By default the total count is not returned. The total count must be expanded (using expand=total_count) to get the total number of items in the list.
         limit:
           type: integer
-          description: The maximum number of items to return. A limit of 15 with an
-            offset of 0 returns items 1-15.
+          description: The maximum number of items to return. A limit of 15 with an offset of 0 returns items 1-15.
           default: 10
           minimum: 1
           maximum: 100
         offset:
           type: integer
-          description: The offset of the items to return. An offset of 10 with a limit
-            of 10 returns items 11-20.
+          description: The offset of the items to return. An offset of 10 with a limit of 10 returns items 11-20.
           default: 0
           minimum: 0
         has_more:
           type: boolean
-          description: True if there are more items in the list to return. False if
-            there are no more items to return.
+          description: True if there are more items in the list to return. False if there are no more items to return.
           example: false
     DeploymentStatus:
       type: string
-      description: 'This status merges the ''activity_status'' and ''error_status''
-        fields, with error states taking precedence over activity states when errors
-        are present. For example, if the activity status is ''deployed'' but the error
-        status is ''failed'', the status is ''failed''. However, if the error status
-        is ''none'' and the activity status is ''deployed'', the status is ''deployed''.
-
-        '
+      description: |
+        This status merges the 'activity_status' and 'error_status' fields, with error states taking precedence over activity states when errors are present. For example, if the activity status is 'deployed' but the error status is 'failed', the status is 'failed'. However, if the error status is 'none' and the activity status is 'deployed', the status is 'deployed'.
       enum:
-      - drifted
-      - staged
-      - queued
-      - deployed
-      - removing
-      - archived
-      - failed
-      - retrying
+        - drifted
+        - staged
+        - queued
+        - deployed
+        - removing
+        - archived
+        - failed
+        - retrying
       x-enum-varnames:
-      - DEPLOYMENT_STATUS_DRIFTED
-      - DEPLOYMENT_STATUS_STAGED
-      - DEPLOYMENT_STATUS_QUEUED
-      - DEPLOYMENT_STATUS_DEPLOYED
-      - DEPLOYMENT_STATUS_REMOVING
-      - DEPLOYMENT_STATUS_ARCHIVED
-      - DEPLOYMENT_STATUS_FAILED
-      - DEPLOYMENT_STATUS_RETRYING
+        - DEPLOYMENT_STATUS_DRIFTED
+        - DEPLOYMENT_STATUS_STAGED
+        - DEPLOYMENT_STATUS_QUEUED
+        - DEPLOYMENT_STATUS_DEPLOYED
+        - DEPLOYMENT_STATUS_REMOVING
+        - DEPLOYMENT_STATUS_ARCHIVED
+        - DEPLOYMENT_STATUS_FAILED
+        - DEPLOYMENT_STATUS_RETRYING
     DeploymentErrorStatus:
       type: string
-      description: 'Last known error state of the deployment.
-
+      description: |
+        Last known error state of the deployment.
 
         `none` means there are no errors.
 
+        `retrying` means an error has been encountered and the agent is retrying to reach the target status.
 
-        `retrying` means an error has been encountered and the agent is retrying to
-        reach the target status.
-
-
-        `failed` means a fatal error has been encountered; the deployment is archived
-        and, if deployed, removed from the device.
-
-        '
+        `failed` means a fatal error has been encountered; the deployment is archived and, if deployed, removed from the device.
       enum:
-      - none
-      - failed
-      - retrying
+        - none
+        - failed
+        - retrying
       x-enum-varnames:
-      - DEPLOYMENT_ERROR_STATUS_NONE
-      - DEPLOYMENT_ERROR_STATUS_FAILED
-      - DEPLOYMENT_ERROR_STATUS_RETRYING
+        - DEPLOYMENT_ERROR_STATUS_NONE
+        - DEPLOYMENT_ERROR_STATUS_FAILED
+        - DEPLOYMENT_ERROR_STATUS_RETRYING
     DeploymentTargetStatus:
       type: string
-      description: 'Desired state of the deployment.
-
+      description: |
+        Desired state of the deployment.
 
         `staged` means the deployment is ready to be deployed.
 
+        `deployed` means all config instances in the deployment are available for consumption on the device.
 
-        `deployed` means all config instances in the deployment are available for
-        consumption on the device.
-
-
-        `archived` means the deployment is available for historical reference but
-        cannot be deployed and is not active on the device.
-
-        '
+        `archived` means the deployment is available for historical reference but cannot be deployed and is not active on the device.
       enum:
-      - staged
-      - deployed
-      - archived
+        - staged
+        - deployed
+        - archived
       x-enum-varnames:
-      - DEPLOYMENT_TARGET_STATUS_STAGED
-      - DEPLOYMENT_TARGET_STATUS_DEPLOYED
-      - DEPLOYMENT_TARGET_STATUS_ARCHIVED
+        - DEPLOYMENT_TARGET_STATUS_STAGED
+        - DEPLOYMENT_TARGET_STATUS_DEPLOYED
+        - DEPLOYMENT_TARGET_STATUS_ARCHIVED
     BaseDeployment:
       title: Base Deployment
       type: object
       required:
-      - object
-      - id
-      - description
-      - status
-      - activity_status
-      - error_status
-      - target_status
-      - device_id
-      - release_id
-      - created_at
-      - updated_at
+        - object
+        - id
+        - description
+        - status
+        - activity_status
+        - error_status
+        - target_status
+        - device_id
+        - release_id
+        - created_at
+        - updated_at
       properties:
         object:
           type: string
           enum:
-          - deployment
+            - deployment
           example: deployment
           x-stainless-const: true
           description: The object type, which is always `deployment`.
@@ -863,17 +724,17 @@ components:
       title: Base Release
       type: object
       required:
-      - object
-      - id
-      - version
-      - git_commit_id
-      - created_at
-      - updated_at
+        - object
+        - id
+        - version
+        - git_commit_id
+        - created_at
+        - updated_at
       properties:
         object:
           type: string
           enum:
-          - release
+            - release
           example: release
           x-stainless-const: true
           description: The object type, which is always `release`.
@@ -903,32 +764,32 @@ components:
     GitRepositoryType:
       type: string
       enum:
-      - github
-      - gitlab
-      - bitbucket
+        - github
+        - gitlab
+        - bitbucket
       x-enum-varnames:
-      - GIT_REPO_TYPE_GITHUB
-      - GIT_REPO_TYPE_GITLAB
-      - GIT_REPO_TYPE_BITBUCKET
+        - GIT_REPO_TYPE_GITHUB
+        - GIT_REPO_TYPE_GITLAB
+        - GIT_REPO_TYPE_BITBUCKET
     BaseGitCommit:
       title: Base Git Commit
       type: object
       required:
-      - object
-      - id
-      - sha
-      - message
-      - repository_owner
-      - repository_name
-      - repository_type
-      - repository_url
-      - commit_url
-      - created_at
+        - object
+        - id
+        - sha
+        - message
+        - repository_owner
+        - repository_name
+        - repository_type
+        - repository_url
+        - commit_url
+        - created_at
       properties:
         object:
           type: string
           enum:
-          - git_commit
+            - git_commit
           example: git_commit
           x-stainless-const: true
           description: The object type, which is always `git_commit`.
@@ -970,7 +831,7 @@ components:
     GitCommit:
       title: Git Commit
       allOf:
-      - $ref: '#/components/schemas/BaseGitCommit'
+        - $ref: '#/components/schemas/BaseGitCommit'
       example:
         object: git_commit
         id: git_commit_123
@@ -985,14 +846,14 @@ components:
     Release:
       title: Release
       allOf:
-      - $ref: '#/components/schemas/BaseRelease'
-      - type: object
-        properties:
-          git_commit:
-            description: The git commit associated with this release.
-            nullable: true
-            allOf:
-            - $ref: '#/components/schemas/GitCommit'
+        - $ref: '#/components/schemas/BaseRelease'
+        - type: object
+          properties:
+            git_commit:
+              description: The git commit associated with this release.
+              nullable: true
+              allOf:
+                - $ref: '#/components/schemas/GitCommit'
       example:
         object: release
         id: rls_123
@@ -1004,18 +865,18 @@ components:
       title: Base Config Instance
       type: object
       required:
-      - object
-      - id
-      - config_type_name
-      - filepath
-      - created_at
-      - config_schema_id
-      - config_type_id
+        - object
+        - id
+        - config_type_name
+        - filepath
+        - created_at
+        - config_schema_id
+        - config_type_id
       properties:
         object:
           type: string
           enum:
-          - config_instance
+            - config_instance
           example: config_instance
           x-stainless-const: true
           description: The object type, which is always `config_instance`.
@@ -1030,8 +891,7 @@ components:
         filepath:
           type: string
           example: /srv/miru/configs/v1/motion-control.json
-          description: The absolute file system path where this config instance is
-            written.
+          description: The absolute file system path where this config instance is written.
         created_at:
           type: string
           format: date-time
@@ -1040,53 +900,63 @@ components:
         config_schema_id:
           type: string
           example: cfg_sch_123
-          description: ID of the config schema which the config instance must adhere
-            to.
+          description: ID of the config schema which the config instance must adhere to.
         config_type_id:
           type: string
           example: cfg_type_123
-          description: ID of the config type which the config instance (and its schema)
-            is a part of.
+          description: ID of the config type which the config instance (and its schema) is a part of.
     InstanceFormat:
       title: Instance Format
       type: string
+      description: |
+        The on-disk format used when a config instance is written to the device filesystem.
+        - `json`: standard JSON.
+        - `yaml`: YAML 1.2.
+        - `jsonc`: JSON with comments (JSON plus `//` and `/* */` comment syntax).
       enum:
-      - json
-      - yaml
-      - jsonc
+        - json
+        - yaml
+        - jsonc
       x-enum-varnames:
-      - INSTANCE_FORMAT_JSON
-      - INSTANCE_FORMAT_YAML
-      - INSTANCE_FORMAT_JSONC
+        - INSTANCE_FORMAT_JSON
+        - INSTANCE_FORMAT_YAML
+        - INSTANCE_FORMAT_JSONC
     InstanceContent:
       title: Instance Content
       type: object
       required:
-      - format
-      - data
+        - format
+        - data
       properties:
         format:
           $ref: '#/components/schemas/InstanceFormat'
         data:
           type: string
           description: The configuration values associated with the config instance.
-          example: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\":\
-            \ true,\n  \"max_payload_kg\": 10.0\n}\n"
+          example: |
+            {
+              "enable_autonomy": true,
+              "enable_remote_control": true,
+              "max_payload_kg": 10.0
+            }
       example:
         format: json
-        data: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\": true,\n\
-          \  \"max_payload_kg\": 10.0\n}\n"
+        data: |
+          {
+            "enable_autonomy": true,
+            "enable_remote_control": true,
+            "max_payload_kg": 10.0
+          }
     ConfigInstance:
       title: Config Instance
       allOf:
-      - $ref: '#/components/schemas/BaseConfigInstance'
-      - type: object
-        properties:
-          content:
-            allOf:
-            - $ref: '#/components/schemas/InstanceContent'
-            description: The configuration values associated with the config instance.
-              Expand the content using 'expand=content' in the query string.
+        - $ref: '#/components/schemas/BaseConfigInstance'
+        - type: object
+          properties:
+            content:
+              allOf:
+                - $ref: '#/components/schemas/InstanceContent'
+              description: The configuration values associated with the config instance. Expand the content using 'expand=content' in the query string.
       example:
         object: config_instance
         id: cfg_inst_123
@@ -1098,34 +968,33 @@ components:
     Deployment:
       title: Deployment
       allOf:
-      - $ref: '#/components/schemas/BaseDeployment'
-      - type: object
-        properties:
-          release:
-            allOf:
-            - $ref: '#/components/schemas/Release'
-            description: Expand the release using 'expand=release' in the query string.
-          config_instances:
-            type: array
-            items:
-              $ref: '#/components/schemas/ConfigInstance'
-            description: Expand the config instances using 'expand=config_instances'
-              in the query string.
-            example:
-            - object: config_instance
-              id: cfg_inst_123
-              config_type_name: Motion Control
-              filepath: /srv/miru/configs/v1/motion-control.json
-              created_at: '2021-01-01T00:00:00Z'
-              config_schema_id: cfg_sch_123
-              config_type_id: cfg_typ_123
-            - object: config_instance
-              id: cfg_inst_456
-              config_type_name: Localization
-              filepath: /srv/miru/configs/v1/localization.json
-              created_at: '2021-01-02T00:00:00Z'
-              config_schema_id: cfg_sch_456
-              config_type_id: cfg_typ_456
+        - $ref: '#/components/schemas/BaseDeployment'
+        - type: object
+          properties:
+            release:
+              allOf:
+                - $ref: '#/components/schemas/Release'
+              description: Expand the release using 'expand=release' in the query string.
+            config_instances:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConfigInstance'
+              description: Expand the config instances using 'expand=config_instances' in the query string.
+              example:
+                - object: config_instance
+                  id: cfg_inst_123
+                  config_type_name: Motion Control
+                  filepath: /srv/miru/configs/v1/motion-control.json
+                  created_at: '2021-01-01T00:00:00Z'
+                  config_schema_id: cfg_sch_123
+                  config_type_id: cfg_typ_123
+                - object: config_instance
+                  id: cfg_inst_456
+                  config_type_name: Localization
+                  filepath: /srv/miru/configs/v1/localization.json
+                  created_at: '2021-01-02T00:00:00Z'
+                  config_schema_id: cfg_sch_456
+                  config_type_id: cfg_typ_456
       example:
         object: deployment
         id: dpl_123
@@ -1141,92 +1010,545 @@ components:
     DeploymentList:
       title: Deployment List
       allOf:
-      - $ref: '#/components/schemas/PaginatedList'
-      - type: object
-        required:
-        - data
-        properties:
-          data:
-            description: The list of deployments.
-            type: array
-            items:
-              $ref: '#/components/schemas/Deployment'
+        - $ref: '#/components/schemas/PaginatedList'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              description: The list of deployments.
+              type: array
+              items:
+                $ref: '#/components/schemas/Deployment'
     DeploymentExpansion:
       type: string
       enum:
-      - release
-      - config_instances
+        - release
+        - config_instances
       x-enum-varnames:
-      - DEPLOYMENT_EXPAND_RELEASE
-      - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
+        - DEPLOYMENT_EXPAND_RELEASE
+        - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
     UpdateDeploymentRequest:
       title: Update Deployment Request
       type: object
       properties:
         activity_status:
           allOf:
-          - $ref: '#/components/schemas/DeploymentActivityStatus'
+            - $ref: '#/components/schemas/DeploymentActivityStatus'
           description: The updated activity status of the deployment.
         error_status:
           allOf:
-          - $ref: '#/components/schemas/DeploymentErrorStatus'
+            - $ref: '#/components/schemas/DeploymentErrorStatus'
           description: The updated error status of the deployment.
         deployed_at:
           type: string
           format: date-time
-          description: Independent historical watermark recording the last time the
-            agent transitioned this deployment to Deployed. The current state is determined
-            by activity_status, not by which timestamp is present. Set by the agent.
+          description: Independent historical watermark recording the last time the agent transitioned this deployment to Deployed. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
         archived_at:
           type: string
           format: date-time
-          description: Independent historical watermark recording the last time the
-            agent transitioned this deployment to Archived. The current state is determined
-            by activity_status, not by which timestamp is present. Set by the agent.
-    DeviceStatus:
-      type: string
-      description: 'The status of the device.
-
-        - Inactive: The miru agent has not yet been installed / authenticated
-
-        - Activating: The miru agent is currently being installed / authenticated
-        (should only last for a few seconds)
-
-        - Online: The miru agent has successfully pinged the server within the last
-        60 seconds.
-
-        - Offline: The miru agent has not successfully pinged the server within the
-        last 60 seconds (e.g. network issues, device is powered off, etc.)
-
-        '
-      enum:
-      - inactive
-      - activating
-      - online
-      - offline
-      x-enum-varnames:
-      - DEVICE_STATUS_INACTIVE
-      - DEVICE_STATUS_ACTIVATING
-      - DEVICE_STATUS_ONLINE
-      - DEVICE_STATUS_OFFLINE
-    BaseDevice:
-      title: Base Device
+          description: Independent historical watermark recording the last time the agent transitioned this deployment to Archived. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
+    UploadRuleSource:
+      title: Upload Rule Source
       type: object
       required:
-      - object
-      - id
-      - name
-      - status
-      - agent_version
-      - last_connected_at
-      - last_disconnected_at
-      - created_at
-      - updated_at
+        - glob
+        - poll_interval
+        - stability_window
+      properties:
+        glob:
+          type: string
+          pattern: ^/
+          example: /var/log/robot/*.log
+          description: An absolute glob pattern (must start with `/`) that selects the files to upload.
+        poll_interval:
+          type: string
+          pattern: ^\d+(s|m|h)$
+          example: 60s
+          description: How often the agent checks matching files for upload eligibility, as a duration (e.g. `60s`).
+        stability_window:
+          type: string
+          pattern: ^\d+(s|m|h)$
+          example: 60s
+          description: How long a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload, as a duration (e.g. `60s`). Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
+      example:
+        glob: /var/log/robot/*.log
+        poll_interval: 60s
+        stability_window: 60s
+    UploadDeletePolicy:
+      title: Upload Delete Policy
+      type: string
+      description: |
+        When the device deletes the local source file after collecting it for upload.
+        - `never`: never delete the local file.
+        - `after_upload`: delete the local file immediately once the upload is durably confirmed.
+      enum:
+        - never
+        - after_upload
+      x-enum-varnames:
+        - UPLOAD_DELETE_POLICY_NEVER
+        - UPLOAD_DELETE_POLICY_AFTER_UPLOAD
+    UploadRuleDestination:
+      title: Upload Rule Destination
+      type: object
+      required:
+        - bucket_id
+        - bucket_name
+        - path
+        - delete_policy
+      properties:
+        bucket_id:
+          type: string
+          example: bkt_123
+          description: ID of the bucket this rule uploads to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Name of the bucket this rule uploads to.
+        path:
+          type: string
+          pattern: .*\{device_id\}.*
+          example: logs/{device_id}/{filename}
+          description: The object-path template the collected file is written to. MUST contain `{device_id}` so each device's uploads are namespaced under its own verified ID.
+        delete_policy:
+          allOf:
+            - $ref: '#/components/schemas/UploadDeletePolicy'
+          description: When the device deletes the local source file after collecting it.
+      example:
+        bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
+        path: logs/{device_id}/{filename}
+        delete_policy: never
+    BaseUploadRule:
+      title: Base Upload Rule
+      type: object
+      required:
+        - object
+        - id
+        - upload_collection_id
+        - upload_collection_name
+        - digest
+        - source
+        - destination
+        - created_at
+        - updated_at
       properties:
         object:
           type: string
           enum:
-          - device
+            - upload_rule
+          example: upload_rule
+          x-stainless-const: true
+          description: The object type, which is always `upload_rule`.
+        id:
+          type: string
+          example: upl_rule_123
+          description: ID of the upload rule.
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection this rule belongs to.
+        upload_collection_name:
+          type: string
+          example: Robot Logs
+          description: The name of the upload collection this rule belongs to.
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the upload rule. Upload rules are immutable and deduplicated by digest within an upload collection.
+        source:
+          $ref: '#/components/schemas/UploadRuleSource'
+        destination:
+          $ref: '#/components/schemas/UploadRuleDestination'
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the upload rule was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the upload rule was last updated.
+      example:
+        object: upload_rule
+        id: upl_rule_123
+        upload_collection_id: upl_col_123
+        upload_collection_name: Robot Logs
+        digest: sha256:1234567890
+        source:
+          glob: /var/log/robot/*.log
+          poll_interval: 60s
+          stability_window: 60s
+        destination:
+          bucket_id: bkt_123
+          bucket_name: my-uploads-bucket
+          path: logs/{device_id}/{filename}
+          delete_policy: never
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
+    UploadRuleList:
+      title: Upload Rule List
+      allOf:
+        - $ref: '#/components/schemas/PaginatedList'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/BaseUploadRule'
+              description: The list of upload rules.
+    UploadSource:
+      title: Upload Source
+      type: object
+      description: Source-side details of the file on the device that produced an upload.
+      required:
+        - file_path
+        - file_modified_at
+      properties:
+        file_path:
+          type: string
+          example: /var/log/robot/robot.log
+          description: Absolute path of the file on the device. Its basename renders the `{filename}` token in the destination path template.
+        file_modified_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
+      example:
+        file_path: /var/log/robot/robot.log
+        file_modified_at: '2021-01-01T00:00:00Z'
+    CreateUploadRequest:
+      title: Create Upload Request
+      type: object
+      required:
+        - upload_rule_id
+        - source
+        - digest
+        - size
+        - release_id
+        - deployment_id
+      properties:
+        upload_rule_id:
+          type: string
+          example: upl_rule_123
+          description: ID of the upload rule that selected this file.
+        source:
+          allOf:
+            - $ref: '#/components/schemas/UploadSource'
+          description: Source-side details of the file on the device.
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the file being uploaded.
+        size:
+          type: integer
+          format: int64
+          example: 1048576
+          description: The size of the file in bytes.
+        incomplete:
+          type: boolean
+          default: false
+          example: false
+          description: Whether the file was incomplete when collected (e.g. it was never closed cleanly / has no finalization marker). Sets the upload's `incomplete` flag. Defaults to false.
+        release_id:
+          type: string
+          example: rls_123
+          description: ID of the release the device is currently on.
+        deployment_id:
+          type: string
+          example: dpl_123
+          description: ID of the deployment the device is currently on.
+    UploadRequiredHeaders:
+      title: Upload Required Headers
+      type: object
+      description: |
+        Provenance metadata the device MUST send as headers on the presigned PUT.
+        These values are echoed into the bucket object's metadata and are populated
+        server-side from the authenticated device's identity; the device never
+        supplies them as request input.
+      required:
+        - device_id
+        - release_id
+        - deployment_id
+        - config_version
+        - digest
+        - file_modified_at
+      properties:
+        device_id:
+          type: string
+          example: dvc_123
+          description: The verified ID of the device that produced the upload.
+        release_id:
+          type: string
+          example: rls_123
+          description: The ID of the release the device was on when the file was captured.
+        deployment_id:
+          type: string
+          example: dpl_123
+          description: The ID of the deployment the device was on when the file was captured.
+        config_version:
+          type: string
+          example: v1.0.0
+          description: The config version active on the device when the file was captured.
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the file being uploaded.
+        file_modified_at:
+          type: string
+          example: '2021-01-01T00:00:00Z'
+          description: The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
+      example:
+        device_id: dvc_123
+        release_id: rls_123
+        deployment_id: dpl_123
+        config_version: v1.0.0
+        digest: sha256:1234567890
+        file_modified_at: '2021-01-01T00:00:00Z'
+    PresignedUpload:
+      title: Presigned Upload
+      type: object
+      required:
+        - upload_id
+        - upload_url
+        - object_key
+        - expires_at
+        - required_headers
+        - already_uploaded
+      properties:
+        upload_id:
+          type: string
+          example: upl_123
+          description: ID of the upload ledger entry created for this request.
+        upload_url:
+          type: string
+          example: https://storage.googleapis.com/my-uploads-bucket/logs/dvc_123/robot.log?X-Goog-Signature=...
+          description: The short-lived V4-presigned PUT URL the device uploads the file to.
+        object_key:
+          type: string
+          example: logs/dvc_123/robot.log
+          description: The object path in the destination bucket. Carries the device's verified ID.
+        expires_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:15:00Z'
+          description: Timestamp after which the presigned URL is no longer valid.
+        required_headers:
+          $ref: '#/components/schemas/UploadRequiredHeaders'
+        already_uploaded:
+          type: boolean
+          example: false
+          description: True if a durable upload with the same digest already exists, in which case the device may skip the PUT.
+      example:
+        upload_id: upl_123
+        upload_url: https://storage.googleapis.com/my-uploads-bucket/logs/dvc_123/robot.log?X-Goog-Signature=...
+        object_key: logs/dvc_123/robot.log
+        expires_at: '2021-01-01T00:15:00Z'
+        required_headers:
+          device_id: dvc_123
+          release_id: rls_123
+          deployment_id: dpl_123
+          config_version: v1.0.0
+          digest: sha256:1234567890
+          file_modified_at: '2021-01-01T00:00:00Z'
+        already_uploaded: false
+    UploadDestination:
+      title: Upload Destination
+      type: object
+      description: Destination-side details of where an upload was written.
+      required:
+        - bucket_id
+        - object_key
+      properties:
+        bucket_id:
+          type: string
+          example: bkt_123
+          description: ID of the registered bucket the file was uploaded to.
+        object_key:
+          type: string
+          example: logs/dvc_123/robot.log
+          description: The object path the file was written to in the destination bucket. Carries the device's verified ID.
+      example:
+        bucket_id: bkt_123
+        object_key: logs/dvc_123/robot.log
+    UploadStatus:
+      title: Upload Status
+      type: string
+      description: |
+        The lifecycle status of an upload in the ledger.
+        - `pending`: a presigned URL has been minted but the device has not yet confirmed a durable write.
+        - `uploaded`: the device confirmed a durable write to the bucket.
+      enum:
+        - pending
+        - uploaded
+      x-enum-varnames:
+        - UPLOAD_STATUS_PENDING
+        - UPLOAD_STATUS_UPLOADED
+    BaseUpload:
+      title: Base Upload
+      type: object
+      required:
+        - object
+        - id
+        - device_id
+        - upload_rule_id
+        - upload_rule_name
+        - source
+        - destination
+        - digest
+        - size
+        - status
+        - incomplete
+        - release_id
+        - deployment_id
+        - uploaded_at
+        - created_at
+        - updated_at
+        - workspace_id
+      properties:
+        object:
+          type: string
+          enum:
+            - upload
+          example: upload
+          x-stainless-const: true
+          description: The object type, which is always `upload`.
+        id:
+          type: string
+          example: upl_123
+          description: ID of the upload.
+        device_id:
+          type: string
+          example: dvc_123
+          description: ID of the device that produced the upload.
+        upload_rule_id:
+          type: string
+          example: upl_rule_123
+          description: ID of the upload rule that produced the upload.
+        upload_rule_name:
+          type: string
+          example: Robot Logs
+          description: Human-readable name of the upload rule that produced the upload.
+        source:
+          allOf:
+            - $ref: '#/components/schemas/UploadSource'
+          description: Source-side details of the file on the device that produced this upload.
+        destination:
+          allOf:
+            - $ref: '#/components/schemas/UploadDestination'
+          description: Destination-side details of where the file was uploaded.
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the uploaded file.
+        size:
+          type: integer
+          format: int64
+          example: 1048576
+          description: The size of the uploaded file in bytes.
+        status:
+          $ref: '#/components/schemas/UploadStatus'
+        incomplete:
+          type: boolean
+          example: false
+          description: 'Whether the file was incomplete when collected (the mint request carried `incomplete: true`). Independent of `status`.'
+        release_id:
+          type: string
+          example: rls_123
+          description: ID of the release the device was on when the upload was produced.
+        deployment_id:
+          type: string
+          example: dpl_123
+          description: ID of the deployment that was active on the device when the upload was produced.
+        uploaded_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2021-01-01T00:00:10Z'
+          description: Timestamp of when the upload was durably confirmed. Null until the upload completes.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the upload was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the upload was last updated.
+        workspace_id:
+          type: string
+          example: wksp_123
+          description: ID of the workspace that owns the upload.
+    Upload:
+      title: Upload
+      allOf:
+        - $ref: '#/components/schemas/BaseUpload'
+      example:
+        object: upload
+        id: upl_123
+        device_id: dvc_123
+        upload_rule_id: upl_rule_123
+        upload_rule_name: Robot Logs
+        source:
+          file_path: /var/log/robot/robot.log
+          file_modified_at: '2021-01-01T00:00:00Z'
+        destination:
+          bucket_id: bkt_123
+          object_key: logs/dvc_123/robot.log
+        digest: sha256:1234567890
+        size: 1048576
+        status: uploaded
+        incomplete: false
+        release_id: rls_123
+        deployment_id: dpl_123
+        uploaded_at: '2021-01-01T00:00:10Z'
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
+        workspace_id: wksp_123
+    DeviceStatus:
+      type: string
+      description: |
+        The status of the device.
+        - Inactive: The miru agent has not yet been installed / authenticated
+        - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds)
+        - Online: The miru agent has successfully pinged the server within the last 60 seconds.
+        - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.)
+        - Archived: The device has been archived. The agent's session has been revoked and the device no longer participates in workspace operations. See `archived_at` for when this occurred.
+      enum:
+        - inactive
+        - activating
+        - online
+        - offline
+        - archived
+      x-enum-varnames:
+        - DEVICE_STATUS_INACTIVE
+        - DEVICE_STATUS_ACTIVATING
+        - DEVICE_STATUS_ONLINE
+        - DEVICE_STATUS_OFFLINE
+        - DEVICE_STATUS_ARCHIVED
+    BaseDevice:
+      title: Base Device
+      type: object
+      required:
+        - object
+        - id
+        - name
+        - description
+        - status
+        - agent_version
+        - last_connected_at
+        - last_disconnected_at
+        - created_at
+        - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+            - device
           example: device
           x-stainless-const: true
           description: The object type, which is always `device`.
@@ -1238,6 +1560,11 @@ components:
           type: string
           example: My Device
           description: Name of the device.
+        description:
+          type: string
+          nullable: true
+          example: Welder on line 3
+          description: A free-form description of the device.
         status:
           $ref: '#/components/schemas/DeviceStatus'
         agent_version:
@@ -1250,15 +1577,13 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           nullable: true
-          description: Timestamp of when the device was last made an initial connection
-            (this is not the same as the last time the device was seen).
+          description: Timestamp of when the device was last made an initial connection (this is not the same as the last time the device was seen).
         last_disconnected_at:
           type: string
           format: date-time
           example: '2021-01-01T00:00:00Z'
           nullable: true
-          description: Timestamp of when the device was last disconnected (this is
-            not the same as the last time the device was seen).
+          description: Timestamp of when the device was last disconnected (this is not the same as the last time the device was seen).
         created_at:
           type: string
           format: date-time
@@ -1272,19 +1597,20 @@ components:
     Device:
       title: Device
       allOf:
-      - $ref: '#/components/schemas/BaseDevice'
-      - type: object
-        required:
-        - session_id
-        properties:
-          session_id:
-            type: string
-            example: dvc_sess_123
-            description: Session ID of the device.
+        - $ref: '#/components/schemas/BaseDevice'
+        - type: object
+          required:
+            - session_id
+          properties:
+            session_id:
+              type: string
+              example: dvc_sess_123
+              description: Session ID of the device.
       example:
         object: device
         id: dvc_123
         name: My Device
+        description: Welder on line 3
         status: online
         agent_version: v1.0.0
         last_connected_at: '2021-01-01T00:00:00Z'
@@ -1305,17 +1631,15 @@ components:
       type: object
       description: Provision a device using a provisioning token.
       required:
-      - public_key_pem
-      - agent_version
-      - name
+        - public_key_pem
+        - agent_version
+        - name
       properties:
         public_key_pem:
           type: string
           description: The public key in PEM format.
-          example: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END
-            PUBLIC KEY-----
-
-            '
+          example: |
+            -----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END PUBLIC KEY-----
         agent_version:
           type: string
           description: The version of the agent the device is running.
@@ -1327,23 +1651,16 @@ components:
     ReprovisionDeviceRequest:
       title: Reprovision Device Request
       type: object
-      description: 'Reprovision an existing device. Reprovisioning rebinds the device
-        record to the calling physical machine: it invalidates any prior session,
-        registers the new public key, and triggers a redeploy of the device''s current
-        deployment. Deployment history is preserved across the swap. The device''s
-        name is not provided here because the target device record already has a name;
-        the device is identified by the provisioning token.'
+      description: 'Reprovision an existing device. Reprovisioning rebinds the device record to the calling physical machine: it invalidates any prior session, registers the new public key, and triggers a redeploy of the device''s current deployment. Deployment history is preserved across the swap. The device''s name is not provided here because the target device record already has a name; the device is identified by the provisioning token.'
       required:
-      - public_key_pem
-      - agent_version
+        - public_key_pem
+        - agent_version
       properties:
         public_key_pem:
           type: string
           description: The public key in PEM format.
-          example: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END
-            PUBLIC KEY-----
-
-            '
+          example: |
+            -----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjVb+KEVBPIGDulBAuAUL\nT8PMvLW+VZ8aZ5p63/uHxM15fSPGnWZ4YtRHVed9gVRufrld3Pei7lP1LB88x6T0\nOPIQjMVXtx87bYSFFSrjqNg9yDUn17HDg7afehXoFuFi/q2QtTBKgOZqnPTRVHEM\nJqVjGCGb70AzpbcS6kdmlGjQY1R9uLbn8hREY+bUq5qgsnC2xfp5iioSYK8bkIUH\nexGybOcSLO21YIIsWoysBPppc1qqSo46L/xK+YjYkdMi3Qt0I07lS6FQk4lbUr6h\nHqRyCVEfUgqX4zy2ba0PHNImokltQfwrljfCZ/odCazCvqbrNptreQLoNVtN7NA4\nYQIDAQAB\n-----END PUBLIC KEY-----
         agent_version:
           type: string
           description: The version of the agent the device is running.
@@ -1352,8 +1669,8 @@ components:
       title: Token Response
       type: object
       required:
-      - token
-      - expires_at
+        - token
+        - expires_at
       properties:
         token:
           type: string
@@ -1370,7 +1687,7 @@ components:
     SyncDevice:
       type: object
       required:
-      - is_synced
+        - is_synced
       properties:
         is_synced:
           type: boolean
@@ -1381,8 +1698,8 @@ components:
     Ping:
       type: object
       required:
-      - message_id
-      - timestamp
+        - message_id
+        - timestamp
       properties:
         message_id:
           type: string
@@ -1399,8 +1716,8 @@ components:
     Pong:
       type: object
       required:
-      - message_id
-      - timestamp
+        - message_id
+        - timestamp
       properties:
         message_id:
           type: string
@@ -1417,9 +1734,9 @@ components:
     Error:
       type: object
       required:
-      - code
-      - params
-      - message
+        - code
+        - params
+        - message
       properties:
         code:
           type: string
@@ -1443,7 +1760,7 @@ components:
       required: true
       schema:
         type: string
-        example: v0.4
+        example: v0.5.0-pre
       description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id
@@ -1457,21 +1774,19 @@ components:
       name: disposition
       in: query
       required: false
-      description: Controls the Content-Disposition behavior. Use `inline` to display
-        in browser or `attachment` to trigger a file download.
+      description: Controls the Content-Disposition behavior. Use `inline` to display in browser or `attachment` to trigger a file download.
       schema:
         type: string
         enum:
-        - inline
-        - attachment
+          - inline
+          - attachment
         default: inline
         example: inline
     offset:
       name: offset
       in: query
       required: false
-      description: The offset of the items to return. An offset of 10 with a limit
-        of 10 returns items 11-20.
+      description: The offset of the items to return. An offset of 10 with a limit of 10 returns items 11-20.
       schema:
         type: integer
         default: 0
@@ -1481,8 +1796,7 @@ components:
       name: limit
       in: query
       required: false
-      description: The maximum number of items to return. A limit of 15 with an offset
-        of 0 returns items 1-15.
+      description: The maximum number of items to return. A limit of 15 with an offset of 0 returns items 1-15.
       schema:
         type: integer
         default: 10
@@ -1499,7 +1813,7 @@ components:
         items:
           $ref: '#/components/schemas/DeploymentListExpansion'
         example:
-        - release
+          - release
     deployment_search_activity_status:
       name: activity_status
       in: query
@@ -1512,7 +1826,7 @@ components:
         items:
           $ref: '#/components/schemas/DeploymentActivityStatus'
         example:
-        - drifted
+          - drifted
     deployment_id:
       name: deployment_id
       in: path
@@ -1531,7 +1845,7 @@ components:
         items:
           $ref: '#/components/schemas/DeploymentExpansion'
         example:
-        - release
+          - release
     release_id:
       name: release_id
       in: path
@@ -1540,6 +1854,14 @@ components:
       schema:
         type: string
         example: rls_123
+    upload_id:
+      name: upload_id
+      in: path
+      required: true
+      description: The unique identifier of the upload.
+      schema:
+        type: string
+        example: upl_123
     git_commit_id:
       name: git_commit_id
       in: path

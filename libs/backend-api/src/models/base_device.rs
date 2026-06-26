@@ -20,6 +20,9 @@ pub struct BaseDevice {
     /// Name of the device.
     #[serde(rename = "name")]
     pub name: String,
+    /// A free-form description of the device.
+    #[serde(rename = "description", deserialize_with = "Option::deserialize")]
+    pub description: Option<String>,
     #[serde(rename = "status")]
     pub status: models::DeviceStatus,
     /// The version of the agent the device is running.
@@ -40,11 +43,12 @@ pub struct BaseDevice {
 }
 
 impl BaseDevice {
-    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, agent_version: Option<String>, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String) -> BaseDevice {
+    pub fn new(object: Object, id: String, name: String, description: Option<String>, status: models::DeviceStatus, agent_version: Option<String>, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String) -> BaseDevice {
         BaseDevice {
             object,
             id,
             name,
+            description,
             status,
             agent_version,
             last_connected_at,
