@@ -13,6 +13,7 @@ pub mod default_capacities {
             cfg_inst_content: 1000,
             deployments: 100,
             releases: 1000,
+            upload_rules: 1000,
             git_commits: 100,
         };
         assert_eq!(actual, expected);

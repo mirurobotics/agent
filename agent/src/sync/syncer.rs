@@ -237,6 +237,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deployments: storage_ref.deployments.as_ref(),
             cfg_insts: storage_ref.cfg_insts.as_ref(),
             releases: storage_ref.releases.as_ref(),
+            upload_rules: storage_ref.upload_rules.as_ref(),
             git_commits: storage_ref.git_commits.as_ref(),
         };
         deployments::sync(&deployments::SyncArgs {

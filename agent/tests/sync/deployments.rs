@@ -7,7 +7,9 @@ use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
+use miru_agent::storage::{
+    self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
+};
 use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::SyncErr;
 
@@ -30,6 +32,7 @@ struct Fixture {
     cfg_inst_stor: CfgInsts,
     cfg_inst_content_stor: CfgInstContent,
     release_stor: Releases,
+    upload_rule_stor: UploadRules,
     git_commit_stor: GitCommits,
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
@@ -53,6 +56,9 @@ impl Fixture {
         let (release_stor, _) = Releases::spawn(16, dir.file("releases.json"), 1000)
             .await
             .unwrap();
+        let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules.json"), 1000)
+            .await
+            .unwrap();
         let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
             .await
             .unwrap();
@@ -65,6 +71,7 @@ impl Fixture {
             cfg_inst_stor,
             cfg_inst_content_stor,
             release_stor,
+            upload_rule_stor,
             git_commit_stor,
             http_client: MockClient::default(),
             retry_policy: fsm::RetryPolicy::default(),
@@ -85,6 +92,7 @@ impl Fixture {
                     content: &self.cfg_inst_content_stor,
                 },
                 releases: &self.release_stor,
+                upload_rules: &self.upload_rule_stor,
                 git_commits: &self.git_commit_stor,
             },
             http_client: &self.http_client,
