@@ -5,3 +5,4 @@ pub mod deployment;
 pub mod device;
 pub mod git_commit;
 pub mod release;
+pub mod upload_rule;

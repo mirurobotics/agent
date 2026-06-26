@@ -45,13 +45,13 @@ This plan delivers the two lowest-risk, independently-verifiable slices:
 - [x] (2026-06-26) **M0.2** Re-vendor `api/specs/backend/v04.yaml` from openapi `4c92b71` bundle, stamped info block (version `v0.5.0-pre`, `x-release-version: v0.5.0-pre`, `x-git-commit.sha` = full `4c92b71...c8a4`). Also substituted the `$API_VERSION$` placeholder (APIVersion enum value + MiruVersion example) → `v0.5.0-pre` (see Surprises).
 - [x] (2026-06-26) **M0.3** Ran `api/regen.sh`; 13 new upload model files under `libs/backend-api/src/models/`; `cargo build -p backend-api` succeeds.
 - [x] (2026-06-26) **M0.4** `libs/backend-api/src/models/api_version.rs` renders `ApiVersion::API_VERSION` as `v0.5.0-pre`; header consequence recorded in Decision Log.
-- [ ] **M1.1** Add hand-rolled `agent/src/models/upload_rule.rs` (+ register in `agent/src/models/mod.rs`).
-- [ ] **M1.2** Add `agent/src/http/upload_rules.rs` (`list` + `list_all`) (+ register in `agent/src/http/mod.rs`).
-- [ ] **M1.3** Add `agent/src/storage/upload_rules.rs`; wire into `Capacities`, `Storage` (init/shutdown), and `storage/layout.rs`.
-- [ ] **M1.4** Wire fetch+cache into `agent/src/sync/deployments.rs` (`pull_upload_rules`) and the `sync::deployments::Storage` struct + `syncer.rs` call site.
-- [ ] **M1.5** Extend the test mock (`agent/tests/mocks/http_client.rs`) with an upload-rules call + setter.
-- [ ] **M1.6** Add tests: `agent/tests/http/upload_rules.rs`, storage round-trip + `agent/tests/storage/layout.rs` assertion, model conversion test.
-- [ ] **V** Run `scripts/preflight.sh` and confirm `Preflight clean` (lint + covgate + tools). Confirm covgate thresholds still pass (models = 100%, http = 93.9%, storage = 94.83%).
+- [x] (2026-06-26) **M1.1** Added `agent/src/models/upload_rule.rs` (`UploadRule`, `UploadRuleSource`, `UploadRuleDestination`, `DeletePolicy`, `UploadRuleID`) + registered/re-exported in `agent/src/models/mod.rs`. `DeletePolicy` is hand-rolled (not via `impl_status_enum!` — that macro needs an `agent_type` device-API enum that doesn't exist for delete policy).
+- [x] (2026-06-26) **M1.2** Added `agent/src/http/upload_rules.rs` (`list` + `list_all`, pagination only) + registered in `agent/src/http/mod.rs`.
+- [x] (2026-06-26) **M1.3** Added `agent/src/storage/upload_rules.rs`; wired into `Capacities` (default 1000), `Storage` init/shutdown, and `storage/layout.rs` (`upload_rules.json`).
+- [x] (2026-06-26) **M1.4** Wired fetch+cache into `agent/src/sync/deployments.rs` (`pull_upload_rules`, `write_if_absent`) + `sync::deployments::Storage` field + `syncer.rs` call site.
+- [x] (2026-06-26) **M1.5** Extended `agent/tests/mocks/http_client.rs` with `Call::ListUploadRules`, `set_list_all_upload_rules`/`set_list_upload_rules_page`, and `GET /upload_rules` routing.
+- [x] (2026-06-26) **M1.6** Added tests: `agent/tests/http/upload_rules.rs` (list/list_all/pagination/error), `agent/tests/storage/upload_rules.rs` (round-trip + no-overwrite), `agent/tests/storage/layout.rs` (`upload_rules()` path), `agent/tests/models/upload_rule.rs` (serde harness + `From` + invalid-date fallback + `DeletePolicy`), and updated `agent/tests/storage/caches.rs`. All 24 new tests pass; existing sync/caches suites (95 tests) still green.
+- [ ] **V** DEFERRED to the later preflight/lint step (per the implementation brief, the final preflight/lint orchestration is run separately). Verified locally instead: `cargo build -p backend-api -p miru-agent` clean, `cargo test --features test` new+adjacent suites pass, `cargo fmt -p miru-agent -- --check` clean. Covgate (`scripts/covgate.sh`) NOT run here; new model tests were designed to keep `models` at 100% (cover `Display`, both `From` paths, `Deserialize` known/unknown, timestamp fallbacks, `Default`).
 
 Use timestamps when completing steps. Split partially-completed work into "done" / "remaining".
 
@@ -81,7 +81,13 @@ Use timestamps when completing steps. Split partially-completed work into "done"
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones. Must include: whether the backend accepts the `v0.5.0-pre` `Miru-Version` header, the final list of generated upload model files, and the final covgate numbers for `models`/`http`/`storage`.)
+**M0 + M1 implemented (2026-06-26).** `openapi-generator-cli` 7.12.0 was available, so M0 regen ran successfully (no hand-written generated models).
+
+- **Generated upload model files** (13, all under `libs/backend-api/src/models/`): `base_upload.rs`, `base_upload_rule.rs`, `create_upload_request.rs`, `presigned_upload.rs`, `upload.rs`, `upload_delete_policy.rs`, `upload_destination.rs`, `upload_required_headers.rs`, `upload_rule_destination.rs`, `upload_rule_list.rs`, `upload_rule_source.rs`, `upload_source.rs`, `upload_status.rs`. The POST/confirm-related ones (`Upload`, `PresignedUpload`, `CreateUploadRequest`, `UploadSource`, `UploadDestination`, `UploadRequiredHeaders`, `UploadStatus`, `BaseUpload`) are generated-but-unused (expected). Regen also picked up unrelated additive changes already on openapi `main` since v0.4 (notably `DeviceStatus::archived` + doc/optional-field updates).
+- **`Miru-Version` header:** now `v0.5.0-pre` (see the corrected Surprises entry — it derives from the `APIVersion` schema enum, not `info.version`; the `$API_VERSION$` placeholder was substituted by hand to reproduce the openapi release pipeline). **OPEN / integration-test gate:** whether the real backend accepts `v0.5.0-pre` is NOT verified here (all M0/M1 tests use the mock client and send no real header). Confirm backend acceptance before integration-testing an agent built from this snapshot.
+- **Covgate numbers:** NOT measured in this pass (`scripts/covgate.sh`/preflight deferred to the separate validation step per the brief). Thresholds to meet remain `models`=100, `http`=93.9, `storage`=94.83. New model tests were written to keep `models` at 100% (every branch of `upload_rule.rs` is exercised).
+- **Local verification done:** `cargo build -p backend-api -p miru-agent` clean; new test suites (24 tests across http/models/storage) pass; existing sync+caches suites (95 tests) unaffected by the added `pull_upload_rules` sync step; `cargo fmt -p miru-agent -- --check` clean.
+- **Commits:** (1) `feat(api): vendor uploads contract from openapi 4c92b71 as v0.5.0-pre` (spec + regenerated models); (2) `feat(uploads): add upload-rules read path (M1)` (source + mock + fixture compile-fixes); (3) tests commit.
 
 ## Context and Orientation
 
