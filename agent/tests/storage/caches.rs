@@ -91,4 +91,36 @@ pub mod init {
         // shutdown fails when it reaches the already-closed cfg_insts.meta
         storage.shutdown().await.unwrap_err();
     }
+
+    #[tokio::test]
+    async fn shutdown_with_pre_closed_releases() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let capacities = Capacities::default();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
+
+        // pre-close the releases store
+        storage.releases.shutdown().await.unwrap();
+
+        // shutdown fails when it reaches the already-closed releases store
+        storage.shutdown().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_pre_closed_upload_rules() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+        let capacities = Capacities::default();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
+
+        // pre-close the upload_rules store
+        storage.upload_rules.shutdown().await.unwrap();
+
+        // shutdown fails when it reaches the already-closed upload_rules store
+        storage.shutdown().await.unwrap_err();
+    }
 }

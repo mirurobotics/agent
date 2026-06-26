@@ -204,6 +204,14 @@ pub mod delete_policy {
     }
 
     #[test]
+    fn deserialize_non_string_errors() {
+        // a non-string JSON value fails at the inner String deserialization,
+        // exercising the error-propagation path of the custom Deserialize impl.
+        let result: Result<DeletePolicy, _> = serde_json::from_str("123");
+        assert!(result.is_err(), "non-string delete policy should error");
+    }
+
+    #[test]
     fn serialize_is_snake_case() {
         assert_eq!(
             serde_json::to_string(&DeletePolicy::AfterUpload).unwrap(),
