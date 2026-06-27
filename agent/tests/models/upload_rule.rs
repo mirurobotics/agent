@@ -7,7 +7,10 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+use crate::models::harnesses::{
+    serde_tests, status_serde_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
+    StatusFixture,
+};
 
 // ─── fixture ─────────────────────────────────────────────────────────────────
 
@@ -154,68 +157,42 @@ fn from_backend_invalid_dates() {
     assert_eq!(rule.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }
 
-// ─── delete-policy tests ─────────────────────────────────────────────────────
+// ─── delete-policy status enum tests ──────────────────────────────────────────
 
-pub mod delete_policy {
+impl StatusFixture for DeletePolicy {
+    fn variants() -> Vec<Self> {
+        DeletePolicy::variants()
+    }
+    fn wire_str(&self) -> &'static str {
+        self.as_str()
+    }
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                input: "\"never\"",
+                expected: DeletePolicy::Never,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"after_upload\"",
+                expected: DeletePolicy::AfterUpload,
+                valid: true,
+            },
+            StatusCase {
+                input: "\"unknown\"",
+                expected: DeletePolicy::Never,
+                valid: false,
+            },
+        ]
+    }
+}
+
+mod delete_policy {
     use super::*;
+    status_serde_tests!(DeletePolicy);
+}
 
-    #[test]
-    fn default_is_never() {
-        assert_eq!(DeletePolicy::default(), DeletePolicy::Never);
-    }
-
-    #[test]
-    fn display() {
-        assert_eq!(DeletePolicy::Never.to_string(), "never");
-        assert_eq!(DeletePolicy::AfterUpload.to_string(), "after_upload");
-    }
-
-    #[test]
-    fn from_backend_known() {
-        let never: DeletePolicy =
-            (&backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_NEVER).into();
-        assert_eq!(never, DeletePolicy::Never);
-
-        let after: DeletePolicy =
-            (&backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD).into();
-        assert_eq!(after, DeletePolicy::AfterUpload);
-    }
-
-    #[test]
-    fn from_backend_unknown_defaults_to_never() {
-        let unknown: DeletePolicy =
-            (&backend_client::UploadDeletePolicy::UploadDeletePolicyUnknown).into();
-        assert_eq!(unknown, DeletePolicy::Never);
-    }
-
-    #[test]
-    fn deserialize_known() {
-        let never: DeletePolicy = serde_json::from_str("\"never\"").unwrap();
-        assert_eq!(never, DeletePolicy::Never);
-
-        let after: DeletePolicy = serde_json::from_str("\"after_upload\"").unwrap();
-        assert_eq!(after, DeletePolicy::AfterUpload);
-    }
-
-    #[test]
-    fn deserialize_unknown_defaults_to_never() {
-        let unknown: DeletePolicy = serde_json::from_str("\"bogus\"").unwrap();
-        assert_eq!(unknown, DeletePolicy::Never);
-    }
-
-    #[test]
-    fn deserialize_non_string_errors() {
-        // a non-string JSON value fails at the inner String deserialization,
-        // exercising the error-propagation path of the custom Deserialize impl.
-        let result: Result<DeletePolicy, _> = serde_json::from_str("123");
-        assert!(result.is_err(), "non-string delete policy should error");
-    }
-
-    #[test]
-    fn serialize_is_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&DeletePolicy::AfterUpload).unwrap(),
-            "\"after_upload\""
-        );
-    }
+#[test]
+fn delete_policy_default() {
+    assert_eq!(DeletePolicy::default(), DeletePolicy::Never);
 }
