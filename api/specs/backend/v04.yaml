@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: 4c92b71aa5ae84733ff799b9afc6ee975052c8a4
-    url: https://github.com/mirurobotics/openapi/commit/4c92b71aa5ae84733ff799b9afc6ee975052c8a4
-    message: 'feat(uploads): add upload_collection parent resource, re-parent upload rules (#144)'
+    sha: fe6e9ca53d4d67c1aaf6ba36e8b3d5c5f0fcc85f
+    url: https://github.com/mirurobotics/openapi/commit/fe6e9ca53d4d67c1aaf6ba36e8b3d5c5f0fcc85f
+    message: 'refactor(upload-rule): rename interval fields to _secs and type as integer (#146)'
 servers:
   - url: https://staging.api.mirurobotics.com/agent/v1
     description: Staging
@@ -1053,28 +1053,26 @@ components:
       type: object
       required:
         - glob
-        - poll_interval
-        - stability_window
+        - poll_interval_secs
+        - stability_window_secs
       properties:
         glob:
           type: string
           pattern: ^/
           example: /var/log/robot/*.log
           description: An absolute glob pattern (must start with `/`) that selects the files to upload.
-        poll_interval:
-          type: string
-          pattern: ^\d+(s|m|h)$
-          example: 60s
-          description: How often the agent checks matching files for upload eligibility, as a duration (e.g. `60s`).
-        stability_window:
-          type: string
-          pattern: ^\d+(s|m|h)$
-          example: 60s
-          description: How long a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload, as a duration (e.g. `60s`). Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
+        poll_interval_secs:
+          type: integer
+          example: 60
+          description: How often, in seconds, the agent checks matching files for upload eligibility.
+        stability_window_secs:
+          type: integer
+          example: 60
+          description: How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
       example:
         glob: /var/log/robot/*.log
-        poll_interval: 60s
-        stability_window: 60s
+        poll_interval_secs: 60
+        stability_window_secs: 60
     UploadDeletePolicy:
       title: Upload Delete Policy
       type: string
@@ -1178,8 +1176,8 @@ components:
         digest: sha256:1234567890
         source:
           glob: /var/log/robot/*.log
-          poll_interval: 60s
-          stability_window: 60s
+          poll_interval_secs: 60
+          stability_window_secs: 60
         destination:
           bucket_id: bkt_123
           bucket_name: my-uploads-bucket

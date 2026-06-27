@@ -14,20 +14,20 @@ pub struct UploadRuleSource {
     /// An absolute glob pattern (must start with `/`) that selects the files to upload.
     #[serde(rename = "glob")]
     pub glob: String,
-    /// How often the agent checks matching files for upload eligibility, as a duration (e.g. `60s`).
-    #[serde(rename = "poll_interval")]
-    pub poll_interval: String,
-    /// How long a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload, as a duration (e.g. `60s`). Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
-    #[serde(rename = "stability_window")]
-    pub stability_window: String,
+    /// How often, in seconds, the agent checks matching files for upload eligibility.
+    #[serde(rename = "poll_interval_secs")]
+    pub poll_interval_secs: i32,
+    /// How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
+    #[serde(rename = "stability_window_secs")]
+    pub stability_window_secs: i32,
 }
 
 impl UploadRuleSource {
-    pub fn new(glob: String, poll_interval: String, stability_window: String) -> UploadRuleSource {
+    pub fn new(glob: String, poll_interval_secs: i32, stability_window_secs: i32) -> UploadRuleSource {
         UploadRuleSource {
             glob,
-            poll_interval,
-            stability_window,
+            poll_interval_secs,
+            stability_window_secs,
         }
     }
 }
