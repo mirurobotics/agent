@@ -7,9 +7,7 @@ use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage::{
-    self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
-};
+use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
 use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::SyncErr;
 
@@ -17,9 +15,9 @@ use miru_agent::sync::SyncErr;
 use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
 use crate::sync::helpers::*;
 use backend_api::models::{
-    BaseUploadRule, Deployment as BackendDeployment,
-    DeploymentActivityStatus as BackendActivityStatus, DeploymentErrorStatus as BackendErrorStatus,
-    DeploymentTargetStatus as BackendTargetStatus, UpdateDeploymentRequest,
+    Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
+    DeploymentErrorStatus as BackendErrorStatus, DeploymentTargetStatus as BackendTargetStatus,
+    UpdateDeploymentRequest,
 };
 
 // external crates
@@ -32,7 +30,6 @@ struct Fixture {
     cfg_inst_stor: CfgInsts,
     cfg_inst_content_stor: CfgInstContent,
     release_stor: Releases,
-    upload_rule_stor: UploadRules,
     git_commit_stor: GitCommits,
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
@@ -56,9 +53,6 @@ impl Fixture {
         let (release_stor, _) = Releases::spawn(16, dir.file("releases.json"), 1000)
             .await
             .unwrap();
-        let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules.json"), 1000)
-            .await
-            .unwrap();
         let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
             .await
             .unwrap();
@@ -71,7 +65,6 @@ impl Fixture {
             cfg_inst_stor,
             cfg_inst_content_stor,
             release_stor,
-            upload_rule_stor,
             git_commit_stor,
             http_client: MockClient::default(),
             retry_policy: fsm::RetryPolicy::default(),
@@ -92,7 +85,6 @@ impl Fixture {
                     content: &self.cfg_inst_content_stor,
                 },
                 releases: &self.release_stor,
-                upload_rules: &self.upload_rule_stor,
                 git_commits: &self.git_commit_stor,
             },
             http_client: &self.http_client,
@@ -117,13 +109,6 @@ fn push_bodies(requests: &[CapturedRequest]) -> Vec<UpdateDeploymentRequest> {
                 .expect("push body should deserialize as UpdateDeploymentRequest")
         })
         .collect()
-}
-
-fn backend_upload_rule(id: &str) -> BaseUploadRule {
-    BaseUploadRule {
-        id: id.to_string(),
-        ..BaseUploadRule::default()
-    }
 }
 
 fn cfg_inst_args(f: &Fixture, ids: &[&str]) -> Vec<CfgInstArgs> {
@@ -374,26 +359,6 @@ mod pull_success {
 
         let content = read_content(&f.cfg_inst_content_stor, "shared_cfg_inst").await;
         assert_eq!(content, "shared content");
-    }
-
-    #[tokio::test]
-    async fn stores_upload_rules() {
-        let f = Fixture::new("sync_stores_upload_rules").await;
-        f.http_client.set_list_all_upload_rules(|| {
-            Ok(vec![
-                backend_upload_rule("upl_rule_1"),
-                backend_upload_rule("upl_rule_2"),
-            ])
-        });
-
-        f.sync().await.unwrap();
-
-        // both upload rules pulled from the backend should be cached
-        let rules = f.upload_rule_stor.values().await.unwrap();
-        assert_eq!(rules.len(), 2, "both upload rules should be stored");
-        let ids: Vec<String> = rules.iter().map(|r| r.id.clone()).collect();
-        assert!(ids.contains(&"upl_rule_1".to_string()));
-        assert!(ids.contains(&"upl_rule_2".to_string()));
     }
 
     #[tokio::test]
@@ -654,30 +619,6 @@ mod pull_failure {
         f.sync().await.unwrap();
         let content = read_content(&f.cfg_inst_content_stor, "cfg_inst_1").await;
         assert_eq!(content, "recovered content");
-    }
-
-    #[tokio::test]
-    async fn upload_rules_pull_failure_is_collected() {
-        let f = Fixture::new("sync_upload_rules_fail").await;
-        // upload-rules list fails with a non-network error (no retry)
-        f.http_client.set_list_all_upload_rules(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: false,
-            }))
-        });
-
-        let err = f.sync().await.unwrap_err();
-        assert!(
-            matches!(err, SyncErr::SyncErrors(_)),
-            "upload-rule pull failure should surface as SyncErrors, got: {err:?}"
-        );
-
-        // nothing should have been written to the upload-rule cache
-        let rules = f.upload_rule_stor.values().await.unwrap();
-        assert!(
-            rules.is_empty(),
-            "no upload rules should be stored on pull failure"
-        );
     }
 
     #[tokio::test]

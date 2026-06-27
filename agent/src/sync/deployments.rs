@@ -28,7 +28,6 @@ pub struct Storage<'a> {
     pub deployments: &'a storage::Deployments,
     pub cfg_insts: storage::CfgInstRef<'a>,
     pub releases: &'a storage::Releases,
-    pub upload_rules: &'a storage::UploadRules,
     pub git_commits: &'a storage::GitCommits,
 }
 
@@ -52,12 +51,6 @@ pub async fn sync<HTTPClientT: http::ClientI>(
     debug!("pulling deployments from server");
     if let Err(e) = pull_deployments(args.http_client, args.storage, args.token).await {
         error!("Failed to pull deployments: {e}");
-        errors.push(e);
-    }
-
-    debug!("pulling upload rules from server");
-    if let Err(e) = pull_upload_rules(args.http_client, args.storage, args.token).await {
-        error!("Failed to pull upload rules: {e}");
         errors.push(e);
     }
 
@@ -139,28 +132,6 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
     })
     .await
     .map_err(SyncErr::from)
-}
-
-async fn pull_upload_rules<'a, HTTPClientT: http::ClientI>(
-    http_client: &HTTPClientT,
-    storage: &Storage<'a>,
-    token: &str,
-) -> Result<(), SyncErr> {
-    let rules = http::with_retry(|| {
-        http::upload_rules::list_all(http_client, http::upload_rules::ListAllParams { token })
-    })
-    .await?;
-
-    for backend_rule in rules {
-        let rule: models::UploadRule = backend_rule.into();
-        let id = rule.id.clone();
-        storage
-            .upload_rules
-            .write_if_absent(id, rule, |_, _| false)
-            .await?;
-    }
-
-    Ok(())
 }
 
 async fn pull_content_for_cfg_insts<'a, HTTPClientT: http::ClientI>(

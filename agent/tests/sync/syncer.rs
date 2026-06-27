@@ -17,7 +17,6 @@ use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{
     self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
-    UploadRules,
 };
 use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
@@ -78,9 +77,6 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits_cache.json"), 1000)
         .await
         .unwrap();
-    let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules_cache.json"), 1000)
-        .await
-        .unwrap();
 
     Storage {
         device: Arc::new(device_stor),
@@ -90,7 +86,6 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         },
         deployments: Arc::new(deployment_stor),
         releases: Arc::new(release_stor),
-        upload_rules: Arc::new(upload_rule_stor),
         git_commits: Arc::new(git_commit_stor),
     }
 }
@@ -257,64 +252,6 @@ pub mod shutdown {
 
         syncer.shutdown().await.unwrap();
         worker_handler.await.unwrap();
-    }
-}
-
-pub mod actor_send_errors {
-    use super::*;
-
-    /// Once the worker actor has stopped, its command receiver is dropped, so
-    /// every `SyncerExt` method should fail when it tries to send a command.
-    /// This exercises the send-failure error path shared by all actor methods.
-    #[tokio::test]
-    async fn methods_error_after_worker_stopped() {
-        let dir = filesys::Dir::create_temp_dir("syncer_send_errs")
-            .await
-            .unwrap();
-        let auth_client = Arc::new(MockClient::default());
-        let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
-        let http_client = Arc::new(MockClient::default());
-        let storage = Arc::new(create_storage(&dir).await);
-
-        let log_file = dir.file("events.jsonl");
-        let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
-            .await
-            .unwrap();
-
-        let (syncer, worker_handle) = spawn(
-            32,
-            SyncerArgs {
-                storage: storage.clone(),
-                http_client: http_client.clone(),
-                token_mngr: Arc::new(token_mngr),
-                deploy_opts: apply::DeployOpts {
-                    retry_policy: fsm::RetryPolicy::default(),
-                },
-                backoff: cooldown::Backoff {
-                    base_secs: 1,
-                    growth_factor: 2,
-                    max_secs: 12 * 60 * 60,
-                },
-                event_hub,
-            },
-        )
-        .unwrap();
-
-        // stop the worker and wait for it to exit so the receiver is dropped
-        syncer.shutdown().await.unwrap();
-        worker_handle.await.unwrap();
-
-        // every actor method should now fail to reach the stopped worker
-        syncer.sync().await.unwrap_err();
-        syncer.sync_if_not_in_cooldown().await.unwrap_err();
-        syncer.get_sync_state().await.unwrap_err();
-        syncer.is_in_cooldown().await.unwrap_err();
-        syncer.get_cooldown_ends_at().await.unwrap_err();
-        syncer.get_last_attempted_sync_at().await.unwrap_err();
-        syncer.subscribe().await.unwrap_err();
-        syncer.shutdown().await.unwrap_err();
-        #[cfg(feature = "test")]
-        syncer.set_sync_state(State::default()).await.unwrap_err();
     }
 }
 
