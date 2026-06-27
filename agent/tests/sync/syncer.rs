@@ -17,6 +17,7 @@ use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{
     self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
+    UploadRules,
 };
 use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
@@ -77,6 +78,9 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits_cache.json"), 1000)
         .await
         .unwrap();
+    let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules_cache.json"), 1000)
+        .await
+        .unwrap();
 
     Storage {
         device: Arc::new(device_stor),
@@ -86,6 +90,7 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         },
         deployments: Arc::new(deployment_stor),
         releases: Arc::new(release_stor),
+        upload_rules: Arc::new(upload_rule_stor),
         git_commits: Arc::new(git_commit_stor),
     }
 }
