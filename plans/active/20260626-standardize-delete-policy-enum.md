@@ -21,16 +21,15 @@ After this change, `DeletePolicy` is generated the same way as the other enums. 
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) Milestone 1 — add the backend-only form to `impl_status_enum!` and refactor the shared `@core` arm.
-- [ ] Milestone 2 — route `DeletePolicy` through the new macro form in `upload_rule.rs`.
-- [ ] Milestone 3 — migrate `DeletePolicy` tests to `StatusFixture` + `status_serde_tests!`.
-- [ ] Milestone 4 — validation: `scripts/preflight.sh` reports `Preflight clean`.
-
-Add timestamps as steps complete; split into done/remaining as needed.
+- [x] (2026-06-26) Milestone 1 — add the backend-only form to `impl_status_enum!` and refactor the shared `@core` arm. Committed; device + deployment enum tests (94 lib + integration) pass unchanged, proving additivity.
+- [x] (2026-06-26) Milestone 2 — route `DeletePolicy` through the new macro form in `upload_rule.rs`. Committed; generated `delete_policy_mapping_tests` (3 tests) pass.
+- [x] (2026-06-26) Milestone 3 — migrate `DeletePolicy` tests to `StatusFixture` + `status_serde_tests!`. Committed; 8 hand-written tests removed, replaced by 4 harness tests + `delete_policy_default`.
+- [~] Milestone 4 — validation: build + `clippy --all-targets -D warnings` clean; all 100 model integration tests pass (device/deployment unchanged + new DeletePolicy). Full `scripts/preflight.sh` deferred to a later step per task scope.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The integration-test binary target is `mod` (entry `tests/mod.rs`), not `models`; filter model tests via `--test mod 'models::'`.
+- Pre-existing unrelated test failure: `logs_init_locked::test_reload_level_no_op_when_env_filter_locked` fails on the clean tree too (verified via `git stash`); it is environment-specific (global tracing env-filter lock) and independent of this change.
 
 ## Decision Log
 
@@ -201,4 +200,12 @@ Acceptance summary: `Preflight clean` printed; `DeletePolicy` has no hand-writte
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed Milestones 1–3 across three commits on `feat/uploads-read-path`:
+
+1. `feat(models): add backend-only form to impl_status_enum macro` — extracted shared `Deserialize`/`variants()`/`as_str()` into a new internal `@core` arm; `@base` now delegates to `@core` and adds only the domain→agent `From`; added the public backend-only form (`backend_type:` + `unknown_backend:`, no `agent_type:`, 3-part mappings) that emits `@core` + backend→domain `From` (unknown→default+log) + the `*_mapping_tests` module, and NO domain→backend `From`.
+2. `refactor(models): route DeletePolicy through impl_status_enum macro` — added `Hash` to the derive, removed the three hand-written impls, invoked the new form.
+3. `test(models): migrate DeletePolicy to status_serde_tests harness` — added `impl StatusFixture for DeletePolicy` + `status_serde_tests!(DeletePolicy)` + `delete_policy_default`, removed all eight hand-written tests.
+
+Validation done within task scope: `cargo build --features test` clean, `cargo clippy --features test --all-targets -- -D warnings` clean, all 100 model integration tests pass (device + deployment status enums behaviorally unchanged; new DeletePolicy coverage in place). Full `scripts/preflight.sh` (incl. covgate 100% on models) intentionally deferred to a later step.
+
+DeletePolicy is now covered by: generated `delete_policy_mapping_tests::{unknown_backend_maps_to_default, unknown_wire_string_deserializes_to_default, known_backend_values_map_exactly}` (src, `#[cfg(test)]`) and harness `delete_policy::harness::{serde_roundtrip_all_variants, unknown_falls_back_to_default, rejects_invalid_string, as_str_matches_serde}` plus `delete_policy_default`.
