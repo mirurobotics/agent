@@ -1,9 +1,6 @@
 // Shared boilerplate for status enums. The public macro has:
 // - a base form for agent-facing enums
 // - an extended form that also generates backend conversions
-// - a backend-only form (no agent conversion) for enums that only exist on the
-//   backend wire, generating the backend→domain conversion plus a forward-compat
-//   test module
 macro_rules! impl_status_enum {
     (
         enum $name:ident,
@@ -154,87 +151,7 @@ macro_rules! impl_status_enum {
         }
     };
     (
-        // Backend-only form (no agent conversion). Generates the shared core, the
-        // backend→domain `From` (unknown → default + log), and the same
-        // forward-compat test module the backend-with-tests form emits. Distinct
-        // token sequence from all other arms: `backend_type:` + `unknown_backend:`
-        // with NO `agent_type:`, and 3-part mappings.
-        enum $name:ident,
-        default: $default:ident,
-        label: $label:expr,
-        log: $log_macro:ident,
-        backend_type: $backend_type:ty,
-        unknown_backend: $unknown_backend:path,
-        mappings: [
-            $(
-                $variant:ident => $wire:literal => $backend_value:path
-            ),+ $(,)?
-        ]
-    ) => {
-        impl_status_enum!(
-            // Reuse the shared enum/string conversion implementation first.
-            @core
-            enum $name,
-            default: $default,
-            label: $label,
-            log: $log_macro,
-            mappings: [
-                $(
-                    $variant => $wire
-                ),+
-            ]
-        );
-
-        impl From<&$backend_type> for $name {
-            fn from(status: &$backend_type) -> $name {
-                match status {
-                    $(
-                        $backend_value => $name::$variant,
-                    )+
-                    other => {
-                        let default = $name::$default;
-                        $log_macro!(
-                            "{} backend value {:?} is not recognized, defaulting to {:?}",
-                            $label, other, default
-                        );
-                        default
-                    }
-                }
-            }
-        }
-
-        #[cfg(test)]
-        paste::paste! {
-            mod [<$name:snake _mapping_tests>] {
-                use super::*;
-
-                #[test]
-                fn unknown_backend_maps_to_default() {
-                    let d: $name = (&$unknown_backend).into();
-                    assert_eq!(d, $name::$default);
-                }
-
-                #[test]
-                fn unknown_wire_string_deserializes_to_default() {
-                    let d: $name =
-                        serde_json::from_str("\"__impl_status_enum_unknown_sentinel__\"")
-                            .unwrap();
-                    assert_eq!(d, $name::$default);
-                }
-
-                #[test]
-                fn known_backend_values_map_exactly() {
-                    $(
-                        let d: $name = (&$backend_value).into();
-                        assert_eq!(d, $name::$variant);
-                    )+
-                }
-            }
-        }
-    };
-    (
-        // Internal arm that generates the agent-facing behavior: the shared core
-        // plus the domain→agent conversion.
+        // Internal arm that generates the behavior shared by both public forms.
         @base
         enum $name:ident,
         default: $default:ident,
@@ -244,45 +161,6 @@ macro_rules! impl_status_enum {
         mappings: [
             $(
                 $variant:ident => $wire:literal => $agent_value:expr
-            ),+ $(,)?
-        ]
-    ) => {
-        impl_status_enum!(
-            @core
-            enum $name,
-            default: $default,
-            label: $label,
-            log: $log_macro,
-            mappings: [
-                $(
-                    $variant => $wire
-                ),+
-            ]
-        );
-
-        impl From<&$name> for $agent_type {
-            fn from(status: &$name) -> Self {
-                match status {
-                    $(
-                        $name::$variant => $agent_value,
-                    )+
-                }
-            }
-        }
-    };
-    (
-        // Internal arm that generates the behavior shared by every form: the
-        // `Deserialize` impl (unknown wire string → default + log) and the
-        // `variants()` / `as_str()` accessors. Takes no `agent_type` and emits no
-        // `From`.
-        @core
-        enum $name:ident,
-        default: $default:ident,
-        label: $label:expr,
-        log: $log_macro:ident,
-        mappings: [
-            $(
-                $variant:ident => $wire:literal
             ),+ $(,)?
         ]
     ) => {
@@ -316,6 +194,16 @@ macro_rules! impl_status_enum {
             pub fn as_str(&self) -> &'static str {
                 match self {
                     $($name::$variant => $wire,)+
+                }
+            }
+        }
+
+        impl From<&$name> for $agent_type {
+            fn from(status: &$name) -> Self {
+                match status {
+                    $(
+                        $name::$variant => $agent_value,
+                    )+
                 }
             }
         }

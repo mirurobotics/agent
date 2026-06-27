@@ -159,12 +159,20 @@ fn from_backend_invalid_dates() {
 
 // ─── delete-policy status enum tests ──────────────────────────────────────────
 
+// DeletePolicy is a backend-only enum (hand-rolled, not via `impl_status_enum!`),
+// so it has no generated `variants()`/`as_str()`; spell those out here. The
+// serde suite comes from the shared `status_serde_tests!` harness; the
+// backend->domain conversion and `Display` are not covered by the harness and
+// keep their explicit tests below.
 impl StatusFixture for DeletePolicy {
     fn variants() -> Vec<Self> {
-        DeletePolicy::variants()
+        vec![DeletePolicy::Never, DeletePolicy::AfterUpload]
     }
     fn wire_str(&self) -> &'static str {
-        self.as_str()
+        match self {
+            DeletePolicy::Never => "never",
+            DeletePolicy::AfterUpload => "after_upload",
+        }
     }
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -189,7 +197,32 @@ impl StatusFixture for DeletePolicy {
 
 mod delete_policy {
     use super::*;
+
     status_serde_tests!(DeletePolicy);
+
+    #[test]
+    fn display() {
+        assert_eq!(DeletePolicy::Never.to_string(), "never");
+        assert_eq!(DeletePolicy::AfterUpload.to_string(), "after_upload");
+    }
+
+    #[test]
+    fn from_backend_known() {
+        let never: DeletePolicy =
+            (&backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_NEVER).into();
+        assert_eq!(never, DeletePolicy::Never);
+
+        let after: DeletePolicy =
+            (&backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD).into();
+        assert_eq!(after, DeletePolicy::AfterUpload);
+    }
+
+    #[test]
+    fn from_backend_unknown_defaults_to_never() {
+        let unknown: DeletePolicy =
+            (&backend_client::UploadDeletePolicy::UploadDeletePolicyUnknown).into();
+        assert_eq!(unknown, DeletePolicy::Never);
+    }
 }
 
 #[test]
