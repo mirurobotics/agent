@@ -47,18 +47,20 @@ Since then, openapi `main` advanced one commit (`fe6e9ca`) that reshapes `Upload
 
 ## Progress
 
-- [ ] **S0** Preflight the generator (`openapi-generator-cli` reachable) — gate; STOP/report if unavailable.
-- [ ] **S1** Re-vendor `api/specs/backend/v04.yaml` from openapi `fe6e9ca` (keep #89 stamping shape; bump `x-git-commit` only).
-- [ ] **S2** Regenerate models via `api/regen.sh`; confirm `upload_rule_source.rs` fields are `i32` named `*_secs`.
-- [ ] **S3** Update `agent/src/models/upload_rule.rs` (`UploadRuleSource` fields + `From` conversion).
-- [ ] **S4** Update tests/fixtures: `tests/models/upload_rule.rs`, `tests/storage/upload_rules.rs`, and re-verify `tests/http/upload_rules.rs`, `tests/mocks/http_client.rs`, `tests/sync/deployments.rs`.
-- [ ] **V** `scripts/preflight.sh` reports `Preflight clean` (lint, clippy `-D warnings`, fmt, full test suite, covgate per-module gate: `models`=100, `http`, `storage`, `sync`).
+- [x] **S0** Preflight the generator (`openapi-generator-cli` reachable) — gate; STOP/report if unavailable. (2026-06-26: `7.12.0` available.)
+- [x] **S1** Re-vendor `api/specs/backend/v04.yaml` from openapi `fe6e9ca` (keep #89 stamping shape; bump `x-git-commit` only). (2026-06-26: diff vs previous vendor is exactly x-git-commit + the two `*_secs` integer fields/examples; nothing else.)
+- [x] **S2** Regenerate models via `api/regen.sh`; confirm `upload_rule_source.rs` fields are `i32` named `*_secs`. (2026-06-26: only `upload_rule_source.rs` changed; both fields render `i32`.)
+- [x] **S3** Update `agent/src/models/upload_rule.rs` (`UploadRuleSource` fields + `From` conversion). (2026-06-26: fields now `poll_interval_secs: i32` / `stability_window_secs: i32`; derived `Default` still valid.)
+- [x] **S4** Update tests/fixtures: `tests/models/upload_rule.rs`, `tests/storage/upload_rules.rs`, and re-verify `tests/http/upload_rules.rs`, `tests/mocks/http_client.rs`, `tests/sync/deployments.rs`. (2026-06-26: model JSON fixture + both builders updated to integers; http/mocks/sync use `..default()` and needed no edit — all compile and pass.)
+- [~] **V** `scripts/preflight.sh` reports `Preflight clean` — DEFERRED to a later step per orchestration. (2026-06-26: validated the touched surface instead — `cargo build -p miru-agent` succeeds and all 28 upload-rule tests pass via `cargo test --features test`. Full preflight/coverage gate not run here.)
 
 Use timestamps when completing steps. Split partially-completed work into "done" / "remaining".
 
 ## Surprises & Discoveries
 
 (Seed findings; add entries as work proceeds.)
+
+- **2026-06-26 (execution): every prediction held; no surprises.** The bundle at `origin/main` was exactly `fe6e9ca`. The raw-bundle-vs-current-vendor diff was precisely the predicted set: stamping (`version`, `x-release-version`+`x-git-commit` block, two `$API_VERSION$` placeholders) plus the `UploadRuleSource` field rename/retype and example blocks — nothing else. Generated regen touched only `upload_rule_source.rs` (`codegen/` is gitignored, so it never appeared in `git status`). Both fields rendered `i32` as predicted. The `..default()` http/mocks/sync tests needed no edit and pass. `cargo machete`/full preflight intentionally not run (deferred).
 
 - **The diff is verified to be exactly the two-field rename/retype.** `git -C repos/openapi diff 4c92b71 fe6e9ca -- apis/apps/backend-server/agent/openapi.gen.yaml` touches ONLY the `UploadRuleSource` schema (required list, the two property definitions, and the inline `example:` blocks) plus the `BaseUploadRule` example. No other schema, path, or enum changes. So regen should diff only `upload_rule_source.rs` (and the version/commit stamp is the only `info:`-block change in the spec).
 - **Bare `integer` (no `format:`) → `i32`** under this generator + the repo's `api/templates/rust/model.mustache`. Evidence: `paginated_list.rs` renders `pub limit: i32` / `pub offset: i32` for the bundle's unformatted `integer` page fields, while `int64`-formatted `total_count` renders `Option<i64>`. The two new fields have no `format:`, so expect `i32`. **Confirm after S2** and match the domain-model type to whatever regen actually produces (S3).
@@ -229,6 +231,15 @@ Acceptance (human-verifiable):
 - If a test fails to compile after regen with an unknown-field error, S4 missed a fixture/builder — re-run the repo-wide grep guard.
 - Rollback: `git -C /home/ben/miru/workbench4/repos/agent checkout -- api/specs/backend/v04.yaml libs/backend-api agent/src/models/upload_rule.rs agent/tests` restores pre-change state (only if abandoning).
 - Commit the spec + regenerated models separately from the hand-written model/test edits so the generated churn is isolated and reviewable (mirrors #89's commit split).
+
+## Outcomes & Retrospective
+
+**2026-06-26 — implemented (S0–S4 done; V deferred).** Two commits in the agent repo on `feat/uploads-read-path`:
+
+1. `chore(api): re-vendor agent bundle at fe6e9ca, retype upload-rule intervals` — `api/specs/backend/v04.yaml` (re-vendored from `fe6e9ca`, `v0.5.0-pre` stamping preserved, `x-git-commit` bumped) + regenerated `libs/backend-api/src/models/upload_rule_source.rs` (`poll_interval_secs: i32`, `stability_window_secs: i32`).
+2. `feat(uploads): retype upload-rule interval fields to integer seconds` — `agent/src/models/upload_rule.rs` (`UploadRuleSource` fields + `From` conversion) and the test fixtures/builders in `agent/tests/models/upload_rule.rs` + `agent/tests/storage/upload_rules.rs`.
+
+Validation performed: `cargo build -p backend-api`, `cargo build -p miru-agent`, and `cargo test --features test` filtered to `upload_rule` (28 tests, all green, including the `..default()`-based http/sync tests). The full `scripts/preflight.sh` / coverage gate was intentionally NOT run — it is owned by a later orchestration step. No deviations from the plan; every prediction in Surprises & Discoveries held.
 
 ---
 
