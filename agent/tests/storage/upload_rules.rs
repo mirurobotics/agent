@@ -14,8 +14,8 @@ fn rule(id: &str, digest: &str, policy: DeletePolicy) -> UploadRule {
         digest: digest.to_string(),
         source: UploadRuleSource {
             glob: "/data/*.mcap".to_string(),
-            poll_interval: "60s".to_string(),
-            stability_window: "30s".to_string(),
+            poll_interval_secs: 60,
+            stability_window_secs: 30,
         },
         destination: UploadRuleDestination {
             bucket_id: "buck_1".to_string(),
