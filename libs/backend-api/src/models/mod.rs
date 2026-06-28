@@ -88,8 +88,6 @@ pub mod upload_required_headers;
 pub use self::upload_required_headers::UploadRequiredHeaders;
 pub mod upload_rule_destination;
 pub use self::upload_rule_destination::UploadRuleDestination;
-pub mod upload_rule_list;
-pub use self::upload_rule_list::UploadRuleList;
 pub mod upload_rule_source;
 pub use self::upload_rule_source::UploadRuleSource;
 pub mod upload_source;

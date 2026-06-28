@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: fe6e9ca53d4d67c1aaf6ba36e8b3d5c5f0fcc85f
-    url: https://github.com/mirurobotics/openapi/commit/fe6e9ca53d4d67c1aaf6ba36e8b3d5c5f0fcc85f
-    message: 'refactor(upload-rule): rename interval fields to _secs and type as integer (#146)'
+    sha: e0bc63ebe87f040582e4efbdb14d64e72bec5b55
+    url: https://github.com/mirurobotics/openapi/commit/e0bc63ebe87f040582e4efbdb14d64e72bec5b55
+    message: 'feat(agent): deliver upload rules via deployment expansion (#150)'
 servers:
   - url: https://staging.api.mirurobotics.com/agent/v1
     description: Staging
@@ -148,22 +148,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Release'
-  /upload_rules:
-    parameters:
-      - $ref: '#/components/parameters/MiruVersion'
-    get:
-      tags:
-        - Upload Rules
-      summary: List
-      operationId: getUploadRules
-      description: List the upload rules in the authenticated device's currently-deployed release.
-      responses:
-        '200':
-          description: Successfully retrieved the upload rules.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UploadRuleList'
   /uploads:
     parameters:
       - $ref: '#/components/parameters/MiruVersion'
@@ -536,10 +520,12 @@ components:
         - total_count
         - release
         - config_instances
+        - upload_rules
       x-enum-varnames:
         - DEPLOYMENT_LIST_EXPAND_TOTAL_COUNT
         - DEPLOYMENT_LIST_EXPAND_RELEASE
         - DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES
+        - DEPLOYMENT_LIST_EXPAND_UPLOAD_RULES
     DeploymentActivityStatus:
       type: string
       description: |
@@ -965,89 +951,6 @@ components:
         created_at: '2021-01-01T00:00:00Z'
         config_schema_id: cfg_sch_123
         config_type_id: cfg_typ_123
-    Deployment:
-      title: Deployment
-      allOf:
-        - $ref: '#/components/schemas/BaseDeployment'
-        - type: object
-          properties:
-            release:
-              allOf:
-                - $ref: '#/components/schemas/Release'
-              description: Expand the release using 'expand=release' in the query string.
-            config_instances:
-              type: array
-              items:
-                $ref: '#/components/schemas/ConfigInstance'
-              description: Expand the config instances using 'expand=config_instances' in the query string.
-              example:
-                - object: config_instance
-                  id: cfg_inst_123
-                  config_type_name: Motion Control
-                  filepath: /srv/miru/configs/v1/motion-control.json
-                  created_at: '2021-01-01T00:00:00Z'
-                  config_schema_id: cfg_sch_123
-                  config_type_id: cfg_typ_123
-                - object: config_instance
-                  id: cfg_inst_456
-                  config_type_name: Localization
-                  filepath: /srv/miru/configs/v1/localization.json
-                  created_at: '2021-01-02T00:00:00Z'
-                  config_schema_id: cfg_sch_456
-                  config_type_id: cfg_typ_456
-      example:
-        object: deployment
-        id: dpl_123
-        description: Deployment for the motion control config instance
-        status: staged
-        activity_status: staged
-        error_status: none
-        target_status: staged
-        device_id: dvc_123
-        release_id: rls_123
-        created_at: '2024-01-01T00:00:00Z'
-        updated_at: '2024-01-01T00:00:00Z'
-    DeploymentList:
-      title: Deployment List
-      allOf:
-        - $ref: '#/components/schemas/PaginatedList'
-        - type: object
-          required:
-            - data
-          properties:
-            data:
-              description: The list of deployments.
-              type: array
-              items:
-                $ref: '#/components/schemas/Deployment'
-    DeploymentExpansion:
-      type: string
-      enum:
-        - release
-        - config_instances
-      x-enum-varnames:
-        - DEPLOYMENT_EXPAND_RELEASE
-        - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
-    UpdateDeploymentRequest:
-      title: Update Deployment Request
-      type: object
-      properties:
-        activity_status:
-          allOf:
-            - $ref: '#/components/schemas/DeploymentActivityStatus'
-          description: The updated activity status of the deployment.
-        error_status:
-          allOf:
-            - $ref: '#/components/schemas/DeploymentErrorStatus'
-          description: The updated error status of the deployment.
-        deployed_at:
-          type: string
-          format: date-time
-          description: Independent historical watermark recording the last time the agent transitioned this deployment to Deployed. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
-        archived_at:
-          type: string
-          format: date-time
-          description: Independent historical watermark recording the last time the agent transitioned this deployment to Archived. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
     UploadRuleSource:
       title: Upload Rule Source
       type: object
@@ -1185,8 +1088,72 @@ components:
           delete_policy: never
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
-    UploadRuleList:
-      title: Upload Rule List
+    Deployment:
+      title: Deployment
+      allOf:
+        - $ref: '#/components/schemas/BaseDeployment'
+        - type: object
+          properties:
+            release:
+              allOf:
+                - $ref: '#/components/schemas/Release'
+              description: Expand the release using 'expand=release' in the query string.
+            config_instances:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConfigInstance'
+              description: Expand the config instances using 'expand=config_instances' in the query string.
+              example:
+                - object: config_instance
+                  id: cfg_inst_123
+                  config_type_name: Motion Control
+                  filepath: /srv/miru/configs/v1/motion-control.json
+                  created_at: '2021-01-01T00:00:00Z'
+                  config_schema_id: cfg_sch_123
+                  config_type_id: cfg_typ_123
+                - object: config_instance
+                  id: cfg_inst_456
+                  config_type_name: Localization
+                  filepath: /srv/miru/configs/v1/localization.json
+                  created_at: '2021-01-02T00:00:00Z'
+                  config_schema_id: cfg_sch_456
+                  config_type_id: cfg_typ_456
+            upload_rules:
+              type: array
+              items:
+                $ref: '#/components/schemas/BaseUploadRule'
+              description: Expand the upload rules using 'expand=upload_rules' in the query string.
+              example:
+                - object: upload_rule
+                  id: upl_rule_123
+                  upload_collection_id: upl_col_123
+                  upload_collection_name: Robot Logs
+                  digest: sha256:1234567890
+                  source:
+                    glob: /var/log/robot/*.log
+                    poll_interval_secs: 60
+                    stability_window_secs: 60
+                  destination:
+                    bucket_id: bkt_123
+                    bucket_name: my-uploads-bucket
+                    path: logs/{device_id}/{filename}
+                    delete_policy: never
+                  created_at: '2021-01-01T00:00:00Z'
+                  updated_at: '2021-01-01T00:00:00Z'
+      example:
+        object: deployment
+        id: dpl_123
+        description: Deployment for the motion control config instance
+        status: staged
+        activity_status: staged
+        error_status: none
+        target_status: staged
+        device_id: dvc_123
+        release_id: rls_123
+        created_at: '2024-01-01T00:00:00Z'
+        updated_at: '2024-01-01T00:00:00Z'
+    DeploymentList:
+      title: Deployment List
       allOf:
         - $ref: '#/components/schemas/PaginatedList'
         - type: object
@@ -1194,10 +1161,40 @@ components:
             - data
           properties:
             data:
+              description: The list of deployments.
               type: array
               items:
-                $ref: '#/components/schemas/BaseUploadRule'
-              description: The list of upload rules.
+                $ref: '#/components/schemas/Deployment'
+    DeploymentExpansion:
+      type: string
+      enum:
+        - release
+        - config_instances
+        - upload_rules
+      x-enum-varnames:
+        - DEPLOYMENT_EXPAND_RELEASE
+        - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
+        - DEPLOYMENT_EXPAND_UPLOAD_RULES
+    UpdateDeploymentRequest:
+      title: Update Deployment Request
+      type: object
+      properties:
+        activity_status:
+          allOf:
+            - $ref: '#/components/schemas/DeploymentActivityStatus'
+          description: The updated activity status of the deployment.
+        error_status:
+          allOf:
+            - $ref: '#/components/schemas/DeploymentErrorStatus'
+          description: The updated error status of the deployment.
+        deployed_at:
+          type: string
+          format: date-time
+          description: Independent historical watermark recording the last time the agent transitioned this deployment to Deployed. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
+        archived_at:
+          type: string
+          format: date-time
+          description: Independent historical watermark recording the last time the agent transitioned this deployment to Archived. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
     UploadSource:
       title: Upload Source
       type: object

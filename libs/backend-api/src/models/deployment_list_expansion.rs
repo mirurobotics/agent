@@ -18,6 +18,8 @@ pub enum DeploymentListExpansion {
     DEPLOYMENT_LIST_EXPAND_RELEASE,
     #[serde(rename = "config_instances")]
     DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES,
+    #[serde(rename = "upload_rules")]
+    DEPLOYMENT_LIST_EXPAND_UPLOAD_RULES,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
@@ -32,6 +34,7 @@ impl std::fmt::Display for DeploymentListExpansion {
             Self::DEPLOYMENT_LIST_EXPAND_TOTAL_COUNT => write!(f, "total_count"),
             Self::DEPLOYMENT_LIST_EXPAND_RELEASE => write!(f, "release"),
             Self::DEPLOYMENT_LIST_EXPAND_CONFIG_INSTANCES => write!(f, "config_instances"),
+            Self::DEPLOYMENT_LIST_EXPAND_UPLOAD_RULES => write!(f, "upload_rules"),
             Self::DeploymentListExpansionUnknown => write!(f, "unknown"),
         }
     }
