@@ -71,6 +71,14 @@ pub struct CfgInstsNotExpandedErr {
 impl crate::errors::Error for CfgInstsNotExpandedErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("deployment '{deployment_id}' did not have upload_rules expansion (backend did not expand upload rules)")]
+pub struct UploadRulesNotExpandedErr {
+    pub deployment_id: String,
+}
+
+impl crate::errors::Error for UploadRulesNotExpandedErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum SyncErr {
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
@@ -96,6 +104,8 @@ pub enum SyncErr {
     MockErr(MockErr),
     #[error(transparent)]
     CfgInstsNotExpanded(CfgInstsNotExpandedErr),
+    #[error(transparent)]
+    UploadRulesNotExpanded(UploadRulesNotExpandedErr),
 }
 
 impl From<authn::AuthnErr> for SyncErr {
@@ -140,6 +150,12 @@ impl From<CfgInstsNotExpandedErr> for SyncErr {
     }
 }
 
+impl From<UploadRulesNotExpandedErr> for SyncErr {
+    fn from(e: UploadRulesNotExpandedErr) -> Self {
+        Self::UploadRulesNotExpanded(e)
+    }
+}
+
 crate::impl_error!(SyncErr {
     AuthnErr,
     CacheErr,
@@ -153,4 +169,5 @@ crate::impl_error!(SyncErr {
     ReceiveActorMessageErr,
     MockErr,
     CfgInstsNotExpanded,
+    UploadRulesNotExpanded,
 });
