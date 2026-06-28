@@ -3,9 +3,8 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{
-    BaseUploadRule, Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError,
-    ErrorResponse, GitCommit as BackendGitCommit, Release as BackendRelease, TokenResponse,
-    UploadRuleList,
+    Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError, ErrorResponse,
+    GitCommit as BackendGitCommit, Release as BackendRelease, TokenResponse,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};
 
@@ -32,7 +31,6 @@ pub enum Call {
     GetConfigInstanceContent,
     GetRelease,
     GetGitCommit,
-    ListUploadRules,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -55,7 +53,6 @@ type SingleDeploymentFn = Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPEr
 type SingleReleaseFn = Mutex<Box<dyn Fn() -> Result<BackendRelease, HTTPErr> + Send + Sync>>;
 type SingleGitCommitFn = Mutex<Box<dyn Fn() -> Result<BackendGitCommit, HTTPErr> + Send + Sync>>;
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
-type ListUploadRulesFn = Mutex<Box<dyn Fn() -> Result<UploadRuleList, HTTPErr> + Send + Sync>>;
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 type GetDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 
@@ -71,7 +68,6 @@ pub struct MockClient {
     pub get_release_fn: SingleReleaseFn,
     pub get_git_commit_fn: SingleGitCommitFn,
     pub get_cfg_inst_content_fn: GetCfgInstContentFn,
-    pub list_upload_rules_fn: ListUploadRulesFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -89,7 +85,6 @@ impl Default for MockClient {
             get_release_fn: Mutex::new(Box::new(|| Ok(BackendRelease::default()))),
             get_git_commit_fn: Mutex::new(Box::new(|| Ok(BackendGitCommit::default()))),
             get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
-            list_upload_rules_fn: Mutex::new(Box::new(|| Ok(UploadRuleList::default()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -166,27 +161,6 @@ impl MockClient {
         *self.get_cfg_inst_content_fn.lock().unwrap() = Box::new(f);
     }
 
-    pub fn set_list_all_upload_rules<F>(&self, f: F)
-    where
-        F: Fn() -> Result<Vec<BaseUploadRule>, HTTPErr> + Send + Sync + 'static,
-    {
-        *self.list_upload_rules_fn.lock().unwrap() = Box::new(move || {
-            let data = f()?;
-            Ok(UploadRuleList {
-                total_count: Some(data.len() as i64),
-                data,
-                ..UploadRuleList::default()
-            })
-        });
-    }
-
-    pub fn set_list_upload_rules_page<F>(&self, f: F)
-    where
-        F: Fn() -> Result<UploadRuleList, HTTPErr> + Send + Sync + 'static,
-    {
-        *self.list_upload_rules_fn.lock().unwrap() = Box::new(f);
-    }
-
     pub fn call_count(&self, target: Call) -> usize {
         self.requests
             .lock()
@@ -227,7 +201,6 @@ impl MockClient {
             (m, p) if *m == Method::PATCH && p.starts_with("/devices/") => Call::UpdateDevice,
             (m, p) if *m == Method::GET && p == "/device" => Call::GetDevice,
             (m, p) if *m == Method::GET && p == "/deployments" => Call::ListDeployments,
-            (m, p) if *m == Method::GET && p == "/upload_rules" => Call::ListUploadRules,
             (m, p)
                 if *m == Method::GET
                     && p.starts_with("/config_instances/")
@@ -260,10 +233,6 @@ impl MockClient {
             Call::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
             Call::GetRelease => json(&(self.get_release_fn.lock().unwrap())()?),
             Call::GetGitCommit => json(&(self.get_git_commit_fn.lock().unwrap())()?),
-            Call::ListUploadRules => {
-                let list = (self.list_upload_rules_fn.lock().unwrap())()?;
-                json(&list)
-            }
             Call::GetConfigInstanceContent => {
                 // Extract ID from /config_instances/{id}/content
                 let id = path
