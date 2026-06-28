@@ -40,17 +40,21 @@ This is the minimal, contained change that swaps the acquisition mechanism witho
 
 ## Progress
 
-- [ ] **S1** Re-vendor `api/specs/backend/v04.yaml` from openapi `e0bc63e`, preserving `v0.5.0-pre` stamping; run `api/regen.sh`; commit spec + regenerated `libs/backend-api/src/models/` atomically.
-- [ ] **S2** Remove the obsolete standalone client (`http/upload_rules.rs` + registration) and its tests/mock plumbing.
-- [ ] **S3** Wire acquisition via the deployment expansion (request `upload_rules`, extract + cache in `sync/deployments.rs`).
-- [ ] **S4** Tests: sync expansion extraction + caching; update fixtures/factories; remove standalone-client tests.
-- [ ] **V** `scripts/preflight.sh` reports `Preflight clean`.
+- [x] **S1** (2026-06-28) Re-vendored `api/specs/backend/v04.yaml` from openapi `e0bc63e`, preserving `v0.5.0-pre` stamping; ran `api/regen.sh`; committed spec + regenerated `libs/backend-api/src/models/` (commit `e52bbe4`). openapi-generator-cli 7.12.0 was available.
+- [x] **S2** (2026-06-28) Removed the obsolete standalone client (`http/upload_rules.rs` + registration) and its tests/mock plumbing (commit `bd79aa2`).
+- [x] **S3** (2026-06-28) Wired acquisition via the deployment expansion (requested `upload_rules`, extract + cache in `sync/deployments.rs`; new `SyncErr::UploadRulesNotExpanded`) (commit `7801f4d`).
+- [x] **S4** (2026-06-28) Tests: sync expansion extraction + caching; updated fixtures/factories; removed standalone-client tests; fixed two `backend_client::Deployment` literals in `tests/models/deployment.rs` for the new field.
+- [ ] **V** `scripts/preflight.sh` reports `Preflight clean` (deferred — this milestone validates with `cargo build`, `cargo clippy --all-targets -D warnings`, and the sync/upload_rule tests; full preflight is a later step).
 
 Use timestamps when completing steps. Split partially-completed work into "done" / "remaining".
 
 ## Surprises & Discoveries
 
 (Add entries as work proceeds. Seed findings from the verified context below.)
+
+- **(2026-06-28, during impl) The re-vendor git diff is +103/-106 (209 lines), larger than a naive "four schema changes + two removals" line count — but it is semantically EXACTLY #150.** The extra churn is a benign *schema reordering* in the source bundle: the `Deployment` / `DeploymentList` / `DeploymentExpansion` / `UpdateDeploymentRequest` family now appears *after* the `UploadRule*` schemas (previously before them), so git renders the move as delete+re-add blocks. Verified by comparing sorted schema-name sets (diff = exactly `-UploadRuleList`) and sorted path sets (diff = exactly `-/upload_rules`). No property-level changes beyond the expected `Deployment.upload_rules` array + the two enum variant additions. `origin/main` is exactly `e0bc63e`.
+- **(2026-06-28, during impl) Two extra test construction sites needed the new field**, beyond the plan's enumerated test surface: `agent/tests/models/deployment.rs` builds `backend_client::Deployment { ... }` struct literals (no `..Default::default()`) in `from_backend` and `from_backend_invalid_dates`. The regen-added `upload_rules` field made them fail to compile (`missing field upload_rules`); added `upload_rules: Some(vec![])` to both. This mirrors how those literals already carry `config_instances`.
+- **(2026-06-28, during impl) Generated-model churn was minimal and exactly as predicted:** `deployment.rs` (+`upload_rules` field), `deployment_expansion.rs` / `deployment_list_expansion.rs` (+variant), `mod.rs` (drops `upload_rule_list`), and `upload_rule_list.rs` deleted. `device-api` untouched. `api_version.rs` still renders `v0.5.0-pre` (no `Miru-Version` header change).
 
 - **The vendored spec is already at `v0.5.0-pre` (commit fe6e9ca).** There is NO openapi agent release tag newer than `agent/v0.4.0`, so we CONTINUE the established `v0.5.0-pre` pre-release stamping rather than inventing a release version. The only `info:` changes vs. the current file are the three `x-git-commit` keys (sha/url/message) → `e0bc63e`.
 - **Verified spec diff (current fe6e9ca → e0bc63e), via structural YAML comparison — exactly `#150`, no surprises:**
@@ -72,7 +76,18 @@ Use timestamps when completing steps. Split partially-completed work into "done"
 
 ## Outcomes & Retrospective
 
-(Fill in after implementation: generated model files that changed, the final spec diff, covgate numbers, commit list, and any integration-test gating.)
+(2026-06-28, implementation)
+
+- **Generated model files changed by regen:** `libs/backend-api/src/models/deployment.rs` (+`upload_rules: Option<Vec<BaseUploadRule>>`), `deployment_expansion.rs` (+`DEPLOYMENT_EXPAND_UPLOAD_RULES`), `deployment_list_expansion.rs` (+`DEPLOYMENT_LIST_EXPAND_UPLOAD_RULES`), `models/mod.rs` (dropped `upload_rule_list` mod/use); `upload_rule_list.rs` deleted. `device-api` untouched. `api_version.rs` still renders `v0.5.0-pre`.
+- **Final spec diff:** +103/-106 (semantically exactly #150; extra line count is a benign schema reordering of the Deployment family below the UploadRule family — see Surprises). Schema-set diff = `-UploadRuleList`; path-set diff = `-/upload_rules`.
+- **Commits (branch `feat/uploads-via-deployment-expansion`):**
+  - `e52bbe4` feat(api): re-vendor uploads contract from openapi e0bc63e (#150)
+  - `bd79aa2` refactor(http): remove obsolete standalone upload_rules client
+  - `7801f4d` feat(sync): acquire upload rules via the deployment expansion
+  - (S4) test(sync): cover upload-rule expansion extraction + caching
+- **New SyncErr variant:** `SyncErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr { deployment_id })`. Upload rules are requested via `expansions = ["config_instances", "release.git_commit", "upload_rules"]` in `fetch_active_deployments` and extracted/cached in `store_expanded_upload_rules` (called from `pull_deployments`).
+- **Extra fix beyond the plan's enumerated test surface:** three `backend_api::models::Deployment` literals in `agent/tests/sync/syncer.rs` (real-syncer tests) and two in `agent/tests/models/deployment.rs` needed `upload_rules: Some(vec![])` once the field became required by the pull path / the struct literal gained the field.
+- **Validation:** `cargo build -p miru-agent --features test`, `cargo clippy -p miru-agent --features test --all-targets -- -D warnings`, and the full `scripts/test.sh` suite all green. Full `scripts/preflight.sh`/covgate is a later milestone step (not run here).
 
 ## Context and Orientation
 
