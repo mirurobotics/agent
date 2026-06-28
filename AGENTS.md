@@ -35,6 +35,26 @@ All error types derive `thiserror::Error` and implement the custom `crate::error
 
 `#[cfg(feature = "test")]` gates test-only code (mock implementations, state setters). Never use this flag in production code paths.
 
+### Enum conventions
+
+Pick the enum facility by what the enum needs to do:
+
+- **Backend-mirrored status enum** (has a `backend_api` and/or `device_api` twin) →
+  `impl_status_enum!` (`agent/src/models/status.rs`) with `agent_type` +
+  `backend_type` + `unknown_backend`. Generates the wire `Deserialize`
+  (unknown→default), `variants()`, `as_str()`, all layer conversions, and inline
+  serde + backend forward-compat tests.
+- **Local wire/config enum with no backend twin** → `impl_status_enum!` local or
+  agent-only form (omit `backend_type`; omit `agent_type` too when there is no
+  agent-server twin). Add `display: true`, `aliases: [...]`,
+  `case_insensitive: true`, and/or `on_non_string: default` only as needed (e.g.
+  `LogLevel`). These clauses default off, so the wire-strict, case-sensitive,
+  non-string-rejecting behavior is the baseline.
+- **Error enum** (`thiserror::Error` + `crate::errors::Error`) → `impl_error!`;
+  never `impl_status_enum!`. Data-carrying / one-way enums like `errors::Code`
+  (a `BackendError(String)` variant and a one-way `as_str()`) are excluded.
+- **Internal/actor/config enum with no wire contract** → plain derives, no macro.
+
 ## Testing
 
 Always use `scripts/test.sh`:

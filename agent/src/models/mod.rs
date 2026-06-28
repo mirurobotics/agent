@@ -4,7 +4,7 @@ pub mod device;
 pub mod errors;
 pub mod git_commit;
 pub mod release;
-mod status;
+pub(crate) mod status;
 pub mod upload_rule;
 
 // internal crates

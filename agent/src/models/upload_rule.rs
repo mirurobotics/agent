@@ -1,5 +1,6 @@
 // internal crates
 use crate::deserialize_error;
+use crate::models::status::impl_status_enum;
 use backend_api::models as backend_client;
 
 // external crates
@@ -18,54 +19,21 @@ pub enum DeletePolicy {
     AfterUpload,
 }
 
-impl std::fmt::Display for DeletePolicy {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            DeletePolicy::Never => write!(f, "never"),
-            DeletePolicy::AfterUpload => write!(f, "after_upload"),
-        }
-    }
-}
-
-impl From<&backend_client::UploadDeletePolicy> for DeletePolicy {
-    fn from(policy: &backend_client::UploadDeletePolicy) -> DeletePolicy {
-        match policy {
-            backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_NEVER => DeletePolicy::Never,
-            backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD => {
-                DeletePolicy::AfterUpload
-            }
-            other => {
-                let default = DeletePolicy::Never;
-                error!(
-                    "upload delete policy backend value {:?} is not recognized, defaulting to {:?}",
-                    other, default
-                );
-                default
-            }
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for DeletePolicy {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let default = DeletePolicy::default();
-        match s.as_str() {
-            "never" => Ok(DeletePolicy::Never),
-            "after_upload" => Ok(DeletePolicy::AfterUpload),
-            status => {
-                error!(
-                    "delete policy '{}' is not valid, defaulting to {:?}",
-                    status, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
+impl_status_enum!(
+    enum DeletePolicy,
+    default: Never,
+    label: "delete policy",
+    log: error,
+    display: true,
+    backend_type: backend_client::UploadDeletePolicy,
+    unknown_backend: backend_client::UploadDeletePolicy::UploadDeletePolicyUnknown,
+    mappings: [
+        Never => "never" =>
+            backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_NEVER,
+        AfterUpload => "after_upload" =>
+            backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD,
+    ]
+);
 
 // ============================ UPLOAD RULE SOURCE ================================= //
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
