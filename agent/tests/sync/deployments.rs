@@ -7,7 +7,9 @@ use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage::{self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
+use miru_agent::storage::{
+    self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
+};
 use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::SyncErr;
 
@@ -31,6 +33,7 @@ struct Fixture {
     cfg_inst_content_stor: CfgInstContent,
     release_stor: Releases,
     git_commit_stor: GitCommits,
+    upload_rule_stor: UploadRules,
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
     event_hub: EventHub,
@@ -56,6 +59,9 @@ impl Fixture {
         let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
             .await
             .unwrap();
+        let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules.json"), 1000)
+            .await
+            .unwrap();
         let log_file = dir.file("events.jsonl");
         let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
             .await
@@ -66,6 +72,7 @@ impl Fixture {
             cfg_inst_content_stor,
             release_stor,
             git_commit_stor,
+            upload_rule_stor,
             http_client: MockClient::default(),
             retry_policy: fsm::RetryPolicy::default(),
             event_hub,
@@ -86,6 +93,7 @@ impl Fixture {
                 },
                 releases: &self.release_stor,
                 git_commits: &self.git_commit_stor,
+                upload_rules: &self.upload_rule_stor,
             },
             http_client: &self.http_client,
             opts: &opts,
@@ -181,6 +189,25 @@ mod pull_success {
         assert_deployment_stored(&f.deployment_stor, "dpl_1").await;
         assert_release_stored(&f.release_stor, "rel_1").await;
         assert_git_commit_stored(&f.git_commit_stor, "gc_1").await;
+    }
+
+    #[tokio::test]
+    async fn stores_upload_rules_from_expanded_deployment() {
+        let f = Fixture::new("sync_upload_rules").await;
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let dpl = make_deployment_with_upload_rules(
+            "dpl_1",
+            cfg_inst_args,
+            &["upl_rule_1", "upl_rule_2"],
+        );
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        f.sync().await.unwrap();
+
+        assert_deployment_stored(&f.deployment_stor, "dpl_1").await;
+        assert_upload_rule_stored(&f.upload_rule_stor, "upl_rule_1").await;
+        assert_upload_rule_stored(&f.upload_rule_stor, "upl_rule_2").await;
     }
 
     #[tokio::test]
@@ -447,6 +474,29 @@ mod pull_failure {
         assert!(
             is_cfg_insts_not_expanded,
             "expected CfgInstsNotExpanded (or SyncErrors containing it), got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn upload_rules_not_expanded_error() {
+        let f = Fixture::new("upload_rules_not_expanded_error").await;
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let unexpanded = BackendDeployment {
+            upload_rules: None,
+            ..make_deployment("dpl_1", cfg_inst_args)
+        };
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![unexpanded.clone()]));
+
+        let err = f.sync().await.unwrap_err();
+        let is_upload_rules_not_expanded = matches!(err, SyncErr::UploadRulesNotExpanded(_))
+            || matches!(
+                &err,
+                SyncErr::SyncErrors(se) if se.errors.iter().any(|e| matches!(e, SyncErr::UploadRulesNotExpanded(_)))
+            );
+        assert!(
+            is_upload_rules_not_expanded,
+            "expected UploadRulesNotExpanded (or SyncErrors containing it), got: {err:?}"
         );
     }
 

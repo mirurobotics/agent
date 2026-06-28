@@ -1,11 +1,12 @@
 // internal crates
 use backend_api::models::{
-    Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
+    BaseUploadRule, Deployment as BackendDeployment,
+    DeploymentActivityStatus as BackendActivityStatus,
     DeploymentTargetStatus as BackendTargetStatus, GitCommit as BackendGitCommit,
     GitRepositoryType, Release as BackendRelease,
 };
 use miru_agent::models;
-use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases};
+use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules};
 use miru_agent::sync::syncer::State;
 
 // external crates
@@ -34,6 +35,7 @@ pub fn make_deployment(id: &str, cfg_inst_args: Vec<CfgInstArgs>) -> BackendDepl
         activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
         config_instances: Some(cfg_insts),
+        upload_rules: Some(Vec::new()),
         ..Default::default()
     }
 }
@@ -71,6 +73,26 @@ pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
         updated_at: Utc::now().to_rfc3339(),
         git_commit,
     }
+}
+
+pub fn make_backend_upload_rule(id: &str) -> BaseUploadRule {
+    BaseUploadRule {
+        id: id.to_string(),
+        created_at: Utc::now().to_rfc3339(),
+        updated_at: Utc::now().to_rfc3339(),
+        ..Default::default()
+    }
+}
+
+/// Builds a deployment carrying expanded upload rules with the given ids.
+pub fn make_deployment_with_upload_rules(
+    id: &str,
+    cfg_inst_args: Vec<CfgInstArgs>,
+    rule_ids: &[&str],
+) -> BackendDeployment {
+    let mut dpl = make_deployment(id, cfg_inst_args);
+    dpl.upload_rules = Some(rule_ids.iter().map(|rid| make_backend_upload_rule(rid)).collect());
+    dpl
 }
 
 pub fn make_deployment_with_release(
@@ -152,6 +174,11 @@ pub async fn assert_release_stored(release_stor: &Releases, id: &str) {
 pub async fn assert_git_commit_stored(git_commit_stor: &GitCommits, id: &str) {
     let cached = git_commit_stor.read_optional(id.to_string()).await.unwrap();
     assert!(cached.is_some(), "git commit {id} should be stored");
+}
+
+pub async fn assert_upload_rule_stored(upload_rule_stor: &UploadRules, id: &str) {
+    let cached = upload_rule_stor.read_optional(id.to_string()).await.unwrap();
+    assert!(cached.is_some(), "upload rule {id} should be stored");
 }
 
 // ========================= STATE ASSERTIONS ========================= //
