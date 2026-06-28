@@ -12,6 +12,7 @@ pub mod layout;
 pub mod releases;
 pub mod settings;
 pub mod setup;
+pub mod upload_rules;
 
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
@@ -21,6 +22,7 @@ pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings};
+pub use self::upload_rules::UploadRules;
 pub use crate::network::{BackendHost, MqttHost};
 
 use self::device::Device as DeviceStorage;
@@ -37,6 +39,7 @@ pub struct Capacities {
     pub cfg_inst_content: usize,
     pub deployments: usize,
     pub releases: usize,
+    pub upload_rules: usize,
     pub git_commits: usize,
 }
 
@@ -47,6 +50,7 @@ impl Default for Capacities {
             cfg_inst_content: 1000,
             deployments: 100,
             releases: 1000,
+            upload_rules: 1000,
             git_commits: 100,
         }
     }
@@ -78,6 +82,7 @@ pub struct Storage {
     pub cfg_insts: CfgInstStor,
     pub deployments: Arc<Deployments>,
     pub releases: Arc<Releases>,
+    pub upload_rules: Arc<UploadRules>,
     pub git_commits: Arc<GitCommits>,
 }
 
@@ -134,6 +139,11 @@ impl Storage {
             Releases::spawn(64, layout.releases(), capacities.releases).await?;
         let releases = Arc::new(release_stor);
 
+        // upload rules
+        let (upload_rule_stor, upload_rule_stor_handle) =
+            UploadRules::spawn(64, layout.upload_rules(), capacities.upload_rules).await?;
+        let upload_rules = Arc::new(upload_rule_stor);
+
         // git commits
         let (git_commit_stor, git_commit_stor_handle) =
             GitCommits::spawn(64, layout.git_commits(), capacities.git_commits).await?;
@@ -146,6 +156,7 @@ impl Storage {
                 cfg_inst_content_stor_handle,
                 deployment_stor_handle,
                 release_stor_handle,
+                upload_rule_stor_handle,
                 git_commit_stor_handle,
             ];
 
@@ -161,6 +172,7 @@ impl Storage {
                 },
                 deployments,
                 releases,
+                upload_rules,
                 git_commits,
             },
             shutdown_handle,
@@ -187,6 +199,7 @@ impl Storage {
         self.cfg_insts.content.shutdown().await?;
         self.deployments.shutdown().await?;
         self.releases.shutdown().await?;
+        self.upload_rules.shutdown().await?;
         self.git_commits.shutdown().await?;
 
         Ok(())

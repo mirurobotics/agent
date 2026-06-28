@@ -91,6 +91,16 @@ pub mod storage_layout {
     }
 
     #[test]
+    fn upload_rules() {
+        let layout = Layout::default();
+        let file = layout.upload_rules();
+        assert_eq!(
+            file.to_string(),
+            "/var/lib/miru/resources/upload_rules.json"
+        );
+    }
+
+    #[test]
     fn git_commits() {
         let layout = Layout::default();
         let file = layout.git_commits();

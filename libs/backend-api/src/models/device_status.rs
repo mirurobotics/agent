@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// DeviceStatus : The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.) 
-/// The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.) 
+/// DeviceStatus : The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.) - Archived: The device has been archived. The agent's session has been revoked and the device no longer participates in workspace operations. See `archived_at` for when this occurred. 
+/// The status of the device. - Inactive: The miru agent has not yet been installed / authenticated - Activating: The miru agent is currently being installed / authenticated (should only last for a few seconds) - Online: The miru agent has successfully pinged the server within the last 60 seconds. - Offline: The miru agent has not successfully pinged the server within the last 60 seconds (e.g. network issues, device is powered off, etc.) - Archived: The device has been archived. The agent's session has been revoked and the device no longer participates in workspace operations. See `archived_at` for when this occurred. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum DeviceStatus {
     #[serde(rename = "inactive")]
@@ -21,6 +21,8 @@ pub enum DeviceStatus {
     DEVICE_STATUS_ONLINE,
     #[serde(rename = "offline")]
     DEVICE_STATUS_OFFLINE,
+    #[serde(rename = "archived")]
+    DEVICE_STATUS_ARCHIVED,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
@@ -36,6 +38,7 @@ impl std::fmt::Display for DeviceStatus {
             Self::DEVICE_STATUS_ACTIVATING => write!(f, "activating"),
             Self::DEVICE_STATUS_ONLINE => write!(f, "online"),
             Self::DEVICE_STATUS_OFFLINE => write!(f, "offline"),
+            Self::DEVICE_STATUS_ARCHIVED => write!(f, "archived"),
             Self::DeviceStatusUnknown => write!(f, "unknown"),
         }
     }

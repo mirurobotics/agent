@@ -499,8 +499,12 @@ pub mod deploy_func_validation_errs {
     #[tokio::test]
     async fn rejects_parent_traversal_filepath() {
         let f = Fixture::new().await;
+        // Build a parent-traversal path rooted under the fixture temp dir so the
+        // resolved target cannot collide with a pre-existing system file.
+        let base = f.temp_dir.path().display().to_string();
+        let traversal_path = format!("{base}/myapp/../passwd");
         let cfg_inst = ConfigInstance {
-            filepath: "/etc/myapp/../passwd".to_string(),
+            filepath: traversal_path.clone(),
             ..Default::default()
         };
         f.seed_cfg_inst(&cfg_inst, "{\"traversal\": true}".to_string())
@@ -515,7 +519,7 @@ pub mod deploy_func_validation_errs {
         );
 
         assert!(
-            !filesys::File::new(Path::new("/etc/myapp/../passwd")).exists(),
+            !filesys::File::new(Path::new(&traversal_path)).exists(),
             "parent traversal path file should not exist",
         );
     }

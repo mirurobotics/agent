@@ -9,7 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// 
+/// InstanceFormat : The on-disk format used when a config instance is written to the device filesystem. - `json`: standard JSON. - `yaml`: YAML 1.2. - `jsonc`: JSON with comments (JSON plus `//` and `/_* *_/` comment syntax). 
+/// The on-disk format used when a config instance is written to the device filesystem. - `json`: standard JSON. - `yaml`: YAML 1.2. - `jsonc`: JSON with comments (JSON plus `//` and `/_* *_/` comment syntax). 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum InstanceFormat {
     #[serde(rename = "json")]
