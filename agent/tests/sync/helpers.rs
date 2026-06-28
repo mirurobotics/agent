@@ -6,7 +6,9 @@ use backend_api::models::{
     GitRepositoryType, Release as BackendRelease,
 };
 use miru_agent::models;
-use miru_agent::storage::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules};
+use miru_agent::storage::{
+    CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
+};
 use miru_agent::sync::syncer::State;
 
 // external crates
@@ -91,7 +93,12 @@ pub fn make_deployment_with_upload_rules(
     rule_ids: &[&str],
 ) -> BackendDeployment {
     let mut dpl = make_deployment(id, cfg_inst_args);
-    dpl.upload_rules = Some(rule_ids.iter().map(|rid| make_backend_upload_rule(rid)).collect());
+    dpl.upload_rules = Some(
+        rule_ids
+            .iter()
+            .map(|rid| make_backend_upload_rule(rid))
+            .collect(),
+    );
     dpl
 }
 
@@ -177,7 +184,10 @@ pub async fn assert_git_commit_stored(git_commit_stor: &GitCommits, id: &str) {
 }
 
 pub async fn assert_upload_rule_stored(upload_rule_stor: &UploadRules, id: &str) {
-    let cached = upload_rule_stor.read_optional(id.to_string()).await.unwrap();
+    let cached = upload_rule_stor
+        .read_optional(id.to_string())
+        .await
+        .unwrap();
     assert!(cached.is_some(), "upload rule {id} should be stored");
 }
 
