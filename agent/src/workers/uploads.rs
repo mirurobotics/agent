@@ -31,11 +31,13 @@ impl Default for Options {
 
 /// Per-file stability state used by the readiness state machine. A file is
 /// "ready" once its (size, mtime) have been unchanged for at least
-/// `stability_window_secs` since `stable_since`.
-struct FileObservation {
-    size: u64,
-    mtime: std::time::SystemTime,
-    stable_since: DateTime<Utc>,
+/// `stability_window_secs` since `stable_since`. Fields are public so unit
+/// tests can construct/inspect observations against the pure `decide_ready`
+/// seam directly.
+pub struct FileObservation {
+    pub size: u64,
+    pub mtime: std::time::SystemTime,
+    pub stable_since: DateTime<Utc>,
 }
 
 /// A file that has been determined ready for upload. Fields are public so unit
@@ -110,33 +112,34 @@ async fn run_impl<SleepF, SleepFut, NowF>(
             // stays a plain, unit-testable sync fn.
             let rule_clone = rule.clone();
             let moved_observations = std::mem::take(&mut observations);
-            let (returned_observations, ready) = match tokio::task::spawn_blocking(move || {
-                let mut obs = moved_observations;
-                let ready = decide_ready(&rule_clone, &mut obs, now);
-                (obs, ready)
-            })
-            .await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("uploads readiness task panicked: {e:?}");
-                    (HashMap::new(), Vec::new())
-                }
-            };
+            let moved_already_reported = std::mem::take(&mut already_reported);
+            let (returned_observations, returned_already_reported, ready) =
+                match tokio::task::spawn_blocking(move || {
+                    let mut obs = moved_observations;
+                    let mut reported = moved_already_reported;
+                    let ready = decide_ready(&rule_clone, &mut obs, &mut reported, now);
+                    (obs, reported, ready)
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        error!("uploads readiness task panicked: {e:?}");
+                        (HashMap::new(), HashSet::new(), Vec::new())
+                    }
+                };
             observations = returned_observations;
+            already_reported = returned_already_reported;
 
-            // placeholder sink: emit a log line per newly-ready file exactly once.
-            // M3 replaces this with the digest + POST /uploads pipeline.
+            // placeholder sink: emit a log line per newly-ready file. decide_ready
+            // already deduped against already_reported, so every returned file is
+            // newly ready. M3 replaces this with the digest + POST /uploads pipeline.
             for rf in ready {
-                if already_reported.contains(&rf.path) {
-                    continue;
-                }
                 info!(
                     file_path = %rf.path.display(),
                     file_modified_at = %rf.modified_at,
                     "upload candidate ready (M2 placeholder sink)"
                 );
-                already_reported.insert(rf.path.clone());
             }
 
             let interval_secs = std::cmp::max(
@@ -176,11 +179,16 @@ async fn run_impl<SleepF, SleepFut, NowF>(
 ///
 /// This does BLOCKING filesystem I/O (glob walk + metadata) and is intended to
 /// be called inside `tokio::task::spawn_blocking`. It is kept sync and pure
-/// (state in/out via the `observations` argument) so it can be unit-tested
-/// directly without a runtime.
-fn decide_ready(
+/// (state in/out via the `observations`/`already_reported` arguments) so it can
+/// be unit-tested directly without a runtime.
+///
+/// Returns only NEWLY-ready files: a file crossing into "ready" is recorded in
+/// `already_reported` and is never returned again, so callers can treat every
+/// returned file as a once-per-file event.
+pub fn decide_ready(
     rule: &UploadRule,
     observations: &mut HashMap<PathBuf, FileObservation>,
+    already_reported: &mut HashSet<PathBuf>,
     now: DateTime<Utc>,
 ) -> Vec<ReadyFile> {
     let mut ready = Vec::new();
@@ -221,11 +229,13 @@ fn decide_ready(
                 // stability. NOT implemented in M2.
                 if now.signed_duration_since(obs.stable_since).num_seconds()
                     >= rule.source.stability_window_secs as i64
+                    && !already_reported.contains(&path)
                 {
                     ready.push(ReadyFile {
                         path: path.clone(),
                         modified_at: mtime.into(),
                     });
+                    already_reported.insert(path.clone());
                 }
             }
             _ => {
