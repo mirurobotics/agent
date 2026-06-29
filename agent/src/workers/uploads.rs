@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 // internal crates
-use crate::models::{UploadRule, UploadRuleID};
+use crate::models::{DplActivity, UploadRule, UploadRuleID};
 use crate::storage;
 
 // external crates
@@ -50,6 +50,8 @@ pub struct ReadyFile {
 
 pub async fn run<SleepF, SleepFut, NowF>(
     options: &Options,
+    deployments: &storage::Deployments,
+    releases: &storage::Releases,
     upload_rules: &storage::UploadRules,
     sleep_fn: SleepF,
     now_fn: NowF,
@@ -64,12 +66,14 @@ pub async fn run<SleepF, SleepFut, NowF>(
             info!("Uploads worker shutdown complete");
         }
         // doesn't return but we do need to run it in the background
-        _ = run_impl(options, upload_rules, sleep_fn, now_fn) => {}
+        _ = run_impl(options, deployments, releases, upload_rules, sleep_fn, now_fn) => {}
     }
 }
 
 async fn run_impl<SleepF, SleepFut, NowF>(
     options: &Options,
+    deployments: &storage::Deployments,
+    releases: &storage::Releases,
     upload_rules: &storage::UploadRules,
     sleep_fn: SleepF,
     now_fn: NowF,
@@ -88,15 +92,11 @@ async fn run_impl<SleepF, SleepFut, NowF>(
     loop {
         let now = now_fn();
 
-        // load the current rules; on a cache error log and treat as empty so the
-        // worker keeps running rather than crashing.
-        let rules = match upload_rules.values().await {
-            Ok(rules) => rules,
-            Err(e) => {
-                error!("error reading cached upload rules: {e:?}");
-                Vec::new()
-            }
-        };
+        // resolve the active rule set by traversal: Deployed deployment(s) ->
+        // release -> upload_rule_ids -> rule bodies. Cache errors / missing ids
+        // are handled inside the helper (logged, skipped) so the worker keeps
+        // running rather than crashing.
+        let rules = active_upload_rules(deployments, releases, upload_rules).await;
 
         for rule in &rules {
             let due = next_scan_at.get(&rule.id).is_none_or(|next| *next <= now);
@@ -170,6 +170,62 @@ async fn run_impl<SleepF, SleepFut, NowF>(
         debug!("uploads worker sleeping {wait:?} until next scan");
         sleep_fn(wait).await;
     }
+}
+
+/// Resolves the active upload rules from the currently-deployed deployment(s):
+/// Deployed deployment -> release (by release_id) -> release.upload_rule_ids
+/// -> rule BODIES (by id) from the append-only UploadRules store. Unions across
+/// all Deployed deployments (normally exactly one; the union covers redeploy
+/// transitions). Missing ids are skipped with a debug log. Cache errors are
+/// logged and treated as empty so the worker never crashes.
+async fn active_upload_rules(
+    deployments: &storage::Deployments,
+    releases: &storage::Releases,
+    upload_rules: &storage::UploadRules,
+) -> Vec<UploadRule> {
+    let deployed = match deployments
+        .find_where(|d| d.activity_status == DplActivity::Deployed)
+        .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            error!("error reading deployments: {e:?}");
+            return Vec::new();
+        }
+    };
+
+    let mut seen: HashSet<UploadRuleID> = HashSet::new();
+    let mut out: Vec<UploadRule> = Vec::new();
+    for dpl in deployed {
+        let release = match releases.read_optional(dpl.release_id.clone()).await {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                debug!(
+                    "release {} for deployed deployment {} not cached; skipping",
+                    dpl.release_id, dpl.id
+                );
+                continue;
+            }
+            Err(e) => {
+                error!("error reading release {}: {e:?}", dpl.release_id);
+                continue;
+            }
+        };
+        for rule_id in &release.upload_rule_ids {
+            if !seen.insert(rule_id.clone()) {
+                continue;
+            }
+            match upload_rules.read_optional(rule_id.clone()).await {
+                Ok(Some(rule)) => out.push(rule),
+                Ok(None) => debug!(
+                    "upload rule {rule_id} referenced by release {} not in store; skipping",
+                    release.id
+                ),
+                Err(e) => error!("error reading upload rule {rule_id}: {e:?}"),
+            }
+        }
+    }
+    out
 }
 
 /// Pure readiness decision for a single rule. Enumerates `rule.source.glob`,
