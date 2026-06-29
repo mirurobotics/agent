@@ -178,7 +178,10 @@ async fn run_impl<SleepF, SleepFut, NowF>(
 /// all Deployed deployments (normally exactly one; the union covers redeploy
 /// transitions). Missing ids are skipped with a debug log. Cache errors are
 /// logged and treated as empty so the worker never crashes.
-async fn active_upload_rules(
+///
+/// Public as a test seam (mirrors `decide_ready`) so unit tests can exercise the
+/// traversal directly against seeded stores.
+pub async fn active_upload_rules(
     deployments: &storage::Deployments,
     releases: &storage::Releases,
     upload_rules: &storage::UploadRules,
