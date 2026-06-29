@@ -40,11 +40,11 @@ This is a contained acquisition-mechanism swap with no change to downstream uplo
 
 ## Progress
 
-- [ ] **S0** Preflight the generator (`openapi-generator-cli version`); STOP/report if unavailable.
-- [ ] **S1** Re-vendor `api/specs/backend/v04.yaml` from openapi `97809d8`; verify the diff; run `api/regen.sh`; commit spec + regenerated `libs/backend-api/src/models/`.
-- [ ] **S2** Rewire `agent/src/sync/deployments.rs` to release-level acquisition; commit.
-- [ ] **S3** Update tests/fixtures for release-sourced rules; commit.
-- [ ] **V** `scripts/preflight.sh` reports `Preflight clean`.
+- [x] **S0** (2026-06-28) Preflight the generator — `openapi-generator-cli` 7.12.0 available; `agent/tests/mocks/http_client.rs` has no `upload_rules` refs (no edit needed).
+- [x] **S1** (2026-06-28) Re-vendored `api/specs/backend/v04.yaml` at openapi `97809d8` (v0.5.0-pre stamp continued); diff verified as exactly the #151 field move + git-commit stamp; ran `api/regen.sh`; committed spec + regenerated models (`797bf18`).
+- [x] **S2** (2026-06-28) Rewired `agent/src/sync/deployments.rs` to release-level acquisition; folded extraction into `store_expanded_release`, deleted the standalone helper, reworded the error (`7d2ce02`).
+- [x] **S3** (2026-06-28) Updated tests/fixtures for release-sourced rules; committed (`92281f7`).
+- [~] **V** Deferred to the orchestrator's later delivery step (task scope explicitly excludes running `scripts/preflight.sh`). Verified green here: `cargo build -p miru-agent --features test`, `cargo clippy -p miru-agent --features test --all-targets -- -D warnings`, `cargo fmt --check`, and the sync/models/storage test suites (incl. both new branches).
 
 Use timestamps when completing steps. Split partially-completed work into "done" / "remaining".
 
@@ -55,6 +55,9 @@ Use timestamps when completing steps. Split partially-completed work into "done"
 - (Seed) The current branch ALREADY implements deployment-level acquisition end-to-end (from the #150 plan): `agent/src/sync/deployments.rs` has a `store_expanded_upload_rules` helper reading `backend_dpl.upload_rules`; `agent/src/sync/errors.rs` has the `UploadRulesNotExpanded` variant; tests exist. This plan REWORKS that code in place, it does not add it from scratch. Re-verify the exact line numbers below before editing (they drift).
 - (Seed) There is NO dedicated `ReleaseExpansion` schema in the bundle. Nested expansions (`release.git_commit`, `release.upload_rules`) are plain `&str` literals in the syncer's expansions list — picking up `release.upload_rules` is a one-string change, no generated enum involved.
 - (Seed) `agent/tests/mocks/http_client.rs` does NOT reference `upload_rules` at all (the deployment/release expansion fixtures live in `agent/tests/sync/helpers.rs`). The mock needs NO edits for this change. Re-verify with the grep in S0.
+- (2026-06-28, S1) The vendor diff is EXACTLY #151 — no extra changes. Order-independent line comparison vs. the prior spec shows only: `Deployment.upload_rules` removed; `Release.upload_rules` added (description reworded to `expand=release.upload_rules`); the two `DEPLOYMENT_*_UPLOAD_RULES` enum varnames + `upload_rules` enum values removed; `info.x-git-commit` bumped to `97809d8`. The large +/- blocks in the raw `git diff` are pure YAML reordering of the `Release`/`ConfigInstance` schemas (they shifted position relative to `Deployment`), not content changes.
+- (2026-06-28, S1) DEVIATION from the plan's codegen prediction: the generator (7.12.0) DOES include `upload_rules: None` inside `Release::new()` (line 50 of `libs/backend-api/src/models/release.rs`), alongside `git_commit: None` — the plan predicted it would be omitted from `new()`. Harmless and consistent: both optional fields default to `None` in `new()` and neither is a `new()` parameter.
+- (2026-06-28, S3) DEVIATION: the plan's enumerated test surface missed two `BackendRelease { ... }` literals in `agent/tests/models/release.rs` (`from_backend` line ~66, `from_backend_invalid_dates` line ~88) that have no `..Default::default()`. Adding `upload_rules` to the `Release` struct made them fail to compile; fixed by adding `upload_rules: None,` to each (mirroring `git_commit: None`). All other `backend_client::Release` literals across the test tree use `..Default::default()` and needed no change.
 
 ## Decision Log
 
@@ -66,7 +69,15 @@ Use timestamps when completing steps. Split partially-completed work into "done"
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Completed 2026-06-28 on branch `feat/uploads-via-deployment-expansion` (push mode). Upload-rule acquisition now reads `release.upload_rules` end-to-end:
+
+- **S1** (`797bf18`): re-vendored `api/specs/backend/v04.yaml` at openapi `97809d8`, regenerated `libs/backend-api` models. `Release` gained `upload_rules`, `Deployment` lost it, the two `DEPLOYMENT_*_UPLOAD_RULES` expansion variants are gone. Vendor diff verified as exactly #151.
+- **S2** (`7d2ce02`): syncer requests `["config_instances", "release.git_commit", "release.upload_rules"]`; upload-rule extraction folded into `store_expanded_release` (placed before the git_commit early-return); `store_expanded_upload_rules` helper and its call deleted; `UploadRulesNotExpanded` (name + `deployment_id` field kept) now fires when an expanded release lacks `upload_rules`, message reworded.
+- **S3** (`92281f7`): fixtures source rules from the expanded release; key tests `stores_upload_rules_from_expanded_release` (happy path) and `upload_rules_not_expanded_error` (None-array branch) pass.
+
+Validation (this task's scope, not full preflight): `cargo build -p miru-agent --features test`, `cargo clippy -p miru-agent --features test --all-targets -- -D warnings`, `cargo fmt --check`, and the sync/models/storage suites all green. Full `scripts/preflight.sh` is left to the orchestrator's delivery step.
+
+Deviations: generator put `upload_rules: None` in `Release::new()` (plan predicted omission — harmless); two `BackendRelease` literals in `agent/tests/models/release.rs` needed the new field (not in the plan's enumerated test surface). See Surprises & Discoveries.
 
 ## Context and Orientation
 
