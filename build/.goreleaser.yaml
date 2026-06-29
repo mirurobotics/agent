@@ -87,6 +87,14 @@ archives:
       - goos: windows
         formats: [zip]
 
+# Generate SPDX-JSON SBOMs via syft (GoReleaser's default SBOM cmd). One SBOM
+# per archive and per package; uploaded with the release via the release stanza.
+sboms:
+  - id: archive
+    artifacts: archive
+  - id: package
+    artifacts: package
+
 changelog:
   sort: asc
   use: git
