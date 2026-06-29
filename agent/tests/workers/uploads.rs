@@ -4,8 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 // internal crates
-use crate::mocks::clock::Clock;
-use crate::mocks::error::SleepController;
+use crate::mocks::{clock::Clock, error::SleepController};
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::models::{UploadRule, UploadRuleSource};
 use miru_agent::storage::{self, Layout};
