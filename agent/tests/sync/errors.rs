@@ -10,7 +10,9 @@ use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::storage::StorageErr;
-use miru_agent::sync::errors::{CfgInstsNotExpandedErr, SyncErrors, SyncerInCooldownErr};
+use miru_agent::sync::errors::{
+    CfgInstsNotExpandedErr, SyncErrors, SyncerInCooldownErr, UploadRulesNotExpandedErr,
+};
 use miru_agent::sync::SyncErr;
 
 fn authn_err() -> AuthnErr {
@@ -97,6 +99,15 @@ mod from_conversions {
         }
         .into();
         assert!(matches!(err, SyncErr::CfgInstsNotExpanded(_)));
+    }
+
+    #[test]
+    fn upload_rules_not_expanded_err_maps() {
+        let err: SyncErr = UploadRulesNotExpandedErr {
+            deployment_id: "dpl_1".to_string(),
+        }
+        .into();
+        assert!(matches!(err, SyncErr::UploadRulesNotExpanded(_)));
     }
 }
 

@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: fe6e9ca53d4d67c1aaf6ba36e8b3d5c5f0fcc85f
-    url: https://github.com/mirurobotics/openapi/commit/fe6e9ca53d4d67c1aaf6ba36e8b3d5c5f0fcc85f
-    message: 'refactor(upload-rule): rename interval fields to _secs and type as integer (#146)'
+    sha: 97809d89ad2ad29405859e5709b0a29cd72ecc01
+    url: https://github.com/mirurobotics/openapi/commit/97809d89ad2ad29405859e5709b0a29cd72ecc01
+    message: 'refactor(agent): move upload-rules expansion from Deployment to Release (#151)'
 servers:
   - url: https://staging.api.mirurobotics.com/agent/v1
     description: Staging
@@ -148,22 +148,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Release'
-  /upload_rules:
-    parameters:
-      - $ref: '#/components/parameters/MiruVersion'
-    get:
-      tags:
-        - Upload Rules
-      summary: List
-      operationId: getUploadRules
-      description: List the upload rules in the authenticated device's currently-deployed release.
-      responses:
-        '200':
-          description: Successfully retrieved the upload rules.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UploadRuleList'
   /uploads:
     parameters:
       - $ref: '#/components/parameters/MiruVersion'
@@ -843,6 +827,143 @@ components:
         repository_url: https://github.com/user/repo
         commit_url: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
         created_at: '2021-01-01T00:00:00Z'
+    UploadRuleSource:
+      title: Upload Rule Source
+      type: object
+      required:
+        - glob
+        - poll_interval_secs
+        - stability_window_secs
+      properties:
+        glob:
+          type: string
+          pattern: ^/
+          example: /var/log/robot/*.log
+          description: An absolute glob pattern (must start with `/`) that selects the files to upload.
+        poll_interval_secs:
+          type: integer
+          example: 60
+          description: How often, in seconds, the agent checks matching files for upload eligibility.
+        stability_window_secs:
+          type: integer
+          example: 60
+          description: How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
+      example:
+        glob: /var/log/robot/*.log
+        poll_interval_secs: 60
+        stability_window_secs: 60
+    UploadDeletePolicy:
+      title: Upload Delete Policy
+      type: string
+      description: |
+        When the device deletes the local source file after collecting it for upload.
+        - `never`: never delete the local file.
+        - `after_upload`: delete the local file immediately once the upload is durably confirmed.
+      enum:
+        - never
+        - after_upload
+      x-enum-varnames:
+        - UPLOAD_DELETE_POLICY_NEVER
+        - UPLOAD_DELETE_POLICY_AFTER_UPLOAD
+    UploadRuleDestination:
+      title: Upload Rule Destination
+      type: object
+      required:
+        - bucket_id
+        - bucket_name
+        - path
+        - delete_policy
+      properties:
+        bucket_id:
+          type: string
+          example: bkt_123
+          description: ID of the bucket this rule uploads to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Name of the bucket this rule uploads to.
+        path:
+          type: string
+          pattern: .*\{device_id\}.*
+          example: logs/{device_id}/{filename}
+          description: The object-path template the collected file is written to. MUST contain `{device_id}` so each device's uploads are namespaced under its own verified ID.
+        delete_policy:
+          allOf:
+            - $ref: '#/components/schemas/UploadDeletePolicy'
+          description: When the device deletes the local source file after collecting it.
+      example:
+        bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
+        path: logs/{device_id}/{filename}
+        delete_policy: never
+    BaseUploadRule:
+      title: Base Upload Rule
+      type: object
+      required:
+        - object
+        - id
+        - upload_collection_id
+        - upload_collection_name
+        - digest
+        - source
+        - destination
+        - created_at
+        - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+            - upload_rule
+          example: upload_rule
+          x-stainless-const: true
+          description: The object type, which is always `upload_rule`.
+        id:
+          type: string
+          example: upl_rule_123
+          description: ID of the upload rule.
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection this rule belongs to.
+        upload_collection_name:
+          type: string
+          example: Robot Logs
+          description: The name of the upload collection this rule belongs to.
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the upload rule. Upload rules are immutable and deduplicated by digest within an upload collection.
+        source:
+          $ref: '#/components/schemas/UploadRuleSource'
+        destination:
+          $ref: '#/components/schemas/UploadRuleDestination'
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the upload rule was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the upload rule was last updated.
+      example:
+        object: upload_rule
+        id: upl_rule_123
+        upload_collection_id: upl_col_123
+        upload_collection_name: Robot Logs
+        digest: sha256:1234567890
+        source:
+          glob: /var/log/robot/*.log
+          poll_interval_secs: 60
+          stability_window_secs: 60
+        destination:
+          bucket_id: bkt_123
+          bucket_name: my-uploads-bucket
+          path: logs/{device_id}/{filename}
+          delete_policy: never
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
     Release:
       title: Release
       allOf:
@@ -854,6 +975,28 @@ components:
               nullable: true
               allOf:
                 - $ref: '#/components/schemas/GitCommit'
+            upload_rules:
+              type: array
+              items:
+                $ref: '#/components/schemas/BaseUploadRule'
+              description: The upload rules included in this release. Expand using 'expand=release.upload_rules' in the query string.
+              example:
+                - object: upload_rule
+                  id: upl_rule_123
+                  upload_collection_id: upl_col_123
+                  upload_collection_name: Robot Logs
+                  digest: sha256:1234567890
+                  source:
+                    glob: /var/log/robot/*.log
+                    poll_interval_secs: 60
+                    stability_window_secs: 60
+                  destination:
+                    bucket_id: bkt_123
+                    bucket_name: my-uploads-bucket
+                    path: logs/{device_id}/{filename}
+                    delete_policy: never
+                  created_at: '2021-01-01T00:00:00Z'
+                  updated_at: '2021-01-01T00:00:00Z'
       example:
         object: release
         id: rls_123
@@ -1048,156 +1191,6 @@ components:
           type: string
           format: date-time
           description: Independent historical watermark recording the last time the agent transitioned this deployment to Archived. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
-    UploadRuleSource:
-      title: Upload Rule Source
-      type: object
-      required:
-        - glob
-        - poll_interval_secs
-        - stability_window_secs
-      properties:
-        glob:
-          type: string
-          pattern: ^/
-          example: /var/log/robot/*.log
-          description: An absolute glob pattern (must start with `/`) that selects the files to upload.
-        poll_interval_secs:
-          type: integer
-          example: 60
-          description: How often, in seconds, the agent checks matching files for upload eligibility.
-        stability_window_secs:
-          type: integer
-          example: 60
-          description: How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
-      example:
-        glob: /var/log/robot/*.log
-        poll_interval_secs: 60
-        stability_window_secs: 60
-    UploadDeletePolicy:
-      title: Upload Delete Policy
-      type: string
-      description: |
-        When the device deletes the local source file after collecting it for upload.
-        - `never`: never delete the local file.
-        - `after_upload`: delete the local file immediately once the upload is durably confirmed.
-      enum:
-        - never
-        - after_upload
-      x-enum-varnames:
-        - UPLOAD_DELETE_POLICY_NEVER
-        - UPLOAD_DELETE_POLICY_AFTER_UPLOAD
-    UploadRuleDestination:
-      title: Upload Rule Destination
-      type: object
-      required:
-        - bucket_id
-        - bucket_name
-        - path
-        - delete_policy
-      properties:
-        bucket_id:
-          type: string
-          example: bkt_123
-          description: ID of the bucket this rule uploads to.
-        bucket_name:
-          type: string
-          example: my-uploads-bucket
-          description: Name of the bucket this rule uploads to.
-        path:
-          type: string
-          pattern: .*\{device_id\}.*
-          example: logs/{device_id}/{filename}
-          description: The object-path template the collected file is written to. MUST contain `{device_id}` so each device's uploads are namespaced under its own verified ID.
-        delete_policy:
-          allOf:
-            - $ref: '#/components/schemas/UploadDeletePolicy'
-          description: When the device deletes the local source file after collecting it.
-      example:
-        bucket_id: bkt_123
-        bucket_name: my-uploads-bucket
-        path: logs/{device_id}/{filename}
-        delete_policy: never
-    BaseUploadRule:
-      title: Base Upload Rule
-      type: object
-      required:
-        - object
-        - id
-        - upload_collection_id
-        - upload_collection_name
-        - digest
-        - source
-        - destination
-        - created_at
-        - updated_at
-      properties:
-        object:
-          type: string
-          enum:
-            - upload_rule
-          example: upload_rule
-          x-stainless-const: true
-          description: The object type, which is always `upload_rule`.
-        id:
-          type: string
-          example: upl_rule_123
-          description: ID of the upload rule.
-        upload_collection_id:
-          type: string
-          example: upl_col_123
-          description: ID of the upload collection this rule belongs to.
-        upload_collection_name:
-          type: string
-          example: Robot Logs
-          description: The name of the upload collection this rule belongs to.
-        digest:
-          type: string
-          example: sha256:1234567890
-          description: The digest of the upload rule. Upload rules are immutable and deduplicated by digest within an upload collection.
-        source:
-          $ref: '#/components/schemas/UploadRuleSource'
-        destination:
-          $ref: '#/components/schemas/UploadRuleDestination'
-        created_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the upload rule was created.
-        updated_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the upload rule was last updated.
-      example:
-        object: upload_rule
-        id: upl_rule_123
-        upload_collection_id: upl_col_123
-        upload_collection_name: Robot Logs
-        digest: sha256:1234567890
-        source:
-          glob: /var/log/robot/*.log
-          poll_interval_secs: 60
-          stability_window_secs: 60
-        destination:
-          bucket_id: bkt_123
-          bucket_name: my-uploads-bucket
-          path: logs/{device_id}/{filename}
-          delete_policy: never
-        created_at: '2021-01-01T00:00:00Z'
-        updated_at: '2021-01-01T00:00:00Z'
-    UploadRuleList:
-      title: Upload Rule List
-      allOf:
-        - $ref: '#/components/schemas/PaginatedList'
-        - type: object
-          required:
-            - data
-          properties:
-            data:
-              type: array
-              items:
-                $ref: '#/components/schemas/BaseUploadRule'
-              description: The list of upload rules.
     UploadSource:
       title: Upload Source
       type: object
