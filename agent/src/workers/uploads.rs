@@ -280,8 +280,8 @@ pub fn decide_ready(
         };
 
         match observations.get(&path) {
-            // new file, or size/mtime changed since last observation: (re)start
-            // the stability window and do NOT report.
+            // size/mtime unchanged since last observation: the stability window
+            // is still running; report once it has elapsed.
             Some(obs) if obs.size == size && obs.mtime == mtime => {
                 // HOOK (M3): finalization-marker detection (MCAP footer / parquet
                 // magic bytes) would gate readiness here in addition to size+mtime
@@ -297,6 +297,8 @@ pub fn decide_ready(
                     already_reported.insert(path.clone());
                 }
             }
+            // new file, or size/mtime changed since last observation: (re)start
+            // the stability window and do NOT report.
             _ => {
                 observations.insert(
                     path,
