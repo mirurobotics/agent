@@ -96,7 +96,6 @@ async fn pull_deployments<'a, HTTPClientT: http::ClientI>(
         let cfg_inst_ids = cfg_insts.iter().map(|inst| inst.id.clone()).collect();
 
         store_expanded_release(storage, &backend_dpl).await?;
-        store_expanded_upload_rules(storage, &backend_dpl).await?;
         store_deployment(storage.deployments, backend_dpl, cfg_inst_ids).await?;
 
         for backend_cfg_inst in &cfg_insts {
@@ -121,7 +120,11 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
     ];
-    let expansions: &[&str] = &["config_instances", "release.git_commit", "upload_rules"];
+    let expansions: &[&str] = &[
+        "config_instances",
+        "release.git_commit",
+        "release.upload_rules",
+    ];
     http::with_retry(|| {
         http::deployments::list_all(
             http_client,
@@ -230,13 +233,20 @@ async fn store_deployment(
         .map_err(SyncErr::from)
 }
 
-/// Extracts and caches the expanded release and git_commit from a backend
-/// deployment before the deployment itself is stored (which only keeps the
-/// release_id reference).
+/// Extracts and caches the expanded release, its upload rules, and its
+/// git_commit from a backend deployment before the deployment itself is stored
+/// (which only keeps the release_id reference).
 ///
-/// Uses `write_if_absent` because releases and git_commits are immutable on the
-/// backend — once created, their fields never change. Skipping writes for
-/// already-cached entries avoids unnecessary I/O on every sync cycle.
+/// Upload rules ride on the expanded release: the syncer always requests
+/// `expand=release.upload_rules`, so once a release is present a missing
+/// `upload_rules` array is a contract violation and surfaces as a hard error
+/// (mirroring the `config_instances` expansion). The extraction sits before the
+/// git_commit early-return so a release lacking a git commit still triggers the
+/// required upload-rule check.
+///
+/// Uses `write_if_absent` because releases, upload rules, and git_commits are
+/// immutable on the backend — once created, their fields never change. Skipping
+/// writes for already-cached entries avoids unnecessary I/O on every sync cycle.
 async fn store_expanded_release(
     storage: &Storage<'_>,
     backend_dpl: &backend_client::Deployment,
@@ -252,6 +262,20 @@ async fn store_expanded_release(
         .write_if_absent(release_id, release, |_, _| false)
         .await?;
 
+    let rules = backend_release.upload_rules.clone().ok_or_else(|| {
+        SyncErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr {
+            deployment_id: backend_dpl.id.clone(),
+        })
+    })?;
+    for backend_rule in rules {
+        let rule: models::UploadRule = backend_rule.into();
+        let id = rule.id.clone();
+        storage
+            .upload_rules
+            .write_if_absent(id, rule, |_, _| false)
+            .await?;
+    }
+
     let Some(Some(backend_gc)) = &backend_release.git_commit else {
         return Ok(());
     };
@@ -262,35 +286,6 @@ async fn store_expanded_release(
         .git_commits
         .write_if_absent(gc_id, gc, |_, _| false)
         .await?;
-
-    Ok(())
-}
-
-/// Extracts and caches the upload rules expanded onto a backend deployment.
-///
-/// The syncer always requests `expand=upload_rules`, so a missing array is a
-/// contract violation and surfaces as a hard error (mirroring the
-/// `config_instances` expansion). Uses `write_if_absent` because upload rules
-/// are immutable on the backend (digest-deduped) — once created, their fields
-/// never change — so already-cached rules avoid unnecessary I/O on every sync.
-async fn store_expanded_upload_rules(
-    storage: &Storage<'_>,
-    backend_dpl: &backend_client::Deployment,
-) -> Result<(), SyncErr> {
-    let rules = backend_dpl.upload_rules.clone().ok_or_else(|| {
-        SyncErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr {
-            deployment_id: backend_dpl.id.clone(),
-        })
-    })?;
-
-    for backend_rule in rules {
-        let rule: models::UploadRule = backend_rule.into();
-        let id = rule.id.clone();
-        storage
-            .upload_rules
-            .write_if_absent(id, rule, |_, _| false)
-            .await?;
-    }
 
     Ok(())
 }

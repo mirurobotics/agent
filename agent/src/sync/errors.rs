@@ -71,7 +71,7 @@ pub struct CfgInstsNotExpandedErr {
 impl crate::errors::Error for CfgInstsNotExpandedErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("deployment '{deployment_id}' did not have upload_rules expansion (backend did not expand upload rules)")]
+#[error("deployment '{deployment_id}' release did not have upload_rules expansion (backend did not expand release.upload_rules)")]
 pub struct UploadRulesNotExpandedErr {
     pub deployment_id: String,
 }
