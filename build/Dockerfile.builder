@@ -44,6 +44,18 @@ RUN curl -fsSL -o /tmp/goreleaser_Linux_x86_64.tar.gz "https://github.com/gorele
     && rm /tmp/goreleaser_Linux_x86_64.tar.gz /tmp/checksums.txt \
     && goreleaser --version
 
+# Install syft (Anchore) for SBOM generation. build/.goreleaser.yaml's
+# `sboms:` stanza shells out to `syft` (GoReleaser's default SBOM cmd) to
+# produce SPDX-JSON SBOMs for the archives and the .deb package.
+# Verified using the SHA256 checksum from the syft release.
+ARG SYFT_VERSION=1.46.0
+RUN curl -fsSL -o /tmp/syft_${SYFT_VERSION}_linux_amd64.tar.gz "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" \
+    && curl -fsSL -o /tmp/syft_checksums.txt "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt" \
+    && cd /tmp && grep "syft_${SYFT_VERSION}_linux_amd64.tar.gz$" syft_checksums.txt | sha256sum -c - \
+    && tar -xzf /tmp/syft_${SYFT_VERSION}_linux_amd64.tar.gz -C /usr/local/bin syft \
+    && rm /tmp/syft_${SYFT_VERSION}_linux_amd64.tar.gz /tmp/syft_checksums.txt \
+    && syft version
+
 # Add Rust targets for cross-compilation
 RUN rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
 
