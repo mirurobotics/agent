@@ -335,4 +335,29 @@ mod actor {
         }
         assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
     }
+
+    // shutdown stops the actor loop; the actor task completes and any subsequent
+    // command fails with a send error (the receiver is gone).
+    #[tokio::test]
+    async fn shutdown_stops_actor_and_later_commands_error() {
+        let clock = Clock::new(1000);
+        let (uploader, handle) = Uploader::spawn(
+            64,
+            UploaderArgs {
+                min_poll_interval_secs: 1,
+                now_fn: Arc::new(clock.now_fn()),
+            },
+        )
+        .unwrap();
+
+        uploader.shutdown().await.unwrap();
+        // the run loop broke out of the receive loop, so the task finishes.
+        handle.await.unwrap();
+
+        let err = uploader.scan().await.unwrap_err();
+        assert!(matches!(
+            err,
+            miru_agent::upload::UploadErr::SendActorMessageErr(_)
+        ));
+    }
 }

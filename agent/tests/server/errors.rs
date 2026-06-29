@@ -15,6 +15,7 @@ use miru_agent::server::ServerErr;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
+use miru_agent::upload::UploadErr;
 
 fn authn_err() -> AuthnErr {
     AuthnErr::MockError(AuthnMockError {
@@ -69,6 +70,13 @@ fn events_err() -> EventsErr {
 fn sync_err() -> SyncErr {
     SyncErr::MockErr(SyncMockErr {
         is_network_conn_err: false,
+    })
+}
+
+fn upload_err() -> UploadErr {
+    UploadErr::ReceiveActorMessageErr(miru_agent::cache::errors::ReceiveActorMessageErr {
+        source: Box::new(std::io::Error::other("recv failed")),
+        trace: miru_agent::trace!(),
     })
 }
 
@@ -127,5 +135,26 @@ mod from_conversions {
     fn sync_err_maps_to_server_sync_err() {
         let err: ServerErr = sync_err().into();
         assert!(matches!(err, ServerErr::SyncErr(_)));
+    }
+
+    #[test]
+    fn upload_err_maps_to_server_upload_err() {
+        let err: ServerErr = upload_err().into();
+        assert!(matches!(err, ServerErr::UploadErr(_)));
+    }
+}
+
+mod error_trait {
+    use super::*;
+    use miru_agent::errors::Error;
+
+    // Exercise the impl_error! arms for the ServerErr::UploadErr variant.
+    #[test]
+    fn upload_err_delegates_error_trait_methods() {
+        let err: ServerErr = upload_err().into();
+        let _ = err.code();
+        let _ = err.http_status();
+        assert!(!err.is_network_conn_err());
+        let _ = err.params();
     }
 }
