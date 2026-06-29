@@ -24,11 +24,10 @@ macro_rules! dispatch {
     }};
 }
 
-/// Per-file stability state used by the readiness state machine. A file is
-/// "ready" once its (size, mtime) have been unchanged for at least
-/// `stability_window_secs` since `stable_since`. Fields are public so unit
-/// tests can construct/inspect observations against the pure `decide_ready`
-/// seam directly.
+/// Per-file stability state used by the readiness state machine. A file is "ready" once
+/// its (size, mtime) have been unchanged for at least `stability_window_secs` since
+/// `stable_since`. Fields are public so unit tests can construct/inspect observations
+/// against the pure `decide_ready` seam directly.
 pub struct FileObservation {
     pub size: u64,
     pub mtime: std::time::SystemTime,

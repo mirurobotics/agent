@@ -815,7 +815,9 @@ pub mod upload_push {
 
         f.storage
             .upload_rules
-            .write_if_absent("r1".to_string(), rule_with("r1", "/none/*.mcap"), |_, _| false)
+            .write_if_absent("r1".to_string(), rule_with("r1", "/none/*.mcap"), |_, _| {
+                false
+            })
             .await
             .unwrap();
         f.storage
