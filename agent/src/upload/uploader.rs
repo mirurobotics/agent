@@ -253,6 +253,14 @@ pub enum Command {
     GetRules {
         respond_to: oneshot::Sender<Result<Vec<UploadRule>, UploadErr>>,
     },
+    /// Inspector: number of files recorded in `already_reported`. Lets actor
+    /// tests observe readiness/cadence/dedupe through the public handle without
+    /// scraping logs (each newly-ready file is reported exactly once, so this
+    /// count is a faithful proxy for "files that have crossed into ready").
+    #[cfg(feature = "test")]
+    GetReportedCount {
+        respond_to: oneshot::Sender<Result<usize, UploadErr>>,
+    },
 }
 
 pub struct Worker {
@@ -291,6 +299,15 @@ impl Worker {
                 Command::GetRules { respond_to } => {
                     if respond_to.send(Ok(self.uploader.rules.clone())).is_err() {
                         error!("Actor failed to send get rules response");
+                    }
+                }
+                #[cfg(feature = "test")]
+                Command::GetReportedCount { respond_to } => {
+                    if respond_to
+                        .send(Ok(self.uploader.already_reported.len()))
+                        .is_err()
+                    {
+                        error!("Actor failed to send get reported count response");
                     }
                 }
             }
@@ -343,6 +360,12 @@ impl Uploader {
     #[cfg(feature = "test")]
     pub async fn get_rules(&self) -> Result<Vec<UploadRule>, UploadErr> {
         self.send_command(|tx| Command::GetRules { respond_to: tx })
+            .await?
+    }
+
+    #[cfg(feature = "test")]
+    pub async fn get_reported_count(&self) -> Result<usize, UploadErr> {
+        self.send_command(|tx| Command::GetReportedCount { respond_to: tx })
             .await?
     }
 }

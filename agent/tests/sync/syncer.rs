@@ -18,11 +18,14 @@ use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, dirs, files, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
-use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
+use miru_agent::models::{
+    Deployment, Device, DplActivity, DplErrStatus, DplTarget, Release, UploadRule, UploadRuleSource,
+};
 use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
 };
 use miru_agent::sync::{SyncErr, Syncer, SyncerExt};
+use miru_agent::upload::uploader::{Uploader, UploaderArgs};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -111,6 +114,19 @@ pub fn spawn(
     Ok((Syncer::new(sender), worker_handle))
 }
 
+/// Spawn a real uploader actor for the syncer to push the active rule set into.
+fn spawn_test_uploader() -> Arc<Uploader> {
+    let (u, _h) = Uploader::spawn(
+        64,
+        UploaderArgs {
+            min_poll_interval_secs: 1,
+            now_fn: Arc::new(Utc::now),
+        },
+    )
+    .unwrap();
+    Arc::new(u)
+}
+
 // ========================= FIXTURE ========================= //
 
 struct Fixture {
@@ -120,6 +136,7 @@ struct Fixture {
     syncer: Syncer,
     backoff: cooldown::Backoff,
     token_mngr: Arc<TokenManager>,
+    uploader: Arc<Uploader>,
 }
 
 impl Fixture {
@@ -148,6 +165,8 @@ impl Fixture {
             .await
             .unwrap();
 
+        let uploader = spawn_test_uploader();
+
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
@@ -159,6 +178,7 @@ impl Fixture {
                 },
                 backoff,
                 event_hub,
+                uploader: uploader.clone(),
             },
         )
         .unwrap();
@@ -170,6 +190,7 @@ impl Fixture {
             syncer,
             backoff,
             token_mngr,
+            uploader,
         }
     }
 
@@ -257,6 +278,7 @@ pub mod shutdown {
                     max_secs: 12 * 60 * 60,
                 },
                 event_hub,
+                uploader: spawn_test_uploader(),
             },
         )
         .unwrap();
@@ -757,6 +779,109 @@ pub mod sync_if_not_in_cooldown {
         let state = f.syncer.get_sync_state().await.unwrap();
         let window = StateAssert::new(before, after);
         window.assert_between(state.last_attempted_sync_at, TimeDelta::zero());
+    }
+}
+
+pub mod upload_push {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn rule_with(id: &str, glob: &str) -> UploadRule {
+        UploadRule {
+            id: id.to_string(),
+            source: UploadRuleSource {
+                glob: glob.to_string(),
+                poll_interval_secs: 60,
+                stability_window_secs: 0,
+            },
+            ..Default::default()
+        }
+    }
+
+    fn ids(rules: &[UploadRule]) -> BTreeSet<String> {
+        rules.iter().map(|r| r.id.clone()).collect()
+    }
+
+    // After a sync, the syncer resolves the active upload rule set from the
+    // Deployed deployment -> release -> rule traversal and pushes it into the
+    // uploader. The deployment is seeded with activity == target == Deployed so
+    // apply::apply is a no-op and the deployment stays Deployed across sync.
+    #[tokio::test]
+    async fn pushes_resolved_active_set() {
+        let f = Fixture::new("upload_push_resolved").await;
+        // pull only ADDS, never clears the local cache, so an empty backend list
+        // leaves our seeded deployment in place.
+        f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+        f.storage
+            .upload_rules
+            .write_if_absent("r1".to_string(), rule_with("r1", "/none/*.mcap"), |_, _| false)
+            .await
+            .unwrap();
+        f.storage
+            .releases
+            .write_if_absent(
+                "rel".to_string(),
+                Release {
+                    id: "rel".to_string(),
+                    upload_rule_ids: vec!["r1".to_string()],
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+        f.storage
+            .deployments
+            .write_if_absent(
+                "dpl".to_string(),
+                Deployment {
+                    id: "dpl".to_string(),
+                    activity_status: DplActivity::Deployed,
+                    target_status: DplTarget::Deployed,
+                    release_id: "rel".to_string(),
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+
+        f.reset_cooldown().await;
+        let _ = f.syncer.sync().await;
+
+        assert_eq!(
+            ids(&f.uploader.get_rules().await.unwrap()),
+            BTreeSet::from(["r1".to_string()])
+        );
+    }
+
+    // With only a Queued deployment, the active set is empty so the uploader
+    // ends up with no rules.
+    #[tokio::test]
+    async fn empty_when_no_deployed() {
+        let f = Fixture::new("upload_push_empty").await;
+        f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+        f.storage
+            .deployments
+            .write_if_absent(
+                "dpl".to_string(),
+                Deployment {
+                    id: "dpl".to_string(),
+                    activity_status: DplActivity::Queued,
+                    release_id: "rel".to_string(),
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+
+        f.reset_cooldown().await;
+        let _ = f.syncer.sync().await;
+
+        assert!(f.uploader.get_rules().await.unwrap().is_empty());
     }
 }
 
