@@ -10,7 +10,7 @@
 # Examples:
 #   docker build -f build/Dockerfile --target artifacts --output type=local,dest=./dist .
 
-FROM ghcr.io/mirurobotics/agent-builder:e414257 AS build
+FROM ghcr.io/mirurobotics/agent-builder:43e2c5b AS build
 
 COPY . .
 

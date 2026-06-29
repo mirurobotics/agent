@@ -10,6 +10,11 @@ snapshot:
 builds:
   - id: "agent"
     builder: rust
+    # Build through cargo-auditable (wrapper baked into the builder image) so each
+    # binary embeds its dependency tree in a `.dep-v0` ELF section. With `command:
+    # zigbuild` below, GoReleaser runs `cargo-auditable-zigbuild zigbuild
+    # --target=... --release -p=miru-agent`, i.e. `cargo auditable zigbuild ...`.
+    tool: cargo-auditable-zigbuild
     binary: "miru-agent"
     targets:
       - x86_64-unknown-linux-gnu
@@ -87,13 +92,17 @@ archives:
       - goos: windows
         formats: [zip]
 
-# Generate SPDX-JSON SBOMs via syft (GoReleaser's default SBOM cmd). One SBOM
-# per archive and per package; uploaded with the release via the release stanza.
+# Generate SPDX-JSON SBOMs via syft (GoReleaser's default SBOM cmd), uploaded
+# with the release via the release stanza. Scan the binary and the archive — not
+# the .deb: syft reads the cargo-auditable `.dep-v0` section out of the binary
+# (and recurses into the tar.gz to find it), so those SBOMs list every linked
+# crate. A .deb scan only reads DPKG control metadata and never inspects the
+# nested binary, so it can never enumerate dependencies.
 sboms:
   - id: archive
     artifacts: archive
-  - id: package
-    artifacts: package
+  - id: binary
+    artifacts: binary
 
 changelog:
   sort: asc
