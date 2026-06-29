@@ -34,6 +34,23 @@ RUN curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/z
 # Install cargo-zigbuild
 RUN cargo install cargo-zigbuild
 
+# Install cargo-auditable so release builds embed each binary's dependency tree
+# in a `.dep-v0` ELF section. syft (>= 1.15) reads that section, so SBOMs
+# generated from the binaries/archives list every linked crate instead of just
+# the top-level package. Wired up in build/.goreleaser.yaml via the Rust
+# builder's `tool:` (see the wrapper below).
+RUN cargo install cargo-auditable --locked
+
+# Wrapper used as GoReleaser's Rust build `tool:`. cargo-auditable only activates
+# when invoked as `cargo auditable <cmd>` — it inspects argv[1] and refuses to run
+# if it isn't "auditable" — so GoReleaser's `tool:`/`command:` cannot point at the
+# cargo-auditable binary directly. This wrapper restores the `cargo auditable`
+# invocation while passing through whatever GoReleaser appends (e.g.
+# `zigbuild --target=... --release -p=miru-agent`).
+RUN printf '#!/usr/bin/env bash\nexec cargo auditable "$@"\n' \
+        > /usr/local/bin/cargo-auditable-zigbuild \
+    && chmod +x /usr/local/bin/cargo-auditable-zigbuild
+
 # Install GoReleaser (OSS version - Pro features unlocked via GORELEASER_KEY at runtime)
 # Verified using SHA256 checksum from release
 ARG GORELEASER_VERSION=2.13.3
