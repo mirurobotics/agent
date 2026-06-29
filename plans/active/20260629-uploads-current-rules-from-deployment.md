@@ -31,12 +31,12 @@ The crux is step (3)'s missing linkage: the domain `Release` today has NO rule l
 
 ## Progress
 
-- [ ] **M1** Add `upload_rule_ids: Vec<models::UploadRuleID>` to domain `Release` (field + `Default` empty `Vec` + `Deserialize` path) and replace `From<backend_client::Release>` with `Release::from_backend(release, upload_rule_ids)` mirroring `Deployment::from_backend`.
-- [ ] **M2** Populate `upload_rule_ids` in `store_expanded_release` (extract ids from the expanded `backend_release.upload_rules`, pass to `Release::from_backend`). Rule BODIES still written to `storage::UploadRules` by id, unchanged, append-only.
-- [ ] **M3** Change worker rule sourcing in `uploads.rs::run_impl`: resolve the active rule set by traversal (Deployed deployment → release → `upload_rule_ids` → bodies by id; skip + `debug!` missing ids). Thread `deployments` + `releases` stores through `run`/`run_impl`.
-- [ ] **M4** Wire the two extra stores into `init_uploads_worker` (`agent/src/app/run.rs`).
-- [ ] **M5** Tests — sync linkage test; worker traversal/stale-skip/no-deployed/missing-id tests; model `from_backend`/`Deserialize` tests updated for the new field.
-- [ ] **V** `scripts/preflight.sh` reports `Preflight clean`.
+- [x] **M1** (2026-06-29) Added `upload_rule_ids: Vec<UploadRuleID>` to domain `Release` (field + `Default` empty `Vec` + `#[serde(default)]` `Deserialize` path) and replaced `From<backend_client::Release>` with `Release::from_backend(release, upload_rule_ids)` mirroring `Deployment::from_backend`.
+- [x] **M2** (2026-06-29) Populated `upload_rule_ids` in `store_expanded_release` (extract ids from the expanded `backend_release.upload_rules` FIRST, then build via `Release::from_backend`). Rule BODIES still written append-only via `write_if_absent` — unchanged.
+- [x] **M3** (2026-06-29) Worker rule sourcing in `uploads.rs::run_impl` now resolves the active set by traversal via a new `active_upload_rules` helper (Deployed deployment → release → `upload_rule_ids` → bodies by id; union+dedupe; skip + `debug!` missing ids; cache errors logged + treated as empty). Threaded `deployments` + `releases` stores through `run`/`run_impl`.
+- [x] **M4** (2026-06-29) Wired the two extra stores into `init_uploads_worker` (`agent/src/app/run.rs`).
+- [x] **M5** (2026-06-29) Tests — sync linkage test; 9 direct `active_upload_rules` unit tests (resolved/stale-skip/no-deployed/missing-id/missing-release/union+dedupe/3 cache-error arms); updated cadence/idle tests; model `from_backend`/`Deserialize` tests updated; service-get link branch test. All 1365 tests pass; covgate green.
+- [x] **V** (2026-06-29) `cargo build -p miru-agent --features test`, `cargo clippy -p miru-agent --features test --all-targets -- -D warnings`, and the full test suite all clean. (Full `scripts/preflight.sh` deferred to the orchestrator's later step per task scope.)
 
 Use timestamps when completing steps. Split partially-completed work into "done" / "remaining".
 
@@ -46,6 +46,10 @@ Use timestamps when completing steps. Split partially-completed work into "done"
 
 - **The worker plumbing for the uploads handle already exists** in `app/run.rs` (`init_uploads_worker` at `:259-287`, `ShutdownManager.uploads_worker_handle` field/new/shutdown step, and the `register_handle_rejects_uploads_duplicates` test). This plan only ADDS the `deployments` + `releases` stores to the already-present `init_uploads_worker` and `uploads::run` — it does NOT add a new worker or handle.
 - **`backend_release.upload_rules` is the SAME source** for both the rule bodies (already written, `deployments.rs:265-277`) and the new `upload_rule_ids`. We derive ids from that one expanded array; no second fetch.
+- **(2026-06-29) A SECOND backend→domain Release conversion existed beyond the syncer**: `agent/src/services/release/get.rs:20` used `models::Release::from(backend_rls)` (the fetch-release-by-id service path), not just `deployments.rs:258`. Removing the `From` impl broke its build, so it was migrated to `Release::from_backend`, deriving ids via `backend_rls.upload_rules.as_ref().map(...).unwrap_or_default()` (empty Vec when the expansion is absent — this by-id endpoint does not contractually guarantee the `upload_rules` expansion the way the syncer does, so a hard error would be wrong here). A regression test was added (`get.rs` `cache_miss_backend_release_with_upload_rules_links_ids`) to cover the new `Some(...)` branch and hold the `services/release` covgate.
+- **(2026-06-29) The new non-defaulted `Release` struct field broke 4 pre-existing exhaustive `Release { .. }` literals in unrelated server tests** (`agent/tests/server/handlers.rs`, `response.rs`); each gained `upload_rule_ids: Vec::new()`. Mechanical, no behavior change.
+- **(2026-06-29) `active_upload_rules` was made `pub`** (not `#[cfg(feature="test")]`-gated, since `run_impl` calls it in production) to be directly unit-testable, mirroring the existing `pub fn decide_ready` test seam. This is the cleanest way to cover all five traversal branches without driving everything through the run loop.
+- **(2026-06-29) The `--lib` clippy run is NOT sufficient**: a `clippy::cloned_ref_to_slice_refs` lint in the new test code (`&[r1.clone()]` → `std::slice::from_ref(&r1)`) only surfaced under `cargo clippy --all-targets`. Always validate test code with `--all-targets`.
 
 ## Decision Log
 
@@ -57,10 +61,19 @@ Use timestamps when completing steps. Split partially-completed work into "done"
   Date/Author: 2026-06-29 / plan author.
 - **Decision: the worker now DEPENDS on `storage::Deployments` + `storage::Releases` in addition to `storage::UploadRules`.** All three are `cache::FileCache<K,V>` already living in `storage::Storage` (`storage/mod.rs:83-85`) and reachable via `AppState.storage`. Threading two more `&FileCache` refs through `run`/`run_impl` and cloning two more `Arc`s in `init_uploads_worker` mirrors how `init_poller_worker`/`init_mqtt_worker` clone multiple `app_state.storage.*` / `app_state.*` pieces (`app/run.rs:228-320`).
   Date/Author: 2026-06-29 / plan author.
+- **Decision (2026-06-29, implementer): `#[serde(default)]` on the `Deserialize` inner `upload_rule_ids` field.** As the plan's M1 note anticipated, this lets release JSON persisted before the field existed deserialize to an empty `Vec` rather than erroring. This intentionally diverges from `Deployment.config_instance_ids` (which has no such default) — the safer choice for the on-disk releases cache, and consistent with the empty-Vec `Default`.
+- **Decision (2026-06-29, implementer): expose `active_upload_rules` as a `pub` test seam rather than driving every traversal branch through the run loop.** Mirrors the existing `pub fn decide_ready`. Direct unit tests deterministically cover deployed/none/missing-release/missing-rule/dedupe/error arms; not `#[cfg]`-gated because `run_impl` calls it in production.
 
 ## Outcomes & Retrospective
 
-(Fill in at completion: final `Release::from_backend` signature, final `uploads::run` signature, measured covgate %s for `models`/`sync`/`workers`/`app`, and the validation status incl. the `Preflight clean` line.)
+**Completed 2026-06-29.** All five milestones + validation done; the worker now acts only on the currently-`Deployed` deployment's release rules.
+
+- **Final `Release::from_backend` signature:** `pub fn from_backend(release: backend_client::Release, upload_rule_ids: Vec<UploadRuleID>) -> Release` (`agent/src/models/release.rs`). The old `impl From<backend_client::Release>` was removed; both call sites (`sync/deployments.rs`, `services/release/get.rs`) migrated.
+- **Final `uploads::run` signature:** `pub async fn run<SleepF, SleepFut, NowF>(options: &Options, deployments: &storage::Deployments, releases: &storage::Releases, upload_rules: &storage::UploadRules, sleep_fn: SleepF, now_fn: NowF, shutdown_signal: Pin<Box<...>>)` — `run_impl` mirrors it. New helper `pub async fn active_upload_rules(deployments, releases, upload_rules) -> Vec<UploadRule>`.
+- **Measured covgate (all ≥ threshold):** `models` = **100** (req 100); `workers` = **87.63** (req 83.21); `services/release` = **91.17** (req 89.28); `sync` and `app` unchanged and green.
+- **Validation status:** `cargo build -p miru-agent --features test` clean; `cargo clippy -p miru-agent --features test --all-targets -- -D warnings` clean; full test suite **1365 passed, 0 failed**. Full `scripts/preflight.sh` (`Preflight clean`) is deferred to the orchestrator's later delivery step per this task's scope; build + clippy --all-targets + tests are all green.
+- **Scope held:** no pruning / no `storage::UploadRules` deletion; no digest/PUT/confirm/ledger/`delete_policy`/outbound HTTP (M3+ remain out of scope). Only the rule sourcing + release linkage changed.
+- **Retrospective:** The plan was accurate; the only surprises were the second `From` call site in `services/release/get.rs` and the unrelated server-test `Release` literals — both mechanical. Making `active_upload_rules` a `pub` seam (vs. only run-loop assertions) was the key choice that kept the workers covgate comfortably above threshold.
 
 ## Context and Orientation
 
