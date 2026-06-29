@@ -28,14 +28,18 @@ This refactor is structural only. It is explicitly NOT M3+: no digest, no PUT/co
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) M1 — create `agent/src/upload/` Uploader object (move readiness/cadence/sink in; actor + handle + Ext); unit tests; covgate file.
-- [ ] M2 — relocate the active-rule traversal into `agent/src/sync/upload_rules.rs`; wire the syncer push (SyncerArgs gains the Uploader handle); move/extend tests.
-- [ ] M3 — rewrite `agent/src/workers/uploads.rs` as a thin timing worker; wire `AppState` + `run.rs` (spawn Uploader before Syncer; enable-gate decision); update worker test.
-- [ ] M4 — validation: `scripts/test.sh` green, `scripts/covgate.sh` green, `scripts/preflight.sh` prints `Preflight clean`.
+- [x] (2026-06-29) M1 — created `agent/src/upload/` Uploader object (moved readiness/cadence/sink in; `SingleThreadUploader` actor + `Uploader` handle + `UploaderExt`); unit tests; covgate file. Commit `5b166a7` (source), `d5bedee`/`238638d` (tests).
+- [x] (2026-06-29) M2 — relocated the active-rule traversal into `agent/src/sync/upload_rules.rs`; wired the syncer push (`SyncerArgs` gained the `Arc<Uploader>` handle; `sync_impl` pushes after `deployments::sync`); moved traversal tests to `agent/tests/sync/upload_rules.rs`; added a syncer-push test.
+- [x] (2026-06-29) M3 — rewrote `agent/src/workers/uploads.rs` as a thin timing worker (`Options { tick_interval_secs }`, `run`/`run_impl` calling `uploader.scan()`); wired `AppState` (Uploader spawned before Syncer, joined + shut down after it) and `run.rs` (`init_uploads_worker` uses `app_state.uploader.clone()`); the single `enable_uploads_worker` gate now gates only the thin worker. Counting-mock worker test added.
+- [x] (2026-06-29) M4 — validation: `cargo build -p miru-agent --features test` clean; `cargo clippy -p miru-agent --features test --all-targets -- -D warnings` clean; full suite `1376 passed; 0 failed`; `scripts/covgate.sh` reports `All modules meet minimum coverage requirement`. (`scripts/preflight.sh` was deferred to the orchestrator per the implementing task; build + clippy --all-targets + tests are green.)
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- `ServerErr` did not already convert from `UploadErr`. `AppState::init` returns `Result<_, server::ServerErr>` and the new `Uploader::spawn` returns `Result<_, UploadErr>`, so `?` needed a `From<UploadErr>`. Added a `ServerErr::UploadErr(upload::UploadErr)` variant + `From` impl + `impl_error!` arm, mirroring the existing `SyncErr` wiring. `UploadErr` is NOT boxed (unlike `SyncErr`) because it is small (two channel-error variants). (2026-06-29)
+- Adding the `ServerErr::UploadErr` variant dropped the `server` module below its 87% covgate threshold (the new `From` impl + macro arms were uncovered). Restored above threshold (87.23%) by adding `From<UploadErr>` + Error-trait tests in `agent/tests/server/errors.rs` — no threshold was lowered. (2026-06-29)
+- The Uploader actor only exposes `scan() -> Result<(), _>` and the `GetRules` inspector, so readiness/cadence/dedupe are not directly observable through the public handle. Rather than scrape `tracing` logs (the repo's `CapturingWriter` is global/thread-local and flaky across `spawn_blocking`), a small `#[cfg(feature = "test")] GetReportedCount` inspector was added (returns `already_reported.len()`), making those behaviors deterministically assertable. (2026-06-29)
+- Syncer-push test determinism: `deployments::sync` always runs `apply_deployments`, which transitions any deployment whose `activity_status` != `target_status`. A seeded `Deployed` deployment with the default `target_status: Staged` would be moved out of `Deployed` before the post-sync traversal ran. The push test therefore seeds `activity_status: Deployed` AND `target_status: Deployed` so `apply` is a no-op; `pull` (`set_list_all_deployments(|| Ok(vec![]))`) only adds and never clears the local cache, so the seeded deployment survives. (2026-06-29)
+- `now` is sampled per-rule inside `SingleThreadUploader::scan` (vs once-per-pass in the old `run_impl`). Difference is sub-millisecond and does not affect cadence (`next_scan_at` is computed from current time, not a prior schedule). (2026-06-29)
 
 ## Decision Log
 
@@ -65,9 +69,23 @@ These design decisions were confirmed before authoring and are recorded here so 
   Rationale: Keeps the worker pure timing (mirrors `poller`'s `sleep_fn` loop). Tradeoff: the worker wakes every base tick even when the next rule is far in the future, but the per-tick due-check is cheap (no glob unless a rule is due). A future optimization could let `scan()` return a next-due hint; out of scope for M2.
   Date/Author: 2026-06-29 / plan author.
 
+- Decision (impl-time): `ServerErr` gains an unboxed `UploadErr` variant + `From<UploadErr>` so `Uploader::spawn`'s `?` works in `AppState::init`.
+  Rationale: Mirrors the `SyncErr` wiring; `UploadErr` is small so boxing is unnecessary.
+  Date/Author: 2026-06-29 / implementer.
+
+- Decision (impl-time): Add a `#[cfg(feature = "test")] GetReportedCount` inspector (`already_reported.len()`) to the Uploader to make readiness/cadence/dedupe deterministically testable through the public handle.
+  Rationale: Avoids flaky global tracing-log capture; consistent with the existing `GetRules` test inspector. No production behavior change.
+  Date/Author: 2026-06-29 / implementer.
+
+- Decision (impl-time): `upload` covgate threshold set to `89.00` (measured 89.29%).
+  Rationale: The remaining uncovered lines are contrived error branches (dropped `oneshot` receivers in actor reply paths, the `spawn_blocking` panic fallback) not worth synthetic tests; `89.00` sits just below measured for a meaningful gate with a small buffer.
+  Date/Author: 2026-06-29 / implementer.
+
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-06-29 on branch `feat/uploads-file-discovery` in three commits (`5b166a7` source refactor, `d5bedee` tests, `238638d` coverage follow-up + threshold). The upload subsystem now mirrors the Syncer/poller split: a stateful `Uploader` actor (`agent/src/upload/`) owns the active rule set, per-file readiness, and per-rule cadence with no storage dependency; the `Syncer` pushes the active set via `update_rules` after each `deployments::sync`; and `agent/src/workers/uploads.rs` is a thin timing worker ticking `uploader.scan()`. Behavior is preserved (ready files still logged via the `upload candidate ready (M2 placeholder sink)` line); no M3+ logic and no pruning were added.
+
+Validation: `cargo build -p miru-agent --features test` and `cargo clippy -p miru-agent --features test --all-targets -- -D warnings` are clean; the full suite is `1376 passed; 0 failed`; `scripts/covgate.sh` reports all modules meet their minimum (upload 89.29%, server 87.23%, sync 94.16%, workers 83.9%, app 90.6%, models 100%). `scripts/preflight.sh` was intentionally deferred to the orchestrator. No surprises in the syncer↔uploader wiring beyond those logged above; no borrow/lifetime issues (the syncer holds a cloned `Arc<Uploader>` handle one-directionally).
 
 ## Context and Orientation
 
