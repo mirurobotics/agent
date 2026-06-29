@@ -17,6 +17,7 @@ use crate::trace;
 use crate::workers::{
     mqtt, poller,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
+    uploads,
 };
 
 // external crates
@@ -153,6 +154,16 @@ async fn init(
         .await?;
     }
 
+    if options.enable_uploads_worker {
+        init_uploads_worker(
+            options.uploads.clone(),
+            app_state.clone(),
+            shutdown_manager,
+            shutdown_tx.subscribe(),
+        )
+        .await?;
+    }
+
     Ok(app_state)
 }
 
@@ -245,6 +256,36 @@ async fn init_poller_worker(
     Ok(())
 }
 
+async fn init_uploads_worker(
+    options: uploads::Options,
+    app_state: Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing uploads worker...");
+
+    let upload_rules = app_state.storage.upload_rules.clone();
+
+    let uploads_handle = tokio::spawn(async move {
+        uploads::run(
+            &options,
+            upload_rules.as_ref(),
+            tokio::time::sleep,
+            chrono::Utc::now,
+            Box::pin(async move {
+                let _ = shutdown_rx.recv().await;
+            }),
+        )
+        .await;
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.uploads_worker_handle,
+        "uploads_handle",
+        uploads_handle,
+    )?;
+    Ok(())
+}
+
 async fn init_mqtt_worker(
     options: mqtt::Options,
     app_state: Arc<AppState>,
@@ -321,6 +362,7 @@ struct ShutdownManager {
     app_state: Option<AppStateShutdownParams>,
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     poller_worker_handle: Option<JoinHandle<()>>,
+    uploads_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
 }
@@ -333,6 +375,7 @@ impl ShutdownManager {
             app_state: None,
             socket_server_handle: None,
             poller_worker_handle: None,
+            uploads_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
         }
@@ -448,7 +491,19 @@ impl ShutdownManager {
             info!("Poller worker handle not found, skipping poller worker shutdown...");
         }
 
-        // 3. mqtt
+        // 3. uploads
+        if let Some(uploads_worker_handle) = self.uploads_worker_handle.take() {
+            uploads_worker_handle.await.map_err(|e| {
+                ServerErr::JoinHandleErr(JoinHandleErr {
+                    source: Box::new(e),
+                    trace: trace!(),
+                })
+            })?;
+        } else {
+            info!("Uploads worker handle not found, skipping uploads worker shutdown...");
+        }
+
+        // 4. mqtt
         if let Some(mqtt_worker_handle) = self.mqtt_worker_handle.take() {
             mqtt_worker_handle.await.map_err(|e| {
                 ServerErr::JoinHandleErr(JoinHandleErr {
@@ -460,7 +515,7 @@ impl ShutdownManager {
             info!("MQTT worker handle not found, skipping MQTT worker shutdown...");
         }
 
-        // 4. server
+        // 5. server
         if let Some(socket_server_handle) = self.socket_server_handle.take() {
             socket_server_handle.await.map_err(|e| {
                 ServerErr::JoinHandleErr(JoinHandleErr {
@@ -472,7 +527,7 @@ impl ShutdownManager {
             info!("Socket server handle not found, skipping socket server shutdown...");
         }
 
-        // 5. app state
+        // 6. app state
         if let Some(app_state) = self.app_state.take() {
             app_state.state.shutdown().await?;
             app_state.state_handle.await;
