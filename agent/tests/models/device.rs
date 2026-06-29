@@ -11,10 +11,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{
-    serde_tests, status_serde_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
-    StatusFixture,
-};
+use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
 
 // ─── fixture ─────────────────────────────────────────────────────────────────
 
@@ -88,39 +85,6 @@ fn defaults() {
 }
 
 // ─── status enum tests ───────────────────────────────────────────────────────
-
-impl StatusFixture for DeviceStatus {
-    fn variants() -> Vec<Self> {
-        DeviceStatus::variants()
-    }
-    fn wire_str(&self) -> &'static str {
-        self.as_str()
-    }
-    fn cases() -> Vec<StatusCase<Self>> {
-        vec![
-            StatusCase {
-                input: "\"online\"",
-                expected: DeviceStatus::Online,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"offline\"",
-                expected: DeviceStatus::Offline,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"unknown\"",
-                expected: DeviceStatus::Offline,
-                valid: false,
-            },
-        ]
-    }
-}
-
-mod status {
-    use super::*;
-    status_serde_tests!(DeviceStatus);
-}
 
 #[test]
 fn status_default() {

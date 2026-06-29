@@ -1,9 +1,11 @@
 // standard crates
-use std::fmt::Display;
 use std::path::PathBuf;
 
+// internal crates
+use crate::models::status::impl_status_enum;
+
 // external crates
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
@@ -21,61 +23,23 @@ pub enum LogLevel {
     Error,
 }
 
-impl LogLevel {
-    pub fn variants() -> Vec<LogLevel> {
-        vec![
-            LogLevel::Trace,
-            LogLevel::Debug,
-            LogLevel::Info,
-            LogLevel::Warn,
-            LogLevel::Error,
-        ]
-    }
-}
-
-impl<'de> Deserialize<'de> for LogLevel {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let default = LogLevel::default();
-
-        let result = String::deserialize(deserializer);
-        let s = match result {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Error deserializing log level: {:?}", e);
-                return Ok(default);
-            }
-        };
-        match s.to_lowercase().as_str() {
-            "trace" => Ok(LogLevel::Trace),
-            "debug" => Ok(LogLevel::Debug),
-            "info" => Ok(LogLevel::Info),
-            "warn" | "warning" => Ok(LogLevel::Warn),
-            "error" => Ok(LogLevel::Error),
-            _ => {
-                error!(
-                    "Invalid log level: {}. Setting to default: '{}'",
-                    s, default
-                );
-                Ok(default)
-            }
-        }
-    }
-}
-
-impl Display for LogLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LogLevel::Trace => write!(f, "trace"),
-            LogLevel::Debug => write!(f, "debug"),
-            LogLevel::Info => write!(f, "info"),
-            LogLevel::Warn => write!(f, "warn"),
-            LogLevel::Error => write!(f, "error"),
-        }
-    }
-}
+impl_status_enum!(
+    enum LogLevel,
+    default: Info,
+    label: "log level",
+    log: error,
+    display: true,
+    case_insensitive: true,
+    on_non_string: default,
+    aliases: [ "warning" => Warn ],
+    mappings: [
+        Trace => "trace",
+        Debug => "debug",
+        Info => "info",
+        Warn => "warn",
+        Error => "error",
+    ]
+);
 
 pub struct Options {
     pub stdout: bool,

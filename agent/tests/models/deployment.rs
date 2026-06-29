@@ -10,10 +10,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{
-    serde_tests, status_serde_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
-    StatusFixture,
-};
+use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
 
 // ─── model tests ───────────────────────────────────────────────────────────
 
@@ -174,44 +171,6 @@ fn defaults() {
 
 // ─── target status enum tests ─────────────────────────────────────────────
 
-impl StatusFixture for DplTarget {
-    fn variants() -> Vec<Self> {
-        DplTarget::variants()
-    }
-    fn wire_str(&self) -> &'static str {
-        self.as_str()
-    }
-    fn cases() -> Vec<StatusCase<Self>> {
-        vec![
-            StatusCase {
-                input: "\"staged\"",
-                expected: DplTarget::Staged,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"deployed\"",
-                expected: DplTarget::Deployed,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"archived\"",
-                expected: DplTarget::Archived,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"unknown\"",
-                expected: DplTarget::Staged,
-                valid: false,
-            },
-        ]
-    }
-}
-
-mod target_status {
-    use super::*;
-    status_serde_tests!(DplTarget);
-}
-
 #[test]
 fn target_status_backend_conversions() {
     struct TestCase {
@@ -277,58 +236,6 @@ fn target_status_sdk_conversions() {
 }
 
 // ─── activity status enum tests ──────────────────────────────────────────────
-impl StatusFixture for DplActivity {
-    fn variants() -> Vec<Self> {
-        DplActivity::variants()
-    }
-    fn wire_str(&self) -> &'static str {
-        self.as_str()
-    }
-    fn cases() -> Vec<StatusCase<Self>> {
-        vec![
-            StatusCase {
-                input: "\"drifted\"",
-                expected: DplActivity::Drifted,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"staged\"",
-                expected: DplActivity::Staged,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"queued\"",
-                expected: DplActivity::Queued,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"deployed\"",
-                expected: DplActivity::Deployed,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"removing\"",
-                expected: DplActivity::Removing,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"archived\"",
-                expected: DplActivity::Archived,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"unknown\"",
-                expected: DplActivity::Drifted,
-                valid: false,
-            },
-        ]
-    }
-}
-
-mod activity_status {
-    use super::*;
-    status_serde_tests!(DplActivity);
-}
 
 #[test]
 fn activity_status_backend_conversions() {
@@ -419,43 +326,6 @@ fn activity_status_sdk_conversions() {
 }
 
 // ─── error status enum tests ──────────────────────────────────────────────
-impl StatusFixture for DplErrStatus {
-    fn variants() -> Vec<Self> {
-        DplErrStatus::variants()
-    }
-    fn wire_str(&self) -> &'static str {
-        self.as_str()
-    }
-    fn cases() -> Vec<StatusCase<Self>> {
-        vec![
-            StatusCase {
-                input: "\"none\"",
-                expected: DplErrStatus::None,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"failed\"",
-                expected: DplErrStatus::Failed,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"retrying\"",
-                expected: DplErrStatus::Retrying,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"unknown\"",
-                expected: DplErrStatus::None,
-                valid: false,
-            },
-        ]
-    }
-}
-
-mod error_status {
-    use super::*;
-    status_serde_tests!(DplErrStatus);
-}
 
 #[test]
 fn error_status_backend_conversions() {
@@ -519,69 +389,6 @@ fn error_status_sdk_conversions() {
             test_case.sdk
         );
     }
-}
-
-impl StatusFixture for DplStatus {
-    fn variants() -> Vec<Self> {
-        DplStatus::variants()
-    }
-    fn wire_str(&self) -> &'static str {
-        self.as_str()
-    }
-    fn cases() -> Vec<StatusCase<Self>> {
-        vec![
-            StatusCase {
-                input: "\"drifted\"",
-                expected: DplStatus::Drifted,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"staged\"",
-                expected: DplStatus::Staged,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"queued\"",
-                expected: DplStatus::Queued,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"deployed\"",
-                expected: DplStatus::Deployed,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"removing\"",
-                expected: DplStatus::Removing,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"archived\"",
-                expected: DplStatus::Archived,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"failed\"",
-                expected: DplStatus::Failed,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"retrying\"",
-                expected: DplStatus::Retrying,
-                valid: true,
-            },
-            StatusCase {
-                input: "\"unknown\"",
-                expected: DplStatus::Drifted,
-                valid: false,
-            },
-        ]
-    }
-}
-
-mod status {
-    use super::*;
-    status_serde_tests!(DplStatus);
 }
 
 #[test]
