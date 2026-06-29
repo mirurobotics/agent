@@ -46,9 +46,6 @@ pub struct Deployment {
     /// Expand the config instances using 'expand=config_instances' in the query string.
     #[serde(rename = "config_instances", skip_serializing_if = "Option::is_none")]
     pub config_instances: Option<Vec<models::ConfigInstance>>,
-    /// Expand the upload rules using 'expand=upload_rules' in the query string.
-    #[serde(rename = "upload_rules", skip_serializing_if = "Option::is_none")]
-    pub upload_rules: Option<Vec<models::BaseUploadRule>>,
 }
 
 impl Deployment {
@@ -67,7 +64,6 @@ impl Deployment {
             updated_at,
             release: None,
             config_instances: None,
-            upload_rules: None,
         }
     }
 }
