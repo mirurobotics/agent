@@ -636,4 +636,32 @@ mod tests {
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }
     }
+
+    #[tokio::test]
+    async fn register_handle_rejects_uploads_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.uploads_worker_handle,
+                "uploads_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.uploads_worker_handle,
+                "uploads_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate uploads handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "uploads_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
 }
