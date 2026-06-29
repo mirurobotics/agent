@@ -604,7 +604,7 @@ mod run_loop {
                 &upload_rules,
                 "dpl_A",
                 "rel_A",
-                &[r1.clone()],
+                std::slice::from_ref(&r1),
             )
             .await;
             seed_deployed(
