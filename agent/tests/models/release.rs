@@ -71,6 +71,7 @@ fn from_backend() {
         created_at: now.to_rfc3339(),
         updated_at: now.to_rfc3339(),
         git_commit: None,
+        upload_rules: None,
     };
 
     let release: Release = backend_release.into();
@@ -92,6 +93,7 @@ fn from_backend_invalid_dates() {
         created_at: "not-a-date".to_string(),
         updated_at: "also-not-a-date".to_string(),
         git_commit: None,
+        upload_rules: None,
     };
 
     let release: Release = backend_release.into();

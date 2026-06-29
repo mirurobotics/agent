@@ -343,7 +343,6 @@ pub mod sync_success {
                 })),
                 ..Default::default()
             }]),
-            upload_rules: Some(vec![]),
             ..Default::default()
         };
 
@@ -953,7 +952,6 @@ pub mod subscribe {
                 id: "cfg_inst_1".to_string(),
                 ..Default::default()
             }]),
-            upload_rules: Some(vec![]),
             ..Default::default()
         };
         let backend_dep_cloned = backend_dep.clone();
@@ -1045,7 +1043,6 @@ pub mod subscribe {
                 id: "cfg_inst_1".to_string(),
                 ..Default::default()
             }]),
-            upload_rules: Some(vec![]),
             ..Default::default()
         };
         let backend_dep_cloned = backend_dep.clone();

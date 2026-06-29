@@ -37,7 +37,6 @@ pub fn make_deployment(id: &str, cfg_inst_args: Vec<CfgInstArgs>) -> BackendDepl
         activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
         config_instances: Some(cfg_insts),
-        upload_rules: Some(Vec::new()),
         ..Default::default()
     }
 }
@@ -74,6 +73,7 @@ pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
         created_at: Utc::now().to_rfc3339(),
         updated_at: Utc::now().to_rfc3339(),
         git_commit,
+        upload_rules: Some(Vec::new()),
     }
 }
 
@@ -86,19 +86,19 @@ pub fn make_backend_upload_rule(id: &str) -> BaseUploadRule {
     }
 }
 
-/// Builds a deployment carrying expanded upload rules with the given ids.
-pub fn make_deployment_with_upload_rules(
+/// Builds a deployment whose expanded release carries upload rules with the
+/// given ids (upload rules ride on `release.upload_rules` in the contract).
+pub fn make_deployment_with_release_upload_rules(
     id: &str,
     cfg_inst_args: Vec<CfgInstArgs>,
     rule_ids: &[&str],
 ) -> BackendDeployment {
-    let mut dpl = make_deployment(id, cfg_inst_args);
-    dpl.upload_rules = Some(
-        rule_ids
-            .iter()
-            .map(|rid| make_backend_upload_rule(rid))
-            .collect(),
-    );
+    let mut dpl = make_deployment_with_release(id, cfg_inst_args, &format!("{id}_rel"), None);
+    let rules = rule_ids
+        .iter()
+        .map(|rid| make_backend_upload_rule(rid))
+        .collect();
+    dpl.release.as_mut().unwrap().upload_rules = Some(rules);
     dpl
 }
 

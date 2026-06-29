@@ -192,10 +192,10 @@ mod pull_success {
     }
 
     #[tokio::test]
-    async fn stores_upload_rules_from_expanded_deployment() {
+    async fn stores_upload_rules_from_expanded_release() {
         let f = Fixture::new("sync_upload_rules").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
-        let dpl = make_deployment_with_upload_rules(
+        let dpl = make_deployment_with_release_upload_rules(
             "dpl_1",
             cfg_inst_args,
             &["upl_rule_1", "upl_rule_2"],
@@ -481,10 +481,8 @@ mod pull_failure {
     async fn upload_rules_not_expanded_error() {
         let f = Fixture::new("upload_rules_not_expanded_error").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
-        let unexpanded = BackendDeployment {
-            upload_rules: None,
-            ..make_deployment("dpl_1", cfg_inst_args)
-        };
+        let mut unexpanded = make_deployment_with_release("dpl_1", cfg_inst_args, "rel_1", None);
+        unexpanded.release.as_mut().unwrap().upload_rules = None;
         f.http_client
             .set_list_all_deployments(move || Ok(vec![unexpanded.clone()]));
 

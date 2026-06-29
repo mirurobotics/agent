@@ -661,7 +661,6 @@ fn from_backend() {
                 ..Default::default()
             },
         ]),
-        upload_rules: Some(vec![]),
     };
 
     let config_instance_ids: Vec<String> = backend_deployment
@@ -709,7 +708,6 @@ fn from_backend_invalid_dates() {
         updated_at: "not-a-date".to_string(),
         release: None,
         config_instances: Some(vec![]),
-        upload_rules: Some(vec![]),
     };
 
     let deployment = Deployment::from_backend(backend_deployment, vec![]);
