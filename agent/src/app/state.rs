@@ -13,12 +13,14 @@ use crate::filesys::PathExt;
 use crate::http;
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
+use crate::upload::UploaderExt;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
+    pub uploader: Arc<crate::upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -62,6 +64,16 @@ impl AppState {
         let (event_hub, event_hub_handle) =
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
+        // initialize the uploader (before the syncer, which pushes rules to it)
+        let (uploader, uploader_handle) = crate::upload::uploader::Uploader::spawn(
+            64,
+            crate::upload::uploader::UploaderArgs {
+                min_poll_interval_secs: 1,
+                now_fn: Arc::new(chrono::Utc::now),
+            },
+        )?;
+        let uploader = Arc::new(uploader);
+
         // initialize the syncer
         let (syncer, syncer_handle) = sync::Syncer::spawn(
             64,
@@ -78,6 +90,7 @@ impl AppState {
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
                 event_hub: event_hub.clone(),
+                uploader: uploader.clone(),
             },
         )?;
         let syncer = Arc::new(syncer);
@@ -86,7 +99,12 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         let shutdown_handle = async move {
-            let handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            let handles = vec![
+                token_mngr_handle,
+                syncer_handle,
+                uploader_handle,
+                event_hub_handle,
+            ];
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -96,6 +114,7 @@ impl AppState {
                 storage,
                 http_client,
                 syncer,
+                uploader,
                 token_mngr,
                 activity_tracker,
                 event_hub,
@@ -107,6 +126,11 @@ impl AppState {
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
+
+        // shutdown the uploader after the syncer (the syncer pushes rules to it)
+        if let Err(e) = self.uploader.shutdown().await {
+            tracing::error!("failed to shutdown uploader: {e}");
+        }
 
         // shutdown the event hub
         if let Err(e) = self.event_hub.shutdown().await {

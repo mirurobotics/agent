@@ -264,18 +264,13 @@ async fn init_uploads_worker(
 ) -> Result<(), ServerErr> {
     info!("Initializing uploads worker...");
 
-    let deployments = app_state.storage.deployments.clone();
-    let releases = app_state.storage.releases.clone();
-    let upload_rules = app_state.storage.upload_rules.clone();
+    let uploader = app_state.uploader.clone();
 
     let uploads_handle = tokio::spawn(async move {
         uploads::run(
             &options,
-            deployments.as_ref(),
-            releases.as_ref(),
-            upload_rules.as_ref(),
+            uploader.as_ref(),
             tokio::time::sleep,
-            chrono::Utc::now,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
             }),

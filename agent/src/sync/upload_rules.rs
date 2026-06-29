@@ -1,0 +1,68 @@
+// standard crates
+use std::collections::HashSet;
+
+// internal crates
+use crate::models::{DplActivity, UploadRule, UploadRuleID};
+use crate::storage;
+
+// external crates
+use tracing::{debug, error};
+
+/// Resolves the active upload rules from the currently-deployed deployment(s):
+/// Deployed deployment -> release (by release_id) -> release.upload_rule_ids
+/// -> rule BODIES (by id) from the append-only UploadRules store. Unions across
+/// all Deployed deployments (normally exactly one; the union covers redeploy
+/// transitions). Missing ids are skipped with a debug log. Cache errors are
+/// logged and treated as empty so the worker never crashes.
+///
+/// Public as a test seam (mirrors `decide_ready`) so unit tests can exercise the
+/// traversal directly against seeded stores.
+pub async fn active_upload_rules(
+    deployments: &storage::Deployments,
+    releases: &storage::Releases,
+    upload_rules: &storage::UploadRules,
+) -> Vec<UploadRule> {
+    let deployed = match deployments
+        .find_where(|d| d.activity_status == DplActivity::Deployed)
+        .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            error!("error reading deployments: {e:?}");
+            return Vec::new();
+        }
+    };
+
+    let mut seen: HashSet<UploadRuleID> = HashSet::new();
+    let mut out: Vec<UploadRule> = Vec::new();
+    for dpl in deployed {
+        let release = match releases.read_optional(dpl.release_id.clone()).await {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                debug!(
+                    "release {} for deployed deployment {} not cached; skipping",
+                    dpl.release_id, dpl.id
+                );
+                continue;
+            }
+            Err(e) => {
+                error!("error reading release {}: {e:?}", dpl.release_id);
+                continue;
+            }
+        };
+        for rule_id in &release.upload_rule_ids {
+            if !seen.insert(rule_id.clone()) {
+                continue;
+            }
+            match upload_rules.read_optional(rule_id.clone()).await {
+                Ok(Some(rule)) => out.push(rule),
+                Ok(None) => debug!(
+                    "upload rule {rule_id} referenced by release {} not in store; skipping",
+                    release.id
+                ),
+                Err(e) => error!("error reading upload rule {rule_id}: {e:?}"),
+            }
+        }
+    }
+    out
+}
