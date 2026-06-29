@@ -208,7 +208,11 @@ mod run_loop {
         let (upload_rules, _h3) = storage::UploadRules::spawn(64, layout.upload_rules(), 1000)
             .await
             .unwrap();
-        (Arc::new(deployments), Arc::new(releases), Arc::new(upload_rules))
+        (
+            Arc::new(deployments),
+            Arc::new(releases),
+            Arc::new(upload_rules),
+        )
     }
 
     fn spawn_worker(
@@ -459,10 +463,16 @@ mod run_loop {
             )
             .await;
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
-            assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string(), "r2".to_string()]));
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
+            assert_eq!(
+                ids(&rules),
+                BTreeSet::from(["r1".to_string(), "r2".to_string()])
+            );
         }
 
         // TS3b: a rule body present in the store but NOT referenced by the
@@ -474,8 +484,7 @@ mod run_loop {
             let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
             let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
             // release references only r1, but r2's body also lives in the store.
-            seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1])
-                .await;
+            seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
             upload_rules
                 .write_if_absent(
                     "r2".to_string(),
@@ -485,9 +494,12 @@ mod run_loop {
                 .await
                 .unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string()]));
         }
 
@@ -511,9 +523,12 @@ mod run_loop {
                 .await
                 .unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert!(rules.is_empty());
         }
 
@@ -557,9 +572,12 @@ mod run_loop {
                 .await
                 .unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string()]));
         }
 
@@ -583,9 +601,12 @@ mod run_loop {
                 .await
                 .unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert!(rules.is_empty());
         }
 
@@ -617,10 +638,16 @@ mod run_loop {
             )
             .await;
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
-            assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string(), "r2".to_string()]));
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
+            assert_eq!(
+                ids(&rules),
+                BTreeSet::from(["r1".to_string(), "r2".to_string()])
+            );
             assert_eq!(rules.len(), 2);
         }
 
@@ -633,9 +660,12 @@ mod run_loop {
             let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
             deployments.shutdown().await.unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert!(rules.is_empty());
         }
 
@@ -647,13 +677,15 @@ mod run_loop {
             let layout = Layout::new(dir);
             let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
             let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
-            seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1])
-                .await;
+            seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
             releases.shutdown().await.unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert!(rules.is_empty());
         }
 
@@ -665,13 +697,15 @@ mod run_loop {
             let layout = Layout::new(dir);
             let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
             let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
-            seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1])
-                .await;
+            seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
             upload_rules.shutdown().await.unwrap();
 
-            let rules =
-                active_upload_rules(deployments.as_ref(), releases.as_ref(), upload_rules.as_ref())
-                    .await;
+            let rules = active_upload_rules(
+                deployments.as_ref(),
+                releases.as_ref(),
+                upload_rules.as_ref(),
+            )
+            .await;
             assert!(rules.is_empty());
         }
     }
