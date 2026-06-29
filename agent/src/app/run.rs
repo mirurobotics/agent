@@ -664,4 +664,35 @@ mod tests {
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }
     }
+
+    #[tokio::test]
+    async fn shutdown_awaits_registered_uploads_worker_handle() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.uploads_worker_handle,
+                "uploads_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        // Drives shutdown_impl through the uploads `Some` branch (awaiting and
+        // clearing the registered handle) while every other worker/server/state
+        // slot stays empty and exercises its skip branch.
+        shutdown_manager.shutdown().await.unwrap();
+
+        assert!(shutdown_manager.uploads_worker_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_skips_absent_uploads_worker_handle() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        // No handles registered: shutdown should succeed via the skip branches,
+        // including the uploads "handle not found" path.
+        shutdown_manager.shutdown().await.unwrap();
+
+        assert!(shutdown_manager.uploads_worker_handle.is_none());
+    }
 }
