@@ -6,6 +6,7 @@ use miru_agent::filesys::{self, Overwrite};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::Release;
+use miru_agent::services::errors::UploadRulesNotExpandedErr;
 use miru_agent::services::release as rls_svc;
 use miru_agent::services::ServiceErr;
 use miru_agent::storage::Releases;
@@ -83,6 +84,7 @@ pub mod get_release_fallback {
             id: "rls_1".to_string(),
             version: "1.0.0".to_string(),
             git_commit_id: Some("gc_1".to_string()),
+            upload_rules: Some(vec![]),
             ..Default::default()
         };
         let stub = StubBackend::new().with_release(Ok(backend_rls));
@@ -207,5 +209,39 @@ pub mod get_release_fallback {
             result,
             Err(ServiceErr::SyncErr(SyncErr::MockErr(_)))
         ));
+    }
+
+    #[tokio::test]
+    async fn cache_miss_backend_missing_upload_rules_errors_and_does_not_cache() {
+        let (_dir, rls_stor) = setup("fb_rls_missing_upload_rules").await;
+        let backend_rls = backend_client::Release {
+            id: "rls_1".to_string(),
+            version: "1.0.0".to_string(),
+            upload_rules: None,
+            ..Default::default()
+        };
+        let stub = StubBackend::new().with_release(Ok(backend_rls));
+
+        let result = rls_svc::get(&rls_stor, &stub, "rls_1".to_string()).await;
+        assert!(matches!(
+            result,
+            Err(ServiceErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr { .. }))
+        ));
+        assert_eq!(stub.release_calls(), 1);
+
+        // The error must not have been cached: a subsequent get still hits the
+        // backend (proven by a fresh stub being invoked exactly once).
+        let backend_rls = backend_client::Release {
+            id: "rls_1".to_string(),
+            version: "1.0.0".to_string(),
+            upload_rules: Some(vec![]),
+            ..Default::default()
+        };
+        let stub2 = StubBackend::new().with_release(Ok(backend_rls));
+        let result2 = rls_svc::get(&rls_stor, &stub2, "rls_1".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result2.id, "rls_1");
+        assert_eq!(stub2.release_calls(), 1);
     }
 }
