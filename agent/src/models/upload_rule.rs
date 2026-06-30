@@ -39,7 +39,6 @@ impl_status_enum!(
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UploadRuleSource {
     pub glob: String,
-    pub poll_interval_secs: i32,
     pub stability_window_secs: i32,
 }
 
@@ -47,7 +46,6 @@ impl From<backend_client::UploadRuleSource> for UploadRuleSource {
     fn from(source: backend_client::UploadRuleSource) -> UploadRuleSource {
         UploadRuleSource {
             glob: source.glob,
-            poll_interval_secs: source.poll_interval_secs,
             stability_window_secs: source.stability_window_secs,
         }
     }
