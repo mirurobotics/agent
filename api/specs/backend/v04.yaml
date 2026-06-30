@@ -141,6 +141,7 @@ paths:
       description: Retrieve a release by its ID.
       parameters:
         - $ref: '#/components/parameters/release_id'
+        - $ref: '#/components/parameters/release_expansions'
       responses:
         '200':
           description: Successfully retrieved the release.
@@ -1174,6 +1175,12 @@ components:
       x-enum-varnames:
         - DEPLOYMENT_EXPAND_RELEASE
         - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
+    ReleaseExpansion:
+      type: string
+      enum:
+        - upload_rules
+      x-enum-varnames:
+        - RELEASE_EXPAND_UPLOAD_RULES
     UpdateDeploymentRequest:
       title: Update Deployment Request
       type: object
@@ -1840,6 +1847,17 @@ components:
           $ref: '#/components/schemas/DeploymentExpansion'
         example:
           - release
+    release_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on the release resource.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/ReleaseExpansion'
+        example:
+          - upload_rules
     release_id:
       name: release_id
       in: path
