@@ -75,9 +75,8 @@ uploader on top of that contract without re-deriving the mapping.
 
 ## Decision Log
 
-- Full upload-rule bodies stay in the separate append-only `upload_rules` store;
-  `Release` only carries id references. DECIDED, FINAL, do not revisit.
-- (Add further decisions here as they arise during implementation.)
+- The store-bodies-separately decision is final; see Scope. (No further decisions
+  yet — add them here as they arise during implementation.)
 
 ## Outcomes & Retrospective
 
@@ -110,8 +109,12 @@ Reference branch. `feat/uploads-file-discovery` already contains working
 versions of parts 2, 3 (the `get.rs` extraction) and 4, mixed in with the
 out-of-scope uploader code. It does NOT contain the part-1 re-vendor, and does
 NOT contain the `fetch_release` `&[]` -> `&["upload_rules"]` change — both are
-net-new here. Inspect the proven source diffs (read-only) with, from
-`/home/ben/miru/workbench4/repos/agent`:
+net-new here. First confirm the branch is present: run `git rev-parse --verify
+feat/uploads-file-discovery` (if it errors, run `git fetch origin
+feat/uploads-file-discovery`). The per-step prose below fully specifies each test
+body, so this branch is a cross-check aid, not the sole source — if it is
+unavailable, follow the prose. Inspect the proven source diffs (read-only) with,
+from `/home/ben/miru/workbench4/repos/agent`:
 
     git diff origin/main..feat/uploads-file-discovery -- \
       agent/src/models/release.rs \
@@ -204,6 +207,10 @@ must land first. M3 depends on M1's regenerated `ReleaseExpansion`/expand wiring
 being present in the spec (although the http layer passes plain string slices, M1
 keeps the spec and generated models consistent). M4 reuses the `from_backend`
 constructor from M2.
+
+Note: M2 leaves temporary `from_backend(..., vec![])` stubs at the two call sites
+so its commit compiles; M3 and M4 replace those exact stubs with real id
+projection. This is intentional — each milestone commit builds on its own.
 
 ## Concrete Steps
 
@@ -303,19 +310,14 @@ mirroring the generated `DeploymentExpansion` — a `RELEASE_EXPAND_UPLOAD_RULES
 variant with `#[serde(rename = "upload_rules")]`, an `Unknown` catch-all, plus
 `Display` and `Default` impls.
 
-Fallback if regen cannot run (no Node/Java in the environment). PREFER running
-`api/regen.sh`. Only if it genuinely cannot run, hand-write
-`libs/backend-api/src/models/release_expansion.rs` by copying the generated
-`libs/backend-api/src/models/deployment_expansion.rs` verbatim and substituting
-the type name (`DeploymentExpansion` -> `ReleaseExpansion`), the single variant
-(-> `RELEASE_EXPAND_UPLOAD_RULES` with `#[serde(rename = "upload_rules")]`), and
-any doc/comment strings; then add the two `mod.rs` lines by hand. The hand-written
-result MUST be byte-equivalent to what the generator would produce — verify by
-structural comparison against `deployment_expansion.rs`. Note: `ReleaseExpansion`
-is UNUSED by hand-written code until/unless someone switches the http layer to the
-enum; Part 3 passes plain `&["upload_rules"]` string slices, not the enum. An
-unused-but-present generated enum is expected and fine (DeploymentExpansion-style
-enums are generated the same way even though the http layer uses string slices).
+Fallback if regen cannot run (no Node/Java). PREFER `api/regen.sh`. Only if it
+genuinely cannot run, hand-write `libs/backend-api/src/models/release_expansion.rs`
+by copying the generated `deployment_expansion.rs` and substituting the type name
+(`DeploymentExpansion` -> `ReleaseExpansion`) and the single variant
+(`RELEASE_EXPAND_UPLOAD_RULES` with `#[serde(rename = "upload_rules")]`), then add
+the two `mod.rs` lines. It must be byte-equivalent to the generated output. The
+enum is unused (Part 3 passes plain `&["upload_rules"]` slices); that is expected,
+exactly as for `DeploymentExpansion`.
 
 Step 1.6 — Commit M1 (from inside the agent repo):
 
@@ -380,22 +382,20 @@ Step 2.2 — Update the model tests in `agent/tests/models/release.rs`. The
 The proven `from_backend` test builds an `expected` `Release` struct and asserts
 `assert_eq!(actual, expected)` to satisfy the field-by-field-assert lint.
 
-Step 2.3 — Compile-check:
+Step 2.3 — Keep the tree compiling with temporary call-site stubs. Replacing the
+`From` impl breaks the two existing call sites, which still use `.into()` /
+`from(...)`. M3 and M4 are the proper homes for the real id-projection logic, so
+do NOT write it here. Instead make each call site compile with an empty-ids stub:
+
+- `agent/src/services/release/get.rs:20` — `models::Release::from_backend(backend_rls, vec![])`
+- `agent/src/sync/deployments.rs:258` — `models::Release::from_backend(backend_release, vec![])`
+
+These `vec![]` stubs are deliberately temporary; M3 and M4 replace them with real
+id extraction. Then compile-check (from `/home/ben/miru/workbench4/repos/agent`):
 
     cargo check --workspace
 
-Expected: clean. (Call sites in `get.rs` and `deployments.rs` still use the old
-`.into()` / `From` form, which no longer exists — so if you have not yet touched
-them this will fail to compile.) To keep M2 self-contained and compiling, also
-apply the minimal call-site updates now is NOT required; instead, since M3 and M4
-are the proper homes for those call sites, prefer to do M2's `cargo check` with
-the call sites temporarily updated to the new constructor. Concretely: in M2 also
-change `agent/src/services/release/get.rs:20` and
-`agent/src/sync/deployments.rs:258` to call `Release::from_backend(..., vec![])`
-as a minimal stub so the tree compiles, then M3/M4 replace those stubs with the
-real id projection. (Alternatively fold M2's commit to occur after M3/M4 edits
-compile; the recommended path is the stub-then-replace approach so each commit
-builds.)
+Expected: clean.
 
 Step 2.4 — Commit M2:
 
@@ -422,7 +422,8 @@ passes `&["config_instances"]`. The http layer
 query pair `("expand", "upload_rules")`.
 
 Step 3.2 — `agent/src/services/release/get.rs` (lines 19-22). Replace the
-`models::Release::from(backend_rls)` line with id projection then `from_backend`.
+temporary `models::Release::from_backend(backend_rls, vec![])` stub left by M2
+with the real id projection feeding `from_backend`.
 Use `unwrap_or_default()` (tolerant) because this is the fallback fetch path:
 
         let upload_rule_ids: Vec<models::UploadRuleID> = backend_rls
@@ -488,7 +489,8 @@ Reference the proven diff:
     git diff origin/main..feat/uploads-file-discovery -- agent/src/sync/deployments.rs
 
 Step 4.1 — `agent/src/sync/deployments.rs`, `store_expanded_release` (lines
-250-291). Current key body builds the release via `.into()`, writes it, then
+250-291). After M2's stub, the body builds the release via the temporary
+`models::Release::from_backend(backend_release, vec![])` call, writes it, then
 extracts `backend_release.upload_rules` with an `ok_or_else(UploadRulesNotExpanded
 { deployment_id })`, then loops writing full rule bodies. Rework so the rules are
 extracted FIRST (reusing the same strict `ok_or_else(UploadRulesNotExpanded)` —
@@ -563,6 +565,9 @@ From `/home/ben/miru/workbench4/repos/agent`:
 Expected: `cargo check` clean; `test.sh` green; `update-deps.sh` refreshes
 `Cargo.lock`; `lint.sh` reports no findings; `preflight.sh` reports all gates
 exit 0.
+
+If `update-deps.sh` changed `Cargo.lock`, amend it into the M4 commit before
+pushing: `git add Cargo.lock && git commit --amend --no-edit`.
 
 Out-of-scope grep guard — confirm NONE of PR #93's symbols leaked in:
 
@@ -651,6 +656,7 @@ on `main` and passes after its milestone.
   earlier commits stand on their own (each compiles). Re-running `./scripts/test.sh`
   and `cargo check --workspace` is always safe and side-effect-free.
 
-- `./scripts/update-deps.sh` may modify `Cargo.lock`; if it does, include the
-  change with the final validation (or fold into the last milestone commit).
-  Re-running it is idempotent once dependencies are settled.
+- `./scripts/update-deps.sh` runs in the final validation pass. If it dirties
+  `Cargo.lock`, amend that change into the M4 commit (the last milestone) before
+  pushing — that is its single committed home. Re-running update-deps.sh is
+  idempotent once dependencies are settled.
