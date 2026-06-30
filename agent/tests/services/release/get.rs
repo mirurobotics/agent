@@ -225,7 +225,9 @@ pub mod get_release_fallback {
         let result = rls_svc::get(&rls_stor, &stub, "rls_1".to_string()).await;
         assert!(matches!(
             result,
-            Err(ServiceErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr { .. }))
+            Err(ServiceErr::UploadRulesNotExpanded(
+                UploadRulesNotExpandedErr { .. }
+            ))
         ));
         assert_eq!(stub.release_calls(), 1);
 
