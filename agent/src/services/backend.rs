@@ -54,9 +54,11 @@ impl<'a, C: ClientI, T: TokenManagerExt> BackendFetcher for HttpBackend<'a, C, T
 
     async fn fetch_release(&self, id: &str) -> Result<backend_client::Release, ServiceErr> {
         let token = self.token().await?;
-        http::with_retry(|| async { http::releases::get(self.client, id, &[], &token.token).await })
-            .await
-            .map_err(ServiceErr::from)
+        http::with_retry(|| async {
+            http::releases::get(self.client, id, &["upload_rules"], &token.token).await
+        })
+        .await
+        .map_err(ServiceErr::from)
     }
 
     async fn fetch_git_commit(&self, id: &str) -> Result<backend_client::GitCommit, ServiceErr> {

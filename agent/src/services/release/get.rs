@@ -17,7 +17,12 @@ pub async fn get<B: BackendFetcher>(
         return Ok(rls);
     }
     let backend_rls = backend.fetch_release(&id).await?;
-    let storage_rls = models::Release::from_backend(backend_rls, vec![]);
+    let upload_rule_ids: Vec<models::UploadRuleID> = backend_rls
+        .upload_rules
+        .as_ref()
+        .map(|rules| rules.iter().map(|r| r.id.clone()).collect())
+        .unwrap_or_default();
+    let storage_rls = models::Release::from_backend(backend_rls, upload_rule_ids);
     cache_release(releases, storage_rls.clone()).await;
     Ok(storage_rls)
 }

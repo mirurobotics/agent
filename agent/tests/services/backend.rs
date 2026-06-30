@@ -55,7 +55,7 @@ async fn fetch_deployment_returns_deserialized_value() {
 }
 
 #[tokio::test]
-async fn fetch_release_constructs_url_no_expand() {
+async fn fetch_release_constructs_url_and_expand_param() {
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
@@ -67,7 +67,7 @@ async fn fetch_release_constructs_url_no_expand() {
         method: reqwest::Method::GET,
         path: "/releases/rls_1".to_string(),
         url: "http://mock/releases/rls_1".to_string(),
-        query: vec![],
+        query: vec![("expand".to_string(), "upload_rules".to_string())],
         body: None,
         token: Some("test-token".to_string()),
     };

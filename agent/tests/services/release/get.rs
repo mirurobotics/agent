@@ -102,6 +102,35 @@ pub mod get_release_fallback {
     }
 
     #[tokio::test]
+    async fn cache_miss_backend_release_with_upload_rules_links_ids() {
+        let (_dir, rls_stor) = setup("fb_rls_upload_rules").await;
+        let backend_rls = backend_client::Release {
+            id: "rls_1".to_string(),
+            version: "1.0.0".to_string(),
+            upload_rules: Some(vec![
+                backend_client::BaseUploadRule {
+                    id: "upl_1".to_string(),
+                    ..Default::default()
+                },
+                backend_client::BaseUploadRule {
+                    id: "upl_2".to_string(),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+        let stub = StubBackend::new().with_release(Ok(backend_rls));
+
+        let result = rls_svc::get(&rls_stor, &stub, "rls_1".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            result.upload_rule_ids,
+            vec!["upl_1".to_string(), "upl_2".to_string()]
+        );
+    }
+
+    #[tokio::test]
     async fn cache_miss_backend_404_propagates_http_err() {
         let (_dir, rls_stor) = setup("fb_rls_404").await;
         let err = ServiceErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
