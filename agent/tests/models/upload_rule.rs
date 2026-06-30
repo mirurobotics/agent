@@ -34,7 +34,6 @@ impl ModelFixture for UploadRule {
                 key: "source",
                 value: json!({
                     "glob": "/data/*.mcap",
-                    "poll_interval_secs": 60,
                     "stability_window_secs": 30,
                 }),
             },
@@ -101,7 +100,6 @@ fn backend_rule(created_at: &str, updated_at: &str) -> backend_client::BaseUploa
         digest: "sha256:abc123".to_string(),
         source: Box::new(backend_client::UploadRuleSource {
             glob: "/data/*.mcap".to_string(),
-            poll_interval_secs: 60,
             stability_window_secs: 30,
         }),
         destination: Box::new(backend_client::UploadRuleDestination {
@@ -112,6 +110,7 @@ fn backend_rule(created_at: &str, updated_at: &str) -> backend_client::BaseUploa
         }),
         created_at: created_at.to_string(),
         updated_at: updated_at.to_string(),
+        content: None,
     }
 }
 
@@ -129,7 +128,6 @@ fn from_backend() {
         digest: "sha256:abc123".to_string(),
         source: UploadRuleSource {
             glob: "/data/*.mcap".to_string(),
-            poll_interval_secs: 60,
             stability_window_secs: 30,
         },
         destination: UploadRuleDestination {

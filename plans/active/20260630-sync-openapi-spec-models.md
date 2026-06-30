@@ -26,13 +26,14 @@ After this task the agent's generated Rust models match current openapi `main`: 
 ## Progress
 
 - [x] M1: Re-vendor backend spec from openapi main + regenerate models
-- [ ] M2: Fix agent source/tests for removed `poll_interval_secs`
+- [x] M2: Fix agent source/tests for removed `poll_interval_secs`
 - [ ] M3: Validate (cargo check/test, lint, preflight clean)
 
 
 ## Surprises & Discoveries
 
 - 2026-06-30 (M1): Strategy B (copy `build/dist/agent.yaml` wholesale) was attempted but rejected in favor of Strategy A (surgical edit). `build/build-release.sh` skips the agent target because HEAD (316936e) is not the `agent/v0.4.0` tag commit, so the snapshot build (`build/build-snapshot.sh`) was used instead. The snapshot artifact differs from the existing vendored `v04.yaml` in three ways that are NOT real spec changes: (a) a different YAML dumper style (list items at column 0 vs the vendored 2-space indent, plus long-description line-wrapping) yielding a ~1181-line noise diff in the body; (b) a version regression `v0.5.0-pre` -> `v0.4` (the version derives from the last git tag); (c) the verbose `x-git-commit.message` body, which itself contains the literal string `poll_interval_secs` and would have failed the acceptance grep over `api/specs/`. Both strategies are documented as converging on identical generated Rust models, so Strategy A was applied: removed `poll_interval_secs` from `UploadRuleSource` (required list, property def, and 3 example occurrences) and added the optional `content: string` property to `BaseUploadRule`, mirroring `apis/apps/backend-server/agent/openapi.gen.yaml` exactly (including its `content` description + example). `api/regen.sh` then modified only `upload_rule_source.rs` (dropped field, updated `new()` signature) and `base_upload_rule.rs` (added `content: Option<String>`); device models untouched, no files added/removed.
+- 2026-06-30 (M2): The plan's Source impact list missed one required compile fix. `agent/tests/models/upload_rule.rs::backend_rule()` builds a `backend_client::BaseUploadRule { ... }` struct literal with all fields spelled out (no `..Default::default()`), so the newly generated `content` field made that literal incomplete and broke compilation. Added `content: None` there (this is the generated-struct test fixture, NOT the agent domain model, so it does not violate the "do not surface content into the domain model" decision). The other `BaseUploadRule` literal, `agent/tests/sync/helpers.rs::make_backend_upload_rule()`, already uses `..Default::default()` and needed no change. `agent/src/models/upload_rule.rs` and `agent/tests/storage/upload_rules.rs` were fixed exactly as planned. `workers/poller.rs` left untouched.
 
 
 ## Decision Log
