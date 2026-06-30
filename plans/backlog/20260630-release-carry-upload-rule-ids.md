@@ -111,7 +111,10 @@ out-of-scope uploader code. It does NOT contain the part-1 re-vendor, and does
 NOT contain the `fetch_release` `&[]` -> `&["upload_rules"]` change — both are
 net-new here. First confirm the branch is present: run `git rev-parse --verify
 feat/uploads-file-discovery` (if it errors, run `git fetch origin
-feat/uploads-file-discovery`). The per-step prose below fully specifies each test
+feat/uploads-file-discovery:feat/uploads-file-discovery` — the `:local`
+refspec is required so the `git diff ..feat/uploads-file-discovery` commands
+below resolve a local ref rather than only the remote-tracking
+`origin/feat/uploads-file-discovery`). The per-step prose below fully specifies each test
 body, so this branch is a cross-check aid, not the sole source — if it is
 unavailable, follow the prose. Inspect the proven source diffs (read-only) with,
 from `/home/ben/miru/workbench4/repos/agent`:
