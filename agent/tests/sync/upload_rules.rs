@@ -10,17 +10,11 @@ use miru_agent::sync::upload_rules::active_upload_rules;
 // =============================== TEST HELPERS ================================= //
 
 /// Build an UploadRule from Default with only the source fields set.
-fn rule_with(
-    id: &str,
-    glob: &str,
-    poll_interval_secs: i32,
-    stability_window_secs: i32,
-) -> UploadRule {
+fn rule_with(id: &str, glob: &str, stability_window_secs: i32) -> UploadRule {
     UploadRule {
         id: id.to_string(),
         source: UploadRuleSource {
             glob: glob.to_string(),
-            poll_interval_secs,
             stability_window_secs,
         },
         ..Default::default()
@@ -109,8 +103,8 @@ async fn resolves_active_set() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
-    let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
-    let r2 = rule_with("r2", "/none/*.mcap", 60, 0);
+    let r1 = rule_with("r1", "/none/*.mcap", 0);
+    let r2 = rule_with("r2", "/none/*.mcap", 0);
     seed_deployed(
         &deployments,
         &releases,
@@ -140,13 +134,13 @@ async fn stale_rule_not_acted_on() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
-    let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
+    let r1 = rule_with("r1", "/none/*.mcap", 0);
     // release references only r1, but r2's body also lives in the store.
     seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
     upload_rules
         .write_if_absent(
             "r2".to_string(),
-            rule_with("r2", "/none/*.mcap", 60, 0),
+            rule_with("r2", "/none/*.mcap", 0),
             |_, _| false,
         )
         .await
@@ -197,8 +191,8 @@ async fn missing_rule_id_skipped() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
-    let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
-    let r2 = rule_with("r2", "/none/*.mcap", 60, 0);
+    let r1 = rule_with("r1", "/none/*.mcap", 0);
+    let r2 = rule_with("r2", "/none/*.mcap", 0);
     // seed release referencing both, but only write r1's body.
     deployments
         .write_if_absent(
@@ -275,8 +269,8 @@ async fn union_and_dedupe_across_deployments() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
-    let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
-    let r2 = rule_with("r2", "/none/*.mcap", 60, 0);
+    let r1 = rule_with("r1", "/none/*.mcap", 0);
+    let r2 = rule_with("r2", "/none/*.mcap", 0);
     seed_deployed(
         &deployments,
         &releases,
@@ -334,7 +328,7 @@ async fn release_cache_error_is_empty() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
-    let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
+    let r1 = rule_with("r1", "/none/*.mcap", 0);
     seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
     releases.shutdown().await.unwrap();
 
@@ -354,7 +348,7 @@ async fn rule_cache_error_is_empty() {
     let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
-    let r1 = rule_with("r1", "/none/*.mcap", 60, 0);
+    let r1 = rule_with("r1", "/none/*.mcap", 0);
     seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
     upload_rules.shutdown().await.unwrap();
 

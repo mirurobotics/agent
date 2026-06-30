@@ -22,17 +22,11 @@ fn t(secs: i64) -> DateTime<Utc> {
 }
 
 /// Build an UploadRule from Default with only the source fields set.
-fn rule_with(
-    id: &str,
-    glob: &str,
-    poll_interval_secs: i32,
-    stability_window_secs: i32,
-) -> UploadRule {
+fn rule_with(id: &str, glob: &str, stability_window_secs: i32) -> UploadRule {
     UploadRule {
         id: id.to_string(),
         source: UploadRuleSource {
             glob: glob.to_string(),
-            poll_interval_secs,
             stability_window_secs,
         },
         ..Default::default()
@@ -64,7 +58,7 @@ mod pure {
         std::fs::write(base.join("other/c.mcap"), b"ccc").unwrap();
 
         // --- absolute, non-recursive: only a.mcap matches ---
-        let rule = rule_with("r1", &format!("{}/data/*.mcap", base.display()), 60, 0);
+        let rule = rule_with("r1", &format!("{}/data/*.mcap", base.display()), 0);
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
         // first call records the observation (stability window 0 still requires a
@@ -76,7 +70,7 @@ mod pure {
         assert_eq!(ready_names(&second), BTreeSet::from(["a.mcap".to_string()]));
 
         // --- recursive `**`: a.mcap + c.mcap match ---
-        let rule = rule_with("r2", &format!("{}/**/*.mcap", base.display()), 60, 0);
+        let rule = rule_with("r2", &format!("{}/**/*.mcap", base.display()), 0);
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
         assert!(decide_ready(&rule, &mut obs, &mut reported, t(0)).is_empty());
@@ -87,7 +81,7 @@ mod pure {
         );
 
         // --- invalid glob: returns empty, no panic ---
-        let rule = rule_with("r3", "[", 60, 0);
+        let rule = rule_with("r3", "[", 0);
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
         assert!(decide_ready(&rule, &mut obs, &mut reported, t(0)).is_empty());
@@ -104,7 +98,7 @@ mod pure {
         // ---- change resets the window ----
         let file = base.join("reset.mcap");
         std::fs::write(&file, b"aaa").unwrap();
-        let rule = rule_with("reset", &glob, 60, 10);
+        let rule = rule_with("reset", &glob, 10);
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
 
@@ -128,7 +122,7 @@ mod pure {
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
         std::fs::write(base.join("stable.mcap"), b"aaa").unwrap();
-        let rule = rule_with("stable", &glob, 60, 10);
+        let rule = rule_with("stable", &glob, 10);
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
         assert!(decide_ready(&rule, &mut obs, &mut reported, t(0)).is_empty());
@@ -144,7 +138,7 @@ mod pure {
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
         std::fs::write(base.join("young.mcap"), b"aaa").unwrap();
-        let rule = rule_with("young", &glob, 60, 10);
+        let rule = rule_with("young", &glob, 10);
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
         assert!(decide_ready(&rule, &mut obs, &mut reported, t(0)).is_empty());
@@ -159,7 +153,7 @@ mod pure {
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
         std::fs::write(base.join("once.mcap"), b"aaa").unwrap();
-        let rule = rule_with("once", &glob, 60, 0);
+        let rule = rule_with("once", &glob, 0);
 
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
@@ -177,7 +171,7 @@ mod pure {
     async fn no_match_is_empty() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let base = dir.path().clone();
-        let rule = rule_with("none", &format!("{}/nope/*.mcap", base.display()), 60, 0);
+        let rule = rule_with("none", &format!("{}/nope/*.mcap", base.display()), 0);
 
         let mut obs: HashMap<PathBuf, FileObservation> = HashMap::new();
         let mut reported: HashSet<PathBuf> = HashSet::new();
@@ -217,8 +211,8 @@ mod actor {
 
         uploader
             .update_rules(vec![
-                rule_with("a", "/none/*.mcap", 60, 0),
-                rule_with("b", "/none/*.mcap", 60, 0),
+                rule_with("a", "/none/*.mcap", 0),
+                rule_with("b", "/none/*.mcap", 0),
             ])
             .await
             .unwrap();
@@ -228,7 +222,7 @@ mod actor {
         );
 
         uploader
-            .update_rules(vec![rule_with("c", "/none/*.mcap", 60, 0)])
+            .update_rules(vec![rule_with("c", "/none/*.mcap", 0)])
             .await
             .unwrap();
         assert_eq!(
@@ -240,7 +234,7 @@ mod actor {
     // Each rule keeps its own scan cadence: a 5s rule is scanned at +5s while a
     // 30s rule is skipped until +30s.
     #[tokio::test]
-    async fn scan_honors_per_rule_cadence() {
+    async fn scan_uses_global_cadence() {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::create_dir_all(base.join("a")).unwrap();
@@ -248,10 +242,11 @@ mod actor {
         std::fs::write(base.join("a/x.mcap"), b"xxx").unwrap();
         std::fs::write(base.join("b/y.mcap"), b"yyy").unwrap();
 
-        let rule_a = rule_with("a", &format!("{}/a/*.mcap", base.display()), 5, 0);
-        let rule_b = rule_with("b", &format!("{}/b/*.mcap", base.display()), 30, 0);
+        let rule_a = rule_with("a", &format!("{}/a/*.mcap", base.display()), 0);
+        let rule_b = rule_with("b", &format!("{}/b/*.mcap", base.display()), 0);
 
         let clock = Clock::new(1000);
+        // all rules share a single global cadence of 1s.
         let uploader = spawn_uploader(&clock, 1);
         uploader.update_rules(vec![rule_a, rule_b]).await.unwrap();
 
@@ -259,15 +254,10 @@ mod actor {
         uploader.scan().await.unwrap();
         assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
 
-        // +5s: rule_a is due (and its file is now stable->ready); rule_b is NOT
-        // due until +30s so it is skipped. Proves per-rule cadence.
-        clock.advance(5);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
-
-        // +30s: rule_b now due and its file is ready; rule_a's file was already
-        // reported so it dedupes.
-        clock.advance(25);
+        // +1s: the global interval has elapsed, so BOTH rules come due in the same
+        // scan and both files are now stable -> both ready. There is no per-rule
+        // interval, so neither rule is skipped.
+        clock.advance(1);
         uploader.scan().await.unwrap();
         assert_eq!(uploader.get_reported_count().await.unwrap(), 2);
     }
@@ -279,7 +269,7 @@ mod actor {
         let base = dir.path().clone();
         std::fs::write(base.join("z.mcap"), b"zzz").unwrap();
 
-        let rule = rule_with("z", &format!("{}/*.mcap", base.display()), 1, 10);
+        let rule = rule_with("z", &format!("{}/*.mcap", base.display()), 10);
 
         let clock = Clock::new(1000);
         let uploader = spawn_uploader(&clock, 1);
@@ -302,7 +292,7 @@ mod actor {
         let base = dir.path().clone();
         std::fs::write(base.join("once.mcap"), b"ooo").unwrap();
 
-        let rule = rule_with("once", &format!("{}/*.mcap", base.display()), 1, 0);
+        let rule = rule_with("once", &format!("{}/*.mcap", base.display()), 0);
 
         let clock = Clock::new(1000);
         let uploader = spawn_uploader(&clock, 1);

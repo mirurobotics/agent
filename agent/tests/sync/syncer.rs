@@ -791,7 +791,6 @@ pub mod upload_push {
             id: id.to_string(),
             source: UploadRuleSource {
                 glob: glob.to_string(),
-                poll_interval_secs: 60,
                 stability_window_secs: 0,
             },
             ..Default::default()

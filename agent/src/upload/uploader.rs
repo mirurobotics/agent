@@ -1,5 +1,4 @@
 // standard crates
-use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -129,12 +128,13 @@ impl SingleThreadUploader {
                 );
             }
 
-            let interval_secs = max(
-                rule.source.poll_interval_secs as i64,
-                self.min_poll_interval_secs,
+            // every rule shares a single global polling cadence: the per-rule
+            // poll_interval was removed from the contract, so the next scan for
+            // each rule is simply one global interval out.
+            self.next_scan_at.insert(
+                rule.id.clone(),
+                now + TimeDelta::seconds(self.min_poll_interval_secs),
             );
-            self.next_scan_at
-                .insert(rule.id.clone(), now + TimeDelta::seconds(interval_secs));
         }
 
         // prune next_scan_at entries for rules that are no longer present.
