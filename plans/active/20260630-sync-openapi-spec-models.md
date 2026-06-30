@@ -25,14 +25,14 @@ After this task the agent's generated Rust models match current openapi `main`: 
 
 ## Progress
 
-- [ ] M1: Re-vendor backend spec from openapi main + regenerate models
+- [x] M1: Re-vendor backend spec from openapi main + regenerate models
 - [ ] M2: Fix agent source/tests for removed `poll_interval_secs`
 - [ ] M3: Validate (cargo check/test, lint, preflight clean)
 
 
 ## Surprises & Discoveries
 
-(none yet — record anything unexpected here as work proceeds)
+- 2026-06-30 (M1): Strategy B (copy `build/dist/agent.yaml` wholesale) was attempted but rejected in favor of Strategy A (surgical edit). `build/build-release.sh` skips the agent target because HEAD (316936e) is not the `agent/v0.4.0` tag commit, so the snapshot build (`build/build-snapshot.sh`) was used instead. The snapshot artifact differs from the existing vendored `v04.yaml` in three ways that are NOT real spec changes: (a) a different YAML dumper style (list items at column 0 vs the vendored 2-space indent, plus long-description line-wrapping) yielding a ~1181-line noise diff in the body; (b) a version regression `v0.5.0-pre` -> `v0.4` (the version derives from the last git tag); (c) the verbose `x-git-commit.message` body, which itself contains the literal string `poll_interval_secs` and would have failed the acceptance grep over `api/specs/`. Both strategies are documented as converging on identical generated Rust models, so Strategy A was applied: removed `poll_interval_secs` from `UploadRuleSource` (required list, property def, and 3 example occurrences) and added the optional `content: string` property to `BaseUploadRule`, mirroring `apis/apps/backend-server/agent/openapi.gen.yaml` exactly (including its `content` description + example). `api/regen.sh` then modified only `upload_rule_source.rs` (dropped field, updated `new()` signature) and `base_upload_rule.rs` (added `content: Option<String>`); device models untouched, no files added/removed.
 
 
 ## Decision Log

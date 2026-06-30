@@ -832,7 +832,6 @@ components:
       type: object
       required:
         - glob
-        - poll_interval_secs
         - stability_window_secs
       properties:
         glob:
@@ -840,17 +839,12 @@ components:
           pattern: ^/
           example: /var/log/robot/*.log
           description: An absolute glob pattern (must start with `/`) that selects the files to upload.
-        poll_interval_secs:
-          type: integer
-          example: 60
-          description: How often, in seconds, the agent checks matching files for upload eligibility.
         stability_window_secs:
           type: integer
           example: 60
           description: How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
       example:
         glob: /var/log/robot/*.log
-        poll_interval_secs: 60
         stability_window_secs: 60
     UploadDeletePolicy:
       title: Upload Delete Policy
@@ -947,6 +941,17 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: Timestamp of when the upload rule was last updated.
+        content:
+          type: string
+          description: Expand the upload rule content using `expand=content` in the query string.
+          example: |
+            source:
+              glob: /var/log/robot/*.log
+              stability_window_secs: 60
+            destination:
+              bucket: my-uploads-bucket
+              path: logs/{device_id}/{filename}
+              delete_policy: never
       example:
         object: upload_rule
         id: upl_rule_123
@@ -955,7 +960,6 @@ components:
         digest: sha256:1234567890
         source:
           glob: /var/log/robot/*.log
-          poll_interval_secs: 60
           stability_window_secs: 60
         destination:
           bucket_id: bkt_123
@@ -988,7 +992,6 @@ components:
                   digest: sha256:1234567890
                   source:
                     glob: /var/log/robot/*.log
-                    poll_interval_secs: 60
                     stability_window_secs: 60
                   destination:
                     bucket_id: bkt_123
