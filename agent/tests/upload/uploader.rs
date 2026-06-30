@@ -262,6 +262,40 @@ mod actor {
         assert_eq!(uploader.get_reported_count().await.unwrap(), 2);
     }
 
+    // A rule scanned within the global cadence window is skipped on the next scan:
+    // the file would otherwise be ready, but the rule is not yet due so it is not
+    // re-scanned and nothing is reported until the interval elapses.
+    #[tokio::test]
+    async fn scan_skips_rule_until_cadence_elapses() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base = dir.path().clone();
+        std::fs::write(base.join("w.mcap"), b"www").unwrap();
+
+        let rule = rule_with("w", &format!("{}/*.mcap", base.display()), 0);
+
+        let clock = Clock::new(1000);
+        // global cadence of 10s: after the first scan the rule is not due again
+        // until t=1010.
+        let uploader = spawn_uploader(&clock, 10);
+        uploader.update_rules(vec![rule]).await.unwrap();
+
+        // record only: stable_since=1000, next_scan_at=1010.
+        uploader.scan().await.unwrap();
+        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+
+        // +1s (t=1001 < 1010): the file is stable and would be ready, but the rule
+        // is not yet due, so the scan skips it and nothing is reported.
+        clock.advance(1);
+        uploader.scan().await.unwrap();
+        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+
+        // +9s (t=1010 >= 1010): the cadence has elapsed, the rule is due, and the
+        // now-stable file is reported.
+        clock.advance(9);
+        uploader.scan().await.unwrap();
+        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
+    }
+
     // The readiness stability window is honored through the actor's scan path.
     #[tokio::test]
     async fn readiness_window_through_scan() {
