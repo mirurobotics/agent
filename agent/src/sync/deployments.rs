@@ -247,6 +247,11 @@ async fn store_deployment(
 /// Uses `write_if_absent` because releases, upload rules, and git_commits are
 /// immutable on the backend — once created, their fields never change. Skipping
 /// writes for already-cached entries avoids unnecessary I/O on every sync cycle.
+///
+/// The upload rule ids are linked onto the domain Release (mirroring how
+/// `config_instance_ids` are linked onto Deployment) so downstream consumers can
+/// resolve the active rule set by traversal rather than scanning the whole
+/// append-only upload-rules store.
 async fn store_expanded_release(
     storage: &Storage<'_>,
     backend_dpl: &backend_client::Deployment,
@@ -255,19 +260,22 @@ async fn store_expanded_release(
         return Ok(());
     };
 
-    let release: models::Release = backend_release.clone().into();
+    let backend_rules = backend_release.upload_rules.clone().ok_or_else(|| {
+        SyncErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr {
+            deployment_id: backend_dpl.id.clone(),
+        })
+    })?;
+    let upload_rule_ids: Vec<models::UploadRuleID> =
+        backend_rules.iter().map(|r| r.id.clone()).collect();
+
+    let release = models::Release::from_backend(backend_release.clone(), upload_rule_ids);
     let release_id = release.id.clone();
     storage
         .releases
         .write_if_absent(release_id, release, |_, _| false)
         .await?;
 
-    let rules = backend_release.upload_rules.clone().ok_or_else(|| {
-        SyncErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr {
-            deployment_id: backend_dpl.id.clone(),
-        })
-    })?;
-    for backend_rule in rules {
+    for backend_rule in backend_rules {
         let rule: models::UploadRule = backend_rule.into();
         let id = rule.id.clone();
         storage

@@ -1,5 +1,6 @@
 // internal crates
 use crate::deserialize_error;
+use crate::models::UploadRuleID;
 use backend_api::models as backend_client;
 
 // external crates
@@ -18,6 +19,7 @@ pub struct Release {
     pub git_commit_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub upload_rule_ids: Vec<UploadRuleID>,
 }
 
 impl Default for Release {
@@ -28,12 +30,16 @@ impl Default for Release {
             git_commit_id: None,
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
+            upload_rule_ids: Vec::new(),
         }
     }
 }
 
-impl From<backend_client::Release> for Release {
-    fn from(release: backend_client::Release) -> Release {
+impl Release {
+    pub fn from_backend(
+        release: backend_client::Release,
+        upload_rule_ids: Vec<UploadRuleID>,
+    ) -> Release {
         Release {
             id: release.id,
             version: release.version,
@@ -46,6 +52,7 @@ impl From<backend_client::Release> for Release {
                 .updated_at
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+            upload_rule_ids,
         }
     }
 }
@@ -62,6 +69,8 @@ impl<'de> Deserialize<'de> for Release {
             git_commit_id: Option<String>,
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
+            #[serde(default)]
+            upload_rule_ids: Vec<UploadRuleID>,
         }
 
         let result = DeserializeRelease::deserialize(deserializer)?;
@@ -77,6 +86,7 @@ impl<'de> Deserialize<'de> for Release {
             updated_at: result
                 .updated_at
                 .unwrap_or_else(|| deserialize_error!("release", "updated_at", default.updated_at)),
+            upload_rule_ids: result.upload_rule_ids,
         })
     }
 }
