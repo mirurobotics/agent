@@ -17,7 +17,7 @@ pub async fn get<B: BackendFetcher>(
         return Ok(rls);
     }
     let backend_rls = backend.fetch_release(&id).await?;
-    let storage_rls = models::Release::from(backend_rls);
+    let storage_rls = models::Release::from_backend(backend_rls, vec![]);
     cache_release(releases, storage_rls.clone()).await;
     Ok(storage_rls)
 }

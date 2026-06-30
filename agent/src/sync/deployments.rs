@@ -255,7 +255,7 @@ async fn store_expanded_release(
         return Ok(());
     };
 
-    let release: models::Release = backend_release.clone().into();
+    let release = models::Release::from_backend(backend_release.clone(), vec![]);
     let release_id = release.id.clone();
     storage
         .releases
