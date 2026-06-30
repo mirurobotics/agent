@@ -211,6 +211,27 @@ mod pull_success {
     }
 
     #[tokio::test]
+    async fn populates_release_upload_rule_ids() {
+        let f = Fixture::new("sync_release_upload_rule_ids").await;
+        let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
+        let dpl = make_deployment_with_release_upload_rules(
+            "dpl_1",
+            cfg_inst_args,
+            &["upl_rule_1", "upl_rule_2"],
+        );
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        f.sync().await.unwrap();
+
+        let release = read_release(&f.release_stor, "dpl_1_rel").await;
+        assert_eq!(
+            release.upload_rule_ids,
+            vec!["upl_rule_1".to_string(), "upl_rule_2".to_string()]
+        );
+    }
+
+    #[tokio::test]
     async fn stores_release_without_git_commit() {
         let f = Fixture::new("sync_release_no_gc").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);

@@ -125,6 +125,14 @@ pub async fn read_deployment(deployment_stor: &Deployments, id: &str) -> models:
     cached
 }
 
+pub async fn read_release(release_stor: &Releases, id: &str) -> models::Release {
+    release_stor
+        .read_optional(id.to_string())
+        .await
+        .unwrap()
+        .expect("release should be stored")
+}
+
 pub async fn assert_deployment_stored(deployment_stor: &Deployments, id: &str) {
     read_deployment(deployment_stor, id).await;
 }
