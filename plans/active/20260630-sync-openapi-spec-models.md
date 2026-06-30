@@ -27,7 +27,7 @@ After this task the agent's generated Rust models match current openapi `main`: 
 
 - [x] M1: Re-vendor backend spec from openapi main + regenerate models
 - [x] M2: Fix agent source/tests for removed `poll_interval_secs`
-- [ ] M3: Validate (cargo check/test, lint, preflight clean)
+- [x] M3: Validate (cargo check/test, lint, preflight clean)
 
 
 ## Surprises & Discoveries
@@ -43,7 +43,7 @@ After this task the agent's generated Rust models match current openapi `main`: 
 
 ## Outcomes & Retrospective
 
-(to be filled in at completion)
+Completed 2026-06-30. The vendored backend spec and generated Rust models now match openapi `main` (316936e): `poll_interval_secs` is gone from `UploadRuleSource` and the optional `content` field is present on `BaseUploadRule`. Implemented via Strategy A (surgical spec edit) rather than Strategy B (see Surprises M1). Validation all green: `cargo check --workspace` clean, `./scripts/test.sh` 1346 passed / 0 failed, `./scripts/lint.sh` clean, `./scripts/preflight.sh` clean (all four sub-checks). `update-deps.sh` left `Cargo.lock` unchanged. M3 produced no code commit. Final commits: M1 `chore(api): sync vendored backend openapi spec and regen models from openapi main`; M2 `refactor(uploads): drop poll_interval_secs from agent upload-rule model and tests`. Acceptance greps 1-3 confirmed: no `poll_interval_secs` in `api/specs/`, in `libs/backend-api/src/models/`, or in `agent/` outside `workers/poller.rs`.
 
 
 ## Context and Orientation
