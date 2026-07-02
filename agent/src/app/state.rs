@@ -13,12 +13,14 @@ use crate::http;
 use crate::server;
 use crate::storage;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
+use crate::upload::{self, UploaderExt};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<storage::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
+    pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -30,6 +32,7 @@ impl AppState {
         capacities: storage::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
+        uploader_opts: upload::Options,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
@@ -62,6 +65,11 @@ impl AppState {
         let (event_hub, event_hub_handle) =
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
+        // initialize the uploader before the syncer, which pushes the active
+        // upload-rule set into it after each sync
+        let (uploader, uploader_handle) = upload::Uploader::spawn(64, uploader_opts)?;
+        let uploader = Arc::new(uploader);
+
         // initialize the syncer
         let (syncer, syncer_handle) = sync::Syncer::spawn(
             64,
@@ -78,6 +86,7 @@ impl AppState {
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
                 event_hub: event_hub.clone(),
+                uploader: uploader.clone(),
             },
         )?;
         let syncer = Arc::new(syncer);
@@ -86,7 +95,12 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         let shutdown_handle = async move {
-            let handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            let handles = vec![
+                token_mngr_handle,
+                syncer_handle,
+                uploader_handle,
+                event_hub_handle,
+            ];
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -96,6 +110,7 @@ impl AppState {
                 storage,
                 http_client,
                 syncer,
+                uploader,
                 token_mngr,
                 activity_tracker,
                 event_hub,
@@ -105,8 +120,14 @@ impl AppState {
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
-        // shutdown the syncer first (it uses storage during sync)
+        // shutdown the syncer first (it uses storage during sync and pushes
+        // rules into the uploader)
         self.syncer.shutdown().await?;
+
+        // shutdown the uploader
+        if let Err(e) = self.uploader.shutdown().await {
+            tracing::error!("failed to shutdown uploader: {e}");
+        }
 
         // shutdown the event hub
         if let Err(e) = self.event_hub.shutdown().await {

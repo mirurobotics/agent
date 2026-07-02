@@ -6,6 +6,7 @@ use crate::deploy::fsm;
 use crate::network::BackendHost;
 use crate::server;
 use crate::storage::{Capacities, Layout};
+use crate::upload;
 use crate::workers::{mqtt, poller, token_refresh::TokenRefreshWorkerOptions};
 
 #[derive(Debug, Clone, Copy)]
@@ -53,6 +54,9 @@ pub struct AppOptions {
 
     pub enable_poller: bool,
     pub poller: poller::Options,
+
+    pub enable_uploads_worker: bool,
+    pub uploader: upload::Options,
 }
 
 impl Default for AppOptions {
@@ -74,6 +78,9 @@ impl Default for AppOptions {
 
             enable_poller: true,
             poller: poller::Options::default(),
+
+            enable_uploads_worker: true,
+            uploader: upload::Options::default(),
         }
     }
 }

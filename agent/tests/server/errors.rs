@@ -15,6 +15,8 @@ use miru_agent::services::ServiceErr;
 use miru_agent::storage::StorageErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
+use miru_agent::upload::errors::SendActorMessageErr;
+use miru_agent::upload::UploadErr;
 
 fn authn_err() -> AuthnErr {
     AuthnErr::MockError(AuthnMockError {
@@ -69,6 +71,13 @@ fn events_err() -> EventsErr {
 fn sync_err() -> SyncErr {
     SyncErr::MockErr(SyncMockErr {
         is_network_conn_err: false,
+    })
+}
+
+fn upload_err() -> UploadErr {
+    UploadErr::SendActorMessageErr(SendActorMessageErr {
+        source: "actor is down".into(),
+        trace: miru_agent::trace!(),
     })
 }
 
@@ -127,5 +136,11 @@ mod from_conversions {
     fn sync_err_maps_to_server_sync_err() {
         let err: ServerErr = sync_err().into();
         assert!(matches!(err, ServerErr::SyncErr(_)));
+    }
+
+    #[test]
+    fn upload_err_maps_to_server_upload_err() {
+        let err: ServerErr = upload_err().into();
+        assert!(matches!(err, ServerErr::UploadErr(_)));
     }
 }

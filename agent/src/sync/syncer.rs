@@ -10,8 +10,9 @@ use crate::errors::*;
 use crate::events;
 use crate::http;
 use crate::storage;
-use crate::sync::{deployments, errors::*};
+use crate::sync::{deployments, errors::*, upload_rules};
 use crate::trace;
+use crate::upload::{self, UploaderExt};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -56,6 +57,7 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
+    pub uploader: Arc<upload::Uploader>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +91,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
+    uploader: Arc<upload::Uploader>,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -109,6 +112,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             event_hub: args.event_hub,
+            uploader: args.uploader,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -240,14 +244,43 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             git_commits: storage_ref.git_commits.as_ref(),
             upload_rules: storage_ref.upload_rules.as_ref(),
         };
-        deployments::sync(&deployments::SyncArgs {
+        let result = deployments::sync(&deployments::SyncArgs {
             http_client: self.http_client.as_ref(),
             storage: &sync_storage,
             opts: &self.deploy_opts,
             token: &token.token,
             event_hub: &self.event_hub,
         })
-        .await
+        .await;
+
+        self.push_active_upload_rules().await;
+
+        result
+    }
+
+    /// Pushes the active upload-rule set into the uploader after deployments
+    /// are applied. Storage is authoritative for what is deployed, so the push
+    /// runs even when the sync itself failed — a partially-failed sync still
+    /// leaves storage reflecting the latest applied state. Push failures are
+    /// logged rather than propagated: the uploader simply keeps its previous
+    /// rule set until the next sync.
+    async fn push_active_upload_rules(&self) {
+        let storage_ref = self.storage.as_ref();
+        let rules_storage = upload_rules::Storage {
+            deployments: storage_ref.deployments.as_ref(),
+            releases: storage_ref.releases.as_ref(),
+            upload_rules: storage_ref.upload_rules.as_ref(),
+        };
+        let rules = match upload_rules::active_upload_rules(&rules_storage).await {
+            Ok(rules) => rules,
+            Err(e) => {
+                error!("failed to resolve the active upload rules: {e:?}");
+                return;
+            }
+        };
+        if let Err(e) = self.uploader.update_rules(rules).await {
+            error!("failed to push the active upload rules to the uploader: {e:?}");
+        }
     }
 }
 

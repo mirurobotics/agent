@@ -12,6 +12,7 @@ use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
 use miru_agent::server::ServerErr;
 use miru_agent::storage::{Capacities, Layout, StorageErr};
+use miru_agent::upload::{self, UploaderExt};
 
 // external crates
 use chrono::Utc;
@@ -28,6 +29,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await;
         match result {
@@ -59,6 +61,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await;
         match result {
@@ -96,6 +99,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await;
         assert!(matches!(
@@ -140,6 +144,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await
         .unwrap();
@@ -193,6 +198,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await
         .unwrap();
@@ -244,6 +250,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await
         .unwrap();
@@ -290,6 +297,7 @@ pub mod shutdown {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await
         .unwrap();
@@ -336,6 +344,7 @@ pub mod shutdown {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            upload::Options::default(),
         )
         .await
         .unwrap();
@@ -357,5 +366,49 @@ pub mod shutdown {
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);
         assert!(device.last_disconnected_at <= Utc::now());
+    }
+
+    #[tokio::test]
+    async fn success_uploader_already_down() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // create a private key file
+        let private_key_file = layout.auth().private_key();
+        private_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        public_key_file
+            .write_string("test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create the device file
+        let device_file = layout.device();
+        let device = Device::default();
+        device_file
+            .write_json(&device, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, state_handle) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+            upload::Options::default(),
+        )
+        .await
+        .unwrap();
+
+        // shut the uploader down early; the app shutdown logs the failure and
+        // still completes
+        state.uploader.shutdown().await.unwrap();
+        state.shutdown().await.unwrap();
+        state_handle.await;
     }
 }

@@ -14,9 +14,11 @@ use crate::authn::{self, TokenManagerExt};
 use crate::http;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
+use crate::upload;
 use crate::workers::{
     mqtt, poller,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
+    uploads,
 };
 
 // external crates
@@ -143,6 +145,16 @@ async fn init(
         .await?;
     }
 
+    if options.enable_uploads_worker {
+        init_uploads_worker(
+            options.uploader.clone(),
+            app_state.clone(),
+            shutdown_manager,
+            shutdown_tx.subscribe(),
+        )
+        .await?;
+    }
+
     if options.enable_mqtt_worker {
         init_mqtt_worker(
             options.mqtt_worker.clone(),
@@ -165,6 +177,7 @@ async fn init_app_state(
         options.storage.capacities,
         Arc::new(http::Client::new(&options.backend_host.as_url())?),
         options.dpl_retry_policy,
+        options.uploader.clone(),
     )
     .await?;
     let app_state = Arc::new(app_state);
@@ -245,6 +258,35 @@ async fn init_poller_worker(
     Ok(())
 }
 
+async fn init_uploads_worker(
+    options: upload::Options,
+    app_state: Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing uploads worker...");
+
+    let uploader = app_state.uploader.clone();
+
+    let uploads_handle = tokio::spawn(async move {
+        uploads::run(
+            &options,
+            uploader.as_ref(),
+            tokio::time::sleep,
+            Box::pin(async move {
+                let _ = shutdown_rx.recv().await;
+            }),
+        )
+        .await;
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.uploads_worker_handle,
+        "uploads_handle",
+        uploads_handle,
+    )?;
+    Ok(())
+}
+
 async fn init_mqtt_worker(
     options: mqtt::Options,
     app_state: Arc<AppState>,
@@ -321,6 +363,7 @@ struct ShutdownManager {
     app_state: Option<AppStateShutdownParams>,
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     poller_worker_handle: Option<JoinHandle<()>>,
+    uploads_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
 }
@@ -333,6 +376,7 @@ impl ShutdownManager {
             app_state: None,
             socket_server_handle: None,
             poller_worker_handle: None,
+            uploads_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
         }
@@ -448,7 +492,19 @@ impl ShutdownManager {
             info!("Poller worker handle not found, skipping poller worker shutdown...");
         }
 
-        // 3. mqtt
+        // 3. uploads
+        if let Some(uploads_worker_handle) = self.uploads_worker_handle.take() {
+            uploads_worker_handle.await.map_err(|e| {
+                ServerErr::JoinHandleErr(JoinHandleErr {
+                    source: Box::new(e),
+                    trace: trace!(),
+                })
+            })?;
+        } else {
+            info!("Uploads worker handle not found, skipping uploads worker shutdown...");
+        }
+
+        // 4. mqtt
         if let Some(mqtt_worker_handle) = self.mqtt_worker_handle.take() {
             mqtt_worker_handle.await.map_err(|e| {
                 ServerErr::JoinHandleErr(JoinHandleErr {
@@ -460,7 +516,7 @@ impl ShutdownManager {
             info!("MQTT worker handle not found, skipping MQTT worker shutdown...");
         }
 
-        // 4. server
+        // 5. server
         if let Some(socket_server_handle) = self.socket_server_handle.take() {
             socket_server_handle.await.map_err(|e| {
                 ServerErr::JoinHandleErr(JoinHandleErr {
@@ -472,7 +528,7 @@ impl ShutdownManager {
             info!("Socket server handle not found, skipping socket server shutdown...");
         }
 
-        // 5. app state
+        // 6. app state
         if let Some(app_state) = self.app_state.take() {
             app_state.state.shutdown().await?;
             app_state.state_handle.await;
@@ -549,6 +605,63 @@ mod tests {
         match err {
             ServerErr::ShutdownMngrDuplicateArgErr(err) => {
                 assert_eq!(err.arg_name, "poller_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_no_handles_completes() {
+        let mut shutdown_manager = new_shutdown_manager();
+        shutdown_manager.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_propagates_an_aborted_uploads_worker() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        let uploads_handle = tokio::spawn(async {
+            std::future::pending::<()>().await;
+        });
+        uploads_handle.abort();
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.uploads_worker_handle,
+                "uploads_handle",
+                uploads_handle,
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .shutdown()
+            .await
+            .expect_err("aborted uploads worker should error");
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+    }
+
+    #[tokio::test]
+    async fn register_handle_rejects_uploads_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.uploads_worker_handle,
+                "uploads_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.uploads_worker_handle,
+                "uploads_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate uploads handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "uploads_handle");
             }
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }

@@ -14,7 +14,7 @@ use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
-use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
+use miru_agent::models::{self, Device, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::storage::{
     self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
     UploadRules,
@@ -23,6 +23,7 @@ use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
 };
 use miru_agent::sync::{SyncErr, Syncer, SyncerExt};
+use miru_agent::upload::{self, Uploader, UploaderExt};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -114,6 +115,7 @@ struct Fixture {
     syncer: Syncer,
     backoff: cooldown::Backoff,
     token_mngr: Arc<TokenManager>,
+    uploader: Arc<Uploader>,
 }
 
 impl Fixture {
@@ -142,6 +144,9 @@ impl Fixture {
             .await
             .unwrap();
 
+        let (uploader, _) = Uploader::spawn(32, upload::Options::default()).unwrap();
+        let uploader = Arc::new(uploader);
+
         let (syncer, _) = spawn(
             32,
             SyncerArgs {
@@ -153,6 +158,7 @@ impl Fixture {
                 },
                 backoff,
                 event_hub,
+                uploader: uploader.clone(),
             },
         )
         .unwrap();
@@ -164,6 +170,7 @@ impl Fixture {
             syncer,
             backoff,
             token_mngr,
+            uploader,
         }
     }
 
@@ -236,6 +243,7 @@ pub mod shutdown {
             .unwrap();
 
         let http_client = Arc::new(http::Client::new("doesntmatter").unwrap());
+        let (uploader, _) = Uploader::spawn(32, upload::Options::default()).unwrap();
         let (syncer, worker_handler) = Syncer::spawn(
             32,
             SyncerArgs {
@@ -251,6 +259,7 @@ pub mod shutdown {
                     max_secs: 12 * 60 * 60,
                 },
                 event_hub,
+                uploader: Arc::new(uploader),
             },
         )
         .unwrap();
@@ -1080,5 +1089,131 @@ pub mod subscribe {
 
         assert!(saw_deployment_wait);
         assert!(saw_sync_success);
+    }
+}
+
+pub mod upload_rules_push {
+    use super::*;
+
+    /// Seeds storage with a deployed deployment whose release carries the
+    /// given upload rules.
+    async fn seed_deployed_rules(f: &Fixture, rule_ids: &[&str]) {
+        let deployment = models::Deployment {
+            id: "dpl_1".to_string(),
+            release_id: "rls_1".to_string(),
+            activity_status: DplActivity::Deployed,
+            target_status: DplTarget::Deployed,
+            ..Default::default()
+        };
+        f.storage
+            .deployments
+            .write(
+                "dpl_1".to_string(),
+                deployment,
+                |_, _| false,
+                Overwrite::Allow,
+            )
+            .await
+            .unwrap();
+
+        let release = models::Release {
+            id: "rls_1".to_string(),
+            upload_rule_ids: rule_ids.iter().map(|rid| rid.to_string()).collect(),
+            ..Default::default()
+        };
+        f.storage
+            .releases
+            .write("rls_1".to_string(), release, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        for rule_id in rule_ids {
+            let rule = models::UploadRule {
+                id: rule_id.to_string(),
+                ..Default::default()
+            };
+            f.storage
+                .upload_rules
+                .write(rule_id.to_string(), rule, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn pushed_rule_ids(uploader: &Uploader) -> Vec<String> {
+        let mut ids: Vec<String> = uploader
+            .get_rules()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|rule| rule.id)
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    #[tokio::test]
+    async fn pushes_active_upload_rules_to_uploader() {
+        let f = Fixture::new("sync_pushes_upload_rules").await;
+        seed_deployed_rules(&f, &["upl_rule_1", "upl_rule_2"]).await;
+
+        // the backend returns no deployments; the push derives the active
+        // rule set from storage (deployed -> release -> rules)
+        f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+        f.syncer.sync().await.unwrap();
+
+        assert_eq!(
+            pushed_rule_ids(&f.uploader).await,
+            vec!["upl_rule_1".to_string(), "upl_rule_2".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn pushes_even_when_the_sync_fails() {
+        let f = Fixture::new("sync_pushes_rules_on_failure").await;
+        seed_deployed_rules(&f, &["upl_rule_1"]).await;
+
+        // storage is authoritative for what is deployed, so a failed pull
+        // still pushes the rule set derived from storage
+        f.http_client.set_list_all_deployments(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        f.syncer.sync().await.unwrap_err();
+
+        assert_eq!(
+            pushed_rule_ids(&f.uploader).await,
+            vec!["upl_rule_1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn traversal_errors_leave_the_previous_rule_set() {
+        let f = Fixture::new("sync_push_traversal_error").await;
+        seed_deployed_rules(&f, &["upl_rule_1"]).await;
+        f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+        // kill the release store so the traversal errors; the push is skipped
+        // and the sync itself still succeeds
+        f.storage.releases.shutdown().await.unwrap();
+
+        f.syncer.sync().await.unwrap();
+
+        assert!(pushed_rule_ids(&f.uploader).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn push_errors_do_not_fail_the_sync() {
+        let f = Fixture::new("sync_push_uploader_down").await;
+        seed_deployed_rules(&f, &["upl_rule_1"]).await;
+        f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+        // kill the uploader so the push fails; the sync itself still succeeds
+        f.uploader.shutdown().await.unwrap();
+
+        f.syncer.sync().await.unwrap();
     }
 }

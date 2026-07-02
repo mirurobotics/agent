@@ -47,7 +47,9 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Business logic
 
-`sync` — orchestrates full state synchronization with the backend. Type `Syncer` is the main coordination point; it fetches device state, identifies needed deployments, and drives the deploy pipeline.
+`sync` — orchestrates full state synchronization with the backend. Type `Syncer` is the main coordination point; it fetches device state, identifies needed deployments, and drives the deploy pipeline. After applying deployments it resolves the active upload-rule set (deployed deployments → release → `upload_rule_ids` → rule bodies) and pushes it into the uploader.
+
+`upload` — data-upload subsystem. Type `Uploader` is an actor that holds the active upload rules (pushed by the syncer) and per-file observation state in memory. Each scan matches rule globs against the filesystem and reports files whose size and mtime have quiesced for the rule's stability window. Currently discovery-only: newly-ready files are emitted to a placeholder log sink; the mint → PUT → confirm upload pipeline is a later milestone.
 
 `deploy` — deployment state machine. The FSM in `deploy/fsm` manages the lifecycle: download artifacts to a staging directory, apply to the target config directory, report status. `deploy/apply` handles the actual file operations.
 
@@ -69,10 +71,11 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Background workers
 
-`workers/` — three long-running tasks:
+`workers/` — four long-running tasks:
 - `mqtt` — subscribes to MQTT topics, triggers sync on events.
 - `poller` — periodic backend sync on a timer.
 - `token_refresh` — rotates JWT before expiry.
+- `uploads` — ticks the uploader's file-discovery scan on its global poll interval.
 
 All workers receive a broadcast shutdown signal and clean up gracefully.
 
