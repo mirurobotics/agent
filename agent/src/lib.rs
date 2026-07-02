@@ -21,5 +21,6 @@ pub mod services;
 pub mod storage;
 pub mod sync;
 pub mod telemetry;
+pub mod upload;
 pub mod version;
 pub mod workers;
