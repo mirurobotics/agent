@@ -18,7 +18,7 @@ use aws_sdk_s3::Client;
 
 pub mod errors;
 
-pub use errors::ObjectStoreErr;
+pub use errors::S3Err;
 use errors::{InvalidResponseErr, ObjectNotFoundErr};
 
 /// Caller-supplied temporary AWS credentials (from an STS AssumeRole).
@@ -84,7 +84,7 @@ impl S3Store {
     }
 
     /// Creates or overwrites an object from an in-memory buffer.
-    pub async fn put_object(&self, key: &str, bytes: Vec<u8>) -> Result<(), ObjectStoreErr> {
+    pub async fn put_object(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3Err> {
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -97,8 +97,8 @@ impl S3Store {
     }
 
     /// Reads an object's whole body into memory. A missing object maps to
-    /// [`ObjectStoreErr::ObjectNotFoundErr`].
-    pub async fn get_object(&self, key: &str) -> Result<Vec<u8>, ObjectStoreErr> {
+    /// [`S3Err::ObjectNotFoundErr`].
+    pub async fn get_object(&self, key: &str) -> Result<Vec<u8>, S3Err> {
         let output = match self
             .client
             .get_object()
@@ -115,7 +115,7 @@ impl S3Store {
                     .unwrap_or(false)
                     || matches!(err.as_service_error(), Some(GetObjectError::NoSuchKey(_)));
                 if is_not_found {
-                    return Err(ObjectStoreErr::ObjectNotFoundErr(ObjectNotFoundErr {
+                    return Err(S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
                         key: key.to_string(),
                         trace: crate::trace!(),
                     }));
@@ -129,7 +129,7 @@ impl S3Store {
         };
 
         let bytes = output.body.collect().await.map_err(|e| {
-            ObjectStoreErr::InvalidResponseErr(InvalidResponseErr {
+            S3Err::InvalidResponseErr(InvalidResponseErr {
                 operation: "get_object".to_string(),
                 msg: format!("failed to collect response body: {e}"),
                 trace: crate::trace!(),
@@ -140,7 +140,7 @@ impl S3Store {
 
     /// Deletes an object. Idempotent per S3 semantics (deleting a missing key
     /// still returns success).
-    pub async fn delete_object(&self, key: &str) -> Result<(), ObjectStoreErr> {
+    pub async fn delete_object(&self, key: &str) -> Result<(), S3Err> {
         self.client
             .delete_object()
             .bucket(&self.bucket)
@@ -153,7 +153,7 @@ impl S3Store {
 
     /// Returns `true` if the object exists (HEAD 200), `false` on a 404. Other
     /// errors propagate.
-    pub async fn object_exists(&self, key: &str) -> Result<bool, ObjectStoreErr> {
+    pub async fn object_exists(&self, key: &str) -> Result<bool, S3Err> {
         match self
             .client
             .head_object()
@@ -183,7 +183,7 @@ impl S3Store {
 
     /// Lists object keys under a prefix. Returns a single page; a truncated
     /// response is recorded via `tracing::warn!` (pagination is a follow-up).
-    pub async fn list_objects(&self, prefix: &str) -> Result<Vec<String>, ObjectStoreErr> {
+    pub async fn list_objects(&self, prefix: &str) -> Result<Vec<String>, S3Err> {
         let output = self
             .client
             .list_objects_v2()

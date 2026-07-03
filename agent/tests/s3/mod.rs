@@ -1,9 +1,9 @@
 // internal crates
 use miru_agent::errors::{Code, Error};
-use miru_agent::object_store::errors::{
+use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
-use miru_agent::object_store::{Credentials, ObjectStoreErr, S3Store};
+use miru_agent::s3::{Credentials, S3Err, S3Store};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -120,7 +120,7 @@ pub mod get {
 
             let err = store.get_object(key).await.unwrap_err();
 
-            assert!(matches!(err, ObjectStoreErr::ObjectNotFoundErr(_)));
+            assert!(matches!(err, S3Err::ObjectNotFoundErr(_)));
             assert!(matches!(err.code(), Code::ResourceNotFound));
             assert_eq!(err.http_status().as_u16(), 404);
         }
@@ -284,7 +284,7 @@ pub mod request_failed {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(!err.is_network_conn_err());
@@ -303,7 +303,7 @@ pub mod request_failed {
 
         let err = store.get_object("denied.txt").await.unwrap_err();
 
-        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
     }
 
     #[tokio::test]
@@ -317,7 +317,7 @@ pub mod request_failed {
 
         let err = store.delete_object("denied.txt").await.unwrap_err();
 
-        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
     }
 
     #[tokio::test]
@@ -336,7 +336,7 @@ pub mod request_failed {
 
         let err = store.object_exists("denied.txt").await.unwrap_err();
 
-        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
     }
 
     #[tokio::test]
@@ -350,7 +350,7 @@ pub mod request_failed {
 
         let err = store.list_objects("").await.unwrap_err();
 
-        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
     }
 
     #[tokio::test]
@@ -362,7 +362,7 @@ pub mod request_failed {
 
         let err = store.get_object("any.txt").await.unwrap_err();
 
-        assert!(matches!(err, ObjectStoreErr::ConnectionErr(_)));
+        assert!(matches!(err, S3Err::ConnectionErr(_)));
         assert!(err.is_network_conn_err());
     }
 }
@@ -392,7 +392,7 @@ pub mod error_types {
 
     #[test]
     fn object_not_found_maps_to_resource_not_found() {
-        let err = ObjectStoreErr::ObjectNotFoundErr(ObjectNotFoundErr {
+        let err = S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
             key: "k".to_string(),
             trace: miru_agent::trace!(),
         });
@@ -404,7 +404,7 @@ pub mod error_types {
 
     #[test]
     fn connection_err_is_network_conn_err() {
-        let err = ObjectStoreErr::ConnectionErr(ConnectionErr {
+        let err = S3Err::ConnectionErr(ConnectionErr {
             key: "k".to_string(),
             msg: "boom".to_string(),
             trace: miru_agent::trace!(),
@@ -416,7 +416,7 @@ pub mod error_types {
 
     #[test]
     fn request_failed_err_defaults_to_internal_server_error() {
-        let err = ObjectStoreErr::RequestFailedErr(RequestFailedErr {
+        let err = S3Err::RequestFailedErr(RequestFailedErr {
             operation: "get_object".to_string(),
             key: None,
             status: None,
@@ -434,7 +434,7 @@ pub mod error_types {
 
     #[test]
     fn invalid_response_err_defaults_to_internal_server_error() {
-        let err = ObjectStoreErr::InvalidResponseErr(InvalidResponseErr {
+        let err = S3Err::InvalidResponseErr(InvalidResponseErr {
             operation: "get_object".to_string(),
             msg: "bad body".to_string(),
             trace: miru_agent::trace!(),

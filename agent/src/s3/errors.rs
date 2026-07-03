@@ -72,7 +72,7 @@ pub struct InvalidResponseErr {
 impl crate::errors::Error for InvalidResponseErr {}
 
 #[derive(Debug, thiserror::Error)]
-pub enum ObjectStoreErr {
+pub enum S3Err {
     #[error(transparent)]
     ObjectNotFoundErr(ObjectNotFoundErr),
     #[error(transparent)]
@@ -83,14 +83,14 @@ pub enum ObjectStoreErr {
     InvalidResponseErr(InvalidResponseErr),
 }
 
-crate::impl_error!(ObjectStoreErr {
+crate::impl_error!(S3Err {
     ObjectNotFoundErr,
     ConnectionErr,
     RequestFailedErr,
     InvalidResponseErr,
 });
 
-/// Maps the operation-agnostic `SdkError` variants into an `ObjectStoreErr`.
+/// Maps the operation-agnostic `SdkError` variants into an `S3Err`.
 ///
 /// Each S3 operation has its own service-error enum `E`, so a not-found case
 /// (`NoSuchKey`, HEAD 404, ...) must be classified by the caller before
@@ -101,24 +101,24 @@ pub fn map_sdk_err_common<E>(
     operation: &str,
     key: Option<String>,
     err: SdkError<E>,
-) -> ObjectStoreErr
+) -> S3Err
 where
     E: std::error::Error + 'static,
 {
     match err {
-        SdkError::TimeoutError(e) => ObjectStoreErr::ConnectionErr(ConnectionErr {
+        SdkError::TimeoutError(e) => S3Err::ConnectionErr(ConnectionErr {
             key: key.unwrap_or_default(),
             msg: format!("request timed out: {e:?}"),
             trace: crate::trace!(),
         }),
-        SdkError::DispatchFailure(e) => ObjectStoreErr::ConnectionErr(ConnectionErr {
+        SdkError::DispatchFailure(e) => S3Err::ConnectionErr(ConnectionErr {
             key: key.unwrap_or_default(),
             msg: format!("failed to dispatch request: {e:?}"),
             trace: crate::trace!(),
         }),
         SdkError::ResponseError(e) => {
             let status = e.raw().status().as_u16();
-            ObjectStoreErr::RequestFailedErr(RequestFailedErr {
+            S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
                 key,
                 status: Some(status),
@@ -126,7 +126,7 @@ where
                 trace: crate::trace!(),
             })
         }
-        SdkError::ConstructionFailure(e) => ObjectStoreErr::RequestFailedErr(RequestFailedErr {
+        SdkError::ConstructionFailure(e) => S3Err::RequestFailedErr(RequestFailedErr {
             operation: operation.to_string(),
             key,
             status: None,
@@ -136,7 +136,7 @@ where
         SdkError::ServiceError(e) => {
             let status = e.raw().status().as_u16();
             let source = e.into_err();
-            ObjectStoreErr::RequestFailedErr(RequestFailedErr {
+            S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
                 key,
                 status: Some(status),
@@ -146,7 +146,7 @@ where
         }
         // `SdkError` is `#[non_exhaustive]`; treat any future variant as a
         // generic request failure rather than panicking.
-        other => ObjectStoreErr::RequestFailedErr(RequestFailedErr {
+        other => S3Err::RequestFailedErr(RequestFailedErr {
             operation: operation.to_string(),
             key,
             status: None,
