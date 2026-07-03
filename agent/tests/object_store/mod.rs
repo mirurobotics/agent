@@ -1,6 +1,9 @@
 // internal crates
 use miru_agent::errors::{Code, Error};
-use miru_agent::object_store::{ObjectStoreErr, S3Store};
+use miru_agent::object_store::errors::{
+    ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
+};
+use miru_agent::object_store::{Credentials, ObjectStoreErr, S3Store};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -33,8 +36,7 @@ fn uri(path_and_query: &str) -> String {
 /// Wires an `S3Store` to a `StaticReplayClient` serving the given events.
 fn store_with(events: Vec<ReplayEvent>) -> (S3Store, StaticReplayClient) {
     let replay = StaticReplayClient::new(events);
-    let store =
-        S3Store::with_http_client(replay.clone(), REGION.to_string(), BUCKET.to_string());
+    let store = S3Store::with_http_client(replay.clone(), REGION.to_string(), BUCKET.to_string());
     (store, replay)
 }
 
@@ -225,5 +227,220 @@ pub mod list {
         let keys = store.list_objects("blobs/").await.unwrap();
 
         assert_eq!(keys, vec!["blobs/one.txt", "blobs/two.txt"]);
+    }
+
+    const TRUNCATED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>test-bucket</Name><Prefix>blobs/</Prefix><KeyCount>1</KeyCount><MaxKeys>1</MaxKeys><IsTruncated>true</IsTruncated><NextContinuationToken>tok</NextContinuationToken><Contents><Key>blobs/one.txt</Key><LastModified>2026-07-03T00:00:00.000Z</LastModified><ETag>"e1"</ETag><Size>3</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>"#;
+
+    #[tokio::test]
+    async fn list_truncated_returns_first_page() {
+        let canned_resp = http::Response::builder()
+            .status(200)
+            .header("content-type", "application/xml")
+            .body(SdkBody::from(TRUNCATED_XML))
+            .unwrap();
+        let expected_req = http::Request::builder()
+            .method("GET")
+            .uri(uri("?list-type=2&prefix=blobs%2F"))
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+
+        // A truncated response still returns the first page of keys (pagination
+        // is a follow-up); it must not error.
+        let keys = store.list_objects("blobs/").await.unwrap();
+
+        assert_eq!(keys, vec!["blobs/one.txt"]);
+    }
+}
+
+/// S3 returns non-404 failures (e.g. 403 AccessDenied) as a modeled service
+/// error, which the common mapper turns into `RequestFailedErr`.
+pub mod request_failed {
+    use super::*;
+
+    const ACCESS_DENIED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>REQ403</RequestId></Error>"#;
+
+    fn access_denied_resp() -> http::Response<SdkBody> {
+        http::Response::builder()
+            .status(403)
+            .header("content-type", "application/xml")
+            .body(SdkBody::from(ACCESS_DENIED_XML))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn put_403_maps_to_request_failed() {
+        let req = http::Request::builder()
+            .method("PUT")
+            .uri(uri("denied.txt?x-id=PutObject"))
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+
+        let err = store
+            .put_object("denied.txt", b"x".to_vec())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(!err.is_network_conn_err());
+        // Exercise the RequestFailedErr Display impl (status + operation).
+        assert!(err.to_string().contains("put_object"));
+    }
+
+    #[tokio::test]
+    async fn get_403_maps_to_request_failed() {
+        let req = http::Request::builder()
+            .method("GET")
+            .uri(uri("denied.txt?x-id=GetObject"))
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+
+        let err = store.get_object("denied.txt").await.unwrap_err();
+
+        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+    }
+
+    #[tokio::test]
+    async fn delete_403_maps_to_request_failed() {
+        let req = http::Request::builder()
+            .method("DELETE")
+            .uri(uri("denied.txt?x-id=DeleteObject"))
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+
+        let err = store.delete_object("denied.txt").await.unwrap_err();
+
+        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+    }
+
+    #[tokio::test]
+    async fn head_403_propagates_as_request_failed() {
+        let req = http::Request::builder()
+            .method("HEAD")
+            .uri(uri("denied.txt"))
+            .body(SdkBody::empty())
+            .unwrap();
+        // HEAD has no response body; a 403 has no XML payload.
+        let resp = http::Response::builder()
+            .status(403)
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(req, resp)]);
+
+        let err = store.object_exists("denied.txt").await.unwrap_err();
+
+        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+    }
+
+    #[tokio::test]
+    async fn list_403_maps_to_request_failed() {
+        let req = http::Request::builder()
+            .method("GET")
+            .uri(uri("?list-type=2&prefix="))
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+
+        let err = store.list_objects("").await.unwrap_err();
+
+        assert!(matches!(err, ObjectStoreErr::RequestFailedErr(_)));
+    }
+
+    #[tokio::test]
+    async fn transport_failure_maps_to_connection_err() {
+        // With no replay events, the connector fails to dispatch the request,
+        // which the SDK surfaces as `SdkError::DispatchFailure` — the mapper's
+        // network-connection path.
+        let (store, _replay) = store_with(vec![]);
+
+        let err = store.get_object("any.txt").await.unwrap_err();
+
+        assert!(matches!(err, ObjectStoreErr::ConnectionErr(_)));
+        assert!(err.is_network_conn_err());
+    }
+}
+
+/// The production constructor performs no network I/O, so it can be built and
+/// dropped in a unit test to exercise that code path.
+pub mod construction {
+    use super::*;
+
+    #[tokio::test]
+    async fn new_builds_without_network() {
+        let creds = Credentials {
+            access_key_id: "AKIA_TEST".to_string(),
+            secret_access_key: "secret".to_string(),
+            session_token: "session".to_string(),
+        };
+        // Constructing must not panic or touch the network.
+        let _store = S3Store::new(creds, "us-west-2".to_string(), "prod-bucket".to_string());
+    }
+}
+
+/// Direct assertions on the leaf error types' trait behavior. These do not go
+/// through the SDK; they pin the `crate::errors::Error` contract each variant
+/// promises (code / http_status / is_network_conn_err / Display).
+pub mod error_types {
+    use super::*;
+
+    #[test]
+    fn object_not_found_maps_to_resource_not_found() {
+        let err = ObjectStoreErr::ObjectNotFoundErr(ObjectNotFoundErr {
+            key: "k".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::ResourceNotFound));
+        assert_eq!(err.http_status().as_u16(), 404);
+        assert!(!err.is_network_conn_err());
+        assert!(err.to_string().contains("object not found"));
+    }
+
+    #[test]
+    fn connection_err_is_network_conn_err() {
+        let err = ObjectStoreErr::ConnectionErr(ConnectionErr {
+            key: "k".to_string(),
+            msg: "boom".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(err.is_network_conn_err());
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert!(err.to_string().contains("connection error"));
+    }
+
+    #[test]
+    fn request_failed_err_defaults_to_internal_server_error() {
+        let err = ObjectStoreErr::RequestFailedErr(RequestFailedErr {
+            operation: "get_object".to_string(),
+            key: None,
+            status: None,
+            msg: "nope".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(!err.is_network_conn_err());
+        // Display with no key / no status hits the fallback formatting.
+        let msg = err.to_string();
+        assert!(msg.contains("<none>"));
+        assert!(msg.contains("unknown"));
+    }
+
+    #[test]
+    fn invalid_response_err_defaults_to_internal_server_error() {
+        let err = ObjectStoreErr::InvalidResponseErr(InvalidResponseErr {
+            operation: "get_object".to_string(),
+            msg: "bad body".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(err.to_string().contains("invalid response"));
     }
 }

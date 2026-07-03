@@ -32,19 +32,25 @@ Streaming (multipart / `ByteStream`-based partial reads and writes) is explicitl
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) M1 — Add dependencies and confirm the workspace builds.
-- [ ] M2 — Implement the `object_store` module (errors + `S3Store` client + CRUD methods).
-- [ ] M3 — Write offline unit tests using the smithy `StaticReplayClient` mock transport.
-- [ ] M4 — Add the `.covgate` gate, run preflight, resolve lint/coverage findings until clean.
-
-Add timestamps and split entries as work proceeds.
+- [x] (2026-07-03 21:34Z) M1 — Added `aws-sdk-s3` + smithy test deps to the workspace and agent Cargo.toml; refreshed the lock; `cargo build` clean. Commit `dbe96aa`.
+- [x] (2026-07-03 21:40Z) M2 — Implemented the `object_store` module (errors + `S3Store` client + five CRUD methods + `#[cfg(feature="test")]` `with_http_client` seam); registered in `lib.rs`; clean build + clippy. Commit `5262a91`.
+- [x] (2026-07-03 21:44Z) M3 — Wrote offline tests via `StaticReplayClient`; all seven required cases plus error-path/construction/leaf-error tests green (`./scripts/test.sh` reports 1357+ passing). Added `http` as a dev-dep (needed to build `http::Request`/`http::Response` for `ReplayEvent`). Commit `7e0ab4d`.
+- [x] (2026-07-03 21:55Z) M4 — Added `.covgate` (87.00, measured 87.05%); ran preflight; resolved the rustsec finding (see Surprises). Commit pending.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- Observation: The plan's chosen `rustls` feature on `aws-sdk-s3` reintroduces a vulnerable webpki, contradicting the Decision Log's claim. `cargo audit` (inside `./scripts/lint.sh`) failed on `rustls-webpki 0.101.7` (RUSTSEC-2026-0098 / RUSTSEC-2026-0099).
+  Evidence: `aws-sdk-s3`'s `rustls` feature → `aws-smithy-runtime/tls-rustls` → `aws-smithy-http-client/legacy-rustls-ring` → `legacy-rustls 0.21.8` + `legacy-hyper-rustls 0.24.2` → `rustls-webpki 0.101.7`. That 0.101.7 carries the *same* advisory pair as the 0.102.8 the workspace already avoids for rumqttc.
+  Resolution: Dropped the `rustls` feature and kept only `default-https-client`, which maps to `aws-smithy-http-client/rustls-aws-lc` (`rustls 0.23` + `hyper-rustls 0.27` → `rustls-webpki 0.103.13`, unaffected). After the change the lock contains only webpki `0.103.13`; `rustls 0.21` / webpki `0.101.7` are gone, and `cargo audit` passes. All 19 object_store tests still pass on the modern client. Feature list is now `["behavior-version-latest", "rt-tokio", "sigv4a", "http-1x", "default-https-client"]`.
 
-- Observation: …
-  Evidence: …
+- Observation: Building `ReplayEvent`s requires the `http` crate directly.
+  Evidence: `ReplayEvent::new(req, resp)` takes `impl TryInto<HttpRequest/HttpResponse>`, and the ergonomic constructors are `http::Request::builder()` / `http::Response::builder()` (the AWS SDK's own tests use `http_1x::Request::builder()`). The plan's dev-dep list omitted `http`. Added `http = "1"` as a workspace dep + agent dev-dep; `cargo machete`/`diet` do not flag it (used from `agent/tests/`).
+
+- Observation: S3 defaults to virtual-hosted-style URLs, which makes replayed request URIs non-deterministic for path assertions.
+  Evidence: Default URL is `https://<bucket>.s3.<region>.amazonaws.com/<key>`. Enabled `.force_path_style(true)` in the `#[cfg(feature="test")]` `with_http_client` seam so requests are `https://s3.<region>.amazonaws.com/<bucket>/<key>`, matching the plan's `/<bucket>/<key>` description and keeping the request assertions stable.
+
+- Observation: `StaticReplayClient` cannot deterministically drive the transport-only `SdkError` arms (`TimeoutError`, `ResponseError`, `ConstructionFailure`) since it always returns a well-formed HTTP response, so full-region coverage of `errors.rs` is capped below the plan's ">90%" estimate.
+  Evidence: Measured combined region coverage is 87.05% (mod.rs 96.68%, errors.rs 63.51%). The uncovered regions are exactly those network-only match arms. The `DispatchFailure`/`ConnectionErr` arm *is* reachable by giving the replay client no events (its connector then returns a `ConnectorError`), and that path is covered. 87.05% is in line with existing modules (server 87.00, activity 86.95, workers 83.21). Gate set to 87.00.
 
 ## Decision Log
 
@@ -54,7 +60,7 @@ All entries below are dated 2026-07-03, authored by the plan author. Add new ent
 
 - **Credentials are always caller-supplied; no ambient AWS config.** Construction uses `aws_sdk_s3::config::Credentials::new(access_key_id, secret_access_key, Some(session_token), None, "miru-agent")` fed to `aws_sdk_s3::config::Builder` together with an explicit `Region`. We do **not** call `aws_config::load_from_env()` or any default-provider chain, so IMDS/env/`~/.aws` are never consulted. This matches the backend-mints-STS design. Region and bucket are constructor arguments.
 
-- **HTTP client / TLS: use the SDK's default rustls HTTPS client for production; inject a mock transport for tests.** The workspace deliberately routes MQTT/reqwest TLS through native-tls/OpenSSL to avoid transitively pinning the vulnerable `rustls-webpki 0.102.8` that `rumqttc`/`rumqttd` drag in (see the long comment in the workspace `Cargo.toml`). `aws-sdk-s3`'s default `rustls` feature pulls a *separate, current* rustls stack (`rustls`, `hyper-rustls`, `rustls-pki-types`, `rustls-native-certs`) that does **not** reintroduce `rustls-webpki 0.102.x`, so it does not conflict with that advisory. We keep the SDK default HTTPS client for real use. For the offline tests we override the connector with `aws_smithy_http_client::test_util::StaticReplayClient`, so no live TLS or network is exercised in CI. If security review later prefers a single TLS stack, a follow-up can switch the SDK to a native-tls hyper connector; that is out of scope here.
+- **HTTP client / TLS: use the SDK's modern `default-https-client` (rustls-aws-lc) for production; inject a mock transport for tests.** The workspace deliberately routes MQTT/reqwest TLS through native-tls/OpenSSL to avoid transitively pinning the vulnerable `rustls-webpki 0.102.8` that `rumqttc`/`rumqttd` drag in (see the long comment in the workspace `Cargo.toml`). **Correction (2026-07-03, during M4):** the plan originally added the SDK's `rustls` feature believing it was safe; in fact `aws-sdk-s3/rustls` maps to `aws-smithy-http-client/legacy-rustls-ring` (`rustls 0.21` + `hyper-rustls 0.24` → `rustls-webpki 0.101.7`), which carries RUSTSEC-2026-0098/0099 — the same advisory class the workspace already avoids. We therefore **dropped the `rustls` feature** and keep only `default-https-client`, which maps to `aws-smithy-http-client/rustls-aws-lc` (`rustls 0.23` + `hyper-rustls 0.27` → `rustls-webpki 0.103.13`, unaffected). `cargo audit` passes with only `0.103.13` in the lock. For the offline tests we override the connector with `aws_smithy_http_client::test_util::StaticReplayClient`, so no live TLS or network is exercised in CI. If security review later prefers a single TLS stack, a follow-up can switch the SDK to a native-tls hyper connector; that is out of scope here.
 
 - **Test transport: `StaticReplayClient` (record-replay), primary.** It lets each test assert the exact HTTP request the SDK emitted (method, URI/key, body bytes) and return a canned HTTP response, which is exactly the coverage the task asks for. Import it from `aws_smithy_http_client::test_util::{StaticReplayClient, ReplayEvent}` (a dev-dependency, `test-util` feature). Note: `aws-smithy-runtime` also re-exports these types at `aws_smithy_runtime::client::http::test_util`, but that module is `#[deprecated]` ("Please use the `test-util` feature from `aws-smithy-http-client` instead"); using it would trip `clippy -D warnings`, so we depend on `aws-smithy-http-client` directly. The alternative operation-level `aws-smithy-mocks` crate is not used, to keep one mocking approach.
 
@@ -66,7 +72,19 @@ All entries below are dated 2026-07-03, authored by the plan author. Add new ent
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-07-03. The agent gained a new `object_store` module exposing an async `S3Store` with `put_object`/`get_object`/`delete_object`/`object_exists`/`list_objects`, built only from caller-supplied temporary STS credentials + region + bucket, with SDK errors mapped into `crate::errors::Error` (404/`NoSuchKey` → `Code::ResourceNotFound`). Nineteen offline tests (`StaticReplayClient`, no live AWS) cover the seven required cases plus error-mapping, construction, and leaf-error trait behavior.
+
+Milestone commits:
+- M1 `dbe96aa` — build(agent): add aws-sdk-s3 and smithy test deps for object_store
+- M2 `5262a91` — feat(agent): add object_store S3 CRUD module
+- M3 `7e0ab4d` — test(agent): offline S3 CRUD tests via StaticReplayClient
+- M4 (this commit) — test(agent): gate object_store coverage; preflight clean
+
+Final validation: `cargo build` clean; `./scripts/test.sh` green (1357+ passing incl. 19 object_store); `./scripts/lint.sh` clean (audit now passes after the TLS fix); `./scripts/covgate.sh` passes (object_store 87.05% ≥ 87.00 gate); `./scripts/preflight.sh` prints "Preflight clean".
+
+Deviations from the plan (all recorded in Surprises & Discoveries): dropped the SDK `rustls` feature to eliminate a vulnerable `rustls-webpki 0.101.7` (kept `default-https-client`/rustls-aws-lc); added `http` as a dev-dep to build `ReplayEvent`s; enabled `force_path_style(true)` in the test-only constructor; coverage landed at 87.05% (gate 87.00) rather than ">90%" because the transport-only `SdkError` arms are not reachable through `StaticReplayClient`.
+
+Follow-ups (unchanged from Decision Log): streaming/multipart and list pagination remain out of scope; no cross-provider trait introduced.
 
 ## Context and Orientation
 
