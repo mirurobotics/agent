@@ -72,6 +72,9 @@ impl S3Store {
             .behavior_version(BehaviorVersion::latest())
             .region(Region::new(region))
             .credentials_provider(credentials)
+            // Path-style URLs (`/<bucket>/<key>`) make the replayed request URIs
+            // deterministic and readable, so tests can assert on the exact path.
+            .force_path_style(true)
             .http_client(http_client)
             .build();
         Self {
