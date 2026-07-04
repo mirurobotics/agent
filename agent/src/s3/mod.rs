@@ -18,9 +18,7 @@
 //! primitives ([`Store::create_multipart_upload`], [`Store::upload_part`],
 //! [`Store::list_parts`], [`Store::complete_multipart_upload`],
 //! [`Store::abort_multipart_upload`]) plus a stateless [`Store::put_multipart`]
-//! convenience. Durable, resumable multipart uploads (surviving a power-off)
-//! live one layer up in [`uploader::Uploader`], which owns the on-disk upload
-//! state and the resume-vs-restart policy.
+//! convenience.
 
 // internal crates
 use crate::filesys::file::File;
@@ -35,7 +33,6 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::Client;
 
 pub mod errors;
-pub mod uploader;
 
 pub use errors::S3Err;
 use errors::{InvalidResponseErr, ObjectNotFoundErr};
@@ -46,31 +43,9 @@ const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 const MIN_PART_SIZE: u64 = 5 * 1024 * 1024; // 5 MiB
 const MAX_PARTS: u64 = 10_000; // 10,000 parts
 
-/// One already-uploaded part as reported by S3 `ListParts`.
-pub struct PartInfo {
-    pub part_number: i32,
-    pub etag: String,
-    pub size: u64,
-}
-
 pub struct Config {
     pub creds: Credentials,
     pub region: String,
-    pub bucket: String,
-}
-
-pub struct Options {
-    pub part_size: u64,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            // Miru-chosen default part size. 8 MiB is the sweet spot for getting good
-            // performance while minimizing the need to retry upload parts.
-            part_size: 8 * 1024 * 1024, // 8 MiB
-        }
-    }
 }
 
 pub struct Credentials {
@@ -89,16 +64,52 @@ impl Default for Credentials {
     }
 }
 
+pub struct Object {
+    pub bucket: String,
+    pub key: String,
+}
+
+impl std::fmt::Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "s3://{}/{}", self.bucket, self.key)
+    }
+}
+
+pub struct PartToUpload {
+    pub upload_id: String,
+    pub number: i32,
+    pub offset: u64,
+    pub length: u64,
+}
+
+pub struct UploadedPart {
+    pub number: i32,
+    pub etag: String,
+    pub size: u64,
+}
+
+pub struct PutOptions {
+    pub part_size: u64,
+}
+
+impl Default for PutOptions {
+    fn default() -> Self {
+        Self {
+            // Miru-chosen default part size. 8 MiB is the sweet spot for getting good
+            // performance while minimizing the need to retry upload parts.
+            part_size: 8 * 1024 * 1024, // 8 MiB
+        }
+    }
+}
+
 pub struct Store {
     client: Client,
-    bucket: String,
-    opts: Options,
 }
 
 impl Store {
     /// Builds a client from caller-supplied temporary credentials. No network
     /// I/O happens here; the first request is made lazily on the first call.
-    pub fn new(cfg: Config, opts: Options) -> Self {
+    pub fn new(cfg: Config) -> Self {
         let s3creds = AwsCredentials::new(
             cfg.creds.access_key_id,
             cfg.creds.secret_access_key,
@@ -113,8 +124,6 @@ impl Store {
             .build();
         Self {
             client: Client::from_conf(s3cfg),
-            bucket: cfg.bucket,
-            opts,
         }
     }
 
@@ -126,7 +135,6 @@ impl Store {
     pub fn from_http_client(
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
         cfg: Config,
-        opts: Options,
     ) -> Self {
         let s3creds = AwsCredentials::new("test-access-key", "test-secret-key", None, None, "test");
         let s3cfg = aws_sdk_s3::config::Config::builder()
@@ -140,15 +148,7 @@ impl Store {
             .build();
         Self {
             client: Client::from_conf(s3cfg),
-            bucket: cfg.bucket,
-            opts,
         }
-    }
-
-    /// The size (in bytes) at or below which [`Self::put`] uses a single
-    /// `PutObject` instead of a multipart upload.
-    pub fn multipart_threshold(&self) -> u64 {
-        self.opts.part_size
     }
 
     /// Creates or overwrites an object by streaming a file off disk.
@@ -156,29 +156,29 @@ impl Store {
     /// The whole file is never held in memory: files at or below the single-PUT
     /// threshold stream through one `PutObject`, and larger files stream part-by-part
     /// through a (stateless) multipart upload (see [`Self::put_multipart`]).
-    pub async fn put(&self, key: &str, file: &File) -> Result<(), S3Err> {
-        let size = file.size().await?;
+    pub async fn put(&self, src: &File, dst: &Object, opts: PutOptions) -> Result<(), S3Err> {
+        let size = src.size().await?;
 
-        if size > self.opts.part_size {
-            self.put_multipart(key, file, size).await
+        if size > opts.part_size {
+            self.put_multipart(src, dst, size).await
         } else {
-            self.put_object(key, file).await
+            self.put_singlepart(src, dst).await
         }
     }
 
     /// Streams a file to S3 as a single-part upload.
-    pub async fn put_object(&self, key: &str, file: &File) -> Result<(), S3Err> {
-        let body = ByteStream::from_path(file.path())
+    pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), S3Err> {
+        let body = ByteStream::from_path(src.path())
             .await
-            .map_err(|e| self.map_bytestream_err("put_object", key, file, &e))?;
+            .map_err(|e| self.map_bytestream_err("put_object", dst, src, &e))?;
         self.client
             .put_object()
-            .bucket(&self.bucket)
-            .key(key)
+            .bucket(&dst.bucket)
+            .key(&dst.key)
             .body(body)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err_common("put_object", Some(key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err_common("put_object", Some(dst.key.to_string()), e))?;
         Ok(())
     }
 
@@ -187,66 +187,50 @@ impl Store {
     /// A fresh upload is created every call: create → `upload_part` over
     /// `part_size_for` chunks → complete. On any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
-    /// parts, then the error propagates. This carries **no durable state** and
-    /// cannot resume across a crash; for resumable uploads use
-    /// [`uploader::Uploader`].
-    pub async fn put_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
+    /// parts, then the error propagates. This variant is **stateless**: it carries
+    /// no durable state and cannot resume across a crash. A resumable variant will
+    /// be reintroduced in a later layer.
+    pub async fn put_multipart(&self, src: &File, dst: &Object, size: u64) -> Result<(), S3Err> {
         let part_size = Self::part_size_for(size);
-        let upload_id = self.create_multipart_upload(key).await?;
+        let upload_id = self.create_multipart_upload(dst).await?;
 
         match self
-            .upload_parts_and_complete(key, file, size, part_size, &upload_id)
+            .upload_parts_and_complete(src, dst, size, part_size, &upload_id)
             .await
         {
             Ok(()) => Ok(()),
             Err(err) => {
                 // Best-effort cleanup: don't mask the original error if the abort
                 // itself fails.
-                let _ = self.abort_multipart_upload(key, &upload_id).await;
+                let _ = self.abort_multipart_upload(dst, &upload_id).await;
                 Err(err)
             }
         }
     }
 
-    /// Uploads every part of `file` (from byte 0) and completes the multipart
-    /// upload. Split out from [`Self::put_multipart`] so a single `?` early-return
-    /// path funnels through one abort site.
-    async fn upload_parts_and_complete(
-        &self,
-        key: &str,
-        file: &File,
-        size: u64,
-        part_size: u64,
-        upload_id: &str,
-    ) -> Result<(), S3Err> {
-        let mut parts: Vec<(i32, String)> = Vec::new();
-        let mut offset: u64 = 0;
-        let mut part_number: i32 = 1; // S3 part numbers are 1-based.
-
-        while offset < size {
-            let len = part_size.min(size - offset);
-            let etag = self
-                .upload_part(key, upload_id, part_number, file, offset, len)
-                .await?;
-            parts.push((part_number, etag));
-            offset += len;
-            part_number += 1;
+    /// Picks a part size that keeps the part count within S3's 10,000-part limit. Uses
+    /// the fixed [`PART_SIZE`] until a file is large enough to need more than 10,000
+    /// such parts, then grows the part size to `ceil(size / 10_000)` (never below the 5
+    /// MiB floor).
+    pub(crate) fn part_size_for(size: u64) -> u64 {
+        if size.div_ceil(PART_SIZE) <= MAX_PARTS {
+            PART_SIZE
+        } else {
+            size.div_ceil(MAX_PARTS).max(MIN_PART_SIZE)
         }
-
-        self.complete_multipart_upload(key, upload_id, &parts).await
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
-    pub async fn create_multipart_upload(&self, key: &str) -> Result<String, S3Err> {
+    pub async fn create_multipart_upload(&self, dst: &Object) -> Result<String, S3Err> {
         let created = self
             .client
             .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
+            .bucket(&dst.bucket)
+            .key(&dst.key)
             .send()
             .await
             .map_err(|e| {
-                errors::map_sdk_err_common("create_multipart_upload", Some(key.to_string()), e)
+                errors::map_sdk_err_common("create_multipart_upload", Some(dst.key.to_string()), e)
             })?;
         let upload_id = created
             .upload_id()
@@ -261,36 +245,84 @@ impl Store {
         Ok(upload_id)
     }
 
+    async fn upload_parts_and_complete(
+        &self,
+        src: &File,
+        dst: &Object,
+        size: u64,
+        part_size: u64,
+        upload_id: &str,
+    ) -> Result<(), S3Err> {
+        let parts = self
+            .upload_parts(src, dst, size, part_size, upload_id)
+            .await?;
+        self.complete_multipart_upload(dst, upload_id, &parts).await
+    }
+
+    /// Uploads every part of `file` (from byte 0) and completes the multipart
+    /// upload. Split out from [`Self::put_multipart`] so a single `?` early-return
+    /// path funnels through one abort site.
+    async fn upload_parts(
+        &self,
+        src: &File,
+        dst: &Object,
+        size: u64,
+        part_size: u64,
+        upload_id: &str,
+    ) -> Result<Vec<UploadedPart>, S3Err> {
+        let mut parts: Vec<UploadedPart> = Vec::new();
+        let mut offset: u64 = 0;
+        let mut part_number: i32 = 1; // S3 part numbers are 1-based.
+
+        while offset < size {
+            let len = part_size.min(size - offset);
+            let part_to_upload = PartToUpload {
+                upload_id: upload_id.to_string(),
+                number: part_number,
+                offset,
+                length: len,
+            };
+            let etag = self.upload_part(src, dst, &part_to_upload).await?;
+            let uploaded_part = UploadedPart {
+                number: part_number,
+                etag,
+                size: len,
+            };
+            parts.push(uploaded_part);
+            offset += len;
+            part_number += 1;
+        }
+
+        Ok(parts)
+    }
+
     /// Streams a single part (`file[offset..offset+len]`) to S3 and returns its
     /// ETag. `InvalidResponseErr` if the response omits the ETag.
     pub async fn upload_part(
         &self,
-        key: &str,
-        upload_id: &str,
-        part_number: i32,
-        file: &File,
-        offset: u64,
-        len: u64,
+        src: &File,
+        dst: &Object,
+        part: &PartToUpload,
     ) -> Result<String, S3Err> {
         let body = ByteStream::read_from()
-            .path(file.path())
-            .offset(offset)
-            .length(Length::Exact(len))
+            .path(src.path())
+            .offset(part.offset)
+            .length(Length::Exact(part.length))
             .build()
             .await
-            .map_err(|e| self.map_bytestream_err("upload_part", key, file, &e))?;
+            .map_err(|e| self.map_bytestream_err("upload_part", dst, src, &e))?;
 
         let part = self
             .client
             .upload_part()
-            .bucket(&self.bucket)
-            .key(key)
-            .upload_id(upload_id)
-            .part_number(part_number)
+            .bucket(&dst.bucket)
+            .key(&dst.key)
+            .upload_id(&part.upload_id)
+            .part_number(part.number)
             .body(body)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err_common("upload_part", Some(key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err_common("upload_part", Some(dst.key.to_string()), e))?;
 
         part.e_tag().map(str::to_string).ok_or_else(|| {
             S3Err::InvalidResponseErr(InvalidResponseErr {
@@ -299,6 +331,60 @@ impl Store {
                 trace: trace!(),
             })
         })
+    }
+
+    /// Completes a multipart upload from the `(part_number, etag)` pairs of the
+    /// landed parts.
+    pub async fn complete_multipart_upload(
+        &self,
+        obj: &Object,
+        upload_id: &str,
+        parts: &[UploadedPart],
+    ) -> Result<(), S3Err> {
+        let completed_parts: Vec<CompletedPart> = parts
+            .iter()
+            .map(|part| {
+                CompletedPart::builder()
+                    .part_number(part.number)
+                    .e_tag(part.etag.clone())
+                    .build()
+            })
+            .collect();
+        let completed = CompletedMultipartUpload::builder()
+            .set_parts(Some(completed_parts))
+            .build();
+        self.client
+            .complete_multipart_upload()
+            .bucket(&obj.bucket)
+            .key(&obj.key)
+            .upload_id(upload_id)
+            .multipart_upload(completed)
+            .send()
+            .await
+            .map_err(|e| {
+                errors::map_sdk_err_common(
+                    "complete_multipart_upload",
+                    Some(obj.key.to_string()),
+                    e,
+                )
+            })?;
+        Ok(())
+    }
+
+    /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
+    /// `Result` so callers decide whether to treat the abort as best-effort.
+    pub async fn abort_multipart_upload(&self, obj: &Object, upload_id: &str) -> Result<(), S3Err> {
+        self.client
+            .abort_multipart_upload()
+            .bucket(&obj.bucket)
+            .key(&obj.key)
+            .upload_id(upload_id)
+            .send()
+            .await
+            .map_err(|e| {
+                errors::map_sdk_err_common("abort_multipart_upload", Some(obj.key.to_string()), e)
+            })?;
+        Ok(())
     }
 
     /// Lists all parts already uploaded for `upload_id`, following pagination.
@@ -310,18 +396,18 @@ impl Store {
     /// all of `{part_number, etag, size}` are returned.
     pub async fn list_parts(
         &self,
-        key: &str,
+        obj: &Object,
         upload_id: &str,
-    ) -> Result<Option<Vec<PartInfo>>, S3Err> {
-        let mut parts: Vec<PartInfo> = Vec::new();
+    ) -> Result<Option<Vec<UploadedPart>>, S3Err> {
+        let mut parts: Vec<UploadedPart> = Vec::new();
         let mut marker: Option<String> = None;
 
         loop {
             let mut req = self
                 .client
                 .list_parts()
-                .bucket(&self.bucket)
-                .key(key)
+                .bucket(&obj.bucket)
+                .key(&obj.key)
                 .upload_id(upload_id);
             if let Some(m) = &marker {
                 req = req.part_number_marker(m);
@@ -339,7 +425,7 @@ impl Store {
                     }
                     return Err(errors::map_sdk_err_common(
                         "list_parts",
-                        Some(key.to_string()),
+                        Some(obj.key.to_string()),
                         err,
                     ));
                 }
@@ -351,8 +437,8 @@ impl Store {
                 else {
                     continue;
                 };
-                parts.push(PartInfo {
-                    part_number,
+                parts.push(UploadedPart {
+                    number: part_number,
                     etag: etag.to_string(),
                     size: size as u64,
                 });
@@ -371,77 +457,15 @@ impl Store {
         Ok(Some(parts))
     }
 
-    /// Completes a multipart upload from the `(part_number, etag)` pairs of the
-    /// landed parts.
-    pub async fn complete_multipart_upload(
-        &self,
-        key: &str,
-        upload_id: &str,
-        parts: &[(i32, String)],
-    ) -> Result<(), S3Err> {
-        let completed_parts: Vec<CompletedPart> = parts
-            .iter()
-            .map(|(part_number, etag)| {
-                CompletedPart::builder()
-                    .part_number(*part_number)
-                    .e_tag(etag)
-                    .build()
-            })
-            .collect();
-        let completed = CompletedMultipartUpload::builder()
-            .set_parts(Some(completed_parts))
-            .build();
-        self.client
-            .complete_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
-            .upload_id(upload_id)
-            .multipart_upload(completed)
-            .send()
-            .await
-            .map_err(|e| {
-                errors::map_sdk_err_common("complete_multipart_upload", Some(key.to_string()), e)
-            })?;
-        Ok(())
-    }
-
-    /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
-    /// `Result` so callers decide whether to treat the abort as best-effort.
-    pub async fn abort_multipart_upload(&self, key: &str, upload_id: &str) -> Result<(), S3Err> {
-        self.client
-            .abort_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
-            .upload_id(upload_id)
-            .send()
-            .await
-            .map_err(|e| {
-                errors::map_sdk_err_common("abort_multipart_upload", Some(key.to_string()), e)
-            })?;
-        Ok(())
-    }
-
-    /// Picks a part size that keeps the part count within S3's 10,000-part limit. Uses
-    /// the fixed [`PART_SIZE`] until a file is large enough to need more than 10,000
-    /// such parts, then grows the part size to `ceil(size / 10_000)` (never below the 5
-    /// MiB floor).
-    pub(crate) fn part_size_for(size: u64) -> u64 {
-        if size.div_ceil(PART_SIZE) <= MAX_PARTS {
-            PART_SIZE
-        } else {
-            size.div_ceil(MAX_PARTS).max(MIN_PART_SIZE)
-        }
-    }
-
     /// Streams an object's body to a destination file. A missing object maps to
     /// [`S3Err::ObjectNotFoundErr`]. The body is copied through a bounded buffer rather
     /// than collected into memory.
-    pub async fn get(&self, key: &str, dest: &File) -> Result<(), S3Err> {
+    pub async fn get(&self, src: &Object, dest: &File) -> Result<(), S3Err> {
         let output = match self
             .client
             .get_object()
-            .bucket(&self.bucket)
-            .key(key)
+            .bucket(&src.bucket)
+            .key(&src.key)
             .send()
             .await
         {
@@ -454,13 +478,13 @@ impl Store {
                     || matches!(err.as_service_error(), Some(GetObjectError::NoSuchKey(_)));
                 if is_not_found {
                     return Err(S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
-                        key: key.to_string(),
+                        key: src.key.to_string(),
                         trace: trace!(),
                     }));
                 }
                 return Err(errors::map_sdk_err_common(
                     "get_object",
-                    Some(key.to_string()),
+                    Some(src.key.to_string()),
                     err,
                 ));
             }
@@ -469,34 +493,36 @@ impl Store {
         let mut reader = output.body.into_async_read();
         let mut file = tokio::fs::File::create(dest.path())
             .await
-            .map_err(|e| self.map_body_io_err("get_object", key, dest, e))?;
+            .map_err(|e| self.map_body_io_err("get_object", &src.key, dest, e))?;
         tokio::io::copy(&mut reader, &mut file)
             .await
-            .map_err(|e| self.map_body_io_err("get_object", key, dest, e))?;
+            .map_err(|e| self.map_body_io_err("get_object", &src.key, dest, e))?;
         Ok(())
     }
 
     /// Deletes an object. Idempotent per S3 semantics (deleting a missing key still
     /// returns success).
-    pub async fn delete(&self, key: &str) -> Result<(), S3Err> {
+    pub async fn delete(&self, obj: &Object) -> Result<(), S3Err> {
         self.client
             .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
+            .bucket(&obj.bucket)
+            .key(&obj.key)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err_common("delete_object", Some(key.to_string()), e))?;
+            .map_err(|e| {
+                errors::map_sdk_err_common("delete_object", Some(obj.key.to_string()), e)
+            })?;
         Ok(())
     }
 
     /// Returns `true` if the object exists (HEAD 200), `false` on a 404. Other errors
     /// propagate.
-    pub async fn exists(&self, key: &str) -> Result<bool, S3Err> {
+    pub async fn exists(&self, obj: &Object) -> Result<bool, S3Err> {
         match self
             .client
             .head_object()
-            .bucket(&self.bucket)
-            .key(key)
+            .bucket(&obj.bucket)
+            .key(&obj.key)
             .send()
             .await
         {
@@ -511,7 +537,7 @@ impl Store {
                 } else {
                     Err(errors::map_sdk_err_common(
                         "head_object",
-                        Some(key.to_string()),
+                        Some(obj.key.to_string()),
                         err,
                     ))
                 }
@@ -540,13 +566,13 @@ impl Store {
     fn map_bytestream_err(
         &self,
         operation: &str,
-        key: &str,
+        obj: &Object,
         file: &File,
         err: &ByteStreamError,
     ) -> S3Err {
         S3Err::InvalidResponseErr(InvalidResponseErr {
             operation: operation.to_string(),
-            msg: format!("failed to open '{file}' for streaming object '{key}': {err}"),
+            msg: format!("failed to open '{file}' for streaming object '{obj}': {err}"),
             trace: trace!(),
         })
     }
