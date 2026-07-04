@@ -71,6 +71,12 @@ pub fn check(
     diagnostics
 }
 
+enum HeaderMatch {
+    Found,
+    Wrong(String),
+    Missing,
+}
+
 fn check_headers(
     block: &ImportBlock,
     classified: &[(ImportGroup, &crate::parser::UseStatement)],
@@ -105,50 +111,53 @@ fn check_headers(
             continue;
         };
 
-        // Look in the block items for the comment before this use,
-        // walking backward and skipping blank lines.
-        let mut found_header = false;
-        for (idx, item) in block.items.iter().enumerate() {
-            if let ImportBlockItem::Use(u) = item {
-                if u.line == first.line {
-                    // Walk backward from idx, skipping blank lines
-                    let mut check_idx = idx;
-                    while check_idx > 0 {
-                        check_idx -= 1;
-                        match &block.items[check_idx] {
-                            ImportBlockItem::BlankLine { .. } => continue,
-                            ImportBlockItem::Comment { text, .. } => {
-                                let trimmed = text.trim();
-                                if trimmed == expected_label {
-                                    found_header = true;
-                                } else if is_group_header(trimmed) {
-                                    diagnostics.push(Diagnostic {
-                                        line: first.line,
-                                        kind: "wrong-header".to_string(),
-                                        message: format!(
-                                            "expected header `{expected_label}`, found `{trimmed}`"
-                                        ),
-                                    });
-                                    found_header = true; // wrong but present
-                                }
-                                break;
-                            }
-                            _ => break, // hit a use statement from another group
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-
-        if !found_header {
-            diagnostics.push(Diagnostic {
+        match find_header(block, first.line, expected_label) {
+            HeaderMatch::Found => {}
+            HeaderMatch::Wrong(found) => diagnostics.push(Diagnostic {
+                line: first.line,
+                kind: "wrong-header".to_string(),
+                message: format!("expected header `{expected_label}`, found `{found}`"),
+            }),
+            HeaderMatch::Missing => diagnostics.push(Diagnostic {
                 line: first.line,
                 kind: "missing-header".to_string(),
                 message: format!("missing `{expected_label}` header before {group} imports"),
-            });
+            }),
         }
     }
+}
+
+/// Locate the header comment for the use statement starting at `first_line`
+/// by walking backward from it, skipping blank lines, until the nearest
+/// comment or another use statement.
+fn find_header(block: &ImportBlock, first_line: usize, expected_label: &str) -> HeaderMatch {
+    let idx = block
+        .items
+        .iter()
+        .position(|item| matches!(item, ImportBlockItem::Use(u) if u.line == first_line));
+    let Some(idx) = idx else {
+        return HeaderMatch::Missing;
+    };
+
+    for item in block.items[..idx].iter().rev() {
+        match item {
+            ImportBlockItem::BlankLine { .. } => continue,
+            ImportBlockItem::Comment { text, .. } => {
+                let trimmed = text.trim();
+                if trimmed == expected_label {
+                    return HeaderMatch::Found;
+                }
+                if is_group_header(trimmed) {
+                    return HeaderMatch::Wrong(trimmed.to_string());
+                }
+                return HeaderMatch::Missing;
+            }
+            // hit a use statement from another group
+            ImportBlockItem::Use(_) => return HeaderMatch::Missing,
+        }
+    }
+
+    HeaderMatch::Missing
 }
 
 /// Check if a comment looks like a group header.

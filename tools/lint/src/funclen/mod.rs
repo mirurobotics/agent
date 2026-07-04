@@ -288,7 +288,10 @@ mod tests {
 
     #[test]
     fn cfg_feature_test_fn_exempt() {
-        let src = format!("#[cfg(feature = \"test\")]\nfn sample() {{\n{}}}\n", body(10));
+        let src = format!(
+            "#[cfg(feature = \"test\")]\nfn sample() {{\n{}}}\n",
+            body(10)
+        );
         assert!(check(&src, 3).is_empty());
     }
 

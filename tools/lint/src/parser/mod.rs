@@ -65,12 +65,7 @@ pub fn parse(content: &str) -> ImportBlock {
         // Blank line
         if trimmed.is_empty() {
             // Flush any pending attrs as comments (they weren't followed by a use)
-            for attr in pending_attrs.drain(..) {
-                items.push(ImportBlockItem::Comment {
-                    text: attr,
-                    line: i, // approximate
-                });
-            }
+            flush_attrs_as_comments(&mut items, &mut pending_attrs, i);
             items.push(ImportBlockItem::BlankLine { line: i + 1 });
             i += 1;
             continue;
@@ -80,82 +75,30 @@ pub fn parse(content: &str) -> ImportBlock {
         // Only accept group header comments as part of the import block.
         // Any other comment (like `// === section ===`) ends the block.
         if trimmed.starts_with("//") {
-            if is_group_header_comment(trimmed) {
-                // Flush pending attrs
-                for attr in pending_attrs.drain(..) {
-                    items.push(ImportBlockItem::Comment {
-                        text: attr,
-                        line: i,
-                    });
-                }
-                items.push(ImportBlockItem::Comment {
-                    text: line.to_string(),
-                    line: i + 1,
-                });
-                i += 1;
-                continue;
-            } else {
-                // Non-header comment — ends the import block
+            if !is_group_header_comment(trimmed) {
                 break;
             }
+            push_header_comment(&mut items, &mut pending_attrs, line, i);
+            i += 1;
+            continue;
         }
 
         // Attribute line (#[...]) — only if followed by a use statement
-        // Look ahead to see if a use statement follows (skipping more attrs)
+        // (skipping further attrs in the lookahead)
         if trimmed.starts_with("#[") {
-            if attrs_lead_to_use(&lines, i) {
-                pending_attrs.push(line.to_string());
-                i += 1;
-                continue;
-            } else {
-                // Attribute not followed by use — ends the import block
+            if !attrs_lead_to_use(&lines, i) {
                 break;
             }
+            pending_attrs.push(line.to_string());
+            i += 1;
+            continue;
         }
 
         // use or pub use statement
         if trimmed.starts_with("use ") || trimmed.starts_with("pub use ") {
-            let start_line = i + 1;
-            let mut text = String::new();
-
-            // Track brace depth for multi-line use statements
-            let mut brace_depth: i32 = 0;
-            let first_line = line;
-            loop {
-                let l = lines[i];
-                text.push_str(l);
-                text.push('\n');
-
-                for ch in l.chars() {
-                    match ch {
-                        '{' => brace_depth += 1,
-                        '}' => brace_depth -= 1,
-                        _ => {}
-                    }
-                }
-
-                i += 1;
-
-                // Statement ends when we hit a semicolon and brace depth is 0
-                if l.trim().ends_with(';') && brace_depth <= 0 {
-                    break;
-                }
-                if i >= lines.len() {
-                    break;
-                }
-            }
-
-            let (root_crate, sort_key) = extract_path_info(first_line);
-
-            let attrs = std::mem::take(&mut pending_attrs);
-
-            items.push(ImportBlockItem::Use(UseStatement {
-                text,
-                line: start_line,
-                root_crate,
-                sort_key,
-                attrs,
-            }));
+            let (stmt, next) = parse_use_statement(&lines, i, &mut pending_attrs);
+            items.push(ImportBlockItem::Use(stmt));
+            i = next;
             continue;
         }
 
@@ -164,12 +107,7 @@ pub fn parse(content: &str) -> ImportBlock {
     }
 
     // Flush any trailing pending attrs (shouldn't normally happen)
-    for attr in pending_attrs.drain(..) {
-        items.push(ImportBlockItem::Comment {
-            text: attr,
-            line: i + 1,
-        });
-    }
+    flush_attrs_as_comments(&mut items, &mut pending_attrs, i + 1);
 
     // Trim trailing blank lines from the block
     while matches!(items.last(), Some(ImportBlockItem::BlankLine { .. })) {
@@ -181,6 +119,76 @@ pub fn parse(content: &str) -> ImportBlock {
         start_line,
         end_line: i + 1,
     }
+}
+
+fn flush_attrs_as_comments(
+    items: &mut Vec<ImportBlockItem>,
+    pending_attrs: &mut Vec<String>,
+    line: usize,
+) {
+    for attr in pending_attrs.drain(..) {
+        items.push(ImportBlockItem::Comment { text: attr, line });
+    }
+}
+
+fn push_header_comment(
+    items: &mut Vec<ImportBlockItem>,
+    pending_attrs: &mut Vec<String>,
+    line: &str,
+    i: usize,
+) {
+    flush_attrs_as_comments(items, pending_attrs, i);
+    items.push(ImportBlockItem::Comment {
+        text: line.to_string(),
+        line: i + 1,
+    });
+}
+
+/// Consume a (possibly multi-line) use statement starting at `start`.
+/// Returns the parsed statement and the index of the first line after it.
+fn parse_use_statement(
+    lines: &[&str],
+    start: usize,
+    pending_attrs: &mut Vec<String>,
+) -> (UseStatement, usize) {
+    let first_line = lines[start];
+    let mut text = String::new();
+    let mut brace_depth: i32 = 0;
+    let mut i = start;
+
+    loop {
+        let l = lines[i];
+        text.push_str(l);
+        text.push('\n');
+
+        for ch in l.chars() {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => brace_depth -= 1,
+                _ => {}
+            }
+        }
+
+        i += 1;
+
+        // Statement ends when we hit a semicolon and brace depth is 0
+        if l.trim().ends_with(';') && brace_depth <= 0 {
+            break;
+        }
+        if i >= lines.len() {
+            break;
+        }
+    }
+
+    let (root_crate, sort_key) = extract_path_info(first_line);
+    let stmt = UseStatement {
+        text,
+        line: start + 1,
+        root_crate,
+        sort_key,
+        attrs: std::mem::take(pending_attrs),
+    };
+    (stmt, i)
 }
 
 fn skip_leading_prelude(lines: &[&str]) -> usize {

@@ -96,8 +96,7 @@ fn run_from_dir(
         return 0;
     }
 
-    let total_issues =
-        totals.diagnostics + assert_violations.len() + funclen_violations.len();
+    let total_issues = totals.diagnostics + assert_violations.len() + funclen_violations.len();
     if total_issues > 0 {
         let _ = writeln!(stdout, "\n{} violation(s) found.", total_issues);
         return 1;
