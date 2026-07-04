@@ -2,7 +2,7 @@
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
-use crate::filesys::{self, Overwrite};
+use crate::filesys::{self, files, Overwrite};
 use crate::http;
 use crate::provisioning::{errors::*, shared};
 use crate::version;
@@ -50,7 +50,7 @@ async fn reprovision_with_backend<HTTPClientT: http::ClientI>(
     public_key_file: &filesys::File,
     token: &str,
 ) -> Result<backend_client::Device, ProvisionErr> {
-    let public_key_pem = public_key_file.read_string().await?;
+    let public_key_pem = files::read_string(public_key_file).await?;
     let payload = backend_client::ReprovisionDeviceRequest {
         public_key_pem,
         agent_version: version::VERSION.to_string(),

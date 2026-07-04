@@ -11,7 +11,7 @@ use miru_agent::app::{
 };
 use miru_agent::cli;
 use miru_agent::disk;
-use miru_agent::filesys::{dir::Dir, path::PathExt};
+use miru_agent::filesys::{dirs, files, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
@@ -56,7 +56,7 @@ async fn main() {
 
 async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
     // initialize logging
-    let tmp_dir = Dir::create_temp_dir("miru-agent-provision-logs").await?;
+    let tmp_dir = dirs::create_temp("miru-agent-provision-logs").await?;
     let options = logs::Options {
         // sending logs to stdout will interfere with the provision outputs
         stdout: false,
@@ -74,7 +74,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
         provision::provision(&http_client, &layout, &settings, &token, args.device_name).await;
 
     drop(_guard);
-    if let Err(e) = tmp_dir.delete().await {
+    if let Err(e) = dirs::delete(&tmp_dir).await {
         eprintln!("failed to clean up provision log dir: {e}");
     }
 
@@ -109,7 +109,7 @@ async fn run_reprovision(
     args: cli::ReprovisionArgs,
 ) -> Result<backend_client::Device, ProvisionErr> {
     // initialize logging
-    let tmp_dir = Dir::create_temp_dir("miru-agent-reprovision-logs").await?;
+    let tmp_dir = dirs::create_temp("miru-agent-reprovision-logs").await?;
     let options = logs::Options {
         // sending logs to stdout will interfere with the reprovision outputs
         stdout: false,
@@ -126,7 +126,7 @@ async fn run_reprovision(
     let result = reprovision::reprovision(&http_client, &layout, &settings, &token).await;
 
     drop(_guard);
-    if let Err(e) = tmp_dir.delete().await {
+    if let Err(e) = dirs::delete(&tmp_dir).await {
         eprintln!("failed to clean up reprovision log dir: {e}");
     }
 
@@ -194,7 +194,7 @@ async fn run_agent() {
 
     // retrieve the settings files
     let settings_file = layout.settings();
-    let settings = match settings_file.read_json::<disk::Settings>().await {
+    let settings = match files::read_json::<disk::Settings>(&settings_file).await {
         Ok(settings) => settings,
         Err(e) => {
             error!("Unable to read settings file: {}", e);
@@ -239,7 +239,7 @@ async fn run_agent() {
 
 async fn get_bootstrap_backend_host() -> BackendHost {
     let settings_file = disk::Layout::default().settings();
-    if let Ok(settings) = settings_file.read_json::<disk::Settings>().await {
+    if let Ok(settings) = files::read_json::<disk::Settings>(&settings_file).await {
         return settings.backend.host;
     }
 

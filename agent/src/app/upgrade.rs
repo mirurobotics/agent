@@ -7,7 +7,7 @@ use crate::app::errors::UpgradeErr;
 use crate::authn::{self, token::Token};
 use crate::cooldown;
 use crate::disk::{self, Layout, Settings};
-use crate::filesys::PathExt;
+use crate::filesys::{files, PathExt};
 use crate::http::{self, ClientI};
 use crate::models;
 
@@ -111,7 +111,7 @@ pub async fn reconcile_impl<HTTPClientT: ClientI>(
 ) -> Result<(), UpgradeErr> {
     let token = issue_token(http_client, layout).await?;
     let device = fetch_device(http_client, &token).await?;
-    let settings = match layout.settings().read_json::<Settings>().await {
+    let settings = match files::read_json::<Settings>(&layout.settings()).await {
         Ok(settings) => settings,
         Err(e) => {
             warn!("unable to read settings.json; falling back to defaults: {e}");

@@ -13,7 +13,7 @@ pub mod errors {
 
     #[tokio::test]
     async fn device_file_shutdown() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -32,7 +32,7 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_does_not_exist() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -40,7 +40,7 @@ pub mod success {
                 .await
                 .unwrap();
 
-        layout.device().delete().await.unwrap();
+        filesys::files::delete(&layout.device()).await.unwrap();
 
         let device = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(device, Device::default());
@@ -48,7 +48,7 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_exists() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -62,7 +62,7 @@ pub mod success {
 
     #[tokio::test]
     async fn returns_custom_device_data() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let custom_device = Device {

@@ -15,7 +15,7 @@ pub mod concurrent {
     type TestCache = FileCache<String, String>;
 
     async fn spawn_cache_with_capacity(capacity: usize) -> (TestCache, JoinHandle<()>) {
-        let file = filesys::Dir::create_temp_dir("testing")
+        let file = filesys::dirs::create_temp("testing")
             .await
             .unwrap()
             .file("cache.json");
@@ -31,7 +31,7 @@ pub mod concurrent {
 
         #[tokio::test]
         async fn spawn() {
-            let file = filesys::Dir::create_temp_dir("testing")
+            let file = filesys::dirs::create_temp("testing")
                 .await
                 .unwrap()
                 .file("cache.json");
@@ -52,7 +52,7 @@ pub mod single_thread {
     type TestCache = SingleThreadFileCache<String, String>;
 
     async fn new_cache_with_capacity(capacity: usize) -> TestCache {
-        let file = filesys::Dir::create_temp_dir("testing")
+        let file = filesys::dirs::create_temp("testing")
             .await
             .unwrap()
             .file("cache.json");
@@ -68,7 +68,7 @@ pub mod single_thread {
 
         #[tokio::test]
         async fn new() {
-            let file = filesys::Dir::create_temp_dir("testing")
+            let file = filesys::dirs::create_temp("testing")
                 .await
                 .unwrap()
                 .file("cache.json");

@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::filesys::{errors::*, file::File, Atomic, Overwrite, WriteOptions};
+use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
 use crate::trace;
 
@@ -40,7 +40,7 @@ where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub async fn new(file: File) -> Result<Self, FileSysErr> {
-        let cache = file.read_json::<ContentT>().await?;
+        let cache = files::read_json::<ContentT>(&file).await?;
 
         // initialize the struct with the read data
         let cached_file = Self {
@@ -70,7 +70,8 @@ where
     where
         Self: Sized,
     {
-        file.write_json(
+        files::write_json(
+            &file,
             data,
             WriteOptions {
                 overwrite,
@@ -86,9 +87,7 @@ where
     }
 
     pub async fn write(&mut self, data: ContentT) -> Result<(), FileSysErr> {
-        self.file
-            .write_json(&data, WriteOptions::OVERWRITE_ATOMIC)
-            .await?;
+        files::write_json(&self.file, &data, WriteOptions::OVERWRITE_ATOMIC).await?;
         self.cache = Arc::new(data);
         Ok(())
     }

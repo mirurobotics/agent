@@ -12,9 +12,11 @@ pub mod assert_activated {
     use super::*;
 
     async fn fresh_layout() -> (Layout, filesys::Dir) {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir.clone());
-        layout.auth().root.create_if_absent().await.unwrap();
+        filesys::dirs::create_if_absent(&layout.auth().root)
+            .await
+            .unwrap();
         (layout, dir)
     }
 
@@ -29,12 +31,13 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_private_key_missing() {
         let (layout, _dir) = fresh_layout().await;
-        layout
-            .auth()
-            .public_key()
-            .write_string("public", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &layout.auth().public_key(),
+            "public",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -43,12 +46,13 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_public_key_missing() {
         let (layout, _dir) = fresh_layout().await;
-        layout
-            .auth()
-            .private_key()
-            .write_string("private", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &layout.auth().private_key(),
+            "private",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -58,12 +62,14 @@ pub mod assert_activated {
     async fn returns_ok_when_both_keys_present() {
         let (layout, _dir) = fresh_layout().await;
         let auth = layout.auth();
-        auth.private_key()
-            .write_string("private", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        auth.public_key()
-            .write_string("public", WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_string(
+            &auth.private_key(),
+            "private",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        filesys::files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -91,16 +97,14 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn returns_id_from_device_file_when_valid() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let device = Device {
             id: "dvc_from_file".to_string(),
             ..Device::default()
         };
-        layout
-            .device()
-            .write_json(&device, WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_json(&layout.device(), &device, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -110,19 +114,18 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn falls_back_to_token_jwt_when_device_file_missing() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // no device.json — write a token.json containing a JWT with the
         // device id encoded in the `sub` claim
         let auth = layout.auth();
-        auth.root.create_if_absent().await.unwrap();
+        filesys::dirs::create_if_absent(&auth.root).await.unwrap();
         let token = Token {
             token: new_jwt("dvc_from_jwt"),
             expires_at: Utc::now() + Duration::minutes(5),
         };
-        auth.token()
-            .write_json(&token, WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_json(&auth.token(), &token, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -132,7 +135,7 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn returns_resolve_err_when_no_sources_yield_id() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // empty layout: no device.json, no token.json

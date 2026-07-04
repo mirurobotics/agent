@@ -34,7 +34,7 @@ impl Fixture {
     }
 
     async fn with_hub_opts(name: &str, opts: SpawnOptions) -> Self {
-        let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+        let dir = filesys::dirs::create_temp(name).await.unwrap();
         let storage = Arc::new(create_storage(&dir).await);
         let http_client = Arc::new(MockClient::default());
         let (token_mngr, _handle) = create_token_manager(&dir, http_client.clone()).await;

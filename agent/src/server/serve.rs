@@ -7,7 +7,7 @@ use std::{
 };
 
 // internal crates
-use crate::filesys::{self, PathExt};
+use crate::filesys::{self, files, PathExt};
 use crate::server::{
     errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr},
     handlers,
@@ -198,7 +198,7 @@ async fn acquire_unix_socket_listener(
 async fn create_unix_socket_listener(
     socket_file: &filesys::File,
 ) -> Result<UnixListener, ServerErr> {
-    socket_file.delete().await?;
+    files::delete(socket_file).await?;
     let socket_path = socket_file.path();
     tokio::net::UnixListener::bind(socket_path).map_err(|e| {
         ServerErr::BindUnixSocketErr(BindUnixSocketErr {

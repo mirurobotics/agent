@@ -9,7 +9,7 @@ use miru_agent::services::ServiceErr;
 use chrono::{DateTime, Utc};
 
 async fn setup(name: &str) -> (filesys::Dir, Deployments) {
-    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+    let dir = filesys::dirs::create_temp(name).await.unwrap();
     let (dpl_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
         .await
         .unwrap();

@@ -14,7 +14,7 @@ use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 
 async fn setup(name: &str) -> (filesys::Dir, Releases) {
-    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+    let dir = filesys::dirs::create_temp(name).await.unwrap();
     let (rls_stor, _) = Releases::spawn(16, dir.file("releases.json"), 1000)
         .await
         .unwrap();

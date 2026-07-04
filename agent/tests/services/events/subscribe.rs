@@ -21,7 +21,7 @@ fn make_event(event_type: &str) -> EventArgs {
 }
 
 async fn make_hub(name: &str) -> (filesys::Dir, EventHub) {
-    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+    let dir = filesys::dirs::create_temp(name).await.unwrap();
     let log_file = dir.file("events.jsonl");
     let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default())
         .await
@@ -30,7 +30,7 @@ async fn make_hub(name: &str) -> (filesys::Dir, EventHub) {
 }
 
 async fn make_hub_w_retained(name: &str, max_retained: usize) -> (filesys::Dir, EventHub) {
-    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+    let dir = filesys::dirs::create_temp(name).await.unwrap();
     let log_file = dir.file("events.jsonl");
     let opts = SpawnOptions {
         max_retained,
@@ -268,7 +268,7 @@ mod error {
 
     #[tokio::test]
     async fn broadcast_lag_terminates_stream() {
-        let dir = filesys::Dir::create_temp_dir("svc_sub_lag").await.unwrap();
+        let dir = filesys::dirs::create_temp("svc_sub_lag").await.unwrap();
         let log_file = dir.file("events.jsonl");
         let opts = SpawnOptions {
             broadcast_capacity: 2,

@@ -9,7 +9,7 @@ use crate::cache::{
     errors::{CacheErr, CannotOverwriteCacheElement},
     single_thread::{CacheKey, CacheValue, SingleThreadCache},
 };
-use crate::filesys::{file::File, path::PathExt, Overwrite, WriteOptions};
+use crate::filesys::{file::File, files, path::PathExt, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -36,8 +36,7 @@ where
     pub async fn new(file: File, capacity: usize) -> Result<Self, CacheErr> {
         if !file.exists() {
             let empty_cache: HashMap<K, CacheEntry<K, V>> = HashMap::new();
-            file.write_json(&empty_cache, WriteOptions::OVERWRITE_ATOMIC)
-                .await?;
+            files::write_json(&file, &empty_cache, WriteOptions::OVERWRITE_ATOMIC).await?;
         }
 
         Ok(Self {
@@ -49,15 +48,13 @@ where
     }
 
     async fn read_cache(&self) -> Result<HashMap<K, CacheEntry<K, V>>, CacheErr> {
-        self.file
-            .read_json::<HashMap<K, CacheEntry<K, V>>>()
+        files::read_json::<HashMap<K, CacheEntry<K, V>>>(&self.file)
             .await
             .map_err(CacheErr::from)
     }
 
     async fn write_cache(&self, cache: &HashMap<K, CacheEntry<K, V>>) -> Result<(), CacheErr> {
-        self.file
-            .write_json(cache, WriteOptions::OVERWRITE_ATOMIC)
+        files::write_json(&self.file, cache, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .map_err(CacheErr::from)
     }

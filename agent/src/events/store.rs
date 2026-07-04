@@ -3,7 +3,7 @@ use crate::events::{
     errors::{CursorExpiredErr, EventsErr},
     model::{Event, EventArgs},
 };
-use crate::filesys::{self, AppendOptions, Overwrite, PathExt, WriteOptions};
+use crate::filesys::{self, files, AppendOptions, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -47,9 +47,12 @@ impl EventStore {
             .expect("event ID overflow: exhausted i64 space");
 
         let json = serde_json::to_string(&event)?;
-        self.log_file
-            .append_bytes(format!("{json}\n").as_bytes(), AppendOptions::SYNC)
-            .await?;
+        files::append_bytes(
+            &self.log_file,
+            format!("{json}\n").as_bytes(),
+            AppendOptions::SYNC,
+        )
+        .await?;
 
         self.events.push(event.clone());
 
@@ -133,10 +136,8 @@ impl EventStore {
     async fn write_compacted_content(&self, content: &str) -> Result<(), EventsErr> {
         let tmp_file_path = self.log_file.path().with_extension("jsonl.tmp");
         let tmp_file = filesys::File::new(tmp_file_path);
-        tmp_file
-            .write_string(content, WriteOptions::OVERWRITE_ATOMIC)
-            .await?;
-        tmp_file.move_to(&self.log_file, Overwrite::Allow).await?;
+        files::write_string(&tmp_file, content, WriteOptions::OVERWRITE_ATOMIC).await?;
+        files::move_to(&tmp_file, &self.log_file, Overwrite::Allow).await?;
         Ok(())
     }
 
@@ -152,7 +153,7 @@ impl EventStore {
         let mut events = Vec::new();
         let mut next_event_id: i64 = 1;
 
-        let content = log_file.read_string().await?;
+        let content = files::read_string(log_file).await?;
         for (line_num, line) in content.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() {

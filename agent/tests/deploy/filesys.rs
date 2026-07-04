@@ -20,7 +20,7 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = filesys::Dir::create_temp_dir("deploy-filesys-test")
+        let temp_dir = filesys::dirs::create_temp("deploy-filesys-test")
             .await
             .unwrap();
         let resources_dir = temp_dir.subdir("resources");
@@ -152,7 +152,9 @@ pub mod deploy_func_success {
         let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        let actual = filesys::files::read_string(&filesys::File::new(&filepath))
+            .await
+            .unwrap();
         assert_eq!(actual, content);
     }
 
@@ -169,14 +171,16 @@ pub mod deploy_func_success {
 
         // pre-populate the file with old content
         let file = filesys::File::new(&filepath);
-        file.write_json(&json!({"old": true}), WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_json(&file, &json!({"old": true}), WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
         let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        let actual = filesys::files::read_string(&filesys::File::new(&filepath))
+            .await
+            .unwrap();
         assert_eq!(actual, new_content);
     }
 
@@ -201,8 +205,7 @@ pub mod deploy_func_success {
         f.deploy(&deployment).await.unwrap();
 
         for (i, cfg_inst) in cfg_insts.iter().enumerate() {
-            let actual = filesys::File::new(&cfg_inst.filepath)
-                .read_string()
+            let actual = filesys::files::read_string(&filesys::File::new(&cfg_inst.filepath))
                 .await
                 .unwrap();
             assert_eq!(actual, contents[i]);
@@ -229,9 +232,13 @@ pub mod deploy_func_success {
         let deployment = f.new_queued(&[a_cfg, b_cfg]);
         f.deploy(&deployment).await.unwrap();
 
-        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        let a_actual = filesys::files::read_string(&filesys::File::new(&a_path))
+            .await
+            .unwrap();
         assert_eq!(a_actual, "new_a");
-        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
+        let b_actual = filesys::files::read_string(&filesys::File::new(&b_path))
+            .await
+            .unwrap();
         assert_eq!(b_actual, "new_b");
 
         let leftover = detect_backup_files(&f.temp_dir);
@@ -258,7 +265,9 @@ pub mod deploy_func_success {
         f.deploy(&deployment).await.unwrap();
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        let actual = filesys::files::read_string(&filesys::File::new(&filepath))
+            .await
+            .unwrap();
         assert_eq!(actual, content);
     }
 
@@ -276,7 +285,9 @@ pub mod deploy_func_success {
         let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        let actual = filesys::files::read_string(&filesys::File::new(&filepath))
+            .await
+            .unwrap();
         assert_eq!(actual, content);
     }
 
@@ -297,7 +308,9 @@ pub mod deploy_func_success {
         let deployment = f.new_queued(std::slice::from_ref(&cfg_inst));
         f.deploy(&deployment).await.unwrap();
 
-        let actual = filesys::File::new(&filepath).read_string().await.unwrap();
+        let actual = filesys::files::read_string(&filesys::File::new(&filepath))
+            .await
+            .unwrap();
         assert_eq!(actual, content);
     }
 
@@ -307,10 +320,13 @@ pub mod deploy_func_success {
 
         // Pre-populate a.json with old content
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        filesys::File::new(&a_path)
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&a_path),
+            "old_a",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         // Simulate a stale backup left by a prior interrupted deploy
         let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
@@ -327,7 +343,9 @@ pub mod deploy_func_success {
         f.deploy(&deployment).await.unwrap();
 
         // a.json should have new content
-        let actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        let actual = filesys::files::read_string(&filesys::File::new(&a_path))
+            .await
+            .unwrap();
         assert_eq!(actual, "new_a");
 
         // stale backup overwritten by snapshot then removed by cleanup_backups
@@ -571,16 +589,21 @@ pub mod deploy_func_backup_errs {
 
         // create locked_dir and write c.json with "old" content BEFORE locking
         let locked_dir = f.temp_dir.subdir("locked");
-        locked_dir.create().await.unwrap();
+        filesys::dirs::create(&locked_dir).await.unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
-        filesys::File::new(&c_path)
-            .write_string("old", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&c_path),
+            "old",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         // now lock the parent directory so snapshot_destination's sibling
         // backup copy cannot succeed
-        locked_dir.set_permissions(read_only()).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, read_only())
+            .await
+            .unwrap();
 
         let c_cfg = ConfigInstance {
             filepath: c_path.clone(),
@@ -596,10 +619,14 @@ pub mod deploy_func_backup_errs {
         );
 
         // restore permissions
-        locked_dir.set_permissions(writeable()).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, writeable())
+            .await
+            .unwrap();
 
         // c.json content must be unchanged
-        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
+        let c_actual = filesys::files::read_string(&filesys::File::new(&c_path))
+            .await
+            .unwrap();
         assert_eq!(c_actual, "old");
 
         // no backup siblings leaked next to c.json
@@ -617,25 +644,36 @@ pub mod deploy_func_backup_errs {
         // Pre-populate a.json and b.json in writable temp_dir root
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
         let b_path = f.temp_dir.path().join("b.json").display().to_string();
-        filesys::File::new(&a_path)
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        filesys::File::new(&b_path)
-            .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&a_path),
+            "old_a",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&b_path),
+            "old_b",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
         // backup copy cannot create miru.backup.c.json (EACCES)
         let locked_dir = f.temp_dir.subdir("locked");
-        locked_dir.create().await.unwrap();
+        filesys::dirs::create(&locked_dir).await.unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
-        filesys::File::new(&c_path)
-            .write_string("old_c", WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_string(
+            &filesys::File::new(&c_path),
+            "old_c",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        filesys::dirs::set_permissions(&locked_dir, read_only())
             .await
             .unwrap();
-        locked_dir.set_permissions(read_only()).await.unwrap();
 
         let a_cfg = ConfigInstance {
             filepath: a_path.clone(),
@@ -661,14 +699,22 @@ pub mod deploy_func_backup_errs {
         );
 
         // restore permissions
-        locked_dir.set_permissions(writeable()).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, writeable())
+            .await
+            .unwrap();
 
         // files should be unchanged
-        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        let a_actual = filesys::files::read_string(&filesys::File::new(&a_path))
+            .await
+            .unwrap();
         assert_eq!(a_actual, "old_a");
-        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
+        let b_actual = filesys::files::read_string(&filesys::File::new(&b_path))
+            .await
+            .unwrap();
         assert_eq!(b_actual, "old_b");
-        let c_actual = filesys::File::new(&c_path).read_string().await.unwrap();
+        let c_actual = filesys::files::read_string(&filesys::File::new(&c_path))
+            .await
+            .unwrap();
         assert_eq!(c_actual, "old_c");
 
         // backup files consumed by rollback (rename-back), none should remain
@@ -688,8 +734,10 @@ pub mod deploy_func_write_errs {
     async fn write_file_permission_denied() {
         let f = Fixture::new().await;
         let locked_dir = f.temp_dir.subdir("locked");
-        locked_dir.create().await.unwrap();
-        locked_dir.set_permissions(read_only()).await.unwrap();
+        filesys::dirs::create(&locked_dir).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, read_only())
+            .await
+            .unwrap();
 
         let filepath = locked_dir.file("config.json").path().display().to_string();
         let cfg_inst = ConfigInstance {
@@ -723,19 +771,27 @@ pub mod deploy_func_write_errs {
         // pre-seed two files with old content via filesys::File::write_string
         let a_path = f.temp_dir.file("a.json").path().display().to_string();
         let b_path = f.temp_dir.file("b.json").path().display().to_string();
-        filesys::File::new(&a_path)
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        filesys::File::new(&b_path)
-            .write_string("old_b", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&a_path),
+            "old_a",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&b_path),
+            "old_b",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         // create locked subdir
         let locked_dir = f.temp_dir.subdir("locked");
-        locked_dir.create().await.unwrap();
-        locked_dir.set_permissions(read_only()).await.unwrap();
+        filesys::dirs::create(&locked_dir).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, read_only())
+            .await
+            .unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
 
         let a_cfg = ConfigInstance {
@@ -759,12 +815,18 @@ pub mod deploy_func_write_errs {
         assert!(matches!(result, Err(DeployErr::WriteAccessDenied(_))));
 
         // restore permissions
-        locked_dir.set_permissions(writeable()).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, writeable())
+            .await
+            .unwrap();
 
         // a and b should be rolled back to old content
-        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        let a_actual = filesys::files::read_string(&filesys::File::new(&a_path))
+            .await
+            .unwrap();
         assert_eq!(a_actual, "old_a");
-        let b_actual = filesys::File::new(&b_path).read_string().await.unwrap();
+        let b_actual = filesys::files::read_string(&filesys::File::new(&b_path))
+            .await
+            .unwrap();
         assert_eq!(b_actual, "old_b");
 
         // c should not exist
@@ -791,8 +853,10 @@ pub mod deploy_func_write_errs {
 
         // third destination lives under a locked subdirectory so the write fails
         let locked_dir = f.temp_dir.subdir("locked");
-        locked_dir.create().await.unwrap();
-        locked_dir.set_permissions(read_only()).await.unwrap();
+        filesys::dirs::create(&locked_dir).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, read_only())
+            .await
+            .unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
 
         let a_cfg = ConfigInstance {
@@ -816,7 +880,9 @@ pub mod deploy_func_write_errs {
         assert!(matches!(&result, Err(DeployErr::WriteAccessDenied(_))));
 
         // restore permissions
-        locked_dir.set_permissions(writeable()).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, writeable())
+            .await
+            .unwrap();
 
         // first two destinations were created then rolled back via delete
         assert!(
@@ -847,18 +913,23 @@ pub mod deploy_func_write_errs {
 
         // Existed: pre-populate a.json with "old_a"
         let a_path = f.temp_dir.file("a.json").path().display().to_string();
-        filesys::File::new(&a_path)
-            .write_string("old_a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&a_path),
+            "old_a",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         // DidNotExist: fresh path b.json
         let b_path = f.temp_dir.file("b.json").path().display().to_string();
 
         // Failing destination: locked_dir/c.json
         let locked_dir = f.temp_dir.subdir("locked");
-        locked_dir.create().await.unwrap();
-        locked_dir.set_permissions(read_only()).await.unwrap();
+        filesys::dirs::create(&locked_dir).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, read_only())
+            .await
+            .unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
 
         let a_cfg = ConfigInstance {
@@ -882,10 +953,14 @@ pub mod deploy_func_write_errs {
         assert!(matches!(&result, Err(DeployErr::WriteAccessDenied(_))));
 
         // restore permissions so tempdir drop can recurse
-        locked_dir.set_permissions(writeable()).await.unwrap();
+        filesys::dirs::set_permissions(&locked_dir, writeable())
+            .await
+            .unwrap();
 
         // Existed snapshot was restored via rename-back
-        let a_actual = filesys::File::new(&a_path).read_string().await.unwrap();
+        let a_actual = filesys::files::read_string(&filesys::File::new(&a_path))
+            .await
+            .unwrap();
         assert_eq!(a_actual, "old_a");
 
         // DidNotExist snapshot was rolled back via delete
@@ -1017,13 +1092,17 @@ pub mod remove_func_success {
 
         // lock the parent directory so remove_file fails with EACCES
         let parent = dest.parent().unwrap();
-        parent.set_permissions(read_only()).await.unwrap();
+        filesys::dirs::set_permissions(&parent, read_only())
+            .await
+            .unwrap();
 
         let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
 
         // restore permissions so tempdir drop can recurse
-        parent.set_permissions(writeable()).await.unwrap();
+        filesys::dirs::set_permissions(&parent, writeable())
+            .await
+            .unwrap();
 
         // deletion errors are now propagated
         assert!(
@@ -1110,10 +1189,13 @@ pub mod remove_func_errs {
         // Create the good file up front. If validation happened in-loop rather
         // than as a pre-pass, this file would be removed before the bad path is
         // discovered.
-        filesys::File::new(&good_path)
-            .write_string("on_disk_before_remove", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &filesys::File::new(&good_path),
+            "on_disk_before_remove",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let deployment = f.new_removing(&[good_cfg, bad_cfg]);
         let result = f.remove(&deployment, &[]).await;
