@@ -32,48 +32,74 @@ pub mod errors;
 pub use errors::S3Err;
 use errors::{InvalidResponseErr, ObjectNotFoundErr};
 
-const PART_SIZE: u64 = 8 * 1024 * 1024;
-const MIN_PART_SIZE: u64 = 5 * 1024 * 1024;
-const MAX_PARTS: u64 = 10_000;
+const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 
-/// Files larger than this stream through a multipart upload; files at or below
-/// it go through a single `PutObject`.
-const DEFAULT_MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024;
+// S3-defined part sized limits. These are hard limits which we cannot bypass.
+const MIN_PART_SIZE: u64 = 5 * 1024 * 1024; // 5 MiB
+const MAX_PARTS: u64 = 10_000; // 10,000 parts
 
-/// Caller-supplied temporary AWS credentials (from an STS AssumeRole).
+pub struct Config {
+    pub creds: Credentials,
+    pub region: String,
+    pub bucket: String,
+}
+
+pub struct Options {
+    pub part_size: u64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            // Miru-chosen default part size. 8 MiB is the sweet spot for getting good
+            // performance while minimizing the need to retry upload parts.
+            part_size: 8 * 1024 * 1024, // 8 MiB
+        }
+    }
+}
+
 pub struct Credentials {
     pub access_key_id: String,
     pub secret_access_key: String,
     pub session_token: String,
 }
 
-/// An async S3 client scoped to a single bucket.
-pub struct S3Store {
-    client: Client,
-    bucket: String,
-    single_put_threshold: u64,
+impl Default for Credentials {
+    fn default() -> Self {
+        Self {
+            access_key_id: "access-key".to_string(),
+            secret_access_key: "secret-key".to_string(),
+            session_token: "session-token".to_string(),
+        }
+    }
 }
 
-impl S3Store {
+pub struct Store {
+    client: Client,
+    bucket: String,
+    opts: Options,
+}
+
+impl Store {
     /// Builds a client from caller-supplied temporary credentials. No network
     /// I/O happens here; the first request is made lazily on the first call.
-    pub fn new(creds: Credentials, region: String, bucket: String) -> Self {
-        let credentials = AwsCredentials::new(
-            creds.access_key_id,
-            creds.secret_access_key,
-            Some(creds.session_token),
+    pub fn new(cfg: Config, opts: Options) -> Self {
+        let s3creds = AwsCredentials::new(
+            cfg.creds.access_key_id,
+            cfg.creds.secret_access_key,
+            Some(cfg.creds.session_token),
             None,
             "miru-agent",
         );
-        let config = aws_sdk_s3::config::Config::builder()
+        let s3cfg = aws_sdk_s3::config::Config::builder()
             .behavior_version(BehaviorVersion::latest())
-            .region(Region::new(region))
-            .credentials_provider(credentials)
+            .region(Region::new(cfg.region))
+            .credentials_provider(s3creds)
             .build();
         Self {
-            client: Client::from_conf(config),
-            bucket,
-            single_put_threshold: DEFAULT_MULTIPART_THRESHOLD,
+            client: Client::from_conf(s3cfg),
+            bucket: cfg.bucket,
+            opts,
         }
     }
 
@@ -82,52 +108,48 @@ impl S3Store {
     /// serve canned responses without touching the network. Credentials are
     /// static dummies since no real signing endpoint is contacted.
     #[cfg(feature = "test")]
-    pub fn with_http_client(
+    pub fn from_http_client(
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
-        region: String,
-        bucket: String,
+        cfg: Config,
+        opts: Options,
     ) -> Self {
-        let credentials =
-            AwsCredentials::new("test-access-key", "test-secret-key", None, None, "test");
-        let config = aws_sdk_s3::config::Config::builder()
+        let s3creds = AwsCredentials::new("test-access-key", "test-secret-key", None, None, "test");
+        let s3cfg = aws_sdk_s3::config::Config::builder()
             .behavior_version(BehaviorVersion::latest())
-            .region(Region::new(region))
-            .credentials_provider(credentials)
+            .region(Region::new(cfg.region))
+            .credentials_provider(s3creds)
             // Path-style URLs (`/<bucket>/<key>`) make the replayed request URIs
             // deterministic and readable, so tests can assert on the exact path.
             .force_path_style(true)
             .http_client(http_client)
             .build();
         Self {
-            client: Client::from_conf(config),
-            bucket,
-            single_put_threshold: DEFAULT_MULTIPART_THRESHOLD,
+            client: Client::from_conf(s3cfg),
+            bucket: cfg.bucket,
+            opts,
         }
-    }
-
-    /// Test-only seam to force the multipart path with small fixtures by
-    /// lowering the single-PUT threshold (e.g. to 0).
-    #[cfg(feature = "test")]
-    pub fn set_single_put_threshold(&mut self, bytes: u64) {
-        self.single_put_threshold = bytes;
     }
 
     /// Creates or overwrites an object by streaming a file off disk.
     ///
-    /// The whole file is never held in memory: files at or below the
-    /// single-PUT threshold stream through one `PutObject`, and larger files
-    /// stream part-by-part through a multipart upload (see
-    /// [`Self::put_object_multipart`]).
-    pub async fn put_file(&self, key: &str, file: File) -> Result<(), S3Err> {
+    /// The whole file is never held in memory: files at or below the single-PUT
+    /// threshold stream through one `PutObject`, and larger files stream part-by-part
+    /// through a multipart upload (see [`Self::put_object_multipart`]).
+    pub async fn put(&self, key: &str, file: File) -> Result<(), S3Err> {
         let size = file.size().await?;
 
-        if size > self.single_put_threshold {
-            return self.put_file_multipart(key, &file, size).await;
+        if size > self.opts.part_size {
+            self.put_multipart(key, &file, size).await
+        } else {
+            self.put_singlepart(key, &file).await
         }
+    }
 
+    /// Streams a file to S3 as a single-part upload.
+    async fn put_singlepart(&self, key: &str, file: &File) -> Result<(), S3Err> {
         let body = ByteStream::from_path(file.path())
             .await
-            .map_err(|e| self.map_bytestream_err("put_object", key, &file, &e))?;
+            .map_err(|e| self.map_bytestream_err("put_object", key, file, &e))?;
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -139,10 +161,10 @@ impl S3Store {
         Ok(())
     }
 
-    /// Streams a file to S3 as a multipart upload, one part at a time. On any
-    /// failure during the part loop or completion, the in-progress upload is
-    /// aborted (best-effort) so S3 does not retain orphaned parts.
-    async fn put_file_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
+    /// Streams a file to S3 as a multipart upload, one part at a time. On any failure
+    /// during the part loop or completion, the in-progress upload is aborted
+    /// (best-effort) so S3 does not retain orphaned parts.
+    async fn put_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
         let part_size = Self::part_size_for(size);
 
         let created = self
@@ -184,9 +206,9 @@ impl S3Store {
         }
     }
 
-    /// Uploads every part of `file` and completes the multipart upload. Split
-    /// out from [`Self::put_object_multipart`] so a single `?` early-return path
-    /// funnels through one abort site.
+    /// Uploads every part of `file` and completes the multipart upload. Split out from
+    /// [`Self::put_object_multipart`] so a single `?` early-return path funnels through
+    /// one abort site.
     async fn upload_parts_and_complete(
         &self,
         key: &str,
@@ -250,10 +272,10 @@ impl S3Store {
         Ok(())
     }
 
-    /// Picks a part size that keeps the part count within S3's 10,000-part
-    /// limit. Uses the fixed [`PART_SIZE`] until a file is large enough to need
-    /// more than 10,000 such parts, then grows the part size to `ceil(size /
-    /// 10_000)` (never below the 5 MiB floor).
+    /// Picks a part size that keeps the part count within S3's 10,000-part limit. Uses
+    /// the fixed [`PART_SIZE`] until a file is large enough to need more than 10,000
+    /// such parts, then grows the part size to `ceil(size / 10_000)` (never below the 5
+    /// MiB floor).
     fn part_size_for(size: u64) -> u64 {
         if size.div_ceil(PART_SIZE) <= MAX_PARTS {
             PART_SIZE
@@ -263,9 +285,9 @@ impl S3Store {
     }
 
     /// Streams an object's body to a destination file. A missing object maps to
-    /// [`S3Err::ObjectNotFoundErr`]. The body is copied through a bounded buffer
-    /// rather than collected into memory.
-    pub async fn get_object(&self, key: &str, dest: &File) -> Result<(), S3Err> {
+    /// [`S3Err::ObjectNotFoundErr`]. The body is copied through a bounded buffer rather
+    /// than collected into memory.
+    pub async fn get(&self, key: &str, dest: &File) -> Result<(), S3Err> {
         let output = match self
             .client
             .get_object()
@@ -305,9 +327,9 @@ impl S3Store {
         Ok(())
     }
 
-    /// Deletes an object. Idempotent per S3 semantics (deleting a missing key
-    /// still returns success).
-    pub async fn delete_object(&self, key: &str) -> Result<(), S3Err> {
+    /// Deletes an object. Idempotent per S3 semantics (deleting a missing key still
+    /// returns success).
+    pub async fn delete(&self, key: &str) -> Result<(), S3Err> {
         self.client
             .delete_object()
             .bucket(&self.bucket)
@@ -318,9 +340,9 @@ impl S3Store {
         Ok(())
     }
 
-    /// Returns `true` if the object exists (HEAD 200), `false` on a 404. Other
-    /// errors propagate.
-    pub async fn object_exists(&self, key: &str) -> Result<bool, S3Err> {
+    /// Returns `true` if the object exists (HEAD 200), `false` on a 404. Other errors
+    /// propagate.
+    pub async fn exists(&self, key: &str) -> Result<bool, S3Err> {
         match self
             .client
             .head_object()
@@ -348,8 +370,8 @@ impl S3Store {
         }
     }
 
-    /// Maps a filesystem I/O error hit while streaming an object body (opening
-    /// the source, creating the destination, or copying) into an `S3Err`.
+    /// Maps a filesystem I/O error hit while streaming an object body (opening the
+    /// source, creating the destination, or copying) into an `S3Err`.
     fn map_body_io_err(
         &self,
         operation: &str,
@@ -364,8 +386,8 @@ impl S3Store {
         })
     }
 
-    /// Maps a [`ByteStream`] construction error (e.g. the file could not be
-    /// opened or read) into an `S3Err`.
+    /// Maps a [`ByteStream`] construction error (e.g. the file could not be opened or
+    /// read) into an `S3Err`.
     fn map_bytestream_err(
         &self,
         operation: &str,
@@ -388,9 +410,9 @@ mod tests {
     #[test]
     fn part_size_uses_fixed_size_below_the_part_ceiling() {
         // A file that fits in ≤ 10,000 fixed-size parts keeps the fixed size.
-        assert_eq!(S3Store::part_size_for(0), PART_SIZE);
-        assert_eq!(S3Store::part_size_for(PART_SIZE), PART_SIZE);
-        assert_eq!(S3Store::part_size_for(PART_SIZE * MAX_PARTS), PART_SIZE);
+        assert_eq!(Store::part_size_for(0), PART_SIZE);
+        assert_eq!(Store::part_size_for(PART_SIZE), PART_SIZE);
+        assert_eq!(Store::part_size_for(PART_SIZE * MAX_PARTS), PART_SIZE);
     }
 
     #[test]
@@ -398,7 +420,7 @@ mod tests {
         // One byte past the fixed-size ceiling forces a larger part size so the
         // count stays ≤ 10,000.
         let size = PART_SIZE * MAX_PARTS + 1;
-        let part = S3Store::part_size_for(size);
+        let part = Store::part_size_for(size);
         assert!(part > PART_SIZE);
         assert!(size.div_ceil(part) <= MAX_PARTS);
     }
@@ -409,6 +431,6 @@ mod tests {
         // the S3 minimum. `ceil(size / 10_000)` < 5 MiB when size is small, but
         // such sizes take the fixed-size branch; to hit the floor directly we
         // check the max() guard holds at the branch boundary.
-        assert!(S3Store::part_size_for(u64::MAX) >= MIN_PART_SIZE);
+        assert!(Store::part_size_for(u64::MAX) >= MIN_PART_SIZE);
     }
 }

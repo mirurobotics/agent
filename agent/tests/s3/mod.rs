@@ -7,7 +7,7 @@ use miru_agent::filesys::file::File;
 use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
-use miru_agent::s3::{Credentials, S3Err, S3Store};
+use miru_agent::s3::{Config, Credentials, Options, S3Err, Store};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -38,10 +38,22 @@ fn uri(path_and_query: &str) -> String {
     format!("https://s3.{REGION}.amazonaws.com/{BUCKET}/{path_and_query}")
 }
 
-/// Wires an `S3Store` to a `StaticReplayClient` serving the given events.
-fn store_with(events: Vec<ReplayEvent>) -> (S3Store, StaticReplayClient) {
+/// Wires a `Store` to a `StaticReplayClient` serving the given events, using the
+/// default multipart part size.
+fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
+    store_with_part_size(events, Options::default().part_size)
+}
+
+/// Wires a `Store` whose multipart threshold is `part_size`, so multipart tests
+/// force the multipart path with tiny fixtures (`part_size: 0` → always multipart).
+fn store_with_part_size(events: Vec<ReplayEvent>, part_size: u64) -> (Store, StaticReplayClient) {
     let replay = StaticReplayClient::new(events);
-    let store = S3Store::with_http_client(replay.clone(), REGION.to_string(), BUCKET.to_string());
+    let cfg = Config {
+        region: REGION.to_string(),
+        bucket: BUCKET.to_string(),
+        creds: Credentials::default(),
+    };
+    let store = Store::from_http_client(replay.clone(), cfg, Options { part_size });
     (store, replay)
 }
 
@@ -82,7 +94,7 @@ pub mod put {
                 .unwrap();
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            store.put_file(key, File::new(src.path())).await.unwrap();
+            store.put(key, File::new(src.path())).await.unwrap();
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
             assert_eq!(requests.len(), 1);
@@ -136,10 +148,11 @@ pub mod put {
         #[tokio::test]
         async fn large_file_uploads_in_parts() {
             let key = "big.bin";
-            // With the threshold set to 0 below, this small file takes the
-            // multipart path. The default 256 MiB part size dwarfs the file, so
-            // it uploads as a single part — enough to exercise the full
-            // create → upload_part → complete sequence without a huge fixture.
+            // Constructing the store with `part_size: 0` (via `store_with_part_size`
+            // below) forces this small file onto the multipart path. The 8 MiB part
+            // size dwarfs the file, so it uploads as a single part — enough to
+            // exercise the full create → upload_part → complete sequence without a
+            // huge fixture.
             let body = b"multipart-body".to_vec();
             let src = temp_file_with(&body);
 
@@ -163,15 +176,16 @@ pub mod put {
                 .body(SdkBody::empty())
                 .unwrap();
 
-            let (mut store, replay) = store_with(vec![
-                ReplayEvent::new(create_req, create_resp()),
-                ReplayEvent::new(part_req, upload_part_resp("\"etag-part-1\"")),
-                ReplayEvent::new(complete_req, complete_resp()),
-            ]);
-            // Threshold below the file size forces the multipart path.
-            store.set_single_put_threshold(0);
+            let (store, replay) = store_with_part_size(
+                vec![
+                    ReplayEvent::new(create_req, create_resp()),
+                    ReplayEvent::new(part_req, upload_part_resp("\"etag-part-1\"")),
+                    ReplayEvent::new(complete_req, complete_resp()),
+                ],
+                0,
+            );
 
-            store.put_file(key, File::new(src.path())).await.unwrap();
+            store.put(key, File::new(src.path())).await.unwrap();
 
             // Assert the create → upload_part → complete sequence fired, matching
             // methods and paths (bodies for POSTs vary and are ignored).
@@ -212,13 +226,10 @@ pub mod put {
                 )))
                 .unwrap();
 
-            let (mut store, _replay) = store_with(vec![ReplayEvent::new(create_req, no_id_resp)]);
-            store.set_single_put_threshold(0);
+            let (store, _replay) =
+                store_with_part_size(vec![ReplayEvent::new(create_req, no_id_resp)], 0);
 
-            let err = store
-                .put_file(key, File::new(src.path()))
-                .await
-                .unwrap_err();
+            let err = store.put(key, File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
         }
 
@@ -243,13 +254,10 @@ pub mod put {
                 ))
                 .unwrap();
 
-            let (mut store, _replay) = store_with(vec![ReplayEvent::new(create_req, create_fail)]);
-            store.set_single_put_threshold(0);
+            let (store, _replay) =
+                store_with_part_size(vec![ReplayEvent::new(create_req, create_fail)], 0);
 
-            let err = store
-                .put_file(key, File::new(src.path()))
-                .await
-                .unwrap_err();
+            let err = store.put(key, File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
         }
 
@@ -299,18 +307,17 @@ pub mod put {
                 .body(SdkBody::empty())
                 .unwrap();
 
-            let (mut store, replay) = store_with(vec![
-                ReplayEvent::new(create_req, create_resp()),
-                ReplayEvent::new(part_req, upload_part_resp("\"etag-part-1\"")),
-                ReplayEvent::new(complete_req, complete_fail),
-                ReplayEvent::new(abort_req, abort_resp),
-            ]);
-            store.set_single_put_threshold(0);
+            let (store, replay) = store_with_part_size(
+                vec![
+                    ReplayEvent::new(create_req, create_resp()),
+                    ReplayEvent::new(part_req, upload_part_resp("\"etag-part-1\"")),
+                    ReplayEvent::new(complete_req, complete_fail),
+                    ReplayEvent::new(abort_req, abort_resp),
+                ],
+                0,
+            );
 
-            let err = store
-                .put_file(key, File::new(src.path()))
-                .await
-                .unwrap_err();
+            let err = store.put(key, File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
@@ -361,17 +368,16 @@ pub mod put {
                 .body(SdkBody::empty())
                 .unwrap();
 
-            let (mut store, replay) = store_with(vec![
-                ReplayEvent::new(create_req, create_resp()),
-                ReplayEvent::new(part_req, part_fail_resp),
-                ReplayEvent::new(abort_req, abort_resp),
-            ]);
-            store.set_single_put_threshold(0);
+            let (store, replay) = store_with_part_size(
+                vec![
+                    ReplayEvent::new(create_req, create_resp()),
+                    ReplayEvent::new(part_req, part_fail_resp),
+                    ReplayEvent::new(abort_req, abort_resp),
+                ],
+                0,
+            );
 
-            let err = store
-                .put_file(key, File::new(src.path()))
-                .await
-                .unwrap_err();
+            let err = store.put(key, File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
             // The abort must have been issued after the failed part.
@@ -409,10 +415,7 @@ pub mod get {
                 .unwrap();
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            store
-                .get_object(key, &File::new(dest.path()))
-                .await
-                .unwrap();
+            store.get(key, &File::new(dest.path())).await.unwrap();
 
             let written = std::fs::read(dest.path()).unwrap();
             assert_eq!(written, payload);
@@ -443,7 +446,7 @@ pub mod get {
                 .unwrap();
             let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            let err = store.get_object(key, &dest).await.unwrap_err();
+            let err = store.get(key, &dest).await.unwrap_err();
 
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
         }
@@ -471,10 +474,7 @@ pub mod get {
                 .unwrap();
             let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            let err = store
-                .get_object(key, &File::new(dest.path()))
-                .await
-                .unwrap_err();
+            let err = store.get(key, &File::new(dest.path())).await.unwrap_err();
 
             assert!(matches!(err, S3Err::ObjectNotFoundErr(_)));
             assert!(matches!(err.code(), Code::ResourceNotFound));
@@ -503,7 +503,7 @@ pub mod delete {
                 .unwrap();
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            store.delete_object(key).await.unwrap();
+            store.delete(key).await.unwrap();
 
             replay.assert_requests_match(IGNORED_HEADERS);
         }
@@ -531,7 +531,7 @@ pub mod exists {
                 .unwrap();
             let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            assert!(store.object_exists(key).await.unwrap());
+            assert!(store.exists(key).await.unwrap());
         }
     }
 
@@ -552,7 +552,7 @@ pub mod exists {
                 .unwrap();
             let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            assert!(!store.object_exists(key).await.unwrap());
+            assert!(!store.exists(key).await.unwrap());
         }
     }
 }
@@ -584,7 +584,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
         let err = store
-            .put_file("denied.txt", File::new(src.path()))
+            .put("denied.txt", File::new(src.path()))
             .await
             .unwrap_err();
 
@@ -607,7 +607,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
         let err = store
-            .get_object("denied.txt", &File::new(dest.path()))
+            .get("denied.txt", &File::new(dest.path()))
             .await
             .unwrap_err();
 
@@ -623,7 +623,7 @@ pub mod request_failed {
             .unwrap();
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
-        let err = store.delete_object("denied.txt").await.unwrap_err();
+        let err = store.delete("denied.txt").await.unwrap_err();
 
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
     }
@@ -642,7 +642,7 @@ pub mod request_failed {
             .unwrap();
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, resp)]);
 
-        let err = store.object_exists("denied.txt").await.unwrap_err();
+        let err = store.exists("denied.txt").await.unwrap_err();
 
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
     }
@@ -656,7 +656,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![]);
 
         let err = store
-            .get_object("any.txt", &File::new(dest.path()))
+            .get("any.txt", &File::new(dest.path()))
             .await
             .unwrap_err();
 
@@ -675,7 +675,7 @@ pub mod put_source_missing {
         let (store, _replay) = store_with(vec![]);
         let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-        let err = store.put_file("k", missing).await.unwrap_err();
+        let err = store.put("k", missing).await.unwrap_err();
 
         assert!(matches!(err, S3Err::FileSysErr(_)));
     }
@@ -688,13 +688,17 @@ pub mod construction {
 
     #[tokio::test]
     async fn new_builds_without_network() {
-        let creds = Credentials {
-            access_key_id: "AKIA_TEST".to_string(),
-            secret_access_key: "secret".to_string(),
-            session_token: "session".to_string(),
+        let cfg = Config {
+            creds: Credentials {
+                access_key_id: "AKIA_TEST".to_string(),
+                secret_access_key: "secret".to_string(),
+                session_token: "session".to_string(),
+            },
+            region: "us-west-2".to_string(),
+            bucket: "prod-bucket".to_string(),
         };
         // Constructing must not panic or touch the network.
-        let _store = S3Store::new(creds, "us-west-2".to_string(), "prod-bucket".to_string());
+        let _store = Store::new(cfg, Options::default());
     }
 }
 
