@@ -1,14 +1,14 @@
 // internal crates
+use crate::disk;
 use crate::filesys;
 use crate::models;
 use crate::services::{backend::BackendFetcher, errors::ServiceErr};
-use crate::storage;
 
 // external crates
 use tracing::error;
 
 pub async fn get<B: BackendFetcher>(
-    git_commits: &storage::GitCommits,
+    git_commits: &disk::GitCommits,
     backend: &B,
     id: String,
 ) -> Result<models::GitCommit, ServiceErr> {
@@ -22,7 +22,7 @@ pub async fn get<B: BackendFetcher>(
     Ok(storage_gc)
 }
 
-async fn cache_git_commit(git_commits: &storage::GitCommits, storage_gc: models::GitCommit) {
+async fn cache_git_commit(git_commits: &disk::GitCommits, storage_gc: models::GitCommit) {
     let id = storage_gc.id.clone();
     if let Err(e) = git_commits
         .write(

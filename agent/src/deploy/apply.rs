@@ -1,8 +1,8 @@
 // internal crates
 use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
+use crate::disk;
 use crate::filesys;
 use crate::models;
-use crate::storage;
 use crate::trace;
 
 // external crates
@@ -19,8 +19,8 @@ pub struct Args<'a> {
 }
 
 pub struct Storage<'a> {
-    pub deployments: &'a storage::Deployments,
-    pub cfg_insts: storage::CfgInstRef<'a>,
+    pub deployments: &'a disk::Deployments,
+    pub cfg_insts: disk::CfgInstRef<'a>,
 }
 
 pub struct Outcome {
@@ -69,7 +69,7 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
     }
 }
 
-async fn read_deployments(storage: &storage::Deployments) -> Result<Categorized, DeployErr> {
+async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, DeployErr> {
     let target_deployed = find_target_deployed(storage).await?;
     let tgt_dpl_id = target_deployed.as_ref().map(|d| d.id.clone());
 
@@ -124,7 +124,7 @@ async fn read_deployments(storage: &storage::Deployments) -> Result<Categorized,
 }
 
 async fn find_target_deployed(
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
 ) -> Result<Option<models::Deployment>, DeployErr> {
     let target_deployed = storage
         .find_where(|d| {
@@ -143,7 +143,7 @@ async fn find_target_deployed(
 }
 
 async fn read_cfg_insts(
-    storage: &storage::CfgInsts,
+    storage: &disk::CfgInsts,
     ids: &[String],
 ) -> Result<Vec<models::ConfigInstance>, DeployErr> {
     let mut cfg_insts = Vec::with_capacity(ids.len());
@@ -292,7 +292,7 @@ fn remaining_cooldown(deployment: &models::Deployment) -> Option<chrono::TimeDel
 
 // ================================= REMOVING ====================================== //
 async fn mark_removing(
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
     deployments: Vec<models::Deployment>,
 ) -> Result<Vec<models::Deployment>, DeployErr> {
     let mut marked = Vec::new();
@@ -304,7 +304,7 @@ async fn mark_removing(
 }
 
 async fn mark_one_removing(
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
     deployment: models::Deployment,
 ) -> Result<models::Deployment, DeployErr> {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Remove);
@@ -358,7 +358,7 @@ async fn remove(
 
 // ================================= ARCHIVE ======================================= //
 
-async fn archive(deployments: &storage::Deployments, deployment: models::Deployment) -> Outcome {
+async fn archive(deployments: &disk::Deployments, deployment: models::Deployment) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Archive);
 
     let deployment = fsm::archive(deployment);
@@ -374,14 +374,14 @@ async fn archive(deployments: &storage::Deployments, deployment: models::Deploym
 // ================================= HELPERS ======================================= //
 
 async fn store_dpl(
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
     deployment: &models::Deployment,
 ) -> Result<(), DeployErr> {
     storage
         .write(
             deployment.id.clone(),
             deployment.clone(),
-            storage::deployments::is_dirty,
+            disk::deployments::is_dirty,
             filesys::Overwrite::Allow,
         )
         .await

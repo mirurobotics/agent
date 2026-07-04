@@ -1,9 +1,9 @@
 // internal crates
 use crate::cache;
+use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::filesys;
 use crate::models;
-use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
 #[error("deployment '{deployment_id}' has no config instances")]
@@ -110,7 +110,7 @@ pub enum DeployErr {
     #[error(transparent)]
     PathNotAllowed(PathNotAllowedErr),
     #[error(transparent)]
-    StorageErr(StorageErr),
+    DiskErr(DiskErr),
     #[error(transparent)]
     WriteAccessDenied(WriteAccessDeniedErr),
     #[error(transparent)]
@@ -129,9 +129,9 @@ impl From<filesys::FileSysErr> for DeployErr {
     }
 }
 
-impl From<StorageErr> for DeployErr {
-    fn from(e: StorageErr) -> Self {
-        Self::StorageErr(e)
+impl From<DiskErr> for DeployErr {
+    fn from(e: DiskErr) -> Self {
+        Self::DiskErr(e)
     }
 }
 
@@ -192,7 +192,7 @@ crate::impl_error!(DeployErr {
     CacheErr,
     FileSysErr,
     PathNotAllowed,
-    StorageErr,
+    DiskErr,
     WriteAccessDenied,
     GenericErr,
 });

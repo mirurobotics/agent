@@ -4,9 +4,9 @@ use std::path::Component;
 
 // internal crates
 use crate::deploy::errors::*;
+use crate::disk;
 use crate::filesys::{self, errors::FileSysErr, PathExt, WriteOptions};
 use crate::models;
-use crate::storage;
 use crate::trace;
 
 // external crates
@@ -17,7 +17,7 @@ pub const BACKUP_FILE_PREFIX: &str = "miru.backup";
 /// Reads the deployment's config instances and writes them to their filesystem
 /// destinations using a snapshot+atomic-rename loop with rollback on partial failure.
 pub async fn deploy(
-    storage: &storage::CfgInstRef<'_>,
+    storage: &disk::CfgInstRef<'_>,
     deployment: &models::Deployment,
 ) -> Result<(), DeployErr> {
     validate_deploy_target(deployment)?;
@@ -53,7 +53,7 @@ fn validate_deploy_target(deployment: &models::Deployment) -> Result<(), DeployE
 }
 
 async fn read_cfg_insts(
-    storage: &storage::CfgInsts,
+    storage: &disk::CfgInsts,
     ids: &[String],
 ) -> Result<Vec<models::ConfigInstance>, DeployErr> {
     let mut cfg_insts = Vec::with_capacity(ids.len());
@@ -109,7 +109,7 @@ fn validate_filepath(file: &filesys::File) -> Result<(), DeployErr> {
 
 async fn write_cfg_insts(
     cfg_insts: &[models::ConfigInstance],
-    content_stor: &storage::CfgInstContent,
+    content_stor: &disk::CfgInstContent,
 ) -> Result<(), DeployErr> {
     let mut snapshots: Vec<Snapshot> = Vec::with_capacity(cfg_insts.len());
     if let Err(e) = write_cfg_insts_impl(&mut snapshots, cfg_insts, content_stor).await {
@@ -167,7 +167,7 @@ fn map_snapshot_err(
 async fn write_cfg_insts_impl(
     snapshots: &mut Vec<Snapshot>,
     cfg_insts: &[models::ConfigInstance],
-    content_stor: &storage::CfgInstContent,
+    content_stor: &disk::CfgInstContent,
 ) -> Result<(), DeployErr> {
     for cfg_inst in cfg_insts {
         let dest = filesys::File::new(&cfg_inst.filepath);
@@ -263,7 +263,7 @@ async fn remove_backups(snapshots: &[Snapshot]) {
 
 // ================================= REMOVE ======================================== //
 pub async fn remove(
-    storage: &storage::CfgInstRef<'_>,
+    storage: &disk::CfgInstRef<'_>,
     deployment: &models::Deployment,
     keeps: &[filesys::File],
 ) -> Result<(), DeployErr> {

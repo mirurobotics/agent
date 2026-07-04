@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::cache::CacheEntry;
+use miru_agent::disk::deployments::is_dirty;
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus};
-use miru_agent::storage::deployments::is_dirty;
 
 // external crates
 use chrono::Utc;

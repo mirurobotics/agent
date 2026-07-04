@@ -1,6 +1,6 @@
 // internal crates
+use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::filesys;
-use miru_agent::storage::{Capacities, Layout, Storage};
 
 pub mod default_capacities {
     use super::*;

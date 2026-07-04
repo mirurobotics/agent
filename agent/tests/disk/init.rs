@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 // internal crates
 use miru_agent::cache::CacheEntry;
+use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::models::Deployment;
-use miru_agent::storage::{Capacities, Layout, Storage};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

@@ -1,10 +1,10 @@
 // internal crates
 use crate::cli;
 use crate::crypt::rsa;
+use crate::disk::{self, settings};
 use crate::filesys::{self, Overwrite};
 use crate::http;
 use crate::provisioning::{errors::*, shared};
-use crate::storage::{self, settings};
 use crate::version;
 use backend_api::models as backend_client;
 
@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 
 pub async fn reprovision<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    layout: &storage::Layout,
+    layout: &disk::Layout,
     settings: &settings::Settings,
     token: &str,
 ) -> Result<backend_client::Device, ProvisionErr> {
@@ -28,7 +28,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
         rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
 
         let device = reprovision_with_backend(http_client, &public_key_file, token).await?;
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             layout,
             &(&device).into(),
             settings,

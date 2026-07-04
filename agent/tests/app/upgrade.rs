@@ -8,10 +8,10 @@ use backend_api::models as backend_client;
 use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
+use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
 use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
-use miru_agent::storage::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
 
 // external crates
 use chrono::{Duration, Utc};
@@ -89,7 +89,7 @@ mod reconcile {
 
         // pre-write the marker with the same version we're about to call reconcile
         // with; reconcile() should make zero HTTP calls.
-        storage::agent_version::write(&layout.agent_version(), "v1.0.0")
+        disk::agent_version::write(&layout.agent_version(), "v1.0.0")
             .await
             .unwrap();
 
@@ -121,7 +121,7 @@ mod reconcile {
         assert_eq!(outcome.attempts, 0);
 
         // marker present, version stamped
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .unwrap();
         assert_eq!(marker, Some("v0.9.0".to_string()));
@@ -145,7 +145,7 @@ mod reconcile {
     async fn rebootstraps_when_marker_version_differs() {
         let (layout, _dir) = prepare_layout("upgrade_old_marker").await;
 
-        storage::agent_version::write(&layout.agent_version(), "v0.0.1")
+        disk::agent_version::write(&layout.agent_version(), "v0.0.1")
             .await
             .unwrap();
 
@@ -157,7 +157,7 @@ mod reconcile {
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
 
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .unwrap();
         assert_eq!(marker, Some("v0.0.2".to_string()));
@@ -195,7 +195,7 @@ mod reconcile {
         assert_eq!(outcome.attempts, 2);
 
         // marker now reflects the new version
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .unwrap();
         assert_eq!(marker, Some("v1.2.3".to_string()));
@@ -248,7 +248,7 @@ mod needs_upgrade {
     #[tokio::test]
     async fn returns_false_when_marker_matches() {
         let (layout, _dir) = prepare_layout("needs_upgrade_match").await;
-        storage::agent_version::write(&layout.agent_version(), "v1.2.3")
+        disk::agent_version::write(&layout.agent_version(), "v1.2.3")
             .await
             .unwrap();
         assert!(!needs_upgrade(&layout, "v1.2.3").await);
@@ -257,7 +257,7 @@ mod needs_upgrade {
     #[tokio::test]
     async fn returns_true_when_marker_differs() {
         let (layout, _dir) = prepare_layout("needs_upgrade_differs").await;
-        storage::agent_version::write(&layout.agent_version(), "v1.0.0")
+        disk::agent_version::write(&layout.agent_version(), "v1.0.0")
             .await
             .unwrap();
         assert!(needs_upgrade(&layout, "v2.0.0").await);
@@ -289,7 +289,7 @@ mod reconcile_impl {
             .await
             .unwrap();
 
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .unwrap();
         assert_eq!(marker, Some(version.to_string()));
@@ -339,7 +339,7 @@ mod reconcile_impl {
         let (layout, _dir) = prepare_layout("reconcile_impl_reset_fail").await;
         // Place a directory at the device.json path so setup::reset's atomic
         // write of device.json cannot replace it and returns
-        // StorageErr::FileSysErr(_).
+        // DiskErr::FileSysErr(_).
         tokio::fs::create_dir_all(layout.device().path())
             .await
             .unwrap();
@@ -347,10 +347,10 @@ mod reconcile_impl {
         let mock = make_mock_client(backend_device("dvc_ri4", "reset_fail"));
         let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
             .await
-            .expect_err("expected StorageErr from reset failure");
+            .expect_err("expected DiskErr from reset failure");
         match err {
-            UpgradeErr::StorageErr(_) => {}
-            other => panic!("expected UpgradeErr::StorageErr, got {other:?}"),
+            UpgradeErr::DiskErr(_) => {}
+            other => panic!("expected UpgradeErr::DiskErr, got {other:?}"),
         }
     }
 
@@ -375,7 +375,7 @@ mod reconcile_impl {
 
         // setup::reset wrote the marker before update_device ran, so the marker
         // reflects the new version even though update_device failed.
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .unwrap();
         assert_eq!(marker, Some(version.to_string()));

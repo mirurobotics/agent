@@ -1,10 +1,10 @@
 // internal crates
 use crate::deploy::apply;
+use crate::disk;
 use crate::events;
 use crate::filesys::Overwrite;
 use crate::http;
 use crate::models::{self, deployment::DplActivity};
-use crate::storage;
 use crate::sync::errors::*;
 use crate::trace;
 use backend_api::models::{
@@ -25,18 +25,18 @@ pub struct SyncArgs<'a, HTTPClientT> {
 }
 
 pub struct Storage<'a> {
-    pub deployments: &'a storage::Deployments,
-    pub cfg_insts: storage::CfgInstRef<'a>,
-    pub releases: &'a storage::Releases,
-    pub git_commits: &'a storage::GitCommits,
-    pub upload_rules: &'a storage::UploadRules,
+    pub deployments: &'a disk::Deployments,
+    pub cfg_insts: disk::CfgInstRef<'a>,
+    pub releases: &'a disk::Releases,
+    pub git_commits: &'a disk::GitCommits,
+    pub upload_rules: &'a disk::UploadRules,
 }
 
 impl<'a> Storage<'a> {
     pub fn apply_storage(&self) -> apply::Storage<'a> {
         apply::Storage {
             deployments: self.deployments,
-            cfg_insts: storage::CfgInstRef {
+            cfg_insts: disk::CfgInstRef {
                 meta: self.cfg_insts.meta,
                 content: self.cfg_insts.content,
             },
@@ -174,7 +174,7 @@ async fn pull_content_for_cfg_insts<'a, HTTPClientT: http::ClientI>(
 
 async fn pull_cfg_inst_content<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    storage: &storage::CfgInstRef<'_>,
+    storage: &disk::CfgInstRef<'_>,
     cfg_inst_id: String,
     token: &str,
 ) -> Result<(), SyncErr> {
@@ -212,7 +212,7 @@ async fn pull_cfg_inst_content<HTTPClientT: http::ClientI>(
 /// ensuring the next push phase retries the update even though the pull just
 /// overwrote the value.
 async fn store_deployment(
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
     backend_dpl: backend_client::Deployment,
     cfg_inst_ids: Vec<String>,
 ) -> Result<(), SyncErr> {
@@ -371,7 +371,7 @@ async fn apply_deployments<'a>(
 // =================================== PUSH ======================================== //
 async fn push_deployments<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
     token: &str,
 ) -> Result<(), SyncErr> {
     let dirty_entries = storage.get_dirty_entries().await?;
@@ -399,7 +399,7 @@ async fn push_deployments<HTTPClientT: http::ClientI>(
 
 async fn push_deployment<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    storage: &storage::Deployments,
+    storage: &disk::Deployments,
     deployment: models::Deployment,
     token: &str,
 ) -> Result<(), SyncErr> {

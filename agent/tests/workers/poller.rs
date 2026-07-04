@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 // internal crates
 use crate::mocks::{error::SleepController, syncer::MockSyncer};
+use miru_agent::disk::{self, Layout};
 use miru_agent::filesys;
 use miru_agent::models::Device;
-use miru_agent::storage::{self, Layout};
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, State, SyncEvent, SyncFailure};
 use miru_agent::sync::SyncErr;
@@ -23,7 +23,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -106,7 +106,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -190,7 +190,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
         let device_file = Arc::new(device_file);
@@ -261,7 +261,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -322,7 +322,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -384,7 +384,7 @@ pub mod run {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 

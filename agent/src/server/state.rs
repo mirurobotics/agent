@@ -4,9 +4,9 @@ use std::sync::Arc;
 // internal crates
 use crate::activity;
 use crate::authn;
+use crate::disk::Storage;
 use crate::events;
 use crate::http;
-use crate::storage::Storage;
 use crate::sync;
 
 // external crates

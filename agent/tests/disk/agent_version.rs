@@ -1,6 +1,6 @@
 // internal crates
+use miru_agent::disk::agent_version;
 use miru_agent::filesys::{self, WriteOptions};
-use miru_agent::storage::agent_version;
 
 pub mod read {
     use super::*;

@@ -1,10 +1,10 @@
 // internal crates
 use crate::cache;
+use crate::disk::DiskErr;
 use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::models;
-use crate::storage::StorageErr;
 use crate::sync;
 
 #[derive(Debug, thiserror::Error)]
@@ -24,7 +24,7 @@ pub enum ServiceErr {
     #[error(transparent)]
     ModelsErr(models::ModelsErr),
     #[error(transparent)]
-    StorageErr(StorageErr),
+    DiskErr(DiskErr),
     #[error(transparent)]
     HTTPErr(http::HTTPErr),
     #[error(transparent)]
@@ -53,9 +53,9 @@ impl From<models::ModelsErr> for ServiceErr {
     }
 }
 
-impl From<StorageErr> for ServiceErr {
-    fn from(e: StorageErr) -> Self {
-        Self::StorageErr(e)
+impl From<DiskErr> for ServiceErr {
+    fn from(e: DiskErr) -> Self {
+        Self::DiskErr(e)
     }
 }
 
@@ -88,7 +88,7 @@ crate::impl_error!(ServiceErr {
     EventsErr,
     FileSysErr,
     ModelsErr,
-    StorageErr,
+    DiskErr,
     HTTPErr,
     SyncErr,
     UploadRulesNotExpanded,

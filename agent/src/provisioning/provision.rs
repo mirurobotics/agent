@@ -1,11 +1,11 @@
 // internal crates
 use crate::cli;
 use crate::crypt::rsa;
+use crate::disk::{self, settings};
 use crate::filesys::{self, Overwrite};
 use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
-use crate::storage::{self, settings};
 use crate::telemetry;
 use crate::version;
 use backend_api::models as backend_client;
@@ -22,13 +22,13 @@ pub struct Outcome {
 
 pub async fn provision<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    layout: &storage::Layout,
+    layout: &disk::Layout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
 ) -> Result<Outcome, ProvisionErr> {
     // if a machine has already been provisioned, then just return the device's name
-    if storage::assert_activated(layout).await.is_ok() {
+    if disk::assert_activated(layout).await.is_ok() {
         let device_name = match layout.device().read_json::<models::Device>().await {
             Ok(device) => device.name,
             Err(e) => {
@@ -53,7 +53,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
 
         let device =
             provision_with_backend(http_client, &public_key_file, token, device_name).await?;
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             layout,
             &(&device).into(),
             settings,

@@ -2,10 +2,10 @@
 use std::env;
 
 // internal crates
+use crate::disk::settings;
 use crate::filesys;
 use crate::network::{BackendHost, MqttHost};
 use crate::provisioning::errors::*;
-use crate::storage::settings;
 
 // external crates
 #[allow(unused_imports)]

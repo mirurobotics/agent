@@ -7,10 +7,10 @@ use miru_agent::deploy::errors::{
     WriteAccessDeniedErr,
 };
 use miru_agent::deploy::DeployErr;
+use miru_agent::disk::DiskErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::models::DplTarget;
-use miru_agent::storage::StorageErr;
 
 fn cache_err() -> CacheErr {
     CacheErr::CacheElementNotFound(CacheElementNotFound {
@@ -26,8 +26,8 @@ fn filesys_err() -> FileSysErr {
     })
 }
 
-fn storage_err() -> StorageErr {
-    StorageErr::CacheErr(cache_err())
+fn storage_err() -> DiskErr {
+    DiskErr::CacheErr(cache_err())
 }
 
 fn empty_config_instances_err() -> EmptyConfigInstancesErr {
@@ -111,7 +111,7 @@ mod from_conversions {
     #[test]
     fn storage_err_maps_to_deploy_storage_err() {
         let err: DeployErr = storage_err().into();
-        assert!(matches!(err, DeployErr::StorageErr(_)));
+        assert!(matches!(err, DeployErr::DiskErr(_)));
     }
 
     #[test]

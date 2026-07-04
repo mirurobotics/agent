@@ -2,13 +2,13 @@
 use crate::mocks::backend::{PanicBackend, StubBackend};
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
+use miru_agent::disk::Deployments;
 use miru_agent::filesys::{self, Overwrite};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::services::deployment as dpl_svc;
 use miru_agent::services::ServiceErr;
-use miru_agent::storage::Deployments;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 

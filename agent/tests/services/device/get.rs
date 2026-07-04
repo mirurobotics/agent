@@ -1,9 +1,9 @@
 // internal crates
+use miru_agent::disk::{self, Layout};
 use miru_agent::filesys;
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::services::device as dvc_svc;
 use miru_agent::services::ServiceErr;
-use miru_agent::storage::{self, Layout};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -17,7 +17,7 @@ pub mod errors {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
         device_file.shutdown().await.unwrap();
@@ -36,7 +36,7 @@ pub mod success {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -52,7 +52,7 @@ pub mod success {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -77,7 +77,7 @@ pub mod success {
         };
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), custom_device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), custom_device.clone())
                 .await
                 .unwrap();
 

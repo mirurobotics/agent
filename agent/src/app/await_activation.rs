@@ -3,7 +3,7 @@ use std::future::Future;
 use std::time::Duration;
 
 // internal crates
-use crate::storage::{self, Layout};
+use crate::disk::{self, Layout};
 
 // external crates
 use tokio::pin;
@@ -21,7 +21,7 @@ where
     Fut: Future<Output = ()> + Send,
     S: Future<Output = ()> + Send,
 {
-    if storage::assert_activated(layout).await.is_ok() {
+    if disk::assert_activated(layout).await.is_ok() {
         info!("Device activated; starting agent.");
         return Outcome::Activated;
     }
@@ -39,7 +39,7 @@ where
                 return Outcome::ShutdownRequested;
             }
             _ = sleep_fn(Duration::from_secs(1)) => {
-                if storage::assert_activated(layout).await.is_ok() {
+                if disk::assert_activated(layout).await.is_ok() {
                     info!("Device activated; starting agent.");
                     return Outcome::Activated;
                 }

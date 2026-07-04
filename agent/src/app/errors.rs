@@ -1,13 +1,13 @@
 // internal crates
 use crate::authn;
+use crate::disk;
 use crate::filesys;
 use crate::http;
-use crate::storage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum UpgradeErr {
     #[error(transparent)]
-    StorageErr(#[from] storage::StorageErr),
+    DiskErr(#[from] disk::DiskErr),
     #[error(transparent)]
     HTTPErr(#[from] http::HTTPErr),
     #[error(transparent)]

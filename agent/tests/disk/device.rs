@@ -1,9 +1,9 @@
 // internal crates
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
+use miru_agent::disk::{assert_activated, resolve_device_id, DiskErr, Layout};
 use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::models::Device;
-use miru_agent::storage::{assert_activated, resolve_device_id, Layout, StorageErr};
 
 // external crates
 use chrono::{Duration, Utc};
@@ -23,7 +23,7 @@ pub mod assert_activated {
         let (layout, _dir) = fresh_layout().await;
 
         let result = assert_activated(&layout).await.unwrap_err();
-        assert!(matches!(result, StorageErr::DeviceNotActivatedErr(_)));
+        assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
     }
 
     #[tokio::test]
@@ -37,7 +37,7 @@ pub mod assert_activated {
             .unwrap();
 
         let result = assert_activated(&layout).await.unwrap_err();
-        assert!(matches!(result, StorageErr::DeviceNotActivatedErr(_)));
+        assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
     }
 
     #[tokio::test]
@@ -51,7 +51,7 @@ pub mod assert_activated {
             .unwrap();
 
         let result = assert_activated(&layout).await.unwrap_err();
-        assert!(matches!(result, StorageErr::DeviceNotActivatedErr(_)));
+        assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
     }
 
     #[tokio::test]
@@ -137,6 +137,6 @@ pub mod resolve_device_id {
 
         // empty layout: no device.json, no token.json
         let err = resolve_device_id(&layout).await.unwrap_err();
-        assert!(matches!(err, StorageErr::ResolveDeviceIDErr(_)));
+        assert!(matches!(err, DiskErr::ResolveDeviceIDErr(_)));
     }
 }

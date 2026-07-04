@@ -5,11 +5,11 @@ use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::deploy::errors::EmptyConfigInstancesErr;
 use miru_agent::deploy::DeployErr;
+use miru_agent::disk::DiskErr;
 use miru_agent::errors::Error;
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
-use miru_agent::storage::StorageErr;
 use miru_agent::sync::errors::{
     CfgInstsNotExpandedErr, SyncErrors, SyncerInCooldownErr, UploadRulesNotExpandedErr,
 };
@@ -49,8 +49,8 @@ fn http_err() -> HTTPErr {
     })
 }
 
-fn storage_err() -> StorageErr {
-    StorageErr::CacheErr(cache_err())
+fn storage_err() -> DiskErr {
+    DiskErr::CacheErr(cache_err())
 }
 
 mod from_conversions {
@@ -89,7 +89,7 @@ mod from_conversions {
     #[test]
     fn storage_err_maps_to_sync_storage_err() {
         let err: SyncErr = storage_err().into();
-        assert!(matches!(err, SyncErr::StorageErr(_)));
+        assert!(matches!(err, SyncErr::DiskErr(_)));
     }
 
     #[test]
