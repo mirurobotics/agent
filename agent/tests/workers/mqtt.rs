@@ -440,7 +440,7 @@ pub mod handle_mqtt_error {
         });
 
         let options = Options::default();
-        let (client, eventloop) = Client::new(&options).await;
+        let (client, eventloop) = Client::new(&options);
         let created_at = client.created_at;
 
         let before_patch = Utc::now();
@@ -499,7 +499,7 @@ pub mod handle_mqtt_error {
         });
 
         let options = Options::default();
-        let (client, eventloop) = Client::new(&options).await;
+        let (client, eventloop) = Client::new(&options);
         let created_at = client.created_at;
 
         let before_patch = Utc::now();
@@ -561,7 +561,7 @@ pub mod handle_mqtt_error {
         });
 
         let options = Options::default();
-        let (client, eventloop) = Client::new(&options).await;
+        let (client, eventloop) = Client::new(&options);
         let created_at = client.created_at;
 
         let before_patch = Utc::now();

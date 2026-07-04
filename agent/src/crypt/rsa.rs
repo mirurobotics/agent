@@ -43,8 +43,17 @@ pub async fn gen_key_pair(
     public_key_file: &filesys::File,
     overwrite: Overwrite,
 ) -> Result<(), CryptErr> {
-    // Generate the RSA key pair
-    let rsa = ssl_err!(GenerateRSAKeyPairErr, Rsa::generate(num_bits))?;
+    // Generate the RSA key pair on a blocking thread so the 4096-bit keygen
+    // (hundreds of ms of pure CPU) does not pin an async worker thread and stall
+    // concurrent tasks (MQTT loop, poller, local socket server). Only the raw
+    // `Rsa::generate` moves into the closure; the `ssl_err!` mapping stays in the
+    // async body so its `trace!()`/`?` machinery runs in the async context. A
+    // JoinError only occurs if the blocking task panics, which would have
+    // propagated inline before this change too, so we let it propagate.
+    let rsa = tokio::task::spawn_blocking(move || Rsa::generate(num_bits))
+        .await
+        .expect("rsa keygen task panicked");
+    let rsa = ssl_err!(GenerateRSAKeyPairErr, rsa)?;
 
     // Extract and write the private key
     let private_key_pem = ssl_err!(ConvertPrivateKeyToPEMErr, rsa.private_key_to_pem())?;

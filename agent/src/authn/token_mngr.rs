@@ -60,7 +60,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
 
     async fn get_token(&self) -> Arc<Token> {
         // get the token
-        self.token_file.read().await
+        self.token_file.read()
     }
 
     async fn refresh_token(&mut self) -> Result<(), AuthnErr> {

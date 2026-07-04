@@ -56,7 +56,7 @@ pub mod new {
 
         // ensure the contents is correct
         let cached_file = SingleThreadTokenFile::new(file).await.unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &token);
+        assert_eq!(cached_file.read().as_ref(), &token);
     }
 }
 
@@ -71,7 +71,7 @@ pub mod new_with_default {
         let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -87,7 +87,7 @@ pub mod new_with_default {
         let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -108,7 +108,7 @@ pub mod new_with_default {
         let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &token);
+        assert_eq!(cached_file.read().as_ref(), &token);
     }
 }
 
@@ -123,7 +123,7 @@ pub mod create {
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -134,7 +134,7 @@ pub mod create {
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -169,7 +169,7 @@ pub mod create {
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 }
 
@@ -184,7 +184,7 @@ pub mod read {
         let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -203,7 +203,7 @@ pub mod read {
         assert!(!file.exists());
 
         // should still be able to read the file since it's cached in memory
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
     }
 }
 
@@ -220,7 +220,7 @@ pub mod write {
             SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
 
         // write to the file
         let token = Token {
@@ -228,7 +228,7 @@ pub mod write {
             expires_at: Utc::now() + Duration::days(1),
         };
         cached_file.write(token.clone()).await.unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &token);
+        assert_eq!(cached_file.read().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -241,7 +241,7 @@ pub mod write {
             SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
 
         // delete the file
         file.delete().await.unwrap();
@@ -253,7 +253,7 @@ pub mod write {
             expires_at: Utc::now() + Duration::days(1),
         };
         cached_file.write(token.clone()).await.unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &token);
+        assert_eq!(cached_file.read().as_ref(), &token);
     }
 }
 
@@ -269,7 +269,7 @@ pub mod patch {
             SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
 
         // patch the file
         let updates = Updates {
@@ -281,7 +281,7 @@ pub mod patch {
             expires_at: updates.expires_at.unwrap(),
         };
         cached_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, cached_file.read().await.as_ref());
+        assert_eq!(&expected, cached_file.read().as_ref());
     }
 
     #[tokio::test]
@@ -303,7 +303,7 @@ pub mod patch {
 
         // patch with empty updates — merge produces no change, so write is skipped
         cached_file.patch(Updates::empty()).await.unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &token);
+        assert_eq!(cached_file.read().as_ref(), &token);
 
         // backing file should still not exist (no write occurred)
         assert!(!file.exists());
@@ -318,7 +318,7 @@ pub mod patch {
             SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().await.as_ref(), &Token::default());
+        assert_eq!(cached_file.read().as_ref(), &Token::default());
 
         // delete the file
         file.delete().await.unwrap();
@@ -334,7 +334,7 @@ pub mod patch {
             expires_at: updates.expires_at.unwrap(),
         };
         cached_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, cached_file.read().await.as_ref());
+        assert_eq!(&expected, cached_file.read().as_ref());
     }
 }
 

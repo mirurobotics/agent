@@ -28,7 +28,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     device_name: Option<String>,
 ) -> Result<Outcome, ProvisionErr> {
     // if a machine has already been provisioned, then just return the device's name
-    if disk::assert_activated(layout).await.is_ok() {
+    if disk::assert_activated(layout).is_ok() {
         let device_name = match layout.device().read_json::<models::Device>().await {
             Ok(device) => device.name,
             Err(e) => {

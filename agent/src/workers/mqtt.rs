@@ -175,7 +175,7 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
     let options = MqttOptions::new(credentials)
         .with_connect_address(broker_address)
         .with_client_id(device_id.to_string());
-    let (mqtt_client, eventloop) = mqtt::Client::new(&options).await;
+    let (mqtt_client, eventloop) = mqtt::Client::new(&options);
 
     // subscribe to device synchronization updates
     if let Err(e) = mqtt::device::subscribe_all(&mqtt_client, device_id).await {

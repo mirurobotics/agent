@@ -21,7 +21,7 @@ where
     Fut: Future<Output = ()> + Send,
     S: Future<Output = ()> + Send,
 {
-    if disk::assert_activated(layout).await.is_ok() {
+    if disk::assert_activated(layout).is_ok() {
         info!("Device activated; starting agent.");
         return Outcome::Activated;
     }
@@ -39,7 +39,7 @@ where
                 return Outcome::ShutdownRequested;
             }
             _ = sleep_fn(Duration::from_secs(1)) => {
-                if disk::assert_activated(layout).await.is_ok() {
+                if disk::assert_activated(layout).is_ok() {
                     info!("Device activated; starting agent.");
                     return Outcome::Activated;
                 }

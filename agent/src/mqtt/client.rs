@@ -41,7 +41,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new(options: &Options) -> (Self, EventLoop) {
+    pub fn new(options: &Options) -> (Self, EventLoop) {
         let mut mqtt_options = MqttOptions::new(
             &options.client_id,
             options.connect_address.broker().as_str(),
