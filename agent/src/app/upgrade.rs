@@ -32,7 +32,7 @@ where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
 {
-    validate_layout(layout).await?;
+    validate_layout(layout)?;
 
     let backoff = cooldown::Backoff {
         base_secs: 1,
@@ -97,7 +97,7 @@ pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
     }
 }
 
-pub async fn validate_layout(layout: &Layout) -> Result<(), UpgradeErr> {
+pub fn validate_layout(layout: &Layout) -> Result<(), UpgradeErr> {
     let auth_dir = layout.auth();
     auth_dir.private_key().assert_exists()?;
     auth_dir.public_key().assert_exists()?;

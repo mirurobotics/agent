@@ -323,7 +323,7 @@ mod poll_error_classification {
             ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
         );
 
-        let (_, mut eventloop) = miru_agent::mqtt::Client::new(&opts).await;
+        let (_, mut eventloop) = miru_agent::mqtt::Client::new(&opts);
 
         let err = poll(&mut eventloop).await.unwrap_err();
         assert!(err.is_network_conn_err());
@@ -341,7 +341,7 @@ mod mqtt_client_new {
             username: "test".to_string(),
             password: "test".to_string(),
         });
-        let (client, _eventloop) = Client::new(&opts).await;
+        let (client, _eventloop) = Client::new(&opts);
         let after = chrono::Utc::now();
 
         assert!(client.created_at >= before);

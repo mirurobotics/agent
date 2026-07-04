@@ -11,7 +11,7 @@ use crate::trace;
 
 pub type Device = ConcurrentCachedFile<models::Device, device::Updates>;
 
-pub async fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
+pub fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
     let auth_dir = layout.auth();
     if !auth_dir.private_key().exists() {
         return Err(DiskErr::DeviceNotActivatedErr(DeviceNotActivatedErr {
@@ -40,7 +40,7 @@ pub async fn resolve_device_id(layout: &Layout) -> Result<String, DiskErr> {
     // attempt to get the device id from the existing token on file
     let token_file =
         TokenFile::new_with_default(layout.auth().token(), crate::authn::Token::default()).await?;
-    let token = token_file.read().await;
+    let token = token_file.read();
     let jwt_err = match jwt::extract_device_id(&token.token) {
         Ok(device_id) => return Ok(device_id),
         Err(e) => e,

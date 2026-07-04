@@ -22,7 +22,7 @@ pub mod assert_activated {
     async fn returns_err_when_both_keys_missing() {
         let (layout, _dir) = fresh_layout().await;
 
-        let result = assert_activated(&layout).await.unwrap_err();
+        let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
     }
 
@@ -36,7 +36,7 @@ pub mod assert_activated {
             .await
             .unwrap();
 
-        let result = assert_activated(&layout).await.unwrap_err();
+        let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
     }
 
@@ -50,7 +50,7 @@ pub mod assert_activated {
             .await
             .unwrap();
 
-        let result = assert_activated(&layout).await.unwrap_err();
+        let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
     }
 
@@ -67,7 +67,7 @@ pub mod assert_activated {
             .await
             .unwrap();
 
-        assert_activated(&layout).await.unwrap();
+        assert_activated(&layout).unwrap();
     }
 }
 

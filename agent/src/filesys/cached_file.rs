@@ -81,7 +81,7 @@ where
         Self::new(file).await
     }
 
-    pub async fn read(&self) -> Arc<ContentT> {
+    pub fn read(&self) -> Arc<ContentT> {
         self.cache.clone()
     }
 
@@ -161,11 +161,7 @@ where
                     break;
                 }
                 Command::Read { respond_to } => {
-                    dispatch!(
-                        self.file.read().await,
-                        respond_to,
-                        "Actor failed to read file"
-                    );
+                    dispatch!(self.file.read(), respond_to, "Actor failed to read file");
                 }
                 Command::Write { data, respond_to } => {
                     dispatch!(
