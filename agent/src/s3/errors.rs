@@ -97,11 +97,7 @@ crate::impl_error!(S3Err {
 /// delegating here. This helper only covers the variants that need no
 /// operation-specific knowledge: dispatch/timeout (network), response and
 /// construction failures, and the service-error fallback.
-pub fn map_sdk_err_common<E>(
-    operation: &str,
-    key: Option<String>,
-    err: SdkError<E>,
-) -> S3Err
+pub fn map_sdk_err_common<E>(operation: &str, key: Option<String>, err: SdkError<E>) -> S3Err
 where
     E: std::error::Error + 'static,
 {
@@ -153,5 +149,37 @@ where
             msg: format!("request failed: {other}"),
             trace: crate::trace!(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::Error as _;
+
+    // A stand-in service error `E` for the mapper's generic parameter. The
+    // timeout/construction branches never inspect it.
+    #[derive(Debug, thiserror::Error)]
+    #[error("dummy service error")]
+    struct DummyErr;
+
+    #[test]
+    fn timeout_maps_to_connection_err() {
+        let err: SdkError<DummyErr> =
+            SdkError::timeout_error(Box::<dyn std::error::Error + Send + Sync>::from("slow"));
+        let mapped = map_sdk_err_common("get_object", Some("k".to_string()), err);
+        assert!(matches!(mapped, S3Err::ConnectionErr(_)));
+        assert!(mapped.is_network_conn_err());
+    }
+
+    #[test]
+    fn construction_failure_maps_to_request_failed_without_status() {
+        let err: SdkError<DummyErr> =
+            SdkError::construction_failure(Box::<dyn std::error::Error + Send + Sync>::from("bad"));
+        let mapped = map_sdk_err_common("put_object", None, err);
+        match mapped {
+            S3Err::RequestFailedErr(e) => assert!(e.status.is_none()),
+            other => panic!("expected RequestFailedErr, got {other:?}"),
+        }
     }
 }
