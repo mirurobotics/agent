@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 // internal crates
-use crate::models::{UploadRule, UploadRuleID};
+use crate::models::{UploadCollectionID, UploadRule};
 use crate::trace;
 use crate::upload::errors::*;
 
@@ -47,85 +47,62 @@ pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
-/// Poll-based file watcher: it does NOT subscribe to OS/inotify filesystem
-/// events. Instead each `scan()` re-enumerates the globbed files on a cadence
-/// (one global `min_poll_interval_secs` shared by all rules) and applies a
-/// size/mtime stability window to decide which files are ready. Newly-ready
-/// files are deduped so each is reported exactly once.
-pub struct SingleThreadScanner {
-    rules: Vec<UploadRule>,
-    next_scan_at: HashMap<UploadRuleID, DateTime<Utc>>,
+/// Owned (non-actor) sub-scanner for a single upload collection. Holds exactly
+/// one active `UploadRule` plus that collection's own observation/dedupe/cadence
+/// state. This is the structural home of what used to be global scanner state:
+/// each collection now advances its readiness state machine independently.
+struct CollectionScanner {
+    rule: UploadRule,
     observations: HashMap<PathBuf, FileObservation>,
     already_reported: HashSet<PathBuf>,
-    min_poll_interval_secs: i64,
-    now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    next_scan_at: Option<DateTime<Utc>>,
 }
 
-impl SingleThreadScanner {
-    pub fn new(args: ScannerArgs) -> Self {
+impl CollectionScanner {
+    /// New sub-scanner with empty state and no recorded next-scan time, so it is
+    /// due on its first scan.
+    fn new(rule: UploadRule) -> Self {
         Self {
-            rules: Vec::new(),
-            next_scan_at: HashMap::new(),
+            rule,
             observations: HashMap::new(),
             already_reported: HashSet::new(),
-            min_poll_interval_secs: args.min_poll_interval_secs,
-            now_fn: args.now_fn,
+            next_scan_at: None,
         }
     }
 
-    /// Replace the active rule set with `rules`, pruning per-rule cadence state
-    /// for rules that are no longer present. Per-file observation/dedupe state is
-    /// intentionally NOT pruned (lingering entries are harmless). New rules get no
-    /// `next_scan_at` entry, so they are due on the next scan.
-    fn update_rules(&mut self, rules: Vec<UploadRule>) {
-        self.rules = rules;
-        let present_ids: HashSet<&UploadRuleID> = self.rules.iter().map(|r| &r.id).collect();
-        self.next_scan_at.retain(|id, _| present_ids.contains(id));
+    /// Replace only the active rule, carrying over observation/dedupe/cadence
+    /// state. This is the whole point of the collection-keyed partition: a rule
+    /// redeploy (new rule id / digest for the same collection) preserves the
+    /// in-flight stability windows and dedupe set for that collection.
+    fn set_rule(&mut self, rule: UploadRule) {
+        self.rule = rule;
     }
 
-    async fn scan(&mut self) -> Result<(), UploadErr> {
-        // Snapshot the rules so the per-rule loop can mutate scanner state
-        // (observations/dedupe/next_scan_at) without holding a borrow of
-        // `self.rules`. Rule ids are distinct within a set, so rescheduling one
-        // rule never changes another rule's due check.
-        let rules = self.rules.clone();
-        for rule in rules {
-            let now = (self.now_fn)();
-
-            if !self.is_rule_due(&rule.id, now) {
-                continue;
-            }
-
-            let rule_id = rule.id.clone();
-            let ready = self.run_readiness(rule, now).await;
-            self.emit_ready(ready);
-            self.reschedule(&rule_id, now);
-        }
-
-        self.prune_next_scan_at();
-
-        Ok(())
-    }
-
-    /// Global-cadence due check: a rule is due when it has no recorded next-scan
+    /// Per-collection cadence due check: due when it has no recorded next-scan
     /// time (freshly added) or its next-scan time has arrived.
-    fn is_rule_due(&self, rule_id: &UploadRuleID, now: DateTime<Utc>) -> bool {
-        self.next_scan_at
-            .get(rule_id)
-            .is_none_or(|next| *next <= now)
+    fn is_due(&self, now: DateTime<Utc>) -> bool {
+        self.next_scan_at.is_none_or(|next| next <= now)
     }
 
-    /// Run the readiness decision for one rule under `spawn_blocking`.
+    /// Schedule this collection's next scan one global interval out.
+    fn reschedule(&mut self, now: DateTime<Utc>, min_poll_interval_secs: i64) {
+        self.next_scan_at = Some(now + TimeDelta::seconds(min_poll_interval_secs));
+    }
+
+    /// Run the readiness decision for this collection's rule under
+    /// `spawn_blocking`.
     ///
     /// `decide_ready` does blocking fs I/O (glob enumeration + stat). Per the
     /// Decision Log, run it under spawn_blocking to keep the runtime responsive.
-    /// The observations map is keyed by PathBuf across all rules; we move it (and
-    /// the dedupe set) into the blocking task and take it back out afterwards
-    /// (alongside the newly-ready files) so decide_ready itself stays a plain,
-    /// unit-testable sync fn. If the task panics we log and restore empty state.
-    async fn run_readiness(&mut self, rule: UploadRule, now: DateTime<Utc>) -> Vec<ReadyFile> {
+    /// Because `spawn_blocking` needs `'static`, we move this collection's
+    /// observations map (and dedupe set) into the blocking task and take them
+    /// back out afterwards (alongside the newly-ready files) so decide_ready
+    /// itself stays a plain, unit-testable sync fn. If the task panics we log and
+    /// restore empty state.
+    async fn run_readiness(&mut self, now: DateTime<Utc>) -> Vec<ReadyFile> {
         let moved_observations = std::mem::take(&mut self.observations);
         let moved_already_reported = std::mem::take(&mut self.already_reported);
+        let rule = self.rule.clone();
         let (returned_observations, returned_already_reported, ready) =
             match tokio::task::spawn_blocking(move || {
                 let mut obs = moved_observations;
@@ -145,11 +122,81 @@ impl SingleThreadScanner {
         self.already_reported = returned_already_reported;
         ready
     }
+}
+
+/// Poll-based file watcher: it does NOT subscribe to OS/inotify filesystem
+/// events. Instead each `scan()` re-enumerates the globbed files on a cadence
+/// (one global `min_poll_interval_secs` shared by all collections) and applies a
+/// size/mtime stability window to decide which files are ready. Newly-ready
+/// files are deduped so each is reported exactly once.
+///
+/// State is partitioned per upload collection: the scanner is a thin wrapper over
+/// a `HashMap<UploadCollectionID, CollectionScanner>`, each sub-scanner owning its
+/// own rule/observations/dedupe/cadence.
+pub struct SingleThreadScanner {
+    collections: HashMap<UploadCollectionID, CollectionScanner>,
+    min_poll_interval_secs: i64,
+    now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+}
+
+impl SingleThreadScanner {
+    pub fn new(args: ScannerArgs) -> Self {
+        Self {
+            collections: HashMap::new(),
+            min_poll_interval_secs: args.min_poll_interval_secs,
+            now_fn: args.now_fn,
+        }
+    }
+
+    /// Reconcile the active rule set into the per-collection sub-scanners,
+    /// preserving each surviving collection's observation/dedupe/cadence state.
+    ///
+    /// Rules are folded to one-per-collection (last-in-the-vec wins) BEFORE any
+    /// state is touched, collapsing the redeploy double-rule case. Collections no
+    /// longer present are dropped; surviving collections get their rule replaced
+    /// (state carried over) and new collections get a fresh sub-scanner (due on
+    /// next scan).
+    fn update_rules(&mut self, rules: Vec<UploadRule>) {
+        let mut folded: HashMap<UploadCollectionID, UploadRule> = HashMap::new();
+        for rule in rules {
+            folded.insert(rule.upload_collection_id.clone(), rule);
+        }
+
+        self.collections.retain(|cid, _| folded.contains_key(cid));
+
+        for (cid, rule) in folded {
+            match self.collections.get_mut(&cid) {
+                Some(collection) => collection.set_rule(rule),
+                None => {
+                    self.collections.insert(cid, CollectionScanner::new(rule));
+                }
+            }
+        }
+    }
+
+    async fn scan(&mut self) -> Result<(), UploadErr> {
+        // Each collection advances independently; order across collections is
+        // unspecified. A collection's own cadence gates whether it runs this tick.
+        for collection in self.collections.values_mut() {
+            let now = (self.now_fn)();
+
+            if !collection.is_due(now) {
+                continue;
+            }
+
+            let ready = collection.run_readiness(now).await;
+            Self::emit_ready(ready);
+            collection.reschedule(now, self.min_poll_interval_secs);
+        }
+
+        Ok(())
+    }
 
     /// Placeholder sink: emit a log line per newly-ready file. `decide_ready`
-    /// already deduped against `already_reported`, so every file here is newly
-    /// ready. M3 replaces this with the digest + POST /uploads pipeline.
-    fn emit_ready(&self, ready: Vec<ReadyFile>) {
+    /// already deduped against the collection's `already_reported`, so every file
+    /// here is newly ready. M3 replaces this with the digest + POST /uploads
+    /// pipeline.
+    fn emit_ready(ready: Vec<ReadyFile>) {
         for rf in ready {
             info!(
                 file_path = %rf.path.display(),
@@ -157,22 +204,6 @@ impl SingleThreadScanner {
                 "upload candidate ready (M2 placeholder sink)"
             );
         }
-    }
-
-    /// Schedule the rule's next scan one global interval out. Every rule shares a
-    /// single global polling cadence: the per-rule poll_interval was removed from
-    /// the contract, so the next scan for each rule is simply one interval out.
-    fn reschedule(&mut self, rule_id: &UploadRuleID, now: DateTime<Utc>) {
-        self.next_scan_at.insert(
-            rule_id.clone(),
-            now + TimeDelta::seconds(self.min_poll_interval_secs),
-        );
-    }
-
-    /// Prune `next_scan_at` entries for rules that are no longer present.
-    fn prune_next_scan_at(&mut self) {
-        let present_ids: HashSet<&UploadRuleID> = self.rules.iter().map(|r| &r.id).collect();
-        self.next_scan_at.retain(|id, _| present_ids.contains(id));
     }
 }
 
@@ -370,16 +401,25 @@ impl Worker {
                 }
                 #[cfg(feature = "test")]
                 Command::GetRules { respond_to } => {
-                    if respond_to.send(Ok(self.scanner.rules.clone())).is_err() {
+                    let rules = self
+                        .scanner
+                        .collections
+                        .values()
+                        .map(|c| c.rule.clone())
+                        .collect::<Vec<_>>();
+                    if respond_to.send(Ok(rules)).is_err() {
                         error!("Actor failed to send get rules response");
                     }
                 }
                 #[cfg(feature = "test")]
                 Command::GetReportedCount { respond_to } => {
-                    if respond_to
-                        .send(Ok(self.scanner.already_reported.len()))
-                        .is_err()
-                    {
+                    let count = self
+                        .scanner
+                        .collections
+                        .values()
+                        .map(|c| c.already_reported.len())
+                        .sum::<usize>();
+                    if respond_to.send(Ok(count)).is_err() {
                         error!("Actor failed to send get reported count response");
                     }
                 }

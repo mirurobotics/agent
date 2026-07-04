@@ -24,6 +24,7 @@ pub use self::git_commit::GitCommitID;
 pub use self::release::Release;
 pub use self::release::ReleaseID;
 pub use self::upload_rule::DeletePolicy;
+pub use self::upload_rule::UploadCollectionID;
 pub use self::upload_rule::UploadRule;
 pub use self::upload_rule::UploadRuleDestination;
 pub use self::upload_rule::UploadRuleID;

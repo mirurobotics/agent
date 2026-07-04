@@ -73,6 +73,7 @@ impl From<backend_client::UploadRuleDestination> for UploadRuleDestination {
 
 // ================================ UPLOAD RULE =================================== //
 pub type UploadRuleID = String;
+pub type UploadCollectionID = String;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct UploadRule {
