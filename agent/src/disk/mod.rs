@@ -31,6 +31,7 @@ use self::layout::Layout as StorLayout;
 use crate::filesys::Overwrite;
 use crate::models;
 
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -93,72 +94,38 @@ impl Storage {
         device_id: String,
     ) -> Result<(Storage, impl Future<Output = ()>), StorErr> {
         // device storage
-        let (device_storage, device_storage_handle) = DeviceStorage::spawn_with_default(
-            64,
-            layout.device(),
-            models::Device {
-                id: device_id.clone(),
-                activated: true,
-                status: models::DeviceStatus::Offline,
-                ..models::Device::default()
-            },
-        )
-        .await?;
+        let (device, device_handle) = init_device_storage(layout, device_id).await?;
 
-        device_storage
-            .patch(models::device::Updates {
-                status: Some(models::DeviceStatus::Offline),
-                ..models::device::Updates::empty()
-            })
-            .await?;
-
-        let device = Arc::new(device_storage);
-
-        // config instance metadata
-        let (cfg_inst_stor, cfg_inst_stor_handle) =
-            CfgInsts::spawn(64, layout.config_instance_meta(), capacities.cfg_insts).await?;
-        let cfg_inst_metadata = Arc::new(cfg_inst_stor);
-
-        // config instance content
-        let (cfg_inst_content_stor, cfg_inst_content_stor_handle) = CfgInstContent::spawn(
-            64,
-            layout.config_instance_content(),
-            capacities.cfg_inst_content,
-        )
-        .await?;
-        let cfg_inst_content = Arc::new(cfg_inst_content_stor);
+        // config instances (metadata + content)
+        let (cfg_insts, cfg_inst_handles) = init_cfg_inst_storage(layout, capacities).await?;
 
         // deployments
-        let (deployment_stor, deployment_stor_handle) =
-            Deployments::spawn(64, layout.deployments(), capacities.deployments).await?;
-        reset_deployment_retry_state(&deployment_stor).await?;
-        let deployments = Arc::new(deployment_stor);
+        let (deployments, deployment_handle) = init_deployment_storage(layout, capacities).await?;
 
         // releases
-        let (release_stor, release_stor_handle) =
+        let (release_stor, release_handle) =
             Releases::spawn(64, layout.releases(), capacities.releases).await?;
         let releases = Arc::new(release_stor);
 
         // file rules
-        let (file_rule_stor, file_rule_stor_handle) =
+        let (file_rule_stor, file_rule_handle) =
             FileRules::spawn(64, layout.file_rules(), capacities.file_rules).await?;
         let file_rules = Arc::new(file_rule_stor);
 
         // git commits
-        let (git_commit_stor, git_commit_stor_handle) =
+        let (git_commit_stor, git_commit_handle) =
             GitCommits::spawn(64, layout.git_commits(), capacities.git_commits).await?;
         let git_commits = Arc::new(git_commit_stor);
 
         let shutdown_handle = async move {
-            let handles = vec![
-                device_storage_handle,
-                cfg_inst_stor_handle,
-                cfg_inst_content_stor_handle,
-                deployment_stor_handle,
-                release_stor_handle,
-                file_rule_stor_handle,
-                git_commit_stor_handle,
-            ];
+            let mut handles = vec![device_handle];
+            handles.extend(cfg_inst_handles);
+            handles.extend([
+                deployment_handle,
+                release_handle,
+                file_rule_handle,
+                git_commit_handle,
+            ]);
 
             futures::future::join_all(handles).await;
         };
@@ -166,10 +133,7 @@ impl Storage {
         Ok((
             Storage {
                 device,
-                cfg_insts: CfgInstStor {
-                    meta: cfg_inst_metadata,
-                    content: cfg_inst_content,
-                },
+                cfg_insts,
                 deployments,
                 releases,
                 file_rules,
@@ -179,32 +143,39 @@ impl Storage {
         ))
     }
 
+    // if the device is online, set it to offline before shutting down
+    async fn mark_device_offline(&self, first_err: Option<StorErr>) -> Option<StorErr> {
+        let device_data = match self.device.read().await {
+            Ok(device_data) => device_data,
+            Err(e) => {
+                error!("failed to read device data during shutdown: {e}");
+                return first_err.or(Some(e.into()));
+            }
+        };
+
+        match device_data.status {
+            models::DeviceStatus::Online => {
+                info!("Shutting down device storage, setting device to offline");
+                record(
+                    first_err,
+                    "device offline patch",
+                    self.device
+                        .patch(models::device::Updates::disconnected())
+                        .await,
+                )
+            }
+            models::DeviceStatus::Offline => {
+                info!("Shutting down device storage, device is already offline");
+                first_err
+            }
+        }
+    }
+
     pub async fn shutdown(&self) -> Result<(), StorErr> {
         // best-effort: attempt every step, return the first error at the end
         let mut first_err: Option<StorErr> = None;
 
-        // if the device is online, set it to offline before shutting down
-        match self.device.read().await {
-            Ok(device_data) => match device_data.status {
-                models::DeviceStatus::Online => {
-                    info!("Shutting down device storage, setting device to offline");
-                    first_err = record(
-                        first_err,
-                        "device offline patch",
-                        self.device
-                            .patch(models::device::Updates::disconnected())
-                            .await,
-                    );
-                }
-                models::DeviceStatus::Offline => {
-                    info!("Shutting down device storage, device is already offline");
-                }
-            },
-            Err(e) => {
-                error!("failed to read device data during shutdown: {e}");
-                first_err = first_err.or(Some(e.into()));
-            }
-        }
+        first_err = self.mark_device_offline(first_err).await;
 
         first_err = record(first_err, "device store", self.device.shutdown().await);
         first_err = record(
@@ -256,6 +227,68 @@ fn record<E: Into<StorErr>>(
             first_err.or(Some(e))
         }
     }
+}
+
+async fn init_device_storage(
+    layout: &StorLayout,
+    device_id: String,
+) -> Result<(Arc<DeviceStorage>, JoinHandle<()>), StorErr> {
+    let (device_storage, device_storage_handle) = DeviceStorage::spawn_with_default(
+        64,
+        layout.device(),
+        models::Device {
+            id: device_id.clone(),
+            activated: true,
+            status: models::DeviceStatus::Offline,
+            ..models::Device::default()
+        },
+    )
+    .await?;
+
+    device_storage
+        .patch(models::device::Updates {
+            status: Some(models::DeviceStatus::Offline),
+            ..models::device::Updates::empty()
+        })
+        .await?;
+
+    Ok((Arc::new(device_storage), device_storage_handle))
+}
+
+async fn init_cfg_inst_storage(
+    layout: &StorLayout,
+    capacities: Capacities,
+) -> Result<(CfgInstStor, [JoinHandle<()>; 2]), StorErr> {
+    // config instance metadata
+    let (cfg_inst_stor, cfg_inst_stor_handle) =
+        CfgInsts::spawn(64, layout.config_instance_meta(), capacities.cfg_insts).await?;
+
+    // config instance content
+    let (cfg_inst_content_stor, cfg_inst_content_stor_handle) = CfgInstContent::spawn(
+        64,
+        layout.config_instance_content(),
+        capacities.cfg_inst_content,
+    )
+    .await?;
+
+    let cfg_insts = CfgInstStor {
+        meta: Arc::new(cfg_inst_stor),
+        content: Arc::new(cfg_inst_content_stor),
+    };
+    Ok((
+        cfg_insts,
+        [cfg_inst_stor_handle, cfg_inst_content_stor_handle],
+    ))
+}
+
+async fn init_deployment_storage(
+    layout: &StorLayout,
+    capacities: Capacities,
+) -> Result<(Arc<Deployments>, JoinHandle<()>), StorErr> {
+    let (deployment_stor, deployment_stor_handle) =
+        Deployments::spawn(64, layout.deployments(), capacities.deployments).await?;
+    reset_deployment_retry_state(&deployment_stor).await?;
+    Ok((Arc::new(deployment_stor), deployment_stor_handle))
 }
 
 /// Resets retry state (attempts, cooldown) for all persisted deployments so

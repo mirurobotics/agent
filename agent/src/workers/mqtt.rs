@@ -24,6 +24,7 @@ use crate::workers::next_sync_event;
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};
 use secrecy::SecretString;
+use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
@@ -84,33 +85,8 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
 {
     info!("Running mqtt worker");
 
-    let mut syncer_subscriber = match syncer.subscribe().await {
-        Ok(subscriber) => Some(subscriber),
-        Err(e) => {
-            error!("error subscribing to syncer events: {e:?}; disabling event subscription");
-            None
-        }
-    };
-
-    let device = device_stor
-        .read()
-        .await
-        .unwrap_or_else(|_| Arc::new(models::Device::default()));
-
-    // create the mqtt client
-    let (mqtt_client, eventloop) = init_client(
-        &device.id,
-        &device.session_id,
-        token_mngr,
-        options.broker_address.clone(),
-    )
-    .await;
-
-    let mut state = State {
-        client: mqtt_client,
-        eventloop,
-        err_streak: 0,
-    };
+    let (mut state, device, mut syncer_subscriber) =
+        init_state(options, token_mngr, syncer, device_stor).await;
 
     loop {
         tokio::select! {
@@ -159,6 +135,48 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
         let cooldown_duration = Duration::from_secs(cooldown_secs as u64);
         sleep_fn(cooldown_duration).await;
     }
+}
+
+async fn init_state<TokenManagerT: TokenManagerExt, SyncerT: SyncerExt>(
+    options: &Options,
+    token_mngr: &TokenManagerT,
+    syncer: &SyncerT,
+    device_stor: &disk::Device,
+) -> (
+    State,
+    Arc<models::Device>,
+    Option<watch::Receiver<SyncEvent>>,
+) {
+    // subscribe to syncer events
+    let syncer_subscriber = match syncer.subscribe().await {
+        Ok(subscriber) => Some(subscriber),
+        Err(e) => {
+            error!("error subscribing to syncer events: {e:?}; disabling event subscription");
+            None
+        }
+    };
+
+    let device = device_stor
+        .read()
+        .await
+        .unwrap_or_else(|_| Arc::new(models::Device::default()));
+
+    // create the mqtt client
+    let (mqtt_client, eventloop) = init_client(
+        &device.id,
+        &device.session_id,
+        token_mngr,
+        options.broker_address.clone(),
+    )
+    .await;
+
+    let state = State {
+        client: mqtt_client,
+        eventloop,
+        err_streak: 0,
+    };
+
+    (state, device, syncer_subscriber)
 }
 
 async fn init_client<TokenManagerT: TokenManagerExt>(

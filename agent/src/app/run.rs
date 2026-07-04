@@ -123,6 +123,19 @@ async fn init(
     )
     .await?;
 
+    init_optional_services(options, &app_state, shutdown_manager, &shutdown_tx).await?;
+    init_data_upload_workers(options, &app_state, shutdown_manager, &shutdown_tx).await?;
+
+    Ok(app_state)
+}
+
+// the socket server, poller, and mqtt worker are each opt-in via AppOptions
+async fn init_optional_services(
+    options: &AppOptions,
+    app_state: &Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> Result<(), ServerErr> {
     if options.enable_socket_server {
         init_socket_server(
             options,
@@ -154,6 +167,15 @@ async fn init(
         .await?;
     }
 
+    Ok(())
+}
+
+async fn init_data_upload_workers(
+    options: &AppOptions,
+    app_state: &Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> Result<(), ServerErr> {
     init_scan_worker(
         options.scanner.clone(),
         app_state.scanner.clone(),
@@ -176,7 +198,7 @@ async fn init(
     )
     .await?;
 
-    Ok(app_state)
+    Ok(())
 }
 
 async fn init_app_state(
@@ -539,132 +561,49 @@ impl ShutdownManager {
         let mut first_err: Option<ServerErr> = None;
 
         // 1. refresh
-        if let Some(token_refresh_worker_handle) = self.token_refresh_worker_handle.take() {
-            if let Err(e) = token_refresh_worker_handle.await {
-                error!("Failed to shutdown token refresh worker: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!(
-                "Token refresh worker handle not found, skipping token refresh worker shutdown..."
-            );
-        }
+        join_worker(
+            self.token_refresh_worker_handle.take(),
+            "token refresh",
+            &mut first_err,
+        )
+        .await;
 
         // 2. poller
-        if let Some(poller_worker_handle) = self.poller_worker_handle.take() {
-            if let Err(e) = poller_worker_handle.await {
-                error!("Failed to shutdown poller worker: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!("Poller worker handle not found, skipping poller worker shutdown...");
-        }
+        join_worker(self.poller_worker_handle.take(), "poller", &mut first_err).await;
 
         // 3. mqtt
-        if let Some(mqtt_worker_handle) = self.mqtt_worker_handle.take() {
-            if let Err(e) = mqtt_worker_handle.await {
-                error!("Failed to shutdown MQTT worker: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!("MQTT worker handle not found, skipping MQTT worker shutdown...");
-        }
+        join_worker(self.mqtt_worker_handle.take(), "MQTT", &mut first_err).await;
 
-        // 4. server
-        if let Some(socket_server_handle) = self.socket_server_handle.take() {
-            match socket_server_handle.await {
-                Err(e) => {
-                    error!("Failed to shutdown socket server: {}", e);
-                    first_err.get_or_insert_with(|| {
-                        ServerErr::JoinHandleErr(JoinHandleErr {
-                            source: Box::new(e),
-                            trace: trace!(),
-                        })
-                    });
-                }
-                Ok(Err(e)) => {
-                    error!("Failed to shutdown socket server: {}", e);
-                    first_err.get_or_insert(e);
-                }
-                Ok(Ok(())) => {}
-            }
-        } else {
-            info!("Socket server handle not found, skipping socket server shutdown...");
-        }
+        // 4. server (its handle carries the socket server's own Result)
+        self.shutdown_socket_server(&mut first_err).await;
 
         // 5. scan driver worker
-        if let Some(scan_worker_handle) = self.scan_worker_handle.take() {
-            if let Err(e) = scan_worker_handle.await {
-                error!("Failed to shutdown scan driver worker: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!("Scan driver worker handle not found, skipping scan driver worker shutdown...");
-        }
+        join_worker(
+            self.scan_worker_handle.take(),
+            "scan driver",
+            &mut first_err,
+        )
+        .await;
 
         // 6. sync-scan bridge worker
-        if let Some(sync_scan_bridge_worker_handle) = self.sync_scan_bridge_worker_handle.take() {
-            if let Err(e) = sync_scan_bridge_worker_handle.await {
-                error!("Failed to shutdown sync-scan bridge worker: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!("Sync-scan bridge worker handle not found, skipping sync-scan bridge worker shutdown...");
-        }
+        join_worker(
+            self.sync_scan_bridge_worker_handle.take(),
+            "sync-scan bridge",
+            &mut first_err,
+        )
+        .await;
 
         // 7. delete driver worker (must join before app state shutdown so no
         // sweeps race the deleter actor's shutdown)
-        if let Some(delete_worker_handle) = self.delete_worker_handle.take() {
-            if let Err(e) = delete_worker_handle.await {
-                error!("Failed to shutdown delete driver worker: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!(
-                "Delete driver worker handle not found, skipping delete driver worker shutdown..."
-            );
-        }
+        join_worker(
+            self.delete_worker_handle.take(),
+            "delete driver",
+            &mut first_err,
+        )
+        .await;
 
         // 8. app state
-        if let Some(app_state) = self.app_state.take() {
-            if let Err(e) = app_state.state.shutdown().await {
-                error!("Failed to shutdown app state: {}", e);
-                first_err.get_or_insert(e);
-            }
-            app_state.state_handle.await;
-        } else {
-            info!("App state not found, skipping app state shutdown...");
-        }
+        self.shutdown_app_state(&mut first_err).await;
 
         match first_err {
             Some(e) => Err(e),
@@ -673,6 +612,64 @@ impl ShutdownManager {
                 Ok(())
             }
         }
+    }
+
+    async fn shutdown_socket_server(&mut self, first_err: &mut Option<ServerErr>) {
+        let Some(socket_server_handle) = self.socket_server_handle.take() else {
+            info!("Socket server handle not found, skipping socket server shutdown...");
+            return;
+        };
+
+        match socket_server_handle.await {
+            Err(e) => {
+                error!("Failed to shutdown socket server: {}", e);
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
+            }
+            Ok(Err(e)) => {
+                error!("Failed to shutdown socket server: {}", e);
+                first_err.get_or_insert(e);
+            }
+            Ok(Ok(())) => {}
+        }
+    }
+
+    async fn shutdown_app_state(&mut self, first_err: &mut Option<ServerErr>) {
+        let Some(app_state) = self.app_state.take() else {
+            info!("App state not found, skipping app state shutdown...");
+            return;
+        };
+
+        if let Err(e) = app_state.state.shutdown().await {
+            error!("Failed to shutdown app state: {}", e);
+            first_err.get_or_insert(e);
+        }
+        app_state.state_handle.await;
+    }
+}
+
+async fn join_worker(
+    handle: Option<JoinHandle<()>>,
+    name: &str,
+    first_err: &mut Option<ServerErr>,
+) {
+    let Some(handle) = handle else {
+        info!("{name} worker handle not found, skipping {name} worker shutdown...");
+        return;
+    };
+
+    if let Err(e) = handle.await {
+        error!("Failed to shutdown {name} worker: {}", e);
+        first_err.get_or_insert_with(|| {
+            ServerErr::JoinHandleErr(JoinHandleErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        });
     }
 }
 
