@@ -122,7 +122,7 @@ impl S3Store {
         let size = file.size().await?;
 
         if size > self.single_put_threshold {
-            return self.put_object_multipart(key, &file, size).await;
+            return self.put_file_multipart(key, &file, size).await;
         }
 
         let body = ByteStream::from_path(file.path())
@@ -142,7 +142,7 @@ impl S3Store {
     /// Streams a file to S3 as a multipart upload, one part at a time. On any
     /// failure during the part loop or completion, the in-progress upload is
     /// aborted (best-effort) so S3 does not retain orphaned parts.
-    async fn put_object_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
+    async fn put_file_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
         let part_size = Self::part_size_for(size);
 
         let created = self
