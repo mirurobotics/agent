@@ -25,14 +25,20 @@ After this change:
 
 ## Progress
 
-- [ ] Milestone 1: implement `funclen` check in `tools/lint` with unit tests; wire into CLI.
-- [ ] Milestone 2: refactor the 3 oversized functions in `tools/lint/src`; tools lint passes.
-- [ ] Milestone 3: refactor the 8 violations in `agent/src` (7 refactors + 1 suppression); repo lint passes.
-- [ ] Milestone 4: update `AGENTS.md`; preflight reports clean.
+- [x] Milestone 1: implement `funclen` check in `tools/lint` with unit tests; wire into CLI.
+- [x] Milestone 2: refactor the 3 oversized functions in `tools/lint/src`; tools lint passes.
+- [x] Milestone 3: refactor the 8 violations in `agent/src` (7 refactors + 1 suppression); repo lint passes.
+- [x] Milestone 4: update `AGENTS.md`; preflight validated (see Surprises — "Preflight clean" is unobservable in this root container; three of four components pass, the fourth fails only on the 14 pre-existing root-environment test failures).
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-07-04: Milestone 1 verification matched the plan's measured worklist exactly — 8 findings in `agent/src` and 3 in `tools/lint/src`, identical files, line numbers, and counts. `agent/tests` produced zero funclen findings (path exemption works through the `scripts/lib/lint.sh` loop unchanged).
+- 2026-07-04: rustfmt's default `struct_lit_width` (18) re-expands short struct literals onto multiple lines, which briefly pushed the refactored `parser::parse` back to 51 body lines; fixed by also extracting the header-comment branch (`push_header_comment`). Lesson: verify funclen counts after `cargo fmt`, not before.
+- 2026-07-04: the dev container runs as root, so 14 pre-existing tests that rely on chmod-based permission denial (2 in the `miru-agent` lib target under `deploy::filesys::tests`, 12 in `agent/tests` under `deploy::*`, `filesys::dir::new_home_dir`, `sync::deployments::apply_error_isolation`) fail in this environment on the base tree and on the refactored tree with bitwise-identical failure lists (1338 passed / 12 failed integration, 141/2 lib). Verified pre-existing via `git stash`; unrelated to this change. All other tests pass; CI runs unprivileged and covers them.
+- 2026-07-04: `cargo machete`, `cargo audit`, and `cargo diet` were not preinstalled in the container; installed via `scripts/lib/install-lint-deps.sh` (network access through the proxy worked). `cargo audit` passes with one allowed warning (RUSTSEC-2024-0436, paste unmaintained — pre-existing allowlist).
+- 2026-07-04: `./scripts/preflight.sh` on the final tree: `Preflight FAILED (lint=0 tests=1 tools_lint=0 tools_tests=0)`. Repo lint, tools lint, and tools covgate all pass; the only failing component is repo covgate, which aborts at its test phase on the two pre-existing root-env lib tests (`deploy::filesys::tests::remove_backups_continues_when_delete_fails`, `rollback_returns_errors_when_restores_fail_synthetic`) before gates are even computed. "Preflight clean" therefore cannot be observed in this container; CI (unprivileged) is the authoritative gate for the branch.
+- 2026-07-04: the tools crate has real per-module covgates under `tools/lint/src/*/.covgate` (the plan only mentioned the crate-root `.covgate` of 0). The `checker` refactor dipped that module to 96.98% (gate 97.61%); fixed with three direct unit tests for `find_header`/`is_group_header` → 98.52%.
+- 2026-07-04: the `Storage::init` refactor initially cost the `storage` module 0.30 points of region coverage (95.01% → 94.71% with the root-env tests skipped, gate 94.83%): the three new `init_*(...).await?` call sites in `init` added error-branch regions no test exercised. Attribution was established by running covgate with an identical skip set on the pre-change tree (deploy identical, filesys +0.24, storage −0.30). Fixed per plan guidance by adding three failure-path tests to `agent/tests/storage/caches.rs` (`init_fails_when_device_path_is_a_directory`, `init_fails_when_cfg_inst_content_path_is_a_file`, `init_fails_when_deployments_path_is_a_directory`) instead of lowering the gate. Note `SingleThreadFileCache::new` does not eagerly read its file, so blocking `metadata.json` with a directory does NOT fail `CfgInsts::spawn`; the content store's `create_if_absent` is the reliable failure point for the cfg-inst helper.
 
 ## Decision Log
 
@@ -50,12 +56,24 @@ After this change:
   Date/Author: 2026-07-04 / plan author.
 - Decision: `Worker::run` in `agent/src/cache/concurrent.rs` (187 lines) is the single planned suppression, not a refactor. It is a flat actor dispatch table — one match arm per `Command` variant, each arm a single `dispatch!` invocation; splitting it into sub-matches would need catch-all `unreachable!()` arms. gotools applies the same exemption to its own rule-dispatch table (`//nolint:funclen // dispatch table grows with each new rule`). Final call remains with the implementer; everything else must be refactored.
   Date/Author: 2026-07-04 / plan author.
+- Decision: implementer confirmed the `Worker::run` suppression (not a refactor). Inspected the function: it is a flat `match` with exactly one `dispatch!` arm per `Command` variant plus the `Shutdown` arm; any split would need artificial sub-matches with `unreachable!()` catch-alls. Applied `// lint:allow(funclen) — actor dispatch table; one arm per Command variant` directly above `pub async fn run`, mirroring gotools' nolint on its own dispatch table.
+  Date/Author: 2026-07-04 / implementer.
 - Decision: milestone order is linter-first (implement, then fix violations). Intermediate commits fail repo-wide lint until Milestone 3 completes; this is accepted within the PR because the linter is the natural verification tool for the refactor milestones, and the final state is green.
   Date/Author: 2026-07-04 / plan author.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Delivered as planned, in four commits plus one coverage follow-up:
+
+- `feat(lint): add funclen check enforcing 50-line function limit` — new `tools/lint/src/funclen/mod.rs` (syn visitor: named fns, impl/trait methods, closures; gotools counting semantics; test-code exemptions; `lint:allow(funclen)` suppression), `--funclen-threshold` flag (default 50, 0 disables) wired into `run_from_dir` for both check and fix modes, 18 unit tests + 3 app-level tests.
+- `refactor(lint): split oversized lint tool functions under funclen limit` — `parser::parse` → `parse_use_statement`/`flush_attrs_as_comments`/`push_header_comment`; `fixer::fix_file` → `bucket_by_group`/`render_import_block`/`splice_import_block`; `checker::check_headers` → `find_header` returning a `HeaderMatch` enum. Linter output on `agent/src` + `agent/tests` verified byte-identical before/after, and `--fix` on a tree copy was a no-op.
+- `refactor: split oversized functions to satisfy funclen lint` — the 7 planned extractions plus the sanctioned `Worker::run` suppression. `LINT_FIX=0 ./scripts/lint.sh` passes end-to-end.
+- `test: add failure-path coverage for storage init and checker helpers` — restored the `storage` module gate (94.71% → 95.99% under identical skip conditions, gate 94.83%) and the tools `checker` gate (96.98% → 98.52%, gate 97.61%) after the refactors shifted region counts.
+- `docs: document funclen lint rule and suppression` — AGENTS.md Linting section + this plan's living sections.
+
+Validation summary: detection and suppression acceptance tests pass; `LINT_FIX=0 ./scripts/lint.sh` and `LINT_FIX=0 ./tools/lint/scripts/lint.sh` exit 0; tools covgate fully green; agent tests pass except 14 pre-existing root-environment failures (bitwise-identical on the base tree, covered by unprivileged CI); repo covgate green for all modules my change touches once those env failures are skipped (deploy/filesys shortfalls under skips are attributable purely to the skipped tests — deploy identical to base, filesys +1.09 vs base). `./scripts/preflight.sh` reports `Preflight FAILED (lint=0 tests=1 tools_lint=0 tools_tests=0)` — the single failing component is repo covgate's test phase, failing only on the pre-existing env tests.
+
+Retrospective: the plan's embedded gotools semantics and measured worklist were exact — zero drift. Two things the plan under-called: (1) rustfmt's `struct_lit_width` interacts with funclen (count after `cargo fmt`), and (2) behavior-preserving extraction of `x().await?` call chains creates new uncovered error-branch regions at the caller, which region-based covgates notice; budget a coverage follow-up for any refactor milestone in a covgated repo.
 
 ## Context and Orientation
 
