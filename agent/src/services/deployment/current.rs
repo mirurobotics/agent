@@ -1,10 +1,10 @@
 // internal crates
+use crate::disk;
 use crate::models;
 use crate::services::errors::ServiceErr;
-use crate::storage;
 
 pub async fn get_current(
-    deployments: &storage::Deployments,
+    deployments: &disk::Deployments,
 ) -> Result<models::Deployment, ServiceErr> {
     let dpl = deployments
         .find_one("deployed", |d| {

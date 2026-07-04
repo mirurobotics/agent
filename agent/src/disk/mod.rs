@@ -17,7 +17,7 @@ pub mod upload_rules;
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{assert_activated, resolve_device_id, Device};
-pub use self::errors::{DeviceNotActivatedErr, StorageErr};
+pub use self::errors::{DeviceNotActivatedErr, DiskErr};
 pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
@@ -26,7 +26,7 @@ pub use self::upload_rules::UploadRules;
 pub use crate::network::{BackendHost, MqttHost};
 
 use self::device::Device as DeviceStorage;
-use self::errors::StorageErr as StorErr;
+use self::errors::DiskErr as StorErr;
 use self::layout::Layout as StorLayout;
 use crate::filesys::Overwrite;
 use crate::models;

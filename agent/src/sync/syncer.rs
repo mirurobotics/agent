@@ -6,10 +6,10 @@ use std::time::Duration;
 use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
 use crate::deploy::apply;
+use crate::disk;
 use crate::errors::*;
 use crate::events;
 use crate::http;
-use crate::storage;
 use crate::sync::{deployments, errors::*};
 use crate::trace;
 
@@ -50,7 +50,7 @@ pub enum SyncEvent {
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
-    pub storage: Arc<storage::Storage>,
+    pub storage: Arc<disk::Storage>,
     pub http_client: Arc<HTTPClientT>,
     pub token_mngr: Arc<TokenManagerT>,
     pub deploy_opts: apply::DeployOpts,
@@ -85,7 +85,7 @@ impl State {
 
 pub struct SingleThreadSyncer<HTTPClientT> {
     http_client: Arc<HTTPClientT>,
-    storage: Arc<storage::Storage>,
+    storage: Arc<disk::Storage>,
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,

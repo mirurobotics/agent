@@ -7,16 +7,16 @@ use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
 use crate::deploy::{apply, fsm};
+use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
 use crate::server;
-use crate::storage;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
-    pub storage: Arc<storage::Storage>,
+    pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
     pub token_mngr: Arc<authn::TokenManager>,
@@ -26,8 +26,8 @@ pub struct AppState {
 
 impl AppState {
     pub async fn init(
-        layout: &storage::Layout,
-        capacities: storage::Capacities,
+        layout: &disk::Layout,
+        capacities: disk::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
@@ -42,10 +42,10 @@ impl AppState {
             TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
 
         // get the device id
-        let device_id = storage::resolve_device_id(layout).await?;
+        let device_id = disk::resolve_device_id(layout).await?;
 
         // initialize storage
-        let (stor, storage_handle) = storage::Storage::init(layout, capacities, device_id).await?;
+        let (stor, storage_handle) = disk::Storage::init(layout, capacities, device_id).await?;
         let storage = Arc::new(stor);
 
         // initialize the token manager

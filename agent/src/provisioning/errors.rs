@@ -1,11 +1,11 @@
 // internal crates
 use crate::authn;
 use crate::crypt;
+use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::filesys;
 use crate::http;
 use crate::logs;
-use crate::storage::StorageErr;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Missing environment variable: {name}")]
@@ -42,7 +42,7 @@ pub enum ProvisionErr {
     #[error(transparent)]
     LogsErr(logs::LogsErr),
     #[error(transparent)]
-    StorageErr(StorageErr),
+    DiskErr(DiskErr),
 }
 
 impl From<authn::AuthnErr> for ProvisionErr {
@@ -75,9 +75,9 @@ impl From<logs::LogsErr> for ProvisionErr {
     }
 }
 
-impl From<StorageErr> for ProvisionErr {
-    fn from(e: StorageErr) -> Self {
-        Self::StorageErr(e)
+impl From<DiskErr> for ProvisionErr {
+    fn from(e: DiskErr) -> Self {
+        Self::DiskErr(e)
     }
 }
 
@@ -95,7 +95,7 @@ crate::impl_error!(ProvisionErr {
     FileSysErr,
     HTTPErr,
     LogsErr,
-    StorageErr,
+    DiskErr,
 });
 
 #[cfg(test)]
@@ -149,12 +149,12 @@ mod tests {
 
         #[test]
         fn from_storage_err() {
-            let err = StorageErr::DeviceNotActivatedErr(crate::storage::DeviceNotActivatedErr {
+            let err = DiskErr::DeviceNotActivatedErr(crate::disk::DeviceNotActivatedErr {
                 msg: "test".to_string(),
                 trace: crate::trace!(),
             });
             let install_err = ProvisionErr::from(err);
-            assert!(matches!(install_err, ProvisionErr::StorageErr(_)));
+            assert!(matches!(install_err, ProvisionErr::DiskErr(_)));
         }
 
         #[test]

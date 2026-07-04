@@ -3,10 +3,10 @@ use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::crypt::errors::InvalidJWTErr;
 use miru_agent::crypt::CryptErr;
+use miru_agent::disk::errors::ResolveDeviceIDErr;
+use miru_agent::disk::DiskErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
-use miru_agent::storage::errors::ResolveDeviceIDErr;
-use miru_agent::storage::StorageErr;
 
 fn cache_err() -> CacheErr {
     CacheErr::CacheElementNotFound(CacheElementNotFound {
@@ -34,20 +34,20 @@ mod from_conversions {
 
     #[test]
     fn cache_err_maps_to_storage_cache_err() {
-        let err: StorageErr = cache_err().into();
-        assert!(matches!(err, StorageErr::CacheErr(_)));
+        let err: DiskErr = cache_err().into();
+        assert!(matches!(err, DiskErr::CacheErr(_)));
     }
 
     #[test]
     fn crypt_err_maps_to_storage_crypt_err() {
-        let err: StorageErr = crypt_err().into();
-        assert!(matches!(err, StorageErr::CryptErr(_)));
+        let err: DiskErr = crypt_err().into();
+        assert!(matches!(err, DiskErr::CryptErr(_)));
     }
 
     #[test]
     fn filesys_err_maps_to_storage_filesys_err() {
-        let err: StorageErr = filesys_err().into();
-        assert!(matches!(err, StorageErr::FileSysErr(_)));
+        let err: DiskErr = filesys_err().into();
+        assert!(matches!(err, DiskErr::FileSysErr(_)));
     }
 }
 
@@ -69,7 +69,7 @@ mod display {
         assert!(rendered.contains(&format!("{}", crypt_err())));
 
         // ensure the wrapped variant routes through Display via transparent
-        let storage: StorageErr = StorageErr::ResolveDeviceIDErr(Box::new(ResolveDeviceIDErr {
+        let storage: DiskErr = DiskErr::ResolveDeviceIDErr(Box::new(ResolveDeviceIDErr {
             device_file_err: Box::new(filesys_err()),
             jwt_err: Box::new(crypt_err()),
             trace: miru_agent::trace!(),

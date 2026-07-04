@@ -2,12 +2,12 @@
 use crate::authn;
 use crate::cache;
 use crate::crypt;
+use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::events;
 use crate::filesys;
 use crate::http;
 use crate::services;
-use crate::storage::StorageErr;
 use crate::sync;
 
 #[derive(Debug, thiserror::Error)]
@@ -107,7 +107,7 @@ pub enum ServerErr {
     #[error(transparent)]
     ServiceErr(services::ServiceErr),
     #[error(transparent)]
-    StorageErr(StorageErr),
+    DiskErr(DiskErr),
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
 
@@ -164,9 +164,9 @@ impl From<services::ServiceErr> for ServerErr {
     }
 }
 
-impl From<StorageErr> for ServerErr {
-    fn from(e: StorageErr) -> Self {
-        Self::StorageErr(e)
+impl From<DiskErr> for ServerErr {
+    fn from(e: DiskErr) -> Self {
+        Self::DiskErr(e)
     }
 }
 
@@ -187,7 +187,7 @@ crate::impl_error!(ServerErr {
     FileSysErr,
     HTTPErr,
     ServiceErr,
-    StorageErr,
+    DiskErr,
     SyncErr,
     BindUnixSocketErr,
     RunAxumServerErr,

@@ -1,7 +1,7 @@
 // internal crates
+use miru_agent::disk::{Backend, MQTTBroker, Settings};
 use miru_agent::logs::LogLevel;
 use miru_agent::network::{BackendHost, MqttHost};
-use miru_agent::storage::{Backend, MQTTBroker, Settings};
 
 // external crates
 use serde_json::json;

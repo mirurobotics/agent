@@ -6,12 +6,12 @@ use std::sync::Arc;
 use miru_agent::app::state::AppState;
 use miru_agent::authn::Token;
 use miru_agent::deploy::fsm;
+use miru_agent::disk::{Capacities, DiskErr, Layout};
 use miru_agent::filesys::{self, FileSysErr, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
 use miru_agent::server::ServerErr;
-use miru_agent::storage::{Capacities, Layout, StorageErr};
 
 // external crates
 use chrono::Utc;
@@ -100,7 +100,7 @@ pub mod init {
         .await;
         assert!(matches!(
             result,
-            Err(ServerErr::StorageErr(StorageErr::ResolveDeviceIDErr(_)))
+            Err(ServerErr::DiskErr(DiskErr::ResolveDeviceIDErr(_)))
         ));
     }
 

@@ -1,15 +1,15 @@
 // internal crates
+use crate::disk;
 use crate::filesys::Overwrite;
 use crate::models;
 use crate::services::{backend::BackendFetcher, errors::ServiceErr};
-use crate::storage;
 use crate::sync;
 
 // external crates
 use tracing::error;
 
 pub async fn get<B: BackendFetcher>(
-    deployments: &storage::Deployments,
+    deployments: &disk::Deployments,
     backend: &B,
     id: String,
 ) -> Result<models::Deployment, ServiceErr> {
@@ -33,7 +33,7 @@ pub async fn get<B: BackendFetcher>(
     Ok(storage_dpl)
 }
 
-async fn cache_deployment(deployments: &storage::Deployments, storage_dpl: models::Deployment) {
+async fn cache_deployment(deployments: &disk::Deployments, storage_dpl: models::Deployment) {
     let id = storage_dpl.id.clone();
     if let Err(e) = deployments
         .write(

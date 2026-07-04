@@ -10,6 +10,7 @@ use miru_agent::app::{
     upgrade,
 };
 use miru_agent::cli;
+use miru_agent::disk;
 use miru_agent::filesys::{dir::Dir, path::PathExt};
 use miru_agent::http;
 use miru_agent::logs;
@@ -17,7 +18,6 @@ use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendHost;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
-use miru_agent::storage;
 use miru_agent::version;
 use miru_agent::workers::mqtt;
 
@@ -67,7 +67,7 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
 
     let settings = provision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.host.as_url())?;
-    let layout = storage::Layout::default();
+    let layout = disk::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
     let result =
@@ -120,7 +120,7 @@ async fn run_reprovision(
 
     let settings = reprovision::determine_settings(&args);
     let http_client = http::Client::new(&settings.backend.host.as_url())?;
-    let layout = storage::Layout::default();
+    let layout = disk::Layout::default();
     let token = provisioning::read_token_from_env()?;
 
     let result = reprovision::reprovision(&http_client, &layout, &settings, &token).await;
@@ -151,7 +151,7 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
 }
 
 async fn run_agent() {
-    let layout = storage::Layout::default();
+    let layout = disk::Layout::default();
 
     // initialize logging early so reconciliation and pre-settings activity are
     // observable. The level is reloaded once settings are read below.
@@ -194,7 +194,7 @@ async fn run_agent() {
 
     // retrieve the settings files
     let settings_file = layout.settings();
-    let settings = match settings_file.read_json::<storage::Settings>().await {
+    let settings = match settings_file.read_json::<disk::Settings>().await {
         Ok(settings) => settings,
         Err(e) => {
             error!("Unable to read settings file: {}", e);
@@ -238,12 +238,12 @@ async fn run_agent() {
 }
 
 async fn get_bootstrap_backend_host() -> BackendHost {
-    let settings_file = storage::Layout::default().settings();
-    if let Ok(settings) = settings_file.read_json::<storage::Settings>().await {
+    let settings_file = disk::Layout::default().settings();
+    if let Ok(settings) = settings_file.read_json::<disk::Settings>().await {
         return settings.backend.host;
     }
 
-    storage::Backend::default().host
+    disk::Backend::default().host
 }
 
 async fn await_shutdown_signal() {

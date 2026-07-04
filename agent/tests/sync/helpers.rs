@@ -5,10 +5,8 @@ use backend_api::models::{
     DeploymentTargetStatus as BackendTargetStatus, GitCommit as BackendGitCommit,
     GitRepositoryType, Release as BackendRelease,
 };
+use miru_agent::disk::{CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules};
 use miru_agent::models;
-use miru_agent::storage::{
-    CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
-};
 use miru_agent::sync::syncer::State;
 
 // external crates

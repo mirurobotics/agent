@@ -1,7 +1,7 @@
 // internal crates
+use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::filesys;
 use miru_agent::models::{DeletePolicy, UploadRule, UploadRuleDestination, UploadRuleSource};
-use miru_agent::storage::{Capacities, Layout, Storage};
 
 // external crates
 use chrono::{DateTime, Utc};

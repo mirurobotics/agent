@@ -7,6 +7,7 @@ use std::time::Duration;
 // internal crates
 use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
+use crate::disk;
 use crate::errors::*;
 use crate::models::{self, device};
 use crate::mqtt::{
@@ -17,7 +18,6 @@ use crate::mqtt::{
     options::{ConnectAddress, Credentials, Options as MqttOptions},
     topics,
 };
-use crate::storage;
 use crate::sync::{syncer::SyncEvent, SyncerExt};
 
 // external crates
@@ -49,7 +49,7 @@ pub async fn run<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt>(
     options: &Options,
     token_mngr: &TokenManagerT,
     syncer: &SyncerT,
-    device_stor: &storage::Device,
+    device_stor: &disk::Device,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -75,7 +75,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
     options: &Options,
     token_mngr: &TokenManagerT,
     syncer: &SyncerT,
-    device_stor: &storage::Device,
+    device_stor: &disk::Device,
     sleep_fn: F,
 ) where
     F: Fn(Duration) -> Fut,
@@ -213,7 +213,7 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
     mqtt_client: &ClientT,
     syncer: &SyncerT,
     device_id: &str,
-    device_stor: &storage::Device,
+    device_stor: &disk::Device,
 ) -> ErrStreak {
     let err_streak = 0;
 
@@ -311,7 +311,7 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     device: &models::Device,
     token_mngr: &TokenManagerT,
     broker_address: &ConnectAddress,
-    device_stor: &storage::Device,
+    device_stor: &disk::Device,
 ) -> State {
     state.err_streak = if e.is_network_conn_err() {
         // don't increment the error streak on network connection errors

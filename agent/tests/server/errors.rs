@@ -5,6 +5,7 @@ use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::crypt::errors::InvalidJWTErr;
 use miru_agent::crypt::CryptErr;
+use miru_agent::disk::DiskErr;
 use miru_agent::events::errors::{EventsErr, MalformedCursorErr};
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
@@ -12,7 +13,6 @@ use miru_agent::http::errors::MockErr as HTTPMockErr;
 use miru_agent::http::HTTPErr;
 use miru_agent::server::ServerErr;
 use miru_agent::services::ServiceErr;
-use miru_agent::storage::StorageErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 
@@ -56,8 +56,8 @@ fn service_err() -> ServiceErr {
     }))
 }
 
-fn storage_err() -> StorageErr {
-    StorageErr::CacheErr(cache_err())
+fn storage_err() -> DiskErr {
+    DiskErr::CacheErr(cache_err())
 }
 
 fn events_err() -> EventsErr {
@@ -114,7 +114,7 @@ mod from_conversions {
     #[test]
     fn storage_err_maps_to_server_storage_err() {
         let err: ServerErr = storage_err().into();
-        assert!(matches!(err, ServerErr::StorageErr(_)));
+        assert!(matches!(err, ServerErr::DiskErr(_)));
     }
 
     #[test]

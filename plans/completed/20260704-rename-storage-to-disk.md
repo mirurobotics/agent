@@ -21,16 +21,16 @@ There is **no behavior change**: same files, same on-disk format, same logic. Ac
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) Read this plan end-to-end. Confirm on branch `refactor/rename-storage-to-disk`.
-- [ ] `git mv` the 12 tracked files under `agent/src/storage/` (incl. `.covgate`) to `agent/src/disk/`.
-- [ ] `git mv` the 11 tracked files under `agent/tests/storage/` to `agent/tests/disk/`.
-- [ ] `agent/src/lib.rs`: `pub mod storage;` → `pub mod disk;`, re-sorted into alphabetical position (moves up, between `deploy` and `errors`).
-- [ ] `agent/tests/mod.rs`: `pub mod storage;` → `pub mod disk;`, re-sorted (moves up, between `deploy` and `errors`).
-- [ ] Rename all module-path references `crate::storage` / `miru_agent::storage` / `storage::` → `disk` across the 28 src files and 23 test files outside the module dir (plus the intra-module `self::`/`super::` uses).
-- [ ] Rename the error type `StorageErr` → `DiskErr` everywhere: the definition + `impl_error!` block + `From` impls in the module's `errors.rs`; the `pub use` and `use ... as StorErr` in the module's `mod.rs`; and the five aggregating enums that carry it (`ServiceErr`, `ProvisionErr`, `SyncErr`, `DeployErr`, `ServerErr`) — variant name, `From<StorageErr>` impl, and `impl_error!` entry each.
-- [ ] Update doc/module comments that name the module "storage" as an identifier (not generic English "storage").
-- [ ] `cargo build -p miru-agent` clean; `./scripts/test.sh` full suite passes; `./scripts/lint.sh` clean (import linter + audit); `./scripts/covgate.sh` clean.
-- [ ] `./scripts/preflight.sh` prints `Preflight clean`. Do not open the PR until it does.
+- [x] (2026-07-04) Read this plan end-to-end. Confirmed on branch `refactor/rename-storage-to-disk`.
+- [x] `git mv` the 12 tracked files under `agent/src/storage/` (incl. `.covgate`) to `agent/src/disk/`.
+- [x] `git mv` the 11 tracked files under `agent/tests/storage/` to `agent/tests/disk/`.
+- [x] `agent/src/lib.rs`: `pub mod storage;` → `pub mod disk;`, re-sorted into alphabetical position (moved up, between `deploy` and `errors`).
+- [x] `agent/tests/mod.rs`: `pub mod storage;` → `pub mod disk;`, re-sorted (moved up, between `deploy` and `errors`).
+- [x] Renamed all module-path references `crate::storage` / `miru_agent::storage` / `storage::` → `disk` across the referencing src/test files (plus the intra-module uses).
+- [x] Renamed the error type `StorageErr` → `DiskErr` everywhere (86 occurrences): the definition + `impl_error!` block + `From` impls in the module's `errors.rs`; the `pub use` and `use ... as StorErr` alias-target in the module's `mod.rs`; and the five aggregating enums that carry it (`ServiceErr`, `ProvisionErr`, `SyncErr`, `DeployErr`, `ServerErr`) — variant name, `From<StorageErr>` impl, and `impl_error!` entry each.
+- [x] Verified doc/module comments: none named the module as an identifier (only generic English "storage" prose remains, left as-is per plan).
+- [x] `cargo build -p miru-agent` clean; `./scripts/test.sh` full suite passes (1495 tests, unchanged); `./scripts/lint.sh` clean (import linter + audit); `./scripts/covgate.sh` clean.
+- [x] `./scripts/preflight.sh` prints `Preflight clean`.
 
 ## Surprises & Discoveries
 
@@ -49,7 +49,15 @@ There is **no behavior change**: same files, same on-disk format, same logic. Ac
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Completed 2026-07-04. Pure mechanical rename, no behavior change.
+
+- Moved 13 tracked files `agent/src/storage/*` → `agent/src/disk/*` (12 `.rs` + `.covgate`) and 11 `agent/tests/storage/*` → `agent/tests/disk/*` via `git mv` (renames preserved history; `.covgate` gate of 94.83 now lives at `agent/src/disk/.covgate`).
+- Registered `pub mod disk;` in `agent/src/lib.rs` and `agent/tests/mod.rs`, re-sorted between `deploy` and `errors`; removed the old `storage` line.
+- Renamed module-path references (`crate::storage` ×30, `miru_agent::storage` ×34, bare `storage::` module segments) → `disk` equivalents, and the error type `StorageErr` → `DiskErr` (86 occurrences), including the five aggregating enums' variant/`From`/`impl_error!` entries.
+- Total diff vs `main`: 75 files changed, 269 insertions / 269 deletions — perfectly balanced, confirming a 1-for-1 token rename with no line additions or removals.
+- Watch-outs honored: the `filesys` module path (`From<filesys::FileSysErr>`) unchanged; the `gcs` test var in `tests/sync/deployments.rs` untouched; local `storage` bindings/fields, the `Storage` struct, the `StorageOptions` type, and the internal aliases `StorErr`/`StorLayout`/`DeviceStorage`/`CfgInstStor` all left as-is.
+- Validation: `cargo build` clean; `./scripts/test.sh` 1495 tests pass (unchanged); `./scripts/lint.sh` clean; `./scripts/covgate.sh` clean; `./scripts/preflight.sh` prints `Preflight clean`.
+- No deviations from plan. Committed as a single commit (a "move-only" first commit would not build, since the reference updates are inseparable from a buildable state — the plan explicitly allowed a single commit in that case).
 
 ## Context and Orientation
 

@@ -1,6 +1,6 @@
 // internal crates
+use miru_agent::disk::Layout;
 use miru_agent::filesys::{self, PathExt};
-use miru_agent::storage::Layout;
 
 pub mod storage_layout {
     use super::*;

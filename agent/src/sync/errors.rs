@@ -2,10 +2,10 @@
 use crate::authn;
 use crate::cache;
 use crate::deploy;
+use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::filesys;
 use crate::http;
-use crate::storage::StorageErr;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -91,7 +91,7 @@ pub enum SyncErr {
     #[error(transparent)]
     HTTPClientErr(http::HTTPErr),
     #[error(transparent)]
-    StorageErr(StorageErr),
+    DiskErr(DiskErr),
     #[error(transparent)]
     SyncErrors(SyncErrors),
     #[error(transparent)]
@@ -138,9 +138,9 @@ impl From<http::HTTPErr> for SyncErr {
     }
 }
 
-impl From<StorageErr> for SyncErr {
-    fn from(e: StorageErr) -> Self {
-        Self::StorageErr(e)
+impl From<DiskErr> for SyncErr {
+    fn from(e: DiskErr) -> Self {
+        Self::DiskErr(e)
     }
 }
 
@@ -162,7 +162,7 @@ crate::impl_error!(SyncErr {
     DeployErr,
     FileSysErr,
     HTTPClientErr,
-    StorageErr,
+    DiskErr,
     SyncErrors,
     InCooldownErr,
     SendActorMessageErr,

@@ -1,8 +1,8 @@
 // internal crates
 use crate::authn;
+use crate::disk::{self, errors::*, layout::Layout, settings::Settings};
 use crate::filesys::{self, Overwrite, WriteOptions};
 use crate::models;
-use crate::storage::{self, errors::*, layout::Layout, settings::Settings};
 
 /// Wipe all stateful files and rewrite them from the supplied inputs. The
 /// device's RSA keypair under `auth/` is intentionally NOT touched here —
@@ -13,7 +13,7 @@ pub async fn reset(
     device: &models::Device,
     settings: &Settings,
     agent_version: &str,
-) -> Result<(), StorageErr> {
+) -> Result<(), DiskErr> {
     // ensure auth dir exists (token.json lives there)
     let auth_dir = layout.auth();
     auth_dir.root.create_if_absent().await?;
@@ -48,7 +48,7 @@ pub async fn reset(
 
     // write the new marker last so that when resetting storage for the agent upgrade,
     // the marker represents a complete bootstrap.
-    storage::agent_version::write(&layout.agent_version(), agent_version).await?;
+    disk::agent_version::write(&layout.agent_version(), agent_version).await?;
 
     Ok(())
 }
@@ -62,7 +62,7 @@ pub async fn bootstrap(
     private_key_file: &filesys::File,
     public_key_file: &filesys::File,
     version: &str,
-) -> Result<(), StorageErr> {
+) -> Result<(), DiskErr> {
     // create the auth directory
     let auth_dir = layout.auth();
     auth_dir.root.create_if_absent().await?;

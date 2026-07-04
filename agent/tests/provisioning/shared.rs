@@ -2,10 +2,10 @@
 use crate::mocks::http_client::MockClient;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
+use miru_agent::disk::{Layout, Settings};
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
-use miru_agent::storage::{Layout, Settings};
 
 // external crates
 use serde_json::json;

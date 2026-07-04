@@ -1,8 +1,8 @@
 // internal crates
 use miru_agent::authn;
+use miru_agent::disk::{self, Layout, Settings};
 use miru_agent::filesys::{self, PathExt, WriteOptions};
 use miru_agent::models::Device;
-use miru_agent::storage::{self, Layout, Settings};
 
 pub mod bootstrap {
     use super::*;
@@ -42,7 +42,7 @@ pub mod bootstrap {
         assert!(events_dir.exists());
 
         // marker file
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .unwrap()
             .unwrap();
@@ -77,7 +77,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -101,7 +101,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -124,7 +124,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -157,7 +157,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -187,7 +187,7 @@ pub mod bootstrap {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -213,7 +213,7 @@ pub mod bootstrap {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -239,7 +239,7 @@ pub mod bootstrap {
         // setup the storage
         let device = Device::default();
         let settings = Settings::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -274,7 +274,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -312,7 +312,7 @@ pub mod bootstrap {
 
         // setup the storage
         let device = Device::default();
-        storage::setup::bootstrap(
+        disk::setup::bootstrap(
             &layout,
             &device,
             &settings,
@@ -369,7 +369,7 @@ pub mod reset {
     }
 
     async fn assert_marker(layout: &Layout, expected_version: &str) {
-        let marker = storage::agent_version::read(&layout.agent_version())
+        let marker = disk::agent_version::read(&layout.agent_version())
             .await
             .expect("marker read should succeed")
             .expect("marker should exist after reset");
@@ -401,7 +401,7 @@ pub mod reset {
 
         let device = Device::default();
         let settings = Settings::default();
-        storage::setup::reset(&layout, &device, &settings, "v9.9.9")
+        disk::setup::reset(&layout, &device, &settings, "v9.9.9")
             .await
             .unwrap();
 
@@ -436,7 +436,7 @@ pub mod reset {
             .unwrap();
         assert!(stale.exists());
 
-        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
             .await
             .unwrap();
 
@@ -458,7 +458,7 @@ pub mod reset {
             .unwrap();
         assert!(stale.exists());
 
-        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
             .await
             .unwrap();
 
@@ -472,7 +472,7 @@ pub mod reset {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
-        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.1.0")
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.1.0")
             .await
             .unwrap();
 
@@ -493,11 +493,11 @@ pub mod reset {
         // pre-write an old marker
         let layout_root = layout.root();
         layout_root.create_if_absent().await.unwrap();
-        storage::agent_version::write(&layout.agent_version(), "v0.0.1")
+        disk::agent_version::write(&layout.agent_version(), "v0.0.1")
             .await
             .unwrap();
 
-        storage::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.0.2")
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.0.2")
             .await
             .unwrap();
 

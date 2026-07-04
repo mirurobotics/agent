@@ -9,16 +9,16 @@ use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
 use miru_agent::deploy::{apply, fsm};
+use miru_agent::disk::{
+    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
+    UploadRules,
+};
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage::{
-    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
-    UploadRules,
-};
 use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
 };
@@ -69,7 +69,7 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         .await
         .unwrap();
     let (device_stor, _) =
-        storage::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
+        disk::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
             .await
             .unwrap();
     let (release_stor, _) = Releases::spawn(16, dir.file("releases_cache.json"), 1000)

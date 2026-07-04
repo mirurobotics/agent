@@ -5,16 +5,16 @@ use std::path::{Path, PathBuf};
 // internal crates
 use miru_agent::deploy::filesys::{deploy, remove, BACKUP_FILE_PREFIX};
 use miru_agent::deploy::DeployErr;
+use miru_agent::disk;
 use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
-use miru_agent::storage;
 
 // external crates
 use serde_json::json;
 
 struct Fixture {
-    cfg_inst_meta: storage::CfgInsts,
-    cfg_inst_content: storage::CfgInstContent,
+    cfg_inst_meta: disk::CfgInsts,
+    cfg_inst_content: disk::CfgInstContent,
     pub(super) temp_dir: filesys::Dir,
 }
 
@@ -26,11 +26,11 @@ impl Fixture {
         let resources_dir = temp_dir.subdir("resources");
 
         let (cfg_inst_meta, _) =
-            storage::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
+            disk::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
                 .await
                 .unwrap();
         let (cfg_inst_content, _) =
-            storage::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
+            disk::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
                 .await
                 .unwrap();
 
@@ -93,8 +93,8 @@ impl Fixture {
         }
     }
 
-    fn storage_ref(&self) -> storage::CfgInstRef<'_> {
-        storage::CfgInstRef {
+    fn storage_ref(&self) -> disk::CfgInstRef<'_> {
+        disk::CfgInstRef {
             meta: &self.cfg_inst_meta,
             content: &self.cfg_inst_content,
         }

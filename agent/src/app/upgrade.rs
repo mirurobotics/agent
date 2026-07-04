@@ -6,10 +6,10 @@ use std::time::Duration;
 use crate::app::errors::UpgradeErr;
 use crate::authn::{self, token::Token};
 use crate::cooldown;
+use crate::disk::{self, Layout, Settings};
 use crate::filesys::PathExt;
 use crate::http::{self, ClientI};
 use crate::models;
-use crate::storage::{self, Layout, Settings};
 
 // external crates
 use tracing::{error, info, warn};
@@ -74,7 +74,7 @@ where
 
 pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
     let marker_file = layout.agent_version();
-    match storage::agent_version::read(&marker_file).await {
+    match disk::agent_version::read(&marker_file).await {
         Ok(None) => {
             info!("unable to determine previous miru agent package version");
             true
@@ -118,7 +118,7 @@ pub async fn reconcile_impl<HTTPClientT: ClientI>(
             Settings::default()
         }
     };
-    storage::setup::reset(layout, &device, &settings, version).await?;
+    disk::setup::reset(layout, &device, &settings, version).await?;
     update_device(http_client, &device, version, &token).await?;
     Ok(())
 }

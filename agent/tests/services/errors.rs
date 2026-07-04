@@ -1,6 +1,7 @@
 // internal crates
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
+use miru_agent::disk::DiskErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::MockErr as HTTPMockErr;
@@ -9,7 +10,6 @@ use miru_agent::models::errors::DateTimeParseErr;
 use miru_agent::models::ModelsErr;
 use miru_agent::services::errors::UploadRulesNotExpandedErr;
 use miru_agent::services::ServiceErr;
-use miru_agent::storage::StorageErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 
@@ -35,8 +35,8 @@ fn models_err() -> ModelsErr {
     })
 }
 
-fn storage_err() -> StorageErr {
-    StorageErr::CacheErr(cache_err())
+fn storage_err() -> DiskErr {
+    DiskErr::CacheErr(cache_err())
 }
 
 fn http_err() -> HTTPErr {
@@ -81,7 +81,7 @@ mod from_conversions {
     #[test]
     fn storage_err_maps_to_service_storage_err() {
         let err: ServiceErr = storage_err().into();
-        assert!(matches!(err, ServiceErr::StorageErr(_)));
+        assert!(matches!(err, ServiceErr::DiskErr(_)));
     }
 
     #[test]

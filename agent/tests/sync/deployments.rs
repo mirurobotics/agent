@@ -3,13 +3,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
 use miru_agent::deploy::{apply, fsm};
+use miru_agent::disk::{
+    self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
+};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage::{
-    self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
-};
 use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::SyncErr;
 
@@ -87,7 +87,7 @@ impl Fixture {
         sync(&SyncArgs {
             storage: &miru_agent::sync::deployments::Storage {
                 deployments: &self.deployment_stor,
-                cfg_insts: storage::CfgInstRef {
+                cfg_insts: disk::CfgInstRef {
                     meta: &self.cfg_inst_stor,
                     content: &self.cfg_inst_content_stor,
                 },

@@ -52,7 +52,7 @@ impl std::fmt::Display for ResolveDeviceIDErr {
 impl crate::errors::Error for ResolveDeviceIDErr {}
 
 #[derive(Debug, thiserror::Error)]
-pub enum StorageErr {
+pub enum DiskErr {
     #[error(transparent)]
     DeviceNotActivatedErr(DeviceNotActivatedErr),
     #[error(transparent)]
@@ -69,25 +69,25 @@ pub enum StorageErr {
     ResolveDeviceIDErr(Box<ResolveDeviceIDErr>),
 }
 
-impl From<cache::CacheErr> for StorageErr {
+impl From<cache::CacheErr> for DiskErr {
     fn from(e: cache::CacheErr) -> Self {
         Self::CacheErr(e)
     }
 }
 
-impl From<crypt::CryptErr> for StorageErr {
+impl From<crypt::CryptErr> for DiskErr {
     fn from(e: crypt::CryptErr) -> Self {
         Self::CryptErr(e)
     }
 }
 
-impl From<filesys::FileSysErr> for StorageErr {
+impl From<filesys::FileSysErr> for DiskErr {
     fn from(e: filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
     }
 }
 
-crate::impl_error!(StorageErr {
+crate::impl_error!(DiskErr {
     DeviceNotActivatedErr,
     PruneCacheErrs,
     CacheErr,

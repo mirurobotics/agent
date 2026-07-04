@@ -2,9 +2,9 @@
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
+use miru_agent::disk;
 use miru_agent::filesys::{self, File, Overwrite, PathExt};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
-use miru_agent::storage;
 
 // external crates
 use chrono::TimeDelta;
@@ -12,9 +12,9 @@ use chrono::TimeDelta;
 // ================================= FIXTURE ===================================== //
 
 struct Fixture {
-    deployments: storage::Deployments,
-    cfg_insts: storage::CfgInsts,
-    cfg_inst_content: storage::CfgInstContent,
+    deployments: disk::Deployments,
+    cfg_insts: disk::CfgInsts,
+    cfg_inst_content: disk::CfgInstContent,
     temp_dir: filesys::Dir,
 }
 
@@ -24,14 +24,14 @@ impl Fixture {
         let resources_dir = temp_dir.subdir("resources");
 
         let (deployments, _) =
-            storage::Deployments::spawn(16, resources_dir.file("deployments.json"), 1000)
+            disk::Deployments::spawn(16, resources_dir.file("deployments.json"), 1000)
                 .await
                 .unwrap();
-        let (cfg_insts, _) = storage::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
+        let (cfg_insts, _) = disk::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
             .await
             .unwrap();
         let (cfg_inst_content, _) =
-            storage::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
+            disk::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
                 .await
                 .unwrap();
 
@@ -99,7 +99,7 @@ impl Fixture {
     fn storage(&self) -> apply::Storage<'_> {
         apply::Storage {
             deployments: &self.deployments,
-            cfg_insts: storage::CfgInstRef {
+            cfg_insts: disk::CfgInstRef {
                 meta: &self.cfg_insts,
                 content: &self.cfg_inst_content,
             },

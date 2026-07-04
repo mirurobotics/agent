@@ -1,6 +1,7 @@
 // internal crates
 use crate::mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager};
 use miru_agent::authn::Token;
+use miru_agent::disk::{self, Layout};
 use miru_agent::filesys;
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::mqtt::client::Client;
@@ -8,7 +9,6 @@ use miru_agent::mqtt::device::{Ping, SyncDevice};
 use miru_agent::mqtt::errors::MockErr;
 use miru_agent::mqtt::options::Options;
 use miru_agent::mqtt::{topics, MQTTError};
-use miru_agent::storage::{self, Layout};
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent, SyncFailure};
 use miru_agent::sync::SyncErr;
@@ -60,7 +60,7 @@ pub mod handle_connection_events {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -82,7 +82,7 @@ pub mod handle_connection_events {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
-        let (device_file, _) = storage::Device::spawn_with_default(
+        let (device_file, _) = disk::Device::spawn_with_default(
             64,
             layout.device(),
             Device {
@@ -117,7 +117,7 @@ pub mod handle_connection_events {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -145,7 +145,7 @@ pub mod handle_connection_events {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -175,7 +175,7 @@ pub mod handle_connection_events {
         let layout = Layout::new(dir);
 
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), Device::default())
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
                 .await
                 .unwrap();
 
@@ -203,7 +203,7 @@ pub mod handle_connection_events {
         let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
         let layout = Layout::new(dir);
 
-        let (device_file, _) = storage::Device::spawn_with_default(
+        let (device_file, _) = disk::Device::spawn_with_default(
             64,
             layout.device(),
             Device {
@@ -240,7 +240,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -265,7 +265,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -292,7 +292,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -319,7 +319,7 @@ pub mod handle_sync_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -355,7 +355,7 @@ pub mod handle_ping_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -383,7 +383,7 @@ pub mod handle_ping_events {
 
         let device = Device::default();
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -425,7 +425,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -484,7 +484,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 
@@ -546,7 +546,7 @@ pub mod handle_mqtt_error {
             ..Device::default()
         };
         let (device_file, _) =
-            storage::Device::spawn_with_default(64, layout.device(), device.clone())
+            disk::Device::spawn_with_default(64, layout.device(), device.clone())
                 .await
                 .unwrap();
 

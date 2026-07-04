@@ -4,10 +4,10 @@ use std::path::PathBuf;
 // internal crates
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
+use miru_agent::disk::Layout;
 use miru_agent::filesys::{self, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::Options;
-use miru_agent::storage::Layout;
 
 // external crates
 use serial_test::serial;

@@ -1,17 +1,17 @@
 // internal crates
+use crate::disk;
 use crate::filesys;
 use crate::models;
 use crate::services::{
     backend::BackendFetcher,
     errors::{ServiceErr, UploadRulesNotExpandedErr},
 };
-use crate::storage;
 
 // external crates
 use tracing::error;
 
 pub async fn get<B: BackendFetcher>(
-    releases: &storage::Releases,
+    releases: &disk::Releases,
     backend: &B,
     id: String,
 ) -> Result<models::Release, ServiceErr> {
@@ -32,7 +32,7 @@ pub async fn get<B: BackendFetcher>(
     Ok(storage_rls)
 }
 
-async fn cache_release(releases: &storage::Releases, storage_rls: models::Release) {
+async fn cache_release(releases: &disk::Releases, storage_rls: models::Release) {
     let id = storage_rls.id.clone();
     if let Err(e) = releases
         .write(
