@@ -5,14 +5,15 @@
 //! settings.json, ...). Do not conflate the two.
 //!
 //! A [`Store`] is constructed **only** from caller-supplied temporary
-//! credentials (access key id, secret access key, session token) plus a region
-//! and bucket name. It never reads ambient AWS configuration (environment
+//! credentials (access key id, secret access key, session token) plus a region.
+//! It is bucket-agnostic: each operation targets an [`Object`] carrying its own
+//! bucket and key. It never reads ambient AWS configuration (environment
 //! variables, `~/.aws`, or EC2/ECS instance metadata): the Miru backend mints
 //! short-lived STS credentials and hands them to the agent.
 //!
 //! Object bodies are streamed to and from disk (never buffered whole in
 //! memory) so the agent can move multi-gigabyte artifacts on memory-constrained
-//! devices. Uploads larger than [`Options::part_size`] use a multipart upload.
+//! devices. Uploads larger than [`PutOptions::part_size`] use a multipart upload.
 //!
 //! [`Store`] is a thin, stateless client: it exposes the S3 multipart
 //! primitives ([`Store::create_multipart_upload`], [`Store::upload_part`],
@@ -64,6 +65,7 @@ impl Default for Credentials {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Object {
     pub bucket: String,
     pub key: String,
@@ -75,6 +77,7 @@ impl std::fmt::Display for Object {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PartToUpload {
     pub upload_id: String,
     pub number: i32,
@@ -82,12 +85,14 @@ pub struct PartToUpload {
     pub length: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UploadedPart {
     pub number: i32,
     pub etag: String,
     pub size: u64,
 }
 
+#[derive(Debug, Clone)]
 pub struct PutOptions {
     pub part_size: u64,
 }
@@ -245,6 +250,10 @@ impl Store {
         Ok(upload_id)
     }
 
+    /// Uploads every part and completes the multipart upload. Split out from
+    /// [`Self::put_multipart`] so a single `?` early-return path funnels through
+    /// one abort site: any failure here propagates as one `Err` that
+    /// `put_multipart` catches to issue a best-effort abort.
     async fn upload_parts_and_complete(
         &self,
         src: &File,
@@ -259,9 +268,8 @@ impl Store {
         self.complete_multipart_upload(dst, upload_id, &parts).await
     }
 
-    /// Uploads every part of `file` (from byte 0) and completes the multipart
-    /// upload. Split out from [`Self::put_multipart`] so a single `?` early-return
-    /// path funnels through one abort site.
+    /// Streams each part of `src` (from byte 0) to S3 in order, returning the
+    /// [`UploadedPart`]s (part number, ETag, size) needed to complete the upload.
     async fn upload_parts(
         &self,
         src: &File,
@@ -312,7 +320,7 @@ impl Store {
             .await
             .map_err(|e| self.map_bytestream_err("upload_part", dst, src, &e))?;
 
-        let part = self
+        let output = self
             .client
             .upload_part()
             .bucket(&dst.bucket)
@@ -324,7 +332,7 @@ impl Store {
             .await
             .map_err(|e| errors::map_sdk_err_common("upload_part", Some(dst.key.to_string()), e))?;
 
-        part.e_tag().map(str::to_string).ok_or_else(|| {
+        output.e_tag().map(str::to_string).ok_or_else(|| {
             S3Err::InvalidResponseErr(InvalidResponseErr {
                 operation: "upload_part".to_string(),
                 msg: "response did not include an etag".to_string(),
@@ -493,10 +501,10 @@ impl Store {
         let mut reader = output.body.into_async_read();
         let mut file = tokio::fs::File::create(dest.path())
             .await
-            .map_err(|e| self.map_body_io_err("get_object", &src.key, dest, e))?;
+            .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
         tokio::io::copy(&mut reader, &mut file)
             .await
-            .map_err(|e| self.map_body_io_err("get_object", &src.key, dest, e))?;
+            .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
         Ok(())
     }
 
@@ -550,13 +558,13 @@ impl Store {
     fn map_body_io_err(
         &self,
         operation: &str,
-        key: &str,
+        obj: &Object,
         file: &File,
         err: std::io::Error,
     ) -> S3Err {
         S3Err::InvalidResponseErr(InvalidResponseErr {
             operation: operation.to_string(),
-            msg: format!("filesystem I/O error for object '{key}' at path '{file}': {err}"),
+            msg: format!("filesystem I/O error for object '{obj}' at path '{file}': {err}"),
             trace: trace!(),
         })
     }

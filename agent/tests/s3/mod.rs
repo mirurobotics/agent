@@ -589,6 +589,171 @@ pub mod exists {
     }
 }
 
+/// `list_parts` is a public multipart primitive with no in-tree caller, so it is
+/// covered directly here: the happy path, pagination across two pages, and the
+/// 404 → `Ok(None)` mapping used to detect an expired upload.
+pub mod list_parts {
+    use super::*;
+    use miru_agent::s3::UploadedPart;
+
+    const UPLOAD_ID: &str = "test-upload-id";
+
+    /// Canned `ListPartsResult` XML for `parts`, optionally truncated with a
+    /// `NextPartNumberMarker`, modeled on the real S3 response shape.
+    fn list_parts_xml(parts: &[(i32, &str, u64)], next_marker: Option<i32>) -> String {
+        let mut body = String::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>test-bucket</Bucket><Key>big.bin</Key><UploadId>test-upload-id</UploadId>"#,
+        );
+        match next_marker {
+            Some(m) => body.push_str(&format!(
+                "<IsTruncated>true</IsTruncated><NextPartNumberMarker>{m}</NextPartNumberMarker>"
+            )),
+            None => body.push_str("<IsTruncated>false</IsTruncated>"),
+        }
+        for (number, etag, size) in parts {
+            body.push_str(&format!(
+                "<Part><PartNumber>{number}</PartNumber><ETag>{etag}</ETag><Size>{size}</Size></Part>"
+            ));
+        }
+        body.push_str("</ListPartsResult>");
+        body
+    }
+
+    fn list_parts_resp(
+        parts: &[(i32, &str, u64)],
+        next_marker: Option<i32>,
+    ) -> http::Response<SdkBody> {
+        http::Response::builder()
+            .status(200)
+            .header("content-type", "application/xml")
+            .body(SdkBody::from(list_parts_xml(parts, next_marker)))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_parts_returns_uploaded_parts() {
+        let key = "big.bin";
+        let req = http::Request::builder()
+            .method("GET")
+            .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}&x-id=ListParts")))
+            .body(SdkBody::empty())
+            .unwrap();
+        let resp = list_parts_resp(
+            &[
+                (1, "\"etag-1\"", 8 * 1024 * 1024),
+                (2, "\"etag-2\"", 4 * 1024 * 1024),
+            ],
+            None,
+        );
+        let (store, replay) = store_with(vec![ReplayEvent::new(req, resp)]);
+
+        let parts = store
+            .list_parts(&obj(key), UPLOAD_ID)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            parts,
+            vec![
+                UploadedPart {
+                    number: 1,
+                    etag: "\"etag-1\"".to_string(),
+                    size: 8 * 1024 * 1024,
+                },
+                UploadedPart {
+                    number: 2,
+                    etag: "\"etag-2\"".to_string(),
+                    size: 4 * 1024 * 1024,
+                },
+            ]
+        );
+        assert_eq!(replay.actual_requests().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_parts_follows_pagination() {
+        let key = "big.bin";
+        // First page is truncated with a marker; second page completes. All parts
+        // accumulate and both requests fire.
+        let page1_req = http::Request::builder()
+            .method("GET")
+            .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}&x-id=ListParts")))
+            .body(SdkBody::empty())
+            .unwrap();
+        let page2_req = http::Request::builder()
+            .method("GET")
+            .uri(uri(&format!(
+                "big.bin?part-number-marker=1&uploadId={UPLOAD_ID}&x-id=ListParts"
+            )))
+            .body(SdkBody::empty())
+            .unwrap();
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(
+                page1_req,
+                list_parts_resp(&[(1, "\"etag-1\"", 8 * 1024 * 1024)], Some(1)),
+            ),
+            ReplayEvent::new(
+                page2_req,
+                list_parts_resp(&[(2, "\"etag-2\"", 4 * 1024 * 1024)], None),
+            ),
+        ]);
+
+        let parts = store
+            .list_parts(&obj(key), UPLOAD_ID)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            parts,
+            vec![
+                UploadedPart {
+                    number: 1,
+                    etag: "\"etag-1\"".to_string(),
+                    size: 8 * 1024 * 1024,
+                },
+                UploadedPart {
+                    number: 2,
+                    etag: "\"etag-2\"".to_string(),
+                    size: 4 * 1024 * 1024,
+                },
+            ]
+        );
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1]
+            .uri()
+            .to_string()
+            .contains("part-number-marker=1"));
+    }
+
+    #[tokio::test]
+    async fn list_parts_404_maps_to_none() {
+        let key = "big.bin";
+        let req = http::Request::builder()
+            .method("GET")
+            .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}&x-id=ListParts")))
+            .body(SdkBody::empty())
+            .unwrap();
+        // A 404 (e.g. NoSuchUpload) means the upload no longer exists.
+        let resp = http::Response::builder()
+            .status(404)
+            .header("content-type", "application/xml")
+            .body(SdkBody::from(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist.</Message></Error>"#,
+            ))
+            .unwrap();
+        let (store, _replay) = store_with(vec![ReplayEvent::new(req, resp)]);
+
+        let result = store.list_parts(&obj(key), UPLOAD_ID).await.unwrap();
+
+        assert!(result.is_none());
+    }
+}
+
 /// S3 returns non-404 failures (e.g. 403 AccessDenied) as a modeled service
 /// error, which the common mapper turns into `RequestFailedErr`.
 pub mod request_failed {
