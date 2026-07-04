@@ -84,69 +84,95 @@ impl SingleThreadScanner {
     }
 
     async fn scan(&mut self) -> Result<(), UploadErr> {
-        for rule in &self.rules {
+        // Snapshot the rules so the per-rule loop can mutate scanner state
+        // (observations/dedupe/next_scan_at) without holding a borrow of
+        // `self.rules`. Rule ids are distinct within a set, so rescheduling one
+        // rule never changes another rule's due check.
+        let rules = self.rules.clone();
+        for rule in rules {
             let now = (self.now_fn)();
 
-            let due = self
-                .next_scan_at
-                .get(&rule.id)
-                .is_none_or(|next| *next <= now);
-            if !due {
+            if !self.is_rule_due(&rule.id, now) {
                 continue;
             }
 
-            // decide_ready does blocking fs I/O (glob enumeration + stat). Per the
-            // Decision Log, run it under spawn_blocking to keep the runtime
-            // responsive. The observations map is keyed by PathBuf across all
-            // rules; we move it into the blocking task and take it back out
-            // afterwards (alongside the newly-ready files) so decide_ready itself
-            // stays a plain, unit-testable sync fn.
-            let rule_clone = rule.clone();
-            let moved_observations = std::mem::take(&mut self.observations);
-            let moved_already_reported = std::mem::take(&mut self.already_reported);
-            let (returned_observations, returned_already_reported, ready) =
-                match tokio::task::spawn_blocking(move || {
-                    let mut obs = moved_observations;
-                    let mut reported = moved_already_reported;
-                    let ready = decide_ready(&rule_clone, &mut obs, &mut reported, now);
-                    (obs, reported, ready)
-                })
-                .await
-                {
-                    Ok(result) => result,
-                    Err(e) => {
-                        error!("uploads readiness task panicked: {e:?}");
-                        (HashMap::new(), HashSet::new(), Vec::new())
-                    }
-                };
-            self.observations = returned_observations;
-            self.already_reported = returned_already_reported;
-
-            // placeholder sink: emit a log line per newly-ready file. decide_ready
-            // already deduped against already_reported, so every returned file is
-            // newly ready. M3 replaces this with the digest + POST /uploads pipeline.
-            for rf in ready {
-                info!(
-                    file_path = %rf.path.display(),
-                    file_modified_at = %rf.modified_at,
-                    "upload candidate ready (M2 placeholder sink)"
-                );
-            }
-
-            // every rule shares a single global polling cadence: the per-rule
-            // poll_interval was removed from the contract, so the next scan for
-            // each rule is simply one global interval out.
-            self.next_scan_at.insert(
-                rule.id.clone(),
-                now + TimeDelta::seconds(self.min_poll_interval_secs),
-            );
+            let rule_id = rule.id.clone();
+            let ready = self.run_readiness(rule, now).await;
+            self.emit_ready(ready);
+            self.reschedule(&rule_id, now);
         }
 
-        // prune next_scan_at entries for rules that are no longer present.
-        let present_ids: HashSet<&UploadRuleID> = self.rules.iter().map(|r| &r.id).collect();
-        self.next_scan_at.retain(|id, _| present_ids.contains(id));
+        self.prune_next_scan_at();
 
         Ok(())
+    }
+
+    /// Global-cadence due check: a rule is due when it has no recorded next-scan
+    /// time (freshly added) or its next-scan time has arrived.
+    fn is_rule_due(&self, rule_id: &UploadRuleID, now: DateTime<Utc>) -> bool {
+        self.next_scan_at
+            .get(rule_id)
+            .is_none_or(|next| *next <= now)
+    }
+
+    /// Run the readiness decision for one rule under `spawn_blocking`.
+    ///
+    /// `decide_ready` does blocking fs I/O (glob enumeration + stat). Per the
+    /// Decision Log, run it under spawn_blocking to keep the runtime responsive.
+    /// The observations map is keyed by PathBuf across all rules; we move it (and
+    /// the dedupe set) into the blocking task and take it back out afterwards
+    /// (alongside the newly-ready files) so decide_ready itself stays a plain,
+    /// unit-testable sync fn. If the task panics we log and restore empty state.
+    async fn run_readiness(&mut self, rule: UploadRule, now: DateTime<Utc>) -> Vec<ReadyFile> {
+        let moved_observations = std::mem::take(&mut self.observations);
+        let moved_already_reported = std::mem::take(&mut self.already_reported);
+        let (returned_observations, returned_already_reported, ready) =
+            match tokio::task::spawn_blocking(move || {
+                let mut obs = moved_observations;
+                let mut reported = moved_already_reported;
+                let ready = decide_ready(&rule, &mut obs, &mut reported, now);
+                (obs, reported, ready)
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    error!("uploads readiness task panicked: {e:?}");
+                    (HashMap::new(), HashSet::new(), Vec::new())
+                }
+            };
+        self.observations = returned_observations;
+        self.already_reported = returned_already_reported;
+        ready
+    }
+
+    /// Placeholder sink: emit a log line per newly-ready file. `decide_ready`
+    /// already deduped against `already_reported`, so every file here is newly
+    /// ready. M3 replaces this with the digest + POST /uploads pipeline.
+    fn emit_ready(&self, ready: Vec<ReadyFile>) {
+        for rf in ready {
+            info!(
+                file_path = %rf.path.display(),
+                file_modified_at = %rf.modified_at,
+                "upload candidate ready (M2 placeholder sink)"
+            );
+        }
+    }
+
+    /// Schedule the rule's next scan one global interval out. Every rule shares a
+    /// single global polling cadence: the per-rule poll_interval was removed from
+    /// the contract, so the next scan for each rule is simply one interval out.
+    fn reschedule(&mut self, rule_id: &UploadRuleID, now: DateTime<Utc>) {
+        self.next_scan_at.insert(
+            rule_id.clone(),
+            now + TimeDelta::seconds(self.min_poll_interval_secs),
+        );
+    }
+
+    /// Prune `next_scan_at` entries for rules that are no longer present.
+    fn prune_next_scan_at(&mut self) {
+        let present_ids: HashSet<&UploadRuleID> = self.rules.iter().map(|r| &r.id).collect();
+        self.next_scan_at.retain(|id, _| present_ids.contains(id));
     }
 }
 
@@ -171,11 +197,35 @@ pub fn decide_ready(
 ) -> Vec<ReadyFile> {
     let mut ready = Vec::new();
 
-    let paths = match glob::glob(&rule.source.glob) {
+    for (path, size, mtime) in stat_glob_matches(&rule.source.glob) {
+        if let Some(rf) = decide_file(
+            path,
+            size,
+            mtime,
+            rule.source.stability_window_secs,
+            observations,
+            already_reported,
+            now,
+        ) {
+            ready.push(rf);
+        }
+    }
+
+    ready
+}
+
+/// Enumerate `glob` and stat every matched existing regular file, yielding
+/// `(path, size, mtime)` per file. An invalid glob is logged and yields nothing;
+/// non-files and entries whose metadata/mtime cannot be read are skipped (e.g. a
+/// file deleted mid-scan).
+fn stat_glob_matches(glob: &str) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    let mut matches = Vec::new();
+
+    let paths = match glob::glob(glob) {
         Ok(paths) => paths,
         Err(e) => {
-            error!("invalid glob {:?}: {e}", rule.source.glob);
-            return ready;
+            error!("invalid glob {:?}: {e}", glob);
+            return matches;
         }
     };
 
@@ -198,40 +248,59 @@ pub fn decide_ready(
             Err(_) => continue,
         };
 
-        match observations.get(&path) {
-            // size/mtime unchanged since last observation: the stability window
-            // is still running; report once it has elapsed.
-            Some(obs) if obs.size == size && obs.mtime == mtime => {
-                // HOOK (M3): finalization-marker detection (MCAP footer / parquet
-                // magic bytes) would gate readiness here in addition to size+mtime
-                // stability. NOT implemented in M2.
-                if now.signed_duration_since(obs.stable_since).num_seconds()
-                    >= rule.source.stability_window_secs as i64
-                    && !already_reported.contains(&path)
-                {
-                    ready.push(ReadyFile {
-                        path: path.clone(),
-                        modified_at: mtime.into(),
-                    });
-                    already_reported.insert(path.clone());
-                }
-            }
-            // new file, or size/mtime changed since last observation: (re)start
-            // the stability window and do NOT report.
-            _ => {
-                observations.insert(
-                    path,
-                    FileObservation {
-                        size,
-                        mtime,
-                        stable_since: now,
-                    },
-                );
-            }
-        }
+        matches.push((path, size, mtime));
     }
 
-    ready
+    matches
+}
+
+/// Advance the stability window for one file and decide whether it is newly
+/// ready. When (size, mtime) are unchanged since the last observation and the
+/// window has elapsed, the file is reported once (recorded in `already_reported`
+/// and returned). Otherwise the window is (re)started by inserting a fresh
+/// observation and nothing is returned.
+fn decide_file(
+    path: PathBuf,
+    size: u64,
+    mtime: std::time::SystemTime,
+    stability_window_secs: i32,
+    observations: &mut HashMap<PathBuf, FileObservation>,
+    already_reported: &mut HashSet<PathBuf>,
+    now: DateTime<Utc>,
+) -> Option<ReadyFile> {
+    match observations.get(&path) {
+        // size/mtime unchanged since last observation: the stability window
+        // is still running; report once it has elapsed.
+        Some(obs) if obs.size == size && obs.mtime == mtime => {
+            // HOOK (M3): finalization-marker detection (MCAP footer / parquet
+            // magic bytes) would gate readiness here in addition to size+mtime
+            // stability. NOT implemented in M2.
+            if now.signed_duration_since(obs.stable_since).num_seconds()
+                >= stability_window_secs as i64
+                && !already_reported.contains(&path)
+            {
+                already_reported.insert(path.clone());
+                return Some(ReadyFile {
+                    path,
+                    modified_at: mtime.into(),
+                });
+            }
+            None
+        }
+        // new file, or size/mtime changed since last observation: (re)start
+        // the stability window and do NOT report.
+        _ => {
+            observations.insert(
+                path,
+                FileObservation {
+                    size,
+                    mtime,
+                    stable_since: now,
+                },
+            );
+            None
+        }
+    }
 }
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
