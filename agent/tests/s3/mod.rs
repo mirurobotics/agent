@@ -3,6 +3,7 @@ use std::io::Write as _;
 
 // internal crates
 use miru_agent::errors::{Code, Error};
+use miru_agent::filesys::file::File;
 use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
@@ -81,7 +82,7 @@ pub mod put {
                 .unwrap();
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            store.put_object(key, src.path()).await.unwrap();
+            store.put_file(key, File::new(src.path())).await.unwrap();
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
             assert_eq!(requests.len(), 1);
@@ -170,7 +171,7 @@ pub mod put {
             // Threshold below the file size forces the multipart path.
             store.set_single_put_threshold(0);
 
-            store.put_object(key, src.path()).await.unwrap();
+            store.put_file(key, File::new(src.path())).await.unwrap();
 
             // Assert the create → upload_part → complete sequence fired, matching
             // methods and paths (bodies for POSTs vary and are ignored).
@@ -214,7 +215,10 @@ pub mod put {
             let (mut store, _replay) = store_with(vec![ReplayEvent::new(create_req, no_id_resp)]);
             store.set_single_put_threshold(0);
 
-            let err = store.put_object(key, src.path()).await.unwrap_err();
+            let err = store
+                .put_file(key, File::new(src.path()))
+                .await
+                .unwrap_err();
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
         }
 
@@ -242,7 +246,10 @@ pub mod put {
             let (mut store, _replay) = store_with(vec![ReplayEvent::new(create_req, create_fail)]);
             store.set_single_put_threshold(0);
 
-            let err = store.put_object(key, src.path()).await.unwrap_err();
+            let err = store
+                .put_file(key, File::new(src.path()))
+                .await
+                .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
         }
 
@@ -300,7 +307,10 @@ pub mod put {
             ]);
             store.set_single_put_threshold(0);
 
-            let err = store.put_object(key, src.path()).await.unwrap_err();
+            let err = store
+                .put_file(key, File::new(src.path()))
+                .await
+                .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
@@ -358,7 +368,10 @@ pub mod put {
             ]);
             store.set_single_put_threshold(0);
 
-            let err = store.put_object(key, src.path()).await.unwrap_err();
+            let err = store
+                .put_file(key, File::new(src.path()))
+                .await
+                .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
             // The abort must have been issued after the failed part.
@@ -396,7 +409,10 @@ pub mod get {
                 .unwrap();
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            store.get_object(key, dest.path()).await.unwrap();
+            store
+                .get_object(key, &File::new(dest.path()))
+                .await
+                .unwrap();
 
             let written = std::fs::read(dest.path()).unwrap();
             assert_eq!(written, payload);
@@ -414,7 +430,7 @@ pub mod get {
             // The destination's parent directory does not exist, so creating the
             // file fails after the object is fetched — exercising the streaming
             // I/O error path.
-            let dest = std::path::Path::new("/nonexistent/dir/out.bin");
+            let dest = File::new("/nonexistent/dir/out.bin");
             let expected_req = http::Request::builder()
                 .method("GET")
                 .uri(uri("blobs/data.bin?x-id=GetObject"))
@@ -427,7 +443,7 @@ pub mod get {
                 .unwrap();
             let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            let err = store.get_object(key, dest).await.unwrap_err();
+            let err = store.get_object(key, &dest).await.unwrap_err();
 
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
         }
@@ -455,7 +471,10 @@ pub mod get {
                 .unwrap();
             let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            let err = store.get_object(key, dest.path()).await.unwrap_err();
+            let err = store
+                .get_object(key, &File::new(dest.path()))
+                .await
+                .unwrap_err();
 
             assert!(matches!(err, S3Err::ObjectNotFoundErr(_)));
             assert!(matches!(err.code(), Code::ResourceNotFound));
@@ -565,7 +584,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
         let err = store
-            .put_object("denied.txt", src.path())
+            .put_file("denied.txt", File::new(src.path()))
             .await
             .unwrap_err();
 
@@ -588,7 +607,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
         let err = store
-            .get_object("denied.txt", dest.path())
+            .get_object("denied.txt", &File::new(dest.path()))
             .await
             .unwrap_err();
 
@@ -636,7 +655,10 @@ pub mod request_failed {
         let dest = NamedTempFile::new().unwrap();
         let (store, _replay) = store_with(vec![]);
 
-        let err = store.get_object("any.txt", dest.path()).await.unwrap_err();
+        let err = store
+            .get_object("any.txt", &File::new(dest.path()))
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, S3Err::ConnectionErr(_)));
         assert!(err.is_network_conn_err());
@@ -644,18 +666,18 @@ pub mod request_failed {
 }
 
 /// A put over a missing source file surfaces the filesystem error (mapped to
-/// `InvalidResponseErr`) before any network call is made.
+/// `FileSysErr`) before any network call is made.
 pub mod put_source_missing {
     use super::*;
 
     #[tokio::test]
-    async fn put_missing_source_maps_to_invalid_response() {
+    async fn put_missing_source_maps_to_filesys_err() {
         let (store, _replay) = store_with(vec![]);
-        let missing = std::path::Path::new("/nonexistent/definitely/not/here.bin");
+        let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-        let err = store.put_object("k", missing).await.unwrap_err();
+        let err = store.put_file("k", missing).await.unwrap_err();
 
-        assert!(matches!(err, S3Err::InvalidResponseErr(_)));
+        assert!(matches!(err, S3Err::FileSysErr(_)));
     }
 }
 

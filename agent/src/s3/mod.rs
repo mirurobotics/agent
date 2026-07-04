@@ -12,12 +12,12 @@
 //!
 //! Object bodies are streamed to and from disk (never buffered whole in
 //! memory) so the agent can move multi-gigabyte artifacts on memory-constrained
-//! devices. Uploads larger than [`SINGLE_PUT_MAX`] use a multipart upload.
-
-// standard crates
-use std::path::Path;
+//! devices. Uploads larger than [`DEFAULT_MULTIPART_THRESHOLD`] use a multipart
+//! upload.
 
 // internal crates
+use crate::filesys::file::File;
+use crate::filesys::path::PathExt;
 use crate::trace;
 
 // external crates
@@ -32,21 +32,13 @@ pub mod errors;
 pub use errors::S3Err;
 use errors::{InvalidResponseErr, ObjectNotFoundErr};
 
-/// S3's hard limit for a single `PutObject`: 5 GiB. Larger objects must be
-/// uploaded in parts. This is also the default multipart threshold.
-const SINGLE_PUT_MAX: u64 = 5 * 1024 * 1024 * 1024;
-
-/// Size of each multipart part: 256 MiB. Comfortably above S3's 5 MiB minimum
-/// (all parts but the last must be ≥ 5 MiB) and small enough to keep per-part
-/// memory bounded, while staying under the 10,000-part ceiling for objects up
-/// to ~2.5 TiB before the adaptive sizing below kicks in.
-const PART_SIZE: u64 = 256 * 1024 * 1024;
-
-/// S3's minimum part size (5 MiB), the floor for the adaptive part size.
+const PART_SIZE: u64 = 8 * 1024 * 1024;
 const MIN_PART_SIZE: u64 = 5 * 1024 * 1024;
-
-/// S3's maximum number of parts in a multipart upload.
 const MAX_PARTS: u64 = 10_000;
+
+/// Files larger than this stream through a multipart upload; files at or below
+/// it go through a single `PutObject`.
+const DEFAULT_MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024;
 
 /// Caller-supplied temporary AWS credentials (from an STS AssumeRole).
 pub struct Credentials {
@@ -59,11 +51,6 @@ pub struct Credentials {
 pub struct S3Store {
     client: Client,
     bucket: String,
-    /// Uploads with a file size at or below this many bytes use a single
-    /// `PutObject`; larger ones use a multipart upload. Defaults to
-    /// [`SINGLE_PUT_MAX`] (S3's 5 GiB single-PUT limit). Overridable in tests
-    /// (see [`S3Store::set_single_put_threshold`]) so a small file can exercise
-    /// the multipart path without a real 5 GiB fixture.
     single_put_threshold: u64,
 }
 
@@ -86,7 +73,7 @@ impl S3Store {
         Self {
             client: Client::from_conf(config),
             bucket,
-            single_put_threshold: SINGLE_PUT_MAX,
+            single_put_threshold: DEFAULT_MULTIPART_THRESHOLD,
         }
     }
 
@@ -114,13 +101,12 @@ impl S3Store {
         Self {
             client: Client::from_conf(config),
             bucket,
-            single_put_threshold: SINGLE_PUT_MAX,
+            single_put_threshold: DEFAULT_MULTIPART_THRESHOLD,
         }
     }
 
-    /// Lowers the single-PUT-vs-multipart threshold so tests can drive the
-    /// multipart path with a small fixture instead of a real 5 GiB file. A
-    /// threshold of 0 forces every upload through multipart.
+    /// Test-only seam to force the multipart path with small fixtures by
+    /// lowering the single-PUT threshold (e.g. to 0).
     #[cfg(feature = "test")]
     pub fn set_single_put_threshold(&mut self, bytes: u64) {
         self.single_put_threshold = bytes;
@@ -132,19 +118,16 @@ impl S3Store {
     /// single-PUT threshold stream through one `PutObject`, and larger files
     /// stream part-by-part through a multipart upload (see
     /// [`Self::put_object_multipart`]).
-    pub async fn put_object(&self, key: &str, path: &Path) -> Result<(), S3Err> {
-        let size = tokio::fs::metadata(path)
-            .await
-            .map_err(|e| self.map_body_io_err("put_object", key, path, e))?
-            .len();
+    pub async fn put_file(&self, key: &str, file: File) -> Result<(), S3Err> {
+        let size = file.size().await?;
 
         if size > self.single_put_threshold {
-            return self.put_object_multipart(key, path, size).await;
+            return self.put_object_multipart(key, &file, size).await;
         }
 
-        let body = ByteStream::from_path(path)
+        let body = ByteStream::from_path(file.path())
             .await
-            .map_err(|e| self.map_bytestream_err("put_object", key, path, &e))?;
+            .map_err(|e| self.map_bytestream_err("put_object", key, &file, &e))?;
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -159,7 +142,7 @@ impl S3Store {
     /// Streams a file to S3 as a multipart upload, one part at a time. On any
     /// failure during the part loop or completion, the in-progress upload is
     /// aborted (best-effort) so S3 does not retain orphaned parts.
-    async fn put_object_multipart(&self, key: &str, path: &Path, size: u64) -> Result<(), S3Err> {
+    async fn put_object_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
         let part_size = Self::part_size_for(size);
 
         let created = self
@@ -181,7 +164,7 @@ impl S3Store {
         })?;
 
         match self
-            .upload_parts_and_complete(key, path, size, part_size, upload_id)
+            .upload_parts_and_complete(key, file, size, part_size, upload_id)
             .await
         {
             Ok(()) => Ok(()),
@@ -201,13 +184,13 @@ impl S3Store {
         }
     }
 
-    /// Uploads every part of `path` and completes the multipart upload. Split
+    /// Uploads every part of `file` and completes the multipart upload. Split
     /// out from [`Self::put_object_multipart`] so a single `?` early-return path
     /// funnels through one abort site.
     async fn upload_parts_and_complete(
         &self,
         key: &str,
-        path: &Path,
+        file: &File,
         size: u64,
         part_size: u64,
         upload_id: &str,
@@ -220,12 +203,12 @@ impl S3Store {
         while offset < size {
             let len = part_size.min(size - offset);
             let body = ByteStream::read_from()
-                .path(path)
+                .path(file.path())
                 .offset(offset)
                 .length(Length::Exact(len))
                 .build()
                 .await
-                .map_err(|e| self.map_bytestream_err("upload_part", key, path, &e))?;
+                .map_err(|e| self.map_bytestream_err("upload_part", key, file, &e))?;
 
             let part = self
                 .client
@@ -282,7 +265,7 @@ impl S3Store {
     /// Streams an object's body to a destination file. A missing object maps to
     /// [`S3Err::ObjectNotFoundErr`]. The body is copied through a bounded buffer
     /// rather than collected into memory.
-    pub async fn get_object(&self, key: &str, dest: &Path) -> Result<(), S3Err> {
+    pub async fn get_object(&self, key: &str, dest: &File) -> Result<(), S3Err> {
         let output = match self
             .client
             .get_object()
@@ -313,7 +296,7 @@ impl S3Store {
         };
 
         let mut reader = output.body.into_async_read();
-        let mut file = tokio::fs::File::create(dest)
+        let mut file = tokio::fs::File::create(dest.path())
             .await
             .map_err(|e| self.map_body_io_err("get_object", key, dest, e))?;
         tokio::io::copy(&mut reader, &mut file)
@@ -371,15 +354,12 @@ impl S3Store {
         &self,
         operation: &str,
         key: &str,
-        path: &Path,
+        file: &File,
         err: std::io::Error,
     ) -> S3Err {
         S3Err::InvalidResponseErr(InvalidResponseErr {
             operation: operation.to_string(),
-            msg: format!(
-                "filesystem I/O error for object '{key}' at path '{}': {err}",
-                path.display()
-            ),
+            msg: format!("filesystem I/O error for object '{key}' at path '{file}': {err}"),
             trace: trace!(),
         })
     }
@@ -390,15 +370,12 @@ impl S3Store {
         &self,
         operation: &str,
         key: &str,
-        path: &Path,
+        file: &File,
         err: &ByteStreamError,
     ) -> S3Err {
         S3Err::InvalidResponseErr(InvalidResponseErr {
             operation: operation.to_string(),
-            msg: format!(
-                "failed to open '{}' for streaming object '{key}': {err}",
-                path.display()
-            ),
+            msg: format!("failed to open '{file}' for streaming object '{key}': {err}"),
             trace: trace!(),
         })
     }

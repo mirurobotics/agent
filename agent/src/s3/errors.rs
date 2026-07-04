@@ -1,5 +1,6 @@
 // internal crates
 use crate::errors::{Code, HTTPCode, Trace};
+use crate::filesys;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
@@ -81,6 +82,14 @@ pub enum S3Err {
     RequestFailedErr(RequestFailedErr),
     #[error(transparent)]
     InvalidResponseErr(InvalidResponseErr),
+    #[error(transparent)]
+    FileSysErr(filesys::FileSysErr),
+}
+
+impl From<filesys::FileSysErr> for S3Err {
+    fn from(e: filesys::FileSysErr) -> Self {
+        Self::FileSysErr(e)
+    }
 }
 
 crate::impl_error!(S3Err {
@@ -88,6 +97,7 @@ crate::impl_error!(S3Err {
     ConnectionErr,
     RequestFailedErr,
     InvalidResponseErr,
+    FileSysErr,
 });
 
 /// Maps the operation-agnostic `SdkError` variants into an `S3Err`.
