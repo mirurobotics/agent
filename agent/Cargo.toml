@@ -20,6 +20,9 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 glob = { workspace = true }
+google-cloud-storage = { workspace = true }
+google-cloud-auth = { workspace = true }
+google-cloud-gax = { workspace = true }
 nix = { workspace = true }
 backend-api = { workspace = true }
 device-api = { workspace = true }
@@ -46,8 +49,13 @@ tower-http = { workspace = true }
 aws-sdk-s3 = { workspace = true, features = ["test-util"] }
 aws-smithy-http-client = { workspace = true, features = ["test-util"] }
 aws-smithy-types = { workspace = true }
+google-cloud-gax = { workspace = true }
+google-cloud-iam-v1 = "1.10"
+google-cloud-longrunning = "1.11"
+google-cloud-storage = { workspace = true }
 http = { workspace = true }
 http-body-util = "0.1"
+mockall = "0.14"
 paste = "1"
 reqwest = { workspace = true, features = ["json"] }
 rumqttd = { workspace = true }

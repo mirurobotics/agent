@@ -32,8 +32,14 @@ chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
 glob = "0.3.3"
+# GCS object storage. Default features pull `default-rustls-provider` (rustls
+# 0.23 + aws-lc-rs → rustls-webpki 0.103.x, unaffected by RUSTSEC-2026-0098/0099).
+# Do NOT disable defaults: that drops the crypto provider and forces manual setup.
+google-cloud-auth = { version = "1.13.0" }
+google-cloud-gax = { version = "1.11.0" }
+google-cloud-storage = { version = "1.15.0" }
 http = "1"
-nix ={ version = "0.31.2", default-features = false, features = ["user"] }
+nix = { version = "0.31.2", default-features = false, features = ["user"] }
 reqwest = { version = "0.13.1", features = ["query"] }
 backend-api = { path = "libs/backend-api" }
 device-api = { path = "libs/device-api" }
