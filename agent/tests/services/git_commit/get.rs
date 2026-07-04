@@ -3,7 +3,7 @@ use crate::mocks::backend::{PanicBackend, StubBackend};
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::disk::GitCommits;
-use miru_agent::filesys::{self, Overwrite};
+use miru_agent::filesys::{self, dirs, Overwrite};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::GitCommit;
@@ -13,7 +13,7 @@ use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 
 async fn setup(name: &str) -> (filesys::Dir, GitCommits) {
-    let dir = filesys::dirs::create_temp(name).await.unwrap();
+    let dir = dirs::create_temp(name).await.unwrap();
     let (stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
         .await
         .unwrap();

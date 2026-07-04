@@ -4,7 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::{error::SleepController, syncer::MockSyncer};
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys;
+use miru_agent::filesys::dirs;
 use miru_agent::models::Device;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, State, SyncEvent, SyncFailure};
@@ -19,7 +19,7 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_not_in_cooldown() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -102,7 +102,7 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_in_cooldown() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -186,7 +186,7 @@ pub mod run {
 
     #[tokio::test]
     async fn sync_success_event_updates_last_synced_at() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -257,7 +257,7 @@ pub mod run {
 
     #[tokio::test]
     async fn cooldown_end_from_deployment_wait_triggers_sync() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -318,7 +318,7 @@ pub mod run {
 
     #[tokio::test]
     async fn ignored_syncer_events() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -380,7 +380,7 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_cooldown_end_from_sync_failure_event() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =

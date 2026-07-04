@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{
-    errors::*, file::File, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
+    dirs, errors::*, file::File, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
 };
 use crate::trace;
 
@@ -81,7 +81,7 @@ pub async fn append_bytes(
     buf: &[u8],
     opts: crate::filesys::AppendOptions,
 ) -> Result<(), FileSysErr> {
-    crate::filesys::dirs::create_if_absent(&file.parent()?).await?;
+    dirs::create_if_absent(&file.parent()?).await?;
     let mut f = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -109,7 +109,7 @@ pub async fn append_bytes(
 
 pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(), FileSysErr> {
     // ensure parent directory exists
-    crate::filesys::dirs::create_if_absent(&file.parent()?).await?;
+    dirs::create_if_absent(&file.parent()?).await?;
 
     if opts.atomic == Atomic::Yes {
         let af = match opts.overwrite {
@@ -216,7 +216,7 @@ pub async fn copy_to(file: &File, dst: &File, opts: CopyOptions) -> Result<(), F
     }
 
     // ensure the parent directory of the new file exists and create it if not
-    crate::filesys::dirs::create_if_absent(&dst.parent()?).await?;
+    dirs::create_if_absent(&dst.parent()?).await?;
 
     tokio::fs::copy(file.path(), dst.path())
         .await
@@ -274,7 +274,7 @@ pub async fn move_to(file: &File, new_file: &File, overwrite: Overwrite) -> Resu
     }
 
     // ensure the parent directory of the new file exists and create it if not
-    crate::filesys::dirs::create_if_absent(&new_file.parent()?).await?;
+    dirs::create_if_absent(&new_file.parent()?).await?;
 
     // rename() on Linux atomically replaces the destination file, so no
     // explicit delete is needed for Overwrite::Allow.

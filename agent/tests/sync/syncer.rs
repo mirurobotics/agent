@@ -15,7 +15,7 @@ use miru_agent::disk::{
 };
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, Overwrite, WriteOptions};
+use miru_agent::filesys::{self, dirs, files, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
@@ -37,7 +37,7 @@ pub async fn create_token_manager(
         .await
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
-    filesys::files::write_string(
+    files::write_string(
         &private_key_file,
         "private_key",
         WriteOptions::OVERWRITE_ATOMIC,
@@ -45,7 +45,7 @@ pub async fn create_token_manager(
     .await
     .unwrap();
     let public_key_file = dir.file("public_key.pem");
-    filesys::files::write_string(
+    files::write_string(
         &public_key_file,
         "public_key",
         WriteOptions::OVERWRITE_ATOMIC,
@@ -136,7 +136,7 @@ impl Fixture {
     }
 
     async fn new_with_backoff(name: &str, backoff: cooldown::Backoff) -> Self {
-        let dir = filesys::dirs::create_temp(name).await.unwrap();
+        let dir = dirs::create_temp(name).await.unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
         let token_mngr = Arc::new(token_mngr);
@@ -230,7 +230,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn shutdown() {
-        let dir = filesys::dirs::create_temp("spawn").await.unwrap();
+        let dir = dirs::create_temp("spawn").await.unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
 

@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::authn;
 use miru_agent::disk::{self, Layout, Settings};
-use miru_agent::filesys::{self, PathExt, WriteOptions};
+use miru_agent::filesys::{self, dirs, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
 
 pub mod bootstrap {
@@ -12,16 +12,12 @@ pub mod bootstrap {
     async fn validate_storage(layout: &Layout) {
         // agent file
         let device_file = layout.device();
-        let device_file_content = filesys::files::read_json::<Device>(&device_file)
-            .await
-            .unwrap();
+        let device_file_content = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device_file_content, Device::default());
 
         // settings file
         let settings_file = layout.settings();
-        let settings_file_content = filesys::files::read_json::<Settings>(&settings_file)
-            .await
-            .unwrap();
+        let settings_file_content = files::read_json::<Settings>(&settings_file).await.unwrap();
         assert_eq!(settings_file_content, Settings::default());
 
         // token file
@@ -32,15 +28,13 @@ pub mod bootstrap {
         // private key file
         let private_key_file = auth_layout.private_key();
         assert!(private_key_file.exists());
-        let private_key_contents = filesys::files::read_string(&private_key_file)
-            .await
-            .unwrap();
+        let private_key_contents = files::read_string(&private_key_file).await.unwrap();
         assert!(!private_key_contents.is_empty());
 
         // public key file
         let public_key_file = auth_layout.public_key();
         assert!(public_key_file.exists());
-        let public_key_contents = filesys::files::read_string(&public_key_file).await.unwrap();
+        let public_key_contents = files::read_string(&public_key_file).await.unwrap();
         assert!(!public_key_contents.is_empty());
 
         // events directory
@@ -58,11 +52,11 @@ pub mod bootstrap {
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
         let temp_dir = layout.temp_dir();
         let private_key_file = temp_dir.file("private_key.pem");
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&private_key_file, "test", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         let public_key_file = temp_dir.file("public_key.pem");
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&public_key_file, "test", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -71,13 +65,13 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_public_key_file_doesnt_exist() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
-        filesys::files::delete(&public_key_file).await.unwrap();
+        files::delete(&public_key_file).await.unwrap();
 
         // setup the storage
         let device = Device::default();
@@ -95,13 +89,13 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_private_key_file_doesnt_exist() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
-        filesys::files::delete(&private_key_file).await.unwrap();
+        files::delete(&private_key_file).await.unwrap();
 
         // setup the storage
         let device = Device::default();
@@ -119,7 +113,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn clean_install() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -145,7 +139,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn device_file_already_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -154,7 +148,7 @@ pub mod bootstrap {
 
         // create the agent file
         let device_file = layout.device();
-        filesys::files::write_json(
+        files::write_json(
             &device_file,
             &Device::default(),
             WriteOptions::OVERWRITE_ATOMIC,
@@ -181,7 +175,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn auth_directory_already_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create the public / private key files
@@ -189,7 +183,7 @@ pub mod bootstrap {
 
         // create the auth directory
         let auth_dir = layout.auth();
-        filesys::dirs::create(&auth_dir.root).await.unwrap();
+        dirs::create(&auth_dir.root).await.unwrap();
 
         // setup the storage
         let device = Device::default();
@@ -211,7 +205,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn private_key_file_already_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create the public / private key files
@@ -237,7 +231,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn public_key_file_already_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create the public / private key files
@@ -263,7 +257,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn storage_directory_already_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -273,7 +267,7 @@ pub mod bootstrap {
         // create the storage directory
         let resources_dir = layout.resources();
         let subfile = resources_dir.file("test");
-        filesys::files::write_string(&subfile, "test", WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&subfile, "test", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         assert!(subfile.exists());
@@ -300,7 +294,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn events_directory_already_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let settings = Settings::default();
 
@@ -310,7 +304,7 @@ pub mod bootstrap {
         // create the events directory with a stale log file
         let events_dir = layout.events_dir();
         let subfile = events_dir.file("events.jsonl");
-        filesys::files::write_string(&subfile, "{\"id\":1}\n", WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&subfile, "{\"id\":1}\n", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         assert!(subfile.exists());
@@ -344,17 +338,15 @@ pub mod reset {
 
     async fn write_existing_keys(layout: &Layout) {
         let auth_dir = layout.auth();
-        filesys::dirs::create_if_absent(&auth_dir.root)
-            .await
-            .unwrap();
-        filesys::files::write_string(
+        dirs::create_if_absent(&auth_dir.root).await.unwrap();
+        files::write_string(
             &auth_dir.private_key(),
             PRIVATE_KEY_CONTENTS,
             WriteOptions::OVERWRITE_ATOMIC,
         )
         .await
         .unwrap();
-        filesys::files::write_string(
+        files::write_string(
             &auth_dir.public_key(),
             PUBLIC_KEY_CONTENTS,
             WriteOptions::OVERWRITE_ATOMIC,
@@ -365,10 +357,10 @@ pub mod reset {
 
     async fn assert_keys_preserved(layout: &Layout) {
         let auth_dir = layout.auth();
-        let private_key = filesys::files::read_string(&auth_dir.private_key())
+        let private_key = files::read_string(&auth_dir.private_key())
             .await
             .expect("private key should still exist after reset");
-        let public_key = filesys::files::read_string(&auth_dir.public_key())
+        let public_key = files::read_string(&auth_dir.public_key())
             .await
             .expect("public key should still exist after reset");
         assert_eq!(private_key, PRIVATE_KEY_CONTENTS);
@@ -384,7 +376,7 @@ pub mod reset {
     }
 
     async fn assert_default_token(layout: &Layout) {
-        let token = filesys::files::read_json::<authn::Token>(&layout.auth().token())
+        let token = files::read_json::<authn::Token>(&layout.auth().token())
             .await
             .unwrap();
         assert_eq!(token, authn::Token::default());
@@ -392,12 +384,12 @@ pub mod reset {
 
     #[tokio::test]
     async fn preserves_keys_and_writes_marker() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         write_existing_keys(&layout).await;
 
         // pre-write a stale device file with arbitrary content
-        filesys::files::write_string(
+        files::write_string(
             &layout.device(),
             "{\"some\":\"stale\"}",
             WriteOptions::OVERWRITE_ATOMIC,
@@ -414,11 +406,9 @@ pub mod reset {
         assert_keys_preserved(&layout).await;
 
         // device + settings written from inputs
-        let on_disk_device = filesys::files::read_json::<Device>(&layout.device())
-            .await
-            .unwrap();
+        let on_disk_device = files::read_json::<Device>(&layout.device()).await.unwrap();
         assert_eq!(on_disk_device, device);
-        let on_disk_settings = filesys::files::read_json::<Settings>(&layout.settings())
+        let on_disk_settings = files::read_json::<Settings>(&layout.settings())
             .await
             .unwrap();
         assert_eq!(on_disk_settings, settings);
@@ -434,13 +424,13 @@ pub mod reset {
 
     #[tokio::test]
     async fn wipes_resources_subtree() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         write_existing_keys(&layout).await;
 
         // pre-create something under resources/config_instances/contents/
         let stale = layout.config_instance_content().file("stale.json");
-        filesys::files::write_string(&stale, "{}", WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&stale, "{}", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         assert!(stale.exists());
@@ -455,13 +445,13 @@ pub mod reset {
 
     #[tokio::test]
     async fn wipes_events_subtree() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         write_existing_keys(&layout).await;
 
         // pre-create something under events/
         let stale = layout.events_dir().file("events.jsonl");
-        filesys::files::write_string(&stale, "{}", WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&stale, "{}", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         assert!(stale.exists());
@@ -477,7 +467,7 @@ pub mod reset {
 
     #[tokio::test]
     async fn no_prior_state() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.1.0")
@@ -494,13 +484,13 @@ pub mod reset {
 
     #[tokio::test]
     async fn overwrites_existing_marker() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         write_existing_keys(&layout).await;
 
         // pre-write an old marker
         let layout_root = layout.root();
-        filesys::dirs::create_if_absent(&layout_root).await.unwrap();
+        dirs::create_if_absent(&layout_root).await.unwrap();
         disk::agent_version::write(&layout.agent_version(), "v0.0.1")
             .await
             .unwrap();

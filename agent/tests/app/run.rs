@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, WriteOptions};
+use miru_agent::filesys::{self, dirs, files, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::Options;
 
@@ -18,27 +18,27 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
 
     // create a private key file
     let private_key_file = layout.auth().private_key();
-    filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+    files::write_string(&private_key_file, "test", WriteOptions::default())
         .await
         .unwrap();
 
     // create a public key file
     let public_key_file = layout.auth().public_key();
-    filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+    files::write_string(&public_key_file, "test", WriteOptions::default())
         .await
         .unwrap();
 
     // create the device file
     let device_file = layout.device();
     let device = Device::default();
-    filesys::files::write_json(&device_file, &device, WriteOptions::default())
+    files::write_json(&device_file, &device, WriteOptions::default())
         .await
         .unwrap();
 }
 
 #[tokio::test]
 async fn invalid_app_state_initialization() {
-    let dir = filesys::dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::create_temp("testing").await.unwrap();
     let options = AppOptions {
         storage: StorageOptions {
             layout: Layout::new(dir),
@@ -60,7 +60,7 @@ async fn invalid_app_state_initialization() {
 #[serial]
 #[tokio::test]
 async fn max_runtime_reached() {
-    let dir = filesys::dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::create_temp("testing").await.unwrap();
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
@@ -93,7 +93,7 @@ async fn max_runtime_reached() {
 #[serial]
 #[tokio::test]
 async fn is_persistent() {
-    let dir = filesys::dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::create_temp("testing").await.unwrap();
     let max_runtime = Duration::from_millis(100);
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
@@ -127,7 +127,7 @@ async fn is_persistent() {
 #[serial]
 #[tokio::test]
 async fn idle_timeout_reached() {
-    let dir = filesys::dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::create_temp("testing").await.unwrap();
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         storage: StorageOptions {
@@ -162,7 +162,7 @@ async fn idle_timeout_reached() {
 #[serial]
 #[tokio::test]
 async fn shutdown_signal_received() {
-    let dir = filesys::dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::create_temp("testing").await.unwrap();
     prepare_valid_server_storage(dir.clone()).await;
     let options = AppOptions {
         lifecycle: LifecycleOptions {

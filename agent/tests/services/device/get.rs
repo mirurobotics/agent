@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys;
+use miru_agent::filesys::{dirs, files};
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::services::device as dvc_svc;
 use miru_agent::services::ServiceErr;
@@ -13,7 +13,7 @@ pub mod errors {
 
     #[tokio::test]
     async fn device_file_shutdown() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -32,7 +32,7 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_does_not_exist() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -40,7 +40,7 @@ pub mod success {
                 .await
                 .unwrap();
 
-        filesys::files::delete(&layout.device()).await.unwrap();
+        files::delete(&layout.device()).await.unwrap();
 
         let device = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(device, Device::default());
@@ -48,7 +48,7 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_exists() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let (device_file, _) =
@@ -62,7 +62,7 @@ pub mod success {
 
     #[tokio::test]
     async fn returns_custom_device_data() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         let custom_device = Device {

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 // internal crates
 use miru_agent::cache::CacheEntry;
 use miru_agent::disk::{Capacities, Layout, Storage};
-use miru_agent::filesys::{self, WriteOptions};
+use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::Deployment;
 
 // external crates
@@ -32,7 +32,7 @@ async fn seed_deployments(layout: &Layout, entries: Vec<CacheEntry<String, Deplo
     for entry in entries {
         map.insert(entry.key.clone(), entry);
     }
-    filesys::files::write_json(&file, &map, WriteOptions::OVERWRITE_ATOMIC)
+    files::write_json(&file, &map, WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 }
@@ -42,7 +42,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_attempts() {
-        let dir = filesys::dirs::create_temp("reset_attempts").await.unwrap();
+        let dir = dirs::create_temp("reset_attempts").await.unwrap();
         let layout = Layout::new(dir);
 
         let dpl = Deployment {
@@ -68,7 +68,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_active_cooldown() {
-        let dir = filesys::dirs::create_temp("reset_cooldown").await.unwrap();
+        let dir = dirs::create_temp("reset_cooldown").await.unwrap();
         let layout = Layout::new(dir);
 
         let mut dpl = Deployment {
@@ -94,9 +94,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn skips_clean_deployments() {
-        let dir = filesys::dirs::create_temp("reset_skip_clean")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("reset_skip_clean").await.unwrap();
         let layout = Layout::new(dir);
 
         let clean = Deployment {
