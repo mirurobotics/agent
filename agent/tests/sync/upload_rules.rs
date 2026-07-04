@@ -100,7 +100,7 @@ async fn seed_deployed(
 // present => both rules resolve.
 #[tokio::test]
 async fn resolves_active_set() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     let r1 = rule_with("r1", "/none/*.mcap", 0);
@@ -131,7 +131,7 @@ async fn resolves_active_set() {
 // deployed release is not acted on.
 #[tokio::test]
 async fn stale_rule_not_acted_on() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     let r1 = rule_with("r1", "/none/*.mcap", 0);
@@ -158,7 +158,7 @@ async fn stale_rule_not_acted_on() {
 // TS3c: no Deployed deployment (only a Queued one) => empty.
 #[tokio::test]
 async fn no_deployed_is_empty() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     deployments
@@ -188,7 +188,7 @@ async fn no_deployed_is_empty() {
 // missing rule id is skipped.
 #[tokio::test]
 async fn missing_rule_id_skipped() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     let r1 = rule_with("r1", "/none/*.mcap", 0);
@@ -236,7 +236,7 @@ async fn missing_rule_id_skipped() {
 // TS3d2: Deployed deployment whose release_id is not cached => empty.
 #[tokio::test]
 async fn missing_release_is_empty() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     deployments
@@ -266,7 +266,7 @@ async fn missing_release_is_empty() {
 // and dedupe to a single set.
 #[tokio::test]
 async fn union_and_dedupe_across_deployments() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     let r1 = rule_with("r1", "/none/*.mcap", 0);
@@ -307,7 +307,7 @@ async fn union_and_dedupe_across_deployments() {
 // treated as empty.
 #[tokio::test]
 async fn deployments_cache_error_is_empty() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     deployments.shutdown().await.unwrap();
@@ -325,7 +325,7 @@ async fn deployments_cache_error_is_empty() {
 // the deployed release, that deployment is skipped.
 #[tokio::test]
 async fn release_cache_error_is_empty() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     let r1 = rule_with("r1", "/none/*.mcap", 0);
@@ -345,7 +345,7 @@ async fn release_cache_error_is_empty() {
 // rule id, all skipped.
 #[tokio::test]
 async fn rule_cache_error_is_empty() {
-    let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
     let layout = Layout::new(dir);
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     let r1 = rule_with("r1", "/none/*.mcap", 0);

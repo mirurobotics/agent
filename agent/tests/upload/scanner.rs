@@ -66,7 +66,7 @@ mod pure {
     // T1: glob match/miss (absolute), recursive `**`, and an invalid glob.
     #[tokio::test]
     async fn glob_match_miss_recursive_and_invalid() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::create_dir_all(base.join("data")).unwrap();
         std::fs::create_dir_all(base.join("other")).unwrap();
@@ -111,7 +111,7 @@ mod pure {
     // T2: stability state machine.
     #[tokio::test]
     async fn stability_state_machine() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
 
@@ -138,7 +138,7 @@ mod pure {
         );
 
         // ---- unchanged >= window => stable ----
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
         std::fs::write(base.join("stable.mcap"), b"aaa").unwrap();
@@ -154,7 +154,7 @@ mod pure {
         );
 
         // ---- not-yet-stable ----
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
         std::fs::write(base.join("young.mcap"), b"aaa").unwrap();
@@ -169,7 +169,7 @@ mod pure {
     // T4: a stable file is returned as newly-stable exactly ONCE.
     #[tokio::test]
     async fn dedupe_reports_once() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         let glob = format!("{}/*.mcap", base.display());
         std::fs::write(base.join("once.mcap"), b"aaa").unwrap();
@@ -189,7 +189,7 @@ mod pure {
     // T5: a glob matching nothing returns empty, no panic.
     #[tokio::test]
     async fn no_match_is_empty() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         let rule = rule_with("none", &format!("{}/nope/*.mcap", base.display()), 0);
 
@@ -260,7 +260,7 @@ mod actor {
     // re-reported after the swap.
     #[tokio::test]
     async fn update_rules_carries_state_across_rule_version_swap() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::write(base.join("carry.mcap"), b"ccc").unwrap();
         let glob = format!("{}/*.mcap", base.display());
@@ -304,7 +304,7 @@ mod actor {
     // double-rule case. The winning rule's glob matches the one real file.
     #[tokio::test]
     async fn update_rules_double_rule_tie_break_last_wins() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::write(base.join("hit.mcap"), b"hhh").unwrap();
         let glob_match = format!("{}/*.mcap", base.display());
@@ -342,7 +342,7 @@ mod actor {
     // Under the old global map this would dedupe to 1.
     #[tokio::test]
     async fn distinct_collections_do_not_share_observation_state() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::write(base.join("shared.mcap"), b"sss").unwrap();
         let glob = format!("{}/*.mcap", base.display());
@@ -369,7 +369,7 @@ mod actor {
     // 30s rule is skipped until +30s.
     #[tokio::test]
     async fn scan_uses_global_cadence() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::create_dir_all(base.join("a")).unwrap();
         std::fs::create_dir_all(base.join("b")).unwrap();
@@ -401,7 +401,7 @@ mod actor {
     // re-scanned and nothing is reported until the interval elapses.
     #[tokio::test]
     async fn scan_skips_rule_until_cadence_elapses() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::write(base.join("w.mcap"), b"www").unwrap();
 
@@ -433,7 +433,7 @@ mod actor {
     // The stability window is honored through the actor's scan path.
     #[tokio::test]
     async fn stability_window_through_scan() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::write(base.join("z.mcap"), b"zzz").unwrap();
 
@@ -456,7 +456,7 @@ mod actor {
     // A stable file is counted exactly once across repeated scans.
     #[tokio::test]
     async fn dedupe_reports_once_across_scans() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let base = dir.path().clone();
         std::fs::write(base.join("once.mcap"), b"ooo").unwrap();
 
