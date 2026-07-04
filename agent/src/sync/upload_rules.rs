@@ -15,7 +15,7 @@ use tracing::{debug, error};
 /// transitions). Missing ids are skipped with a debug log. Cache errors are
 /// logged and treated as empty so the worker never crashes.
 ///
-/// Public as a test seam (mirrors `decide_ready`) so unit tests can exercise the
+/// Public as a test seam (mirrors `find_stable`) so unit tests can exercise the
 /// traversal directly against seeded stores.
 pub async fn active_upload_rules(
     deployments: &disk::Deployments,

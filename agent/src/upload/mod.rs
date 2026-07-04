@@ -1,3 +1,4 @@
+pub(crate) mod collection_scanner;
 pub mod errors;
 pub mod scanner;
 
