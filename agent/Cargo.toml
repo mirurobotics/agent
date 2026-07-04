@@ -23,6 +23,7 @@ glob = { workspace = true }
 google-cloud-storage = { workspace = true }
 google-cloud-auth = { workspace = true }
 google-cloud-gax = { workspace = true }
+http = { workspace = true }
 nix = { workspace = true }
 backend-api = { workspace = true }
 device-api = { workspace = true }
