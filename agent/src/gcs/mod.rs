@@ -289,3 +289,51 @@ impl GcsStore {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider() -> StaticTokenCredentials {
+        StaticTokenCredentials {
+            header_value: HeaderValue::from_static("Bearer abc123"),
+            entity_tag: EntityTag::new(),
+        }
+    }
+
+    /// Fresh extensions (no cached `EntityTag`) yield a `New` result carrying an
+    /// `Authorization: Bearer <token>` header.
+    #[tokio::test]
+    async fn headers_emits_bearer_on_new() {
+        let provider = provider();
+        let result = provider.headers(Extensions::new()).await.unwrap();
+        match result {
+            CacheableResource::New { data, .. } => {
+                let auth = data.get(http::header::AUTHORIZATION).unwrap();
+                assert_eq!(auth.to_str().unwrap(), "Bearer abc123");
+            }
+            CacheableResource::NotModified => panic!("expected New headers"),
+        }
+    }
+
+    /// Re-presenting the provider's own `EntityTag` yields `NotModified`.
+    #[tokio::test]
+    async fn headers_returns_not_modified_for_matching_tag() {
+        let provider = provider();
+        let mut extensions = Extensions::new();
+        // Extract the tag from the first (New) response, then present it back.
+        let CacheableResource::New { entity_tag, .. } =
+            provider.headers(extensions.clone()).await.unwrap()
+        else {
+            panic!("expected New headers");
+        };
+        extensions.insert(entity_tag);
+        let result = provider.headers(extensions).await.unwrap();
+        assert!(matches!(result, CacheableResource::NotModified));
+    }
+
+    #[tokio::test]
+    async fn universe_domain_is_none() {
+        assert!(provider().universe_domain().await.is_none());
+    }
+}

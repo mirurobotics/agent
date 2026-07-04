@@ -57,6 +57,8 @@ struct HttpRecord {
     download_body: Vec<u8>,
     /// If set, downloads respond with this status instead of 200 + body.
     download_status: Option<StatusCode>,
+    /// If set, uploads respond with this status instead of 200 + Object JSON.
+    upload_status: Option<StatusCode>,
 }
 
 fn bearer_present(headers: &HeaderMap) -> bool {
@@ -73,19 +75,28 @@ async fn upload_handler(
     State(rec): State<HttpRecorder>,
     headers: HeaderMap,
     _body: Bytes,
-) -> ([(axum::http::HeaderName, &'static str); 1], String) {
+) -> (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 1],
+    String,
+) {
     let mut r = rec.inner.lock().unwrap();
     r.upload_hits += 1;
     r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+    let json_ct = [(axum::http::header::CONTENT_TYPE, "application/json")];
+    if let Some(status) = r.upload_status {
+        return (
+            status,
+            json_ct,
+            "{\"error\":{\"code\":403,\"message\":\"denied\"}}".to_string(),
+        );
+    }
     let object = serde_json::json!({
         "name": "artifacts/hello.txt",
         "bucket": BUCKET,
     })
     .to_string();
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
-        object,
-    )
+    (StatusCode::OK, json_ct, object)
 }
 
 /// Handles the media download `GET /storage/v1/b/{bucket}/o/{object}`. On
@@ -165,6 +176,21 @@ pub mod put {
 
         assert!(matches!(err, GcsErr::InvalidResponseErr(_)));
     }
+
+    #[tokio::test]
+    async fn upload_error_maps_to_request_failed() {
+        let rec = HttpRecorder::default();
+        rec.inner.lock().unwrap().upload_status = Some(StatusCode::FORBIDDEN);
+        let store = http_store(rec).await;
+        let src = temp_file_with(b"payload");
+
+        let err = store
+            .put_object("denied.txt", src.path())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+    }
 }
 
 pub mod get {
@@ -205,6 +231,22 @@ pub mod get {
         assert!(matches!(err, GcsErr::ObjectNotFoundErr(_)));
         assert!(matches!(err.code(), Code::ResourceNotFound));
         assert_eq!(err.http_status().as_u16(), 404);
+    }
+
+    #[tokio::test]
+    async fn download_error_maps_to_request_failed() {
+        // A non-404 download failure (403) delegates to the common mapper.
+        let rec = HttpRecorder::default();
+        rec.inner.lock().unwrap().download_status = Some(StatusCode::FORBIDDEN);
+        let store = http_store(rec).await;
+        let dest = NamedTempFile::new().unwrap();
+
+        let err = store
+            .get_object("denied.txt", dest.path())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
     }
 
     #[tokio::test]
