@@ -12,7 +12,8 @@ use tracing::info;
 #[derive(Debug, Clone)]
 pub struct Options {
     /// Base tick interval between `scan()` passes. The scanner internally skips
-    /// rules whose `next_scan_at` has not elapsed, so the worker is pure timing.
+    /// collections whose per-collection cadence has not elapsed, so the worker is
+    /// pure timing.
     pub tick_interval_secs: i64,
 }
 
