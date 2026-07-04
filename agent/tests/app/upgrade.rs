@@ -9,7 +9,7 @@ use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
-use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions, dirs, files};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
 
@@ -23,12 +23,12 @@ use chrono::{Duration, Utc};
 /// `resolve_device_id` and the JWT-signing path inside `reconcile` both work
 /// without contacting a real backend.
 async fn prepare_layout(name: &str) -> (Layout, filesys::Dir) {
-    let dir = filesys::dirs::create_temp(name).await.unwrap();
+    let dir = dirs::create_temp(name).await.unwrap();
     let layout = Layout::new(dir.clone());
 
     // generate a real RSA keypair under auth/
     let auth_dir = layout.auth();
-    filesys::dirs::create_if_absent(&auth_dir.root)
+    dirs::create_if_absent(&auth_dir.root)
         .await
         .unwrap();
     rsa::gen_key_pair(
@@ -73,10 +73,10 @@ type PrivateKey = String;
 
 async fn read_keys(layout: &Layout) -> (PrivateKey, PublicKey) {
     let auth_dir = layout.auth();
-    let private = filesys::files::read_string(&auth_dir.private_key())
+    let private = files::read_string(&auth_dir.private_key())
         .await
         .unwrap();
-    let public = filesys::files::read_string(&auth_dir.public_key())
+    let public = files::read_string(&auth_dir.public_key())
         .await
         .unwrap();
     (private, public)
@@ -138,7 +138,7 @@ mod reconcile {
         assert_eq!(pub_before, pub_after);
 
         // device.json reflects the mock response with the running version
-        let on_disk_device = filesys::files::read_json::<Device>(&layout.device())
+        let on_disk_device = files::read_json::<Device>(&layout.device())
             .await
             .unwrap();
         assert_eq!(on_disk_device.id, "dvc_2");
@@ -402,7 +402,7 @@ mod reconcile_impl {
             },
             ..Settings::default()
         };
-        filesys::files::write_json(&layout.settings(), &staging, WriteOptions::OVERWRITE_ATOMIC)
+        files::write_json(&layout.settings(), &staging, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -411,7 +411,7 @@ mod reconcile_impl {
             .await
             .unwrap();
 
-        let on_disk = filesys::files::read_json::<Settings>(&layout.settings())
+        let on_disk = files::read_json::<Settings>(&layout.settings())
             .await
             .unwrap();
         assert_eq!(
@@ -433,7 +433,7 @@ mod reconcile_impl {
             .await
             .unwrap();
 
-        let on_disk = filesys::files::read_json::<Settings>(&layout.settings())
+        let on_disk = files::read_json::<Settings>(&layout.settings())
             .await
             .unwrap();
         assert_eq!(on_disk, Settings::default());
@@ -443,7 +443,7 @@ mod reconcile_impl {
     async fn falls_back_to_defaults_when_settings_corrupt() {
         let (layout, _dir) = prepare_layout("reconcile_impl_settings_corrupt").await;
 
-        filesys::files::write_string(
+        files::write_string(
             &layout.settings(),
             "not-json",
             WriteOptions::OVERWRITE_ATOMIC,
@@ -456,7 +456,7 @@ mod reconcile_impl {
             .await
             .unwrap();
 
-        let on_disk = filesys::files::read_json::<Settings>(&layout.settings())
+        let on_disk = files::read_json::<Settings>(&layout.settings())
             .await
             .unwrap();
         assert_eq!(on_disk, Settings::default());

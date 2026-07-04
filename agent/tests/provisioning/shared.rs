@@ -3,7 +3,7 @@ use crate::mocks::http_client::MockClient;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};
-use miru_agent::filesys::{self, PathExt};
+use miru_agent::filesys::{self, PathExt, dirs, files};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
 
@@ -48,7 +48,7 @@ pub(super) struct Env {
 
 impl Env {
     pub async fn new(prefix: &str) -> Self {
-        let root = filesys::dirs::create_temp(prefix).await.unwrap();
+        let root = dirs::create_temp(prefix).await.unwrap();
         let layout = Layout::new(root.clone());
         Self {
             root,
@@ -74,7 +74,7 @@ impl Env {
     }
 
     pub async fn cleanup(self) {
-        filesys::dirs::delete(&self.root).await.unwrap();
+        dirs::delete(&self.root).await.unwrap();
     }
 }
 
@@ -128,7 +128,7 @@ pub(super) async fn validate_storage(layout: &Layout, expected_name: &str) {
     let device_file = layout.device();
     assert!(device_file.exists(), "device.json missing");
     let device_json: serde_json::Value =
-        serde_json::from_str(&filesys::files::read_string(&device_file).await.unwrap()).unwrap();
+        serde_json::from_str(&files::read_string(&device_file).await.unwrap()).unwrap();
     assert_eq!(device_json["device_id"], DEVICE_ID);
     assert_eq!(device_json["name"], expected_name);
 
@@ -156,34 +156,34 @@ impl StorageSnapshot {
     pub async fn capture(layout: &Layout) -> Self {
         let auth = layout.auth();
         Self {
-            device: filesys::files::read_string(&layout.device()).await.ok(),
-            settings: filesys::files::read_string(&layout.settings()).await.ok(),
-            private_key: filesys::files::read_string(&auth.private_key()).await.ok(),
-            public_key: filesys::files::read_string(&auth.public_key()).await.ok(),
-            token: filesys::files::read_string(&auth.token()).await.ok(),
+            device: files::read_string(&layout.device()).await.ok(),
+            settings: files::read_string(&layout.settings()).await.ok(),
+            private_key: files::read_string(&auth.private_key()).await.ok(),
+            public_key: files::read_string(&auth.public_key()).await.ok(),
+            token: files::read_string(&auth.token()).await.ok(),
         }
     }
 
     pub async fn assert_unchanged(&self, layout: &Layout) {
         let auth = layout.auth();
         assert_eq!(
-            filesys::files::read_string(&layout.device()).await.ok(),
+            files::read_string(&layout.device()).await.ok(),
             self.device
         );
         assert_eq!(
-            filesys::files::read_string(&layout.settings()).await.ok(),
+            files::read_string(&layout.settings()).await.ok(),
             self.settings
         );
         assert_eq!(
-            filesys::files::read_string(&auth.private_key()).await.ok(),
+            files::read_string(&auth.private_key()).await.ok(),
             self.private_key
         );
         assert_eq!(
-            filesys::files::read_string(&auth.public_key()).await.ok(),
+            files::read_string(&auth.public_key()).await.ok(),
             self.public_key
         );
         assert_eq!(
-            filesys::files::read_string(&auth.token()).await.ok(),
+            files::read_string(&auth.token()).await.ok(),
             self.token
         );
     }

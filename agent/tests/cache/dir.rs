@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
 use miru_agent::cache::{DirCache, SingleThreadDirCache};
-use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{Overwrite, PathExt, WriteOptions, dirs, files};
 
 // external crates
 use tokio::task::JoinHandle;
@@ -18,7 +18,7 @@ pub mod concurrent {
     type TestCache = DirCache<String, String>;
 
     async fn spawn_cache_with_capacity(capacity: usize) -> (TestCache, JoinHandle<()>) {
-        let dir = filesys::dirs::create_temp("testing")
+        let dir = dirs::create_temp("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -33,7 +33,7 @@ pub mod concurrent {
 
     #[tokio::test]
     async fn spawn() {
-        let dir = filesys::dirs::create_temp("testing")
+        let dir = dirs::create_temp("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -47,7 +47,7 @@ pub mod concurrent {
 
     #[tokio::test]
     async fn prune_invalid_entries() {
-        let dir = filesys::dirs::create_temp("testing")
+        let dir = dirs::create_temp("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -55,7 +55,7 @@ pub mod concurrent {
 
         // write invalid json files to files in the cache directory
         let invalid_json_file = dir.file("invalid.json");
-        filesys::files::write_string(
+        files::write_string(
             &invalid_json_file,
             "invalid json",
             WriteOptions::OVERWRITE_NONATOMIC,
@@ -95,7 +95,7 @@ pub mod single_thread {
     type TestCache = SingleThreadDirCache<String, String>;
 
     async fn new_cache_with_capacity(capacity: usize) -> TestCache {
-        let dir = filesys::dirs::create_temp("testing")
+        let dir = dirs::create_temp("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -108,7 +108,7 @@ pub mod single_thread {
 
     #[tokio::test]
     async fn new() {
-        let dir = filesys::dirs::create_temp("testing")
+        let dir = dirs::create_temp("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -123,7 +123,7 @@ pub mod single_thread {
 
     #[tokio::test]
     async fn prune_invalid_entries_reduces_below_capacity() {
-        let dir = filesys::dirs::create_temp("testing")
+        let dir = dirs::create_temp("testing")
             .await
             .unwrap()
             .subdir(PathBuf::from("cache"));
@@ -142,7 +142,7 @@ pub mod single_thread {
         // inject 3 invalid (non-JSON) files to push size to 6 (> capacity 5)
         for i in 0..3 {
             let invalid_file = dir.file(&format!("invalid{i}.json"));
-            filesys::files::write_string(
+            files::write_string(
                 &invalid_file,
                 "not valid json",
                 WriteOptions::OVERWRITE_ATOMIC,

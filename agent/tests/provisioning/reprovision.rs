@@ -3,7 +3,7 @@ use super::shared::{
     mock_failing_reprovision, mock_ok_reprovision, validate_storage, Env, StorageSnapshot,
 };
 use crate::mocks::http_client as mock;
-use miru_agent::filesys::PathExt;
+use miru_agent::filesys::{PathExt, files};
 use miru_agent::provisioning::{errors::*, reprovision};
 
 pub mod reprovision_fn {
@@ -46,7 +46,7 @@ pub mod reprovision_fn {
     async fn rotates_keypair() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
-        let priv_before = miru_agent::filesys::files::read_string(&env.layout.auth().private_key())
+        let priv_before = files::read_string(&env.layout.auth().private_key())
             .await
             .unwrap();
 
@@ -55,7 +55,7 @@ pub mod reprovision_fn {
             .await
             .unwrap();
 
-        let priv_after = miru_agent::filesys::files::read_string(&env.layout.auth().private_key())
+        let priv_after = files::read_string(&env.layout.auth().private_key())
             .await
             .unwrap();
         assert_ne!(

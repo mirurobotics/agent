@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::{Capacities, Layout, Storage};
-use miru_agent::filesys;
+use miru_agent::filesys::{dirs};
 use miru_agent::models::{DeletePolicy, UploadRule, UploadRuleDestination, UploadRuleSource};
 
 // external crates
@@ -28,7 +28,7 @@ fn rule(id: &str, digest: &str, policy: DeletePolicy) -> UploadRule {
 }
 
 async fn init_storage() -> Storage {
-    let dir = filesys::dirs::create_temp("upload_rules_test")
+    let dir = dirs::create_temp("upload_rules_test")
         .await
         .unwrap();
     let layout = Layout::new(dir);

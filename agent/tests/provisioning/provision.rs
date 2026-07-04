@@ -3,7 +3,7 @@ use super::shared::{
     mock_failing_provision, mock_ok_provision, validate_storage, Env, StorageSnapshot, DEVICE_ID,
 };
 use crate::mocks::http_client as mock;
-use miru_agent::filesys::{PathExt, WriteOptions};
+use miru_agent::filesys::{PathExt, WriteOptions, dirs, files};
 use miru_agent::provisioning::{errors::*, provision};
 
 pub mod provision_fn {
@@ -109,7 +109,7 @@ pub mod provision_fn {
 
         // pre-create only device.json — no keys, so assert_activated fails
         // and the short-circuit doesn't trigger
-        miru_agent::filesys::dirs::create_if_absent(&env.layout.root())
+        dirs::create_if_absent(&env.layout.root())
             .await
             .unwrap();
         let stub_device = serde_json::json!({
@@ -122,7 +122,7 @@ pub mod provision_fn {
             "last_connected_at": "1970-01-01T00:00:00Z",
             "last_disconnected_at": "1970-01-01T00:00:00Z",
         });
-        miru_agent::filesys::files::write_string(
+        files::write_string(
             &env.layout.device(),
             &serde_json::to_string(&stub_device).unwrap(),
             WriteOptions::OVERWRITE_ATOMIC,
@@ -155,7 +155,7 @@ pub mod provision_fn {
         env.seed_provision("initial").await;
 
         // delete the public key to trigger provisioning
-        miru_agent::filesys::files::delete(&env.layout.auth().public_key())
+        files::delete(&env.layout.auth().public_key())
             .await
             .unwrap();
 
@@ -183,7 +183,7 @@ pub mod provision_fn {
 
         // corrupt device.json so read_json fails, but keep the keys intact so
         // assert_activated still succeeds and the short-circuit branch runs
-        miru_agent::filesys::files::write_string(
+        files::write_string(
             &env.layout.device(),
             "not valid json",
             WriteOptions::OVERWRITE_ATOMIC,

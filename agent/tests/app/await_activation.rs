@@ -6,16 +6,16 @@ use std::time::Duration as StdDuration;
 // internal crates
 use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, WriteOptions};
+use miru_agent::filesys::{self, WriteOptions, dirs, files};
 
 // (none — stdlib + tokio macros)
 
 // ============================ TEST HARNESS ============================ //
 
 async fn fresh_layout(name: &str) -> (Layout, filesys::Dir) {
-    let dir = filesys::dirs::create_temp(name).await.unwrap();
+    let dir = dirs::create_temp(name).await.unwrap();
     let layout = Layout::new(dir.clone());
-    filesys::dirs::create_if_absent(&layout.auth().root)
+    dirs::create_if_absent(&layout.auth().root)
         .await
         .unwrap();
     (layout, dir)
@@ -23,14 +23,14 @@ async fn fresh_layout(name: &str) -> (Layout, filesys::Dir) {
 
 async fn write_keys(layout: &Layout) {
     let auth = layout.auth();
-    filesys::files::write_string(
+    files::write_string(
         &auth.private_key(),
         "private",
         WriteOptions::OVERWRITE_ATOMIC,
     )
     .await
     .unwrap();
-    filesys::files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
+    files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 }
@@ -82,14 +82,14 @@ async fn activates_after_n_cycles() {
         async move {
             if n + 1 == activate_after {
                 let auth = layout.auth();
-                filesys::files::write_string(
+                files::write_string(
                     &auth.private_key(),
                     "private",
                     WriteOptions::OVERWRITE_ATOMIC,
                 )
                 .await
                 .unwrap();
-                filesys::files::write_string(
+                files::write_string(
                     &auth.public_key(),
                     "public",
                     WriteOptions::OVERWRITE_ATOMIC,

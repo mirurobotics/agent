@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::{Capacities, Layout, Storage};
-use miru_agent::filesys;
+use miru_agent::filesys::{dirs};
 
 pub mod default_capacities {
     use super::*;
@@ -25,7 +25,7 @@ pub mod init {
 
     #[tokio::test]
     async fn init_and_shutdown() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -38,7 +38,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_while_online() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -62,7 +62,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_twice_returns_error() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -78,7 +78,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_substore() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -94,7 +94,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_releases() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -110,7 +110,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_upload_rules() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())

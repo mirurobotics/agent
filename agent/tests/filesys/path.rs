@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
-use miru_agent::filesys::{self, path, Atomic, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{self, path, Atomic, Overwrite, PathExt, WriteOptions, dirs};
 
 // external crates
 #[allow(unused_imports)]
@@ -13,7 +13,7 @@ pub mod exists {
 
     #[tokio::test]
     async fn existing_path() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         assert!(dir.exists());
     }
 
@@ -57,7 +57,7 @@ pub mod abs_path {
     #[test]
     fn empty_path_is_current_dir() {
         let dir = filesys::Dir::new(PathBuf::from(""));
-        let expected_dir = filesys::dirs::current().unwrap();
+        let expected_dir = dirs::current().unwrap();
         assert_eq!(&dir.abs_path().unwrap(), expected_dir.path());
     }
 
@@ -77,7 +77,7 @@ pub mod abs_path {
 
     #[test]
     fn replace_multiple_slashes() {
-        let current_dir = filesys::dirs::current().unwrap();
+        let current_dir = dirs::current().unwrap();
         let current_dir_path_buf = current_dir.path();
         let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
         let parent_dir_path = path::clean(current_dir.parent().unwrap().path())
@@ -111,7 +111,7 @@ pub mod abs_path {
 
     #[test]
     fn eliminate_current_dir() {
-        let current_dir = filesys::dirs::current().unwrap();
+        let current_dir = dirs::current().unwrap();
         let current_dir_path_buf = current_dir.path();
         let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
 
@@ -143,7 +143,7 @@ pub mod abs_path {
 
     #[test]
     fn eliminate_parent_dir() {
-        let current_dir = filesys::dirs::current().unwrap();
+        let current_dir = dirs::current().unwrap();
         let current_dir_path_buf = current_dir.path();
         let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
         let parent_dir = current_dir.parent().unwrap();

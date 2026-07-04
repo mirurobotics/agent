@@ -7,7 +7,7 @@ use miru_agent::app::state::AppState;
 use miru_agent::authn::Token;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
-use miru_agent::filesys::{self, FileSysErr, WriteOptions};
+use miru_agent::filesys::{FileSysErr, WriteOptions, dirs, files};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
@@ -21,7 +21,7 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_private_key_file() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         let result = AppState::init(
             &layout,
@@ -45,11 +45,11 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_public_key_file() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         // create a private key file (but no public key file)
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -75,16 +75,16 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_device_id() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+        files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -104,18 +104,18 @@ pub mod init {
     #[tokio::test]
     async fn success_missing_device_file_but_valid_token() {
         let begin_test = Utc::now().timestamp();
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+        files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -125,7 +125,7 @@ pub mod init {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY".to_string(),
                 expires_at: Utc::now(),
             };
-        filesys::files::write_json(&token_file, &token, WriteOptions::default())
+        files::write_json(&token_file, &token, WriteOptions::default())
             .await
             .unwrap();
 
@@ -150,7 +150,7 @@ pub mod init {
             status: DeviceStatus::Offline,
             ..Device::default()
         };
-        let device = filesys::files::read_json::<Device>(&device_file)
+        let device = files::read_json::<Device>(&device_file)
             .await
             .unwrap();
         assert_eq!(device, expected_device);
@@ -159,25 +159,25 @@ pub mod init {
     #[tokio::test]
     async fn success_missing_token_file() {
         let begin_test = Utc::now().timestamp();
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+        files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
-        filesys::files::write_json(&device_file, &device, WriteOptions::default())
+        files::write_json(&device_file, &device, WriteOptions::default())
             .await
             .unwrap();
 
@@ -192,7 +192,7 @@ pub mod init {
 
         // the token file should now have the default token
         let token_file = layout.auth().token();
-        let token = filesys::files::read_json::<Token>(&token_file)
+        let token = files::read_json::<Token>(&token_file)
             .await
             .unwrap();
         assert_eq!(token.token, Token::default().token);
@@ -204,18 +204,18 @@ pub mod init {
 
     #[tokio::test]
     async fn success_set_device_to_offline_on_boot() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+        files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -227,7 +227,7 @@ pub mod init {
             status: DeviceStatus::Online,
             ..Device::default()
         };
-        filesys::files::write_json(&device_file, &device, WriteOptions::default())
+        files::write_json(&device_file, &device, WriteOptions::default())
             .await
             .unwrap();
 
@@ -242,7 +242,7 @@ pub mod init {
 
         // the device file should now have the device set to offline
         let device_file = layout.device();
-        let device = filesys::files::read_json::<Device>(&device_file)
+        let device = files::read_json::<Device>(&device_file)
             .await
             .unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
@@ -254,25 +254,25 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn success_device_offline() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+        files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
-        filesys::files::write_json(&device_file, &device, WriteOptions::default())
+        files::write_json(&device_file, &device, WriteOptions::default())
             .await
             .unwrap();
 
@@ -296,25 +296,25 @@ pub mod shutdown {
             log_dir: PathBuf::from("/tmp/miru"),
         });
 
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
+        files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
+        files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
-        filesys::files::write_json(&device_file, &device, WriteOptions::OVERWRITE_NONATOMIC)
+        files::write_json(&device_file, &device, WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
 
@@ -341,7 +341,7 @@ pub mod shutdown {
 
         // the device file should now have the device set to offline
         let device_file = layout.device();
-        let device = filesys::files::read_json::<Device>(&device_file)
+        let device = files::read_json::<Device>(&device_file)
             .await
             .unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);

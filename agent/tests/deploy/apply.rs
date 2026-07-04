@@ -3,7 +3,7 @@ use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
-use miru_agent::filesys::{self, File, Overwrite, PathExt};
+use miru_agent::filesys::{self, File, Overwrite, PathExt, dirs, files};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
 
 // external crates
@@ -20,7 +20,7 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = filesys::dirs::create_temp("apply-test").await.unwrap();
+        let temp_dir = dirs::create_temp("apply-test").await.unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
         let (deployments, _) =
@@ -303,7 +303,7 @@ mod find_target_deployed {
             "healthy deployment file should exist on disk"
         );
         assert_eq!(
-            filesys::files::read_string(&file).await.unwrap(),
+            files::read_string(&file).await.unwrap(),
             "healthy-content"
         );
     }
@@ -346,7 +346,7 @@ mod deploy_success {
         // verify file on disk
         let file = File::new(&ci.filepath);
         assert!(file.exists(), "deployed file should exist on disk");
-        let content = filesys::files::read_string(&file).await.unwrap();
+        let content = files::read_string(&file).await.unwrap();
         assert_eq!(content, r#"{"speed": 4}"#);
     }
 
@@ -393,25 +393,25 @@ mod deploy_success {
         );
 
         assert_eq!(
-            filesys::files::read_string(&File::new(&ci1.filepath))
+            files::read_string(&File::new(&ci1.filepath))
                 .await
                 .unwrap(),
             "content-a"
         );
         assert_eq!(
-            filesys::files::read_string(&File::new(&ci2.filepath))
+            files::read_string(&File::new(&ci2.filepath))
                 .await
                 .unwrap(),
             "content-b"
         );
         assert_eq!(
-            filesys::files::read_string(&File::new(&ci3.filepath))
+            files::read_string(&File::new(&ci3.filepath))
                 .await
                 .unwrap(),
             "content-c"
         );
         assert_eq!(
-            filesys::files::read_string(&File::new(&ci4.filepath))
+            files::read_string(&File::new(&ci4.filepath))
                 .await
                 .unwrap(),
             "content-d"
@@ -515,12 +515,12 @@ mod deploy_success {
 
         // shared file survives with updated content
         assert!(shared.path().exists(), "shared file should survive");
-        let content = filesys::files::read_string(&shared).await.unwrap();
+        let content = files::read_string(&shared).await.unwrap();
         assert_eq!(content, r#"{"file": "y-new"}"#);
 
         // new-only file created
         assert!(new_only.path().exists(), "new-only file should be created");
-        let content = filesys::files::read_string(&new_only).await.unwrap();
+        let content = files::read_string(&new_only).await.unwrap();
         assert_eq!(content, r#"{"file": "z"}"#);
     }
 }
@@ -721,8 +721,8 @@ mod deploy_errors {
         let f = Fixture::new().await;
 
         let locked_dir = f.temp_dir.subdir("locked");
-        filesys::dirs::create(&locked_dir).await.unwrap();
-        filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
+        dirs::create(&locked_dir).await.unwrap();
+        dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
             .await
             .unwrap();
 
@@ -748,7 +748,7 @@ mod deploy_errors {
 
         let outcomes = f.apply().await.unwrap();
 
-        filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755))
+        dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755))
             .await
             .unwrap();
 
@@ -1379,7 +1379,7 @@ mod remove_action {
 
         // Lock the parent directory so removal fails with EACCES
         let parent_dir = dest.parent().unwrap();
-        filesys::dirs::set_permissions(&parent_dir, std::fs::Permissions::from_mode(0o555))
+        dirs::set_permissions(&parent_dir, std::fs::Permissions::from_mode(0o555))
             .await
             .unwrap();
 
@@ -1395,7 +1395,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
 
         // Restore permissions BEFORE assertions so tempdir cleanup succeeds
-        filesys::dirs::set_permissions(&parent_dir, std::fs::Permissions::from_mode(0o755))
+        dirs::set_permissions(&parent_dir, std::fs::Permissions::from_mode(0o755))
             .await
             .unwrap();
 
