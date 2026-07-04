@@ -1,7 +1,7 @@
 //! Remote S3 object storage.
 //!
 //! This module talks to an S3 bucket over the network. It is distinct from
-//! [`crate::storage`], which manages local on-disk device state (device.json,
+//! [`crate::disk`], which manages local on-disk device state (device.json,
 //! settings.json, ...). Do not conflate the two.
 //!
 //! An [`S3Store`] is constructed **only** from caller-supplied temporary
