@@ -174,7 +174,7 @@ mod tests {
     use super::*;
     use crate::classifier::Classifier;
     use crate::config::Config;
-    use crate::parser::parse;
+    use crate::parser::{parse, UseStatement};
 
     fn default_config() -> Config {
         Config {
@@ -354,5 +354,48 @@ fn main() {}
                 .any(|diagnostic| diagnostic.kind == "split-internal-imports"),
             "expected split-internal-imports diagnostic, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn find_header_missing_when_use_line_not_in_block() {
+        let block = parse("use crate::app::state::AppState;\n\nfn main() {}\n");
+        assert!(matches!(
+            find_header(&block, 999, "// internal crates"),
+            HeaderMatch::Missing
+        ));
+    }
+
+    #[test]
+    fn find_header_missing_for_non_header_comment() {
+        let block = ImportBlock {
+            items: vec![
+                ImportBlockItem::Comment {
+                    text: "#[allow(unused_imports)]".to_string(),
+                    line: 1,
+                },
+                ImportBlockItem::Use(UseStatement {
+                    text: "use crate::app::state::AppState;\n".to_string(),
+                    line: 2,
+                    root_crate: "crate".to_string(),
+                    sort_key: "crate::app::state::AppState".to_string(),
+                    attrs: Vec::new(),
+                }),
+            ],
+            start_line: 1,
+            end_line: 3,
+        };
+        assert!(matches!(
+            find_header(&block, 2, "// internal crates"),
+            HeaderMatch::Missing
+        ));
+    }
+
+    #[test]
+    fn group_headers_recognized_for_all_labels() {
+        assert!(is_group_header("// standard crates"));
+        assert!(is_group_header("// internal crates"));
+        assert!(is_group_header("// external crates"));
+        assert!(is_group_header("// std imports"));
+        assert!(!is_group_header("// ======== SECTION ======== //"));
     }
 }

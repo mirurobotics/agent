@@ -70,6 +70,55 @@ pub mod init {
     }
 
     #[tokio::test]
+    async fn init_fails_when_device_path_is_a_directory() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // occupy the device file path with a directory so its store fails to spawn
+        layout.root().subdir("device.json").create().await.unwrap();
+
+        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn init_fails_when_cfg_inst_content_path_is_a_file() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // occupy the config instance content directory path with a file so its
+        // store fails to spawn after device storage has initialized
+        layout
+            .resources()
+            .subdir("config_instances")
+            .file("contents")
+            .write_string("not a directory", filesys::WriteOptions::default())
+            .await
+            .unwrap();
+
+        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn init_fails_when_deployments_path_is_a_directory() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // occupy the deployments file path with a directory so its store fails
+        // to spawn after the device and config instance stores have initialized
+        layout
+            .resources()
+            .subdir("deployments.json")
+            .create()
+            .await
+            .unwrap();
+
+        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn shutdown_twice_returns_error() {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
