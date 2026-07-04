@@ -14,25 +14,17 @@
 //! memory) so the agent can move multi-gigabyte artifacts on memory-constrained
 //! devices. Uploads larger than [`Options::part_size`] use a multipart upload.
 //!
-//! ## Resumable multipart uploads
-//!
-//! Multipart uploads can survive a power-off and resume instead of restarting
-//! from byte 0, but only when [`Config::upload_state_dir`] is `Some`. In that
-//! mode each in-progress upload records a small durable `UploadState` JSON
-//! (the `upload_id` plus guards) keyed by object key. S3 `ListParts` is the
-//! source of truth for which parts already landed; the local state only carries
-//! the `upload_id` and enough metadata to detect a changed source file. The
-//! state file is written right after `create_multipart_upload` and deleted on a
-//! successful `complete` **and** on `abort`, so a crash (which runs neither
-//! delete) leaves the file behind for the next run to resume from. When
-//! `upload_state_dir` is `None` the behavior is stateless: create a fresh upload
-//! every time and abort on error.
+//! [`Store`] is a thin, stateless client: it exposes the S3 multipart
+//! primitives ([`Store::create_multipart_upload`], [`Store::upload_part`],
+//! [`Store::list_parts`], [`Store::complete_multipart_upload`],
+//! [`Store::abort_multipart_upload`]) plus a stateless [`Store::put_multipart`]
+//! convenience. Durable, resumable multipart uploads (surviving a power-off)
+//! live one layer up in [`uploader::Uploader`], which owns the on-disk upload
+//! state and the resume-vs-restart policy.
 
 // internal crates
-use crate::filesys::dir::Dir;
-use crate::filesys::file::{sanitize_filename, File};
+use crate::filesys::file::File;
 use crate::filesys::path::PathExt;
-use crate::filesys::WriteOptions;
 use crate::trace;
 
 // external crates
@@ -41,9 +33,9 @@ use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::primitives::{ByteStream, ByteStreamError, Length};
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::Client;
-use serde::{Deserialize, Serialize};
 
 pub mod errors;
+pub mod uploader;
 
 pub use errors::S3Err;
 use errors::{InvalidResponseErr, ObjectNotFoundErr};
@@ -54,36 +46,17 @@ const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 const MIN_PART_SIZE: u64 = 5 * 1024 * 1024; // 5 MiB
 const MAX_PARTS: u64 = 10_000; // 10,000 parts
 
-/// Durable handle to an in-progress multipart upload, persisted so a reboot can
-/// resume instead of restarting. S3 (ListParts) is the source of truth for which
-/// parts landed; this only records the upload_id plus guards to detect a changed
-/// source file.
-#[derive(Debug, Serialize, Deserialize)]
-struct UploadState {
-    upload_id: String,
-    key: String,
-    size: u64,
-    part_size: u64,
-}
-
-/// In-memory starting point for an upload derived from `ListParts`: which parts
-/// already landed (a contiguous 1..N prefix), where to resume streaming from, and
-/// the next part number to upload.
-struct ResumeState {
-    upload_id: String,
-    completed_parts: Vec<CompletedPart>,
-    offset: u64,
-    next_part_number: i32,
+/// One already-uploaded part as reported by S3 `ListParts`.
+pub struct PartInfo {
+    pub part_number: i32,
+    pub etag: String,
+    pub size: u64,
 }
 
 pub struct Config {
     pub creds: Credentials,
     pub region: String,
     pub bucket: String,
-    /// When `Some`, in-progress multipart uploads are persisted here (keyed by
-    /// object key) so a reboot can resume them; when `None`, uploads are
-    /// stateless (fresh every time, aborted on error).
-    pub upload_state_dir: Option<Dir>,
 }
 
 pub struct Options {
@@ -120,7 +93,6 @@ pub struct Store {
     client: Client,
     bucket: String,
     opts: Options,
-    upload_state_dir: Option<Dir>,
 }
 
 impl Store {
@@ -143,7 +115,6 @@ impl Store {
             client: Client::from_conf(s3cfg),
             bucket: cfg.bucket,
             opts,
-            upload_state_dir: cfg.upload_state_dir,
         }
     }
 
@@ -171,27 +142,32 @@ impl Store {
             client: Client::from_conf(s3cfg),
             bucket: cfg.bucket,
             opts,
-            upload_state_dir: cfg.upload_state_dir,
         }
+    }
+
+    /// The size (in bytes) at or below which [`Self::put`] uses a single
+    /// `PutObject` instead of a multipart upload.
+    pub fn multipart_threshold(&self) -> u64 {
+        self.opts.part_size
     }
 
     /// Creates or overwrites an object by streaming a file off disk.
     ///
     /// The whole file is never held in memory: files at or below the single-PUT
     /// threshold stream through one `PutObject`, and larger files stream part-by-part
-    /// through a multipart upload (see `put_multipart`).
-    pub async fn put(&self, key: &str, file: File) -> Result<(), S3Err> {
+    /// through a (stateless) multipart upload (see [`Self::put_multipart`]).
+    pub async fn put(&self, key: &str, file: &File) -> Result<(), S3Err> {
         let size = file.size().await?;
 
         if size > self.opts.part_size {
-            self.put_multipart(key, &file, size).await
+            self.put_multipart(key, file, size).await
         } else {
-            self.put_singlepart(key, &file).await
+            self.put_object(key, file).await
         }
     }
 
     /// Streams a file to S3 as a single-part upload.
-    async fn put_singlepart(&self, key: &str, file: &File) -> Result<(), S3Err> {
+    pub async fn put_object(&self, key: &str, file: &File) -> Result<(), S3Err> {
         let body = ByteStream::from_path(file.path())
             .await
             .map_err(|e| self.map_bytestream_err("put_object", key, file, &e))?;
@@ -206,233 +182,138 @@ impl Store {
         Ok(())
     }
 
-    /// Streams a file to S3 as a multipart upload, one part at a time.
+    /// Streams a file to S3 as a **stateless** multipart upload, one part at a time.
     ///
-    /// When `upload_state_dir` is configured this is resumable: an existing state
-    /// file for `key` is consulted (via [`Self::resume_or_restart`]) so parts that
-    /// already landed on S3 are skipped instead of re-uploaded. Otherwise a fresh
-    /// upload is created every time. On any in-process failure during the part loop
-    /// or completion, the in-progress upload is aborted (best-effort) and the state
-    /// file is deleted so S3 does not retain orphaned parts and the next run starts
-    /// clean. A crash/power-off runs neither cleanup path, leaving the state file for
-    /// resume.
-    async fn put_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
+    /// A fresh upload is created every call: create → `upload_part` over
+    /// `part_size_for` chunks → complete. On any in-process failure the
+    /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
+    /// parts, then the error propagates. This carries **no durable state** and
+    /// cannot resume across a crash; for resumable uploads use
+    /// [`uploader::Uploader`].
+    pub async fn put_multipart(&self, key: &str, file: &File, size: u64) -> Result<(), S3Err> {
         let part_size = Self::part_size_for(size);
-        let state_file = self.upload_state_file(key);
-
-        // Resolve a starting point: resume an in-progress upload if we have durable
-        // state that S3 still recognizes, otherwise start fresh.
-        let start = match &state_file {
-            Some(f) => self.resume_or_restart(f, key, size, part_size).await?,
-            None => None,
-        };
-
-        let (upload_id, completed_parts, offset, part_number) = match start {
-            Some(rs) => (
-                rs.upload_id,
-                rs.completed_parts,
-                rs.offset,
-                rs.next_part_number,
-            ),
-            None => {
-                let created = self
-                    .client
-                    .create_multipart_upload()
-                    .bucket(&self.bucket)
-                    .key(key)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        errors::map_sdk_err_common(
-                            "create_multipart_upload",
-                            Some(key.to_string()),
-                            e,
-                        )
-                    })?;
-                let upload_id = created
-                    .upload_id()
-                    .ok_or_else(|| {
-                        S3Err::InvalidResponseErr(InvalidResponseErr {
-                            operation: "create_multipart_upload".to_string(),
-                            msg: "response did not include an upload id".to_string(),
-                            trace: trace!(),
-                        })
-                    })?
-                    .to_string();
-
-                // Persist the durable handle immediately so a crash before completion
-                // can resume this exact upload.
-                if let Some(f) = &state_file {
-                    f.write_json(
-                        &UploadState {
-                            upload_id: upload_id.clone(),
-                            key: key.to_string(),
-                            size,
-                            part_size,
-                        },
-                        WriteOptions::OVERWRITE_ATOMIC,
-                    )
-                    .await?;
-                }
-
-                // S3 part numbers are 1-based.
-                (upload_id, Vec::new(), 0, 1)
-            }
-        };
+        let upload_id = self.create_multipart_upload(key).await?;
 
         match self
-            .upload_parts_and_complete(
-                key,
-                file,
-                size,
-                part_size,
-                &upload_id,
-                completed_parts,
-                offset,
-                part_number,
-            )
+            .upload_parts_and_complete(key, file, size, part_size, &upload_id)
             .await
         {
-            Ok(()) => {
-                // Success: the upload is complete, so the durable handle is no longer
-                // needed. Best-effort delete (a leftover file only wastes a resume
-                // attempt on the next run).
-                if let Some(f) = &state_file {
-                    let _ = f.delete().await;
-                }
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(err) => {
-                // Best-effort cleanup: don't mask the original error if the
-                // abort itself fails.
-                let _ = self
-                    .client
-                    .abort_multipart_upload()
-                    .bucket(&self.bucket)
-                    .key(key)
-                    .upload_id(&upload_id)
-                    .send()
-                    .await;
-                if let Some(f) = &state_file {
-                    let _ = f.delete().await;
-                }
+                // Best-effort cleanup: don't mask the original error if the abort
+                // itself fails.
+                let _ = self.abort_multipart_upload(key, &upload_id).await;
                 Err(err)
             }
         }
     }
 
-    /// The state file for `key`, or `None` when no `upload_state_dir` is configured.
-    ///
-    /// `sanitize_filename` can map distinct keys onto the same filename; the
-    /// `UploadState.key` field is verified on load, so a collision is treated as
-    /// "no resumable state" (fresh upload, overwriting the file).
-    fn upload_state_file(&self, key: &str) -> Option<File> {
-        self.upload_state_dir
-            .as_ref()
-            .map(|dir| dir.file(&format!("{}.json", sanitize_filename(key))))
-    }
-
-    /// Decides whether an in-progress multipart upload can be resumed from durable
-    /// state, and if so where to resume from.
-    ///
-    /// Returns `Ok(None)` (caller starts fresh) when there is no state file, when
-    /// the state is unreadable/corrupt, when it describes a different source file
-    /// (key/size/part_size mismatch), or when S3 no longer recognizes the upload
-    /// (`ListParts` 404 / NoSuchUpload). An incompatible state also triggers a
-    /// best-effort abort of the stale upload. A bad local hint never hard-fails an
-    /// upload; only genuine S3/network errors propagate.
-    async fn resume_or_restart(
+    /// Uploads every part of `file` (from byte 0) and completes the multipart
+    /// upload. Split out from [`Self::put_multipart`] so a single `?` early-return
+    /// path funnels through one abort site.
+    async fn upload_parts_and_complete(
         &self,
-        state_file: &File,
         key: &str,
+        file: &File,
         size: u64,
         part_size: u64,
-    ) -> Result<Option<ResumeState>, S3Err> {
-        if !state_file.exists() {
-            return Ok(None);
+        upload_id: &str,
+    ) -> Result<(), S3Err> {
+        let mut parts: Vec<(i32, String)> = Vec::new();
+        let mut offset: u64 = 0;
+        let mut part_number: i32 = 1; // S3 part numbers are 1-based.
+
+        while offset < size {
+            let len = part_size.min(size - offset);
+            let etag = self
+                .upload_part(key, upload_id, part_number, file, offset, len)
+                .await?;
+            parts.push((part_number, etag));
+            offset += len;
+            part_number += 1;
         }
 
-        // A corrupt/unreadable state file is just a bad local hint: drop it and
-        // start fresh rather than failing the upload.
-        let state: UploadState = match state_file.read_json().await {
-            Ok(state) => state,
-            Err(_) => {
-                let _ = state_file.delete().await;
-                return Ok(None);
-            }
-        };
+        self.complete_multipart_upload(key, upload_id, &parts).await
+    }
 
-        // A changed source file invalidates every recorded part (part N no longer
-        // maps to the same byte range). Abort the stale upload and start fresh.
-        if state.key != key || state.size != size || state.part_size != part_size {
-            let _ = self
-                .client
-                .abort_multipart_upload()
-                .bucket(&self.bucket)
-                .key(key)
-                .upload_id(&state.upload_id)
-                .send()
-                .await;
-            let _ = state_file.delete().await;
-            return Ok(None);
-        }
+    /// Starts a multipart upload and returns its `upload_id`.
+    pub async fn create_multipart_upload(&self, key: &str) -> Result<String, S3Err> {
+        let created = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| {
+                errors::map_sdk_err_common("create_multipart_upload", Some(key.to_string()), e)
+            })?;
+        let upload_id = created
+            .upload_id()
+            .ok_or_else(|| {
+                S3Err::InvalidResponseErr(InvalidResponseErr {
+                    operation: "create_multipart_upload".to_string(),
+                    msg: "response did not include an upload id".to_string(),
+                    trace: trace!(),
+                })
+            })?
+            .to_string();
+        Ok(upload_id)
+    }
 
-        let parts = match self.list_parts(key, &state.upload_id).await? {
-            Some(parts) => parts,
-            // The upload expired or was lifecycle-aborted: the id is dead, so drop
-            // the state and start fresh.
-            None => {
-                let _ = state_file.delete().await;
-                return Ok(None);
-            }
-        };
+    /// Streams a single part (`file[offset..offset+len]`) to S3 and returns its
+    /// ETag. `InvalidResponseErr` if the response omits the ETag.
+    pub async fn upload_part(
+        &self,
+        key: &str,
+        upload_id: &str,
+        part_number: i32,
+        file: &File,
+        offset: u64,
+        len: u64,
+    ) -> Result<String, S3Err> {
+        let body = ByteStream::read_from()
+            .path(file.path())
+            .offset(offset)
+            .length(Length::Exact(len))
+            .build()
+            .await
+            .map_err(|e| self.map_bytestream_err("upload_part", key, file, &e))?;
 
-        // Build the contiguous 1..N prefix of fully-landed parts. Interior parts are
-        // always exactly `part_size`; a gap, a missing e_tag, or a wrong size stops
-        // the run so we never claim a part that isn't safely complete.
-        let mut completed_parts: Vec<CompletedPart> = Vec::new();
-        let mut next_part_number: i32 = 1;
-        loop {
-            let Some(part) = parts
-                .iter()
-                .find(|p| p.part_number() == Some(next_part_number))
-            else {
-                break;
-            };
-            let Some(e_tag) = part.e_tag() else { break };
-            if part.size() != Some(part_size as i64) {
-                break;
-            }
-            completed_parts.push(
-                CompletedPart::builder()
-                    .part_number(next_part_number)
-                    .e_tag(e_tag)
-                    .build(),
-            );
-            next_part_number += 1;
-        }
+        let part = self
+            .client
+            .upload_part()
+            .bucket(&self.bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .part_number(part_number)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| errors::map_sdk_err_common("upload_part", Some(key.to_string()), e))?;
 
-        let landed = (next_part_number - 1) as u64;
-        let offset = (landed * part_size).min(size);
-        Ok(Some(ResumeState {
-            upload_id: state.upload_id,
-            completed_parts,
-            offset,
-            next_part_number,
-        }))
+        part.e_tag().map(str::to_string).ok_or_else(|| {
+            S3Err::InvalidResponseErr(InvalidResponseErr {
+                operation: "upload_part".to_string(),
+                msg: "response did not include an etag".to_string(),
+                trace: trace!(),
+            })
+        })
     }
 
     /// Lists all parts already uploaded for `upload_id`, following pagination.
     ///
     /// Returns `Ok(None)` when S3 reports the upload no longer exists (a 404 /
-    /// NoSuchUpload), mirroring the raw-response status check used by `get`/`exists`.
-    /// Any other SDK error propagates via `map_sdk_err_common`.
-    async fn list_parts(
+    /// NoSuchUpload), mirroring the raw-response status check used by `get`/`exists`,
+    /// so a caller can distinguish "expired upload" from a listing of parts. Any
+    /// other SDK error propagates via `map_sdk_err_common`. Only parts that carry
+    /// all of `{part_number, etag, size}` are returned.
+    pub async fn list_parts(
         &self,
         key: &str,
         upload_id: &str,
-    ) -> Result<Option<Vec<aws_sdk_s3::types::Part>>, S3Err> {
-        let mut parts: Vec<aws_sdk_s3::types::Part> = Vec::new();
+    ) -> Result<Option<Vec<PartInfo>>, S3Err> {
+        let mut parts: Vec<PartInfo> = Vec::new();
         let mut marker: Option<String> = None;
 
         loop {
@@ -464,7 +345,18 @@ impl Store {
                 }
             };
 
-            parts.extend(output.parts().iter().cloned());
+            for part in output.parts() {
+                let (Some(part_number), Some(etag), Some(size)) =
+                    (part.part_number(), part.e_tag(), part.size())
+                else {
+                    continue;
+                };
+                parts.push(PartInfo {
+                    part_number,
+                    etag: etag.to_string(),
+                    size: size as u64,
+                });
+            }
 
             if output.is_truncated() == Some(true) {
                 match output.next_part_number_marker() {
@@ -479,55 +371,23 @@ impl Store {
         Ok(Some(parts))
     }
 
-    /// Uploads the remaining parts of `file` (starting from `offset` /
-    /// `part_number`, with `completed_parts` already landed) and completes the
-    /// multipart upload. Split out from [`Self::put_multipart`] so a single `?`
-    /// early-return path funnels through one abort site.
-    #[allow(clippy::too_many_arguments)]
-    async fn upload_parts_and_complete(
+    /// Completes a multipart upload from the `(part_number, etag)` pairs of the
+    /// landed parts.
+    pub async fn complete_multipart_upload(
         &self,
         key: &str,
-        file: &File,
-        size: u64,
-        part_size: u64,
         upload_id: &str,
-        mut completed_parts: Vec<CompletedPart>,
-        mut offset: u64,
-        mut part_number: i32,
+        parts: &[(i32, String)],
     ) -> Result<(), S3Err> {
-        while offset < size {
-            let len = part_size.min(size - offset);
-            let body = ByteStream::read_from()
-                .path(file.path())
-                .offset(offset)
-                .length(Length::Exact(len))
-                .build()
-                .await
-                .map_err(|e| self.map_bytestream_err("upload_part", key, file, &e))?;
-
-            let part = self
-                .client
-                .upload_part()
-                .bucket(&self.bucket)
-                .key(key)
-                .upload_id(upload_id)
-                .part_number(part_number)
-                .body(body)
-                .send()
-                .await
-                .map_err(|e| errors::map_sdk_err_common("upload_part", Some(key.to_string()), e))?;
-
-            completed_parts.push(
+        let completed_parts: Vec<CompletedPart> = parts
+            .iter()
+            .map(|(part_number, etag)| {
                 CompletedPart::builder()
-                    .part_number(part_number)
-                    .set_e_tag(part.e_tag().map(str::to_string))
-                    .build(),
-            );
-
-            offset += len;
-            part_number += 1;
-        }
-
+                    .part_number(*part_number)
+                    .e_tag(etag)
+                    .build()
+            })
+            .collect();
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(completed_parts))
             .build();
@@ -545,11 +405,27 @@ impl Store {
         Ok(())
     }
 
+    /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
+    /// `Result` so callers decide whether to treat the abort as best-effort.
+    pub async fn abort_multipart_upload(&self, key: &str, upload_id: &str) -> Result<(), S3Err> {
+        self.client
+            .abort_multipart_upload()
+            .bucket(&self.bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .send()
+            .await
+            .map_err(|e| {
+                errors::map_sdk_err_common("abort_multipart_upload", Some(key.to_string()), e)
+            })?;
+        Ok(())
+    }
+
     /// Picks a part size that keeps the part count within S3's 10,000-part limit. Uses
     /// the fixed [`PART_SIZE`] until a file is large enough to need more than 10,000
     /// such parts, then grows the part size to `ceil(size / 10_000)` (never below the 5
     /// MiB floor).
-    fn part_size_for(size: u64) -> u64 {
+    pub(crate) fn part_size_for(size: u64) -> u64 {
         if size.div_ceil(PART_SIZE) <= MAX_PARTS {
             PART_SIZE
         } else {

@@ -9,6 +9,7 @@ use miru_agent::filesys::path::PathExt;
 use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
+use miru_agent::s3::uploader::Uploader;
 use miru_agent::s3::{Config, Credentials, Options, S3Err, Store};
 
 // external crates
@@ -54,27 +55,6 @@ fn store_with_part_size(events: Vec<ReplayEvent>, part_size: u64) -> (Store, Sta
         region: REGION.to_string(),
         bucket: BUCKET.to_string(),
         creds: Credentials::default(),
-        upload_state_dir: None,
-    };
-    let store = Store::from_http_client(replay.clone(), cfg, Options { part_size });
-    (store, replay)
-}
-
-/// Wires a `Store` whose in-progress multipart uploads persist to `state_dir`, so
-/// resumable-upload tests can pre-seed durable state and observe its lifecycle.
-/// `part_size: 0` (as elsewhere) forces the multipart path regardless of fixture
-/// size.
-fn resumable_store(
-    events: Vec<ReplayEvent>,
-    part_size: u64,
-    state_dir: &Dir,
-) -> (Store, StaticReplayClient) {
-    let replay = StaticReplayClient::new(events);
-    let cfg = Config {
-        region: REGION.to_string(),
-        bucket: BUCKET.to_string(),
-        creds: Credentials::default(),
-        upload_state_dir: Some(Dir::new(state_dir.path())),
     };
     let store = Store::from_http_client(replay.clone(), cfg, Options { part_size });
     (store, replay)
@@ -117,7 +97,7 @@ pub mod put {
                 .unwrap();
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
-            store.put(key, File::new(src.path())).await.unwrap();
+            store.put(key, &File::new(src.path())).await.unwrap();
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
             assert_eq!(requests.len(), 1);
@@ -208,7 +188,7 @@ pub mod put {
                 0,
             );
 
-            store.put(key, File::new(src.path())).await.unwrap();
+            store.put(key, &File::new(src.path())).await.unwrap();
 
             // Assert the create → upload_part → complete sequence fired, matching
             // methods and paths (bodies for POSTs vary and are ignored).
@@ -252,7 +232,7 @@ pub mod put {
             let (store, _replay) =
                 store_with_part_size(vec![ReplayEvent::new(create_req, no_id_resp)], 0);
 
-            let err = store.put(key, File::new(src.path())).await.unwrap_err();
+            let err = store.put(key, &File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
         }
 
@@ -280,7 +260,7 @@ pub mod put {
             let (store, _replay) =
                 store_with_part_size(vec![ReplayEvent::new(create_req, create_fail)], 0);
 
-            let err = store.put(key, File::new(src.path())).await.unwrap_err();
+            let err = store.put(key, &File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
         }
 
@@ -340,7 +320,7 @@ pub mod put {
                 0,
             );
 
-            let err = store.put(key, File::new(src.path())).await.unwrap_err();
+            let err = store.put(key, &File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
@@ -400,7 +380,7 @@ pub mod put {
                 0,
             );
 
-            let err = store.put(key, File::new(src.path())).await.unwrap_err();
+            let err = store.put(key, &File::new(src.path())).await.unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
             // The abort must have been issued after the failed part.
@@ -607,7 +587,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
         let err = store
-            .put("denied.txt", File::new(src.path()))
+            .put("denied.txt", &File::new(src.path()))
             .await
             .unwrap_err();
 
@@ -698,7 +678,7 @@ pub mod put_source_missing {
         let (store, _replay) = store_with(vec![]);
         let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-        let err = store.put("k", missing).await.unwrap_err();
+        let err = store.put("k", &missing).await.unwrap_err();
 
         assert!(matches!(err, S3Err::FileSysErr(_)));
     }
@@ -719,7 +699,6 @@ pub mod construction {
             },
             region: "us-west-2".to_string(),
             bucket: "prod-bucket".to_string(),
-            upload_state_dir: None,
         };
         // Constructing must not panic or touch the network.
         let _store = Store::new(cfg, Options::default());
@@ -787,11 +766,12 @@ pub mod error_types {
     }
 }
 
-/// Resumable multipart uploads: when `upload_state_dir` is set, an in-progress
-/// upload is persisted (keyed by object key) so a reboot resumes from S3's already
-/// -landed parts instead of restarting from byte 0. These tests use a 16 MiB
-/// fixture so `part_size_for` yields two 8 MiB parts, which is the minimum needed
-/// to exercise "part 1 already landed, upload only part 2".
+/// Resumable multipart uploads, driven through an [`Uploader`]: the in-progress
+/// upload is persisted (keyed by object key) in the uploader's state dir so a
+/// reboot resumes from S3's already-landed parts instead of restarting from byte
+/// 0. These tests use a 16 MiB fixture so `part_size_for` yields two 8 MiB parts,
+/// which is the minimum needed to exercise "part 1 already landed, upload only
+/// part 2".
 pub mod resumable {
     use super::*;
 
@@ -806,8 +786,17 @@ pub mod resumable {
         temp_file_with(&vec![0u8; FILE_SIZE as usize])
     }
 
+    /// Wires an [`Uploader`] over a `StaticReplayClient` serving `events`, with its
+    /// durable state persisted to `state_dir`. `part_size: 0` forces the multipart
+    /// path regardless of fixture size.
+    fn uploader_with(events: Vec<ReplayEvent>, state_dir: &Dir) -> (Uploader, StaticReplayClient) {
+        let (store, replay) = store_with_part_size(events, 0);
+        let uploader = Uploader::new(store, Dir::new(state_dir.path()));
+        (uploader, replay)
+    }
+
     /// Writes an `UploadState` JSON to `<state_dir>/<sanitize(key)>.json`, matching
-    /// the on-disk shape `put_multipart` reads. `key` has no unsafe chars here, so
+    /// the on-disk shape the uploader reads. `key` has no unsafe chars here, so
     /// `sanitize_filename` is the identity.
     fn seed_state(state_dir: &Dir, key: &str, upload_id: &str, size: u64, part_size: u64) -> File {
         let state = serde_json::json!({
@@ -929,9 +918,9 @@ pub mod resumable {
                 complete_resp(key),
             ),
         ];
-        let (store, replay) = resumable_store(events, 0, &dir);
+        let (uploader, replay) = uploader_with(events, &dir);
 
-        store.put(key, File::new(src.path())).await.unwrap();
+        uploader.upload(key, &File::new(src.path())).await.unwrap();
 
         let requests = replay.actual_requests().collect::<Vec<_>>();
         assert_eq!(requests.len(), 3, "list_parts + one upload_part + complete");
@@ -1002,9 +991,9 @@ pub mod resumable {
                 complete_resp(key),
             ),
         ];
-        let (store, replay) = resumable_store(events, 0, &dir);
+        let (uploader, replay) = uploader_with(events, &dir);
 
-        store.put(key, File::new(src.path())).await.unwrap();
+        uploader.upload(key, &File::new(src.path())).await.unwrap();
 
         let requests = replay.actual_requests().collect::<Vec<_>>();
         assert_eq!(requests.len(), 5);
@@ -1070,9 +1059,9 @@ pub mod resumable {
                 complete_resp(key),
             ),
         ];
-        let (store, replay) = resumable_store(events, 0, &dir);
+        let (uploader, replay) = uploader_with(events, &dir);
 
-        store.put(key, File::new(src.path())).await.unwrap();
+        uploader.upload(key, &File::new(src.path())).await.unwrap();
 
         let requests = replay.actual_requests().collect::<Vec<_>>();
         assert_eq!(requests.len(), 5);
@@ -1091,7 +1080,7 @@ pub mod resumable {
         assert!(!state_file.exists());
     }
 
-    /// Scenario 4: no pre-seeded state but `upload_state_dir` is set — a fresh
+    /// Scenario 4: no pre-seeded state — a fresh
     /// upload runs (create → parts → complete) and the state file is cleaned up on
     /// success.
     #[tokio::test]
@@ -1130,9 +1119,9 @@ pub mod resumable {
                 complete_resp(key),
             ),
         ];
-        let (store, replay) = resumable_store(events, 0, &dir);
+        let (uploader, replay) = uploader_with(events, &dir);
 
-        store.put(key, File::new(src.path())).await.unwrap();
+        uploader.upload(key, &File::new(src.path())).await.unwrap();
 
         let requests = replay.actual_requests().collect::<Vec<_>>();
         assert_eq!(requests.len(), 4);
@@ -1146,7 +1135,7 @@ pub mod resumable {
         assert!(!state_file.exists());
     }
 
-    /// Scenario 4b: a mid-way failure with `upload_state_dir` set still aborts and
+    /// Scenario 4b: a mid-way failure still aborts and
     /// removes the state file (crash-only durability, not error durability).
     #[tokio::test]
     async fn failure_aborts_and_removes_state() {
@@ -1188,9 +1177,12 @@ pub mod resumable {
                 abort_resp,
             ),
         ];
-        let (store, replay) = resumable_store(events, 0, &dir);
+        let (uploader, replay) = uploader_with(events, &dir);
 
-        let err = store.put(key, File::new(src.path())).await.unwrap_err();
+        let err = uploader
+            .upload(key, &File::new(src.path()))
+            .await
+            .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
 
         let requests = replay.actual_requests().collect::<Vec<_>>();
@@ -1202,5 +1194,43 @@ pub mod resumable {
             .contains("AbortMultipartUpload"));
         // On an in-process error the state file is removed (resume is for crashes).
         assert!(!state_file.exists());
+    }
+
+    /// A file at or below the multipart threshold streams straight through
+    /// `put_object` with no durable state and no multipart calls. Also exercises
+    /// the `store()` accessor.
+    #[tokio::test]
+    async fn small_file_streams_through_put_object() {
+        let key = "small.bin";
+        let body = b"tiny-body".to_vec();
+        let src = temp_file_with(&body);
+        let state_dir = tempfile::TempDir::new().unwrap();
+        let dir = Dir::new(state_dir.path());
+
+        let put_resp = http::Response::builder()
+            .status(200)
+            .body(SdkBody::empty())
+            .unwrap();
+        // Threshold larger than the fixture forces the single-PUT path.
+        let (store, replay) = store_with_part_size(
+            vec![ReplayEvent::new(
+                req("PUT", "small.bin?x-id=PutObject"),
+                put_resp,
+            )],
+            1024,
+        );
+        let uploader = Uploader::new(store, Dir::new(dir.path()));
+
+        // The `store()` accessor exposes the underlying thin client.
+        assert_eq!(uploader.store().multipart_threshold(), 1024);
+
+        uploader.upload(key, &File::new(src.path())).await.unwrap();
+
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method(), "PUT");
+        assert!(requests[0].uri().to_string().contains("x-id=PutObject"));
+        // No durable state is written for the single-PUT path.
+        assert!(!dir.file(&format!("{key}.json")).exists());
     }
 }
