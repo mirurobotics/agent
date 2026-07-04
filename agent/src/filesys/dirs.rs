@@ -2,15 +2,17 @@
 use std::path::PathBuf;
 
 // internal crates
-use crate::filesys::dir::Dir;
-use crate::filesys::errors::{
-    CreateDirErr, CreateTmpDirErr, DeleteDirErr, DirMetadataErr, FileSysErr, MoveDirErr,
-    MoveDirRollbackErr, PathDoesNotExistErr, ReadDirErr, SetDirPermissionsErr, UnknownCurrentDirErr,
-    UnknownHomeDirErr,
+use crate::filesys::{
+    dir::Dir,
+    errors::{
+        CreateDirErr, CreateTmpDirErr, DeleteDirErr, DirMetadataErr, FileSysErr, MoveDirErr,
+        MoveDirRollbackErr, PathDoesNotExistErr, ReadDirErr, SetDirPermissionsErr,
+        UnknownCurrentDirErr, UnknownHomeDirErr,
+    },
+    file::File,
+    path::PathExt,
+    Overwrite,
 };
-use crate::filesys::file::File;
-use crate::filesys::path::PathExt;
-use crate::filesys::Overwrite;
 use crate::trace;
 
 // external crates
@@ -287,12 +289,14 @@ async fn move_to_with_overwrite(dir: &Dir, dest_dir: &Dir) -> Result<(), FileSys
                 Ok(()) => Err(move_dir_err(dir.clone(), dest_dir.clone(), e)),
                 // rollback failed — trash still holds the original dest contents
                 Err(rollback_err) => {
-                    let cleanup_source = delete(&trash_dir).await.err().and_then(
-                        |cleanup_err| match cleanup_err {
-                            FileSysErr::DeleteDirErr(err) => Some(err.source),
-                            _ => None,
-                        },
-                    );
+                    let cleanup_source =
+                        delete(&trash_dir)
+                            .await
+                            .err()
+                            .and_then(|cleanup_err| match cleanup_err {
+                                FileSysErr::DeleteDirErr(err) => Some(err.source),
+                                _ => None,
+                            });
                     Err(FileSysErr::MoveDirRollbackErr(MoveDirRollbackErr {
                         primary_source: Box::new(e),
                         rollback_source: Box::new(rollback_err),

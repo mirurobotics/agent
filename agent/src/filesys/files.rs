@@ -3,8 +3,9 @@ use std::io::Write;
 use std::time::SystemTime;
 
 // internal crates
-use crate::filesys::file::File;
-use crate::filesys::{errors::*, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions};
+use crate::filesys::{
+    errors::*, file::File, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
+};
 use crate::trace;
 
 // external crates

@@ -592,13 +592,11 @@ mod files {
 
         // create some files
         let file1 = dir.file("file1.txt");
-        filesys::files::write_string(&file1
-            , "arglebargle", WriteOptions::default())
+        filesys::files::write_string(&file1, "arglebargle", WriteOptions::default())
             .await
             .unwrap();
         let file2 = dir.file("file2.txt");
-        filesys::files::write_string(&file2
-            , "arglebargle", WriteOptions::default())
+        filesys::files::write_string(&file2, "arglebargle", WriteOptions::default())
             .await
             .unwrap();
 
@@ -785,15 +783,13 @@ mod delete_if_empty_recursive {
 
         // Add file at level2
         let file2 = level2.file("level2_file.txt");
-        filesys::files::write_string(&file2
-            , "level2 content", WriteOptions::default())
+        filesys::files::write_string(&file2, "level2 content", WriteOptions::default())
             .await
             .unwrap();
 
         // Add file at level4
         let file4 = level4.file("level4_file.txt");
-        filesys::files::write_string(&file4
-            , "level4 content", WriteOptions::default())
+        filesys::files::write_string(&file4, "level4 content", WriteOptions::default())
             .await
             .unwrap();
 
@@ -814,8 +810,7 @@ mod delete_if_empty_recursive {
 
         // Add hidden file
         let hidden_file = subdir.file(".hidden");
-        filesys::files::write_string(&hidden_file
-            , "hidden content", WriteOptions::default())
+        filesys::files::write_string(&hidden_file, "hidden content", WriteOptions::default())
             .await
             .unwrap();
 
@@ -874,7 +869,7 @@ mod move_to {
 
     /// Asserts that no leftover `.rename_trash_*` directories exist under `dir`.
     async fn assert_no_trash_dirs(dir: &filesys::Dir) {
-        let siblings = filesys::dirs::subdirs(&dir).await.unwrap();
+        let siblings = filesys::dirs::subdirs(dir).await.unwrap();
         for sibling in &siblings {
             let name = sibling.name().unwrap();
             assert!(
@@ -892,13 +887,17 @@ mod move_to {
 
         // overwrite false
         assert!(matches!(
-            filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap_err(),
+            filesys::dirs::move_to(&src, &dest, Overwrite::Deny)
+                .await
+                .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
 
         // overwrite true
         assert!(matches!(
-            filesys::dirs::move_to(&src, &dest, Overwrite::Allow).await.unwrap_err(),
+            filesys::dirs::move_to(&src, &dest, Overwrite::Allow)
+                .await
+                .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
 
@@ -912,23 +911,30 @@ mod move_to {
         // source directory
         let src = base_dir.subdir("src-dir");
         filesys::dirs::create(&src).await.unwrap();
-        filesys::files::write_string(&src.file("test.txt")
-            , "test content", WriteOptions::default())
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &src.file("test.txt"),
+            "test content",
+            WriteOptions::default(),
+        )
+        .await
+        .unwrap();
 
         // destination directory
         let dest = base_dir.subdir("dest-dir");
 
         // move source directory to destination directory
-        filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Deny)
+            .await
+            .unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
         // check the file was moved
         assert!(dest.file("test.txt").exists());
         assert_eq!(
-            filesys::files::read_string(&dest.file("test.txt")).await.unwrap(),
+            filesys::files::read_string(&dest.file("test.txt"))
+                .await
+                .unwrap(),
             "test content"
         );
         assert_no_trash_dirs(&base_dir).await;
@@ -948,7 +954,9 @@ mod move_to {
 
         // move should fail
         assert!(matches!(
-            filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap_err(),
+            filesys::dirs::move_to(&src, &dest, Overwrite::Deny)
+                .await
+                .unwrap_err(),
             FileSysErr::PathExistsErr { .. }
         ));
 
@@ -962,29 +970,39 @@ mod move_to {
         // source directory
         let src = base_dir.subdir("src-dir");
         filesys::dirs::create(&src).await.unwrap();
-        filesys::files::write_string(&src.file("src-file.txt")
-            , "src content", WriteOptions::default())
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &src.file("src-file.txt"),
+            "src content",
+            WriteOptions::default(),
+        )
+        .await
+        .unwrap();
 
         // destination directory
         let dest = base_dir.subdir("dest-dir");
         filesys::dirs::create(&dest).await.unwrap();
         assert!(dest.exists());
-        filesys::files::write_string(&dest.file("dest-file.txt")
-            , "dest content", WriteOptions::default())
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &dest.file("dest-file.txt"),
+            "dest content",
+            WriteOptions::default(),
+        )
+        .await
+        .unwrap();
 
         // overwrite true should succeed
-        filesys::dirs::move_to(&src, &dest, Overwrite::Allow).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Allow)
+            .await
+            .unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
         // verify src file moved, dest file replaced
         assert!(dest.file("src-file.txt").exists());
         assert_eq!(
-            filesys::files::read_string(&dest.file("src-file.txt")).await.unwrap(),
+            filesys::files::read_string(&dest.file("src-file.txt"))
+                .await
+                .unwrap(),
             "src content"
         );
         assert!(!dest.file("dest-file.txt").exists());
@@ -998,26 +1016,32 @@ mod move_to {
         // source directory
         let src_dir = base_dir.subdir("test-dir");
         filesys::dirs::create(&src_dir).await.unwrap();
-        filesys::files::write_string(&src_dir
-            .file("test.txt")
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&src_dir.file("test.txt"), "test", WriteOptions::default())
             .await
             .unwrap();
 
         // moving to itself should be a no-op
-        filesys::dirs::move_to(&src_dir, &src_dir, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src_dir, &src_dir, Overwrite::Deny)
+            .await
+            .unwrap();
         assert!(src_dir.exists());
         assert!(src_dir.file("test.txt").exists());
         assert_eq!(
-            filesys::files::read_string(&src_dir.file("test.txt")).await.unwrap(),
+            filesys::files::read_string(&src_dir.file("test.txt"))
+                .await
+                .unwrap(),
             "test"
         );
 
-        filesys::dirs::move_to(&src_dir, &src_dir, Overwrite::Allow).await.unwrap();
+        filesys::dirs::move_to(&src_dir, &src_dir, Overwrite::Allow)
+            .await
+            .unwrap();
         assert!(src_dir.exists());
         assert!(src_dir.file("test.txt").exists());
         assert_eq!(
-            filesys::files::read_string(&src_dir.file("test.txt")).await.unwrap(),
+            filesys::files::read_string(&src_dir.file("test.txt"))
+                .await
+                .unwrap(),
             "test"
         );
         assert_no_trash_dirs(&base_dir).await;
@@ -1031,24 +1055,21 @@ mod move_to {
         let src = base_dir.subdir("src-dir");
         filesys::dirs::create(&src).await.unwrap();
         let file1 = src.file("file1.txt");
-        filesys::files::write_string(&file1
-            , "file1", WriteOptions::default())
+        filesys::files::write_string(&file1, "file1", WriteOptions::default())
             .await
             .unwrap();
         // subdirectory 1
         let subdir1 = src.subdir("subdir1");
         filesys::dirs::create(&subdir1).await.unwrap();
         let file2 = subdir1.file("file2.txt");
-        filesys::files::write_string(&file2
-            , "file2", WriteOptions::default())
+        filesys::files::write_string(&file2, "file2", WriteOptions::default())
             .await
             .unwrap();
         // subdirectory 2
         let subdir2 = subdir1.subdir("subdir2");
         filesys::dirs::create(&subdir2).await.unwrap();
         let file3 = subdir2.file("file3.txt");
-        filesys::files::write_string(&file3
-            , "file3", WriteOptions::default())
+        filesys::files::write_string(&file3, "file3", WriteOptions::default())
             .await
             .unwrap();
 
@@ -1056,13 +1077,20 @@ mod move_to {
         let dest = base_dir.subdir("dest-dir");
 
         // move source directory to destination directory
-        filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Deny)
+            .await
+            .unwrap();
         assert!(!src.exists());
         assert!(dest.exists());
 
         // verify root directory
         assert!(dest.file("file1.txt").exists());
-        assert_eq!(filesys::files::read_string(&dest.file("file1.txt")).await.unwrap(), "file1");
+        assert_eq!(
+            filesys::files::read_string(&dest.file("file1.txt"))
+                .await
+                .unwrap(),
+            "file1"
+        );
         assert_eq!(filesys::dirs::subdirs(&dest).await.unwrap().len(), 1);
         assert_eq!(filesys::dirs::files(&dest).await.unwrap().len(), 1);
 
@@ -1071,10 +1099,15 @@ mod move_to {
         assert!(dest_subdir1.exists());
         assert!(dest_subdir1.file("file2.txt").exists());
         assert_eq!(
-            filesys::files::read_string(&dest_subdir1.file("file2.txt")).await.unwrap(),
+            filesys::files::read_string(&dest_subdir1.file("file2.txt"))
+                .await
+                .unwrap(),
             "file2"
         );
-        assert_eq!(filesys::dirs::subdirs(&dest_subdir1).await.unwrap().len(), 1);
+        assert_eq!(
+            filesys::dirs::subdirs(&dest_subdir1).await.unwrap().len(),
+            1
+        );
         assert_eq!(filesys::dirs::files(&dest_subdir1).await.unwrap().len(), 1);
 
         // verify subdirectory 2
@@ -1082,10 +1115,15 @@ mod move_to {
         assert!(dest_subdir2.exists());
         assert!(dest_subdir2.file("file3.txt").exists());
         assert_eq!(
-            filesys::files::read_string(&dest_subdir2.file("file3.txt")).await.unwrap(),
+            filesys::files::read_string(&dest_subdir2.file("file3.txt"))
+                .await
+                .unwrap(),
             "file3"
         );
-        assert_eq!(filesys::dirs::subdirs(&dest_subdir2).await.unwrap().len(), 0);
+        assert_eq!(
+            filesys::dirs::subdirs(&dest_subdir2).await.unwrap().len(),
+            0
+        );
         assert_eq!(filesys::dirs::files(&dest_subdir2).await.unwrap().len(), 1);
         assert_no_trash_dirs(&base_dir).await;
     }
@@ -1097,8 +1135,7 @@ mod move_to {
         // source directory
         let src = base_dir.subdir("src-dir");
         filesys::dirs::create(&src).await.unwrap();
-        filesys::files::write_string(&src.file("test.txt")
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&src.file("test.txt"), "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -1106,7 +1143,9 @@ mod move_to {
         let dest = base_dir.subdir("parent").subdir("dest-dir");
 
         // move source directory to destination directory
-        filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Deny)
+            .await
+            .unwrap();
         assert!(!src.exists());
         assert!(dest.parent().unwrap().exists());
         assert!(dest.exists());
@@ -1128,10 +1167,13 @@ mod move_to {
         // destination directory
         let dest = base_dir.subdir("dest-dir");
         filesys::dirs::create(&dest).await.unwrap();
-        filesys::files::write_string(&dest.file("keep-me.txt")
-            , "precious", WriteOptions::default())
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &dest.file("keep-me.txt"),
+            "precious",
+            WriteOptions::default(),
+        )
+        .await
+        .unwrap();
 
         // move shoud fail
         let result = filesys::dirs::move_to(&src, &dest, Overwrite::Allow).await;
@@ -1140,7 +1182,9 @@ mod move_to {
         // dest must be restored with its original content
         assert!(dest.exists());
         assert_eq!(
-            filesys::files::read_string(&dest.file("keep-me.txt")).await.unwrap(),
+            filesys::files::read_string(&dest.file("keep-me.txt"))
+                .await
+                .unwrap(),
             "precious"
         );
 
@@ -1158,7 +1202,9 @@ pub mod set_permissions {
         let permissions = std::fs::Permissions::from_mode(0o755);
 
         assert!(matches!(
-            filesys::dirs::set_permissions(&target, permissions).await.unwrap_err(),
+            filesys::dirs::set_permissions(&target, permissions)
+                .await
+                .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -1175,17 +1221,23 @@ pub mod set_permissions {
         let restricted = std::fs::Permissions::from_mode(0o700);
 
         // Test read-execute only (555 in octal)
-        filesys::dirs::set_permissions(&target, readonly).await.unwrap();
+        filesys::dirs::set_permissions(&target, readonly)
+            .await
+            .unwrap();
         let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o555);
 
         // Test read-write-execute (755 in octal)
-        filesys::dirs::set_permissions(&target, readwrite).await.unwrap();
+        filesys::dirs::set_permissions(&target, readwrite)
+            .await
+            .unwrap();
         let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o755);
 
         // Test owner-only (700 in octal)
-        filesys::dirs::set_permissions(&target, restricted).await.unwrap();
+        filesys::dirs::set_permissions(&target, restricted)
+            .await
+            .unwrap();
         let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o700);
     }
@@ -1208,7 +1260,9 @@ pub mod set_permissions {
 
         for mode in permissions {
             let expected = std::fs::Permissions::from_mode(mode);
-            filesys::dirs::set_permissions(&target, expected.clone()).await.unwrap();
+            filesys::dirs::set_permissions(&target, expected.clone())
+                .await
+                .unwrap();
             let actual = filesys::dirs::permissions(&target).await.unwrap();
             assert_eq!(actual.mode() & 0o777, expected.mode() & 0o777);
         }
@@ -1237,8 +1291,7 @@ pub mod permissions {
         filesys::dirs::create(&target).await.unwrap();
 
         // set known permissions and verify read-back
-        filesys::dirs::set_permissions(&target
-            , std::fs::Permissions::from_mode(0o750))
+        filesys::dirs::set_permissions(&target, std::fs::Permissions::from_mode(0o750))
             .await
             .unwrap();
         let perms = filesys::dirs::permissions(&target).await.unwrap();

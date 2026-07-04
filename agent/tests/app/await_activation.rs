@@ -15,18 +15,22 @@ use miru_agent::filesys::{self, WriteOptions};
 async fn fresh_layout(name: &str) -> (Layout, filesys::Dir) {
     let dir = filesys::dirs::create_temp(name).await.unwrap();
     let layout = Layout::new(dir.clone());
-    filesys::dirs::create_if_absent(&layout.auth().root).await.unwrap();
+    filesys::dirs::create_if_absent(&layout.auth().root)
+        .await
+        .unwrap();
     (layout, dir)
 }
 
 async fn write_keys(layout: &Layout) {
     let auth = layout.auth();
-    filesys::files::write_string(&auth.private_key()
-        , "private", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
-    filesys::files::write_string(&auth.public_key()
-        , "public", WriteOptions::OVERWRITE_ATOMIC)
+    filesys::files::write_string(
+        &auth.private_key(),
+        "private",
+        WriteOptions::OVERWRITE_ATOMIC,
+    )
+    .await
+    .unwrap();
+    filesys::files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 }
@@ -78,14 +82,20 @@ async fn activates_after_n_cycles() {
         async move {
             if n + 1 == activate_after {
                 let auth = layout.auth();
-                filesys::files::write_string(&auth.private_key()
-                    , "private", WriteOptions::OVERWRITE_ATOMIC)
-                    .await
-                    .unwrap();
-                filesys::files::write_string(&auth.public_key()
-                    , "public", WriteOptions::OVERWRITE_ATOMIC)
-                    .await
-                    .unwrap();
+                filesys::files::write_string(
+                    &auth.private_key(),
+                    "private",
+                    WriteOptions::OVERWRITE_ATOMIC,
+                )
+                .await
+                .unwrap();
+                filesys::files::write_string(
+                    &auth.public_key(),
+                    "public",
+                    WriteOptions::OVERWRITE_ATOMIC,
+                )
+                .await
+                .unwrap();
             }
         }
     };

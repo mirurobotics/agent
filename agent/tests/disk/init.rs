@@ -42,9 +42,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_attempts() {
-        let dir = filesys::dirs::create_temp("reset_attempts")
-            .await
-            .unwrap();
+        let dir = filesys::dirs::create_temp("reset_attempts").await.unwrap();
         let layout = Layout::new(dir);
 
         let dpl = Deployment {
@@ -70,9 +68,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_active_cooldown() {
-        let dir = filesys::dirs::create_temp("reset_cooldown")
-            .await
-            .unwrap();
+        let dir = filesys::dirs::create_temp("reset_cooldown").await.unwrap();
         let layout = Layout::new(dir);
 
         let mut dpl = Deployment {

@@ -55,10 +55,13 @@ pub mod concurrent {
 
         // write invalid json files to files in the cache directory
         let invalid_json_file = dir.file("invalid.json");
-        filesys::files::write_string(&invalid_json_file
-            , "invalid json", WriteOptions::OVERWRITE_NONATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &invalid_json_file,
+            "invalid json",
+            WriteOptions::OVERWRITE_NONATOMIC,
+        )
+        .await
+        .unwrap();
 
         // create 10 entries
         for i in 0..10 {
@@ -139,10 +142,13 @@ pub mod single_thread {
         // inject 3 invalid (non-JSON) files to push size to 6 (> capacity 5)
         for i in 0..3 {
             let invalid_file = dir.file(&format!("invalid{i}.json"));
-            filesys::files::write_string(&invalid_file
-                , "not valid json", WriteOptions::OVERWRITE_ATOMIC)
-                .await
-                .unwrap();
+            filesys::files::write_string(
+                &invalid_file,
+                "not valid json",
+                WriteOptions::OVERWRITE_ATOMIC,
+            )
+            .await
+            .unwrap();
         }
 
         // size should now be 6

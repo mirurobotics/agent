@@ -21,13 +21,11 @@ async fn setup(mock_client: MockClient) -> (filesys::Dir, TokenManager, JoinHand
         .await
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
-    filesys::files::write_string(&private_key_file
-        , "private_key", WriteOptions::default())
+    filesys::files::write_string(&private_key_file, "private_key", WriteOptions::default())
         .await
         .unwrap();
     let public_key_file = dir.file("public_key.pem");
-    filesys::files::write_string(&public_key_file
-        , "public_key", WriteOptions::default())
+    filesys::files::write_string(&public_key_file, "public_key", WriteOptions::default())
         .await
         .unwrap();
     let (token_mngr, worker_handle) = TokenManager::spawn(
@@ -74,13 +72,11 @@ pub mod spawn {
             .unwrap();
         filesys::files::delete(&token_file.file).await.unwrap();
         let private_key_file = dir.file("private_key.pem");
-        filesys::files::write_string(&private_key_file
-            , "private_key", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "private_key", WriteOptions::default())
             .await
             .unwrap();
         let public_key_file = dir.file("public_key.pem");
-        filesys::files::write_string(&public_key_file
-            , "public_key", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "public_key", WriteOptions::default())
             .await
             .unwrap();
 
@@ -103,8 +99,7 @@ pub mod spawn {
             .await
             .unwrap();
         let public_key_file = dir.file("public_key.pem");
-        filesys::files::write_string(&public_key_file
-            , "public_key", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "public_key", WriteOptions::default())
             .await
             .unwrap();
 
@@ -127,8 +122,7 @@ pub mod spawn {
             .await
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
-        filesys::files::write_string(&private_key_file
-            , "private_key", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "private_key", WriteOptions::default())
             .await
             .unwrap();
 
@@ -303,7 +297,9 @@ pub mod refresh_token {
         let (dir, token_mngr, worker_handle) = setup_with_rsa(mock_client).await;
 
         // delete the token file — refresh should still work (cached in memory)
-        filesys::files::delete(&dir.file("token.json")).await.unwrap();
+        filesys::files::delete(&dir.file("token.json"))
+            .await
+            .unwrap();
 
         token_mngr.refresh_token().await.unwrap();
         let token = token_mngr.get_token().await.unwrap();

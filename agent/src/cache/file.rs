@@ -36,8 +36,7 @@ where
     pub async fn new(file: File, capacity: usize) -> Result<Self, CacheErr> {
         if !file.exists() {
             let empty_cache: HashMap<K, CacheEntry<K, V>> = HashMap::new();
-            files::write_json(&file, &empty_cache, WriteOptions::OVERWRITE_ATOMIC)
-                .await?;
+            files::write_json(&file, &empty_cache, WriteOptions::OVERWRITE_ATOMIC).await?;
         }
 
         Ok(Self {

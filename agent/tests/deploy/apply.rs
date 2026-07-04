@@ -302,7 +302,10 @@ mod find_target_deployed {
             file.exists(),
             "healthy deployment file should exist on disk"
         );
-        assert_eq!(filesys::files::read_string(&file).await.unwrap(), "healthy-content");
+        assert_eq!(
+            filesys::files::read_string(&file).await.unwrap(),
+            "healthy-content"
+        );
     }
 }
 

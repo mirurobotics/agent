@@ -49,8 +49,7 @@ pub mod init {
         let layout = Layout::new(dir);
         // create a private key file (but no public key file)
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -80,14 +79,12 @@ pub mod init {
         let layout = Layout::new(dir);
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -112,15 +109,13 @@ pub mod init {
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -130,8 +125,7 @@ pub mod init {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY".to_string(),
                 expires_at: Utc::now(),
             };
-        filesys::files::write_json(&token_file
-            , &token, WriteOptions::default())
+        filesys::files::write_json(&token_file, &token, WriteOptions::default())
             .await
             .unwrap();
 
@@ -156,7 +150,9 @@ pub mod init {
             status: DeviceStatus::Offline,
             ..Device::default()
         };
-        let device = filesys::files::read_json::<Device>(&device_file).await.unwrap();
+        let device = filesys::files::read_json::<Device>(&device_file)
+            .await
+            .unwrap();
         assert_eq!(device, expected_device);
     }
 
@@ -168,23 +164,20 @@ pub mod init {
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
-        filesys::files::write_json(&device_file
-            , &device, WriteOptions::default())
+        filesys::files::write_json(&device_file, &device, WriteOptions::default())
             .await
             .unwrap();
 
@@ -199,7 +192,9 @@ pub mod init {
 
         // the token file should now have the default token
         let token_file = layout.auth().token();
-        let token = filesys::files::read_json::<Token>(&token_file).await.unwrap();
+        let token = filesys::files::read_json::<Token>(&token_file)
+            .await
+            .unwrap();
         assert_eq!(token.token, Token::default().token);
 
         // check last activity
@@ -214,15 +209,13 @@ pub mod init {
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -234,8 +227,7 @@ pub mod init {
             status: DeviceStatus::Online,
             ..Device::default()
         };
-        filesys::files::write_json(&device_file
-            , &device, WriteOptions::default())
+        filesys::files::write_json(&device_file, &device, WriteOptions::default())
             .await
             .unwrap();
 
@@ -250,7 +242,9 @@ pub mod init {
 
         // the device file should now have the device set to offline
         let device_file = layout.device();
-        let device = filesys::files::read_json::<Device>(&device_file).await.unwrap();
+        let device = filesys::files::read_json::<Device>(&device_file)
+            .await
+            .unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
     }
 }
@@ -265,23 +259,20 @@ pub mod shutdown {
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
-        filesys::files::write_json(&device_file
-            , &device, WriteOptions::default())
+        filesys::files::write_json(&device_file, &device, WriteOptions::default())
             .await
             .unwrap();
 
@@ -310,23 +301,20 @@ pub mod shutdown {
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
-        filesys::files::write_string(&private_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create a public key file
         let public_key_file = layout.auth().public_key();
-        filesys::files::write_string(&public_key_file
-            , "test", WriteOptions::default())
+        filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
             .await
             .unwrap();
 
         // create the device file
         let device_file = layout.device();
         let device = Device::default();
-        filesys::files::write_json(&device_file
-            , &device, WriteOptions::OVERWRITE_NONATOMIC)
+        filesys::files::write_json(&device_file, &device, WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
 
@@ -353,7 +341,9 @@ pub mod shutdown {
 
         // the device file should now have the device set to offline
         let device_file = layout.device();
-        let device = filesys::files::read_json::<Device>(&device_file).await.unwrap();
+        let device = filesys::files::read_json::<Device>(&device_file)
+            .await
+            .unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);
         assert!(device.last_disconnected_at <= Utc::now());

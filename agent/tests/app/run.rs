@@ -18,23 +18,20 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
 
     // create a private key file
     let private_key_file = layout.auth().private_key();
-    filesys::files::write_string(&private_key_file
-        , "test", WriteOptions::default())
+    filesys::files::write_string(&private_key_file, "test", WriteOptions::default())
         .await
         .unwrap();
 
     // create a public key file
     let public_key_file = layout.auth().public_key();
-    filesys::files::write_string(&public_key_file
-        , "test", WriteOptions::default())
+    filesys::files::write_string(&public_key_file, "test", WriteOptions::default())
         .await
         .unwrap();
 
     // create the device file
     let device_file = layout.device();
     let device = Device::default();
-    filesys::files::write_json(&device_file
-        , &device, WriteOptions::default())
+    filesys::files::write_json(&device_file, &device, WriteOptions::default())
         .await
         .unwrap();
 }

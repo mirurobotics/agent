@@ -14,7 +14,9 @@ pub mod assert_activated {
     async fn fresh_layout() -> (Layout, filesys::Dir) {
         let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir.clone());
-        filesys::dirs::create_if_absent(&layout.auth().root).await.unwrap();
+        filesys::dirs::create_if_absent(&layout.auth().root)
+            .await
+            .unwrap();
         (layout, dir)
     }
 
@@ -29,12 +31,13 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_private_key_missing() {
         let (layout, _dir) = fresh_layout().await;
-        filesys::files::write_string(&layout
-            .auth()
-            .public_key()
-            , "public", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &layout.auth().public_key(),
+            "public",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -43,12 +46,13 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_public_key_missing() {
         let (layout, _dir) = fresh_layout().await;
-        filesys::files::write_string(&layout
-            .auth()
-            .private_key()
-            , "private", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        filesys::files::write_string(
+            &layout.auth().private_key(),
+            "private",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -58,12 +62,14 @@ pub mod assert_activated {
     async fn returns_ok_when_both_keys_present() {
         let (layout, _dir) = fresh_layout().await;
         let auth = layout.auth();
-        filesys::files::write_string(&auth.private_key()
-            , "private", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        filesys::files::write_string(&auth.public_key()
-            , "public", WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_string(
+            &auth.private_key(),
+            "private",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        filesys::files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -98,9 +104,7 @@ pub mod resolve_device_id {
             id: "dvc_from_file".to_string(),
             ..Device::default()
         };
-        filesys::files::write_json(&layout
-            .device()
-            , &device, WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_json(&layout.device(), &device, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -121,8 +125,7 @@ pub mod resolve_device_id {
             token: new_jwt("dvc_from_jwt"),
             expires_at: Utc::now() + Duration::minutes(5),
         };
-        filesys::files::write_json(&auth.token()
-            , &token, WriteOptions::OVERWRITE_ATOMIC)
+        filesys::files::write_json(&auth.token(), &token, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 

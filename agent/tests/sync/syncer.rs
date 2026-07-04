@@ -37,15 +37,21 @@ pub async fn create_token_manager(
         .await
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
-    filesys::files::write_string(&private_key_file
-        , "private_key", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
+    filesys::files::write_string(
+        &private_key_file,
+        "private_key",
+        WriteOptions::OVERWRITE_ATOMIC,
+    )
+    .await
+    .unwrap();
     let public_key_file = dir.file("public_key.pem");
-    filesys::files::write_string(&public_key_file
-        , "public_key", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
+    filesys::files::write_string(
+        &public_key_file,
+        "public_key",
+        WriteOptions::OVERWRITE_ATOMIC,
+    )
+    .await
+    .unwrap();
 
     TokenManager::spawn(
         32,

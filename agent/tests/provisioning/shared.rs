@@ -166,13 +166,25 @@ impl StorageSnapshot {
 
     pub async fn assert_unchanged(&self, layout: &Layout) {
         let auth = layout.auth();
-        assert_eq!(filesys::files::read_string(&layout.device()).await.ok(), self.device);
-        assert_eq!(filesys::files::read_string(&layout.settings()).await.ok(), self.settings);
+        assert_eq!(
+            filesys::files::read_string(&layout.device()).await.ok(),
+            self.device
+        );
+        assert_eq!(
+            filesys::files::read_string(&layout.settings()).await.ok(),
+            self.settings
+        );
         assert_eq!(
             filesys::files::read_string(&auth.private_key()).await.ok(),
             self.private_key
         );
-        assert_eq!(filesys::files::read_string(&auth.public_key()).await.ok(), self.public_key);
-        assert_eq!(filesys::files::read_string(&auth.token()).await.ok(), self.token);
+        assert_eq!(
+            filesys::files::read_string(&auth.public_key()).await.ok(),
+            self.public_key
+        );
+        assert_eq!(
+            filesys::files::read_string(&auth.token()).await.ok(),
+            self.token
+        );
     }
 }

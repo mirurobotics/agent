@@ -109,7 +109,9 @@ pub mod provision_fn {
 
         // pre-create only device.json — no keys, so assert_activated fails
         // and the short-circuit doesn't trigger
-        miru_agent::filesys::dirs::create_if_absent(&env.layout.root()).await.unwrap();
+        miru_agent::filesys::dirs::create_if_absent(&env.layout.root())
+            .await
+            .unwrap();
         let stub_device = serde_json::json!({
             "device_id": DEVICE_ID,
             "session_id": "sess",
@@ -120,14 +122,13 @@ pub mod provision_fn {
             "last_connected_at": "1970-01-01T00:00:00Z",
             "last_disconnected_at": "1970-01-01T00:00:00Z",
         });
-        miru_agent::filesys::files::write_string(&env.layout
-            .device()
-            , 
-                &serde_json::to_string(&stub_device).unwrap(),
-                WriteOptions::OVERWRITE_ATOMIC,
-            )
-            .await
-            .unwrap();
+        miru_agent::filesys::files::write_string(
+            &env.layout.device(),
+            &serde_json::to_string(&stub_device).unwrap(),
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let mock = mock_ok_provision("after-fallthrough");
         let outcome = provision::provision(
@@ -154,7 +155,9 @@ pub mod provision_fn {
         env.seed_provision("initial").await;
 
         // delete the public key to trigger provisioning
-        miru_agent::filesys::files::delete(&env.layout.auth().public_key()).await.unwrap();
+        miru_agent::filesys::files::delete(&env.layout.auth().public_key())
+            .await
+            .unwrap();
 
         let snapshot = StorageSnapshot::capture(&env.layout).await;
 
@@ -180,11 +183,13 @@ pub mod provision_fn {
 
         // corrupt device.json so read_json fails, but keep the keys intact so
         // assert_activated still succeeds and the short-circuit branch runs
-        miru_agent::filesys::files::write_string(&env.layout
-            .device()
-            , "not valid json", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        miru_agent::filesys::files::write_string(
+            &env.layout.device(),
+            "not valid json",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         // a failing mock — short-circuit must still fire even when device.json
         // is unreadable, so the backend should never be called
