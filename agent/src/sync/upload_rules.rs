@@ -2,8 +2,8 @@
 use std::collections::HashSet;
 
 // internal crates
+use crate::disk;
 use crate::models::{DplActivity, UploadRule, UploadRuleID};
-use crate::storage;
 
 // external crates
 use tracing::{debug, error};
@@ -18,9 +18,9 @@ use tracing::{debug, error};
 /// Public as a test seam (mirrors `decide_ready`) so unit tests can exercise the
 /// traversal directly against seeded stores.
 pub async fn active_upload_rules(
-    deployments: &storage::Deployments,
-    releases: &storage::Releases,
-    upload_rules: &storage::UploadRules,
+    deployments: &disk::Deployments,
+    releases: &disk::Releases,
+    upload_rules: &disk::UploadRules,
 ) -> Vec<UploadRule> {
     let deployed = match deployments
         .find_where(|d| d.activity_status == DplActivity::Deployed)

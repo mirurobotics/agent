@@ -2,9 +2,9 @@
 use std::collections::BTreeSet;
 
 // internal crates
+use miru_agent::disk::{self, Layout};
 use miru_agent::filesys;
 use miru_agent::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
-use miru_agent::storage::{self, Layout};
 use miru_agent::sync::upload_rules::active_upload_rules;
 
 // =============================== TEST HELPERS ================================= //
@@ -30,18 +30,18 @@ fn ids(rules: &[UploadRule]) -> BTreeSet<String> {
 async fn spawn_stores(
     layout: &Layout,
 ) -> (
-    std::sync::Arc<storage::Deployments>,
-    std::sync::Arc<storage::Releases>,
-    std::sync::Arc<storage::UploadRules>,
+    std::sync::Arc<disk::Deployments>,
+    std::sync::Arc<disk::Releases>,
+    std::sync::Arc<disk::UploadRules>,
 ) {
     use std::sync::Arc;
-    let (deployments, _h1) = storage::Deployments::spawn(64, layout.deployments(), 1000)
+    let (deployments, _h1) = disk::Deployments::spawn(64, layout.deployments(), 1000)
         .await
         .unwrap();
-    let (releases, _h2) = storage::Releases::spawn(64, layout.releases(), 1000)
+    let (releases, _h2) = disk::Releases::spawn(64, layout.releases(), 1000)
         .await
         .unwrap();
-    let (upload_rules, _h3) = storage::UploadRules::spawn(64, layout.upload_rules(), 1000)
+    let (upload_rules, _h3) = disk::UploadRules::spawn(64, layout.upload_rules(), 1000)
         .await
         .unwrap();
     (
@@ -54,9 +54,9 @@ async fn spawn_stores(
 /// Seed a Deployed deployment -> release -> upload rule bodies so the
 /// traversal in `active_upload_rules` resolves to the given rules.
 async fn seed_deployed(
-    deployments: &storage::Deployments,
-    releases: &storage::Releases,
-    upload_rules: &storage::UploadRules,
+    deployments: &disk::Deployments,
+    releases: &disk::Releases,
+    upload_rules: &disk::UploadRules,
     dpl_id: &str,
     release_id: &str,
     rules: &[UploadRule],
