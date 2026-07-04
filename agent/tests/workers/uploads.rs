@@ -5,16 +5,16 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::error::SleepController;
 use miru_agent::models::UploadRule;
-use miru_agent::upload::{UploadErr, UploaderExt};
+use miru_agent::upload::{ScannerExt, UploadErr};
 use miru_agent::workers::uploads;
 
-// A counting mock implementing UploaderExt: records how many times scan() is
-// called so the thin timing worker can be observed without any real uploader.
-struct CountingUploader {
+// A counting mock implementing ScannerExt: records how many times scan() is
+// called so the thin timing worker can be observed without any real scanner.
+struct CountingScanner {
     scans: Arc<AtomicUsize>,
 }
 
-impl UploaderExt for CountingUploader {
+impl ScannerExt for CountingScanner {
     async fn update_rules(&self, _rules: Vec<UploadRule>) -> Result<(), UploadErr> {
         Ok(())
     }
@@ -36,12 +36,12 @@ async fn scan_called_each_tick() {
     };
     let sleep_ctrl = Arc::new(SleepController::new());
     let scans = Arc::new(AtomicUsize::new(0));
-    let uploader = Arc::new(CountingUploader {
+    let scanner = Arc::new(CountingScanner {
         scans: scans.clone(),
     });
 
     let options_for_spawn = options.clone();
-    let uploader_for_spawn = uploader.clone();
+    let scanner_for_spawn = scanner.clone();
     let sleep_ctrl_for_spawn = sleep_ctrl.clone();
     let shutdown_signal = Box::pin(async move {
         std::future::pending::<()>().await;
@@ -49,7 +49,7 @@ async fn scan_called_each_tick() {
     let _handle = tokio::spawn(async move {
         uploads::run(
             &options_for_spawn,
-            uploader_for_spawn.as_ref(),
+            scanner_for_spawn.as_ref(),
             sleep_ctrl_for_spawn.sleep_fn(),
             shutdown_signal,
         )
@@ -78,7 +78,7 @@ async fn shuts_down_on_signal() {
     };
     let sleep_ctrl = Arc::new(SleepController::new());
     let scans = Arc::new(AtomicUsize::new(0));
-    let uploader = Arc::new(CountingUploader {
+    let scanner = Arc::new(CountingScanner {
         scans: scans.clone(),
     });
 
@@ -88,12 +88,12 @@ async fn shuts_down_on_signal() {
     });
 
     let options_for_spawn = options.clone();
-    let uploader_for_spawn = uploader.clone();
+    let scanner_for_spawn = scanner.clone();
     let sleep_ctrl_for_spawn = sleep_ctrl.clone();
     let handle = tokio::spawn(async move {
         uploads::run(
             &options_for_spawn,
-            uploader_for_spawn.as_ref(),
+            scanner_for_spawn.as_ref(),
             sleep_ctrl_for_spawn.sleep_fn(),
             shutdown_signal,
         )

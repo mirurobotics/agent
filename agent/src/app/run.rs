@@ -264,12 +264,12 @@ async fn init_uploads_worker(
 ) -> Result<(), ServerErr> {
     info!("Initializing uploads worker...");
 
-    let uploader = app_state.uploader.clone();
+    let scanner = app_state.scanner.clone();
 
     let uploads_handle = tokio::spawn(async move {
         uploads::run(
             &options,
-            uploader.as_ref(),
+            scanner.as_ref(),
             tokio::time::sleep,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;

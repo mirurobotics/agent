@@ -13,14 +13,14 @@ use crate::filesys::PathExt;
 use crate::http;
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
-use crate::upload::UploaderExt;
+use crate::upload::ScannerExt;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
-    pub uploader: Arc<crate::upload::Uploader>,
+    pub scanner: Arc<crate::upload::Scanner>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -64,15 +64,15 @@ impl AppState {
         let (event_hub, event_hub_handle) =
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
-        // initialize the uploader (before the syncer, which pushes rules to it)
-        let (uploader, uploader_handle) = crate::upload::uploader::Uploader::spawn(
+        // initialize the scanner (before the syncer, which pushes rules to it)
+        let (scanner, scanner_handle) = crate::upload::scanner::Scanner::spawn(
             64,
-            crate::upload::uploader::UploaderArgs {
+            crate::upload::scanner::ScannerArgs {
                 min_poll_interval_secs: 1,
                 now_fn: Arc::new(chrono::Utc::now),
             },
         )?;
-        let uploader = Arc::new(uploader);
+        let scanner = Arc::new(scanner);
 
         // initialize the syncer
         let (syncer, syncer_handle) = sync::Syncer::spawn(
@@ -90,7 +90,7 @@ impl AppState {
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
                 event_hub: event_hub.clone(),
-                uploader: uploader.clone(),
+                scanner: scanner.clone(),
             },
         )?;
         let syncer = Arc::new(syncer);
@@ -102,7 +102,7 @@ impl AppState {
             let handles = vec![
                 token_mngr_handle,
                 syncer_handle,
-                uploader_handle,
+                scanner_handle,
                 event_hub_handle,
             ];
 
@@ -114,7 +114,7 @@ impl AppState {
                 storage,
                 http_client,
                 syncer,
-                uploader,
+                scanner,
                 token_mngr,
                 activity_tracker,
                 event_hub,
@@ -127,9 +127,9 @@ impl AppState {
         // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
 
-        // shutdown the uploader after the syncer (the syncer pushes rules to it)
-        if let Err(e) = self.uploader.shutdown().await {
-            tracing::error!("failed to shutdown uploader: {e}");
+        // shutdown the scanner after the syncer (the syncer pushes rules to it)
+        if let Err(e) = self.scanner.shutdown().await {
+            tracing::error!("failed to shutdown scanner: {e}");
         }
 
         // shutdown the event hub

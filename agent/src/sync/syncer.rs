@@ -12,7 +12,7 @@ use crate::events;
 use crate::http;
 use crate::sync::{deployments, errors::*};
 use crate::trace;
-use crate::upload::UploaderExt;
+use crate::upload::ScannerExt;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -57,7 +57,7 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
-    pub uploader: Arc<crate::upload::Uploader>,
+    pub scanner: Arc<crate::upload::Scanner>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,7 +91,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
-    uploader: Arc<crate::upload::Uploader>,
+    scanner: Arc<crate::upload::Scanner>,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -112,7 +112,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             event_hub: args.event_hub,
-            uploader: args.uploader,
+            scanner: args.scanner,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -253,18 +253,18 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         })
         .await;
 
-        // push the active upload rule set to the uploader. The local deployment
+        // push the active upload rule set to the scanner. The local deployment
         // cache reflects what was applied (regardless of whether push_deployments
         // to the backend succeeded), so push on every sync attempt to keep the
-        // uploader converged.
+        // scanner converged.
         let rules = crate::sync::upload_rules::active_upload_rules(
             storage_ref.deployments.as_ref(),
             storage_ref.releases.as_ref(),
             storage_ref.upload_rules.as_ref(),
         )
         .await;
-        if let Err(e) = self.uploader.update_rules(rules).await {
-            error!("failed to push upload rules to uploader: {e:?}");
+        if let Err(e) = self.scanner.update_rules(rules).await {
+            error!("failed to push upload rules to scanner: {e:?}");
         }
 
         result

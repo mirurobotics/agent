@@ -42,12 +42,17 @@ pub struct ReadyFile {
 }
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
-pub struct UploaderArgs {
+pub struct ScannerArgs {
     pub min_poll_interval_secs: i64,
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
-pub struct SingleThreadUploader {
+/// Poll-based file watcher: it does NOT subscribe to OS/inotify filesystem
+/// events. Instead each `scan()` re-enumerates the globbed files on a cadence
+/// (one global `min_poll_interval_secs` shared by all rules) and applies a
+/// size/mtime stability window to decide which files are ready. Newly-ready
+/// files are deduped so each is reported exactly once.
+pub struct SingleThreadScanner {
     rules: Vec<UploadRule>,
     next_scan_at: HashMap<UploadRuleID, DateTime<Utc>>,
     observations: HashMap<PathBuf, FileObservation>,
@@ -56,8 +61,8 @@ pub struct SingleThreadUploader {
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
-impl SingleThreadUploader {
-    pub fn new(args: UploaderArgs) -> Self {
+impl SingleThreadScanner {
+    pub fn new(args: ScannerArgs) -> Self {
         Self {
             rules: Vec::new(),
             next_scan_at: HashMap::new(),
@@ -231,7 +236,7 @@ pub fn decide_ready(
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
 #[allow(async_fn_in_trait)]
-pub trait UploaderExt {
+pub trait ScannerExt {
     async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), UploadErr>;
     async fn scan(&self) -> Result<(), UploadErr>;
     async fn shutdown(&self) -> Result<(), UploadErr>;
@@ -263,13 +268,13 @@ pub enum Command {
 }
 
 pub struct Worker {
-    uploader: SingleThreadUploader,
+    scanner: SingleThreadScanner,
     receiver: mpsc::Receiver<Command>,
 }
 
 impl Worker {
-    pub fn new(uploader: SingleThreadUploader, receiver: mpsc::Receiver<Command>) -> Self {
-        Self { uploader, receiver }
+    pub fn new(scanner: SingleThreadScanner, receiver: mpsc::Receiver<Command>) -> Self {
+        Self { scanner, receiver }
     }
 
     pub async fn run(mut self) {
@@ -282,28 +287,28 @@ impl Worker {
                     break;
                 }
                 Command::UpdateRules { rules, respond_to } => {
-                    self.uploader.update_rules(rules);
+                    self.scanner.update_rules(rules);
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send update rules response: {:?}", e);
                     }
                 }
                 Command::Scan { respond_to } => {
                     dispatch!(
-                        self.uploader.scan().await,
+                        self.scanner.scan().await,
                         respond_to,
                         "Actor failed to send scan response"
                     );
                 }
                 #[cfg(feature = "test")]
                 Command::GetRules { respond_to } => {
-                    if respond_to.send(Ok(self.uploader.rules.clone())).is_err() {
+                    if respond_to.send(Ok(self.scanner.rules.clone())).is_err() {
                         error!("Actor failed to send get rules response");
                     }
                 }
                 #[cfg(feature = "test")]
                 Command::GetReportedCount { respond_to } => {
                     if respond_to
-                        .send(Ok(self.uploader.already_reported.len()))
+                        .send(Ok(self.scanner.already_reported.len()))
                         .is_err()
                     {
                         error!("Actor failed to send get reported count response");
@@ -314,19 +319,22 @@ impl Worker {
     }
 }
 
+/// Cloneable handle to the poll-based file [`SingleThreadScanner`] actor. The
+/// scanner polls the filesystem on a cadence (cadence-driven, not OS/inotify
+/// event-driven) and reports newly-stable files exactly once.
 #[derive(Debug)]
-pub struct Uploader {
+pub struct Scanner {
     sender: mpsc::Sender<Command>,
 }
 
-impl Uploader {
+impl Scanner {
     pub fn spawn(
         buffer_size: usize,
-        args: UploaderArgs,
+        args: ScannerArgs,
     ) -> Result<(Self, JoinHandle<()>), UploadErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            uploader: SingleThreadUploader::new(args),
+            scanner: SingleThreadScanner::new(args),
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
@@ -369,7 +377,7 @@ impl Uploader {
     }
 }
 
-impl UploaderExt for Uploader {
+impl ScannerExt for Scanner {
     async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), UploadErr> {
         self.send_command(|tx| Command::UpdateRules {
             rules,
@@ -386,7 +394,7 @@ impl UploaderExt for Uploader {
     async fn shutdown(&self) -> Result<(), UploadErr> {
         self.send_command(|tx| Command::Shutdown { respond_to: tx })
             .await??;
-        info!("Uploader shutdown complete");
+        info!("Scanner shutdown complete");
         Ok(())
     }
 }

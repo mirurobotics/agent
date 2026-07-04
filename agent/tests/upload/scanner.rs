@@ -7,9 +7,9 @@ use std::sync::Arc;
 use crate::mocks::clock::Clock;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::models::{UploadRule, UploadRuleSource};
-use miru_agent::upload::uploader::{decide_ready, FileObservation, ReadyFile};
-use miru_agent::upload::uploader::{Uploader, UploaderArgs};
-use miru_agent::upload::UploaderExt;
+use miru_agent::upload::scanner::{decide_ready, FileObservation, ReadyFile};
+use miru_agent::upload::scanner::{Scanner, ScannerArgs};
+use miru_agent::upload::ScannerExt;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -185,11 +185,11 @@ mod pure {
 mod actor {
     use super::*;
 
-    /// Spawn an uploader actor with a deterministic injected clock.
-    fn spawn_uploader(clock: &Clock, min_poll: i64) -> Uploader {
-        let (u, _h) = Uploader::spawn(
+    /// Spawn a scanner actor with a deterministic injected clock.
+    fn spawn_scanner(clock: &Clock, min_poll: i64) -> Scanner {
+        let (u, _h) = Scanner::spawn(
             64,
-            UploaderArgs {
+            ScannerArgs {
                 min_poll_interval_secs: min_poll,
                 now_fn: Arc::new(clock.now_fn()),
             },
@@ -198,7 +198,7 @@ mod actor {
         u
     }
 
-    /// The set of rule ids currently held by the uploader.
+    /// The set of rule ids currently held by the scanner.
     fn ids(rules: &[UploadRule]) -> BTreeSet<String> {
         rules.iter().map(|r| r.id.clone()).collect()
     }
@@ -207,9 +207,9 @@ mod actor {
     #[tokio::test]
     async fn update_rules_replaces_set() {
         let clock = Clock::new(1000);
-        let uploader = spawn_uploader(&clock, 1);
+        let scanner = spawn_scanner(&clock, 1);
 
-        uploader
+        scanner
             .update_rules(vec![
                 rule_with("a", "/none/*.mcap", 0),
                 rule_with("b", "/none/*.mcap", 0),
@@ -217,16 +217,16 @@ mod actor {
             .await
             .unwrap();
         assert_eq!(
-            ids(&uploader.get_rules().await.unwrap()),
+            ids(&scanner.get_rules().await.unwrap()),
             BTreeSet::from(["a".to_string(), "b".to_string()])
         );
 
-        uploader
+        scanner
             .update_rules(vec![rule_with("c", "/none/*.mcap", 0)])
             .await
             .unwrap();
         assert_eq!(
-            ids(&uploader.get_rules().await.unwrap()),
+            ids(&scanner.get_rules().await.unwrap()),
             BTreeSet::from(["c".to_string()])
         );
     }
@@ -247,19 +247,19 @@ mod actor {
 
         let clock = Clock::new(1000);
         // all rules share a single global cadence of 1s.
-        let uploader = spawn_uploader(&clock, 1);
-        uploader.update_rules(vec![rule_a, rule_b]).await.unwrap();
+        let scanner = spawn_scanner(&clock, 1);
+        scanner.update_rules(vec![rule_a, rule_b]).await.unwrap();
 
         // first sighting just records observations; nothing ready yet.
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
 
         // +1s: the global interval has elapsed, so BOTH rules come due in the same
         // scan and both files are now stable -> both ready. There is no per-rule
         // interval, so neither rule is skipped.
         clock.advance(1);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 2);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 2);
     }
 
     // A rule scanned within the global cadence window is skipped on the next scan:
@@ -276,24 +276,24 @@ mod actor {
         let clock = Clock::new(1000);
         // global cadence of 10s: after the first scan the rule is not due again
         // until t=1010.
-        let uploader = spawn_uploader(&clock, 10);
-        uploader.update_rules(vec![rule]).await.unwrap();
+        let scanner = spawn_scanner(&clock, 10);
+        scanner.update_rules(vec![rule]).await.unwrap();
 
         // record only: stable_since=1000, next_scan_at=1010.
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
 
         // +1s (t=1001 < 1010): the file is stable and would be ready, but the rule
         // is not yet due, so the scan skips it and nothing is reported.
         clock.advance(1);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
 
         // +9s (t=1010 >= 1010): the cadence has elapsed, the rule is due, and the
         // now-stable file is reported.
         clock.advance(9);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
     }
 
     // The readiness stability window is honored through the actor's scan path.
@@ -306,17 +306,17 @@ mod actor {
         let rule = rule_with("z", &format!("{}/*.mcap", base.display()), 10);
 
         let clock = Clock::new(1000);
-        let uploader = spawn_uploader(&clock, 1);
-        uploader.update_rules(vec![rule]).await.unwrap();
+        let scanner = spawn_scanner(&clock, 1);
+        scanner.update_rules(vec![rule]).await.unwrap();
 
         // record only: stable_since=1000, next_scan_at=1001.
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
 
         // +10s: due (1010 >= 1001) and unchanged for 10s >= window 10 -> ready.
         clock.advance(10);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
     }
 
     // A ready file is counted exactly once across repeated scans.
@@ -329,35 +329,35 @@ mod actor {
         let rule = rule_with("once", &format!("{}/*.mcap", base.display()), 0);
 
         let clock = Clock::new(1000);
-        let uploader = spawn_uploader(&clock, 1);
-        uploader.update_rules(vec![rule]).await.unwrap();
+        let scanner = spawn_scanner(&clock, 1);
+        scanner.update_rules(vec![rule]).await.unwrap();
 
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
-
-        clock.advance(1);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
 
         clock.advance(1);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
 
         clock.advance(1);
-        uploader.scan().await.unwrap();
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
+
+        clock.advance(1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
     }
 
     // With no rules the scan is a no-op: no panic, nothing reported.
     #[tokio::test]
     async fn empty_set_scan_is_noop() {
         let clock = Clock::new(1000);
-        let uploader = spawn_uploader(&clock, 1);
+        let scanner = spawn_scanner(&clock, 1);
 
         for _ in 0..5 {
-            uploader.scan().await.unwrap();
+            scanner.scan().await.unwrap();
         }
-        assert_eq!(uploader.get_reported_count().await.unwrap(), 0);
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
     }
 
     // shutdown stops the actor loop; the actor task completes and any subsequent
@@ -365,20 +365,20 @@ mod actor {
     #[tokio::test]
     async fn shutdown_stops_actor_and_later_commands_error() {
         let clock = Clock::new(1000);
-        let (uploader, handle) = Uploader::spawn(
+        let (scanner, handle) = Scanner::spawn(
             64,
-            UploaderArgs {
+            ScannerArgs {
                 min_poll_interval_secs: 1,
                 now_fn: Arc::new(clock.now_fn()),
             },
         )
         .unwrap();
 
-        uploader.shutdown().await.unwrap();
+        scanner.shutdown().await.unwrap();
         // the run loop broke out of the receive loop, so the task finishes.
         handle.await.unwrap();
 
-        let err = uploader.scan().await.unwrap_err();
+        let err = scanner.scan().await.unwrap_err();
         assert!(matches!(
             err,
             miru_agent::upload::UploadErr::SendActorMessageErr(_)

@@ -4,14 +4,14 @@ use std::pin::Pin;
 use std::time::Duration;
 
 // internal crates
-use crate::upload::UploaderExt;
+use crate::upload::ScannerExt;
 
 // external crates
 use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// Base tick interval between `scan()` passes. The uploader internally skips
+    /// Base tick interval between `scan()` passes. The scanner internally skips
     /// rules whose `next_scan_at` has not elapsed, so the worker is pure timing.
     pub tick_interval_secs: i64,
 }
@@ -24,9 +24,9 @@ impl Default for Options {
     }
 }
 
-pub async fn run<F, Fut, UploaderT: UploaderExt>(
+pub async fn run<F, Fut, ScannerT: ScannerExt>(
     options: &Options,
-    uploader: &UploaderT,
+    scanner: &ScannerT,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -38,13 +38,13 @@ pub async fn run<F, Fut, UploaderT: UploaderExt>(
             info!("Uploads worker shutdown complete");
         }
         // doesn't return but we do need to run it in the background
-        _ = run_impl(options, uploader, sleep_fn) => {}
+        _ = run_impl(options, scanner, sleep_fn) => {}
     }
 }
 
-async fn run_impl<F, Fut, UploaderT: UploaderExt>(
+async fn run_impl<F, Fut, ScannerT: ScannerExt>(
     options: &Options,
-    uploader: &UploaderT,
+    scanner: &ScannerT,
     sleep_fn: F, // for testing purposes
 ) where
     F: Fn(Duration) -> Fut,
@@ -53,7 +53,7 @@ async fn run_impl<F, Fut, UploaderT: UploaderExt>(
     info!("Running uploads worker");
 
     loop {
-        let _ = uploader.scan().await;
+        let _ = scanner.scan().await;
         sleep_fn(Duration::from_secs(options.tick_interval_secs.max(1) as u64)).await;
     }
 }

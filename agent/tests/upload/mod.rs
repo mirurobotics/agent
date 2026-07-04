@@ -1,2 +1,2 @@
 pub mod errors;
-pub mod uploader;
+pub mod scanner;
