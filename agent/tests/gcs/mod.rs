@@ -1,0 +1,461 @@
+// standard crates
+use std::io::Write as _;
+use std::sync::{Arc, Mutex};
+
+// internal crates
+use crate::mocks::http_client::run_server;
+use miru_agent::errors::{Code, Error};
+use miru_agent::gcs::errors::{
+    ConnectionErr, GcsErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
+};
+use miru_agent::gcs::GcsStore;
+
+// external crates
+use axum::body::Bytes;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{get, post};
+use axum::Router;
+use google_cloud_gax::error::rpc::{Code as GaxCode, Status};
+use google_cloud_gax::error::Error as GaxError;
+use google_cloud_gax::response::Response as GaxResponse;
+use google_cloud_storage as gcs;
+use tempfile::NamedTempFile;
+
+const BUCKET: &str = "test-bucket";
+
+/// Writes `bytes` to a fresh temp file and returns the handle (kept alive so the
+/// file is not deleted until the test drops it).
+fn temp_file_with(bytes: &[u8]) -> NamedTempFile {
+    let mut f = NamedTempFile::new().unwrap();
+    f.write_all(bytes).unwrap();
+    f.flush().unwrap();
+    f
+}
+
+// ============================ HTTP DATA-PATH MOCK ============================ //
+//
+// The `Storage` (data) client uploads/downloads over HTTP/JSON. We point it at a
+// local axum server via the `endpoint` override. A permissive router matches on
+// method + path prefix and records the requests it saw so tests can assert an
+// upload/download was issued and that an `Authorization: Bearer ...` header was
+// present. Uploads return a minimal decodable GCS v1 `Object` JSON so the client
+// finalizes the upload; downloads return canned bytes.
+
+/// Shared state recording what the HTTP mock server observed.
+#[derive(Clone, Default)]
+struct HttpRecorder {
+    inner: Arc<Mutex<HttpRecord>>,
+}
+
+#[derive(Default)]
+struct HttpRecord {
+    upload_hits: usize,
+    download_hits: usize,
+    saw_bearer: bool,
+    /// Bytes to serve for the download body.
+    download_body: Vec<u8>,
+    /// If set, downloads respond with this status instead of 200 + body.
+    download_status: Option<StatusCode>,
+}
+
+fn bearer_present(headers: &HeaderMap) -> bool {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.starts_with("Bearer "))
+        .unwrap_or(false)
+}
+
+/// Handles the single-shot upload `POST /upload/storage/v1/b/{bucket}/o`.
+/// Returns a minimal `Object` JSON that the client decodes to finalize.
+async fn upload_handler(
+    State(rec): State<HttpRecorder>,
+    headers: HeaderMap,
+    _body: Bytes,
+) -> ([(axum::http::HeaderName, &'static str); 1], String) {
+    let mut r = rec.inner.lock().unwrap();
+    r.upload_hits += 1;
+    r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+    let object = serde_json::json!({
+        "name": "artifacts/hello.txt",
+        "bucket": BUCKET,
+    })
+    .to_string();
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        object,
+    )
+}
+
+/// Handles the media download `GET /storage/v1/b/{bucket}/o/{object}`. On
+/// success the client's `read_object` finalization requires an
+/// `x-goog-generation` response header (the object's generation).
+async fn download_handler(
+    State(rec): State<HttpRecorder>,
+    headers: HeaderMap,
+) -> (
+    StatusCode,
+    [(axum::http::HeaderName, &'static str); 1],
+    Vec<u8>,
+) {
+    let mut r = rec.inner.lock().unwrap();
+    r.download_hits += 1;
+    r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+    let gen_header = (
+        axum::http::HeaderName::from_static("x-goog-generation"),
+        "123456",
+    );
+    if let Some(status) = r.download_status {
+        return (
+            status,
+            [gen_header],
+            b"{\"error\":{\"code\":404,\"message\":\"Not Found\"}}".to_vec(),
+        );
+    }
+    (StatusCode::OK, [gen_header], r.download_body.clone())
+}
+
+/// Builds the data-path router and returns it alongside the recorder.
+fn http_router(rec: HttpRecorder) -> Router {
+    Router::new()
+        .route("/upload/storage/v1/b/{*rest}", post(upload_handler))
+        .route("/storage/v1/b/{*rest}", get(download_handler))
+        .with_state(rec)
+}
+
+/// Builds a `GcsStore` pointed at a freshly started HTTP mock server.
+async fn http_store(rec: HttpRecorder) -> GcsStore {
+    let server = run_server(http_router(rec)).await;
+    GcsStore::new(
+        "test-token".to_string(),
+        BUCKET.to_string(),
+        Some(server.base_url),
+    )
+    .await
+    .unwrap()
+}
+
+pub mod put {
+    use super::*;
+
+    #[tokio::test]
+    async fn upload_streams_file_body() {
+        let rec = HttpRecorder::default();
+        let store = http_store(rec.clone()).await;
+        let src = temp_file_with(b"hello world");
+
+        store
+            .put_object("artifacts/hello.txt", src.path())
+            .await
+            .unwrap();
+
+        let r = rec.inner.lock().unwrap();
+        assert_eq!(r.upload_hits, 1);
+        assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
+    }
+
+    #[tokio::test]
+    async fn upload_missing_source_maps_to_invalid_response() {
+        let rec = HttpRecorder::default();
+        let store = http_store(rec).await;
+        let missing = std::path::Path::new("/nonexistent/definitely/not/here.bin");
+
+        let err = store.put_object("k", missing).await.unwrap_err();
+
+        assert!(matches!(err, GcsErr::InvalidResponseErr(_)));
+    }
+}
+
+pub mod get {
+    use super::*;
+
+    #[tokio::test]
+    async fn download_streams_body_to_file() {
+        let payload = b"\x00\x01\x02binary-body\xff".to_vec();
+        let rec = HttpRecorder::default();
+        rec.inner.lock().unwrap().download_body = payload.clone();
+        let store = http_store(rec.clone()).await;
+        let dest = NamedTempFile::new().unwrap();
+
+        store
+            .get_object("blobs/data.bin", dest.path())
+            .await
+            .unwrap();
+
+        let written = std::fs::read(dest.path()).unwrap();
+        assert_eq!(written, payload);
+        let r = rec.inner.lock().unwrap();
+        assert_eq!(r.download_hits, 1);
+        assert!(r.saw_bearer, "download must carry Authorization: Bearer");
+    }
+
+    #[tokio::test]
+    async fn download_missing_maps_to_not_found() {
+        let rec = HttpRecorder::default();
+        rec.inner.lock().unwrap().download_status = Some(StatusCode::NOT_FOUND);
+        let store = http_store(rec).await;
+        let dest = NamedTempFile::new().unwrap();
+
+        let err = store
+            .get_object("missing.txt", dest.path())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, GcsErr::ObjectNotFoundErr(_)));
+        assert!(matches!(err.code(), Code::ResourceNotFound));
+        assert_eq!(err.http_status().as_u16(), 404);
+    }
+
+    #[tokio::test]
+    async fn download_to_unwritable_dest_maps_to_invalid_response() {
+        let payload = b"body".to_vec();
+        let rec = HttpRecorder::default();
+        rec.inner.lock().unwrap().download_body = payload;
+        let store = http_store(rec).await;
+        // The destination's parent directory does not exist, so creating the
+        // file fails after the object is fetched.
+        let dest = std::path::Path::new("/nonexistent/dir/out.bin");
+
+        let err = store.get_object("blobs/data.bin", dest).await.unwrap_err();
+
+        assert!(matches!(err, GcsErr::InvalidResponseErr(_)));
+    }
+}
+
+// ============================ gRPC CONTROL-PATH MOCK ============================ //
+//
+// The `StorageControl` client's delete/get-object go over gRPC. Rather than
+// stand up a tonic server, we mock the public `gcs::stub::StorageControl` trait
+// with `mockall` and inject it via `GcsStore::with_control_stub` (which builds
+// the control client with `StorageControl::from_stub`). Only `delete_object` and
+// `get_object` are ever exercised; the rest of the 33-method trait surface must
+// be listed for `mockall` but is never called.
+
+mockall::mock! {
+    #[derive(Debug)]
+    StorageControl {}
+    impl gcs::stub::StorageControl for StorageControl {
+    async fn delete_bucket( &self, _req: gcs::model::DeleteBucketRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<()>>;
+    async fn get_bucket( &self, _req: gcs::model::GetBucketRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Bucket>>;
+    async fn create_bucket( &self, _req: gcs::model::CreateBucketRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Bucket>>;
+    async fn list_buckets( &self, _req: gcs::model::ListBucketsRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ListBucketsResponse>>;
+    async fn lock_bucket_retention_policy( &self, _req: gcs::model::LockBucketRetentionPolicyRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Bucket>>;
+    async fn get_iam_policy( &self, _req: google_cloud_iam_v1::model::GetIamPolicyRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_iam_v1::model::Policy>>;
+    async fn set_iam_policy( &self, _req: google_cloud_iam_v1::model::SetIamPolicyRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_iam_v1::model::Policy>>;
+    async fn test_iam_permissions( &self, _req: google_cloud_iam_v1::model::TestIamPermissionsRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_iam_v1::model::TestIamPermissionsResponse>>;
+    async fn update_bucket( &self, _req: gcs::model::UpdateBucketRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Bucket>>;
+    async fn compose_object( &self, _req: gcs::model::ComposeObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Object>>;
+    async fn delete_object( &self, _req: gcs::model::DeleteObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<()>>;
+    async fn restore_object( &self, _req: gcs::model::RestoreObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Object>>;
+    async fn get_object( &self, _req: gcs::model::GetObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Object>>;
+    async fn update_object( &self, _req: gcs::model::UpdateObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Object>>;
+    async fn list_objects( &self, _req: gcs::model::ListObjectsRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ListObjectsResponse>>;
+    async fn rewrite_object( &self, _req: gcs::model::RewriteObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::RewriteResponse>>;
+    async fn move_object( &self, _req: gcs::model::MoveObjectRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Object>>;
+    async fn create_folder( &self, _req: gcs::model::CreateFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Folder>>;
+    async fn delete_folder( &self, _req: gcs::model::DeleteFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<()>>;
+    async fn get_folder( &self, _req: gcs::model::GetFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::Folder>>;
+    async fn list_folders( &self, _req: gcs::model::ListFoldersRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ListFoldersResponse>>;
+    async fn rename_folder( &self, _req: gcs::model::RenameFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_longrunning::model::Operation>>;
+    async fn get_storage_layout( &self, _req: gcs::model::GetStorageLayoutRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::StorageLayout>>;
+    async fn create_managed_folder( &self, _req: gcs::model::CreateManagedFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ManagedFolder>>;
+    async fn delete_managed_folder( &self, _req: gcs::model::DeleteManagedFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<()>>;
+    async fn get_managed_folder( &self, _req: gcs::model::GetManagedFolderRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ManagedFolder>>;
+    async fn list_managed_folders( &self, _req: gcs::model::ListManagedFoldersRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ListManagedFoldersResponse>>;
+    async fn create_anywhere_cache( &self, _req: gcs::model::CreateAnywhereCacheRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_longrunning::model::Operation>>;
+    async fn update_anywhere_cache( &self, _req: gcs::model::UpdateAnywhereCacheRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_longrunning::model::Operation>>;
+    async fn disable_anywhere_cache( &self, _req: gcs::model::DisableAnywhereCacheRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::AnywhereCache>>;
+    async fn pause_anywhere_cache( &self, _req: gcs::model::PauseAnywhereCacheRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::AnywhereCache>>;
+    async fn resume_anywhere_cache( &self, _req: gcs::model::ResumeAnywhereCacheRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::AnywhereCache>>;
+    async fn get_anywhere_cache( &self, _req: gcs::model::GetAnywhereCacheRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::AnywhereCache>>;
+    async fn list_anywhere_caches( &self, _req: gcs::model::ListAnywhereCachesRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::ListAnywhereCachesResponse>>;
+    async fn get_folder_intelligence_config( &self, _req: gcs::model::GetFolderIntelligenceConfigRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::IntelligenceConfig>>;
+    async fn update_folder_intelligence_config( &self, _req: gcs::model::UpdateFolderIntelligenceConfigRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::IntelligenceConfig>>;
+    async fn get_project_intelligence_config( &self, _req: gcs::model::GetProjectIntelligenceConfigRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::IntelligenceConfig>>;
+    async fn update_project_intelligence_config( &self, _req: gcs::model::UpdateProjectIntelligenceConfigRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::IntelligenceConfig>>;
+    async fn get_organization_intelligence_config( &self, _req: gcs::model::GetOrganizationIntelligenceConfigRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::IntelligenceConfig>>;
+    async fn update_organization_intelligence_config( &self, _req: gcs::model::UpdateOrganizationIntelligenceConfigRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<gcs::model::IntelligenceConfig>>;
+    async fn get_operation( &self, _req: google_cloud_longrunning::model::GetOperationRequest, _options: google_cloud_gax::options::RequestOptions) -> google_cloud_gax::Result<google_cloud_gax::response::Response<google_cloud_longrunning::model::Operation>>;
+    }
+}
+
+/// Builds a `GcsStore` whose control client is the given mock. The data client
+/// is pointed at an unused loopback endpoint (never called by delete/exists).
+async fn control_store(mock: MockStorageControl) -> GcsStore {
+    GcsStore::with_control_stub(mock, BUCKET.to_string(), "http://127.0.0.1:0".to_string())
+        .await
+        .unwrap()
+}
+
+fn not_found_err() -> GaxError {
+    GaxError::service(Status::default().set_code(GaxCode::NotFound))
+}
+
+fn permission_denied_err() -> GaxError {
+    GaxError::service(Status::default().set_code(GaxCode::PermissionDenied))
+}
+
+pub mod delete {
+    use super::*;
+
+    #[tokio::test]
+    async fn delete_removes_object() {
+        let mut mock = MockStorageControl::new();
+        mock.expect_delete_object()
+            .times(1)
+            .returning(|_, _| Ok(GaxResponse::from(())));
+        let store = control_store(mock).await;
+
+        store.delete_object("blobs/data.bin").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_missing_is_idempotent() {
+        let mut mock = MockStorageControl::new();
+        mock.expect_delete_object()
+            .times(1)
+            .returning(|_, _| Err(not_found_err()));
+        let store = control_store(mock).await;
+
+        // A NOT_FOUND delete is a success (idempotent).
+        store.delete_object("missing.txt").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_error_maps_to_request_failed() {
+        let mut mock = MockStorageControl::new();
+        mock.expect_delete_object()
+            .times(1)
+            .returning(|_, _| Err(permission_denied_err()));
+        let store = control_store(mock).await;
+
+        let err = store.delete_object("denied.txt").await.unwrap_err();
+
+        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+    }
+}
+
+pub mod exists {
+    use super::*;
+
+    #[tokio::test]
+    async fn present_returns_true() {
+        let mut mock = MockStorageControl::new();
+        mock.expect_get_object()
+            .times(1)
+            .returning(|_, _| Ok(GaxResponse::from(gcs::model::Object::default())));
+        let store = control_store(mock).await;
+
+        assert!(store.object_exists("blobs/data.bin").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn absent_returns_false() {
+        let mut mock = MockStorageControl::new();
+        mock.expect_get_object()
+            .times(1)
+            .returning(|_, _| Err(not_found_err()));
+        let store = control_store(mock).await;
+
+        assert!(!store.object_exists("missing.txt").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mut mock = MockStorageControl::new();
+        mock.expect_get_object()
+            .times(1)
+            .returning(|_, _| Err(permission_denied_err()));
+        let store = control_store(mock).await;
+
+        let err = store.object_exists("denied.txt").await.unwrap_err();
+
+        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+    }
+}
+
+/// The production constructor performs no real GCS call, so it can be built in a
+/// unit test. A token with a byte invalid in an HTTP header value is rejected.
+pub mod construction {
+    use super::*;
+
+    #[tokio::test]
+    async fn new_builds_with_valid_token() {
+        let store = GcsStore::new("valid-token".to_string(), "prod-bucket".to_string(), None).await;
+        assert!(store.is_ok());
+    }
+
+    #[tokio::test]
+    async fn new_rejects_bad_token() {
+        // A newline is not a valid HTTP header value byte.
+        let result = GcsStore::new("bad\ntoken".to_string(), "prod-bucket".to_string(), None).await;
+        match result {
+            Err(GcsErr::InvalidResponseErr(_)) => {}
+            Ok(_) => panic!("expected InvalidResponseErr, got Ok"),
+            Err(other) => panic!("expected InvalidResponseErr, got {other:?}"),
+        }
+    }
+}
+
+/// Direct assertions on the leaf error types' trait behavior, mirroring s3's
+/// `error_types` module. These pin the `crate::errors::Error` contract each
+/// variant promises (code / http_status / is_network_conn_err / Display).
+pub mod error_types {
+    use super::*;
+
+    #[test]
+    fn object_not_found_maps_to_resource_not_found() {
+        let err = GcsErr::ObjectNotFoundErr(ObjectNotFoundErr {
+            key: "k".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::ResourceNotFound));
+        assert_eq!(err.http_status().as_u16(), 404);
+        assert!(!err.is_network_conn_err());
+        assert!(err.to_string().contains("object not found"));
+    }
+
+    #[test]
+    fn connection_err_is_network_conn_err() {
+        let err = GcsErr::ConnectionErr(ConnectionErr {
+            key: "k".to_string(),
+            msg: "boom".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(err.is_network_conn_err());
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert!(err.to_string().contains("connection error"));
+    }
+
+    #[test]
+    fn request_failed_err_defaults_to_internal_server_error() {
+        let err = GcsErr::RequestFailedErr(RequestFailedErr {
+            operation: "get_object".to_string(),
+            key: None,
+            status: None,
+            msg: "nope".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(!err.is_network_conn_err());
+        // Display with no key / no status hits the fallback formatting.
+        let msg = err.to_string();
+        assert!(msg.contains("<none>"));
+        assert!(msg.contains("unknown"));
+        assert!(msg.contains("get_object"));
+    }
+
+    #[test]
+    fn invalid_response_err_defaults_to_internal_server_error() {
+        let err = GcsErr::InvalidResponseErr(InvalidResponseErr {
+            operation: "get_object".to_string(),
+            msg: "bad body".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(err.to_string().contains("invalid response"));
+    }
+}
