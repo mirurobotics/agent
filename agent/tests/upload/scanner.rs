@@ -33,6 +33,24 @@ fn rule_with(id: &str, glob: &str, stability_window_secs: i32) -> UploadRule {
     }
 }
 
+/// Build an UploadRule with a pinned upload_collection_id (plus id/glob/stability).
+fn rule_in_collection(
+    id: &str,
+    collection_id: &str,
+    glob: &str,
+    stability_window_secs: i32,
+) -> UploadRule {
+    UploadRule {
+        id: id.to_string(),
+        upload_collection_id: collection_id.to_string(),
+        source: UploadRuleSource {
+            glob: glob.to_string(),
+            stability_window_secs,
+        },
+        ..Default::default()
+    }
+}
+
 /// The set of file names (last path component) of the returned ready files.
 fn ready_names(ready: &[ReadyFile]) -> BTreeSet<String> {
     ready
@@ -203,9 +221,12 @@ mod actor {
         rules.iter().map(|r| r.id.clone()).collect()
     }
 
-    // update_rules replaces the active set wholesale (not a merge).
+    // update_rules is a state-preserving reconcile at collection granularity: it
+    // DROPS collections no longer present in the pushed set. Here each rule sits in
+    // its own default collection (rule_with mints a fresh collection id per rule),
+    // so pushing [a,b] then [c] drops the a/b collections and leaves only c.
     #[tokio::test]
-    async fn update_rules_replaces_set() {
+    async fn update_rules_reconciles_active_set() {
         let clock = Clock::new(1000);
         let scanner = spawn_scanner(&clock, 1);
 
@@ -229,6 +250,117 @@ mod actor {
             ids(&scanner.get_rules().await.unwrap()),
             BTreeSet::from(["c".to_string()])
         );
+    }
+
+    // Per-collection state carries over across a rule-version swap: replacing a
+    // collection's rule (new rule id + digest, SAME collection id) preserves that
+    // collection's observation/dedupe state, so an already-reported file is not
+    // re-reported after the swap.
+    #[tokio::test]
+    async fn update_rules_carries_state_across_rule_version_swap() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base = dir.path().clone();
+        std::fs::write(base.join("carry.mcap"), b"ccc").unwrap();
+        let glob = format!("{}/*.mcap", base.display());
+
+        let clock = Clock::new(1000);
+        let scanner = spawn_scanner(&clock, 1);
+
+        // v1: pin collection "coll-A" with rule id "r1" / digest "d1".
+        let mut rule_v1 = rule_in_collection("r1", "coll-A", &glob, 0);
+        rule_v1.digest = "d1".to_string();
+        scanner.update_rules(vec![rule_v1]).await.unwrap();
+
+        // record only.
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
+
+        // +1s: the file crosses into ready and is reported once.
+        clock.advance(1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
+
+        // v2: SAME collection "coll-A", different rule id "r2" / digest "d2".
+        let mut rule_v2 = rule_in_collection("r2", "coll-A", &glob, 0);
+        rule_v2.digest = "d2".to_string();
+        scanner.update_rules(vec![rule_v2]).await.unwrap();
+
+        // +1s and scan again: the dedupe set carried across the swap, so the
+        // already-reported file is NOT re-reported -> count stays at 1.
+        clock.advance(1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
+
+        // The swap took effect: exactly one rule, and its digest is the v2 digest.
+        let rules = scanner.get_rules().await.unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].digest, "d2".to_string());
+    }
+
+    // A single push carrying two rules for the SAME collection is folded to one
+    // (last-in-the-vec wins) before any state is touched, collapsing the redeploy
+    // double-rule case. The winning rule's glob matches the one real file.
+    #[tokio::test]
+    async fn update_rules_double_rule_tie_break_last_wins() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base = dir.path().clone();
+        std::fs::write(base.join("hit.mcap"), b"hhh").unwrap();
+        let glob_match = format!("{}/*.mcap", base.display());
+        let glob_miss = format!("{}/nope/*.mcap", base.display());
+
+        let clock = Clock::new(1000);
+        let scanner = spawn_scanner(&clock, 1);
+
+        // Both rules pin collection "coll-B"; rule_y is last in the vec, so it wins.
+        let mut rule_x = rule_in_collection("rx", "coll-B", &glob_miss, 0);
+        rule_x.digest = "d1".to_string();
+        let mut rule_y = rule_in_collection("ry", "coll-B", &glob_match, 0);
+        rule_y.digest = "d2".to_string();
+        scanner.update_rules(vec![rule_x, rule_y]).await.unwrap();
+
+        // Exactly one rule survives, and it is the last-in-vec (digest "d2").
+        let rules = scanner.get_rules().await.unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].digest, "d2".to_string());
+
+        // record only.
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
+
+        // +1s: the single (winning) collection's glob matches the one file -> one
+        // report, no double-count, no panic.
+        clock.advance(1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 1);
+    }
+
+    // Two DISTINCT collections do not share observation/dedupe state: given two
+    // rules in different collections with identical globs matching the same one
+    // file, that file crosses into ready once PER collection -> reported twice.
+    // Under the old global map this would dedupe to 1.
+    #[tokio::test]
+    async fn distinct_collections_do_not_share_observation_state() {
+        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base = dir.path().clone();
+        std::fs::write(base.join("shared.mcap"), b"sss").unwrap();
+        let glob = format!("{}/*.mcap", base.display());
+
+        let clock = Clock::new(1000);
+        let scanner = spawn_scanner(&clock, 1);
+
+        let rule_c1 = rule_in_collection("c1", "coll-C1", &glob, 0);
+        let rule_c2 = rule_in_collection("c2", "coll-C2", &glob, 0);
+        scanner.update_rules(vec![rule_c1, rule_c2]).await.unwrap();
+
+        // record only (both collections observe the file).
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 0);
+
+        // +1s: each collection independently sees the file cross into ready, so the
+        // summed already_reported count is 2 (once per collection).
+        clock.advance(1);
+        scanner.scan().await.unwrap();
+        assert_eq!(scanner.get_reported_count().await.unwrap(), 2);
     }
 
     // Each rule keeps its own scan cadence: a 5s rule is scanned at +5s while a
