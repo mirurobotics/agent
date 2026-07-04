@@ -6,7 +6,7 @@ use crate::mocks::http_client::MockClient;
 use backend_api::models::TokenResponse;
 use miru_agent::authn::{token_mngr::TokenFile, AuthnErr, Token, TokenManager, TokenManagerExt};
 use miru_agent::crypt::rsa;
-use miru_agent::filesys::{self, Overwrite, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, Overwrite, WriteOptions};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::{self, HTTPErr};
 
@@ -297,9 +297,7 @@ pub mod refresh_token {
         let (dir, token_mngr, worker_handle) = setup_with_rsa(mock_client).await;
 
         // delete the token file — refresh should still work (cached in memory)
-        files::delete(&dir.file("token.json"))
-            .await
-            .unwrap();
+        files::delete(&dir.file("token.json")).await.unwrap();
 
         token_mngr.refresh_token().await.unwrap();
         let token = token_mngr.get_token().await.unwrap();

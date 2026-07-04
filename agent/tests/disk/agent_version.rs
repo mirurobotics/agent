@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::agent_version;
-use miru_agent::filesys::{WriteOptions, dirs, files};
+use miru_agent::filesys::{dirs, files, WriteOptions};
 
 pub mod read {
     use super::*;
@@ -31,9 +31,7 @@ pub mod read {
 
     #[tokio::test]
     async fn trims_surrounding_whitespace() {
-        let dir = dirs::create_temp("agent_version_read_trim")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("agent_version_read_trim").await.unwrap();
         let file = dir.file("agent_version");
         files::write_string(&file, "  v0.4.0  \n\n", WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -49,9 +47,7 @@ pub mod write {
 
     #[tokio::test]
     async fn writes_version_with_trailing_newline() {
-        let dir = dirs::create_temp("agent_version_write")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("agent_version_write").await.unwrap();
         let file = dir.file("agent_version");
 
         agent_version::write(&file, "v0.9.0").await.unwrap();
@@ -62,9 +58,7 @@ pub mod write {
 
     #[tokio::test]
     async fn overwrites_existing_marker() {
-        let dir = dirs::create_temp("agent_version_overwrite")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("agent_version_overwrite").await.unwrap();
         let file = dir.file("agent_version");
 
         agent_version::write(&file, "v0.0.1").await.unwrap();

@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 
 // internal crates
 use miru_agent::crypt::{rsa, CryptErr};
-use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt, WriteOptions};
 
 pub mod fingerprint {
     use super::*;
@@ -194,9 +194,7 @@ pub mod gen_key_pair {
             .await
             .unwrap();
 
-        let private_perms = files::permissions(&private_key_file)
-            .await
-            .unwrap();
+        let private_perms = files::permissions(&private_key_file).await.unwrap();
         let public_perms = files::permissions(&public_key_file).await.unwrap();
         assert_eq!(
             private_perms.mode() & 0o777,

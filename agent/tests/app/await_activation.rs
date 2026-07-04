@@ -6,7 +6,7 @@ use std::time::Duration as StdDuration;
 // internal crates
 use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, WriteOptions};
 
 // (none — stdlib + tokio macros)
 
@@ -15,9 +15,7 @@ use miru_agent::filesys::{self, WriteOptions, dirs, files};
 async fn fresh_layout(name: &str) -> (Layout, filesys::Dir) {
     let dir = dirs::create_temp(name).await.unwrap();
     let layout = Layout::new(dir.clone());
-    dirs::create_if_absent(&layout.auth().root)
-        .await
-        .unwrap();
+    dirs::create_if_absent(&layout.auth().root).await.unwrap();
     (layout, dir)
 }
 
@@ -89,13 +87,9 @@ async fn activates_after_n_cycles() {
                 )
                 .await
                 .unwrap();
-                files::write_string(
-                    &auth.public_key(),
-                    "public",
-                    WriteOptions::OVERWRITE_ATOMIC,
-                )
-                .await
-                .unwrap();
+                files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
+                    .await
+                    .unwrap();
             }
         }
     };

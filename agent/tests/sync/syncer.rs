@@ -15,7 +15,7 @@ use miru_agent::disk::{
 };
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, Overwrite, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, Overwrite, WriteOptions};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};

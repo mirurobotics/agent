@@ -61,7 +61,7 @@ pub mod routes {
     use device_api::models as openapi;
     use miru_agent::activity;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
-    use miru_agent::filesys::{self, Overwrite, dirs};
+    use miru_agent::filesys::{self, dirs, Overwrite};
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
     };

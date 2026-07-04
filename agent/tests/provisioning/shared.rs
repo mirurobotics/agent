@@ -3,7 +3,7 @@ use crate::mocks::http_client::MockClient;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};
-use miru_agent::filesys::{self, PathExt, dirs, files};
+use miru_agent::filesys::{self, dirs, files, PathExt};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
 
@@ -166,10 +166,7 @@ impl StorageSnapshot {
 
     pub async fn assert_unchanged(&self, layout: &Layout) {
         let auth = layout.auth();
-        assert_eq!(
-            files::read_string(&layout.device()).await.ok(),
-            self.device
-        );
+        assert_eq!(files::read_string(&layout.device()).await.ok(), self.device);
         assert_eq!(
             files::read_string(&layout.settings()).await.ok(),
             self.settings
@@ -182,9 +179,6 @@ impl StorageSnapshot {
             files::read_string(&auth.public_key()).await.ok(),
             self.public_key
         );
-        assert_eq!(
-            files::read_string(&auth.token()).await.ok(),
-            self.token
-        );
+        assert_eq!(files::read_string(&auth.token()).await.ok(), self.token);
     }
 }

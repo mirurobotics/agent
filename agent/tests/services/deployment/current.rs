@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::Deployments;
-use miru_agent::filesys::{self, Overwrite, dirs};
+use miru_agent::filesys::{self, dirs, Overwrite};
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::services::deployment as dpl_svc;
 use miru_agent::services::ServiceErr;

@@ -2,7 +2,7 @@
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
 use miru_agent::cache::{FileCache, SingleThreadFileCache};
-use miru_agent::filesys::{PathExt, dirs};
+use miru_agent::filesys::{dirs, PathExt};
 
 // external crates
 use tokio::task::JoinHandle;

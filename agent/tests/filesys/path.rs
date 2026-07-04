@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
-use miru_agent::filesys::{self, path, Atomic, Overwrite, PathExt, WriteOptions, dirs};
+use miru_agent::filesys::{self, dirs, path, Atomic, Overwrite, PathExt, WriteOptions};
 
 // external crates
 #[allow(unused_imports)]

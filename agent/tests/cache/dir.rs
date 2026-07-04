@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
 use miru_agent::cache::{DirCache, SingleThreadDirCache};
-use miru_agent::filesys::{Overwrite, PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{dirs, files, Overwrite, PathExt, WriteOptions};
 
 // external crates
 use tokio::task::JoinHandle;

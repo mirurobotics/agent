@@ -3,7 +3,7 @@ use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
-use miru_agent::filesys::{self, File, Overwrite, PathExt, dirs, files};
+use miru_agent::filesys::{self, dirs, files, File, Overwrite, PathExt};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
 
 // external crates
@@ -302,10 +302,7 @@ mod find_target_deployed {
             file.exists(),
             "healthy deployment file should exist on disk"
         );
-        assert_eq!(
-            files::read_string(&file).await.unwrap(),
-            "healthy-content"
-        );
+        assert_eq!(files::read_string(&file).await.unwrap(), "healthy-content");
     }
 }
 
@@ -393,27 +390,19 @@ mod deploy_success {
         );
 
         assert_eq!(
-            files::read_string(&File::new(&ci1.filepath))
-                .await
-                .unwrap(),
+            files::read_string(&File::new(&ci1.filepath)).await.unwrap(),
             "content-a"
         );
         assert_eq!(
-            files::read_string(&File::new(&ci2.filepath))
-                .await
-                .unwrap(),
+            files::read_string(&File::new(&ci2.filepath)).await.unwrap(),
             "content-b"
         );
         assert_eq!(
-            files::read_string(&File::new(&ci3.filepath))
-                .await
-                .unwrap(),
+            files::read_string(&File::new(&ci3.filepath)).await.unwrap(),
             "content-c"
         );
         assert_eq!(
-            files::read_string(&File::new(&ci4.filepath))
-                .await
-                .unwrap(),
+            files::read_string(&File::new(&ci4.filepath)).await.unwrap(),
             "content-d"
         );
     }

@@ -3,7 +3,7 @@ use super::shared::{
     mock_failing_provision, mock_ok_provision, validate_storage, Env, StorageSnapshot, DEVICE_ID,
 };
 use crate::mocks::http_client as mock;
-use miru_agent::filesys::{PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{dirs, files, PathExt, WriteOptions};
 use miru_agent::provisioning::{errors::*, provision};
 
 pub mod provision_fn {
@@ -109,9 +109,7 @@ pub mod provision_fn {
 
         // pre-create only device.json — no keys, so assert_activated fails
         // and the short-circuit doesn't trigger
-        dirs::create_if_absent(&env.layout.root())
-            .await
-            .unwrap();
+        dirs::create_if_absent(&env.layout.root()).await.unwrap();
         let stub_device = serde_json::json!({
             "device_id": DEVICE_ID,
             "session_id": "sess",

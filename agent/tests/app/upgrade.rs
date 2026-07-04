@@ -9,7 +9,7 @@ use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
-use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
 
@@ -28,9 +28,7 @@ async fn prepare_layout(name: &str) -> (Layout, filesys::Dir) {
 
     // generate a real RSA keypair under auth/
     let auth_dir = layout.auth();
-    dirs::create_if_absent(&auth_dir.root)
-        .await
-        .unwrap();
+    dirs::create_if_absent(&auth_dir.root).await.unwrap();
     rsa::gen_key_pair(
         2048,
         &auth_dir.private_key(),
@@ -73,12 +71,8 @@ type PrivateKey = String;
 
 async fn read_keys(layout: &Layout) -> (PrivateKey, PublicKey) {
     let auth_dir = layout.auth();
-    let private = files::read_string(&auth_dir.private_key())
-        .await
-        .unwrap();
-    let public = files::read_string(&auth_dir.public_key())
-        .await
-        .unwrap();
+    let private = files::read_string(&auth_dir.private_key()).await.unwrap();
+    let public = files::read_string(&auth_dir.public_key()).await.unwrap();
     (private, public)
 }
 
@@ -138,9 +132,7 @@ mod reconcile {
         assert_eq!(pub_before, pub_after);
 
         // device.json reflects the mock response with the running version
-        let on_disk_device = files::read_json::<Device>(&layout.device())
-            .await
-            .unwrap();
+        let on_disk_device = files::read_json::<Device>(&layout.device()).await.unwrap();
         assert_eq!(on_disk_device.id, "dvc_2");
         assert_eq!(on_disk_device.name, "beta");
 

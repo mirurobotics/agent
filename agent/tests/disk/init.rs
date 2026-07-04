@@ -4,7 +4,7 @@ use std::collections::HashMap;
 // internal crates
 use miru_agent::cache::CacheEntry;
 use miru_agent::disk::{Capacities, Layout, Storage};
-use miru_agent::filesys::{WriteOptions, dirs, files};
+use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::Deployment;
 
 // external crates
@@ -94,9 +94,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn skips_clean_deployments() {
-        let dir = dirs::create_temp("reset_skip_clean")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("reset_skip_clean").await.unwrap();
         let layout = Layout::new(dir);
 
         let clean = Deployment {

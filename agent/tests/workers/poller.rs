@@ -4,7 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::{error::SleepController, syncer::MockSyncer};
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::{dirs};
+use miru_agent::filesys::dirs;
 use miru_agent::models::Device;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, State, SyncEvent, SyncFailure};

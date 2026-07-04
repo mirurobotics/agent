@@ -2,7 +2,7 @@
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{assert_activated, resolve_device_id, DiskErr, Layout};
-use miru_agent::filesys::{self, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, WriteOptions};
 use miru_agent::models::Device;
 
 // external crates
@@ -14,9 +14,7 @@ pub mod assert_activated {
     async fn fresh_layout() -> (Layout, filesys::Dir) {
         let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir.clone());
-        dirs::create_if_absent(&layout.auth().root)
-            .await
-            .unwrap();
+        dirs::create_if_absent(&layout.auth().root).await.unwrap();
         (layout, dir)
     }
 

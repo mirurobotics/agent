@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use miru_agent::deploy::filesys::{deploy, remove, BACKUP_FILE_PREFIX};
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
-use miru_agent::filesys::{self, Overwrite, PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
 
 // external crates
@@ -20,9 +20,7 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = dirs::create_temp("deploy-filesys-test")
-            .await
-            .unwrap();
+        let temp_dir = dirs::create_temp("deploy-filesys-test").await.unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
         let (cfg_inst_meta, _) =
@@ -1092,17 +1090,13 @@ pub mod remove_func_success {
 
         // lock the parent directory so remove_file fails with EACCES
         let parent = dest.parent().unwrap();
-        dirs::set_permissions(&parent, read_only())
-            .await
-            .unwrap();
+        dirs::set_permissions(&parent, read_only()).await.unwrap();
 
         let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
 
         // restore permissions so tempdir drop can recurse
-        dirs::set_permissions(&parent, writeable())
-            .await
-            .unwrap();
+        dirs::set_permissions(&parent, writeable()).await.unwrap();
 
         // deletion errors are now propagated
         assert!(

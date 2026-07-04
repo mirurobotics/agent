@@ -7,7 +7,7 @@ use miru_agent::app::state::AppState;
 use miru_agent::authn::Token;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
-use miru_agent::filesys::{FileSysErr, WriteOptions, dirs, files};
+use miru_agent::filesys::{dirs, files, FileSysErr, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
@@ -150,9 +150,7 @@ pub mod init {
             status: DeviceStatus::Offline,
             ..Device::default()
         };
-        let device = files::read_json::<Device>(&device_file)
-            .await
-            .unwrap();
+        let device = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device, expected_device);
     }
 
@@ -192,9 +190,7 @@ pub mod init {
 
         // the token file should now have the default token
         let token_file = layout.auth().token();
-        let token = files::read_json::<Token>(&token_file)
-            .await
-            .unwrap();
+        let token = files::read_json::<Token>(&token_file).await.unwrap();
         assert_eq!(token.token, Token::default().token);
 
         // check last activity
@@ -242,9 +238,7 @@ pub mod init {
 
         // the device file should now have the device set to offline
         let device_file = layout.device();
-        let device = files::read_json::<Device>(&device_file)
-            .await
-            .unwrap();
+        let device = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
     }
 }
@@ -341,9 +335,7 @@ pub mod shutdown {
 
         // the device file should now have the device set to offline
         let device_file = layout.device();
-        let device = files::read_json::<Device>(&device_file)
-            .await
-            .unwrap();
+        let device = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);
         assert!(device.last_disconnected_at <= Utc::now());

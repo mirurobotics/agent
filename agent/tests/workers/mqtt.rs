@@ -2,7 +2,7 @@
 use crate::mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager};
 use miru_agent::authn::Token;
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::{dirs};
+use miru_agent::filesys::dirs;
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::mqtt::client::Client;
 use miru_agent::mqtt::device::{Ping, SyncDevice};

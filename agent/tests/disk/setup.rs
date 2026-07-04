@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::authn;
 use miru_agent::disk::{self, Layout, Settings};
-use miru_agent::filesys::{self, PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
 
 pub mod bootstrap {
@@ -12,16 +12,12 @@ pub mod bootstrap {
     async fn validate_storage(layout: &Layout) {
         // agent file
         let device_file = layout.device();
-        let device_file_content = files::read_json::<Device>(&device_file)
-            .await
-            .unwrap();
+        let device_file_content = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device_file_content, Device::default());
 
         // settings file
         let settings_file = layout.settings();
-        let settings_file_content = files::read_json::<Settings>(&settings_file)
-            .await
-            .unwrap();
+        let settings_file_content = files::read_json::<Settings>(&settings_file).await.unwrap();
         assert_eq!(settings_file_content, Settings::default());
 
         // token file
@@ -32,9 +28,7 @@ pub mod bootstrap {
         // private key file
         let private_key_file = auth_layout.private_key();
         assert!(private_key_file.exists());
-        let private_key_contents = files::read_string(&private_key_file)
-            .await
-            .unwrap();
+        let private_key_contents = files::read_string(&private_key_file).await.unwrap();
         assert!(!private_key_contents.is_empty());
 
         // public key file
@@ -344,9 +338,7 @@ pub mod reset {
 
     async fn write_existing_keys(layout: &Layout) {
         let auth_dir = layout.auth();
-        dirs::create_if_absent(&auth_dir.root)
-            .await
-            .unwrap();
+        dirs::create_if_absent(&auth_dir.root).await.unwrap();
         files::write_string(
             &auth_dir.private_key(),
             PRIVATE_KEY_CONTENTS,
@@ -414,9 +406,7 @@ pub mod reset {
         assert_keys_preserved(&layout).await;
 
         // device + settings written from inputs
-        let on_disk_device = files::read_json::<Device>(&layout.device())
-            .await
-            .unwrap();
+        let on_disk_device = files::read_json::<Device>(&layout.device()).await.unwrap();
         assert_eq!(on_disk_device, device);
         let on_disk_settings = files::read_json::<Settings>(&layout.settings())
             .await

@@ -3,7 +3,7 @@ use super::shared::{
     mock_failing_reprovision, mock_ok_reprovision, validate_storage, Env, StorageSnapshot,
 };
 use crate::mocks::http_client as mock;
-use miru_agent::filesys::{PathExt, files};
+use miru_agent::filesys::{files, PathExt};
 use miru_agent::provisioning::{errors::*, reprovision};
 
 pub mod reprovision_fn {

@@ -2,7 +2,7 @@
 use miru_agent::events::errors::EventsErr;
 use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED};
 use miru_agent::events::store::{EventStore, DEFAULT_MAX_RETAINED};
-use miru_agent::filesys::{self, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, WriteOptions};
 
 // external crates
 use chrono::Utc;
@@ -73,9 +73,7 @@ mod init {
 
     #[tokio::test]
     async fn skips_malformed_lines() {
-        let dir = dirs::create_temp("ev_init_malformed")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("ev_init_malformed").await.unwrap();
         let log_file = dir.file("events.jsonl");
 
         let valid = Event {
@@ -100,9 +98,7 @@ mod init {
 
     #[tokio::test]
     async fn all_malformed_lines_produces_empty_store() {
-        let dir = dirs::create_temp("ev_all_malformed")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("ev_all_malformed").await.unwrap();
         let log_file = dir.file("events.jsonl");
 
         files::write_string(
@@ -221,9 +217,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_at_latest_returns_empty() {
-        let dir = dirs::create_temp("ev_replay_latest")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("ev_replay_latest").await.unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         store.append(make_event("a")).await.unwrap();
@@ -235,9 +229,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_beyond_latest_returns_empty() {
-        let dir = dirs::create_temp("ev_replay_beyond")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("ev_replay_beyond").await.unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         store.append(make_event("a")).await.unwrap();
@@ -264,9 +256,7 @@ mod replay {
 
     #[tokio::test]
     async fn expired_cursor_returns_error() {
-        let dir = dirs::create_temp("ev_replay_expired")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("ev_replay_expired").await.unwrap();
         // small max_retained to force compaction
         let mut store = make_store(&dir, 4).await;
 
@@ -316,9 +306,7 @@ mod compaction {
 
     #[tokio::test]
     async fn compacted_log_survives_reload() {
-        let dir = dirs::create_temp("ev_compact_reload")
-            .await
-            .unwrap();
+        let dir = dirs::create_temp("ev_compact_reload").await.unwrap();
         let max_retained = 6;
         let mut store = make_store(&dir, max_retained).await;
 

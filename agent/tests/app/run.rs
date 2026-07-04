@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::Options;
 

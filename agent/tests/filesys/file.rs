@@ -279,14 +279,8 @@ pub mod copy_to {
 
         assert!(src.exists(), "source should still exist after copy");
         assert!(dest.exists(), "destination should exist after copy");
-        assert_eq!(
-            files::read_string(&dest).await.unwrap(),
-            "hello world"
-        );
-        assert_eq!(
-            files::read_string(&src).await.unwrap(),
-            "hello world"
-        );
+        assert_eq!(files::read_string(&dest).await.unwrap(), "hello world");
+        assert_eq!(files::read_string(&src).await.unwrap(), "hello world");
     }
 
     #[tokio::test]
@@ -421,10 +415,7 @@ pub mod copy_to {
             sync: filesys::Sync::No,
         };
         files::copy_to(&src, &dest, opts).await.unwrap();
-        assert_eq!(
-            files::read_string(&dest).await.unwrap(),
-            "unsynced"
-        );
+        assert_eq!(files::read_string(&dest).await.unwrap(), "unsynced");
     }
 
     #[tokio::test]
@@ -462,9 +453,7 @@ pub mod copy_to {
             sync: filesys::Sync::Yes,
         };
         assert!(matches!(
-            files::copy_to(&src, &dest, opts)
-                .await
-                .unwrap_err(),
+            files::copy_to(&src, &dest, opts).await.unwrap_err(),
             FileSysErr::InvalidFileOverwriteErr { .. }
         ));
         assert_eq!(files::read_string(&dest).await.unwrap(), "dest");
@@ -508,9 +497,7 @@ pub mod move_to {
         // overwrite false
         assert!(src.exists());
         assert!(!dest.exists());
-        files::move_to(&src, &dest, Overwrite::Deny)
-            .await
-            .unwrap();
+        files::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
@@ -520,9 +507,7 @@ pub mod move_to {
         let dest = tmp;
         assert!(src.exists());
         assert!(!dest.exists());
-        files::move_to(&src, &dest, Overwrite::Allow)
-            .await
-            .unwrap();
+        files::move_to(&src, &dest, Overwrite::Allow).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
     }
@@ -565,9 +550,7 @@ pub mod move_to {
         // overwrite false
         assert!(src.exists());
         assert!(dest.exists());
-        files::move_to(&src, &dest, Overwrite::Allow)
-            .await
-            .unwrap();
+        files::move_to(&src, &dest, Overwrite::Allow).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
     }
@@ -579,9 +562,7 @@ pub mod move_to {
         files::write_string(&file, "test", WriteOptions::default())
             .await
             .unwrap();
-        files::move_to(&file, &file, Overwrite::Deny)
-            .await
-            .unwrap();
+        files::move_to(&file, &file, Overwrite::Deny).await.unwrap();
         file.assert_exists().unwrap();
         files::move_to(&file, &file, Overwrite::Allow)
             .await
@@ -610,10 +591,7 @@ pub mod read_bytes {
         files::write_string(&file, "arglebargle", WriteOptions::default())
             .await
             .unwrap();
-        assert_eq!(
-            files::read_bytes(&file).await.unwrap(),
-            b"arglebargle"
-        );
+        assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
     }
 }
 
@@ -665,10 +643,7 @@ pub mod read_string {
         files::write_string(&file, "arglebargle", WriteOptions::default())
             .await
             .unwrap();
-        assert_eq!(
-            files::read_string(&file).await.unwrap(),
-            "arglebargle"
-        );
+        assert_eq!(files::read_string(&file).await.unwrap(), "arglebargle");
     }
 
     #[tokio::test]
@@ -697,9 +672,7 @@ pub mod read_json {
     async fn read_doesnt_exist() {
         let file = filesys::File::new(PathBuf::from("doesnt_exist").join("test-file.json"));
         assert!(matches!(
-            files::read_json::<String>(&file)
-                .await
-                .unwrap_err(),
+            files::read_json::<String>(&file).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -716,9 +689,7 @@ pub mod read_json {
         .await
         .unwrap();
         assert_eq!(
-            files::read_json::<serde_json::Value>(&file)
-                .await
-                .unwrap(),
+            files::read_json::<serde_json::Value>(&file).await.unwrap(),
             serde_json::json!({"test": "arglebargle"})
         );
     }
@@ -791,10 +762,7 @@ pub mod write_bytes {
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_bytes(&file).await.unwrap(),
-                b"arglebargle"
-            );
+            assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
         }
     }
 
@@ -807,10 +775,7 @@ pub mod write_bytes {
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_bytes(&file).await.unwrap(),
-                b"arglebargle"
-            );
+            assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
         }
     }
 
@@ -822,10 +787,7 @@ pub mod write_bytes {
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_bytes(&file).await.unwrap(),
-                b"arglebargle"
-            );
+            assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
 
             // should fail when writing again
             assert!(matches!(
@@ -845,19 +807,13 @@ pub mod write_bytes {
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_bytes(&file).await.unwrap(),
-                b"arglebargle"
-            );
+            assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
 
             // should succeed when writing again
             write_bytes(&file, b"arglebargle", Overwrite::Allow)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_bytes(&file).await.unwrap(),
-                b"arglebargle"
-            );
+            assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
         }
     }
 }
@@ -913,10 +869,7 @@ pub mod write_string {
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_string(&file).await.unwrap(),
-                "hello world"
-            );
+            assert_eq!(files::read_string(&file).await.unwrap(), "hello world");
         }
     }
 
@@ -929,10 +882,7 @@ pub mod write_string {
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_string(&file).await.unwrap(),
-                "hello world"
-            );
+            assert_eq!(files::read_string(&file).await.unwrap(), "hello world");
         }
     }
 
@@ -944,10 +894,7 @@ pub mod write_string {
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_string(&file).await.unwrap(),
-                "hello world"
-            );
+            assert_eq!(files::read_string(&file).await.unwrap(), "hello world");
 
             // should fail when writing again
             assert!(matches!(
@@ -967,19 +914,13 @@ pub mod write_string {
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_string(&file).await.unwrap(),
-                "hello world"
-            );
+            assert_eq!(files::read_string(&file).await.unwrap(), "hello world");
 
             // should succeed when writing again
             write_string(&file, "new content", Overwrite::Allow)
                 .await
                 .unwrap();
-            assert_eq!(
-                files::read_string(&file).await.unwrap(),
-                "new content"
-            );
+            assert_eq!(files::read_string(&file).await.unwrap(), "new content");
         }
     }
 }
@@ -1146,10 +1087,7 @@ pub mod append_bytes {
         files::append_bytes(&file, b"world", filesys::AppendOptions::default())
             .await
             .unwrap();
-        assert_eq!(
-            files::read_string(&file).await.unwrap(),
-            "hello world"
-        );
+        assert_eq!(files::read_string(&file).await.unwrap(), "hello world");
     }
 
     #[tokio::test]
@@ -1180,10 +1118,7 @@ pub mod append_bytes {
         files::append_bytes(&file, b"second\n", filesys::AppendOptions::SYNC)
             .await
             .unwrap();
-        assert_eq!(
-            files::read_string(&file).await.unwrap(),
-            "first\nsecond\n"
-        );
+        assert_eq!(files::read_string(&file).await.unwrap(), "first\nsecond\n");
     }
 
     #[tokio::test]
@@ -1207,10 +1142,7 @@ pub mod append_bytes {
         files::append_bytes(&file, b"", filesys::AppendOptions::default())
             .await
             .unwrap();
-        assert_eq!(
-            files::read_string(&file).await.unwrap(),
-            "existing"
-        );
+        assert_eq!(files::read_string(&file).await.unwrap(), "existing");
     }
 }
 
@@ -1247,23 +1179,17 @@ pub mod set_permissions {
         let executable = std::fs::Permissions::from_mode(0o755);
 
         // Test read-only (444 in octal)
-        files::set_permissions(&file, readonly)
-            .await
-            .unwrap();
+        files::set_permissions(&file, readonly).await.unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o444);
 
         // Test read-write (644 in octal)
-        files::set_permissions(&file, readwrite)
-            .await
-            .unwrap();
+        files::set_permissions(&file, readwrite).await.unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o644);
 
         // Test executable (755 in octal)
-        files::set_permissions(&file, executable)
-            .await
-            .unwrap();
+        files::set_permissions(&file, executable).await.unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o755);
     }
@@ -1424,23 +1350,17 @@ pub mod permissions {
         let executable = std::fs::Permissions::from_mode(0o755);
 
         // Test read-only (444 in octal)
-        files::set_permissions(&file, readonly)
-            .await
-            .unwrap();
+        files::set_permissions(&file, readonly).await.unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o444);
 
         // Test read-write (644 in octal)
-        files::set_permissions(&file, readwrite)
-            .await
-            .unwrap();
+        files::set_permissions(&file, readwrite).await.unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o644);
 
         // Test executable (755 in octal)
-        files::set_permissions(&file, executable)
-            .await
-            .unwrap();
+        files::set_permissions(&file, executable).await.unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o755);
     }

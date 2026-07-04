@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
 // internal crates
-use miru_agent::filesys::{self, FileSysErr, Overwrite, PathExt, WriteOptions, dirs, files};
+use miru_agent::filesys::{self, dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 // external crates
 #[allow(unused_imports)]
@@ -923,18 +923,14 @@ mod move_to {
         let dest = base_dir.subdir("dest-dir");
 
         // move source directory to destination directory
-        dirs::move_to(&src, &dest, Overwrite::Deny)
-            .await
-            .unwrap();
+        dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
         // check the file was moved
         assert!(dest.file("test.txt").exists());
         assert_eq!(
-            files::read_string(&dest.file("test.txt"))
-                .await
-                .unwrap(),
+            files::read_string(&dest.file("test.txt")).await.unwrap(),
             "test content"
         );
         assert_no_trash_dirs(&base_dir).await;
@@ -991,9 +987,7 @@ mod move_to {
         .unwrap();
 
         // overwrite true should succeed
-        dirs::move_to(&src, &dest, Overwrite::Allow)
-            .await
-            .unwrap();
+        dirs::move_to(&src, &dest, Overwrite::Allow).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
@@ -1027,9 +1021,7 @@ mod move_to {
         assert!(src_dir.exists());
         assert!(src_dir.file("test.txt").exists());
         assert_eq!(
-            files::read_string(&src_dir.file("test.txt"))
-                .await
-                .unwrap(),
+            files::read_string(&src_dir.file("test.txt")).await.unwrap(),
             "test"
         );
 
@@ -1039,9 +1031,7 @@ mod move_to {
         assert!(src_dir.exists());
         assert!(src_dir.file("test.txt").exists());
         assert_eq!(
-            files::read_string(&src_dir.file("test.txt"))
-                .await
-                .unwrap(),
+            files::read_string(&src_dir.file("test.txt")).await.unwrap(),
             "test"
         );
         assert_no_trash_dirs(&base_dir).await;
@@ -1077,18 +1067,14 @@ mod move_to {
         let dest = base_dir.subdir("dest-dir");
 
         // move source directory to destination directory
-        dirs::move_to(&src, &dest, Overwrite::Deny)
-            .await
-            .unwrap();
+        dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(!src.exists());
         assert!(dest.exists());
 
         // verify root directory
         assert!(dest.file("file1.txt").exists());
         assert_eq!(
-            files::read_string(&dest.file("file1.txt"))
-                .await
-                .unwrap(),
+            files::read_string(&dest.file("file1.txt")).await.unwrap(),
             "file1"
         );
         assert_eq!(dirs::subdirs(&dest).await.unwrap().len(), 1);
@@ -1104,10 +1090,7 @@ mod move_to {
                 .unwrap(),
             "file2"
         );
-        assert_eq!(
-            dirs::subdirs(&dest_subdir1).await.unwrap().len(),
-            1
-        );
+        assert_eq!(dirs::subdirs(&dest_subdir1).await.unwrap().len(), 1);
         assert_eq!(dirs::files(&dest_subdir1).await.unwrap().len(), 1);
 
         // verify subdirectory 2
@@ -1120,10 +1103,7 @@ mod move_to {
                 .unwrap(),
             "file3"
         );
-        assert_eq!(
-            dirs::subdirs(&dest_subdir2).await.unwrap().len(),
-            0
-        );
+        assert_eq!(dirs::subdirs(&dest_subdir2).await.unwrap().len(), 0);
         assert_eq!(dirs::files(&dest_subdir2).await.unwrap().len(), 1);
         assert_no_trash_dirs(&base_dir).await;
     }
@@ -1143,9 +1123,7 @@ mod move_to {
         let dest = base_dir.subdir("parent").subdir("dest-dir");
 
         // move source directory to destination directory
-        dirs::move_to(&src, &dest, Overwrite::Deny)
-            .await
-            .unwrap();
+        dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(!src.exists());
         assert!(dest.parent().unwrap().exists());
         assert!(dest.exists());
@@ -1182,9 +1160,7 @@ mod move_to {
         // dest must be restored with its original content
         assert!(dest.exists());
         assert_eq!(
-            files::read_string(&dest.file("keep-me.txt"))
-                .await
-                .unwrap(),
+            files::read_string(&dest.file("keep-me.txt")).await.unwrap(),
             "precious"
         );
 
@@ -1221,23 +1197,17 @@ pub mod set_permissions {
         let restricted = std::fs::Permissions::from_mode(0o700);
 
         // Test read-execute only (555 in octal)
-        dirs::set_permissions(&target, readonly)
-            .await
-            .unwrap();
+        dirs::set_permissions(&target, readonly).await.unwrap();
         let perms = dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o555);
 
         // Test read-write-execute (755 in octal)
-        dirs::set_permissions(&target, readwrite)
-            .await
-            .unwrap();
+        dirs::set_permissions(&target, readwrite).await.unwrap();
         let perms = dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o755);
 
         // Test owner-only (700 in octal)
-        dirs::set_permissions(&target, restricted)
-            .await
-            .unwrap();
+        dirs::set_permissions(&target, restricted).await.unwrap();
         let perms = dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o700);
     }
