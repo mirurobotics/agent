@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::errors::{Code, Error, HTTPCode};
-use miru_agent::filesys::{Dir, PathExt};
+use miru_agent::filesys::{dirs, PathExt};
 use miru_agent::logs::{self, LogLevel, LogsErr, Options};
 
 // external crates
@@ -202,7 +202,7 @@ impl Drop for RustLogGuard {
 }
 
 async fn build_layers_tempdir(prefix: &str) -> PathBuf {
-    let dir = Dir::create_temp_dir(prefix).await.unwrap();
+    let dir = dirs::create_temp(prefix).await.unwrap();
     dir.path().clone()
 }
 

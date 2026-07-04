@@ -42,7 +42,7 @@ struct Fixture {
 
 impl Fixture {
     async fn new(name: &str) -> Self {
-        let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+        let dir = filesys::dirs::create_temp(name).await.unwrap();
         let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
             .await
             .unwrap();

@@ -32,7 +32,7 @@ async fn seed_deployments(layout: &Layout, entries: Vec<CacheEntry<String, Deplo
     for entry in entries {
         map.insert(entry.key.clone(), entry);
     }
-    file.write_json(&map, WriteOptions::OVERWRITE_ATOMIC)
+    filesys::files::write_json(&file, &map, WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 }
@@ -42,7 +42,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_attempts() {
-        let dir = filesys::Dir::create_temp_dir("reset_attempts")
+        let dir = filesys::dirs::create_temp("reset_attempts")
             .await
             .unwrap();
         let layout = Layout::new(dir);
@@ -70,7 +70,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_active_cooldown() {
-        let dir = filesys::Dir::create_temp_dir("reset_cooldown")
+        let dir = filesys::dirs::create_temp("reset_cooldown")
             .await
             .unwrap();
         let layout = Layout::new(dir);
@@ -98,7 +98,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn skips_clean_deployments() {
-        let dir = filesys::Dir::create_temp_dir("reset_skip_clean")
+        let dir = filesys::dirs::create_temp("reset_skip_clean")
             .await
             .unwrap();
         let layout = Layout::new(dir);

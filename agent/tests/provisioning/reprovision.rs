@@ -46,14 +46,14 @@ pub mod reprovision_fn {
     async fn rotates_keypair() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
-        let priv_before = env.layout.auth().private_key().read_string().await.unwrap();
+        let priv_before = miru_agent::filesys::files::read_string(&env.layout.auth().private_key()).await.unwrap();
 
         let mock = mock_ok_reprovision("after-reprovision");
         reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token)
             .await
             .unwrap();
 
-        let priv_after = env.layout.auth().private_key().read_string().await.unwrap();
+        let priv_after = miru_agent::filesys::files::read_string(&env.layout.auth().private_key()).await.unwrap();
         assert_ne!(
             priv_before, priv_after,
             "expected fresh keypair after reprovision"

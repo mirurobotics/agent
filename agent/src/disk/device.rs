@@ -5,7 +5,7 @@ use crate::disk::{
     errors::{DeviceNotActivatedErr, DiskErr, ResolveDeviceIDErr},
     layout::Layout,
 };
-use crate::filesys::{cached_file::ConcurrentCachedFile, PathExt};
+use crate::filesys::{cached_file::ConcurrentCachedFile, files, PathExt};
 use crate::models::{self, device};
 use crate::trace;
 
@@ -32,7 +32,7 @@ pub fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
 /// Resolve the device id from the on-disk state.
 pub async fn resolve_device_id(layout: &Layout) -> Result<String, DiskErr> {
     // attempt to get the device id from the device file
-    let device_file_err = match layout.device().read_json::<models::Device>().await {
+    let device_file_err = match files::read_json::<models::Device>(&layout.device()).await {
         Ok(device) => return Ok(device.id),
         Err(e) => e,
     };

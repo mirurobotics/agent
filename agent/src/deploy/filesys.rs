@@ -5,7 +5,7 @@ use std::path::Component;
 // internal crates
 use crate::deploy::errors::*;
 use crate::disk;
-use crate::filesys::{self, errors::FileSysErr, PathExt, WriteOptions};
+use crate::filesys::{self, errors::FileSysErr, files, PathExt, WriteOptions};
 use crate::models;
 use crate::trace;
 
@@ -183,7 +183,7 @@ async fn write_cfg_insts_impl(
             .map_err(|e| map_snapshot_err(cfg_inst, &dest, &backup, e))?;
         snapshots.push(snapshot);
 
-        dest.write_string(&content, WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&dest, &content, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .map_err(|e| map_write_err(cfg_inst, e))?;
     }
@@ -207,10 +207,7 @@ enum Snapshot {
 async fn snapshot(dst: &filesys::File, backup: &filesys::File) -> Result<Snapshot, FileSysErr> {
     // The backup only needs to survive within the same process run for
     // application-level rollback, not across power loss — skip fsync.
-    match dst
-        .copy_to(backup, filesys::CopyOptions::OVERWRITE_NO_SYNC)
-        .await
-    {
+    match files::copy_to(dst, backup, filesys::CopyOptions::OVERWRITE_NO_SYNC).await {
         Ok(()) => Ok(Snapshot::Existed {
             dst: dst.clone(),
             backup: backup.clone(),
@@ -239,8 +236,10 @@ async fn rollback(snapshots: &[Snapshot]) {
 
 async fn rollback_snapshot(snapshot: &Snapshot) -> Result<(), FileSysErr> {
     match snapshot {
-        Snapshot::Existed { dst, backup } => backup.move_to(dst, filesys::Overwrite::Allow).await,
-        Snapshot::DidNotExist { dst } => dst.delete().await,
+        Snapshot::Existed { dst, backup } => {
+            files::move_to(backup, dst, filesys::Overwrite::Allow).await
+        }
+        Snapshot::DidNotExist { dst } => files::delete(dst).await,
     }
 }
 
@@ -250,7 +249,7 @@ async fn rollback_snapshot(snapshot: &Snapshot) -> Result<(), FileSysErr> {
 async fn remove_backups(snapshots: &[Snapshot]) {
     for snapshot in snapshots {
         if let Snapshot::Existed { backup, .. } = snapshot {
-            if let Err(e) = backup.delete().await {
+            if let Err(e) = files::delete(backup).await {
                 warn!(
                     "failed to remove snapshot backup file '{}': {}",
                     backup.path().display(),
@@ -285,7 +284,7 @@ async fn remove_cfg_insts(
         if keeps.contains(&dest) {
             continue;
         }
-        dest.delete().await?;
+        files::delete(&dest).await?;
     }
     Ok(())
 }

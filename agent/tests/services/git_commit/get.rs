@@ -13,7 +13,7 @@ use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 
 async fn setup(name: &str) -> (filesys::Dir, GitCommits) {
-    let dir = filesys::Dir::create_temp_dir(name).await.unwrap();
+    let dir = filesys::dirs::create_temp(name).await.unwrap();
     let (stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
         .await
         .unwrap();

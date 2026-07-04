@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 
 // internal crates
 use crate::crypt::errors::*;
-use crate::filesys::{self, Atomic, Overwrite, PathExt, WriteOptions};
+use crate::filesys::{self, files, Atomic, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -57,35 +57,35 @@ pub async fn gen_key_pair(
 
     // Extract and write the private key
     let private_key_pem = ssl_err!(ConvertPrivateKeyToPEMErr, rsa.private_key_to_pem())?;
-    private_key_file
-        .write_bytes(
-            &private_key_pem,
-            WriteOptions {
-                overwrite,
-                atomic: Atomic::Yes,
-            },
-        )
-        .await?;
+    files::write_bytes(
+        private_key_file,
+        &private_key_pem,
+        WriteOptions {
+            overwrite,
+            atomic: Atomic::Yes,
+        },
+    )
+    .await?;
     // 600 gives the owner read/write permissions. Permissions to the group and others
     // are not granted.
     let permissions = std::fs::Permissions::from_mode(0o600);
-    private_key_file.set_permissions(permissions).await?;
+    files::set_permissions(private_key_file, permissions).await?;
 
     // Extract and write the public key
     let public_key_pem = ssl_err!(ConvertPublicKeyToPEMErr, rsa.public_key_to_pem())?;
-    public_key_file
-        .write_bytes(
-            &public_key_pem,
-            WriteOptions {
-                overwrite,
-                atomic: Atomic::Yes,
-            },
-        )
-        .await?;
+    files::write_bytes(
+        public_key_file,
+        &public_key_pem,
+        WriteOptions {
+            overwrite,
+            atomic: Atomic::Yes,
+        },
+    )
+    .await?;
     // 640 gives the owner read/write permissions, the group read permissions, and
     // nothing for other
     let permissions = std::fs::Permissions::from_mode(0o640);
-    public_key_file.set_permissions(permissions).await?;
+    files::set_permissions(public_key_file, permissions).await?;
 
     Ok(())
 }
@@ -93,7 +93,7 @@ pub async fn gen_key_pair(
 /// Read an RSA private key from the specified file.
 pub async fn read_private_key(private_key_file: &filesys::File) -> Result<Rsa<Private>, CryptErr> {
     private_key_file.assert_exists()?;
-    let private_key_pem = private_key_file.read_secret_bytes().await?;
+    let private_key_pem = files::read_secret_bytes(private_key_file).await?;
     ssl_err!(
         ReadKeyErr,
         Rsa::private_key_from_pem(private_key_pem.expose_secret())
@@ -103,7 +103,7 @@ pub async fn read_private_key(private_key_file: &filesys::File) -> Result<Rsa<Pr
 /// Read an RSA public key from the specified file.
 pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Public>, CryptErr> {
     public_key_file.assert_exists()?;
-    let public_key_pem = public_key_file.read_secret_bytes().await?;
+    let public_key_pem = files::read_secret_bytes(public_key_file).await?;
     ssl_err!(
         ReadKeyErr,
         Rsa::public_key_from_pem(public_key_pem.expose_secret())

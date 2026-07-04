@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 /// Generate a real RSA key pair in a temp dir and return the file handles.
 async fn generate_keys() -> (filesys::Dir, filesys::File, filesys::File) {
-    let dir = filesys::Dir::create_temp_dir("authn_issue_test")
+    let dir = filesys::dirs::create_temp("authn_issue_test")
         .await
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
@@ -124,7 +124,7 @@ mod issue_token {
 
     #[tokio::test]
     async fn bubbles_filesys_err_when_public_key_missing() {
-        let dir = filesys::Dir::create_temp_dir("authn_issue_test")
+        let dir = filesys::dirs::create_temp("authn_issue_test")
             .await
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
@@ -132,7 +132,7 @@ mod issue_token {
         rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
-        public_key_file.delete().await.unwrap();
+        filesys::files::delete(&public_key_file).await.unwrap();
         let mock_client = MockClient::default();
 
         let result = issue_token(&mock_client, &private_key_file, &public_key_file).await;
@@ -240,7 +240,7 @@ mod mint_jwt {
 
     #[tokio::test]
     async fn returns_err_when_public_key_file_is_missing() {
-        let dir = filesys::Dir::create_temp_dir("authn_issue_test")
+        let dir = filesys::dirs::create_temp("authn_issue_test")
             .await
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
@@ -248,7 +248,7 @@ mod mint_jwt {
         rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
-        public_key_file.delete().await.unwrap();
+        filesys::files::delete(&public_key_file).await.unwrap();
 
         let result = mint_jwt(&private_key_file, &public_key_file).await;
 
@@ -257,7 +257,7 @@ mod mint_jwt {
 
     #[tokio::test]
     async fn returns_err_when_private_key_file_is_missing() {
-        let dir = filesys::Dir::create_temp_dir("authn_issue_test")
+        let dir = filesys::dirs::create_temp("authn_issue_test")
             .await
             .unwrap();
         let private_key_file = dir.file("private_key.pem");
@@ -265,7 +265,7 @@ mod mint_jwt {
         rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
             .await
             .unwrap();
-        private_key_file.delete().await.unwrap();
+        filesys::files::delete(&private_key_file).await.unwrap();
 
         let result = mint_jwt(&private_key_file, &public_key_file).await;
 

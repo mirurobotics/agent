@@ -27,7 +27,7 @@ mod init {
 
     #[tokio::test]
     async fn empty_dir_starts_at_id_1() {
-        let dir = filesys::Dir::create_temp_dir("ev_init_empty")
+        let dir = filesys::dirs::create_temp("ev_init_empty")
             .await
             .unwrap();
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -37,7 +37,7 @@ mod init {
 
     #[tokio::test]
     async fn loads_existing_log() {
-        let dir = filesys::Dir::create_temp_dir("ev_init_load").await.unwrap();
+        let dir = filesys::dirs::create_temp("ev_init_load").await.unwrap();
         let log_file = dir.file("events.jsonl");
 
         // write two events manually
@@ -59,8 +59,8 @@ mod init {
             serde_json::to_string(&e1).unwrap(),
             serde_json::to_string(&e2).unwrap(),
         );
-        log_file
-            .write_string(&content, WriteOptions::default())
+        filesys::files::write_string(&log_file
+            , &content, WriteOptions::default())
             .await
             .unwrap();
 
@@ -76,7 +76,7 @@ mod init {
 
     #[tokio::test]
     async fn skips_malformed_lines() {
-        let dir = filesys::Dir::create_temp_dir("ev_init_malformed")
+        let dir = filesys::dirs::create_temp("ev_init_malformed")
             .await
             .unwrap();
         let log_file = dir.file("events.jsonl");
@@ -92,8 +92,8 @@ mod init {
             "not valid json\n\n{}\n{{\"broken\": true}}\n",
             serde_json::to_string(&valid).unwrap(),
         );
-        log_file
-            .write_string(&content, WriteOptions::default())
+        filesys::files::write_string(&log_file
+            , &content, WriteOptions::default())
             .await
             .unwrap();
 
@@ -104,13 +104,13 @@ mod init {
 
     #[tokio::test]
     async fn all_malformed_lines_produces_empty_store() {
-        let dir = filesys::Dir::create_temp_dir("ev_all_malformed")
+        let dir = filesys::dirs::create_temp("ev_all_malformed")
             .await
             .unwrap();
         let log_file = dir.file("events.jsonl");
 
-        log_file
-            .write_string(
+        filesys::files::write_string(&log_file
+            , 
                 "not json at all\n{\"broken\": true}\nalso garbage\n",
                 WriteOptions::default(),
             )
@@ -139,7 +139,7 @@ mod append {
 
     #[tokio::test]
     async fn assigns_monotonic_ids() {
-        let dir = filesys::Dir::create_temp_dir("ev_append_mono")
+        let dir = filesys::dirs::create_temp("ev_append_mono")
             .await
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -155,7 +155,7 @@ mod append {
 
     #[tokio::test]
     async fn persists_to_disk() {
-        let dir = filesys::Dir::create_temp_dir("ev_append_disk")
+        let dir = filesys::dirs::create_temp("ev_append_disk")
             .await
             .unwrap();
         let log_file = dir.file("events.jsonl");
@@ -176,7 +176,7 @@ mod append {
 
     #[tokio::test]
     async fn preserves_event_type_and_data() {
-        let dir = filesys::Dir::create_temp_dir("ev_append_data")
+        let dir = filesys::dirs::create_temp("ev_append_data")
             .await
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -201,7 +201,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_zero_returns_all() {
-        let dir = filesys::Dir::create_temp_dir("ev_replay_zero")
+        let dir = filesys::dirs::create_temp("ev_replay_zero")
             .await
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -218,7 +218,7 @@ mod replay {
 
     #[tokio::test]
     async fn returns_events_after_cursor() {
-        let dir = filesys::Dir::create_temp_dir("ev_replay_after")
+        let dir = filesys::dirs::create_temp("ev_replay_after")
             .await
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -235,7 +235,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_at_latest_returns_empty() {
-        let dir = filesys::Dir::create_temp_dir("ev_replay_latest")
+        let dir = filesys::dirs::create_temp("ev_replay_latest")
             .await
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -249,7 +249,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_beyond_latest_returns_empty() {
-        let dir = filesys::Dir::create_temp_dir("ev_replay_beyond")
+        let dir = filesys::dirs::create_temp("ev_replay_beyond")
             .await
             .unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -262,7 +262,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_zero_on_empty_store_returns_empty() {
-        let dir = filesys::Dir::create_temp_dir("ev_empty_replay")
+        let dir = filesys::dirs::create_temp("ev_empty_replay")
             .await
             .unwrap();
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
@@ -280,7 +280,7 @@ mod replay {
 
     #[tokio::test]
     async fn expired_cursor_returns_error() {
-        let dir = filesys::Dir::create_temp_dir("ev_replay_expired")
+        let dir = filesys::dirs::create_temp("ev_replay_expired")
             .await
             .unwrap();
         // small max_retained to force compaction
@@ -314,7 +314,7 @@ mod compaction {
 
     #[tokio::test]
     async fn compacts_when_exceeding_max_retained() {
-        let dir = filesys::Dir::create_temp_dir("ev_compact").await.unwrap();
+        let dir = filesys::dirs::create_temp("ev_compact").await.unwrap();
         let max_retained = 10;
         let mut store = make_store(&dir, max_retained).await;
 
@@ -332,7 +332,7 @@ mod compaction {
 
     #[tokio::test]
     async fn compacted_log_survives_reload() {
-        let dir = filesys::Dir::create_temp_dir("ev_compact_reload")
+        let dir = filesys::dirs::create_temp("ev_compact_reload")
             .await
             .unwrap();
         let max_retained = 6;
@@ -354,7 +354,7 @@ mod compaction {
 
     #[tokio::test]
     async fn append_after_compaction_continues_ids() {
-        let dir = filesys::Dir::create_temp_dir("ev_compact_ids")
+        let dir = filesys::dirs::create_temp("ev_compact_ids")
             .await
             .unwrap();
         let mut store = make_store(&dir, 4).await;

@@ -30,7 +30,7 @@ pub mod assert_exists {
 
     #[tokio::test]
     async fn success() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         dir.assert_exists().unwrap();
     }
 
@@ -55,7 +55,7 @@ pub mod assert_doesnt_exist {
 
     #[tokio::test]
     async fn failure() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         assert!(matches!(
             dir.assert_doesnt_exist().unwrap_err(),
             FileSysErr::PathExistsErr { .. }
@@ -68,9 +68,9 @@ pub mod delete {
 
     #[tokio::test]
     async fn exists() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         assert!(dir.exists());
-        dir.delete().await.unwrap();
+        filesys::dirs::delete(&dir).await.unwrap();
         assert!(!dir.exists());
     }
 
@@ -78,7 +78,7 @@ pub mod delete {
     async fn doesnt_exist() {
         let dir = filesys::Dir::new(PathBuf::from("doesnt_exist"));
         assert!(!dir.exists());
-        dir.delete().await.unwrap();
+        filesys::dirs::delete(&dir).await.unwrap();
         assert!(!dir.exists());
     }
 }
@@ -88,7 +88,7 @@ pub mod new_home_dir {
 
     #[test]
     fn success() {
-        let dir = filesys::Dir::new_home_dir().unwrap();
+        let dir = filesys::dirs::home().unwrap();
         assert!(dir.exists());
         assert!(dir.path().to_str().unwrap().contains("home"));
     }
@@ -99,7 +99,7 @@ pub mod new_current_dir {
 
     #[test]
     fn success() {
-        let dir = filesys::Dir::new_current_dir().unwrap();
+        let dir = filesys::dirs::current().unwrap();
         assert!(dir.exists());
         assert_eq!(dir.path(), &env::current_dir().unwrap());
     }
@@ -110,7 +110,7 @@ pub mod create_temp_dir {
 
     #[tokio::test]
     async fn success() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         assert!(dir.exists());
         assert!(dir.path().to_str().unwrap().contains("testing"));
     }
@@ -407,26 +407,26 @@ mod create {
 
         #[tokio::test]
         async fn doesnt_exist() {
-            let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+            let temp_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
             let subdir = temp_dir.subdir(PathBuf::from("subdir"));
-            subdir.create().await.unwrap();
+            filesys::dirs::create(&subdir).await.unwrap();
             assert!(subdir.exists());
         }
 
         #[tokio::test]
         async fn parent_doesnt_exist() {
-            let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+            let temp_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
             let subdir = temp_dir.subdir(PathBuf::from("does/not/exist"));
-            subdir.create().await.unwrap();
+            filesys::dirs::create(&subdir).await.unwrap();
             assert!(subdir.exists());
         }
 
         #[tokio::test]
         async fn already_exists() {
-            let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-            dir.create().await.unwrap();
+            let dir = filesys::dirs::create_temp("testing").await.unwrap();
+            filesys::dirs::create(&dir).await.unwrap();
             assert!(dir.exists());
         }
     }
@@ -437,25 +437,25 @@ mod create_if_absent {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let temp_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let temp_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         let subdir = temp_dir.subdir(PathBuf::from("subdir"));
-        subdir.create_if_absent().await.unwrap();
+        filesys::dirs::create_if_absent(&subdir).await.unwrap();
         assert!(subdir.exists());
     }
 
     #[tokio::test]
     async fn exists() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // create some files in the directory to check if they exist afterward
         let file = dir.file("test-file");
-        file.write_string("arglebargle", WriteOptions::default())
+        filesys::files::write_string(&file, "arglebargle", WriteOptions::default())
             .await
             .unwrap();
 
         // create the directory
-        dir.create_if_absent().await.unwrap();
+        filesys::dirs::create_if_absent(&dir).await.unwrap();
         assert!(dir.exists());
         assert!(file.exists());
     }
@@ -553,24 +553,24 @@ mod subdirs {
 
     #[tokio::test]
     async fn empty() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        assert_eq!(dir.subdirs().await.unwrap().len(), 0);
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        assert_eq!(filesys::dirs::subdirs(&dir).await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn success() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // create some subdirs
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
-        subdir1.create().await.unwrap();
+        filesys::dirs::create(&subdir1).await.unwrap();
         let subdir2 = dir.subdir(PathBuf::from("subdir2"));
-        subdir2.create().await.unwrap();
+        filesys::dirs::create(&subdir2).await.unwrap();
         assert!(subdir1.exists());
         assert!(subdir2.exists());
 
         // get the subdirs
-        let subdirs = dir.subdirs().await.unwrap();
+        let subdirs = filesys::dirs::subdirs(&dir).await.unwrap();
         assert_eq!(subdirs.len(), 2);
         assert!(subdirs.iter().any(|d| d.path() == subdir1.path()));
         assert!(subdirs.iter().any(|d| d.path() == subdir2.path()));
@@ -582,28 +582,28 @@ mod files {
 
     #[tokio::test]
     async fn empty() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        assert_eq!(dir.files().await.unwrap().len(), 0);
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        assert_eq!(filesys::dirs::files(&dir).await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn success() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // create some files
         let file1 = dir.file("file1.txt");
-        file1
-            .write_string("arglebargle", WriteOptions::default())
+        filesys::files::write_string(&file1
+            , "arglebargle", WriteOptions::default())
             .await
             .unwrap();
         let file2 = dir.file("file2.txt");
-        file2
-            .write_string("arglebargle", WriteOptions::default())
+        filesys::files::write_string(&file2
+            , "arglebargle", WriteOptions::default())
             .await
             .unwrap();
 
         // get the files
-        let files = dir.files().await.unwrap();
+        let files = filesys::dirs::files(&dir).await.unwrap();
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|f| f.path() == file1.path()));
         assert!(files.iter().any(|f| f.path() == file2.path()));
@@ -615,26 +615,26 @@ mod is_empty {
 
     #[tokio::test]
     async fn success() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        assert!(dir.is_empty().await.unwrap());
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        assert!(filesys::dirs::is_empty(&dir).await.unwrap());
     }
 
     #[tokio::test]
     async fn has_files() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let file = dir.file("test");
-        file.write_string("arglechargle", WriteOptions::default())
+        filesys::files::write_string(&file, "arglechargle", WriteOptions::default())
             .await
             .unwrap();
-        assert!(!dir.is_empty().await.unwrap());
+        assert!(!filesys::dirs::is_empty(&dir).await.unwrap());
     }
 
     #[tokio::test]
     async fn has_subdirs() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
-        subdir.create().await.unwrap();
-        assert!(!dir.is_empty().await.unwrap());
+        filesys::dirs::create(&subdir).await.unwrap();
+        assert!(!filesys::dirs::is_empty(&dir).await.unwrap());
     }
 }
 
@@ -643,83 +643,83 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn success_empty() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(!dir.exists());
     }
 
     #[tokio::test]
     async fn has_files() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let file = dir.file("test");
-        file.write_string("arglechargle", WriteOptions::default())
+        filesys::files::write_string(&file, "arglechargle", WriteOptions::default())
             .await
             .unwrap();
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists());
     }
 
     #[tokio::test]
     async fn has_a_non_empty_subdir() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
-        subdir.create().await.unwrap();
+        filesys::dirs::create(&subdir).await.unwrap();
         let file = subdir.file("test");
-        file.write_string("arglechargle", WriteOptions::default())
+        filesys::files::write_string(&file, "arglechargle", WriteOptions::default())
             .await
             .unwrap();
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists());
     }
 
     #[tokio::test]
     async fn has_empty_subdir() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
-        subdir.create().await.unwrap();
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        filesys::dirs::create(&subdir).await.unwrap();
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(!dir.exists());
     }
 
     #[tokio::test]
     async fn complex_nested_structure_all_empty() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create nested structure: dir/subdir1/subdir2/subdir3
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
-        subdir1.create().await.unwrap();
+        filesys::dirs::create(&subdir1).await.unwrap();
 
         let subdir2 = subdir1.subdir(PathBuf::from("subdir2"));
-        subdir2.create().await.unwrap();
+        filesys::dirs::create(&subdir2).await.unwrap();
 
         let subdir3 = subdir2.subdir(PathBuf::from("subdir3"));
-        subdir3.create().await.unwrap();
+        filesys::dirs::create(&subdir3).await.unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(!dir.exists());
     }
 
     #[tokio::test]
     async fn complex_nested_structure_mixed_content() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create nested structure with some files
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
-        subdir1.create().await.unwrap();
+        filesys::dirs::create(&subdir1).await.unwrap();
 
         let subdir2 = subdir1.subdir(PathBuf::from("subdir2"));
-        subdir2.create().await.unwrap();
+        filesys::dirs::create(&subdir2).await.unwrap();
 
         // Add a file to subdir2 (making it non-empty)
         let file = subdir2.file("keep.txt");
-        file.write_string("don't delete me", WriteOptions::default())
+        filesys::files::write_string(&file, "don't delete me", WriteOptions::default())
             .await
             .unwrap();
 
         let subdir3 = subdir2.subdir(PathBuf::from("subdir3"));
-        subdir3.create().await.unwrap();
+        filesys::dirs::create(&subdir3).await.unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists()); // Main dir should still exist
         assert!(subdir1.exists()); // subdir1 should still exist
         assert!(subdir2.exists()); // subdir2 should still exist (has file)
@@ -728,39 +728,39 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn multiple_empty_subdirs_at_same_level() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create multiple empty subdirs at the same level
         let subdir1 = dir.subdir(PathBuf::from("empty1"));
-        subdir1.create().await.unwrap();
+        filesys::dirs::create(&subdir1).await.unwrap();
 
         let subdir2 = dir.subdir(PathBuf::from("empty2"));
-        subdir2.create().await.unwrap();
+        filesys::dirs::create(&subdir2).await.unwrap();
 
         let subdir3 = dir.subdir(PathBuf::from("empty3"));
-        subdir3.create().await.unwrap();
+        filesys::dirs::create(&subdir3).await.unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(!dir.exists()); // All should be deleted
     }
 
     #[tokio::test]
     async fn mixed_empty_and_non_empty_subdirs() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create empty subdir
         let empty_subdir = dir.subdir(PathBuf::from("empty"));
-        empty_subdir.create().await.unwrap();
+        filesys::dirs::create(&empty_subdir).await.unwrap();
 
         // Create non-empty subdir
         let non_empty_subdir = dir.subdir(PathBuf::from("non_empty"));
-        non_empty_subdir.create().await.unwrap();
+        filesys::dirs::create(&non_empty_subdir).await.unwrap();
         let file = non_empty_subdir.file("test.txt");
-        file.write_string("content", WriteOptions::default())
+        filesys::files::write_string(&file, "content", WriteOptions::default())
             .await
             .unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists()); // Main dir should still exist
         assert!(!empty_subdir.exists()); // Empty subdir should be deleted
         assert!(non_empty_subdir.exists()); // Non-empty subdir should remain
@@ -768,36 +768,36 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn deeply_nested_with_files_at_different_levels() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create structure: dir/level1/level2/level3/level4
         let level1 = dir.subdir(PathBuf::from("level1"));
-        level1.create().await.unwrap();
+        filesys::dirs::create(&level1).await.unwrap();
 
         let level2 = level1.subdir(PathBuf::from("level2"));
-        level2.create().await.unwrap();
+        filesys::dirs::create(&level2).await.unwrap();
 
         let level3 = level2.subdir(PathBuf::from("level3"));
-        level3.create().await.unwrap();
+        filesys::dirs::create(&level3).await.unwrap();
 
         let level4 = level3.subdir(PathBuf::from("level4"));
-        level4.create().await.unwrap();
+        filesys::dirs::create(&level4).await.unwrap();
 
         // Add file at level2
         let file2 = level2.file("level2_file.txt");
-        file2
-            .write_string("level2 content", WriteOptions::default())
+        filesys::files::write_string(&file2
+            , "level2 content", WriteOptions::default())
             .await
             .unwrap();
 
         // Add file at level4
         let file4 = level4.file("level4_file.txt");
-        file4
-            .write_string("level4 content", WriteOptions::default())
+        filesys::files::write_string(&file4
+            , "level4 content", WriteOptions::default())
             .await
             .unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists()); // Main dir should exist
         assert!(level1.exists()); // level1 should exist
         assert!(level2.exists()); // level2 should exist (has file)
@@ -807,62 +807,62 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn empty_subdirs_with_hidden_files() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         let subdir = dir.subdir(PathBuf::from("subdir"));
-        subdir.create().await.unwrap();
+        filesys::dirs::create(&subdir).await.unwrap();
 
         // Add hidden file
         let hidden_file = subdir.file(".hidden");
-        hidden_file
-            .write_string("hidden content", WriteOptions::default())
+        filesys::files::write_string(&hidden_file
+            , "hidden content", WriteOptions::default())
             .await
             .unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists()); // Main dir should exist
         assert!(subdir.exists()); // Subdir should exist (has hidden file)
     }
 
     #[tokio::test]
     async fn stress_test_many_nested_directories() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create many nested directories
         let mut current_dir = dir.clone();
         for i in 0..10 {
             let subdir = current_dir.subdir(format!("level{i}"));
-            subdir.create().await.unwrap();
+            filesys::dirs::create(&subdir).await.unwrap();
             current_dir = subdir;
         }
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(!dir.exists()); // All should be deleted
     }
 
     #[tokio::test]
     async fn partial_cleanup_with_remaining_structure() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // Create structure: dir/branch1/empty1, dir/branch1/empty2, dir/branch2/file
         let branch1 = dir.subdir(PathBuf::from("branch1"));
-        branch1.create().await.unwrap();
+        filesys::dirs::create(&branch1).await.unwrap();
 
         let empty1 = branch1.subdir(PathBuf::from("empty1"));
-        empty1.create().await.unwrap();
+        filesys::dirs::create(&empty1).await.unwrap();
 
         let empty2 = branch1.subdir(PathBuf::from("empty2"));
-        empty2.create().await.unwrap();
+        filesys::dirs::create(&empty2).await.unwrap();
 
         let branch2 = dir.subdir(PathBuf::from("branch2"));
-        branch2.create().await.unwrap();
+        filesys::dirs::create(&branch2).await.unwrap();
 
         let file = branch2.file("keep.txt");
-        file.write_string("keep this", WriteOptions::default())
+        filesys::files::write_string(&file, "keep this", WriteOptions::default())
             .await
             .unwrap();
 
-        assert!(dir.delete_if_empty_recursive().await.is_ok());
+        assert!(filesys::dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(dir.exists()); // Main dir should exist
         assert!(!branch1.exists()); // branch1 should be deleted (all children empty)
         assert!(branch2.exists()); // branch2 should exist (has file)
@@ -874,7 +874,7 @@ mod move_to {
 
     /// Asserts that no leftover `.rename_trash_*` directories exist under `dir`.
     async fn assert_no_trash_dirs(dir: &filesys::Dir) {
-        let siblings = dir.subdirs().await.unwrap();
+        let siblings = filesys::dirs::subdirs(&dir).await.unwrap();
         for sibling in &siblings {
             let name = sibling.name().unwrap();
             assert!(
@@ -886,19 +886,19 @@ mod move_to {
 
     #[tokio::test]
     async fn src_doesnt_exist() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
         let src = base_dir.subdir("src-dir");
         let dest = base_dir.subdir("dest-dir");
 
         // overwrite false
         assert!(matches!(
-            src.move_to(&dest, Overwrite::Deny).await.unwrap_err(),
+            filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
 
         // overwrite true
         assert!(matches!(
-            src.move_to(&dest, Overwrite::Allow).await.unwrap_err(),
+            filesys::dirs::move_to(&src, &dest, Overwrite::Allow).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
 
@@ -907,13 +907,13 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_doesnt_exist() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
-        src.create().await.unwrap();
-        src.file("test.txt")
-            .write_string("test content", WriteOptions::default())
+        filesys::dirs::create(&src).await.unwrap();
+        filesys::files::write_string(&src.file("test.txt")
+            , "test content", WriteOptions::default())
             .await
             .unwrap();
 
@@ -921,14 +921,14 @@ mod move_to {
         let dest = base_dir.subdir("dest-dir");
 
         // move source directory to destination directory
-        src.move_to(&dest, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
         // check the file was moved
         assert!(dest.file("test.txt").exists());
         assert_eq!(
-            dest.file("test.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&dest.file("test.txt")).await.unwrap(),
             "test content"
         );
         assert_no_trash_dirs(&base_dir).await;
@@ -936,19 +936,19 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_exists_deny_overwrite() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
-        src.create().await.unwrap();
+        filesys::dirs::create(&src).await.unwrap();
 
         // destination directory
         let dest = base_dir.subdir("dest-dir");
-        dest.create().await.unwrap();
+        filesys::dirs::create(&dest).await.unwrap();
 
         // move should fail
         assert!(matches!(
-            src.move_to(&dest, Overwrite::Deny).await.unwrap_err(),
+            filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap_err(),
             FileSysErr::PathExistsErr { .. }
         ));
 
@@ -957,34 +957,34 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_exists_allow_overwrite() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
-        src.create().await.unwrap();
-        src.file("src-file.txt")
-            .write_string("src content", WriteOptions::default())
+        filesys::dirs::create(&src).await.unwrap();
+        filesys::files::write_string(&src.file("src-file.txt")
+            , "src content", WriteOptions::default())
             .await
             .unwrap();
 
         // destination directory
         let dest = base_dir.subdir("dest-dir");
-        dest.create().await.unwrap();
+        filesys::dirs::create(&dest).await.unwrap();
         assert!(dest.exists());
-        dest.file("dest-file.txt")
-            .write_string("dest content", WriteOptions::default())
+        filesys::files::write_string(&dest.file("dest-file.txt")
+            , "dest content", WriteOptions::default())
             .await
             .unwrap();
 
         // overwrite true should succeed
-        src.move_to(&dest, Overwrite::Allow).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Allow).await.unwrap();
         assert!(dest.exists());
         assert!(!src.exists());
 
         // verify src file moved, dest file replaced
         assert!(dest.file("src-file.txt").exists());
         assert_eq!(
-            dest.file("src-file.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&dest.file("src-file.txt")).await.unwrap(),
             "src content"
         );
         assert!(!dest.file("dest-file.txt").exists());
@@ -993,31 +993,31 @@ mod move_to {
 
     #[tokio::test]
     async fn src_and_dest_are_same_dir() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src_dir = base_dir.subdir("test-dir");
-        src_dir.create().await.unwrap();
-        src_dir
+        filesys::dirs::create(&src_dir).await.unwrap();
+        filesys::files::write_string(&src_dir
             .file("test.txt")
-            .write_string("test", WriteOptions::default())
+            , "test", WriteOptions::default())
             .await
             .unwrap();
 
         // moving to itself should be a no-op
-        src_dir.move_to(&src_dir, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src_dir, &src_dir, Overwrite::Deny).await.unwrap();
         assert!(src_dir.exists());
         assert!(src_dir.file("test.txt").exists());
         assert_eq!(
-            src_dir.file("test.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&src_dir.file("test.txt")).await.unwrap(),
             "test"
         );
 
-        src_dir.move_to(&src_dir, Overwrite::Allow).await.unwrap();
+        filesys::dirs::move_to(&src_dir, &src_dir, Overwrite::Allow).await.unwrap();
         assert!(src_dir.exists());
         assert!(src_dir.file("test.txt").exists());
         assert_eq!(
-            src_dir.file("test.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&src_dir.file("test.txt")).await.unwrap(),
             "test"
         );
         assert_no_trash_dirs(&base_dir).await;
@@ -1025,30 +1025,30 @@ mod move_to {
 
     #[tokio::test]
     async fn moves_nested_structure() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
-        src.create().await.unwrap();
+        filesys::dirs::create(&src).await.unwrap();
         let file1 = src.file("file1.txt");
-        file1
-            .write_string("file1", WriteOptions::default())
+        filesys::files::write_string(&file1
+            , "file1", WriteOptions::default())
             .await
             .unwrap();
         // subdirectory 1
         let subdir1 = src.subdir("subdir1");
-        subdir1.create().await.unwrap();
+        filesys::dirs::create(&subdir1).await.unwrap();
         let file2 = subdir1.file("file2.txt");
-        file2
-            .write_string("file2", WriteOptions::default())
+        filesys::files::write_string(&file2
+            , "file2", WriteOptions::default())
             .await
             .unwrap();
         // subdirectory 2
         let subdir2 = subdir1.subdir("subdir2");
-        subdir2.create().await.unwrap();
+        filesys::dirs::create(&subdir2).await.unwrap();
         let file3 = subdir2.file("file3.txt");
-        file3
-            .write_string("file3", WriteOptions::default())
+        filesys::files::write_string(&file3
+            , "file3", WriteOptions::default())
             .await
             .unwrap();
 
@@ -1056,49 +1056,49 @@ mod move_to {
         let dest = base_dir.subdir("dest-dir");
 
         // move source directory to destination directory
-        src.move_to(&dest, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(!src.exists());
         assert!(dest.exists());
 
         // verify root directory
         assert!(dest.file("file1.txt").exists());
-        assert_eq!(dest.file("file1.txt").read_string().await.unwrap(), "file1");
-        assert_eq!(dest.subdirs().await.unwrap().len(), 1);
-        assert_eq!(dest.files().await.unwrap().len(), 1);
+        assert_eq!(filesys::files::read_string(&dest.file("file1.txt")).await.unwrap(), "file1");
+        assert_eq!(filesys::dirs::subdirs(&dest).await.unwrap().len(), 1);
+        assert_eq!(filesys::dirs::files(&dest).await.unwrap().len(), 1);
 
         // verify subdirectory 1
         let dest_subdir1 = dest.subdir("subdir1");
         assert!(dest_subdir1.exists());
         assert!(dest_subdir1.file("file2.txt").exists());
         assert_eq!(
-            dest_subdir1.file("file2.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&dest_subdir1.file("file2.txt")).await.unwrap(),
             "file2"
         );
-        assert_eq!(dest_subdir1.subdirs().await.unwrap().len(), 1);
-        assert_eq!(dest_subdir1.files().await.unwrap().len(), 1);
+        assert_eq!(filesys::dirs::subdirs(&dest_subdir1).await.unwrap().len(), 1);
+        assert_eq!(filesys::dirs::files(&dest_subdir1).await.unwrap().len(), 1);
 
         // verify subdirectory 2
         let dest_subdir2 = dest_subdir1.subdir("subdir2");
         assert!(dest_subdir2.exists());
         assert!(dest_subdir2.file("file3.txt").exists());
         assert_eq!(
-            dest_subdir2.file("file3.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&dest_subdir2.file("file3.txt")).await.unwrap(),
             "file3"
         );
-        assert_eq!(dest_subdir2.subdirs().await.unwrap().len(), 0);
-        assert_eq!(dest_subdir2.files().await.unwrap().len(), 1);
+        assert_eq!(filesys::dirs::subdirs(&dest_subdir2).await.unwrap().len(), 0);
+        assert_eq!(filesys::dirs::files(&dest_subdir2).await.unwrap().len(), 1);
         assert_no_trash_dirs(&base_dir).await;
     }
 
     #[tokio::test]
     async fn creates_missing_parent_directory() {
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
-        src.create().await.unwrap();
-        src.file("test.txt")
-            .write_string("test", WriteOptions::default())
+        filesys::dirs::create(&src).await.unwrap();
+        filesys::files::write_string(&src.file("test.txt")
+            , "test", WriteOptions::default())
             .await
             .unwrap();
 
@@ -1106,7 +1106,7 @@ mod move_to {
         let dest = base_dir.subdir("parent").subdir("dest-dir");
 
         // move source directory to destination directory
-        src.move_to(&dest, Overwrite::Deny).await.unwrap();
+        filesys::dirs::move_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(!src.exists());
         assert!(dest.parent().unwrap().exists());
         assert!(dest.exists());
@@ -1120,27 +1120,27 @@ mod move_to {
         //   step 1: rename dest -> trash  (succeeds)
         //   step 2: rename src  -> dest   (fails — src missing)
         //   rollback: rename trash -> dest (restores original dest)
-        let base_dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let base_dir = filesys::dirs::create_temp("testing").await.unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
 
         // destination directory
         let dest = base_dir.subdir("dest-dir");
-        dest.create().await.unwrap();
-        dest.file("keep-me.txt")
-            .write_string("precious", WriteOptions::default())
+        filesys::dirs::create(&dest).await.unwrap();
+        filesys::files::write_string(&dest.file("keep-me.txt")
+            , "precious", WriteOptions::default())
             .await
             .unwrap();
 
         // move shoud fail
-        let result = src.move_to(&dest, Overwrite::Allow).await;
+        let result = filesys::dirs::move_to(&src, &dest, Overwrite::Allow).await;
         assert!(result.is_err(), "expected error for missing src");
 
         // dest must be restored with its original content
         assert!(dest.exists());
         assert_eq!(
-            dest.file("keep-me.txt").read_string().await.unwrap(),
+            filesys::files::read_string(&dest.file("keep-me.txt")).await.unwrap(),
             "precious"
         );
 
@@ -1153,12 +1153,12 @@ pub mod set_permissions {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let target = dir.subdir("nonexistent-dir");
         let permissions = std::fs::Permissions::from_mode(0o755);
 
         assert!(matches!(
-            target.set_permissions(permissions).await.unwrap_err(),
+            filesys::dirs::set_permissions(&target, permissions).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -1166,36 +1166,36 @@ pub mod set_permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn basic_permissions() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let target = dir.subdir("test-dir");
-        target.create().await.unwrap();
+        filesys::dirs::create(&target).await.unwrap();
 
         let readonly = std::fs::Permissions::from_mode(0o555);
         let readwrite = std::fs::Permissions::from_mode(0o755);
         let restricted = std::fs::Permissions::from_mode(0o700);
 
         // Test read-execute only (555 in octal)
-        target.set_permissions(readonly).await.unwrap();
-        let perms = target.permissions().await.unwrap();
+        filesys::dirs::set_permissions(&target, readonly).await.unwrap();
+        let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o555);
 
         // Test read-write-execute (755 in octal)
-        target.set_permissions(readwrite).await.unwrap();
-        let perms = target.permissions().await.unwrap();
+        filesys::dirs::set_permissions(&target, readwrite).await.unwrap();
+        let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o755);
 
         // Test owner-only (700 in octal)
-        target.set_permissions(restricted).await.unwrap();
-        let perms = target.permissions().await.unwrap();
+        filesys::dirs::set_permissions(&target, restricted).await.unwrap();
+        let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o700);
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn all_permission_combinations() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let target = dir.subdir("test-dir");
-        target.create().await.unwrap();
+        filesys::dirs::create(&target).await.unwrap();
 
         let permissions = [
             0o500, // read-execute for owner
@@ -1208,8 +1208,8 @@ pub mod set_permissions {
 
         for mode in permissions {
             let expected = std::fs::Permissions::from_mode(mode);
-            target.set_permissions(expected.clone()).await.unwrap();
-            let actual = target.permissions().await.unwrap();
+            filesys::dirs::set_permissions(&target, expected.clone()).await.unwrap();
+            let actual = filesys::dirs::permissions(&target).await.unwrap();
             assert_eq!(actual.mode() & 0o777, expected.mode() & 0o777);
         }
     }
@@ -1220,11 +1220,11 @@ pub mod permissions {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let target = dir.subdir("nonexistent-dir");
 
         assert!(matches!(
-            target.permissions().await.unwrap_err(),
+            filesys::dirs::permissions(&target).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
@@ -1232,16 +1232,16 @@ pub mod permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn returns_current_permissions() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
         let target = dir.subdir("test-dir");
-        target.create().await.unwrap();
+        filesys::dirs::create(&target).await.unwrap();
 
         // set known permissions and verify read-back
-        target
-            .set_permissions(std::fs::Permissions::from_mode(0o750))
+        filesys::dirs::set_permissions(&target
+            , std::fs::Permissions::from_mode(0o750))
             .await
             .unwrap();
-        let perms = target.permissions().await.unwrap();
+        let perms = filesys::dirs::permissions(&target).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o750);
     }
 }

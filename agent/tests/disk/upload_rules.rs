@@ -28,7 +28,7 @@ fn rule(id: &str, digest: &str, policy: DeletePolicy) -> UploadRule {
 }
 
 async fn init_storage() -> Storage {
-    let dir = filesys::Dir::create_temp_dir("upload_rules_test")
+    let dir = filesys::dirs::create_temp("upload_rules_test")
         .await
         .unwrap();
     let layout = Layout::new(dir);

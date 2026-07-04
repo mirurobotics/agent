@@ -2,7 +2,7 @@
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
-use crate::filesys::{self, Overwrite};
+use crate::filesys::{self, files, Overwrite};
 use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
@@ -29,7 +29,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
 ) -> Result<Outcome, ProvisionErr> {
     // if a machine has already been provisioned, then just return the device's name
     if disk::assert_activated(layout).is_ok() {
-        let device_name = match layout.device().read_json::<models::Device>().await {
+        let device_name = match files::read_json::<models::Device>(&layout.device()).await {
             Ok(device) => device.name,
             Err(e) => {
                 error!("unable to read device.json: {e}");
@@ -79,7 +79,7 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
     token: &str,
     device_name: Option<String>,
 ) -> Result<backend_client::Device, ProvisionErr> {
-    let public_key_pem = public_key_file.read_string().await?;
+    let public_key_pem = files::read_string(public_key_file).await?;
     let payload = backend_client::ProvisionDeviceRequest {
         public_key_pem,
         agent_version: version::VERSION.to_string(),
