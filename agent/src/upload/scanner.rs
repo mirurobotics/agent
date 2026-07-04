@@ -5,16 +5,14 @@ use std::sync::Arc;
 // internal crates
 use crate::models::{UploadCollectionID, UploadRule};
 use crate::trace;
-use crate::upload::collection_scanner::CollectionScanner;
-use crate::upload::errors::*;
+pub use crate::upload::collection_scanner::{find_stable, Observation, StableFile};
+use crate::upload::{collection_scanner::CollectionScanner, errors::*};
 
 // external crates
 use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-
-pub use crate::upload::collection_scanner::{find_stable, Observation, StableFile};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{

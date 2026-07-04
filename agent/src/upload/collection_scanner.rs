@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 // internal crates
-use crate::filesys::{File, PathExt};
+use crate::filesys::{files, File, PathExt};
 use crate::models::UploadRule;
 use crate::trace;
 use crate::upload::errors::*;
@@ -76,7 +76,6 @@ pub(crate) struct CollectionScanner {
 }
 
 impl CollectionScanner {
-
     /// New sub-scanner with empty state and no recorded next-scan time, so it is
     /// due on its first scan.
     pub(crate) fn new(rule: UploadRule) -> Self {
@@ -174,9 +173,36 @@ pub fn find_stable(
 ) -> Vec<StableFile> {
     let mut stable = Vec::new();
 
-    for (path, size, mtime) in stat_glob_matches(&rule.source.glob) {
+    // Enumerate the glob. An invalid pattern is logged and treated as no matches
+    // so the scanner never crashes on a bad rule.
+    let matched = match files::glob(&rule.source.glob) {
+        Ok(matched) => matched,
+        Err(e) => {
+            error!("invalid glob {:?}: {e}", rule.source.glob);
+            return stable;
+        }
+    };
+
+    for file in matched {
+        // Stat each globbed file with SYNC std::fs (this runs under
+        // spawn_blocking; the async files::size/last_modified must NOT be used
+        // here). Skip non-files and entries whose metadata/mtime cannot be read
+        // (e.g. a file deleted mid-scan).
+        let meta = match std::fs::metadata(file.path()) {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let size = meta.len();
+        let mtime = match meta.modified() {
+            Ok(mtime) => mtime,
+            Err(_) => continue,
+        };
+
         if let Some(rf) = decide_file(
-            path,
+            file,
             size,
             mtime,
             rule.source.stability_window_secs,
@@ -189,46 +215,6 @@ pub fn find_stable(
     }
 
     stable
-}
-
-/// Enumerate `glob` and stat every matched existing regular file, yielding `(path,
-/// size, mtime)` per file. An invalid glob is logged and yields nothing; non-files and
-/// entries whose metadata/mtime cannot be read are skipped (e.g. a file deleted
-/// mid-scan).
-fn stat_glob_matches(glob: &str) -> Vec<(File, u64, std::time::SystemTime)> {
-    let mut matches = Vec::new();
-
-    let paths = match glob::glob(glob) {
-        Ok(paths) => paths,
-        Err(e) => {
-            error!("invalid glob {:?}: {e}", glob);
-            return matches;
-        }
-    };
-
-    for entry in paths {
-        let path = match entry {
-            Ok(path) => path,
-            Err(_) => continue,
-        };
-        if !path.is_file() {
-            continue;
-        }
-
-        let meta = match std::fs::metadata(&path) {
-            Ok(meta) => meta,
-            Err(_) => continue, // e.g. file deleted mid-scan
-        };
-        let size = meta.len();
-        let mtime = match meta.modified() {
-            Ok(mtime) => mtime,
-            Err(_) => continue,
-        };
-
-        matches.push((File::new(path), size, mtime));
-    }
-
-    matches
 }
 
 /// Advance the stability window for one file and decide whether it is newly stable.
