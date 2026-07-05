@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 // internal crates
-use crate::upload::ScannerExt;
+use crate::scan::ScannerExt;
 
 // external crates
 use tracing::info;
@@ -36,7 +36,7 @@ pub async fn run<F, Fut, ScannerT: ScannerExt>(
 {
     tokio::select! {
         _ = shutdown_signal.as_mut() => {
-            info!("Uploads worker shutdown complete");
+            info!("Scan worker shutdown complete");
         }
         // doesn't return but we do need to run it in the background
         _ = run_impl(options, scanner, sleep_fn) => {}
@@ -51,7 +51,7 @@ async fn run_impl<F, Fut, ScannerT: ScannerExt>(
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
 {
-    info!("Running uploads worker");
+    info!("Running scan worker");
 
     loop {
         let _ = scanner.scan().await;

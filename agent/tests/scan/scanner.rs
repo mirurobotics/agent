@@ -6,9 +6,9 @@ use std::sync::Arc;
 use crate::mocks::clock::Clock;
 use miru_agent::filesys::{self, File, PathExt};
 use miru_agent::models::{UploadRule, UploadRuleSource};
-use miru_agent::upload::scanner::{find_stable, Observation, StableFile};
-use miru_agent::upload::scanner::{Scanner, ScannerArgs};
-use miru_agent::upload::ScannerExt;
+use miru_agent::scan::scanner::{find_stable, Observation, StableFile};
+use miru_agent::scan::scanner::{Scanner, ScannerArgs};
+use miru_agent::scan::ScannerExt;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -515,7 +515,7 @@ mod actor {
         let err = scanner.scan().await.unwrap_err();
         assert!(matches!(
             err,
-            miru_agent::upload::UploadErr::SendActorMessageErr(_)
+            miru_agent::scan::UploadErr::SendActorMessageErr(_)
         ));
     }
 }

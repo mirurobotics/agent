@@ -7,9 +7,9 @@ use crate::errors::Trace;
 use crate::events;
 use crate::filesys;
 use crate::http;
+use crate::scan;
 use crate::services;
 use crate::sync;
-use crate::upload;
 
 #[derive(Debug, thiserror::Error)]
 pub struct MissingDeviceIDErr {
@@ -112,7 +112,7 @@ pub enum ServerErr {
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
     #[error(transparent)]
-    UploadErr(upload::UploadErr),
+    UploadErr(scan::UploadErr),
 
     // external crate errors
     #[error(transparent)]
@@ -179,8 +179,8 @@ impl From<sync::SyncErr> for ServerErr {
     }
 }
 
-impl From<upload::UploadErr> for ServerErr {
-    fn from(e: upload::UploadErr) -> Self {
+impl From<scan::UploadErr> for ServerErr {
+    fn from(e: scan::UploadErr) -> Self {
         Self::UploadErr(e)
     }
 }

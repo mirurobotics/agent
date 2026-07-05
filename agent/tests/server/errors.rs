@@ -11,11 +11,11 @@ use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::MockErr as HTTPMockErr;
 use miru_agent::http::HTTPErr;
+use miru_agent::scan::UploadErr;
 use miru_agent::server::ServerErr;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
-use miru_agent::upload::UploadErr;
 
 fn authn_err() -> AuthnErr {
     AuthnErr::MockError(AuthnMockError {

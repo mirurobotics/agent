@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::cache::errors::{ReceiveActorMessageErr, SendActorMessageErr};
 use miru_agent::errors::Error;
-use miru_agent::upload::UploadErr;
+use miru_agent::scan::UploadErr;
 
 fn send_actor_msg_err() -> SendActorMessageErr {
     SendActorMessageErr {

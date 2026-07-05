@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 // internal crates
 use crate::models::{UploadCollectionID, UploadRule};
+pub use crate::scan::collection_scanner::{find_stable, Observation, StableFile};
+use crate::scan::{collection_scanner::CollectionScanner, errors::*};
 use crate::trace;
-pub use crate::upload::collection_scanner::{find_stable, Observation, StableFile};
-use crate::upload::{collection_scanner::CollectionScanner, errors::*};
 
 // external crates
 use chrono::{DateTime, Utc};

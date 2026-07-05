@@ -21,11 +21,11 @@ use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{
     Deployment, Device, DplActivity, DplErrStatus, DplTarget, Release, UploadRule, UploadRuleSource,
 };
+use miru_agent::scan::scanner::{Scanner, ScannerArgs};
 use miru_agent::sync::syncer::{
     CooldownEnd, SingleThreadSyncer, State, SyncEvent, SyncFailure, SyncerArgs, Worker,
 };
 use miru_agent::sync::{SyncErr, Syncer, SyncerExt};
-use miru_agent::upload::scanner::{Scanner, ScannerArgs};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

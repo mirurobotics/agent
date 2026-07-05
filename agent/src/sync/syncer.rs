@@ -10,9 +10,9 @@ use crate::disk;
 use crate::errors::*;
 use crate::events;
 use crate::http;
+use crate::scan::ScannerExt;
 use crate::sync::{deployments, errors::*};
 use crate::trace;
-use crate::upload::ScannerExt;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -57,7 +57,7 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
-    pub scanner: Arc<crate::upload::Scanner>,
+    pub scanner: Arc<crate::scan::Scanner>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,7 +91,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
-    scanner: Arc<crate::upload::Scanner>,
+    scanner: Arc<crate::scan::Scanner>,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,

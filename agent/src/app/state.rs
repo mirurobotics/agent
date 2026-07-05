@@ -11,16 +11,16 @@ use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
+use crate::scan::ScannerExt;
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
-use crate::upload::ScannerExt;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
-    pub scanner: Arc<crate::upload::Scanner>,
+    pub scanner: Arc<crate::scan::Scanner>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -65,9 +65,9 @@ impl AppState {
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
         // initialize the scanner (before the syncer, which pushes rules to it)
-        let (scanner, scanner_handle) = crate::upload::scanner::Scanner::spawn(
+        let (scanner, scanner_handle) = crate::scan::scanner::Scanner::spawn(
             64,
-            crate::upload::scanner::ScannerArgs {
+            crate::scan::scanner::ScannerArgs {
                 min_poll_interval_secs: 1,
                 now_fn: Arc::new(chrono::Utc::now),
             },

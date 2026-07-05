@@ -5,8 +5,8 @@ use std::path::PathBuf;
 // internal crates
 use crate::filesys::{files, File, PathExt};
 use crate::models::UploadRule;
+use crate::scan::errors::*;
 use crate::trace;
-use crate::upload::errors::*;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

@@ -5,8 +5,8 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::error::SleepController;
 use miru_agent::models::UploadRule;
-use miru_agent::upload::{ScannerExt, UploadErr};
-use miru_agent::workers::uploads;
+use miru_agent::scan::{ScannerExt, UploadErr};
+use miru_agent::workers::scan;
 
 // A counting mock implementing ScannerExt: records how many times scan() is
 // called so the thin timing worker can be observed without any real scanner.
@@ -31,7 +31,7 @@ impl ScannerExt for CountingScanner {
 // release of the controlled sleep advances exactly one tick.
 #[tokio::test]
 async fn scan_called_each_tick() {
-    let options = uploads::Options {
+    let options = scan::Options {
         tick_interval_secs: 1,
     };
     let sleep_ctrl = Arc::new(SleepController::new());
@@ -47,7 +47,7 @@ async fn scan_called_each_tick() {
         std::future::pending::<()>().await;
     });
     let _handle = tokio::spawn(async move {
-        uploads::run(
+        scan::run(
             &options_for_spawn,
             scanner_for_spawn.as_ref(),
             sleep_ctrl_for_spawn.sleep_fn(),
@@ -73,7 +73,7 @@ async fn scan_called_each_tick() {
 // The worker's run future returns once the shutdown signal fires.
 #[tokio::test]
 async fn shuts_down_on_signal() {
-    let options = uploads::Options {
+    let options = scan::Options {
         tick_interval_secs: 1,
     };
     let sleep_ctrl = Arc::new(SleepController::new());
@@ -91,7 +91,7 @@ async fn shuts_down_on_signal() {
     let scanner_for_spawn = scanner.clone();
     let sleep_ctrl_for_spawn = sleep_ctrl.clone();
     let handle = tokio::spawn(async move {
-        uploads::run(
+        scan::run(
             &options_for_spawn,
             scanner_for_spawn.as_ref(),
             sleep_ctrl_for_spawn.sleep_fn(),

@@ -15,9 +15,8 @@ use crate::http;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
-    mqtt, poller,
+    mqtt, poller, scan,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
-    uploads,
 };
 
 // external crates
@@ -154,9 +153,9 @@ async fn init(
         .await?;
     }
 
-    if options.enable_uploads_worker {
-        init_uploads_worker(
-            options.uploads.clone(),
+    if options.enable_scan_worker {
+        init_scan_worker(
+            options.scan.clone(),
             app_state.clone(),
             shutdown_manager,
             shutdown_tx.subscribe(),
@@ -256,18 +255,18 @@ async fn init_poller_worker(
     Ok(())
 }
 
-async fn init_uploads_worker(
-    options: uploads::Options,
+async fn init_scan_worker(
+    options: scan::Options,
     app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), ServerErr> {
-    info!("Initializing uploads worker...");
+    info!("Initializing scan worker...");
 
     let scanner = app_state.scanner.clone();
 
-    let uploads_handle = tokio::spawn(async move {
-        uploads::run(
+    let scan_handle = tokio::spawn(async move {
+        scan::run(
             &options,
             scanner.as_ref(),
             tokio::time::sleep,
@@ -278,9 +277,9 @@ async fn init_uploads_worker(
         .await;
     });
     shutdown_manager.register_handle(
-        |mgr| &mut mgr.uploads_worker_handle,
-        "uploads_handle",
-        uploads_handle,
+        |mgr| &mut mgr.scan_worker_handle,
+        "scan_handle",
+        scan_handle,
     )?;
     Ok(())
 }
@@ -361,7 +360,7 @@ struct ShutdownManager {
     app_state: Option<AppStateShutdownParams>,
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     poller_worker_handle: Option<JoinHandle<()>>,
-    uploads_worker_handle: Option<JoinHandle<()>>,
+    scan_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
 }
@@ -374,7 +373,7 @@ impl ShutdownManager {
             app_state: None,
             socket_server_handle: None,
             poller_worker_handle: None,
-            uploads_worker_handle: None,
+            scan_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
         }
@@ -490,16 +489,16 @@ impl ShutdownManager {
             info!("Poller worker handle not found, skipping poller worker shutdown...");
         }
 
-        // 3. uploads
-        if let Some(uploads_worker_handle) = self.uploads_worker_handle.take() {
-            uploads_worker_handle.await.map_err(|e| {
+        // 3. scan
+        if let Some(scan_worker_handle) = self.scan_worker_handle.take() {
+            scan_worker_handle.await.map_err(|e| {
                 ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
                 })
             })?;
         } else {
-            info!("Uploads worker handle not found, skipping uploads worker shutdown...");
+            info!("Scan worker handle not found, skipping scan worker shutdown...");
         }
 
         // 4. mqtt
@@ -637,61 +636,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_handle_rejects_uploads_duplicates() {
+    async fn register_handle_rejects_scan_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.uploads_worker_handle,
-                "uploads_handle",
+                |mgr| &mut mgr.scan_worker_handle,
+                "scan_handle",
                 spawn_immediate_handle(),
             )
             .unwrap();
 
         let err = shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.uploads_worker_handle,
-                "uploads_handle",
+                |mgr| &mut mgr.scan_worker_handle,
+                "scan_handle",
                 spawn_immediate_handle(),
             )
-            .expect_err("duplicate uploads handle should error");
+            .expect_err("duplicate scan handle should error");
 
         match err {
             ServerErr::ShutdownMngrDuplicateArgErr(err) => {
-                assert_eq!(err.arg_name, "uploads_handle");
+                assert_eq!(err.arg_name, "scan_handle");
             }
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }
     }
 
     #[tokio::test]
-    async fn shutdown_awaits_registered_uploads_worker_handle() {
+    async fn shutdown_awaits_registered_scan_worker_handle() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.uploads_worker_handle,
-                "uploads_handle",
+                |mgr| &mut mgr.scan_worker_handle,
+                "scan_handle",
                 spawn_immediate_handle(),
             )
             .unwrap();
 
-        // Drives shutdown_impl through the uploads `Some` branch (awaiting and
+        // Drives shutdown_impl through the scan `Some` branch (awaiting and
         // clearing the registered handle) while every other worker/server/state
         // slot stays empty and exercises its skip branch.
         shutdown_manager.shutdown().await.unwrap();
 
-        assert!(shutdown_manager.uploads_worker_handle.is_none());
+        assert!(shutdown_manager.scan_worker_handle.is_none());
     }
 
     #[tokio::test]
-    async fn shutdown_skips_absent_uploads_worker_handle() {
+    async fn shutdown_skips_absent_scan_worker_handle() {
         let mut shutdown_manager = new_shutdown_manager();
 
         // No handles registered: shutdown should succeed via the skip branches,
-        // including the uploads "handle not found" path.
+        // including the scan "handle not found" path.
         shutdown_manager.shutdown().await.unwrap();
 
-        assert!(shutdown_manager.uploads_worker_handle.is_none());
+        assert!(shutdown_manager.scan_worker_handle.is_none());
     }
 }
