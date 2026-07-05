@@ -1220,12 +1220,7 @@ pub mod metadata {
         assert!(!metadata.is_dir());
         assert_eq!(metadata.len(), contents.len() as u64);
         assert!(
-            metadata
-                .modified()
-                .unwrap()
-                .elapsed()
-                .unwrap()
-                < std::time::Duration::from_secs(1)
+            metadata.modified().unwrap().elapsed().unwrap() < std::time::Duration::from_secs(1)
         );
     }
 
@@ -1344,5 +1339,3 @@ pub mod size {
         assert_eq!(files::size(&file).await.unwrap(), 4);
     }
 }
-
-

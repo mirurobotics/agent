@@ -4,7 +4,11 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{
-    dirs, errors::*, file::{File, Metadata}, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
+    dirs,
+    errors::*,
+    file::{File, Metadata},
+    path::PathExt,
+    Atomic, CopyOptions, Overwrite, WriteOptions,
 };
 use crate::trace;
 
@@ -361,6 +365,13 @@ pub async fn create_symlink(
     Ok(())
 }
 
+/// Returns the regular files matching a shell-style glob `pattern`.
+///
+/// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].
+/// Entries that error mid-traversal (e.g. an unreadable directory) are skipped
+/// rather than aborting the walk (skip-and-continue). Matching follows symlinks
+/// and returns only regular files (per [`Path::is_file`]), so directories are
+/// excluded from the results.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let mut matches = Vec::new();
 

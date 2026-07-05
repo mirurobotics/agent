@@ -393,4 +393,3 @@ mod file {
         assert_eq!(file.path(), &dir_path.join("🦀rust.rs"));
     }
 }
-
