@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{
-    dirs, errors::*, file::File, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
+    dirs, errors::*, file::{File, Metadata}, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
 };
 use crate::trace;
 
@@ -361,7 +361,32 @@ pub async fn create_symlink(
     Ok(())
 }
 
-async fn metadata(file: &File) -> Result<std::fs::Metadata, FileSysErr> {
+pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
+    let mut matches = Vec::new();
+
+    let paths = glob::glob(pattern).map_err(|e| {
+        FileSysErr::InvalidGlobErr(InvalidGlobErr {
+            pattern: pattern.to_string(),
+            source: Box::new(e),
+            trace: trace!(),
+        })
+    })?;
+
+    for entry in paths {
+        let path = match entry {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        if !path.is_file() {
+            continue;
+        }
+        matches.push(File::new(path));
+    }
+
+    Ok(matches)
+}
+
+pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {
     tokio::fs::metadata(file.path()).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {

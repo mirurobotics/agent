@@ -4,14 +4,12 @@ pub mod dirs;
 pub mod errors;
 pub mod file;
 pub mod files;
-pub mod glob;
 pub mod path;
 
 // internal crates
 pub use self::dir::Dir;
 pub use self::errors::FileSysErr;
 pub use self::file::File;
-pub use self::glob::stat_matches;
 pub use self::path::PathExt;
 
 /// Whether an operation is allowed to overwrite an existing file or directory.

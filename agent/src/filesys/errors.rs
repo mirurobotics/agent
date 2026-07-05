@@ -70,6 +70,16 @@ pub struct InvalidFileOverwriteErr {
 impl crate::errors::Error for InvalidFileOverwriteErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("invalid glob pattern '{pattern}': {source}")]
+pub struct InvalidGlobErr {
+    pub pattern: String,
+    pub source: Box<glob::PatternError>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidGlobErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("unable to determine parent directory for directory: {dir}")]
 pub struct UnknownParentDirForDirErr {
     pub dir: Dir,
@@ -321,6 +331,8 @@ pub enum FileSysErr {
     #[error(transparent)]
     UnknownDirNameErr(UnknownDirNameErr),
     #[error(transparent)]
+    InvalidGlobErr(InvalidGlobErr),
+    #[error(transparent)]
     InvalidFileOverwriteErr(InvalidFileOverwriteErr),
     #[error(transparent)]
     UnknownFileNameErr(UnknownFileNameErr),
@@ -383,6 +395,7 @@ pub enum FileSysErr {
 crate::impl_error!(FileSysErr {
     InvalidDirNameErr,
     UnknownDirNameErr,
+    InvalidGlobErr,
     InvalidFileOverwriteErr,
     UnknownFileNameErr,
     PathDoesNotExistErr,
