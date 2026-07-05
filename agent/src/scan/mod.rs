@@ -1,7 +1,7 @@
-pub(crate) mod collection_scanner;
+pub(crate) mod collections;
 pub mod errors;
 pub mod scanner;
 pub mod upload_rules;
 
-pub use self::errors::UploadErr;
+pub use self::errors::ScanErr;
 pub use self::scanner::{Scanner, ScannerExt};

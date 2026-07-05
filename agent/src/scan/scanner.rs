@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 // internal crates
 use crate::models::{UploadCollectionID, UploadRule};
-pub use crate::scan::collection_scanner::{find_stable, Observation, StableFile};
-use crate::scan::{collection_scanner::CollectionScanner, errors::*};
+pub use crate::scan::collections::{find_stable, Observation, StableFile};
+use crate::scan::{collections::CollectionScanner, errors::*};
 use crate::trace;
 
 // external crates
@@ -40,7 +40,7 @@ pub struct ScannerArgs {
 /// own rule/observations/dedupe/cadence.
 pub struct SingleThreadScanner {
     collections: HashMap<UploadCollectionID, CollectionScanner>,
-    min_poll_interval_secs: i64,
+    poll_interval_secs: i64,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
@@ -48,7 +48,7 @@ impl SingleThreadScanner {
     pub fn new(args: ScannerArgs) -> Self {
         Self {
             collections: HashMap::new(),
-            min_poll_interval_secs: args.min_poll_interval_secs,
+            poll_interval_secs: args.min_poll_interval_secs,
             now_fn: args.now_fn,
         }
     }
@@ -61,7 +61,7 @@ impl SingleThreadScanner {
     /// longer present are dropped; surviving collections get their rule replaced
     /// (state carried over) and new collections get a fresh sub-scanner (due on
     /// next scan).
-    fn update_rules(&mut self, rules: Vec<UploadRule>) -> Result<(), UploadErr> {
+    fn update_rules(&mut self, rules: Vec<UploadRule>) -> Result<(), ScanErr> {
         let mut folded: HashMap<UploadCollectionID, UploadRule> = HashMap::new();
         for rule in rules {
             folded.insert(rule.upload_collection_id.clone(), rule);
@@ -81,7 +81,7 @@ impl SingleThreadScanner {
         Ok(())
     }
 
-    async fn scan(&mut self) -> Result<(), UploadErr> {
+    async fn scan(&mut self) -> Result<(), ScanErr> {
         // Each collection advances independently; order across collections is
         // unspecified. A collection's own cadence gates whether it runs this tick.
         for collection in self.collections.values_mut() {
@@ -93,7 +93,6 @@ impl SingleThreadScanner {
 
             let stable = collection.scan(now).await;
             Self::emit_stable(stable);
-            collection.reschedule(now, self.min_poll_interval_secs);
         }
 
         Ok(())
@@ -117,25 +116,25 @@ impl SingleThreadScanner {
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
 #[allow(async_fn_in_trait)]
 pub trait ScannerExt {
-    async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), UploadErr>;
-    async fn scan(&self) -> Result<(), UploadErr>;
-    async fn shutdown(&self) -> Result<(), UploadErr>;
+    async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), ScanErr>;
+    async fn scan(&self) -> Result<(), ScanErr>;
+    async fn shutdown(&self) -> Result<(), ScanErr>;
 }
 
 pub enum Command {
     UpdateRules {
         rules: Vec<UploadRule>,
-        respond_to: oneshot::Sender<Result<(), UploadErr>>,
+        respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
     Scan {
-        respond_to: oneshot::Sender<Result<(), UploadErr>>,
+        respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
     Shutdown {
-        respond_to: oneshot::Sender<Result<(), UploadErr>>,
+        respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
     #[cfg(feature = "test")]
     GetRules {
-        respond_to: oneshot::Sender<Result<Vec<UploadRule>, UploadErr>>,
+        respond_to: oneshot::Sender<Result<Vec<UploadRule>, ScanErr>>,
     },
     /// Inspector: number of files recorded in the ledger. Lets actor
     /// tests observe stability/cadence/dedupe through the public handle without
@@ -143,7 +142,7 @@ pub enum Command {
     /// count is a faithful proxy for "files that have crossed into stable").
     #[cfg(feature = "test")]
     GetLedgerCount {
-        respond_to: oneshot::Sender<Result<usize, UploadErr>>,
+        respond_to: oneshot::Sender<Result<usize, ScanErr>>,
     },
 }
 
@@ -221,7 +220,7 @@ impl Scanner {
     pub fn spawn(
         buffer_size: usize,
         args: ScannerArgs,
-    ) -> Result<(Self, JoinHandle<()>), UploadErr> {
+    ) -> Result<(Self, JoinHandle<()>), ScanErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             scanner: SingleThreadScanner::new(args),
@@ -238,16 +237,16 @@ impl Scanner {
     async fn send_command<R>(
         &self,
         cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
-    ) -> Result<R, UploadErr> {
+    ) -> Result<R, ScanErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(cmd(send)).await.map_err(|e| {
-            UploadErr::SendActorMessageErr(SendActorMessageErr {
+            ScanErr::SendActorMessageErr(SendActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
         })?;
         recv.await.map_err(|e| {
-            UploadErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
+            ScanErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
@@ -255,20 +254,20 @@ impl Scanner {
     }
 
     #[cfg(feature = "test")]
-    pub async fn get_rules(&self) -> Result<Vec<UploadRule>, UploadErr> {
+    pub async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
         self.send_command(|tx| Command::GetRules { respond_to: tx })
             .await?
     }
 
     #[cfg(feature = "test")]
-    pub async fn get_ledger_count(&self) -> Result<usize, UploadErr> {
+    pub async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
         self.send_command(|tx| Command::GetLedgerCount { respond_to: tx })
             .await?
     }
 }
 
 impl ScannerExt for Scanner {
-    async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), UploadErr> {
+    async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), ScanErr> {
         self.send_command(|tx| Command::UpdateRules {
             rules,
             respond_to: tx,
@@ -276,12 +275,12 @@ impl ScannerExt for Scanner {
         .await?
     }
 
-    async fn scan(&self) -> Result<(), UploadErr> {
+    async fn scan(&self) -> Result<(), ScanErr> {
         self.send_command(|tx| Command::Scan { respond_to: tx })
             .await?
     }
 
-    async fn shutdown(&self) -> Result<(), UploadErr> {
+    async fn shutdown(&self) -> Result<(), ScanErr> {
         self.send_command(|tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!("Scanner shutdown complete");

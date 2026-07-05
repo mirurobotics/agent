@@ -19,7 +19,7 @@ pub struct InvalidRule {
 impl crate::errors::Error for InvalidRule {}
 
 #[derive(Debug, thiserror::Error)]
-pub enum UploadErr {
+pub enum ScanErr {
     #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
@@ -28,19 +28,19 @@ pub enum UploadErr {
     InvalidRule(InvalidRule),
 }
 
-impl From<SendActorMessageErr> for UploadErr {
+impl From<SendActorMessageErr> for ScanErr {
     fn from(e: SendActorMessageErr) -> Self {
         Self::SendActorMessageErr(e)
     }
 }
 
-impl From<ReceiveActorMessageErr> for UploadErr {
+impl From<ReceiveActorMessageErr> for ScanErr {
     fn from(e: ReceiveActorMessageErr) -> Self {
         Self::ReceiveActorMessageErr(e)
     }
 }
 
-crate::impl_error!(UploadErr {
+crate::impl_error!(ScanErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
     InvalidRule,

@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::cache::errors::{ReceiveActorMessageErr, SendActorMessageErr};
 use miru_agent::errors::Error;
-use miru_agent::scan::UploadErr;
+use miru_agent::scan::ScanErr;
 
 fn send_actor_msg_err() -> SendActorMessageErr {
     SendActorMessageErr {
@@ -22,14 +22,14 @@ mod from_conversions {
 
     #[test]
     fn send_actor_message_err_maps() {
-        let err: UploadErr = send_actor_msg_err().into();
-        assert!(matches!(err, UploadErr::SendActorMessageErr(_)));
+        let err: ScanErr = send_actor_msg_err().into();
+        assert!(matches!(err, ScanErr::SendActorMessageErr(_)));
     }
 
     #[test]
     fn receive_actor_message_err_maps() {
-        let err: UploadErr = recv_actor_msg_err().into();
-        assert!(matches!(err, UploadErr::ReceiveActorMessageErr(_)));
+        let err: ScanErr = recv_actor_msg_err().into();
+        assert!(matches!(err, ScanErr::ReceiveActorMessageErr(_)));
     }
 }
 
@@ -40,8 +40,8 @@ mod error_trait {
     // for both UploadErr variants.
     #[test]
     fn delegates_error_trait_methods() {
-        let send: UploadErr = send_actor_msg_err().into();
-        let recv: UploadErr = recv_actor_msg_err().into();
+        let send: ScanErr = send_actor_msg_err().into();
+        let recv: ScanErr = recv_actor_msg_err().into();
         for err in [send, recv] {
             let _ = err.code();
             let _ = err.http_status();

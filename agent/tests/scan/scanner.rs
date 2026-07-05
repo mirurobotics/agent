@@ -515,7 +515,7 @@ mod actor {
         let err = scanner.scan().await.unwrap_err();
         assert!(matches!(
             err,
-            miru_agent::scan::UploadErr::SendActorMessageErr(_)
+            miru_agent::scan::ScanErr::SendActorMessageErr(_)
         ));
     }
 }

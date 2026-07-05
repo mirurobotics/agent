@@ -5,7 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::error::SleepController;
 use miru_agent::models::UploadRule;
-use miru_agent::scan::{ScannerExt, UploadErr};
+use miru_agent::scan::{ScannerExt, ScanErr};
 use miru_agent::workers::scan;
 
 // A counting mock implementing ScannerExt: records how many times scan() is
@@ -15,14 +15,14 @@ struct CountingScanner {
 }
 
 impl ScannerExt for CountingScanner {
-    async fn update_rules(&self, _rules: Vec<UploadRule>) -> Result<(), UploadErr> {
+    async fn update_rules(&self, _rules: Vec<UploadRule>) -> Result<(), ScanErr> {
         Ok(())
     }
-    async fn scan(&self) -> Result<(), UploadErr> {
+    async fn scan(&self) -> Result<(), ScanErr> {
         self.scans.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    async fn shutdown(&self) -> Result<(), UploadErr> {
+    async fn shutdown(&self) -> Result<(), ScanErr> {
         Ok(())
     }
 }

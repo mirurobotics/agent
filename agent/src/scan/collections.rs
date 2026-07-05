@@ -3,23 +3,33 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 // internal crates
-use crate::filesys::{files, File, PathExt};
+use crate::filesys::{files, File};
+use crate::filesys::PathExt;
 use crate::models::UploadRule;
 use crate::scan::errors::*;
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use tracing::error;
 
-/// Per-file stability state used by the scanner. A file is "stable" once
-/// its (size, mtime) have been unchanged for at least `stability_window_secs` since
-/// `stable_since`. Fields are public so unit tests can construct/inspect observations
-/// against the pure `find_stable` seam directly.
 pub struct Observation {
     pub size: u64,
     pub mtime: std::time::SystemTime,
+}
+
+pub struct Candidate {
+    pub file: File,
+    pub latest_observation: Observation,
+    pub observations: Vec<Observation>,
     pub stable_since: DateTime<Utc>,
+}
+
+pub struct Upload {
+    pub file: File,
+    pub size: u64,
+    pub digest: String,
+    pub modified_at: DateTime<Utc>,
 }
 
 /// A file that has been determined stable enough for upload. Fields are public
@@ -32,16 +42,22 @@ pub struct StableFile {
 
 pub struct State {
     rule: UploadRule,
-    observations: HashMap<File, Observation>,
-    ledger: HashSet<File>,
+    candidates: HashMap<File, Candidate>,
+    ledger: HashMap<File, Vec<Upload>>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::new(UploadRule::default())
+    }
 }
 
 impl State {
     pub(crate) fn new(rule: UploadRule) -> Self {
         Self {
             rule,
-            observations: HashMap::new(),
-            ledger: HashSet::new(),
+            candidates: HashMap::new(),
+            ledger: HashMap::new(),
         }
     }
 
@@ -53,9 +69,9 @@ impl State {
         self.ledger.len()
     }
 
-    fn set_rule(&mut self, rule: UploadRule) -> Result<(), UploadErr> {
+    fn set_rule(&mut self, rule: UploadRule) -> Result<(), ScanErr> {
         if self.rule.upload_collection_id != rule.upload_collection_id {
-            return Err(UploadErr::InvalidRule(InvalidRule {
+            return Err(ScanErr::InvalidRule(InvalidRule {
                 existing_upload_collection_id: self.rule.upload_collection_id.clone(),
                 replacement_upload_collection_id: rule.upload_collection_id,
                 trace: trace!(),
@@ -71,7 +87,6 @@ impl State {
 /// state. This is the structural home of what used to be global scanner state:
 /// each collection now advances its stability state machine independently.
 pub(crate) struct CollectionScanner {
-    next_scan_at: Option<DateTime<Utc>>,
     state: State,
 }
 
@@ -85,10 +100,7 @@ impl CollectionScanner {
     /// Sub-scanner initialized from existing per-collection state. Cadence starts
     /// unset, so the collection is due on its first scan.
     pub(crate) fn from_state(state: State) -> Self {
-        Self {
-            next_scan_at: None,
-            state,
-        }
+        Self { state }
     }
 
     pub(crate) fn rule(&self) -> &UploadRule {
@@ -103,19 +115,8 @@ impl CollectionScanner {
     /// state. This is the whole point of the collection-keyed partition: a rule
     /// redeploy (new rule id / digest for the same collection) preserves the
     /// in-flight stability windows and dedupe set for that collection.
-    pub(crate) fn set_rule(&mut self, rule: UploadRule) -> Result<(), UploadErr> {
+    pub(crate) fn set_rule(&mut self, rule: UploadRule) -> Result<(), ScanErr> {
         self.state.set_rule(rule)
-    }
-
-    /// Per-collection cadence due check: due when it has no recorded next-scan
-    /// time (freshly added) or its next-scan time has arrived.
-    pub(crate) fn is_due(&self, now: DateTime<Utc>) -> bool {
-        self.next_scan_at.is_none_or(|next| next <= now)
-    }
-
-    /// Schedule this collection's next scan one global interval out.
-    pub(crate) fn reschedule(&mut self, now: DateTime<Utc>, min_poll_interval_secs: i64) {
-        self.next_scan_at = Some(now + TimeDelta::seconds(min_poll_interval_secs));
     }
 
     /// Scan this collection's globbed files for newly stable uploads under
@@ -129,28 +130,30 @@ impl CollectionScanner {
     /// task panics we log and restore empty observation/ledger maps while keeping
     /// the active rule.
     pub(crate) async fn scan(&mut self, now: DateTime<Utc>) -> Vec<StableFile> {
-        let moved_observations = std::mem::take(&mut self.state.observations);
-        let moved_ledger = std::mem::take(&mut self.state.ledger);
-        let rule = self.state.rule.clone();
-        let (returned_observations, returned_ledger, stable) =
+        let mut moved_state = std::mem::take(&mut self.state);
+        let (returned_state, stable) =
             match tokio::task::spawn_blocking(move || {
-                let mut obs = moved_observations;
-                let mut ledger = moved_ledger;
-                let stable = find_stable(&rule, &mut obs, &mut ledger, now);
-                (obs, ledger, stable)
+                let mut state = moved_state;
+                let stable = find_stable(&mut state, now);
+                (state, stable)
             })
             .await
             {
                 Ok(result) => result,
                 Err(e) => {
                     error!("uploads stability task panicked: {e:?}");
-                    (HashMap::new(), HashSet::new(), Vec::new())
+                    (State::default(), Vec::new())
                 }
             };
-        self.state.observations = returned_observations;
-        self.state.ledger = returned_ledger;
+        self.state = returned_state;
         stable
     }
+}
+
+pub async fn observe_file(file: &File) -> Result<Observation, ScanErr>  {
+    let meta = files::metadata(file).await?;
+    let mtime = meta.modified()?;
+    Ok(Observation { size: meta.len(), mtime })
 }
 
 /// Pure stability decision for a single rule. Enumerates `rule.source.glob`, stats each
@@ -165,51 +168,22 @@ impl CollectionScanner {
 /// Returns only NEWLY-stable files: a file crossing into "stable" is recorded in
 /// `ledger` and is never returned again, so callers can treat every returned
 /// file as a once-per-file event.
-pub fn find_stable(
-    rule: &UploadRule,
-    observations: &mut HashMap<File, Observation>,
-    ledger: &mut HashSet<File>,
-    now: DateTime<Utc>,
-) -> Vec<StableFile> {
+pub async fn find_stable(state: &mut State, now: DateTime<Utc>) -> Result<Vec<StableFile>, ScanErr> {
     let mut stable = Vec::new();
 
     // Enumerate the glob. An invalid pattern is logged and treated as no matches
     // so the scanner never crashes on a bad rule.
-    let matched = match files::glob(&rule.source.glob) {
+    let matched = match files::glob(&state.rule.source.glob) {
         Ok(matched) => matched,
         Err(e) => {
-            error!("invalid glob {:?}: {e}", rule.source.glob);
+            error!("invalid glob {:?}: {e}", state.rule.source.glob);
             return stable;
         }
     };
 
     for file in matched {
-        // Stat each globbed file with SYNC std::fs (this runs under
-        // spawn_blocking; the async files::size/last_modified must NOT be used
-        // here). Skip non-files and entries whose metadata/mtime cannot be read
-        // (e.g. a file deleted mid-scan).
-        let meta = match std::fs::metadata(file.path()) {
-            Ok(meta) => meta,
-            Err(_) => continue,
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let size = meta.len();
-        let mtime = match meta.modified() {
-            Ok(mtime) => mtime,
-            Err(_) => continue,
-        };
-
-        if let Some(rf) = decide_file(
-            file,
-            size,
-            mtime,
-            rule.source.stability_window_secs,
-            observations,
-            ledger,
-            now,
-        ) {
+        let observation = observe_file(&file).await?;
+        if let Some(rf) = decide_file_stability(state, file, observation, now).await? {
             stable.push(rf);
         }
     }
@@ -217,51 +191,70 @@ pub fn find_stable(
     stable
 }
 
-/// Advance the stability window for one file and decide whether it is newly stable.
-/// When (size, mtime) are unchanged since the last observation and the window has
-/// elapsed, the file is recorded in `ledger` and returned once.
-/// Otherwise the window is (re)started by inserting a fresh observation and nothing is
-/// returned.
-fn decide_file(
+async fn decide_file_stability(
+    state: &mut State,
     file: File,
-    size: u64,
-    mtime: std::time::SystemTime,
-    stability_window_secs: i32,
-    observations: &mut HashMap<File, Observation>,
-    ledger: &mut HashSet<File>,
+    observation: Observation,
     now: DateTime<Utc>,
 ) -> Option<StableFile> {
-    match observations.get(&file) {
-        // size/mtime unchanged since last observation: the stability window
-        // is still running; report once it has elapsed.
-        Some(obs) if obs.size == size && obs.mtime == mtime => {
-            // HOOK (M3): finalization-marker detection (MCAP footer / parquet
-            // magic bytes) would gate stability here in addition to size+mtime
-            // stability. NOT implemented in M2.
-            if now.signed_duration_since(obs.stable_since).num_seconds()
-                >= stability_window_secs as i64
-                && !ledger.contains(&file)
-            {
-                ledger.insert(file.clone());
-                return Some(StableFile {
-                    path: file.path().clone(),
-                    modified_at: mtime.into(),
-                });
-            }
-            None
-        }
+    match state.candidates.get(&file) {
         // new file, or size/mtime changed since last observation: (re)start
         // the stability window and do NOT report.
         _ => {
-            observations.insert(
-                file,
-                Observation {
-                    size,
-                    mtime,
+            state.candidates.insert(file,
+                Candidate {
+                    file,
+                    latest_observation: observation,
+                    observations: vec![observation],
                     stable_since: now,
-                },
-            );
+                });
             None
         }
+        // size/mtime unchanged since last observation: the stability window
+        // is still running; report once it has elapsed.
+        Some(candidate) => {
+            decide_candidate_stability(state, now, candidate).await
+        }
+
     }
+}
+
+async fn is_stable(
+    state: &mut State,
+    candidate: &Candidate,
+    observation: Observation,
+    now: DateTime<Utc>,
+) -> bool {
+
+    // cheap checks: size & mtime
+    let latest = candidate.latest_observation;
+    let latest.size != observation.size {
+        return false;
+    }
+    if latest.mtime != observation.mtime {
+        return false;
+    }
+    true
+
+}
+
+
+async fn decide_candidate_stability(
+    state: &mut State,
+    candidate: &Candidate,
+    now: DateTime<Utc>,
+) -> Option<StableFile> {
+    // HOOK (M3): finalization-marker detection (MCAP footer / parquet // magic bytes) would gate stability here in addition to size+mtime
+    // stability. NOT implemented in M2.
+    let stab_win_secs = state.rule.source.stability_window_secs as i64;
+    if now.signed_duration_since(candidate.stable_since).num_seconds()
+        >= stab_win_secs
+        && !state.ledger.contains_key(&candidate.file)
+    {
+        return Some(StableFile {
+            path: candidate.file.path().clone(),
+            modified_at: candidate.observations.last().unwrap().mtime.into(),
+        });
+    }
+    None
 }

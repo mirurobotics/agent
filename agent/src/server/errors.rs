@@ -112,7 +112,7 @@ pub enum ServerErr {
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
     #[error(transparent)]
-    UploadErr(scan::UploadErr),
+    UploadErr(scan::ScanErr),
 
     // external crate errors
     #[error(transparent)]
@@ -179,8 +179,8 @@ impl From<sync::SyncErr> for ServerErr {
     }
 }
 
-impl From<scan::UploadErr> for ServerErr {
-    fn from(e: scan::UploadErr) -> Self {
+impl From<scan::ScanErr> for ServerErr {
+    fn from(e: scan::ScanErr) -> Self {
         Self::UploadErr(e)
     }
 }

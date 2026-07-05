@@ -11,7 +11,7 @@ use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::MockErr as HTTPMockErr;
 use miru_agent::http::HTTPErr;
-use miru_agent::scan::UploadErr;
+use miru_agent::scan::ScanErr;
 use miru_agent::server::ServerErr;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
@@ -73,8 +73,8 @@ fn sync_err() -> SyncErr {
     })
 }
 
-fn upload_err() -> UploadErr {
-    UploadErr::ReceiveActorMessageErr(miru_agent::cache::errors::ReceiveActorMessageErr {
+fn upload_err() -> ScanErr {
+    ScanErr::ReceiveActorMessageErr(miru_agent::cache::errors::ReceiveActorMessageErr {
         source: Box::new(std::io::Error::other("recv failed")),
         trace: miru_agent::trace!(),
     })
