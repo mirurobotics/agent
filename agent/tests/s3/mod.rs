@@ -7,12 +7,14 @@ use miru_agent::filesys::file::File;
 use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
-use miru_agent::s3::{Config, Credentials, Object, PutOptions, S3Err, Store};
+use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
 use aws_smithy_types::body::SdkBody;
 use tempfile::NamedTempFile;
+
+pub mod multipart;
 
 const REGION: &str = "us-east-1";
 const BUCKET: &str = "test-bucket";
@@ -47,8 +49,9 @@ fn obj(key: &str) -> Object {
     }
 }
 
-/// Wires a `Store` to a `StaticReplayClient` serving the given events. Part size
-/// is now per-call (via [`PutOptions`]), so the store itself carries no threshold.
+/// Wires a `Store` to a `StaticReplayClient` serving the given events. The
+/// single-vs-multipart threshold is the fixed `PART_SIZE` const in the source,
+/// so the store itself carries no per-call options.
 fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
     let replay = StaticReplayClient::new(events);
     let cfg = Config {
@@ -67,10 +70,6 @@ fn temp_file_with(bytes: &[u8]) -> NamedTempFile {
     f.flush().unwrap();
     f
 }
-
-/// Multipart upload and `list_parts` tests live alongside the `s3::multipart`
-/// source module they exercise.
-pub mod multipart;
 
 pub mod put {
     use super::*;
@@ -101,7 +100,7 @@ pub mod put {
             let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
 
             store
-                .put(&File::new(src.path()), &obj(key), PutOptions::default())
+                .put_singlepart(&File::new(src.path()), &obj(key))
                 .await
                 .unwrap();
 
@@ -114,7 +113,6 @@ pub mod put {
             );
         }
     }
-
 }
 
 pub mod get {
@@ -312,11 +310,7 @@ pub mod request_failed {
         let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
 
         let err = store
-            .put(
-                &File::new(src.path()),
-                &obj("denied.txt"),
-                PutOptions::default(),
-            )
+            .put(File::new(src.path()), &obj("denied.txt"))
             .await
             .unwrap_err();
 
@@ -407,10 +401,7 @@ pub mod put_source_missing {
         let (store, _replay) = store_with(vec![]);
         let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-        let err = store
-            .put(&missing, &obj("k"), PutOptions::default())
-            .await
-            .unwrap_err();
+        let err = store.put(missing, &obj("k")).await.unwrap_err();
 
         assert!(matches!(err, S3Err::FileSysErr(_)));
     }
@@ -470,7 +461,7 @@ pub mod error_types {
     fn request_failed_err_defaults_to_internal_server_error() {
         let err = S3Err::RequestFailedErr(RequestFailedErr {
             operation: "get_object".to_string(),
-            key: None,
+            object: None,
             status: None,
             msg: "nope".to_string(),
             trace: miru_agent::trace!(),
@@ -478,7 +469,7 @@ pub mod error_types {
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(!err.is_network_conn_err());
-        // Display with no key / no status hits the fallback formatting.
+        // Display with no object / no status hits the fallback formatting.
         let msg = err.to_string();
         assert!(msg.contains("<none>"));
         assert!(msg.contains("unknown"));

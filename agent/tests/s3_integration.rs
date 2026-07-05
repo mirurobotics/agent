@@ -3,7 +3,7 @@
 //! Unlike the replay-client unit tests in `tests/s3/`, these hit a **real S3
 //! bucket** over the network using the production [`Store::new`] constructor.
 //! They exercise the full object lifecycle (single-part put/get/delete,
-//! multipart put/get, the multipart primitives, abort, and the not-found path)
+//! multipart put/get, resumable multipart upload, abort, and the not-found path)
 //! against live AWS so we catch signing, part-sizing, and wire-format
 //! regressions the mock cannot.
 //!
@@ -47,9 +47,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 // internal crates
 use miru_agent::filesys::file::File;
-use miru_agent::s3::{
-    Config, Credentials, Object, PartToUpload, PutOptions, S3Err, Store, UploadedPart,
-};
+use miru_agent::s3::multipart::Source;
+use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 
 // external crates
 use tempfile::NamedTempFile;
@@ -186,13 +185,7 @@ async fn multipart_round_trip() {
     let src = temp_file_with(&body);
 
     store
-        .put(
-            &File::new(src.path()),
-            &obj,
-            PutOptions {
-                part_size: PART_SIZE,
-            },
-        )
+        .put(File::new(src.path()), &obj)
         .await
         .expect("multipart put");
 
@@ -210,63 +203,32 @@ async fn multipart_round_trip() {
     cleanup(&store, &[obj], &[]).await;
 }
 
-/// 3. Multipart primitives: drive create -> upload_part (two 8 MiB chunks of a
-///    13 MiB file) -> list_parts -> complete -> get -> verify -> delete, using
-///    the low-level API directly.
+/// 3. Multipart `put_multipart` round trip: drive create → upload_part(s) →
+///    complete via the public stateless helper on a 13 MiB file (two parts of 8
+///    MiB and 5 MiB, both >= the 5 MiB S3 minimum), then get → verify → delete.
 #[tokio::test]
-async fn multipart_primitives() {
+async fn multipart_put_round_trip() {
     let Some((store, bucket, prefix)) = setup() else {
-        eprintln!("skipping multipart_primitives: MIRU_S3_IT_* / AWS creds not set");
+        eprintln!("skipping multipart_put_round_trip: MIRU_S3_IT_* / AWS creds not set");
         return;
     };
 
-    let obj = object(&bucket, &prefix, "primitives/blob.bin");
+    let obj = object(&bucket, &prefix, "multipart-put/blob.bin");
     // 13 MiB => two parts of 8 MiB and 5 MiB (both >= the 5 MiB S3 minimum).
     let total: u64 = 13 * 1024 * 1024;
     let body = payload(total as usize);
     let src = temp_file_with(&body);
-    let file = File::new(src.path());
-
-    let upload_id = store
-        .create_multipart_upload(&obj)
-        .await
-        .expect("create_multipart_upload");
-
-    // Build parts by hand: [0, 8 MiB) and [8 MiB, 13 MiB).
-    let mut uploaded: Vec<UploadedPart> = Vec::new();
-    let mut offset: u64 = 0;
-    let mut number: i32 = 1;
-    while offset < total {
-        let length = PART_SIZE.min(total - offset);
-        let part = PartToUpload {
-            upload_id: upload_id.clone(),
-            number,
-            offset,
-            length,
-        };
-        let etag = store
-            .upload_part(&file, &obj, &part)
-            .await
-            .expect("upload_part");
-        uploaded.push(UploadedPart { number, etag });
-        offset += length;
-        number += 1;
-    }
-    assert_eq!(uploaded.len(), 2, "13 MiB at 8 MiB parts must be 2 parts");
-
-    let listed = store
-        .list_parts(&obj, &upload_id)
-        .await
-        .expect("list_parts")
-        .expect("list_parts returns Some for a live upload");
-    let mut listed_numbers: Vec<i32> = listed.iter().map(|p| p.number).collect();
-    listed_numbers.sort_unstable();
-    assert_eq!(listed_numbers, vec![1, 2], "both parts must be listed");
 
     store
-        .complete_multipart_upload(&obj, &upload_id, &uploaded)
+        .put_multipart(
+            &Source {
+                file: File::new(src.path()),
+                size: total,
+            },
+            &obj,
+        )
         .await
-        .expect("complete_multipart_upload");
+        .expect("put_multipart");
 
     let dest = NamedTempFile::new().expect("create temp dest file");
     store
@@ -281,9 +243,49 @@ async fn multipart_primitives() {
     cleanup(&store, &[obj], &[]).await;
 }
 
-/// 4. Abort discards the upload: create an upload, land one part, abort it, then
-///    confirm `list_parts` reports the upload is gone (`Ok(None)`) and no object
-///    exists.
+/// 4. Resume round trip: create an upload, then `resume_multipart_upload` from
+///    byte 0 (no parts landed yet, so it uploads all parts and completes) on a 13
+///    MiB file, then get → verify the bytes → delete.
+#[tokio::test]
+async fn resume_round_trip() {
+    let Some((store, bucket, prefix)) = setup() else {
+        eprintln!("skipping resume_round_trip: MIRU_S3_IT_* / AWS creds not set");
+        return;
+    };
+
+    let obj = object(&bucket, &prefix, "resume/blob.bin");
+    // 13 MiB => two parts of 8 MiB and 5 MiB.
+    let total: u64 = 13 * 1024 * 1024;
+    let body = payload(total as usize);
+    let src = temp_file_with(&body);
+
+    let upload_id = store
+        .create_multipart_upload(&obj)
+        .await
+        .expect("create_multipart_upload");
+
+    // Nothing landed yet: resume must upload every part and complete.
+    store
+        .resume_multipart_upload(&File::new(src.path()), &obj, &upload_id)
+        .await
+        .expect("resume_multipart_upload");
+
+    let dest = NamedTempFile::new().expect("create temp dest file");
+    store
+        .get(&obj, &File::new(dest.path()))
+        .await
+        .expect("get object");
+    let got = std::fs::read(dest.path()).expect("read dest file");
+    assert_eq!(got, body, "resumed object bytes must match");
+
+    store.delete(&obj).await.expect("delete object");
+
+    cleanup(&store, &[obj], &[]).await;
+}
+
+/// 5. Abort discards the upload: create an upload, abort it, then confirm a
+///    later `resume_multipart_upload` reports the upload is gone
+///    (`NoSuchUploadErr`) and no object exists.
 #[tokio::test]
 async fn abort_discards_upload() {
     let Some((store, bucket, prefix)) = setup() else {
@@ -294,36 +296,26 @@ async fn abort_discards_upload() {
     let obj = object(&bucket, &prefix, "abort/blob.bin");
     let body = payload(PART_SIZE as usize); // exactly one 8 MiB part.
     let src = temp_file_with(&body);
-    let file = File::new(src.path());
 
     let upload_id = store
         .create_multipart_upload(&obj)
         .await
         .expect("create_multipart_upload");
 
-    let part = PartToUpload {
-        upload_id: upload_id.clone(),
-        number: 1,
-        offset: 0,
-        length: PART_SIZE,
-    };
-    store
-        .upload_part(&file, &obj, &part)
-        .await
-        .expect("upload_part");
-
     store
         .abort_multipart_upload(&obj, &upload_id)
         .await
         .expect("abort_multipart_upload");
 
-    let after = store
-        .list_parts(&obj, &upload_id)
+    // The upload is gone, so resuming it must report NoSuchUpload rather than
+    // succeed or hang.
+    let err = store
+        .resume_multipart_upload(&File::new(src.path()), &obj, &upload_id)
         .await
-        .expect("list_parts after abort");
+        .expect_err("resume of an aborted upload must error");
     assert!(
-        after.is_none(),
-        "aborted upload must be gone (Ok(None)), got {after:?}"
+        matches!(err, S3Err::NoSuchUploadErr(_)),
+        "aborted upload must be gone (NoSuchUploadErr), got {err:?}"
     );
     assert!(
         !store.exists(&obj).await.expect("exists after abort"),

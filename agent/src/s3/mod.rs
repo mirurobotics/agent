@@ -13,13 +13,12 @@
 //!
 //! Object bodies are streamed to and from disk (never buffered whole in
 //! memory) so the agent can move multi-gigabyte artifacts on memory-constrained
-//! devices. Uploads larger than [`PutOptions::part_size`] use a multipart upload.
+//! devices. Uploads larger than [`PART_SIZE`] use a multipart upload.
 //!
-//! [`Store`] is a thin, stateless client: it exposes the S3 multipart
-//! primitives ([`Store::create_multipart_upload`], [`Store::upload_part`],
-//! [`Store::list_parts`], [`Store::complete_multipart_upload`],
-//! [`Store::abort_multipart_upload`]) plus a stateless [`Store::put_multipart`]
-//! convenience.
+//! [`Store`] is a thin, stateless client. Its public multipart surface is
+//! [`Store::put_multipart`] (stateless one-shot), [`Store::create_multipart_upload`],
+//! [`Store::exec_multipart_upload`], [`Store::resume_multipart_upload`] (re-runnable),
+//! and [`Store::abort_multipart_upload`]; the per-part primitives are internal.
 
 // internal crates
 use crate::filesys::file::File;
@@ -36,8 +35,10 @@ pub mod errors;
 pub mod multipart;
 
 pub use errors::S3Err;
-pub use multipart::{PartToUpload, UploadedPart};
 use errors::{InvalidResponseErr, ObjectNotFoundErr};
+pub use multipart::{PartToUpload, UploadedPart};
+
+const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 
 pub struct Config {
     pub creds: Credentials,
@@ -69,21 +70,6 @@ pub struct Object {
 impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "s3://{}/{}", self.bucket, self.key)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PutOptions {
-    pub part_size: u64,
-}
-
-impl Default for PutOptions {
-    fn default() -> Self {
-        Self {
-            // Miru-chosen default part size. 8 MiB is the sweet spot for getting good
-            // performance while minimizing the need to retry upload parts.
-            part_size: 8 * 1024 * 1024, // 8 MiB
-        }
     }
 }
 
@@ -141,13 +127,14 @@ impl Store {
     /// The whole file is never held in memory: files at or below the single-PUT
     /// threshold stream through one `PutObject`, and larger files stream part-by-part
     /// through a (stateless) multipart upload (see [`Self::put_multipart`]).
-    pub async fn put(&self, src: &File, dst: &Object, opts: PutOptions) -> Result<(), S3Err> {
+    pub async fn put(&self, src: File, dst: &Object) -> Result<(), S3Err> {
         let size = src.size().await?;
 
-        if size > opts.part_size {
-            self.put_multipart(src, dst, size).await
+        if size > PART_SIZE {
+            self.put_multipart(&multipart::Source { file: src, size }, dst)
+                .await
         } else {
-            self.put_singlepart(src, dst).await
+            self.put_singlepart(&src, dst).await
         }
     }
 

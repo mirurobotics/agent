@@ -23,6 +23,24 @@ impl crate::errors::Error for ObjectNotFoundErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("no such multipart upload '{upload_id}' for object '{key}'")]
+pub struct NoSuchUploadErr {
+    pub key: String,
+    pub upload_id: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for NoSuchUploadErr {
+    fn code(&self) -> Code {
+        Code::ResourceNotFound
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::NOT_FOUND
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 #[error("connection error for object '{key}': {msg}")]
 pub struct ConnectionErr {
     pub key: String,
@@ -39,7 +57,7 @@ impl crate::errors::Error for ConnectionErr {
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailedErr {
     pub operation: String,
-    pub key: Option<String>,
+    pub object: Option<String>,
     pub status: Option<u16>,
     pub msg: String,
     pub trace: Box<Trace>,
@@ -47,7 +65,7 @@ pub struct RequestFailedErr {
 
 impl std::fmt::Display for RequestFailedErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let key = self.key.as_deref().unwrap_or("<none>");
+        let object = self.object.as_deref().unwrap_or("<none>");
         let status = self
             .status
             .map(|s| s.to_string())
@@ -55,7 +73,7 @@ impl std::fmt::Display for RequestFailedErr {
         write!(
             f,
             "S3 {} request for object '{}' failed with status {}: {}",
-            self.operation, key, status, self.msg
+            self.operation, object, status, self.msg
         )
     }
 }
@@ -77,6 +95,8 @@ pub enum S3Err {
     #[error(transparent)]
     ObjectNotFoundErr(ObjectNotFoundErr),
     #[error(transparent)]
+    NoSuchUploadErr(NoSuchUploadErr),
+    #[error(transparent)]
     ConnectionErr(ConnectionErr),
     #[error(transparent)]
     RequestFailedErr(RequestFailedErr),
@@ -94,6 +114,7 @@ impl From<filesys::FileSysErr> for S3Err {
 
 crate::impl_error!(S3Err {
     ObjectNotFoundErr,
+    NoSuchUploadErr,
     ConnectionErr,
     RequestFailedErr,
     InvalidResponseErr,
@@ -126,7 +147,7 @@ where
             let status = e.raw().status().as_u16();
             S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
-                key,
+                object: key,
                 status: Some(status),
                 msg: "response could not be parsed".to_string(),
                 trace: crate::trace!(),
@@ -134,7 +155,7 @@ where
         }
         SdkError::ConstructionFailure(e) => S3Err::RequestFailedErr(RequestFailedErr {
             operation: operation.to_string(),
-            key,
+            object: key,
             status: None,
             msg: format!("failed to construct request: {e:?}"),
             trace: crate::trace!(),
@@ -144,7 +165,7 @@ where
             let source = e.into_err();
             S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
-                key,
+                object: key,
                 status: Some(status),
                 msg: source.to_string(),
                 trace: crate::trace!(),
@@ -154,7 +175,7 @@ where
         // generic request failure rather than panicking.
         other => S3Err::RequestFailedErr(RequestFailedErr {
             operation: operation.to_string(),
-            key,
+            object: key,
             status: None,
             msg: format!("request failed: {other}"),
             trace: crate::trace!(),

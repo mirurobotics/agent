@@ -1,16 +1,28 @@
-//! Integration tests for the multipart upload primitives, mirroring the
-//! `s3::multipart` source module: the multipart `put` path (create →
-//! upload_part → complete, aborting the upload on failure) and the `list_parts`
-//! primitive (happy path, pagination across pages, and 404 → `Ok(None)`).
+//! Offline (replay-client) tests for the multipart upload surface, mirroring the
+//! `s3::multipart` source module: the stateless multipart `put` path (create →
+//! upload_part → complete, aborting the upload on failure) and the resumable
+//! `resume_multipart_upload` path (gap-filling only the missing parts, or
+//! failing with `NoSuchUploadErr` when the upload has expired).
 
 use super::*;
-use miru_agent::s3::UploadedPart;
+use miru_agent::s3::multipart::Source;
 
 const UPLOAD_ID: &str = "test-upload-id";
 
-/// Multipart upload path. Passing `PutOptions { part_size: 0 }` lets a tiny
-/// temp file drive the create → upload_part(s) → complete sequence without a
-/// 5 GiB fixture.
+/// Writes a fresh temp file whose length forces `part_size_for` to yield exactly
+/// two parts: one full `PART_SIZE` (8 MiB) part plus a small tail part. Returns
+/// the handle (kept alive so the file survives until the test drops it) and the
+/// total byte length.
+fn two_part_file() -> (NamedTempFile, u64) {
+    const PART_SIZE: u64 = 8 * 1024 * 1024;
+    let len = PART_SIZE + 1024; // 8 MiB + 1 KiB => 2 parts (8 MiB, 1 KiB).
+    let bytes = vec![7u8; len as usize];
+    (temp_file_with(&bytes), len)
+}
+
+/// Stateless multipart `put_multipart`: a tiny temp file rides the multipart path
+/// (the 8 MiB part size dwarfs it, so it uploads as a single part), driving the
+/// create → upload_part → complete sequence and the abort-on-failure paths.
 pub mod put {
     use super::*;
 
@@ -46,13 +58,21 @@ pub mod put {
             .unwrap()
     }
 
+    /// Builds a `Source` for a temp file, reading its length off disk.
+    fn source_of(f: &NamedTempFile) -> Source {
+        let size = std::fs::metadata(f.path()).unwrap().len();
+        Source {
+            file: File::new(f.path()),
+            size,
+        }
+    }
+
     #[tokio::test]
-    async fn large_file_uploads_in_parts() {
+    async fn small_file_uploads_as_single_part() {
         let key = "big.bin";
-        // Passing `PutOptions { part_size: 0 }` forces this small file onto the
-        // multipart path. The 8 MiB part size dwarfs the file, so it uploads as
-        // a single part — enough to exercise the full create → upload_part →
-        // complete sequence without a huge fixture.
+        // The 8 MiB part size dwarfs this file, so it uploads as a single part —
+        // enough to exercise the full create → upload_part → complete sequence
+        // without a huge fixture.
         let body = b"multipart-body".to_vec();
         let src = temp_file_with(&body);
 
@@ -83,11 +103,7 @@ pub mod put {
         ]);
 
         store
-            .put(
-                &File::new(src.path()),
-                &obj(key),
-                PutOptions { part_size: 0 },
-            )
+            .put_multipart(&source_of(&src), &obj(key))
             .await
             .unwrap();
 
@@ -133,11 +149,7 @@ pub mod put {
         let (store, _replay) = store_with(vec![ReplayEvent::new(create_req, no_id_resp)]);
 
         let err = store
-            .put(
-                &File::new(src.path()),
-                &obj(key),
-                PutOptions { part_size: 0 },
-            )
+            .put_multipart(&source_of(&src), &obj(key))
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::InvalidResponseErr(_)));
@@ -167,11 +179,7 @@ pub mod put {
         let (store, _replay) = store_with(vec![ReplayEvent::new(create_req, create_fail)]);
 
         let err = store
-            .put(
-                &File::new(src.path()),
-                &obj(key),
-                PutOptions { part_size: 0 },
-            )
+            .put_multipart(&source_of(&src), &obj(key))
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -231,11 +239,7 @@ pub mod put {
         ]);
 
         let err = store
-            .put(
-                &File::new(src.path()),
-                &obj(key),
-                PutOptions { part_size: 0 },
-            )
+            .put_multipart(&source_of(&src), &obj(key))
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -295,11 +299,7 @@ pub mod put {
         ]);
 
         let err = store
-            .put(
-                &File::new(src.path()),
-                &obj(key),
-                PutOptions { part_size: 0 },
-            )
+            .put_multipart(&source_of(&src), &obj(key))
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -315,10 +315,12 @@ pub mod put {
     }
 }
 
-/// `list_parts` is a public multipart primitive with no in-tree caller, so it is
-/// covered directly here: the happy path, pagination across two pages, and the
-/// 404 → `Ok(None)` mapping used to detect an expired upload.
-pub mod list_parts {
+/// `resume_multipart_upload` gap-fills an existing upload: it lists the landed
+/// parts, uploads only the missing ranges, and completes — never aborting, so a
+/// resume is safe to re-run. These tests also provide the `list_parts` /
+/// `list_parts_page` coverage (happy path, pagination, and the 404 → expired
+/// mapping) now that those primitives are private.
+pub mod resume {
     use super::*;
 
     /// Canned `ListPartsResult` XML for `parts`, optionally truncated with a
@@ -354,110 +356,167 @@ pub mod list_parts {
             .unwrap()
     }
 
-    #[tokio::test]
-    async fn list_parts_returns_uploaded_parts() {
-        let key = "big.bin";
-        let req = http::Request::builder()
+    fn list_parts_req() -> http::Request<SdkBody> {
+        http::Request::builder()
             .method("GET")
             .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}&x-id=ListParts")))
             .body(SdkBody::empty())
-            .unwrap();
-        let resp = list_parts_resp(
-            &[
-                (1, "\"etag-1\"", 8 * 1024 * 1024),
-                (2, "\"etag-2\"", 4 * 1024 * 1024),
-            ],
-            None,
-        );
-        let (store, replay) = store_with(vec![ReplayEvent::new(req, resp)]);
-
-        let parts = store
-            .list_parts(&obj(key), UPLOAD_ID)
-            .await
             .unwrap()
-            .unwrap();
-
-        assert_eq!(
-            parts,
-            vec![
-                UploadedPart {
-                    number: 1,
-                    etag: "\"etag-1\"".to_string(),
-                },
-                UploadedPart {
-                    number: 2,
-                    etag: "\"etag-2\"".to_string(),
-                },
-            ]
-        );
-        assert_eq!(replay.actual_requests().count(), 1);
     }
 
-    #[tokio::test]
-    async fn list_parts_follows_pagination() {
-        let key = "big.bin";
-        // First page is truncated with a marker; second page completes. All parts
-        // accumulate and both requests fire.
-        let page1_req = http::Request::builder()
-            .method("GET")
-            .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}&x-id=ListParts")))
-            .body(SdkBody::empty())
-            .unwrap();
-        let page2_req = http::Request::builder()
-            .method("GET")
+    fn upload_part_req(number: i32) -> http::Request<SdkBody> {
+        http::Request::builder()
+            .method("PUT")
             .uri(uri(&format!(
-                "big.bin?part-number-marker=1&uploadId={UPLOAD_ID}&x-id=ListParts"
+                "big.bin?x-id=UploadPart&partNumber={number}&uploadId={UPLOAD_ID}"
             )))
             .body(SdkBody::empty())
-            .unwrap();
+            .unwrap()
+    }
+
+    fn upload_part_resp(etag: &str) -> http::Response<SdkBody> {
+        http::Response::builder()
+            .status(200)
+            .header("ETag", etag)
+            .body(SdkBody::empty())
+            .unwrap()
+    }
+
+    fn complete_req() -> http::Request<SdkBody> {
+        http::Request::builder()
+            .method("POST")
+            .uri(uri(&format!(
+                "big.bin?x-id=CompleteMultipartUpload&uploadId={UPLOAD_ID}"
+            )))
+            .body(SdkBody::empty())
+            .unwrap()
+    }
+
+    fn complete_resp() -> http::Response<SdkBody> {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Location>https://s3.amazonaws.com/{BUCKET}/big.bin</Location><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><ETag>"final-etag"</ETag></CompleteMultipartUploadResult>"#
+        );
+        http::Response::builder()
+            .status(200)
+            .header("content-type", "application/xml")
+            .body(SdkBody::from(xml))
+            .unwrap()
+    }
+
+    /// Only part 2 is missing: list reports part 1 landed, so resume uploads part
+    /// 2 alone and completes with both etags.
+    #[tokio::test]
+    async fn uploads_only_missing_parts() {
+        let (src, _len) = two_part_file();
+
         let (store, replay) = store_with(vec![
             ReplayEvent::new(
-                page1_req,
-                list_parts_resp(&[(1, "\"etag-1\"", 8 * 1024 * 1024)], Some(1)),
+                list_parts_req(),
+                list_parts_resp(&[(1, "\"landed-1\"", 8 * 1024 * 1024)], None),
             ),
-            ReplayEvent::new(
-                page2_req,
-                list_parts_resp(&[(2, "\"etag-2\"", 4 * 1024 * 1024)], None),
-            ),
+            ReplayEvent::new(upload_part_req(2), upload_part_resp("\"fresh-2\"")),
+            ReplayEvent::new(complete_req(), complete_resp()),
         ]);
 
-        let parts = store
-            .list_parts(&obj(key), UPLOAD_ID)
+        store
+            .resume_multipart_upload(&File::new(src.path()), &obj("big.bin"), UPLOAD_ID)
             .await
-            .unwrap()
             .unwrap();
 
-        assert_eq!(
-            parts,
-            vec![
-                UploadedPart {
-                    number: 1,
-                    etag: "\"etag-1\"".to_string(),
-                },
-                UploadedPart {
-                    number: 2,
-                    etag: "\"etag-2\"".to_string(),
-                },
-            ]
-        );
         let requests = replay.actual_requests().collect::<Vec<_>>();
+        // list_parts, then upload of part 2 only, then complete.
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].uri().to_string().contains("x-id=ListParts"));
+        assert_eq!(requests[1].method(), "PUT");
+        assert!(requests[1].uri().to_string().contains("partNumber=2"));
+        // Complete is a POST to `?uploadId=...` with no part number.
+        assert_eq!(requests[2].method(), "POST");
+        assert!(requests[2]
+            .uri()
+            .to_string()
+            .contains(&format!("uploadId={UPLOAD_ID}")));
+        assert!(!requests[2].uri().to_string().contains("partNumber"));
+    }
+
+    /// No parts landed: list is empty, so resume uploads both parts, then
+    /// completes.
+    #[tokio::test]
+    async fn uploads_all_parts_when_none_landed() {
+        let (src, _len) = two_part_file();
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(list_parts_req(), list_parts_resp(&[], None)),
+            ReplayEvent::new(upload_part_req(1), upload_part_resp("\"fresh-1\"")),
+            ReplayEvent::new(upload_part_req(2), upload_part_resp("\"fresh-2\"")),
+            ReplayEvent::new(complete_req(), complete_resp()),
+        ]);
+
+        store
+            .resume_multipart_upload(&File::new(src.path()), &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap();
+
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].uri().to_string().contains("partNumber=1"));
+        assert!(requests[2].uri().to_string().contains("partNumber=2"));
+        // Complete is a POST to `?uploadId=...` with no part number.
+        assert_eq!(requests[3].method(), "POST");
+        assert!(requests[3]
+            .uri()
+            .to_string()
+            .contains(&format!("uploadId={UPLOAD_ID}")));
+        assert!(!requests[3].uri().to_string().contains("partNumber"));
+    }
+
+    /// Both parts already landed: resume uploads nothing and completes directly
+    /// from the listed etags.
+    #[tokio::test]
+    async fn uploads_nothing_when_all_landed() {
+        let (src, _len) = two_part_file();
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(
+                    &[
+                        (1, "\"landed-1\"", 8 * 1024 * 1024),
+                        (2, "\"landed-2\"", 1024),
+                    ],
+                    None,
+                ),
+            ),
+            ReplayEvent::new(complete_req(), complete_resp()),
+        ]);
+
+        store
+            .resume_multipart_upload(&File::new(src.path()), &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap();
+
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        // Only list_parts and complete — no upload_part fired.
         assert_eq!(requests.len(), 2);
+        assert!(requests[0].uri().to_string().contains("x-id=ListParts"));
+        // Complete is a POST to `?uploadId=...` with no part number.
+        assert_eq!(requests[1].method(), "POST");
         assert!(requests[1]
             .uri()
             .to_string()
-            .contains("part-number-marker=1"));
+            .contains(&format!("uploadId={UPLOAD_ID}")));
+        assert!(!requests
+            .iter()
+            .any(|r| r.uri().to_string().contains("x-id=UploadPart")));
     }
 
+    /// An expired / aborted upload: list_parts 404s (`NoSuchUpload`), so resume
+    /// returns `NoSuchUploadErr` and issues neither an upload_part nor a complete.
     #[tokio::test]
-    async fn list_parts_404_maps_to_none() {
-        let key = "big.bin";
-        let req = http::Request::builder()
-            .method("GET")
-            .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}&x-id=ListParts")))
-            .body(SdkBody::empty())
-            .unwrap();
-        // A 404 (e.g. NoSuchUpload) means the upload no longer exists.
-        let resp = http::Response::builder()
+    async fn expired_upload_maps_to_no_such_upload() {
+        let (src, _len) = two_part_file();
+
+        let not_found = http::Response::builder()
             .status(404)
             .header("content-type", "application/xml")
             .body(SdkBody::from(
@@ -465,10 +524,71 @@ pub mod list_parts {
 <Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist.</Message></Error>"#,
             ))
             .unwrap();
-        let (store, _replay) = store_with(vec![ReplayEvent::new(req, resp)]);
 
-        let result = store.list_parts(&obj(key), UPLOAD_ID).await.unwrap();
+        let (store, replay) = store_with(vec![ReplayEvent::new(list_parts_req(), not_found)]);
 
-        assert!(result.is_none());
+        let err = store
+            .resume_multipart_upload(&File::new(src.path()), &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, S3Err::NoSuchUploadErr(_)));
+        assert!(matches!(err.code(), Code::ResourceNotFound));
+        assert_eq!(err.http_status().as_u16(), 404);
+
+        // Only the list_parts call fired: no upload_part, no complete.
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].uri().to_string().contains("x-id=ListParts"));
+    }
+
+    /// The landed set is discovered across a truncated, two-page `list_parts`
+    /// listing. Both parts are already present, so resume completes without any
+    /// upload_part.
+    #[tokio::test]
+    async fn list_parts_pagination_feeds_landed_set() {
+        let (src, _len) = two_part_file();
+
+        let page2_req = http::Request::builder()
+            .method("GET")
+            .uri(uri(&format!(
+                "big.bin?part-number-marker=1&uploadId={UPLOAD_ID}&x-id=ListParts"
+            )))
+            .body(SdkBody::empty())
+            .unwrap();
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(&[(1, "\"landed-1\"", 8 * 1024 * 1024)], Some(1)),
+            ),
+            ReplayEvent::new(
+                page2_req,
+                list_parts_resp(&[(2, "\"landed-2\"", 1024)], None),
+            ),
+            ReplayEvent::new(complete_req(), complete_resp()),
+        ]);
+
+        store
+            .resume_multipart_upload(&File::new(src.path()), &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap();
+
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        // Two list pages then complete; both parts came from the listing.
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1]
+            .uri()
+            .to_string()
+            .contains("part-number-marker=1"));
+        // Complete is a POST to `?uploadId=...` with no part number.
+        assert_eq!(requests[2].method(), "POST");
+        assert!(requests[2]
+            .uri()
+            .to_string()
+            .contains(&format!("uploadId={UPLOAD_ID}")));
+        assert!(!requests
+            .iter()
+            .any(|r| r.uri().to_string().contains("x-id=UploadPart")));
     }
 }
