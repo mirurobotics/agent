@@ -10,7 +10,6 @@ use crate::disk;
 use crate::errors::*;
 use crate::events;
 use crate::http;
-use crate::scan::ScannerExt;
 use crate::sync::{deployments, errors::*};
 use crate::trace;
 
@@ -57,7 +56,6 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
-    pub scanner: Arc<crate::scan::Scanner>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,7 +89,6 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
-    scanner: Arc<crate::scan::Scanner>,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -112,7 +109,6 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             event_hub: args.event_hub,
-            scanner: args.scanner,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -244,30 +240,14 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             git_commits: storage_ref.git_commits.as_ref(),
             upload_rules: storage_ref.upload_rules.as_ref(),
         };
-        let result = deployments::sync(&deployments::SyncArgs {
+        deployments::sync(&deployments::SyncArgs {
             http_client: self.http_client.as_ref(),
             storage: &sync_storage,
             opts: &self.deploy_opts,
             token: &token.token,
             event_hub: &self.event_hub,
         })
-        .await;
-
-        // push the active upload rule set to the scanner. The local deployment
-        // cache reflects what was applied (regardless of whether push_deployments
-        // to the backend succeeded), so push on every sync attempt to keep the
-        // scanner converged.
-        let rules = crate::sync::upload_rules::active_upload_rules(
-            storage_ref.deployments.as_ref(),
-            storage_ref.releases.as_ref(),
-            storage_ref.upload_rules.as_ref(),
-        )
-        .await;
-        if let Err(e) = self.scanner.update_rules(rules).await {
-            error!("failed to push upload rules to scanner: {e:?}");
-        }
-
-        result
+        .await
     }
 }
 

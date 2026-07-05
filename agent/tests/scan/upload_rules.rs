@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys;
 use miru_agent::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
-use miru_agent::sync::upload_rules::active_upload_rules;
+use miru_agent::scan::upload_rules::active_upload_rules;
 
 // =============================== TEST HELPERS ================================= //
 

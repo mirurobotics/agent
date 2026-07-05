@@ -64,7 +64,8 @@ impl AppState {
         let (event_hub, event_hub_handle) =
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
-        // initialize the scanner (before the syncer, which pushes rules to it)
+        // initialize the scanner (the scan bridge worker pushes rules to it after
+        // each successful sync)
         let (scanner, scanner_handle) = crate::scan::scanner::Scanner::spawn(
             64,
             crate::scan::scanner::ScannerArgs {
@@ -90,7 +91,6 @@ impl AppState {
                     max_secs: 12 * 60 * 60, // 12 hours
                 },
                 event_hub: event_hub.clone(),
-                scanner: scanner.clone(),
             },
         )?;
         let syncer = Arc::new(syncer);
@@ -127,7 +127,8 @@ impl AppState {
         // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
 
-        // shutdown the scanner after the syncer (the syncer pushes rules to it)
+        // shutdown the scanner after the syncer (the scan bridge worker pushes
+        // rules to it after each successful sync)
         if let Err(e) = self.scanner.shutdown().await {
             tracing::error!("failed to shutdown scanner: {e}");
         }
