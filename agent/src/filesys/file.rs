@@ -16,6 +16,8 @@ pub struct File {
     path: PathBuf,
 }
 
+pub type Metadata = std::fs::Metadata;
+
 impl Display for File {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.path.to_str().unwrap_or_default())

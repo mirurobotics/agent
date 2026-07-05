@@ -4,7 +4,11 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{
-    dirs, errors::*, file::File, path::PathExt, Atomic, CopyOptions, Overwrite, WriteOptions,
+    dirs,
+    errors::*,
+    file::{File, Metadata},
+    path::PathExt,
+    Atomic, CopyOptions, Overwrite, WriteOptions,
 };
 use crate::trace;
 
@@ -361,7 +365,39 @@ pub async fn create_symlink(
     Ok(())
 }
 
-async fn metadata(file: &File) -> Result<std::fs::Metadata, FileSysErr> {
+/// Returns the regular files matching a shell-style glob `pattern`.
+///
+/// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].
+/// Entries that error mid-traversal (e.g. an unreadable directory) are skipped
+/// rather than aborting the walk (skip-and-continue). Matching follows symlinks
+/// and returns only regular files (per [`Path::is_file`]), so directories are
+/// excluded from the results.
+pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
+    let mut matches = Vec::new();
+
+    let paths = glob::glob(pattern).map_err(|e| {
+        FileSysErr::InvalidGlobErr(InvalidGlobErr {
+            pattern: pattern.to_string(),
+            source: Box::new(e),
+            trace: trace!(),
+        })
+    })?;
+
+    for entry in paths {
+        let path = match entry {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        if !path.is_file() {
+            continue;
+        }
+        matches.push(File::new(path));
+    }
+
+    Ok(matches)
+}
+
+pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {
     tokio::fs::metadata(file.path()).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
