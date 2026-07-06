@@ -65,17 +65,8 @@ pub async fn hash(file: &File) -> Result<String, FileSysErr> {
         hasher.update(&buf[..n]);
     }
 
-    // `std::io::Write` is imported at the top of this file, so bring the
-    // formatting `Write` trait into scope under a local alias to avoid clashing
-    // with it while building the lowercase hex string.
-    use std::fmt::Write as _;
     let digest = hasher.finalize();
-    let mut out = String::with_capacity("sha256:".len() + digest.len() * 2);
-    out.push_str("sha256:");
-    for b in digest {
-        let _ = write!(out, "{b:02x}");
-    }
-    Ok(out)
+    Ok(format!("sha256:{digest:x}"))
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
