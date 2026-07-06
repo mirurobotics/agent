@@ -26,6 +26,8 @@ pub enum ScanErr {
     ReceiveActorMessageErr(ReceiveActorMessageErr),
     #[error(transparent)]
     InvalidRule(InvalidRule),
+    #[error(transparent)]
+    FileSysErr(crate::filesys::FileSysErr),
 }
 
 impl From<SendActorMessageErr> for ScanErr {
@@ -40,8 +42,15 @@ impl From<ReceiveActorMessageErr> for ScanErr {
     }
 }
 
+impl From<crate::filesys::FileSysErr> for ScanErr {
+    fn from(e: crate::filesys::FileSysErr) -> Self {
+        Self::FileSysErr(e)
+    }
+}
+
 crate::impl_error!(ScanErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
     InvalidRule,
+    FileSysErr,
 });

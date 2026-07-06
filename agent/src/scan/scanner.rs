@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::models::{UploadCollectionID, UploadRule};
-pub use crate::scan::collections::{find_stable, Observation, StableFile};
+pub use crate::scan::collections::{scan, Observation, StableFile, State};
 use crate::scan::{collections::CollectionScanner, errors::*};
 use crate::trace;
 
@@ -93,6 +93,7 @@ impl SingleThreadScanner {
 
             let stable = collection.scan(now).await;
             Self::emit_stable(stable);
+            collection.reschedule(now, self.poll_interval_secs);
         }
 
         Ok(())

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::mocks::clock::Clock;
 use miru_agent::filesys::{self, File, PathExt};
 use miru_agent::models::{UploadRule, UploadRuleSource};
-use miru_agent::scan::scanner::{find_stable, Observation, StableFile};
+use miru_agent::scan::scanner::{scan, Observation, StableFile};
 use miru_agent::scan::scanner::{Scanner, ScannerArgs};
 use miru_agent::scan::ScannerExt;
 
@@ -80,10 +80,10 @@ mod pure {
         let mut ledger: HashSet<File> = HashSet::new();
         // first call records the observation (stability window 0 still requires a
         // prior observation to compare against), so nothing is stable yet.
-        let first = find_stable(&rule, &mut obs, &mut ledger, t(0));
+        let first = scan(&rule, &mut obs, &mut ledger, t(0));
         assert!(first.is_empty());
         // second call at a later `now`: a.mcap is now newly stable.
-        let second = find_stable(&rule, &mut obs, &mut ledger, t(1));
+        let second = scan(&rule, &mut obs, &mut ledger, t(1));
         assert_eq!(
             stable_names(&second),
             BTreeSet::from(["a.mcap".to_string()])
@@ -93,8 +93,8 @@ mod pure {
         let rule = rule_with("r2", &format!("{}/**/*.mcap", base.display()), 0);
         let mut obs: HashMap<File, Observation> = HashMap::new();
         let mut ledger: HashSet<File> = HashSet::new();
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(0)).is_empty());
-        let stable = find_stable(&rule, &mut obs, &mut ledger, t(1));
+        assert!(scan(&rule, &mut obs, &mut ledger, t(0)).is_empty());
+        let stable = scan(&rule, &mut obs, &mut ledger, t(1));
         assert_eq!(
             stable_names(&stable),
             BTreeSet::from(["a.mcap".to_string(), "c.mcap".to_string()])
@@ -104,8 +104,8 @@ mod pure {
         let rule = rule_with("r3", "[", 0);
         let mut obs: HashMap<File, Observation> = HashMap::new();
         let mut ledger: HashSet<File> = HashSet::new();
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(0)).is_empty());
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(100)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(0)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(100)).is_empty());
     }
 
     // T2: stability state machine.
@@ -123,15 +123,15 @@ mod pure {
         let mut ledger: HashSet<File> = HashSet::new();
 
         // t0: record the observation.
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(0)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(0)).is_empty());
         // rewrite with DIFFERENT bytes (changes size) before t=5 -> resets window.
         std::fs::write(&file, b"bbbbbb").unwrap();
         // t5: change detected, window resets to 5, not stable.
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(5)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(5)).is_empty());
         // t12: only 7s since reset (< 10) -> not stable.
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(12)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(12)).is_empty());
         // t16: 11s since reset (>= 10) -> stable.
-        let stable = find_stable(&rule, &mut obs, &mut ledger, t(16));
+        let stable = scan(&rule, &mut obs, &mut ledger, t(16));
         assert_eq!(
             stable_names(&stable),
             BTreeSet::from(["reset.mcap".to_string()])
@@ -145,9 +145,9 @@ mod pure {
         let rule = rule_with("stable", &glob, 10);
         let mut obs: HashMap<File, Observation> = HashMap::new();
         let mut ledger: HashSet<File> = HashSet::new();
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(0)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(0)).is_empty());
         // unchanged file, exactly the window has elapsed -> stable.
-        let stable = find_stable(&rule, &mut obs, &mut ledger, t(10));
+        let stable = scan(&rule, &mut obs, &mut ledger, t(10));
         assert_eq!(
             stable_names(&stable),
             BTreeSet::from(["stable.mcap".to_string()])
@@ -161,9 +161,9 @@ mod pure {
         let rule = rule_with("young", &glob, 10);
         let mut obs: HashMap<File, Observation> = HashMap::new();
         let mut ledger: HashSet<File> = HashSet::new();
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(0)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(0)).is_empty());
         // 9s < 10s window -> not stable.
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(9)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(9)).is_empty());
     }
 
     // T4: a stable file is returned as newly-stable exactly ONCE.
@@ -180,7 +180,7 @@ mod pure {
 
         let mut total_stable = 0;
         for now_secs in [0, 1, 2, 3, 4] {
-            total_stable += find_stable(&rule, &mut obs, &mut ledger, t(now_secs)).len();
+            total_stable += scan(&rule, &mut obs, &mut ledger, t(now_secs)).len();
         }
         // recorded on the first call, reported once on the second, suppressed after.
         assert_eq!(total_stable, 1);
@@ -195,8 +195,8 @@ mod pure {
 
         let mut obs: HashMap<File, Observation> = HashMap::new();
         let mut ledger: HashSet<File> = HashSet::new();
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(0)).is_empty());
-        assert!(find_stable(&rule, &mut obs, &mut ledger, t(100)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(0)).is_empty());
+        assert!(scan(&rule, &mut obs, &mut ledger, t(100)).is_empty());
     }
 }
 
