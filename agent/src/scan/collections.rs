@@ -13,6 +13,7 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tracing::error;
 
+#[derive(Clone)]
 pub struct Observation {
     pub size: u64,
     pub mtime: std::time::SystemTime,
@@ -117,7 +118,7 @@ impl CollectionScanner {
 
     /// Scan this collection's globbed files for newly stable uploads
     pub(crate) async fn scan(&mut self, now: DateTime<Utc>) -> Vec<StableFile> {
-        match scan(&mut self.state, now).await {
+        match self.scan_impl(now).await {
             Ok(stable) => stable,
             Err(e) => {
                 error!("find_stable failed: {e}");
@@ -125,23 +126,73 @@ impl CollectionScanner {
             }
         }
     }
+
+    pub async fn scan_impl(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<StableFile>, ScanErr> {
+        let mut stable = Vec::new();
+
+        let matched = files::glob(&self.state.rule.source.glob)?;
+        for file in matched {
+            let observation = observe_file(&file).await?;
+            let outcome = evaluate_observation(
+                &self.state, file.clone(), observation, now, 
+            ).await?;
+            if let Some(new_stable_file) = outcome.new_stable_file {
+                stable.push(new_stable_file);
+            }
+            if let Some(new_candidate) = outcome.new_candidate {
+                self.state.candidates.insert(file, new_candidate);
+            }
+        }
+
+        Ok(stable)
+    }
 }
 
-pub async fn scan(
-    state: &mut State,
+pub struct ScanOutcome {
+    pub new_candidate: Option<Candidate>,
+    pub new_stable_file: Option<StableFile>,
+}
+
+async fn evaluate_observation(
+    state: &State,
+    file: File,
+    observation: Observation,
     now: DateTime<Utc>,
-) -> Result<Vec<StableFile>, ScanErr> {
-    let mut stable = Vec::new();
-
-    let matched = files::glob(&state.rule.source.glob)?;
-    for file in matched {
-        let observation = observe_file(&file).await?;
-        if let Some(rf) = decide_file_stability(state, file, observation, now).await {
-            stable.push(rf);
+) -> Result<ScanOutcome, ScanErr> {
+    let candidate = match state.candidates.get(&file) {
+        Some(candidate) => candidate,
+        // new candidate -> not stable
+        None => {
+            let candidate = Candidate {
+                file,
+                latest_observation: observation.clone(),
+                observations: vec![observation],
+                stable_since: now,
+            };
+            return Ok(ScanOutcome {
+                new_candidate: Some(candidate),
+                new_stable_file: None,
+            });
         }
-    }
+    };
 
-    Ok(stable)
+    if is_stable(state, &candidate, &observation, now).await? {
+        Ok(ScanOutcome {
+            new_candidate: None,
+            new_stable_file: Some(StableFile {
+                path: candidate.file.path().clone(),
+                modified_at: candidate.observations.last().unwrap().mtime.into(),
+            }),
+        })
+    } else {
+        Ok(ScanOutcome {
+            new_candidate: None,
+            new_stable_file: None,
+        })
+    }
 }
 
 pub async fn observe_file(file: &File) -> Result<Observation, ScanErr>  {
@@ -156,50 +207,19 @@ pub async fn observe_file(file: &File) -> Result<Observation, ScanErr>  {
     Ok(Observation { size: meta.len(), mtime })
 }
 
-async fn decide_file_stability(
-    state: &mut State,
-    file: File,
-    observation: Observation,
-    now: DateTime<Utc>,
-) -> Option<StableFile> {
-    let candidate = match state.candidates.get(&file) {
-        // new candidate -> not stable
-        _ => {
-            let candidate = Candidate {
-                file,
-                latest_observation: observation,
-                observations: vec![observation],
-                stable_since: now,
-            };
-            state.candidates.insert(file, candidate);
-            return None;
-        }
-        Some(candidate) => candidate,
-    };
-
-    if is_stable(state, &candidate, observation, now).await {
-        Some(StableFile {
-            path: candidate.file.path().clone(),
-            modified_at: candidate.observations.last().unwrap().mtime.into(),
-        })
-    } else {
-        None
-    }
-}
-
 async fn is_stable(
-    state: &mut State,
+    state: &State,
     candidate: &Candidate,
-    observation: Observation,
+    observation: &Observation,
     now: DateTime<Utc>,
-) -> bool {
+) -> Result<bool, ScanErr> {
     if !has_stability_window_elapsed(state, candidate, now) {
-        return false;
+        return Ok(false);
     }
     if !is_metadata_stable(candidate, observation) {
-        return false;
+        return Ok(false);
     }
-    differs_from_previous(state, candidate, observation).await
+    Ok(differs_from_previous(state, candidate, observation).await?)
 }
 
 fn has_stability_window_elapsed(
@@ -213,7 +233,7 @@ fn has_stability_window_elapsed(
 
 fn is_metadata_stable(
     candidate: &Candidate,
-    observation: Observation,
+    observation: &Observation,
 ) -> bool {
     if candidate.latest_observation.size != observation.size {
         return false;
@@ -224,28 +244,26 @@ fn is_metadata_stable(
     true
 }
 
-fn differs_from_previous(
+async fn differs_from_previous(
     state: &State,
     candidate: &Candidate,
-    observation: Observation,
-) -> bool {
+    observation: &Observation,
+) -> Result<bool, ScanErr> {
     // check if there is a previous upload
     let previous = if let Some(previous) = find_previous_upload(state, candidate) {
         previous
     } else {
-        return true;
+        return Ok(true);
     };
 
     // check if upload size has changed
     if previous.size != observation.size {
-        return true;
+        return Ok(true);
     }
 
     // check if upload digest has changed
-    if candidate.digest != observation.mtime {
-        return false;
-    }
-    true
+    let digest = files::hash(&candidate.file).await?;
+    Ok(previous.digest != digest)
 }
 
 fn find_previous_upload(state: &State, candidate: &Candidate) -> Option<Upload> {
