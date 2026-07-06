@@ -16,6 +16,7 @@ use crate::trace;
 use atomicwrites::{AllowOverwrite, AtomicFile, DisallowOverwrite};
 use secrecy::{ExposeSecretMut, SecretBox};
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
@@ -35,6 +36,46 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
         })
     })?;
     Ok(buf)
+}
+
+/// Computes the SHA-256 content digest of `file`, returned as `sha256:<lowercase-hex>`.
+///
+/// Streams the file through a fixed 8 KiB buffer, so memory use is constant
+/// regardless of file size (the whole file is never materialized). Hashing is
+/// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
+/// large files to avoid stalling the async runtime.
+pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+    let mut f = TokioFile::open(file.path())
+        .await
+        .map_err(|e| map_io_err_for_open(e, file))?;
+
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8 * 1024];
+    loop {
+        let n = f.read(&mut buf).await.map_err(|e| {
+            FileSysErr::ReadFileErr(ReadFileErr {
+                source: Box::new(e),
+                file: file.clone(),
+                trace: trace!(),
+            })
+        })?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    // `std::io::Write` is imported at the top of this file, so bring the
+    // formatting `Write` trait into scope under a local alias to avoid clashing
+    // with it while building the lowercase hex string.
+    use std::fmt::Write as _;
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity("sha256:".len() + digest.len() * 2);
+    out.push_str("sha256:");
+    for b in digest {
+        let _ = write!(out, "{b:02x}");
+    }
+    Ok(out)
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {

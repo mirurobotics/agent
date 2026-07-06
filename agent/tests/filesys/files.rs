@@ -417,6 +417,62 @@ pub mod read_bytes {
     }
 }
 
+pub mod hash {
+    use super::*;
+
+    #[tokio::test]
+    async fn empty_file() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("empty");
+        files::write_string(&file, "", WriteOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            files::hash(&file).await.unwrap(),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[tokio::test]
+    async fn known_vector_hello() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("hello");
+        files::write_string(&file, "hello", WriteOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            files::hash(&file).await.unwrap(),
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[tokio::test]
+    async fn large_file_multi_read_is_deterministic() {
+        // Larger than the 8 KiB streaming buffer, so hashing spans multiple reads.
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("large");
+        let contents = "a".repeat(20 * 1024);
+        files::write_string(&file, &contents, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let first = files::hash(&file).await.unwrap();
+        let second = files::hash(&file).await.unwrap();
+        assert!(first.starts_with("sha256:"));
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn doesnt_exist() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("nonexistent-file");
+        assert!(matches!(
+            files::hash(&file).await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+}
+
 pub mod read_secret_bytes {
     use super::*;
 
