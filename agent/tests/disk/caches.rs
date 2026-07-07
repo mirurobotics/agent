@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
-use miru_agent::filesys::dirs;
+use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::{self, device};
 
 // external crates
@@ -71,11 +71,13 @@ pub mod init {
 
     #[tokio::test]
     async fn init_fails_when_device_path_is_a_directory() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // occupy the device file path with a directory so its store fails to spawn
-        layout.root().subdir("device.json").create().await.unwrap();
+        dirs::create(&layout.root().subdir("device.json"))
+            .await
+            .unwrap();
 
         let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
         assert!(result.is_err());
@@ -83,16 +85,16 @@ pub mod init {
 
     #[tokio::test]
     async fn init_fails_when_cfg_inst_content_path_is_a_file() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // occupy the config instance content directory path with a file so its
         // store fails to spawn after device storage has initialized
-        layout
+        let contents_file = layout
             .resources()
             .subdir("config_instances")
-            .file("contents")
-            .write_string("not a directory", filesys::WriteOptions::default())
+            .file("contents");
+        files::write_string(&contents_file, "not a directory", WriteOptions::default())
             .await
             .unwrap();
 
@@ -102,15 +104,12 @@ pub mod init {
 
     #[tokio::test]
     async fn init_fails_when_deployments_path_is_a_directory() {
-        let dir = filesys::Dir::create_temp_dir("testing").await.unwrap();
+        let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
 
         // occupy the deployments file path with a directory so its store fails
         // to spawn after the device and config instance stores have initialized
-        layout
-            .resources()
-            .subdir("deployments.json")
-            .create()
+        dirs::create(&layout.resources().subdir("deployments.json"))
             .await
             .unwrap();
 
