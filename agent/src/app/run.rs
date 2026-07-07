@@ -15,7 +15,7 @@ use crate::http;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
-    mqtt, poller, scan, scan_bridge,
+    mqtt, poller, scan, scan_bridge, scan_stable,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
 };
 
@@ -156,6 +156,8 @@ async fn init(
     }
 
     if options.enable_scan_worker {
+        init_scan_stable_worker(app_state.clone(), shutdown_manager, shutdown_tx.subscribe())
+            .await?;
         init_scan_worker(
             options.scan.clone(),
             app_state.clone(),
@@ -291,6 +293,32 @@ async fn init_scan_bridge_worker(
     Ok(())
 }
 
+async fn init_scan_stable_worker(
+    app_state: Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing scan stable worker...");
+
+    let scanner = app_state.scanner.clone();
+
+    let scan_stable_handle = tokio::spawn(async move {
+        scan_stable::run(
+            scanner.as_ref(),
+            Box::pin(async move {
+                let _ = shutdown_rx.recv().await;
+            }),
+        )
+        .await;
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.scan_stable_worker_handle,
+        "scan_stable_handle",
+        scan_stable_handle,
+    )?;
+    Ok(())
+}
+
 async fn init_scan_worker(
     options: scan::Options,
     app_state: Arc<AppState>,
@@ -397,6 +425,7 @@ struct ShutdownManager {
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     poller_worker_handle: Option<JoinHandle<()>>,
     scan_worker_handle: Option<JoinHandle<()>>,
+    scan_stable_worker_handle: Option<JoinHandle<()>>,
     scan_bridge_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
@@ -411,6 +440,7 @@ impl ShutdownManager {
             socket_server_handle: None,
             poller_worker_handle: None,
             scan_worker_handle: None,
+            scan_stable_worker_handle: None,
             scan_bridge_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
@@ -537,6 +567,17 @@ impl ShutdownManager {
             })?;
         } else {
             info!("Scan worker handle not found, skipping scan worker shutdown...");
+        }
+
+        if let Some(scan_stable_worker_handle) = self.scan_stable_worker_handle.take() {
+            scan_stable_worker_handle.await.map_err(|e| {
+                ServerErr::JoinHandleErr(JoinHandleErr {
+                    source: Box::new(e),
+                    trace: trace!(),
+                })
+            })?;
+        } else {
+            info!("Scan stable worker handle not found, skipping scan stable worker shutdown...");
         }
 
         // 3b. scan bridge (drained before app state so the scanner stays alive

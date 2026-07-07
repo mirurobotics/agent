@@ -1,18 +1,26 @@
 // standard crates
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // internal crates
-use crate::models::{UploadCollectionID, UploadRule};
-pub use crate::scan::collections::{scan, Observation, StableFile, State};
-use crate::scan::{collections::CollectionScanner, errors::*};
+use crate::models::{Deployment, UploadCollectionID, UploadRule};
+pub use crate::scan::collection::{Config, Observation, StableFile, State};
+use crate::scan::{collection::CollectionScanner, errors::*};
 use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+
+// =============================== SCANNER EVENTS ================================== //
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanEvent {
+    StableFile(StableFile),
+}
+
+const DEFAULT_BROADCAST_CAPACITY: usize = 256;
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -27,108 +35,135 @@ macro_rules! dispatch {
 pub struct ScannerArgs {
     pub min_poll_interval_secs: i64,
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    pub broadcast_capacity: usize,
 }
 
-/// Poll-based file watcher: it does NOT subscribe to OS/inotify filesystem
-/// events. Instead each `scan()` re-enumerates the globbed files on a cadence
-/// (one global `min_poll_interval_secs` shared by all collections) and applies a
-/// size/mtime stability window to decide which files are stable. Newly-stable
-/// files are deduped so each is reported exactly once.
-///
-/// State is partitioned per upload collection: the scanner is a thin wrapper over
-/// a `HashMap<UploadCollectionID, CollectionScanner>`, each sub-scanner owning its
-/// own rule/observations/dedupe/cadence.
+impl Default for ScannerArgs {
+    fn default() -> Self {
+        Self {
+            min_poll_interval_secs: 1,
+            now_fn: Arc::new(Utc::now),
+            broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+        }
+    }
+}
+
 pub struct SingleThreadScanner {
-    collections: HashMap<UploadCollectionID, CollectionScanner>,
-    poll_interval_secs: i64,
+    scanners: HashMap<UploadCollectionID, CollectionScanner>,
+    deployed: HashSet<UploadCollectionID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    subscriber_tx: broadcast::Sender<ScanEvent>,
 }
 
 impl SingleThreadScanner {
     pub fn new(args: ScannerArgs) -> Self {
+        let (subscriber_tx, _) = broadcast::channel(args.broadcast_capacity);
         Self {
-            collections: HashMap::new(),
-            poll_interval_secs: args.min_poll_interval_secs,
+            scanners: HashMap::new(),
+            deployed: HashSet::new(),
             now_fn: args.now_fn,
+            subscriber_tx,
         }
     }
 
-    /// Reconcile the active rule set into the per-collection sub-scanners,
-    /// preserving each surviving collection's observation/dedupe/cadence state.
-    ///
-    /// Rules are folded to one-per-collection (last-in-the-vec wins) BEFORE any
-    /// state is touched, collapsing the redeploy double-rule case. Collections no
-    /// longer present are dropped; surviving collections get their rule replaced
-    /// (state carried over) and new collections get a fresh sub-scanner (due on
-    /// next scan).
-    fn update_rules(&mut self, rules: Vec<UploadRule>) -> Result<(), ScanErr> {
-        let mut folded: HashMap<UploadCollectionID, UploadRule> = HashMap::new();
-        for rule in rules {
-            folded.insert(rule.upload_collection_id.clone(), rule);
+    fn subscribe(&self) -> broadcast::Receiver<ScanEvent> {
+        self.subscriber_tx.subscribe()
+    }
+
+    fn emit_stable_files(&self, stable_files: Vec<StableFile>) {
+        for stable_file in stable_files {
+            if let Err(e) = self.subscriber_tx.send(ScanEvent::StableFile(stable_file)) {
+                debug!("no stable-file subscribers active: {e:?}");
+            }
+        }
+    }
+
+    fn set_configs(
+        &mut self,
+        deployment: Deployment,
+        rules: Vec<UploadRule>,
+    ) -> Result<(), ScanErr> {
+        let mut deployed: HashSet<UploadCollectionID> = HashSet::new();
+        for rule in rules.iter() {
+            if deployed.contains(&rule.upload_collection_id) {
+                return Err(ScanErr::DuplicateCollectionID(DuplicateCollectionID {
+                    collection_id: rule.upload_collection_id.clone(),
+                    trace: trace!(),
+                }));
+            }
+            deployed.insert(rule.upload_collection_id.clone());
         }
 
-        self.collections.retain(|cid, _| folded.contains_key(cid));
-
-        for (cid, rule) in folded {
-            match self.collections.get_mut(&cid) {
-                Some(collection) => collection.set_rule(rule)?,
+        for rule in rules.iter() {
+            let config = Config {
+                deployment: deployment.clone(),
+                rule: rule.clone(),
+            };
+            match self.scanners.get_mut(&rule.upload_collection_id) {
+                Some(scanner) => scanner.set_config(config)?,
                 None => {
-                    self.collections.insert(cid, CollectionScanner::new(rule));
+                    self.scanners.insert(
+                        rule.upload_collection_id.clone(),
+                        CollectionScanner::new(config),
+                    );
                 }
             }
         }
+
+        self.scanners.retain(|cid, _| deployed.contains(cid));
 
         Ok(())
     }
 
     async fn scan(&mut self) -> Result<(), ScanErr> {
-        // Each collection advances independently; order across collections is
-        // unspecified. A collection's own cadence gates whether it runs this tick.
-        for collection in self.collections.values_mut() {
+        let mut stable_files = Vec::new();
+        let mut inactive_colls = Vec::new();
+
+        // evaluate the candidates for all scanners
+        for (cid, scanner) in self.scanners.iter_mut() {
             let now = (self.now_fn)();
+            stable_files.extend(scanner.evaluate_candidates(now).await?);
 
-            if !collection.is_due(now) {
+            // only deployed scanners discover candidates, other scanners continue
+            // scanning their candidate pool until no candidates remain
+            if self.deployed.contains(cid) {
+                scanner.discover_candidates(now).await?;
                 continue;
+            } else if !scanner.has_candidates() {
+                inactive_colls.push(cid.clone());
             }
-
-            let stable = collection.scan(now).await;
-            Self::emit_stable(stable);
-            collection.reschedule(now, self.poll_interval_secs);
         }
+
+        // prune inactive collection scanners
+        for cid in inactive_colls {
+            self.scanners.remove(&cid);
+        }
+
+        self.emit_stable_files(stable_files);
 
         Ok(())
-    }
-
-    /// Placeholder sink: emit a log line per newly-stable file. `find_stable`
-    /// already deduped against the collection's ledger, so every file
-    /// here is newly stable. M3 replaces this with the digest + POST /uploads
-    /// pipeline.
-    fn emit_stable(stable: Vec<StableFile>) {
-        for sf in stable {
-            info!(
-                file_path = %sf.path.display(),
-                file_modified_at = %sf.modified_at,
-                "upload candidate stable (M2 placeholder sink)"
-            );
-        }
     }
 }
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
 #[allow(async_fn_in_trait)]
 pub trait ScannerExt {
-    async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), ScanErr>;
+    async fn set_configs(&self, cfgs: Vec<Config>) -> Result<(), ScanErr>;
     async fn scan(&self) -> Result<(), ScanErr>;
+    async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr>;
     async fn shutdown(&self) -> Result<(), ScanErr>;
 }
 
 pub enum Command {
-    UpdateRules {
-        rules: Vec<UploadRule>,
+    UpdateConfigs {
+        cfgs: Vec<Config>,
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
     Scan {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
+    },
+    Subscribe {
+        respond_to: oneshot::Sender<Result<broadcast::Receiver<ScanEvent>, ScanErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
@@ -166,11 +201,11 @@ impl Worker {
                     }
                     break;
                 }
-                Command::UpdateRules { rules, respond_to } => {
+                Command::UpdateConfigs { cfgs, respond_to } => {
                     dispatch!(
-                        self.scanner.update_rules(rules),
+                        self.scanner.set_configs(cfgs),
                         respond_to,
-                        "Actor failed to send update rules response"
+                        "Actor failed to send update configs response"
                     );
                 }
                 Command::Scan { respond_to } => {
@@ -180,11 +215,16 @@ impl Worker {
                         "Actor failed to send scan response"
                     );
                 }
+                Command::Subscribe { respond_to } => {
+                    if respond_to.send(Ok(self.scanner.subscribe())).is_err() {
+                        error!("Actor failed to send subscribe response");
+                    }
+                }
                 #[cfg(feature = "test")]
                 Command::GetRules { respond_to } => {
                     let rules = self
                         .scanner
-                        .collections
+                        .scanners
                         .values()
                         .map(|c| c.rule().clone())
                         .collect::<Vec<_>>();
@@ -196,7 +236,7 @@ impl Worker {
                 Command::GetLedgerCount { respond_to } => {
                     let count = self
                         .scanner
-                        .collections
+                        .scanners
                         .values()
                         .map(CollectionScanner::ledger_count)
                         .sum::<usize>();
@@ -268,9 +308,9 @@ impl Scanner {
 }
 
 impl ScannerExt for Scanner {
-    async fn update_rules(&self, rules: Vec<UploadRule>) -> Result<(), ScanErr> {
-        self.send_command(|tx| Command::UpdateRules {
-            rules,
+    async fn set_configs(&self, cfgs: Vec<Config>) -> Result<(), ScanErr> {
+        self.send_command(|tx| Command::UpdateConfigs {
+            cfgs,
             respond_to: tx,
         })
         .await?
@@ -278,6 +318,11 @@ impl ScannerExt for Scanner {
 
     async fn scan(&self) -> Result<(), ScanErr> {
         self.send_command(|tx| Command::Scan { respond_to: tx })
+            .await?
+    }
+
+    async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr> {
+        self.send_command(|tx| Command::Subscribe { respond_to: tx })
             .await?
     }
 

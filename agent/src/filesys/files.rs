@@ -461,10 +461,6 @@ pub async fn size(file: &File) -> Result<u64, FileSysErr> {
     Ok(metadata(file).await?.len())
 }
 
-pub async fn hash(file: &File) -> Result<String, FileSysErr> {
-    todo!()
-}
-
 fn map_io_err_for_open(e: std::io::Error, file: &File) -> FileSysErr {
     if e.kind() == std::io::ErrorKind::NotFound {
         FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {

@@ -71,6 +71,7 @@ impl AppState {
             crate::scan::scanner::ScannerArgs {
                 min_poll_interval_secs: 1,
                 now_fn: Arc::new(chrono::Utc::now),
+                broadcast_capacity: 256,
             },
         )?;
         let scanner = Arc::new(scanner);

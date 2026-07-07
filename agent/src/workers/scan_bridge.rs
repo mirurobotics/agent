@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 // internal crates
 use crate::disk;
-use crate::scan::{upload_rules::active_upload_rules, ScannerExt};
+use crate::scan::{upload_rules::active_upload_configs, ScannerExt};
 use crate::sync::{syncer::SyncEvent, SyncerExt};
 
 // external crates
@@ -58,26 +58,26 @@ async fn run_impl<SyncerT: SyncerExt, ScannerT: ScannerExt>(
     // active rule set before entering the loop. Without this the scanner would
     // not receive any rules until the *next* successful sync.
     syncer_subscriber.borrow_and_update();
-    push_active_rules(scanner, deployments, releases, upload_rules).await;
+    push_active_configs(scanner, deployments, releases, upload_rules).await;
 
     while syncer_subscriber.changed().await.is_ok() {
         let syncer_event = syncer_subscriber.borrow().clone();
         if let SyncEvent::SyncSuccess = syncer_event {
-            push_active_rules(scanner, deployments, releases, upload_rules).await;
+            push_active_configs(scanner, deployments, releases, upload_rules).await;
         }
     }
 }
 
-/// Resolve the active upload rule set from the local caches and push it into the
+/// Resolve the active upload config set from the local caches and push it into the
 /// scanner. Errors are logged and swallowed so the bridge never crashes.
-async fn push_active_rules<ScannerT: ScannerExt>(
+async fn push_active_configs<ScannerT: ScannerExt>(
     scanner: &ScannerT,
     deployments: &disk::Deployments,
     releases: &disk::Releases,
     upload_rules: &disk::UploadRules,
 ) {
-    let rules = active_upload_rules(deployments, releases, upload_rules).await;
-    if let Err(e) = scanner.update_rules(rules).await {
-        error!("failed to push upload rules to scanner: {e:?}");
+    let cfgs = active_upload_configs(deployments, releases, upload_rules).await;
+    if let Err(e) = scanner.set_configs(cfgs).await {
+        error!("failed to push upload configs to scanner: {e:?}");
     }
 }

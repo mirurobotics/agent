@@ -4,6 +4,7 @@ use std::collections::HashSet;
 // internal crates
 use crate::disk;
 use crate::models::{DplActivity, UploadRule, UploadRuleID};
+use crate::scan::collection::Config;
 
 // external crates
 use tracing::{debug, error};
@@ -22,6 +23,20 @@ pub async fn active_upload_rules(
     releases: &disk::Releases,
     upload_rules: &disk::UploadRules,
 ) -> Vec<UploadRule> {
+    active_upload_configs(deployments, releases, upload_rules)
+        .await
+        .into_iter()
+        .map(|cfg| cfg.rule)
+        .collect()
+}
+
+/// Like [`active_upload_rules`], but pairs each rule with the deployed
+/// deployment that sourced it (needed by the scanner's per-collection state).
+pub async fn active_upload_configs(
+    deployments: &disk::Deployments,
+    releases: &disk::Releases,
+    upload_rules: &disk::UploadRules,
+) -> Vec<Config> {
     let deployed = match deployments
         .find_where(|d| d.activity_status == DplActivity::Deployed)
         .await
@@ -34,7 +49,7 @@ pub async fn active_upload_rules(
     };
 
     let mut seen: HashSet<UploadRuleID> = HashSet::new();
-    let mut out: Vec<UploadRule> = Vec::new();
+    let mut out: Vec<Config> = Vec::new();
     for dpl in deployed {
         let release = match releases.read_optional(dpl.release_id.clone()).await {
             Ok(Some(r)) => r,
@@ -55,7 +70,10 @@ pub async fn active_upload_rules(
                 continue;
             }
             match upload_rules.read_optional(rule_id.clone()).await {
-                Ok(Some(rule)) => out.push(rule),
+                Ok(Some(rule)) => out.push(Config {
+                    deployment: dpl.clone(),
+                    rule,
+                }),
                 Ok(None) => debug!(
                     "upload rule {rule_id} referenced by release {} not in store; skipping",
                     release.id

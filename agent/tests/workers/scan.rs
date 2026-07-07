@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 // internal crates
 use crate::mocks::error::SleepController;
-use miru_agent::models::UploadRule;
-use miru_agent::scan::{ScannerExt, ScanErr};
+use miru_agent::models::{Deployment, UploadRule};
+use miru_agent::scan::{Config, ScannerExt, ScanErr};
 use miru_agent::workers::scan;
 
 // A counting mock implementing ScannerExt: records how many times scan() is
@@ -15,12 +15,18 @@ struct CountingScanner {
 }
 
 impl ScannerExt for CountingScanner {
-    async fn update_rules(&self, _rules: Vec<UploadRule>) -> Result<(), ScanErr> {
+    async fn set_configs(&self, _cfgs: Vec<Config>) -> Result<(), ScanErr> {
         Ok(())
     }
     async fn scan(&self) -> Result<(), ScanErr> {
         self.scans.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+    async fn subscribe(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<miru_agent::scan::ScanEvent>, ScanErr> {
+        let (_tx, rx) = tokio::sync::broadcast::channel(1);
+        Ok(rx)
     }
     async fn shutdown(&self) -> Result<(), ScanErr> {
         Ok(())
