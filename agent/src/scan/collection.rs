@@ -2,8 +2,7 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::filesys::errors::*;
-use crate::filesys::{files, File, PathExt};
+use crate::filesys::{errors::*, files, File, PathExt};
 use crate::models::{Deployment, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
@@ -106,17 +105,23 @@ pub struct Candidate {
 
 impl Candidate {
     pub fn latest_observation(&self) -> Result<Observation, ScanErr> {
-        self.observations.last().cloned().ok_or(ScanErr::InternalError(InternalError {
-            message: "No observations found".to_string(),
-            trace: trace!(),
-        }))
+        self.observations
+            .last()
+            .cloned()
+            .ok_or(ScanErr::InternalError(InternalError {
+                message: "No observations found".to_string(),
+                trace: trace!(),
+            }))
     }
 
     pub fn first_observation(&self) -> Result<Observation, ScanErr> {
-        self.observations.first().cloned().ok_or(ScanErr::InternalError(InternalError {
-            message: "No observations found".to_string(),
-            trace: trace!(),
-        }))
+        self.observations
+            .first()
+            .cloned()
+            .ok_or(ScanErr::InternalError(InternalError {
+                message: "No observations found".to_string(),
+                trace: trace!(),
+            }))
     }
 }
 
@@ -133,7 +138,7 @@ pub struct StableFile {
     pub upload_rule_id: String,
 }
 
-/// Owned (non-actor) sub-scanner for a single upload collection. 
+/// Owned (non-actor) sub-scanner for a single upload collection.
 pub(crate) struct CollectionScanner {
     state: State,
 }
@@ -161,7 +166,7 @@ impl CollectionScanner {
         self.state.has_candidates()
     }
 
-    /// Replace only the active rule, carrying over observation/dedupe/cadence state. 
+    /// Replace only the active rule, carrying over observation/dedupe/cadence state.
     pub(crate) async fn update_config(
         &mut self,
         config: Config,
@@ -188,11 +193,13 @@ impl CollectionScanner {
                 EvalAction::WaitForStabilityWindow => continue,
                 EvalAction::Unstable => {
                     self.state.candidates.remove(&candidate.file);
-                },
+                }
                 EvalAction::Stable(stable_file) => {
                     stable_files.push(stable_file.clone());
-                    self.state.ledger.insert(candidate.file.clone(), vec![stable_file]);
-                },
+                    self.state
+                        .ledger
+                        .insert(candidate.file.clone(), vec![stable_file]);
+                }
             }
         }
         Ok(stable_files)
@@ -204,7 +211,9 @@ impl CollectionScanner {
     ) -> Result<Vec<Candidate>, ScanErr> {
         let candidates = discover_candidates(&self.state, now).await?;
         for candidate in candidates.iter() {
-            self.state.candidates.insert(candidate.file.clone(), candidate.clone());
+            self.state
+                .candidates
+                .insert(candidate.file.clone(), candidate.clone());
         }
         Ok(candidates)
     }
@@ -254,7 +263,7 @@ pub async fn observe_file(
     state: &State,
     file: File,
     timestamp: DateTime<Utc>,
-) -> Result<Observation, ScanErr>  {
+) -> Result<Observation, ScanErr> {
     let meta = files::metadata(&file).await?;
     let mtime = meta.modified().map_err(|source| {
         ScanErr::FileSysErr(FileSysErr::FileMetadataErr(FileMetadataErr {
@@ -263,11 +272,11 @@ pub async fn observe_file(
             trace: trace!(),
         }))
     })?;
-    Ok(Observation { 
+    Ok(Observation {
         file,
         timestamp,
-        size: meta.len(), 
-        mtime, 
+        size: meta.len(),
+        mtime,
         deployment_id: state.cfg.deployment.id.clone(),
         upload_rule_id: state.cfg.rule.upload_collection_id.clone(),
     })
@@ -301,14 +310,16 @@ async fn eval_candidate(
         let last = candidate.latest_observation()?;
         debug_assert!(first.equal_metadata(&last));
         Ok(EvalAction::Stable(StableFile {
-                file: candidate.file.clone(),
-                size: observation.size,
-                digest: outcome.digest()?,
-                mtime: last.mtime.into(),
-                first_observed_at: first.timestamp,
-                last_observed_at: last.timestamp,
-                deployment_id: first.deployment_id.clone(),
-                upload_rule_id: first.upload_rule_id.clone(),
+            file: candidate.file.clone(),
+            size: observation.size,
+            // A first-stable file (no same-size predecessor in the ledger) has
+            // no recomputed digest; that is the empty string, not an error.
+            digest: outcome.digest.clone().unwrap_or_default(),
+            mtime: last.mtime.into(),
+            first_observed_at: first.timestamp,
+            last_observed_at: last.timestamp,
+            deployment_id: first.deployment_id.clone(),
+            upload_rule_id: first.upload_rule_id.clone(),
         }))
     } else {
         Ok(EvalAction::Unstable)
@@ -330,15 +341,6 @@ pub struct StabilityOutcome {
     pub digest: Option<String>,
 }
 
-impl StabilityOutcome {
-    pub fn digest(&self) -> Result<String, ScanErr> {
-        self.digest.clone().ok_or(ScanErr::InternalError(InternalError {
-            message: "No digest found".to_string(),
-            trace: trace!(),
-        }))
-    }
-}
-
 async fn determine_stability(
     state: &State,
     candidate: &Candidate,
@@ -354,10 +356,7 @@ async fn determine_stability(
     differs_from_previous(state, candidate, observation).await
 }
 
-fn is_metadata_stable(
-    candidate: &Candidate,
-    observation: &Observation,
-) -> Result<bool, ScanErr> {
+fn is_metadata_stable(candidate: &Candidate, observation: &Observation) -> Result<bool, ScanErr> {
     let latest = candidate.latest_observation()?;
     if latest.size != observation.size {
         return Ok(false);
@@ -400,5 +399,8 @@ async fn differs_from_previous(
 }
 
 fn find_previous_stable_file(state: &State, candidate: &Candidate) -> Option<StableFile> {
-    state.ledger.get(&candidate.file).and_then(|stable_files| stable_files.last().cloned())
+    state
+        .ledger
+        .get(&candidate.file)
+        .and_then(|stable_files| stable_files.last().cloned())
 }
