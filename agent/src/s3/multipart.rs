@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 // internal crates
 use crate::filesys::file::File;
+use crate::filesys::files;
 use crate::filesys::path::PathExt;
 use crate::trace;
 
@@ -154,7 +155,7 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
-        let size = src.size().await?;
+        let size = files::size(src).await?;
         let part_size = Self::part_size_for(size);
 
         // Index the already-landed parts by number. `None` means S3 no longer

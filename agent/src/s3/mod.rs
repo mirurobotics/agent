@@ -22,6 +22,7 @@
 
 // internal crates
 use crate::filesys::file::File;
+use crate::filesys::files;
 use crate::filesys::path::PathExt;
 use crate::trace;
 
@@ -128,7 +129,7 @@ impl Store {
     /// threshold stream through one `PutObject`, and larger files stream part-by-part
     /// through a (stateless) multipart upload (see [`Self::put_multipart`]).
     pub async fn put(&self, src: File, dst: &Object) -> Result<(), S3Err> {
-        let size = src.size().await?;
+        let size = files::size(&src).await?;
 
         if size > PART_SIZE {
             self.put_multipart(&multipart::Source { file: src, size }, dst)
