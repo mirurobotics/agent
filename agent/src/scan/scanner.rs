@@ -78,7 +78,7 @@ impl SingleThreadScanner {
         }
     }
 
-    fn set_configs(
+    async fn update_configs(
         &mut self,
         deployment: Deployment,
         rules: Vec<UploadRule>,
@@ -94,17 +94,18 @@ impl SingleThreadScanner {
             deployed.insert(rule.upload_collection_id.clone());
         }
 
+        let now = (self.now_fn)();
         for rule in rules.iter() {
             let config = Config {
                 deployment: deployment.clone(),
                 rule: rule.clone(),
             };
             match self.scanners.get_mut(&rule.upload_collection_id) {
-                Some(scanner) => scanner.set_config(config)?,
+                Some(scanner) => scanner.update_config(config, now).await?,
                 None => {
                     self.scanners.insert(
                         rule.upload_collection_id.clone(),
-                        CollectionScanner::new(config),
+                        CollectionScanner::new(config, now).await?,
                     );
                 }
             }
@@ -203,7 +204,7 @@ impl Worker {
                 }
                 Command::UpdateConfigs { cfgs, respond_to } => {
                     dispatch!(
-                        self.scanner.set_configs(cfgs),
+                        self.scanner.update_configs(cfgs),
                         respond_to,
                         "Actor failed to send update configs response"
                     );

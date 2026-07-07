@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 
 pub struct State {
     cfg: Config,
+    preexisting: HashMap<File, Observation>,
     candidates: HashMap<File, Candidate>,
     ledger: HashMap<File, Vec<StableFile>>,
 }
@@ -26,6 +27,7 @@ impl State {
     pub(crate) fn new(cfg: Config) -> Self {
         Self {
             cfg,
+            preexisting: HashMap::new(),
             candidates: HashMap::new(),
             ledger: HashMap::new(),
         }
@@ -41,6 +43,19 @@ impl State {
 
     fn has_candidates(&self) -> bool {
         !self.candidates.is_empty()
+    }
+
+    fn is_candidate(&self, file: &File) -> bool {
+        self.candidates.contains_key(file)
+    }
+
+    fn is_preexisting(&self, obs: &Observation) -> bool {
+        let preexisting = if let Some(preexisting) = self.preexisting.get(&obs.file) {
+            preexisting
+        } else {
+            return false;
+        };
+        preexisting.equal_metadata(obs)
     }
 
     fn set_config(&mut self, cfg: Config) -> Result<(), ScanErr> {
@@ -60,7 +75,7 @@ impl State {
         self.ledger.retain(|_, stable_files| {
             stable_files
                 .last()
-                .is_none_or(|stable_file| stable_file.modified_at >= before)
+                .is_none_or(|stable_file| stable_file.first_observed_at >= before)
         });
         Ok(())
     }
@@ -68,6 +83,8 @@ impl State {
 
 #[derive(Clone)]
 pub struct Observation {
+    pub file: File,
+    pub timestamp: DateTime<Utc>,
     pub size: u64,
     pub mtime: std::time::SystemTime,
     pub deployment_id: String,
@@ -85,7 +102,6 @@ impl Observation {
 pub struct Candidate {
     pub file: File,
     pub observations: Vec<Observation>,
-    pub stable_since: DateTime<Utc>,
 }
 
 impl Candidate {
@@ -110,7 +126,9 @@ pub struct StableFile {
     pub file: File,
     pub size: u64,
     pub digest: String,
-    pub modified_at: DateTime<Utc>,
+    pub mtime: DateTime<Utc>,
+    pub first_observed_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub upload_rule_id: String,
 }
@@ -121,8 +139,10 @@ pub(crate) struct CollectionScanner {
 }
 
 impl CollectionScanner {
-    pub(crate) fn new(config: Config) -> Self {
-        Self::from_state(State::new(config))
+    pub(crate) async fn new(config: Config, now: DateTime<Utc>) -> Result<Self, ScanErr> {
+        let mut state = State::new(config);
+        state.preexisting = discover_preexisting(&state, now).await?;
+        Ok(Self::from_state(state))
     }
 
     pub(crate) fn from_state(state: State) -> Self {
@@ -136,14 +156,24 @@ impl CollectionScanner {
     pub(crate) fn ledger_count(&self) -> usize {
         self.state.ledger_count()
     }
-    
+
     pub(crate) fn has_candidates(&self) -> bool {
         self.state.has_candidates()
     }
 
     /// Replace only the active rule, carrying over observation/dedupe/cadence state. 
-    pub(crate) fn set_config(&mut self, config: Config) -> Result<(), ScanErr> {
-        self.state.set_config(config)
+    pub(crate) async fn update_config(
+        &mut self,
+        config: Config,
+        now: DateTime<Utc>,
+    ) -> Result<(), ScanErr> {
+        self.state.set_config(config)?;
+
+        // rediscover preexisting files
+        let preexisting = discover_preexisting(&self.state, now).await?;
+        self.state.preexisting = preexisting;
+
+        Ok(())
     }
 
     pub async fn evaluate_candidates(
@@ -171,18 +201,12 @@ impl CollectionScanner {
     pub async fn discover_candidates(
         &mut self,
         now: DateTime<Utc>,
-    ) -> Result<Vec<StableFile>, ScanErr> {
-        for file in files::glob(&self.state.cfg.rule.source.glob)? {
-            if self.state.candidates.contains_key(&file) {
-                continue;
-            }
-            self.state.candidates.insert(file.clone(), Candidate {
-                file,
-                observations: Vec::new(),
-                stable_since: now,
-            });
+    ) -> Result<Vec<Candidate>, ScanErr> {
+        let candidates = discover_candidates(&self.state, now).await?;
+        for candidate in candidates.iter() {
+            self.state.candidates.insert(candidate.file.clone(), candidate.clone());
         }
-        Ok(Vec::new())
+        Ok(candidates)
     }
 
     fn prune_ledger(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
@@ -190,8 +214,48 @@ impl CollectionScanner {
     }
 }
 
-pub async fn observe_file(state: &State, file: &File) -> Result<Observation, ScanErr>  {
-    let meta = files::metadata(file).await?;
+pub async fn discover_preexisting(
+    state: &State,
+    now: DateTime<Utc>,
+) -> Result<HashMap<File, Observation>, ScanErr> {
+    let mut preexisting = HashMap::new();
+    for file in files::glob(&state.cfg.rule.source.glob)? {
+        if state.is_candidate(&file) {
+            continue;
+        }
+        let observation = observe_file(state, file.clone(), now).await?;
+        preexisting.insert(file, observation);
+    }
+    Ok(preexisting)
+}
+
+pub async fn discover_candidates(
+    state: &State,
+    now: DateTime<Utc>,
+) -> Result<Vec<Candidate>, ScanErr> {
+    let mut candidates = Vec::new();
+    for file in files::glob(&state.cfg.rule.source.glob)? {
+        if state.is_candidate(&file) {
+            continue;
+        }
+        let observation = observe_file(state, file.clone(), now).await?;
+        if state.is_preexisting(&observation) {
+            continue;
+        }
+        candidates.push(Candidate {
+            file,
+            observations: vec![observation],
+        });
+    }
+    Ok(candidates)
+}
+
+pub async fn observe_file(
+    state: &State,
+    file: File,
+    timestamp: DateTime<Utc>,
+) -> Result<Observation, ScanErr>  {
+    let meta = files::metadata(&file).await?;
     let mtime = meta.modified().map_err(|source| {
         ScanErr::FileSysErr(FileSysErr::FileMetadataErr(FileMetadataErr {
             file: file.clone(),
@@ -200,6 +264,8 @@ pub async fn observe_file(state: &State, file: &File) -> Result<Observation, Sca
         }))
     })?;
     Ok(Observation { 
+        file,
+        timestamp,
         size: meta.len(), 
         mtime, 
         deployment_id: state.cfg.deployment.id.clone(),
@@ -218,8 +284,7 @@ async fn eval_candidate(
     candidate: &Candidate,
     now: DateTime<Utc>,
 ) -> Result<EvalAction, ScanErr> {
-
-    if !has_stability_window_elapsed(state, candidate, now) {
+    if !has_stability_window_elapsed(state, candidate, now)? {
         return Ok(EvalAction::WaitForStabilityWindow);
     }
 
@@ -228,7 +293,7 @@ async fn eval_candidate(
         return Ok(EvalAction::Unstable);
     }
 
-    let observation = observe_file(state, &candidate.file).await?;
+    let observation = observe_file(state, candidate.file.clone(), now).await?;
     let outcome = determine_stability(state, candidate, &observation).await?;
 
     if outcome.is_stable {
@@ -239,7 +304,9 @@ async fn eval_candidate(
                 file: candidate.file.clone(),
                 size: observation.size,
                 digest: outcome.digest()?,
-                modified_at: last.mtime.into(),
+                mtime: last.mtime.into(),
+                first_observed_at: first.timestamp,
+                last_observed_at: last.timestamp,
                 deployment_id: first.deployment_id.clone(),
                 upload_rule_id: first.upload_rule_id.clone(),
         }))
@@ -252,9 +319,10 @@ fn has_stability_window_elapsed(
     state: &State,
     candidate: &Candidate,
     now: DateTime<Utc>,
-) -> bool {
+) -> Result<bool, ScanErr> {
     let window = state.cfg.rule.source.stability_window_secs as i64;
-    now.signed_duration_since(candidate.stable_since).num_seconds() >= window
+    let stable_since = candidate.first_observation()?.timestamp;
+    Ok(now.signed_duration_since(stable_since).num_seconds() >= window)
 }
 
 pub struct StabilityOutcome {
@@ -290,10 +358,11 @@ fn is_metadata_stable(
     candidate: &Candidate,
     observation: &Observation,
 ) -> Result<bool, ScanErr> {
-    if candidate.latest_observation()?.size != observation.size {
+    let latest = candidate.latest_observation()?;
+    if latest.size != observation.size {
         return Ok(false);
     }
-    if candidate.latest_observation()?.mtime != observation.mtime {
+    if latest.mtime != observation.mtime {
         return Ok(false);
     }
     Ok(true)
