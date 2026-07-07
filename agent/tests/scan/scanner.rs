@@ -778,6 +778,44 @@ async fn subscribe_receives_stable_file_payload() {
     assert!(sf.first_observed_at <= sf.last_observed_at);
 }
 
+// A first-stable file (no prior ledger entry) carries the REAL file hash on its
+// emitted StableFile.digest, not an empty string. Regression guard for the
+// no-previous branch computing Some(files::hash(..)) rather than None/"".
+#[tokio::test]
+async fn first_stable_file_carries_real_digest() {
+    let dir = filesys::dirs::create_temp("testing").await.unwrap();
+    let base = dir.path().clone();
+    let glob = format!("{}/*.mcap", base.display());
+
+    let clock = Clock::new(1000);
+    let scanner = spawn_scanner(&clock, 1);
+    scanner
+        .update_rules(
+            deployment("dpl-1"),
+            vec![rule_in_collection("rule-1", "coll", &glob, 0)],
+        )
+        .await
+        .unwrap();
+    write(&base, "digest.mcap", b"aaaa");
+
+    let mut rx = scanner.subscribe().await.unwrap();
+
+    scanner.scan().await.unwrap(); // discover
+    clock.advance(1);
+    scanner.scan().await.unwrap(); // evaluate => emit
+
+    let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+    // The digest must be the real SHA-256 of b"aaaa", never empty.
+    assert!(
+        !sf.digest.is_empty(),
+        "first-stable digest must not be empty"
+    );
+    assert_eq!(
+        sf.digest,
+        "sha256:61be55a8e2f6b4e172338bddf184d6dbee29c98853e0a0485ecee7f27b9af0b4".to_string(),
+    );
+}
+
 // scan() producing stable files with NO subscriber does not error (debug branch).
 #[tokio::test]
 async fn emit_with_no_subscriber_does_not_error() {

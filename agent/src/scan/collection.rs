@@ -312,9 +312,7 @@ async fn eval_candidate(
         Ok(EvalAction::Stable(StableFile {
             file: candidate.file.clone(),
             size: observation.size,
-            // A first-stable file (no same-size predecessor in the ledger) has
-            // no recomputed digest; that is the empty string, not an error.
-            digest: outcome.digest.clone().unwrap_or_default(),
+            digest: outcome.digest()?,
             mtime: last.mtime.into(),
             first_observed_at: first.timestamp,
             last_observed_at: last.timestamp,
@@ -339,6 +337,17 @@ fn has_stability_window_elapsed(
 pub struct StabilityOutcome {
     pub is_stable: bool,
     pub digest: Option<String>,
+}
+
+impl StabilityOutcome {
+    pub fn digest(&self) -> Result<String, ScanErr> {
+        self.digest
+            .clone()
+            .ok_or(ScanErr::InternalError(InternalError {
+                message: "Digest is not available".to_string(),
+                trace: trace!(),
+            }))
+    }
 }
 
 async fn determine_stability(
@@ -378,14 +387,14 @@ async fn differs_from_previous(
     } else {
         return Ok(StabilityOutcome {
             is_stable: true,
-            digest: None,
+            digest: Some(files::hash(&candidate.file).await?),
         });
     };
 
     // check if stable file size has changed
     if previous.size != observation.size {
         return Ok(StabilityOutcome {
-            is_stable: true,
+            is_stable: false,
             digest: None,
         });
     }
