@@ -24,12 +24,15 @@ There is no uploader yet; this lands as a self-contained module with no call sit
 
 ## Progress
 
-- [ ] M1: `filesys::files` gains `read_tail` and `read_range` helpers + tests; committed.
-- [ ] M2: `fileformats` module scaffold (enum, dispatch, errors, registration, `.covgate`) + dispatch tests; committed.
-- [ ] M3: tail/head-marker formats (MCAP, Parquet, PNG, JPEG, tar, ZIP, gzip) + tests; committed.
-- [ ] M4: header-parse formats (ROS1 bag, SQLite, HDF5, AVI) + tests; committed.
-- [ ] M5: bounded-walk formats (MP4/MOV, MKV/WebM, zstd) + tests; committed.
+- [x] M1 (source, 2026-07-07): `filesys::files` gains `read_tail` and `read_range` helpers (+ shared internal `read_at`); committed. Remaining: tests (consolidated test pass below).
+- [x] M2 (source, 2026-07-07): `fileformats` module scaffold (enum, dispatch, errors, registration in `lib.rs`, `.covgate` 50.00); committed. Remaining: dispatch tests.
+- [x] M3 (source, 2026-07-07): tail/head-marker formats (MCAP, Parquet, PNG, JPEG, tar, ZIP, gzip) implemented; committed. Remaining: tests.
+- [x] M4 (source, 2026-07-07): header-parse formats (ROS1 bag, SQLite, HDF5, AVI) implemented; committed. Remaining: tests.
+- [x] M5 (source, 2026-07-07): bounded-walk formats (MP4/MOV, MKV/WebM, zstd) implemented; committed. Remaining: tests.
+- [ ] Consolidated test pass: all M1–M5 tests (`agent/tests/filesys/files.rs` additions, new `agent/tests/fileformats/`), registered in `agent/tests/mod.rs`; committed.
 - [ ] M6: coverage gate finalized, lint clean, `./scripts/preflight.sh` prints `Preflight clean`; committed.
+
+Execution note (2026-07-07): work is executed via the implement-skill pipeline — all M1–M5 source landed in one pass (two atomic commits: filesys helpers, fileformats module), with tests following as a consolidated pass, then M6 gates. Milestone content is unchanged; only commit grouping differs from the original per-milestone sequencing.
 
 Use timestamps when completing steps. Split partially completed work into "done" and "remaining" as needed.
 
@@ -48,6 +51,8 @@ Use timestamps when completing steps. Split partially completed work into "done"
   Rationale: A too-small file cannot be a finalized instance of its claimed format, so `Incomplete` is the honest verdict; `Unknown` is reserved for "we cannot tell", and errors must not masquerade as verdicts or the caller will endlessly re-poll a file it cannot read. Date/Author: 2026-07-07 / ben@miruml.com.
 - Decision: gzip never returns `Complete` in this version (returns `Unknown` after magic + minimum-size sanity, `Incomplete` otherwise).
   Rationale: validating the gzip trailer requires decompressing the stream, which violates the cheapness constraint. Best-effort `Unknown` lets the caller fall back to the stability window. Date/Author: 2026-07-07 / ben@miruml.com.
+- Decision: `fileformats::check` fetches the file size before extension routing, so a missing file returns `Err(FileFormatsErr::FileSysErr(_))` regardless of extension (an existing file with an unknown extension still returns `Unknown`).
+  Rationale: I/O failures must never masquerade as verdicts (per the error-policy decision above), and the dispatcher fetching `size` once is what every format fn's signature assumes. Date/Author: 2026-07-07 / ben@miruml.com.
 - Decision: Test fixtures are hand-crafted byte vectors built inline in test code and written to temp dirs — no binary files committed to `testdata/`.
   Rationale: fixtures are tens of bytes, and inline builders are reviewable and self-documenting; `testdata/` (used today only for crypt PEM keys) stays free of opaque binaries. Date/Author: 2026-07-07 / ben@miruml.com.
 
