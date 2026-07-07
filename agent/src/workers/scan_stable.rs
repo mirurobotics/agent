@@ -52,7 +52,7 @@ async fn run_impl<ScannerT: ScannerExt>(scanner: &ScannerT) {
 fn emit_placeholder(stable_file: crate::scan::collection::StableFile) {
     info!(
         file_path = %stable_file.file.path().display(),
-        file_modified_at = %stable_file.modified_at,
+        file_modified_at = %stable_file.mtime,
         "upload candidate stable (M2 placeholder sink)"
     );
 }

@@ -176,7 +176,7 @@ impl CollectionScanner {
         Ok(())
     }
 
-    pub async fn evaluate_candidates(
+    pub(crate) async fn evaluate_candidates(
         &mut self,
         now: DateTime<Utc>,
     ) -> Result<Vec<StableFile>, ScanErr> {
@@ -198,7 +198,7 @@ impl CollectionScanner {
         Ok(stable_files)
     }
 
-    pub async fn discover_candidates(
+    pub(crate) async fn discover_candidates(
         &mut self,
         now: DateTime<Utc>,
     ) -> Result<Vec<Candidate>, ScanErr> {
@@ -209,7 +209,7 @@ impl CollectionScanner {
         Ok(candidates)
     }
 
-    fn prune_ledger(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
+    pub(crate) fn prune_ledger(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
         self.state.prune_ledger(before)
     }
 }

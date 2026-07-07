@@ -4,8 +4,9 @@ use std::pin::Pin;
 
 // internal crates
 use crate::disk;
-use crate::scan::{upload_rules::active_upload_configs, ScannerExt};
+use crate::scan::{upload_rules::{find_deployed, get_dpl_upload_rules}, ScannerExt};
 use crate::sync::{syncer::SyncEvent, SyncerExt};
+use crate::workers::errors::WorkerErr;
 
 // external crates
 use tokio::sync::watch;
@@ -58,12 +59,18 @@ async fn run_impl<SyncerT: SyncerExt, ScannerT: ScannerExt>(
     // active rule set before entering the loop. Without this the scanner would
     // not receive any rules until the *next* successful sync.
     syncer_subscriber.borrow_and_update();
-    push_active_configs(scanner, deployments, releases, upload_rules).await;
+    if let Err(e) = push_active_configs(scanner, deployments, releases, upload_rules).await {
+        error!("failed to push upload configs to scanner at startup: {e:?}");
+    }
 
     while syncer_subscriber.changed().await.is_ok() {
         let syncer_event = syncer_subscriber.borrow().clone();
         if let SyncEvent::SyncSuccess = syncer_event {
-            push_active_configs(scanner, deployments, releases, upload_rules).await;
+            if let Err(e) =
+                push_active_configs(scanner, deployments, releases, upload_rules).await
+            {
+                error!("failed to push upload configs to scanner: {e:?}");
+            }
         }
     }
 }
@@ -75,9 +82,15 @@ async fn push_active_configs<ScannerT: ScannerExt>(
     deployments: &disk::Deployments,
     releases: &disk::Releases,
     upload_rules: &disk::UploadRules,
-) {
-    let cfgs = active_upload_configs(deployments, releases, upload_rules).await;
-    if let Err(e) = scanner.set_configs(cfgs).await {
-        error!("failed to push upload configs to scanner: {e:?}");
+) -> Result<(), WorkerErr> {
+    match find_deployed(deployments).await? {
+        Some(deployed) => {
+            let rules = get_dpl_upload_rules(releases, upload_rules, deployed.clone()).await?;
+            scanner.update_rules(deployed, rules).await?;
+        }
+        None => {
+            scanner.clear_rules().await?;
+        }
     }
+    Ok(())
 }

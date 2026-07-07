@@ -15,7 +15,7 @@ struct CountingScanner {
 }
 
 impl ScannerExt for CountingScanner {
-    async fn set_configs(&self, _cfgs: Vec<Config>) -> Result<(), ScanErr> {
+    async fn update_configs(&self, _cfgs: Vec<Config>) -> Result<(), ScanErr> {
         Ok(())
     }
     async fn scan(&self) -> Result<(), ScanErr> {

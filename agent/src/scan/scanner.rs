@@ -78,7 +78,22 @@ impl SingleThreadScanner {
         }
     }
 
-    async fn update_configs(
+    async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
+        let rules = self.scanners.values().map(|c| c.rule().clone()).collect::<Vec<_>>();
+        Ok(rules)
+    }
+
+    async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
+        let count = self.scanners.values().map(CollectionScanner::ledger_count).sum::<usize>();
+        Ok(count)
+    }
+
+    async fn clear_rules(&mut self) -> Result<(), ScanErr> {
+        self.deployed.clear();
+        Ok(())
+    }
+
+    async fn update_rules(
         &mut self,
         deployment: Deployment,
         rules: Vec<UploadRule>,
@@ -111,7 +126,7 @@ impl SingleThreadScanner {
             }
         }
 
-        self.scanners.retain(|cid, _| deployed.contains(cid));
+        self.deployed = deployed;
 
         Ok(())
     }
@@ -144,20 +159,37 @@ impl SingleThreadScanner {
 
         Ok(())
     }
+
+    async fn prune(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
+        for (_, scanner) in self.scanners.iter_mut() {
+            scanner.prune_ledger(before)?;
+        }
+        Ok(())
+    }
 }
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
 #[allow(async_fn_in_trait)]
 pub trait ScannerExt {
-    async fn set_configs(&self, cfgs: Vec<Config>) -> Result<(), ScanErr>;
+    async fn clear_rules(&self) -> Result<(), ScanErr>;
+    async fn update_rules(
+        &self,
+        deployment: Deployment,
+        rules: Vec<UploadRule>,
+    ) -> Result<(), ScanErr>;
     async fn scan(&self) -> Result<(), ScanErr>;
     async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr>;
     async fn shutdown(&self) -> Result<(), ScanErr>;
+    async fn prune(&self, before: DateTime<Utc>) -> Result<(), ScanErr>;
 }
 
 pub enum Command {
-    UpdateConfigs {
-        cfgs: Vec<Config>,
+    ClearRules {
+        respond_to: oneshot::Sender<Result<(), ScanErr>>,
+    },
+    UpdateRules {
+        deployment: Box<Deployment>,
+        rules: Vec<UploadRule>,
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
     Scan {
@@ -169,17 +201,15 @@ pub enum Command {
     Shutdown {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
-    #[cfg(feature = "test")]
     GetRules {
         respond_to: oneshot::Sender<Result<Vec<UploadRule>, ScanErr>>,
     },
-    /// Inspector: number of files recorded in the ledger. Lets actor
-    /// tests observe stability/cadence/dedupe through the public handle without
-    /// scraping logs (each newly-stable file is reported exactly once, so this
-    /// count is a faithful proxy for "files that have crossed into stable").
-    #[cfg(feature = "test")]
     GetLedgerCount {
         respond_to: oneshot::Sender<Result<usize, ScanErr>>,
+    },
+    Prune {
+        before: DateTime<Utc>,
+        respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
 }
 
@@ -202,9 +232,16 @@ impl Worker {
                     }
                     break;
                 }
-                Command::UpdateConfigs { cfgs, respond_to } => {
+                Command::ClearRules { respond_to } => {
                     dispatch!(
-                        self.scanner.update_configs(cfgs),
+                        self.scanner.clear_rules().await,
+                        respond_to,
+                        "Actor failed to send clear rules response"
+                    );
+                }
+                Command::UpdateRules { deployment, rules, respond_to } => {
+                    dispatch!(
+                        self.scanner.update_rules(*deployment, rules).await,
                         respond_to,
                         "Actor failed to send update configs response"
                     );
@@ -221,29 +258,26 @@ impl Worker {
                         error!("Actor failed to send subscribe response");
                     }
                 }
-                #[cfg(feature = "test")]
                 Command::GetRules { respond_to } => {
-                    let rules = self
-                        .scanner
-                        .scanners
-                        .values()
-                        .map(|c| c.rule().clone())
-                        .collect::<Vec<_>>();
-                    if respond_to.send(Ok(rules)).is_err() {
-                        error!("Actor failed to send get rules response");
-                    }
+                    dispatch!(
+                        self.scanner.get_rules().await,
+                        respond_to,
+                        "Actor failed to send get rules response"
+                    );
                 }
-                #[cfg(feature = "test")]
                 Command::GetLedgerCount { respond_to } => {
-                    let count = self
-                        .scanner
-                        .scanners
-                        .values()
-                        .map(CollectionScanner::ledger_count)
-                        .sum::<usize>();
-                    if respond_to.send(Ok(count)).is_err() {
-                        error!("Actor failed to send get ledger count response");
-                    }
+                    dispatch!(
+                        self.scanner.get_ledger_count().await,
+                        respond_to,
+                        "Actor failed to send get ledger count response"
+                    );
+                }
+                Command::Prune { before, respond_to } => {
+                    dispatch!(
+                        self.scanner.prune(before).await,
+                        respond_to,
+                        "Actor failed to send prune response"
+                    );
                 }
             }
         }
@@ -295,13 +329,11 @@ impl Scanner {
         })
     }
 
-    #[cfg(feature = "test")]
     pub async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
         self.send_command(|tx| Command::GetRules { respond_to: tx })
             .await?
     }
 
-    #[cfg(feature = "test")]
     pub async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
         self.send_command(|tx| Command::GetLedgerCount { respond_to: tx })
             .await?
@@ -309,12 +341,21 @@ impl Scanner {
 }
 
 impl ScannerExt for Scanner {
-    async fn set_configs(&self, cfgs: Vec<Config>) -> Result<(), ScanErr> {
-        self.send_command(|tx| Command::UpdateConfigs {
-            cfgs,
+    async fn clear_rules(&self) -> Result<(), ScanErr> {
+        self.send_command(|tx| Command::ClearRules { respond_to: tx })
+            .await?
+    }
+
+    async fn update_rules(
+        &self,
+        deployment: Deployment,
+        rules: Vec<UploadRule>,
+    ) -> Result<(), ScanErr> {
+        self.send_command(|tx| Command::UpdateRules {
+            deployment: Box::new(deployment),
+            rules,
             respond_to: tx,
-        })
-        .await?
+        }).await?
     }
 
     async fn scan(&self) -> Result<(), ScanErr> {
@@ -332,5 +373,10 @@ impl ScannerExt for Scanner {
             .await??;
         info!("Scanner shutdown complete");
         Ok(())
+    }
+
+    async fn prune(&self, before: DateTime<Utc>) -> Result<(), ScanErr> {
+        self.send_command(|tx| Command::Prune { before, respond_to: tx })
+            .await?
     }
 }

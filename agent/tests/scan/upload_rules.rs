@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys;
 use miru_agent::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
-use miru_agent::scan::upload_rules::active_upload_rules;
+use miru_agent::scan::upload_rules::get_dpl_upload_rules;
 
 // =============================== TEST HELPERS ================================= //
 
@@ -115,7 +115,7 @@ async fn resolves_active_set() {
     )
     .await;
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -146,7 +146,7 @@ async fn stale_rule_not_acted_on() {
         .await
         .unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -175,7 +175,7 @@ async fn no_deployed_is_empty() {
         .await
         .unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -224,7 +224,7 @@ async fn missing_rule_id_skipped() {
         .await
         .unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -253,7 +253,7 @@ async fn missing_release_is_empty() {
         .await
         .unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -290,7 +290,7 @@ async fn union_and_dedupe_across_deployments() {
     )
     .await;
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -312,7 +312,7 @@ async fn deployments_cache_error_is_empty() {
     let (deployments, releases, upload_rules) = spawn_stores(&layout).await;
     deployments.shutdown().await.unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -332,7 +332,7 @@ async fn release_cache_error_is_empty() {
     seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
     releases.shutdown().await.unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),
@@ -352,7 +352,7 @@ async fn rule_cache_error_is_empty() {
     seed_deployed(&deployments, &releases, &upload_rules, "dpl", "rel", &[r1]).await;
     upload_rules.shutdown().await.unwrap();
 
-    let rules = active_upload_rules(
+    let rules = get_dpl_upload_rules(
         deployments.as_ref(),
         releases.as_ref(),
         upload_rules.as_ref(),

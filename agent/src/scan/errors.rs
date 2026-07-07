@@ -50,6 +50,8 @@ pub enum ScanErr {
     InternalError(InternalError),
     #[error(transparent)]
     FileSysErr(crate::filesys::FileSysErr),
+    #[error(transparent)]
+    CacheErr(crate::cache::CacheErr),
 }
 
 impl From<SendActorMessageErr> for ScanErr {
@@ -70,6 +72,12 @@ impl From<crate::filesys::FileSysErr> for ScanErr {
     }
 }
 
+impl From<crate::cache::CacheErr> for ScanErr {
+    fn from(e: crate::cache::CacheErr) -> Self {
+        Self::CacheErr(e)
+    }
+}
+
 crate::impl_error!(ScanErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
@@ -77,4 +85,5 @@ crate::impl_error!(ScanErr {
     DuplicateCollectionID,
     InternalError,
     FileSysErr,
+    CacheErr,
 });
