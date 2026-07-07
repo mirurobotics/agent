@@ -4,7 +4,10 @@ use std::pin::Pin;
 
 // internal crates
 use crate::disk;
-use crate::scan::{upload_rules::{find_deployed, get_dpl_upload_rules}, ScannerExt};
+use crate::scan::{
+    upload_rules::{find_deployed, get_dpl_upload_rules},
+    ScannerExt,
+};
 use crate::sync::{syncer::SyncEvent, SyncerExt};
 use crate::workers::errors::WorkerErr;
 
@@ -66,8 +69,7 @@ async fn run_impl<SyncerT: SyncerExt, ScannerT: ScannerExt>(
     while syncer_subscriber.changed().await.is_ok() {
         let syncer_event = syncer_subscriber.borrow().clone();
         if let SyncEvent::SyncSuccess = syncer_event {
-            if let Err(e) =
-                push_active_configs(scanner, deployments, releases, upload_rules).await
+            if let Err(e) = push_active_configs(scanner, deployments, releases, upload_rules).await
             {
                 error!("failed to push upload configs to scanner: {e:?}");
             }

@@ -1,15 +1,13 @@
 // internal crates
 use crate::disk;
-use crate::models::{DplActivity, Deployment, Release, UploadRule};
+use crate::models::{Deployment, DplActivity, Release, UploadRule};
 use crate::scan::errors::*;
 
-pub async fn find_deployed(
-    deployments: &disk::Deployments,
-) -> Result<Option<Deployment>, ScanErr> {
-    deployments.find_one_optional(
-        "deployed",
-        |d| d.activity_status == DplActivity::Deployed,
-    ).await.map_err(ScanErr::from)
+pub async fn find_deployed(deployments: &disk::Deployments) -> Result<Option<Deployment>, ScanErr> {
+    deployments
+        .find_one_optional("deployed", |d| d.activity_status == DplActivity::Deployed)
+        .await
+        .map_err(ScanErr::from)
 }
 
 pub async fn get_dpl_upload_rules(
@@ -25,7 +23,10 @@ async fn get_dpl_rls(
     releases: &disk::Releases,
     deployment: Deployment,
 ) -> Result<Release, ScanErr> {
-    releases.read(deployment.release_id.clone()).await.map_err(ScanErr::from)
+    releases
+        .read(deployment.release_id.clone())
+        .await
+        .map_err(ScanErr::from)
 }
 
 async fn get_rls_upload_rules(

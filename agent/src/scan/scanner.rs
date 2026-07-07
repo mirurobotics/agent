@@ -79,12 +79,20 @@ impl SingleThreadScanner {
     }
 
     async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
-        let rules = self.scanners.values().map(|c| c.rule().clone()).collect::<Vec<_>>();
+        let rules = self
+            .scanners
+            .values()
+            .map(|c| c.rule().clone())
+            .collect::<Vec<_>>();
         Ok(rules)
     }
 
     async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
-        let count = self.scanners.values().map(CollectionScanner::ledger_count).sum::<usize>();
+        let count = self
+            .scanners
+            .values()
+            .map(CollectionScanner::ledger_count)
+            .sum::<usize>();
         Ok(count)
     }
 
@@ -239,7 +247,11 @@ impl Worker {
                         "Actor failed to send clear rules response"
                     );
                 }
-                Command::UpdateRules { deployment, rules, respond_to } => {
+                Command::UpdateRules {
+                    deployment,
+                    rules,
+                    respond_to,
+                } => {
                     dispatch!(
                         self.scanner.update_rules(*deployment, rules).await,
                         respond_to,
@@ -293,10 +305,7 @@ pub struct Scanner {
 }
 
 impl Scanner {
-    pub fn spawn(
-        buffer_size: usize,
-        args: ScannerArgs,
-    ) -> Result<(Self, JoinHandle<()>), ScanErr> {
+    pub fn spawn(buffer_size: usize, args: ScannerArgs) -> Result<(Self, JoinHandle<()>), ScanErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             scanner: SingleThreadScanner::new(args),
@@ -355,7 +364,8 @@ impl ScannerExt for Scanner {
             deployment: Box::new(deployment),
             rules,
             respond_to: tx,
-        }).await?
+        })
+        .await?
     }
 
     async fn scan(&self) -> Result<(), ScanErr> {
@@ -376,7 +386,10 @@ impl ScannerExt for Scanner {
     }
 
     async fn prune(&self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        self.send_command(|tx| Command::Prune { before, respond_to: tx })
-            .await?
+        self.send_command(|tx| Command::Prune {
+            before,
+            respond_to: tx,
+        })
+        .await?
     }
 }

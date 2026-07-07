@@ -13,6 +13,4 @@ impl From<ScanErr> for WorkerErr {
     }
 }
 
-crate::impl_error!(WorkerErr {
-    ScanErr,
-});
+crate::impl_error!(WorkerErr { ScanErr });
