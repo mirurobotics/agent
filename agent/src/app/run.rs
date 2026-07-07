@@ -785,4 +785,87 @@ mod tests {
 
         assert!(shutdown_manager.scan_worker_handle.is_none());
     }
+
+    #[tokio::test]
+    async fn register_handle_rejects_scan_stable_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_stable_worker_handle,
+                "scan_stable_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_stable_worker_handle,
+                "scan_stable_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate scan stable handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "scan_stable_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
+    #[tokio::test]
+    async fn register_handle_rejects_scan_bridge_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_bridge_worker_handle,
+                "scan_bridge_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_bridge_worker_handle,
+                "scan_bridge_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate scan bridge handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "scan_bridge_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_awaits_registered_scan_stable_and_bridge_handles() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_stable_worker_handle,
+                "scan_stable_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_bridge_worker_handle,
+                "scan_bridge_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        // Drives shutdown_impl through the scan-stable and scan-bridge `Some`
+        // branches (awaiting and clearing both registered handles).
+        shutdown_manager.shutdown().await.unwrap();
+
+        assert!(shutdown_manager.scan_stable_worker_handle.is_none());
+        assert!(shutdown_manager.scan_bridge_worker_handle.is_none());
+    }
 }
