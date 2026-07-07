@@ -103,6 +103,7 @@ fn spawn_test_scanner() -> Arc<Scanner> {
         ScannerArgs {
             min_poll_interval_secs: 1,
             now_fn: Arc::new(Utc::now),
+            ..ScannerArgs::default()
         },
     )
     .unwrap();

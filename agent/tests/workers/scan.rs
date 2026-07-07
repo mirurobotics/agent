@@ -5,17 +5,28 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::error::SleepController;
 use miru_agent::models::{Deployment, UploadRule};
-use miru_agent::scan::{Config, ScannerExt, ScanErr};
+use miru_agent::scan::{ScanErr, ScannerExt};
 use miru_agent::workers::scan;
 
+// external crates
+use chrono::{DateTime, Utc};
+
 // A counting mock implementing ScannerExt: records how many times scan() is
-// called so the thin timing worker can be observed without any real scanner.
+// called so the thin timing worker can be observed without any real scanner. All
+// other trait methods are inert no-ops.
 struct CountingScanner {
     scans: Arc<AtomicUsize>,
 }
 
 impl ScannerExt for CountingScanner {
-    async fn update_configs(&self, _cfgs: Vec<Config>) -> Result<(), ScanErr> {
+    async fn clear_rules(&self) -> Result<(), ScanErr> {
+        Ok(())
+    }
+    async fn update_rules(
+        &self,
+        _deployment: Deployment,
+        _rules: Vec<UploadRule>,
+    ) -> Result<(), ScanErr> {
         Ok(())
     }
     async fn scan(&self) -> Result<(), ScanErr> {
@@ -29,6 +40,9 @@ impl ScannerExt for CountingScanner {
         Ok(rx)
     }
     async fn shutdown(&self) -> Result<(), ScanErr> {
+        Ok(())
+    }
+    async fn prune(&self, _before: DateTime<Utc>) -> Result<(), ScanErr> {
         Ok(())
     }
 }
