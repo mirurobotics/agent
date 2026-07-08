@@ -542,6 +542,12 @@ impl ShutdownManager {
 mod tests {
     use super::*;
 
+    // internal crates
+    use crate::deploy::fsm;
+    use crate::disk::{Capacities, Layout};
+    use crate::filesys::{dirs, files, WriteOptions};
+    use crate::models::Device;
+
     fn new_shutdown_manager() -> ShutdownManager {
         let (shutdown_tx, _) = broadcast::channel(1);
         ShutdownManager::new(shutdown_tx, LifecycleOptions::default())
@@ -549,6 +555,36 @@ mod tests {
 
     fn spawn_immediate_handle() -> tokio::task::JoinHandle<()> {
         tokio::spawn(async {})
+    }
+
+    /// Initialize an AppState against a temp layout populated with the key/device
+    /// files AppState::init requires.
+    async fn init_app_state() -> Arc<AppState> {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        let private_key_file = layout.auth().private_key();
+        files::write_string(&private_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+        let public_key_file = layout.auth().public_key();
+        files::write_string(&public_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+        let device_file = layout.device();
+        files::write_json(&device_file, &Device::default(), WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, _) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+        )
+        .await
+        .unwrap();
+        Arc::new(state)
     }
 
     #[tokio::test]
@@ -691,6 +727,33 @@ mod tests {
         // including the scan "handle not found" path.
         shutdown_manager.shutdown().await.unwrap();
 
+        assert!(shutdown_manager.scan_worker_handle.is_none());
+    }
+
+    // init_scan_worker spawns the scan worker and registers its handle on the
+    // ShutdownManager; a subsequent shutdown awaits and clears that slot.
+    #[tokio::test]
+    async fn init_scan_worker_registers_handle() {
+        let app_state = init_app_state().await;
+        let (shutdown_tx, _) = broadcast::channel(1);
+        let mut shutdown_manager =
+            ShutdownManager::new(shutdown_tx.clone(), LifecycleOptions::default());
+
+        init_scan_worker(
+            scan::Options::default(),
+            app_state.clone(),
+            &mut shutdown_manager,
+            shutdown_tx.subscribe(),
+        )
+        .await
+        .unwrap();
+
+        // the handle is registered.
+        assert!(shutdown_manager.scan_worker_handle.is_some());
+
+        // shutdown broadcasts the signal (via the manager's own tx), drains the
+        // worker, and clears the slot.
+        shutdown_manager.shutdown().await.unwrap();
         assert!(shutdown_manager.scan_worker_handle.is_none());
     }
 }

@@ -11,6 +11,7 @@ use miru_agent::filesys::{dirs, files, FileSysErr, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
+use miru_agent::scan::ScanErr;
 use miru_agent::server::ServerErr;
 
 // external crates
@@ -241,6 +242,44 @@ pub mod init {
         let device = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
     }
+
+    // AppState::init spawns and wires the scanner actor: a live round-trip through
+    // the exposed handle returns an empty ledger (proves spawn + wire, not just a
+    // constructed struct).
+    #[tokio::test]
+    async fn init_exposes_working_scanner() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // create a private key file
+        let private_key_file = layout.auth().private_key();
+        files::write_string(&private_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        files::write_string(&public_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create the device file
+        let device_file = layout.device();
+        files::write_json(&device_file, &Device::default(), WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, _) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(state.scanner.get_ledger_count().await.unwrap(), 0);
+    }
 }
 
 pub mod shutdown {
@@ -339,5 +378,50 @@ pub mod shutdown {
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);
         assert!(device.last_disconnected_at <= Utc::now());
+    }
+
+    // AppState::shutdown stops the scanner actor: a later command through the
+    // handle errors on the now-closed channel.
+    #[tokio::test]
+    async fn shutdown_stops_scanner() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // create a private key file
+        let private_key_file = layout.auth().private_key();
+        files::write_string(&private_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        files::write_string(&public_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create the device file
+        let device_file = layout.device();
+        files::write_json(&device_file, &Device::default(), WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, state_handle) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+        )
+        .await
+        .unwrap();
+
+        // scanner is live before shutdown.
+        assert_eq!(state.scanner.get_ledger_count().await.unwrap(), 0);
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+
+        // scanner actor is gone: the command cannot be sent.
+        let err = state.scanner.get_ledger_count().await.unwrap_err();
+        assert!(matches!(err, ScanErr::SendActorMessageErr(_)));
     }
 }
