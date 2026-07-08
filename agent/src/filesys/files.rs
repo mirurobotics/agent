@@ -22,6 +22,56 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
+/// RAII temp file for TESTS. Owns a `tempfile::NamedTempFile` (Drop deletes the
+/// file) plus our `File` handle; the file lives exactly as long as this value.
+#[cfg(feature = "test")]
+#[derive(Debug)]
+pub struct TempFile {
+    _guard: tempfile::NamedTempFile,
+    file: File,
+}
+
+#[cfg(feature = "test")]
+impl TempFile {
+    pub fn file(&self) -> &File {
+        &self.file
+    }
+
+    /// Owned `File` to move into a longer-lived owner; valid only while `self` lives.
+    pub fn to_file(&self) -> File {
+        self.file.clone()
+    }
+}
+
+#[cfg(feature = "test")]
+impl std::ops::Deref for TempFile {
+    type Target = File;
+    fn deref(&self) -> &File {
+        &self.file
+    }
+}
+
+/// Auto-cleaning temp file for tests. Sync; keeps `prefix` for parity with
+/// [`crate::filesys::dirs::temp`]. The returned [`TempFile`] deletes the file on
+/// drop, so bind it to a named variable that lives as long as the file is needed.
+#[cfg(feature = "test")]
+pub fn temp(prefix: &str) -> Result<TempFile, FileSysErr> {
+    let guard = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempfile()
+        .map_err(|e| {
+            FileSysErr::CreateTmpFileErr(CreateTmpFileErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+    let file = File::new(guard.path().to_path_buf());
+    Ok(TempFile {
+        _guard: guard,
+        file,
+    })
+}
+
 pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     // read file
     let mut f = TokioFile::open(file.path())
@@ -489,5 +539,37 @@ fn map_io_err_for_create(e: std::io::Error, file: &File, overwrite: Overwrite) -
             file: file.clone(),
             trace: trace!(),
         })
+    }
+}
+
+#[cfg(all(test, feature = "test"))]
+mod tests {
+    // internal crates
+    use super::*;
+
+    // ================================ temp ================================= //
+
+    #[tokio::test]
+    async fn temp_file_exists_while_guard_alive_and_deletes_on_drop() {
+        let tf = temp("testing").unwrap();
+
+        // the file exists while the guard is alive
+        let path = tf.path().clone();
+        assert!(path.exists());
+
+        // `file()`/`to_file()` return the same underlying path
+        assert_eq!(tf.file().path(), &path);
+        assert_eq!(tf.to_file().path(), &path);
+
+        // round-trip bytes through the temp file
+        write_bytes(tf.file(), b"hello temp", WriteOptions::OVERWRITE_NONATOMIC)
+            .await
+            .unwrap();
+        let bytes = read_bytes(tf.file()).await.unwrap();
+        assert_eq!(bytes, b"hello temp");
+
+        // dropping the guard deletes the file
+        drop(tf);
+        assert!(!path.exists());
     }
 }

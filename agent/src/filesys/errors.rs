@@ -157,6 +157,15 @@ pub struct CreateTmpDirErr {
 impl crate::errors::Error for CreateTmpDirErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to create temporary file: {source}")]
+pub struct CreateTmpFileErr {
+    pub source: Box<std::io::Error>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for CreateTmpFileErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("failed to delete directory '{dir}': {source}")]
 pub struct DeleteDirErr {
     pub source: Box<std::io::Error>,
@@ -355,6 +364,8 @@ pub enum FileSysErr {
     #[error(transparent)]
     CreateTmpDirErr(CreateTmpDirErr),
     #[error(transparent)]
+    CreateTmpFileErr(CreateTmpFileErr),
+    #[error(transparent)]
     DeleteDirErr(DeleteDirErr),
     #[error(transparent)]
     DeleteFileErr(DeleteFileErr),
@@ -407,6 +418,7 @@ crate::impl_error!(FileSysErr {
     CreateDirErr,
     CreateSymlinkErr,
     CreateTmpDirErr,
+    CreateTmpFileErr,
     DeleteDirErr,
     DeleteFileErr,
     FileMetadataErr,
