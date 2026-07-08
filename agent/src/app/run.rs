@@ -153,7 +153,7 @@ async fn init(
         .await?;
     }
 
-    if options.enable_scan_worker {
+    if options.enable_scanner {
         init_scan_worker(
             options.scan.clone(),
             app_state.clone(),

@@ -52,7 +52,7 @@ impl ScannerExt for CountingScanner {
 #[tokio::test]
 async fn scan_called_each_tick() {
     let options = scan::Options {
-        tick_interval_secs: 1,
+        poll_interval_secs: 1,
     };
     let sleep_ctrl = Arc::new(SleepController::new());
     let scans = Arc::new(AtomicUsize::new(0));
@@ -94,7 +94,7 @@ async fn scan_called_each_tick() {
 #[tokio::test]
 async fn shuts_down_on_signal() {
     let options = scan::Options {
-        tick_interval_secs: 1,
+        poll_interval_secs: 1,
     };
     let sleep_ctrl = Arc::new(SleepController::new());
     let scans = Arc::new(AtomicUsize::new(0));

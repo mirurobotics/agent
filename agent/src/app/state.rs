@@ -128,8 +128,6 @@ impl AppState {
         // shutdown the syncer first (it uses storage during sync)
         self.syncer.shutdown().await?;
 
-        // shutdown the scanner after the syncer (the scan bridge worker pushes
-        // rules to it after each successful sync)
         if let Err(e) = self.scanner.shutdown().await {
             tracing::error!("failed to shutdown scanner: {e}");
         }

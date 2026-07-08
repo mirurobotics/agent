@@ -54,7 +54,7 @@ pub struct AppOptions {
     pub enable_poller: bool,
     pub poller: poller::Options,
 
-    pub enable_scan_worker: bool,
+    pub enable_scanner: bool,
     pub scan: scan::Options,
 }
 
@@ -78,7 +78,7 @@ impl Default for AppOptions {
             enable_poller: true,
             poller: poller::Options::default(),
 
-            enable_scan_worker: true,
+            enable_scanner: true,
             scan: scan::Options::default(),
         }
     }

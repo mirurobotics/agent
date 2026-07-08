@@ -11,16 +11,13 @@ use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// Base tick interval between `scan()` passes. The scanner internally skips
-    /// collections whose per-collection cadence has not elapsed, so the worker is
-    /// pure timing.
-    pub tick_interval_secs: i64,
+    pub poll_interval_secs: i64,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
-            tick_interval_secs: 1,
+            poll_interval_secs: 15,
         }
     }
 }
@@ -55,6 +52,6 @@ async fn run_impl<F, Fut, ScannerT: ScannerExt>(
 
     loop {
         let _ = scanner.scan().await;
-        sleep_fn(Duration::from_secs(options.tick_interval_secs.max(1) as u64)).await;
+        sleep_fn(Duration::from_secs(options.poll_interval_secs.max(1) as u64)).await;
     }
 }
