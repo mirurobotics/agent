@@ -1020,4 +1020,53 @@ mod tests {
             assert_eq!(state.ledger_count(), 1);
         }
     }
+
+    // ===================== M8: State / Candidate accessors ==================== //
+
+    mod state_accessors {
+        use super::*;
+
+        // is_candidate is false for an untracked file and true once the file is
+        // inserted into the candidate map.
+        #[test]
+        fn is_candidate_tracks_membership() {
+            let file = File::new("/none/c.mcap");
+            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+
+            // untracked file => not a candidate.
+            assert!(!state.is_candidate(&file));
+
+            // insert a candidate for the file => now a candidate.
+            let obs = Observation {
+                file: file.clone(),
+                timestamp: ts(1000),
+                size: 4,
+                mtime: SystemTime::UNIX_EPOCH,
+                deployment_id: "d".to_string(),
+                upload_rule_id: "coll".to_string(),
+            };
+            state
+                .candidates
+                .insert(file.clone(), candidate(file.clone(), obs));
+            assert!(state.is_candidate(&file));
+        }
+
+        // latest_observation / first_observation on an empty-observation candidate
+        // both return ScanErr::InternalError (the "No observations found" branch).
+        #[test]
+        fn latest_and_first_observation_empty_errors() {
+            let cand = Candidate {
+                file: File::new("/none/x.mcap"),
+                observations: vec![],
+            };
+            assert!(matches!(
+                cand.latest_observation(),
+                Err(ScanErr::InternalError(_))
+            ));
+            assert!(matches!(
+                cand.first_observation(),
+                Err(ScanErr::InternalError(_))
+            ));
+        }
+    }
 }

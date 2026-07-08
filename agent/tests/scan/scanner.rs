@@ -6,8 +6,11 @@ use std::sync::Arc;
 use crate::mocks::clock::Clock;
 use miru_agent::filesys::{self, PathExt};
 use miru_agent::models::{Deployment, DplActivity, UploadRule, UploadRuleSource};
-use miru_agent::scan::scanner::{Scanner, ScannerArgs, StableFile};
+use miru_agent::scan::scanner::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
 use miru_agent::scan::{ScanEvent, ScannerExt};
+
+// external crates
+use tokio::sync::mpsc;
 
 // =============================== TEST HELPERS ================================= //
 
@@ -918,4 +921,33 @@ async fn empty_set_scan_is_noop() {
         scanner.scan().await.unwrap();
     }
     assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+}
+
+// ===================== B9: MANUAL ACTOR CONSTRUCTION ========================= //
+
+// Build the actor by hand rather than via `Scanner::spawn`: wire the channel,
+// construct `SingleThreadScanner` + `Worker::new`, spawn `worker.run()`, and wrap
+// the sender with `Scanner::new`. Covers `Worker::new` (only otherwise reached via
+// spawn) and the dead `Scanner::new(sender)` (no production caller). A single
+// get_ledger_count/shutdown round-trip proves the hand-built actor works.
+#[tokio::test]
+async fn worker_new_and_scanner_new_round_trip() {
+    let (tx, rx) = mpsc::channel(64);
+    let single = SingleThreadScanner::new(ScannerArgs::default());
+    let worker = Worker::new(single, rx);
+    let handle = tokio::spawn(worker.run());
+
+    let scanner = Scanner::new(tx);
+
+    // the hand-built actor answers commands: empty ledger.
+    assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+
+    // and shuts down cleanly; later commands then error on a closed channel.
+    scanner.shutdown().await.unwrap();
+    handle.await.unwrap();
+    let err = scanner.get_ledger_count().await.unwrap_err();
+    assert!(matches!(
+        err,
+        miru_agent::scan::ScanErr::SendActorMessageErr(_)
+    ));
 }

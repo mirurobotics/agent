@@ -1,6 +1,8 @@
 // internal crates
 use miru_agent::cache::errors::{ReceiveActorMessageErr, SendActorMessageErr};
 use miru_agent::errors::Error;
+use miru_agent::filesys::errors::InvalidDirNameErr;
+use miru_agent::filesys::FileSysErr;
 use miru_agent::scan::errors::{DuplicateCollectionID, InternalError, InvalidRule};
 use miru_agent::scan::ScanErr;
 
@@ -40,6 +42,13 @@ fn internal_error() -> InternalError {
     }
 }
 
+fn filesys_err() -> FileSysErr {
+    FileSysErr::InvalidDirNameErr(InvalidDirNameErr {
+        name: "bad/dir".to_string(),
+        trace: miru_agent::trace!(),
+    })
+}
+
 mod from_conversions {
     use super::*;
 
@@ -53,6 +62,12 @@ mod from_conversions {
     fn receive_actor_message_err_maps() {
         let err: ScanErr = recv_actor_msg_err().into();
         assert!(matches!(err, ScanErr::ReceiveActorMessageErr(_)));
+    }
+
+    #[test]
+    fn filesys_err_maps() {
+        let err: ScanErr = filesys_err().into();
+        assert!(matches!(err, ScanErr::FileSysErr(_)));
     }
 }
 
