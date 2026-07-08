@@ -536,7 +536,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn rollback_returns_errors_when_restores_fail_synthetic() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp =
+            filesys::dirs::temp("rollback_returns_errors_when_restores_fail_synthetic").unwrap();
 
         // Asymmetric setup: rollback iterates `snapshots.iter().rev()`, so
         // the LAST entry in the vec is processed first. We put the failing
@@ -595,7 +596,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn remove_backups_continues_when_delete_fails() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = filesys::dirs::temp("remove_backups_continues_when_delete_fails").unwrap();
 
         // Writable dir: backup can be deleted
         let writable_dir = tmp.path().join("writable");
