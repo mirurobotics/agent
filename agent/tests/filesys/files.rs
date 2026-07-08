@@ -1439,3 +1439,122 @@ pub mod size {
         assert_eq!(files::size(&file).await.unwrap(), 4);
     }
 }
+
+pub mod read_tail {
+    use super::*;
+
+    async fn fixture() -> filesys::File {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("test-file");
+        files::write_bytes(&file, b"arglebargle", WriteOptions::default())
+            .await
+            .unwrap();
+        file
+    }
+
+    #[tokio::test]
+    async fn tail_smaller_than_file() {
+        let file = fixture().await;
+        assert_eq!(files::read_tail(&file, 4).await.unwrap(), b"rgle");
+    }
+
+    #[tokio::test]
+    async fn n_equal_to_file_size() {
+        let file = fixture().await;
+        assert_eq!(files::read_tail(&file, 11).await.unwrap(), b"arglebargle");
+    }
+
+    #[tokio::test]
+    async fn n_larger_than_file() {
+        let file = fixture().await;
+        assert_eq!(files::read_tail(&file, 64).await.unwrap(), b"arglebargle");
+    }
+
+    #[tokio::test]
+    async fn zero_n() {
+        let file = fixture().await;
+        assert_eq!(files::read_tail(&file, 0).await.unwrap(), b"");
+    }
+
+    #[tokio::test]
+    async fn empty_file() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("empty-file");
+        files::write_bytes(&file, b"", WriteOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(files::read_tail(&file, 8).await.unwrap(), b"");
+    }
+
+    #[tokio::test]
+    async fn doesnt_exist() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("nonexistent");
+        assert!(matches!(
+            files::read_tail(&file, 4).await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+}
+
+pub mod read_range {
+    use super::*;
+
+    async fn fixture() -> filesys::File {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("test-file");
+        files::write_bytes(&file, b"arglebargle", WriteOptions::default())
+            .await
+            .unwrap();
+        file
+    }
+
+    #[tokio::test]
+    async fn interior_exact() {
+        let file = fixture().await;
+        assert_eq!(files::read_range(&file, 2, 4).await.unwrap(), b"gleb");
+    }
+
+    #[tokio::test]
+    async fn clipped_at_eof() {
+        let file = fixture().await;
+        assert_eq!(files::read_range(&file, 8, 100).await.unwrap(), b"gle");
+    }
+
+    #[tokio::test]
+    async fn offset_at_eof() {
+        let file = fixture().await;
+        assert_eq!(files::read_range(&file, 11, 4).await.unwrap(), b"");
+    }
+
+    #[tokio::test]
+    async fn offset_past_eof() {
+        let file = fixture().await;
+        assert_eq!(files::read_range(&file, 100, 4).await.unwrap(), b"");
+    }
+
+    #[tokio::test]
+    async fn zero_len() {
+        let file = fixture().await;
+        assert_eq!(files::read_range(&file, 3, 0).await.unwrap(), b"");
+    }
+
+    #[tokio::test]
+    async fn offset_len_overflow() {
+        let file = fixture().await;
+        assert_eq!(
+            files::read_range(&file, u64::MAX, u64::MAX).await.unwrap(),
+            b""
+        );
+    }
+
+    #[tokio::test]
+    async fn doesnt_exist() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = dir.file("nonexistent");
+        assert!(matches!(
+            files::read_range(&file, 0, 4).await.unwrap_err(),
+            FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+}
