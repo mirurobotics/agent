@@ -3,7 +3,7 @@ use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
-use miru_agent::filesys::{self, dirs, files, File, Overwrite, PathExt};
+use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
 
 // external crates
@@ -15,12 +15,12 @@ struct Fixture {
     deployments: disk::Deployments,
     cfg_insts: disk::CfgInsts,
     cfg_inst_content: disk::CfgInstContent,
-    temp_dir: filesys::Dir,
+    temp_dir: dirs::TempDir,
 }
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = dirs::create_temp("apply-test").await.unwrap();
+        let temp_dir = dirs::temp("apply-test").unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
         let (deployments, _) =

@@ -7,7 +7,7 @@ use miru_agent::disk::{
     self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
 };
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, dirs, Overwrite, PathExt};
+use miru_agent::filesys::{dirs, Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::sync::deployments::{sync, SyncArgs};
@@ -37,12 +37,12 @@ struct Fixture {
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
     event_hub: EventHub,
-    dir: filesys::Dir,
+    dir: dirs::TempDir,
 }
 
 impl Fixture {
     async fn new(name: &str) -> Self {
-        let dir = dirs::create_temp(name).await.unwrap();
+        let dir = dirs::temp(name).unwrap();
         let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
             .await
             .unwrap();

@@ -61,7 +61,7 @@ pub mod routes {
     use device_api::models as openapi;
     use miru_agent::activity;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
-    use miru_agent::filesys::{self, dirs, Overwrite};
+    use miru_agent::filesys::{dirs, Overwrite};
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
     };
@@ -81,16 +81,16 @@ pub mod routes {
     struct Fixture {
         state: Arc<State>,
         app: Router,
-        _dir: filesys::Dir,
+        _dir: dirs::TempDir,
         _backend: mock::Server,
     }
 
     impl Fixture {
         async fn new(name: &str) -> Self {
-            let dir = dirs::create_temp(name).await.unwrap();
-            let storage = Arc::new(create_storage(&dir).await);
+            let dir = dirs::temp(name).unwrap();
+            let storage = Arc::new(create_storage(dir.dir()).await);
             let http_client = Arc::new(MockClient::default());
-            let (token_mngr, _handle) = create_token_manager(&dir, http_client.clone()).await;
+            let (token_mngr, _handle) = create_token_manager(dir.dir(), http_client.clone()).await;
             let (sender, _receiver) = mpsc::channel(1);
             let syncer = Arc::new(Syncer::new(sender));
             let activity_tracker = Arc::new(activity::Tracker::new());

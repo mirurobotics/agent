@@ -27,7 +27,7 @@ async fn test_init_installs_globally_and_rejects_double_install() {
         std::env::remove_var("RUST_LOG");
     }
 
-    let dir = dirs::create_temp("miru_test_logs_smoke").await.unwrap();
+    let dir = dirs::temp("miru_test_logs_smoke").unwrap();
 
     let options = Options {
         stdout: false,

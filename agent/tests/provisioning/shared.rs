@@ -3,7 +3,7 @@ use crate::mocks::http_client::MockClient;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};
-use miru_agent::filesys::{self, dirs, files, PathExt};
+use miru_agent::filesys::{dirs, files, PathExt};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
 
@@ -40,7 +40,9 @@ pub(super) fn new_device(id: &str, name: &str) -> Device {
 /// provisioning token. Tests should call `env.cleanup().await` at the end
 /// to remove the temp dir.
 pub(super) struct Env {
-    pub root: filesys::Dir,
+    /// Held only for RAII: the `TempDir` guard deletes the temp directory when
+    /// the `Env` is dropped (or `cleanup` is called).
+    _root: dirs::TempDir,
     pub layout: Layout,
     pub settings: Settings,
     pub token: String,
@@ -48,10 +50,10 @@ pub(super) struct Env {
 
 impl Env {
     pub async fn new(prefix: &str) -> Self {
-        let root = dirs::create_temp(prefix).await.unwrap();
-        let layout = Layout::new(root.clone());
+        let root = dirs::temp(prefix).unwrap();
+        let layout = Layout::new(root.to_dir());
         Self {
-            root,
+            _root: root,
             layout,
             settings: Settings::default(),
             token: new_jwt(DEVICE_ID),
@@ -74,7 +76,8 @@ impl Env {
     }
 
     pub async fn cleanup(self) {
-        dirs::delete(&self.root).await.unwrap();
+        // The `TempDir` guard deletes the directory when dropped here.
+        drop(self);
     }
 }
 
