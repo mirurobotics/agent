@@ -18,6 +18,7 @@ pub mod mqtt;
 pub mod network;
 pub mod privilege;
 pub mod provisioning;
+pub mod s3;
 pub mod server;
 pub mod services;
 pub mod sync;

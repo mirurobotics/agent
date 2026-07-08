@@ -18,13 +18,22 @@ git_commit = "arglebargle"
 [workspace.dependencies]
 async-trait = "0.1.88"
 atomicwrites = "0.4.4"
+# The SDK `rustls` feature maps to aws-smithy-http-client's `legacy-rustls-ring`
+# (rustls 0.21 + hyper-rustls 0.24 → rustls-webpki 0.101.7), which carries
+# RUSTSEC-2026-0098/0099. `default-https-client` instead pulls the modern
+# `rustls-aws-lc` stack (rustls 0.23 + hyper-rustls 0.27 → rustls-webpki
+# 0.103.x, unaffected), so we omit `rustls` and keep only default-https-client.
+aws-sdk-s3 = { version = "1.137", default-features = false, features = ["behavior-version-latest", "rt-tokio", "sigv4a", "http-1x", "default-https-client"] }
+aws-smithy-http-client = { version = "1.1", default-features = false }
+aws-smithy-types = { version = "1.5", default-features = false }
 axum = { version = "0.8.3" }
 base64 = "0.22.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
 glob = "0.3.3"
-nix = { version = "0.31.2", default-features = false, features = ["user"] }
+http = "1"
+nix ={ version = "0.31.2", default-features = false, features = ["user"] }
 reqwest = { version = "0.13.1", features = ["query"] }
 backend-api = { path = "libs/backend-api" }
 device-api = { path = "libs/device-api" }
