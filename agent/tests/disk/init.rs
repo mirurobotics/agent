@@ -42,8 +42,8 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_attempts() {
-        let dir = dirs::create_temp("reset_attempts").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("reset_attempts").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let dpl = Deployment {
             id: "dpl-dirty".to_string(),
@@ -68,8 +68,8 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_active_cooldown() {
-        let dir = dirs::create_temp("reset_cooldown").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("reset_cooldown").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let mut dpl = Deployment {
             id: "dpl-cooldown".to_string(),
@@ -94,8 +94,8 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn skips_clean_deployments() {
-        let dir = dirs::create_temp("reset_skip_clean").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("reset_skip_clean").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let clean = Deployment {
             id: "dpl-clean".to_string(),

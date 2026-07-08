@@ -25,8 +25,8 @@ pub mod init {
 
     #[tokio::test]
     async fn init_and_shutdown() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await
@@ -38,8 +38,8 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_while_online() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await
@@ -62,8 +62,8 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_twice_returns_error() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await
@@ -78,8 +78,8 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_substore() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await
@@ -94,8 +94,8 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_releases() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await
@@ -110,8 +110,8 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_upload_rules() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await

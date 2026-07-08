@@ -2,7 +2,7 @@
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{assert_activated, resolve_device_id, DiskErr, Layout};
-use miru_agent::filesys::{self, dirs, files, WriteOptions};
+use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::Device;
 
 // external crates
@@ -11,16 +11,16 @@ use chrono::{Duration, Utc};
 pub mod assert_activated {
     use super::*;
 
-    async fn fresh_layout() -> (Layout, filesys::Dir) {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir.clone());
+    async fn fresh_layout() -> (Layout, dirs::TempDir) {
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         dirs::create_if_absent(&layout.auth().root).await.unwrap();
         (layout, dir)
     }
 
     #[tokio::test]
     async fn returns_err_when_both_keys_missing() {
-        let (layout, _dir) = fresh_layout().await;
+        let (layout, _tmp) = fresh_layout().await;
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -28,7 +28,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn returns_err_when_private_key_missing() {
-        let (layout, _dir) = fresh_layout().await;
+        let (layout, _tmp) = fresh_layout().await;
         files::write_string(
             &layout.auth().public_key(),
             "public",
@@ -43,7 +43,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn returns_err_when_public_key_missing() {
-        let (layout, _dir) = fresh_layout().await;
+        let (layout, _tmp) = fresh_layout().await;
         files::write_string(
             &layout.auth().private_key(),
             "private",
@@ -58,7 +58,7 @@ pub mod assert_activated {
 
     #[tokio::test]
     async fn returns_ok_when_both_keys_present() {
-        let (layout, _dir) = fresh_layout().await;
+        let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
         files::write_string(
             &auth.private_key(),
@@ -95,8 +95,8 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn returns_id_from_device_file_when_valid() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let device = Device {
             id: "dvc_from_file".to_string(),
@@ -112,8 +112,8 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn falls_back_to_token_jwt_when_device_file_missing() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // no device.json — write a token.json containing a JWT with the
         // device id encoded in the `sub` claim
@@ -133,8 +133,8 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn returns_resolve_err_when_no_sources_yield_id() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // empty layout: no device.json, no token.json
         let err = resolve_device_id(&layout).await.unwrap_err();

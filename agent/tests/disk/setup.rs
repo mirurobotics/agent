@@ -65,8 +65,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_public_key_file_doesnt_exist() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
         // create the public / private key files
@@ -89,8 +89,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_private_key_file_doesnt_exist() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
         // create the public / private key files
@@ -113,8 +113,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn clean_install() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
         // create the public / private key files
@@ -139,8 +139,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn device_file_already_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
         // create the public / private key files
@@ -175,8 +175,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn auth_directory_already_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
@@ -205,8 +205,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn private_key_file_already_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
@@ -231,8 +231,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn public_key_file_already_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create the public / private key files
         let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
@@ -257,8 +257,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn storage_directory_already_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
         // create the public / private key files
@@ -294,8 +294,8 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn events_directory_already_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
         // create the public / private key files
@@ -384,8 +384,8 @@ pub mod reset {
 
     #[tokio::test]
     async fn preserves_keys_and_writes_marker() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-write a stale device file with arbitrary content
@@ -424,8 +424,8 @@ pub mod reset {
 
     #[tokio::test]
     async fn wipes_resources_subtree() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-create something under resources/config_instances/contents/
@@ -445,8 +445,8 @@ pub mod reset {
 
     #[tokio::test]
     async fn wipes_events_subtree() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-create something under events/
@@ -467,8 +467,8 @@ pub mod reset {
 
     #[tokio::test]
     async fn no_prior_state() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.1.0")
             .await
@@ -484,8 +484,8 @@ pub mod reset {
 
     #[tokio::test]
     async fn overwrites_existing_marker() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-write an old marker
