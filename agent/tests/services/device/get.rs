@@ -13,8 +13,8 @@ pub mod errors {
 
     #[tokio::test]
     async fn device_file_shutdown() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -32,8 +32,8 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_does_not_exist() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -48,8 +48,8 @@ pub mod success {
 
     #[tokio::test]
     async fn device_file_exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -62,8 +62,8 @@ pub mod success {
 
     #[tokio::test]
     async fn returns_custom_device_data() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let custom_device = Device {
             id: "dev-42".to_string(),
