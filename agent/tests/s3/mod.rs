@@ -69,6 +69,45 @@ fn temp_file_with(bytes: &[u8]) -> NamedTempFile {
     f
 }
 
+/// Builds an expected request (method + path-style URI, empty body) to match a
+/// `ReplayEvent` against. Only the method and key/query are usually meaningful.
+fn req(method: &str, path_and_query: &str) -> http::Request<SdkBody> {
+    http::Request::builder()
+        .method(method)
+        .uri(uri(path_and_query))
+        .body(SdkBody::empty())
+        .unwrap()
+}
+
+/// Builds a canned response with `status` and `body`, setting `content-length`
+/// to match. Pass `&[]` for a bodyless response (200 OK, 204, HEAD, ...).
+fn resp(status: u16, body: &[u8]) -> http::Response<SdkBody> {
+    http::Response::builder()
+        .status(status)
+        .header("content-length", body.len().to_string())
+        .body(SdkBody::from(body.to_vec()))
+        .unwrap()
+}
+
+/// Builds a canned S3 error response carrying an XML `<Error>` document, as S3
+/// returns for failures like `NoSuchKey` or `AccessDenied`.
+fn resp_xml(status: u16, xml: &str) -> http::Response<SdkBody> {
+    http::Response::builder()
+        .status(status)
+        .header("content-type", "application/xml")
+        .body(SdkBody::from(xml.to_string()))
+        .unwrap()
+}
+
+/// Wires a `Store` to a replay client expecting exactly one request/response
+/// exchange — the shape of nearly every test here.
+fn store_expecting(
+    request: http::Request<SdkBody>,
+    response: http::Response<SdkBody>,
+) -> (Store, StaticReplayClient) {
+    store_with(vec![ReplayEvent::new(request, response)])
+}
+
 pub mod put {
     use super::*;
 
@@ -78,24 +117,15 @@ pub mod put {
         #[tokio::test]
         async fn put_streams_file_body_bytes() {
             let key = "artifacts/hello.txt";
-            let body = b"hello world".to_vec();
-            let src = temp_file_with(&body);
+            let src = temp_file_with(b"hello world");
             // The body streams off disk, so the replay client records it as an
-            // unbuffered `SdkBody` whose `.bytes()` is `None` — meaning
-            // `assert_requests_match` cannot byte-compare it. The request is
-            // paired with an empty expected body and we assert the method +
-            // path here; `get_streams_body_to_file` covers a real round-trip of
-            // the payload contents.
-            let expected_req = http::Request::builder()
-                .method("PUT")
-                .uri(uri("artifacts/hello.txt?x-id=PutObject"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(200)
-                .body(SdkBody::empty())
-                .unwrap();
-            let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            // unbuffered `SdkBody` whose `.bytes()` is `None` — `assert_requests_match`
+            // can't byte-compare it, so we assert the method + path by hand instead.
+            // `get_streams_body_to_file` covers a real round-trip of the payload.
+            let (store, replay) = store_expecting(
+                req("PUT", "artifacts/hello.txt?x-id=PutObject"),
+                resp(200, &[]),
+            );
 
             store
                 .put_singlepart(&File::new(src.path()), &obj(key))
@@ -124,22 +154,14 @@ pub mod get {
             let key = "blobs/data.bin";
             let payload = b"\x00\x01\x02binary-body\xff".to_vec();
             let dest = NamedTempFile::new().unwrap();
-            let expected_req = http::Request::builder()
-                .method("GET")
-                .uri(uri("blobs/data.bin?x-id=GetObject"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(200)
-                .header("content-length", payload.len().to_string())
-                .body(SdkBody::from(payload.clone()))
-                .unwrap();
-            let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            let (store, replay) = store_expecting(
+                req("GET", "blobs/data.bin?x-id=GetObject"),
+                resp(200, &payload),
+            );
 
             store.get(&obj(key), &File::new(dest.path())).await.unwrap();
 
-            let written = std::fs::read(dest.path()).unwrap();
-            assert_eq!(written, payload);
+            assert_eq!(std::fs::read(dest.path()).unwrap(), payload);
             replay.assert_requests_match(IGNORED_HEADERS);
         }
     }
@@ -150,22 +172,14 @@ pub mod get {
         #[tokio::test]
         async fn get_to_missing_parent_dir_maps_to_invalid_response() {
             let key = "blobs/data.bin";
-            let payload = b"body".to_vec();
             // The destination's parent directory does not exist, so creating the
             // file fails after the object is fetched — exercising the streaming
             // I/O error path.
             let dest = File::new("/nonexistent/dir/out.bin");
-            let expected_req = http::Request::builder()
-                .method("GET")
-                .uri(uri("blobs/data.bin?x-id=GetObject"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(200)
-                .header("content-length", payload.len().to_string())
-                .body(SdkBody::from(payload))
-                .unwrap();
-            let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            let (store, _replay) = store_expecting(
+                req("GET", "blobs/data.bin?x-id=GetObject"),
+                resp(200, b"body"),
+            );
 
             let err = store.get(&obj(key), &dest).await.unwrap_err();
 
@@ -183,17 +197,10 @@ pub mod get {
         async fn get_missing_maps_to_not_found() {
             let key = "missing.txt";
             let dest = NamedTempFile::new().unwrap();
-            let expected_req = http::Request::builder()
-                .method("GET")
-                .uri(uri("missing.txt?x-id=GetObject"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(404)
-                .header("content-type", "application/xml")
-                .body(SdkBody::from(NO_SUCH_KEY_XML))
-                .unwrap();
-            let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            let (store, _replay) = store_expecting(
+                req("GET", "missing.txt?x-id=GetObject"),
+                resp_xml(404, NO_SUCH_KEY_XML),
+            );
 
             let err = store
                 .get(&obj(key), &File::new(dest.path()))
@@ -216,16 +223,10 @@ pub mod delete {
         #[tokio::test]
         async fn delete_removes_object() {
             let key = "blobs/data.bin";
-            let expected_req = http::Request::builder()
-                .method("DELETE")
-                .uri(uri("blobs/data.bin?x-id=DeleteObject"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(204)
-                .body(SdkBody::empty())
-                .unwrap();
-            let (store, replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            let (store, replay) = store_expecting(
+                req("DELETE", "blobs/data.bin?x-id=DeleteObject"),
+                resp(204, &[]),
+            );
 
             store.delete(&obj(key)).await.unwrap();
 
@@ -243,17 +244,7 @@ pub mod exists {
         #[tokio::test]
         async fn head_200_returns_true() {
             let key = "blobs/data.bin";
-            let expected_req = http::Request::builder()
-                .method("HEAD")
-                .uri(uri("blobs/data.bin"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(200)
-                .header("content-length", "42")
-                .body(SdkBody::empty())
-                .unwrap();
-            let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            let (store, _replay) = store_expecting(req("HEAD", "blobs/data.bin"), resp(200, &[]));
 
             assert!(store.exists(&obj(key)).await.unwrap());
         }
@@ -265,16 +256,7 @@ pub mod exists {
         #[tokio::test]
         async fn head_404_returns_false() {
             let key = "missing.txt";
-            let expected_req = http::Request::builder()
-                .method("HEAD")
-                .uri(uri("missing.txt"))
-                .body(SdkBody::empty())
-                .unwrap();
-            let canned_resp = http::Response::builder()
-                .status(404)
-                .body(SdkBody::empty())
-                .unwrap();
-            let (store, _replay) = store_with(vec![ReplayEvent::new(expected_req, canned_resp)]);
+            let (store, _replay) = store_expecting(req("HEAD", "missing.txt"), resp(404, &[]));
 
             assert!(!store.exists(&obj(key)).await.unwrap());
         }
@@ -290,22 +272,14 @@ pub mod request_failed {
 <Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>REQ403</RequestId></Error>"#;
 
     fn access_denied_resp() -> http::Response<SdkBody> {
-        http::Response::builder()
-            .status(403)
-            .header("content-type", "application/xml")
-            .body(SdkBody::from(ACCESS_DENIED_XML))
-            .unwrap()
+        resp_xml(403, ACCESS_DENIED_XML)
     }
 
     #[tokio::test]
     async fn put_403_maps_to_request_failed() {
         let src = temp_file_with(b"x");
-        let req = http::Request::builder()
-            .method("PUT")
-            .uri(uri("denied.txt?x-id=PutObject"))
-            .body(SdkBody::empty())
-            .unwrap();
-        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+        let (store, _replay) =
+            store_expecting(req("PUT", "denied.txt?x-id=PutObject"), access_denied_resp());
 
         let err = store
             .put(File::new(src.path()), &obj("denied.txt"))
@@ -323,12 +297,8 @@ pub mod request_failed {
     #[tokio::test]
     async fn get_403_maps_to_request_failed() {
         let dest = NamedTempFile::new().unwrap();
-        let req = http::Request::builder()
-            .method("GET")
-            .uri(uri("denied.txt?x-id=GetObject"))
-            .body(SdkBody::empty())
-            .unwrap();
-        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+        let (store, _replay) =
+            store_expecting(req("GET", "denied.txt?x-id=GetObject"), access_denied_resp());
 
         let err = store
             .get(&obj("denied.txt"), &File::new(dest.path()))
@@ -340,12 +310,10 @@ pub mod request_failed {
 
     #[tokio::test]
     async fn delete_403_maps_to_request_failed() {
-        let req = http::Request::builder()
-            .method("DELETE")
-            .uri(uri("denied.txt?x-id=DeleteObject"))
-            .body(SdkBody::empty())
-            .unwrap();
-        let (store, _replay) = store_with(vec![ReplayEvent::new(req, access_denied_resp())]);
+        let (store, _replay) = store_expecting(
+            req("DELETE", "denied.txt?x-id=DeleteObject"),
+            access_denied_resp(),
+        );
 
         let err = store.delete(&obj("denied.txt")).await.unwrap_err();
 
@@ -354,17 +322,8 @@ pub mod request_failed {
 
     #[tokio::test]
     async fn head_403_propagates_as_request_failed() {
-        let req = http::Request::builder()
-            .method("HEAD")
-            .uri(uri("denied.txt"))
-            .body(SdkBody::empty())
-            .unwrap();
         // HEAD has no response body; a 403 has no XML payload.
-        let resp = http::Response::builder()
-            .status(403)
-            .body(SdkBody::empty())
-            .unwrap();
-        let (store, _replay) = store_with(vec![ReplayEvent::new(req, resp)]);
+        let (store, _replay) = store_expecting(req("HEAD", "denied.txt"), resp(403, &[]));
 
         let err = store.exists(&obj("denied.txt")).await.unwrap_err();
 
