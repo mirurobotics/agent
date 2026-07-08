@@ -17,15 +17,16 @@ pub mod concurrent {
 
     type TestCache = DirCache<String, String>;
 
-    async fn spawn_cache_with_capacity(capacity: usize) -> (TestCache, JoinHandle<()>) {
-        let dir = dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .subdir(PathBuf::from("cache"));
-        TestCache::spawn(32, dir.clone(), capacity).await.unwrap()
+    async fn spawn_cache_with_capacity(
+        capacity: usize,
+    ) -> (dirs::TempDir, TestCache, JoinHandle<()>) {
+        let tmp = dirs::temp("testing").unwrap();
+        let dir = tmp.subdir(PathBuf::from("cache"));
+        let (cache, handle) = TestCache::spawn(32, dir, capacity).await.unwrap();
+        (tmp, cache, handle)
     }
 
-    async fn spawn_cache() -> (TestCache, JoinHandle<()>) {
+    async fn spawn_cache() -> (dirs::TempDir, TestCache, JoinHandle<()>) {
         spawn_cache_with_capacity(1000).await
     }
 
@@ -33,10 +34,8 @@ pub mod concurrent {
 
     #[tokio::test]
     async fn spawn() {
-        let dir = dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .subdir(PathBuf::from("cache"));
+        let tmp = dirs::temp("testing").unwrap();
+        let dir = tmp.subdir(PathBuf::from("cache"));
         let _ = TestCache::spawn(32, dir.clone(), 1000).await.unwrap();
         // the directory should not exist yet
         assert!(dir.exists());
@@ -47,10 +46,8 @@ pub mod concurrent {
 
     #[tokio::test]
     async fn prune_invalid_entries() {
-        let dir = dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .subdir(PathBuf::from("cache"));
+        let tmp = dirs::temp("testing").unwrap();
+        let dir = tmp.subdir(PathBuf::from("cache"));
         let (cache, _) = TestCache::spawn(32, dir.clone(), 10).await.unwrap();
 
         // write invalid json files to files in the cache directory
@@ -94,24 +91,21 @@ pub mod single_thread {
 
     type TestCache = SingleThreadDirCache<String, String>;
 
-    async fn new_cache_with_capacity(capacity: usize) -> TestCache {
-        let dir = dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .subdir(PathBuf::from("cache"));
-        TestCache::new(dir.clone(), capacity).await.unwrap()
+    async fn new_cache_with_capacity(capacity: usize) -> (dirs::TempDir, TestCache) {
+        let tmp = dirs::temp("testing").unwrap();
+        let dir = tmp.subdir(PathBuf::from("cache"));
+        let cache = TestCache::new(dir, capacity).await.unwrap();
+        (tmp, cache)
     }
 
-    async fn new_cache() -> TestCache {
+    async fn new_cache() -> (dirs::TempDir, TestCache) {
         new_cache_with_capacity(1000).await
     }
 
     #[tokio::test]
     async fn new() {
-        let dir = dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .subdir(PathBuf::from("cache"));
+        let tmp = dirs::temp("testing").unwrap();
+        let dir = tmp.subdir(PathBuf::from("cache"));
         let _ = TestCache::new(dir.clone(), 1000).await.unwrap();
         assert!(dir.exists());
 
@@ -123,10 +117,8 @@ pub mod single_thread {
 
     #[tokio::test]
     async fn prune_invalid_entries_reduces_below_capacity() {
-        let dir = dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .subdir(PathBuf::from("cache"));
+        let tmp = dirs::temp("testing").unwrap();
+        let dir = tmp.subdir(PathBuf::from("cache"));
         let mut cache = TestCache::new(dir.clone(), 5).await.unwrap();
 
         // write 3 valid entries
