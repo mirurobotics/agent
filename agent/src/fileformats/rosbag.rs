@@ -60,7 +60,7 @@ fn find_index_pos(header: &[u8]) -> Option<u64> {
             header[pos + 3],
         ]) as usize;
         pos += 4;
-        if pos + field_len > header.len() {
+        if field_len > header.len() - pos {
             return None;
         }
         let field = &header[pos..pos + field_len];
