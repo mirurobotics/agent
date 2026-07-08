@@ -20,8 +20,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// Generate a real RSA key pair in a temp dir and return the file handles.
-async fn generate_keys() -> (filesys::Dir, filesys::File, filesys::File) {
-    let dir = dirs::create_temp("authn_issue_test").await.unwrap();
+async fn generate_keys() -> (dirs::TempDir, filesys::File, filesys::File) {
+    let dir = dirs::temp("authn_issue_test").unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
     rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
@@ -122,7 +122,7 @@ mod issue_token {
 
     #[tokio::test]
     async fn bubbles_filesys_err_when_public_key_missing() {
-        let dir = dirs::create_temp("authn_issue_test").await.unwrap();
+        let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
         rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
@@ -236,7 +236,7 @@ mod mint_jwt {
 
     #[tokio::test]
     async fn returns_err_when_public_key_file_is_missing() {
-        let dir = dirs::create_temp("authn_issue_test").await.unwrap();
+        let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
         rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
@@ -251,7 +251,7 @@ mod mint_jwt {
 
     #[tokio::test]
     async fn returns_err_when_private_key_file_is_missing() {
-        let dir = dirs::create_temp("authn_issue_test").await.unwrap();
+        let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
         rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
