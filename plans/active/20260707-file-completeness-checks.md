@@ -30,7 +30,8 @@ There is no uploader yet; this lands as a self-contained module with no call sit
 - [x] M4 (source, 2026-07-07): header-parse formats (ROS1 bag, SQLite, HDF5, AVI) implemented; committed. Remaining: tests.
 - [x] M5 (source, 2026-07-07): bounded-walk formats (MP4/MOV, MKV/WebM, zstd) implemented; committed. Remaining: tests.
 - [x] Consolidated test pass (2026-07-07): all M1–M5 tests (178 new: 163 in `agent/tests/fileformats/`, 15 in `agent/tests/filesys/files.rs` incl. two directory read-error tests), registered in `agent/tests/mod.rs`; full suite 1539 passed / 0 failed; committed.
-- [x] M6 — coverage (2026-07-07): `agent/src/fileformats/.covgate` raised 50.00 → 96.92 (measured); `./scripts/covgate.sh` all modules pass; `Cargo.lock` refreshed via `./scripts/update-deps.sh`; committed. Remaining: preflight loop until `Preflight clean`.
+- [x] M6 — coverage (2026-07-07): `agent/src/fileformats/.covgate` raised 50.00 → 96.92 (measured); `./scripts/covgate.sh` all modules pass; `Cargo.lock` refreshed via `./scripts/update-deps.sh` (lockfile is gitignored in this repo, so nothing to commit for it); committed.
+- [x] M6 — preflight (2026-07-07): `./scripts/preflight.sh` prints `Preflight clean` (exit 0) — lint, tests + coverage gates, tools lint, tools tests (99 passed) all green. One review finding from the preflight refine loop fixed (test-only): alias-extension routing verdict-pinned in `agent/tests/fileformats/check.rs` (final suite 1541 passed / 0 failed); committed. Plan intentionally left in `plans/active/` — the parent orchestrator owns the plan lifecycle.
 
 Execution note (2026-07-07): work is executed via the implement-skill pipeline — all M1–M5 source landed in one pass (two atomic commits: filesys helpers, fileformats module), with tests following as a consolidated pass, then M6 gates. Milestone content is unchanged; only commit grouping differs from the original per-milestone sequencing.
 
@@ -58,7 +59,13 @@ Use timestamps when completing steps. Split partially completed work into "done"
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-07-07 on branch `feat/file-finalization-checks` (8 commits including the plan doc; not yet pushed — publication is the parent orchestrator's step).
+
+- Delivered exactly the planned API: `miru_agent::fileformats::check(&File) -> Result<Completeness, FileFormatsErr>` with per-format checks for all 14 formats, plus `filesys::files::{read_tail, read_range}` (sharing an internal `read_at`). No new dependencies; `Cargo.toml` untouched; no call sites outside tests, as intended.
+- Tests: 187 added overall (165 under `agent/tests/fileformats/`, 15 in `agent/tests/filesys/files.rs`, plus registration; counts include the covgate and alias-pinning follow-ups). Full suite: 1541 passed / 0 failed. Cheapness invariant verified: no `read_bytes`/`hash` calls under `agent/src/fileformats/` (grep clean).
+- Gates: `fileformats` coverage 96.92% (gate set to 96.92); `filesys` 81.94% (gate 81.69 untouched); `./scripts/preflight.sh` → `Preflight clean` on the first post-M6 run.
+- What worked: the plan's byte-level specs were implementable verbatim — only one source fix emerged from review (wrap-proof rosbag bounds guard), and no source bugs surfaced during test implementation.
+- What to remember: adding even small helpers to a mature module can sink that module's covgate (filesys dipped 0.23% below); budget error-path tests for new helpers up front. The directory-read (EISDIR) trick is a clean way to exercise read-error closures without mocks.
 
 ## Context and Orientation
 
