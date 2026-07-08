@@ -10,6 +10,7 @@ use crate::trace;
 // external crates
 use chrono::{DateTime, Utc};
 
+#[derive(Debug, PartialEq)]
 pub struct State {
     pub(crate) cfg: Config,
     pub(crate) preexisting: HashMap<File, Observation>,
@@ -17,6 +18,7 @@ pub struct State {
     pub(crate) ledger: HashMap<File, Vec<StableFile>>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     pub deployment: Deployment,
     pub rule: UploadRule,
@@ -80,7 +82,7 @@ impl State {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
     pub file: File,
     pub timestamp: DateTime<Utc>,
@@ -97,7 +99,7 @@ impl Observation {
 }
 
 // A file that is a candidate for upload.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub file: File,
     pub observations: Vec<Observation>,
