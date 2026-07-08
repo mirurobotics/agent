@@ -294,12 +294,11 @@ mod tests {
     use super::*;
 
     // internal crates
-    use crate::filesys::PathExt;
+    use crate::filesys::{Dir, PathExt};
     use crate::models::{Deployment, UploadRule, UploadRuleSource};
     use crate::scan::state::{Candidate, Config, Observation, StableFile, State};
 
     // external crates
-    use std::path::Path;
     use std::time::{Duration, SystemTime};
 
     // ================================ FIXTURES =================================== //
@@ -341,25 +340,16 @@ mod tests {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
 
-    /// A persisted temp dir (matches the integration tests' `create_temp`).
-    async fn temp_dir() -> std::path::PathBuf {
-        crate::filesys::dirs::create_temp("testing")
-            .await
-            .unwrap()
-            .path()
-            .clone()
-    }
-
     /// Write `bytes` to `dir/name` and return the corresponding `File`.
-    fn write(dir: &Path, name: &str, bytes: &[u8]) -> File {
-        let path = dir.join(name);
+    fn write(dir: &Dir, name: &str, bytes: &[u8]) -> File {
+        let path = dir.path().join(name);
         std::fs::write(&path, bytes).unwrap();
         File::new(path)
     }
 
     /// The `*.mcap` glob for a directory.
-    fn glob_for(dir: &Path) -> String {
-        format!("{}/*.mcap", dir.display())
+    fn glob_for(dir: &Dir) -> String {
+        format!("{}/*.mcap", dir.path().display())
     }
 
     /// Observe `file` at `timestamp` through the production `observe_file`.
@@ -398,7 +388,7 @@ mod tests {
         // preexisting: it is not a candidate and a discover pass finds nothing.
         #[tokio::test]
         async fn new_snapshots_present_file_as_preexisting() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             write(&dir, "a.mcap", b"aaaa");
             let mut scanner =
                 CollectionScanner::new(config("d", "coll", &glob_for(&dir), 10), ts(1000))
@@ -420,7 +410,7 @@ mod tests {
         // update_config re-snapshots preexisting and reflects the new rule.
         #[tokio::test]
         async fn update_config_same_collection_resnapshots() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let glob = glob_for(&dir);
             let mut scanner = CollectionScanner::new(config("d", "coll", &glob, 0), ts(1000))
                 .await
@@ -450,7 +440,7 @@ mod tests {
         // update_config propagates the InvalidRule error on a collection change.
         #[tokio::test]
         async fn update_config_collection_change_errors() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let glob = glob_for(&dir);
             let mut scanner = CollectionScanner::new(config("d", "coll", &glob, 0), ts(1000))
                 .await
@@ -471,7 +461,7 @@ mod tests {
         // A preexisting file whose metadata is unchanged is never promoted.
         #[tokio::test]
         async fn unchanged_preexisting_not_promoted() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             write(&dir, "pre.mcap", b"aaaa");
             let mut scanner =
                 CollectionScanner::new(config("d", "coll", &glob_for(&dir), 0), ts(1000))
@@ -486,7 +476,7 @@ mod tests {
         // A preexisting file whose size changed is promoted to a candidate.
         #[tokio::test]
         async fn changed_preexisting_promoted() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "pre.mcap", b"aaaa");
             let mut scanner =
                 CollectionScanner::new(config("d", "coll", &glob_for(&dir), 0), ts(1000))
@@ -502,7 +492,7 @@ mod tests {
         // An already-tracked candidate is not re-added on a second discover pass.
         #[tokio::test]
         async fn tracked_candidate_not_readded() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "pre.mcap", b"aaaa");
             let mut scanner =
                 CollectionScanner::new(config("d", "coll", &glob_for(&dir), 0), ts(1000))
@@ -532,7 +522,7 @@ mod tests {
         // has_stability_window_elapsed at the >= boundary and one second short.
         #[tokio::test]
         async fn window_boundary_and_short() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "w.mcap", b"aaaa");
             let state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -547,7 +537,7 @@ mod tests {
         // window 0: now == first observation timestamp already satisfies >= 0.
         #[tokio::test]
         async fn window_zero_at_first_timestamp() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "w.mcap", b"aaaa");
             let state = State::new(config("d", "coll", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -593,7 +583,7 @@ mod tests {
         // No previous stable file => stable with the real hash of the content.
         #[tokio::test]
         async fn no_previous_hashes_content() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa");
             let state = State::new(config("d", "coll", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -607,7 +597,7 @@ mod tests {
         // Previous stable file with the same size => stable, re-hashed.
         #[tokio::test]
         async fn previous_same_size_dedup() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa");
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -624,7 +614,7 @@ mod tests {
         // Previous stable file with a different size => unstable, no digest.
         #[tokio::test]
         async fn previous_size_changed_unstable() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa");
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -641,7 +631,7 @@ mod tests {
         // determine_stability short-circuits on unstable metadata: no hash taken.
         #[tokio::test]
         async fn determine_stability_short_circuits_on_metadata() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa");
             let state = State::new(config("d", "coll", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -680,7 +670,7 @@ mod tests {
         // A stable candidate produces a StableFile with the expected payload.
         #[tokio::test]
         async fn stable_payload_fields() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "e.mcap", b"aaaa");
             let state = State::new(config("dpl-1", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -706,7 +696,7 @@ mod tests {
         // reachable directly but awkward through the actor.
         #[tokio::test]
         async fn deleted_file_is_unstable() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "gone.mcap", b"aaaa");
             let state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -720,7 +710,7 @@ mod tests {
         // Before the window elapses, evaluation waits.
         #[tokio::test]
         async fn not_yet_elapsed_waits() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "wait.mcap", b"aaaa");
             let state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -733,7 +723,7 @@ mod tests {
         // evaluate_candidates inserts a stable file into the ledger and returns it.
         #[tokio::test]
         async fn evaluate_inserts_stable() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "ins.mcap", b"aaaa");
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -749,7 +739,7 @@ mod tests {
         // reported, the candidate removed, the ledger untouched.
         #[tokio::test]
         async fn evaluate_drops_unstable() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "drop.mcap", b"aaaa");
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -774,7 +764,7 @@ mod tests {
         // Two distinct stable files yield a ledger count of two.
         #[tokio::test]
         async fn ledger_count_two_distinct() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let f1 = write(&dir, "one.mcap", b"aaaa");
             let f2 = write(&dir, "two.mcap", b"aaaa");
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
@@ -791,7 +781,7 @@ mod tests {
         // A tracked candidate re-evaluated does not re-report: dedup keeps count 1.
         #[tokio::test]
         async fn report_once_dedup() {
-            let dir = temp_dir().await;
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
             let file = write(&dir, "dedup.mcap", b"aaaa");
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
