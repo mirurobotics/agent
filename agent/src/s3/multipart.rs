@@ -381,21 +381,14 @@ impl Store {
 
         match req.send().await {
             Ok(page) => Ok(Some(page)),
-            Err(err) => {
-                let upload_gone = err
-                    .raw_response()
-                    .map(|r| r.status().as_u16() == 404)
-                    .unwrap_or(false);
-                if upload_gone {
-                    Ok(None)
-                } else {
-                    Err(errors::map_sdk_err_common(
-                        "list_parts",
-                        Some(obj.key.to_string()),
-                        err,
-                    ))
-                }
-            }
+            // A missing upload (404 / NoSuchUpload) is not an error here: it tells
+            // the caller the upload expired, so surface it as `Ok(None)`.
+            Err(err) if errors::is_not_found(&err) => Ok(None),
+            Err(err) => Err(errors::map_sdk_err_common(
+                "list_parts",
+                Some(obj.key.to_string()),
+                err,
+            )),
         }
     }
 }

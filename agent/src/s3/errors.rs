@@ -121,13 +121,29 @@ crate::impl_error!(S3Err {
     FileSysErr,
 });
 
+/// Whether an `SdkError` carries an HTTP 404 (checked against the raw response
+/// status, so it works for any operation's service-error enum `E`).
+///
+/// This is detection only. What a 404 *means* is operation-specific and cannot
+/// be decided here: some callers turn it into an error (`get` →
+/// `ObjectNotFoundErr`), while others treat it as a non-error success value
+/// (`exists` → `Ok(false)`, `list_parts` → `Ok(None)`). Callers must therefore
+/// check this and short-circuit before delegating to [`map_sdk_err_common`].
+pub fn is_not_found<E>(err: &SdkError<E>) -> bool {
+    err.raw_response()
+        .map(|r| r.status().as_u16() == 404)
+        .unwrap_or(false)
+}
+
 /// Maps the operation-agnostic `SdkError` variants into an `S3Err`.
 ///
-/// Each S3 operation has its own service-error enum `E`, so a not-found case
-/// (`NoSuchKey`, HEAD 404, ...) must be classified by the caller before
-/// delegating here. This helper only covers the variants that need no
-/// operation-specific knowledge: dispatch/timeout (network), response and
-/// construction failures, and the service-error fallback.
+/// Each S3 operation has its own service-error enum `E`. A not-found case can be
+/// *detected* generically with [`is_not_found`], but it must be *interpreted* and
+/// short-circuited by the caller before delegating here, because some callers
+/// treat a 404 as a success value (`Ok(false)` / `Ok(None)`) that this
+/// `-> S3Err` signature cannot express. This helper only covers the variants
+/// that need no operation-specific knowledge: dispatch/timeout (network),
+/// response and construction failures, and the service-error fallback.
 pub fn map_sdk_err_common<E>(operation: &str, key: Option<String>, err: SdkError<E>) -> S3Err
 where
     E: std::error::Error + 'static,

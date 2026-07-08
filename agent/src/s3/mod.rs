@@ -169,10 +169,7 @@ impl Store {
         {
             Ok(output) => output,
             Err(err) => {
-                let is_not_found = err
-                    .raw_response()
-                    .map(|r| r.status().as_u16() == 404)
-                    .unwrap_or(false)
+                let is_not_found = errors::is_not_found(&err)
                     || matches!(err.as_service_error(), Some(GetObjectError::NoSuchKey(_)));
                 if is_not_found {
                     return Err(S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
@@ -226,11 +223,7 @@ impl Store {
         {
             Ok(_) => Ok(true),
             Err(err) => {
-                let is_not_found = err
-                    .raw_response()
-                    .map(|r| r.status().as_u16() == 404)
-                    .unwrap_or(false);
-                if is_not_found {
+                if errors::is_not_found(&err) {
                     Ok(false)
                 } else {
                     Err(errors::map_sdk_err_common(
