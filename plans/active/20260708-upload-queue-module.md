@@ -27,7 +27,7 @@ Deliberately out of scope for this PR (deferred to follow-up PRs):
 ## Progress
 
 - [x] Milestone 1: module scaffold, errors, job type, registration. (2026-07-08: all tests pass, 3 new `upload::job::dedup_key` tests)
-- [ ] Milestone 2: queue with dedup, prune, reject-on-full, plus unit tests.
+- [x] Milestone 2: queue with dedup, prune, reject-on-full, plus unit tests. (2026-07-08: all tests pass, 8 new `upload::queue` tests)
 - [ ] Milestone 3: executor trait, `LogExecutor`, mock test executor.
 - [ ] Milestone 4: `Uploader` actor with interleaved run loop, retry/requeue/cap semantics, plus tests.
 - [ ] Milestone 5: coverage ratchet, preflight, plan bookkeeping.
