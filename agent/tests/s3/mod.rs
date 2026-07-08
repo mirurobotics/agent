@@ -1,9 +1,7 @@
-// standard crates
-use std::io::Write as _;
-
 // internal crates
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
+use miru_agent::filesys::{files, PathExt, WriteOptions};
 use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
@@ -12,7 +10,6 @@ use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
 use aws_smithy_types::body::SdkBody;
-use tempfile::NamedTempFile;
 
 const REGION: &str = "us-east-1";
 const BUCKET: &str = "test-bucket";
@@ -60,13 +57,14 @@ fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
     (store, replay)
 }
 
-/// Writes `bytes` to a fresh temp file and returns the handle (kept alive so
+/// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
 /// the file is not deleted until the test drops it).
-fn temp_file_with(bytes: &[u8]) -> NamedTempFile {
-    let mut f = NamedTempFile::new().unwrap();
-    f.write_all(bytes).unwrap();
-    f.flush().unwrap();
-    f
+async fn temp_file_with(bytes: &[u8]) -> files::TempFile {
+    let tf = files::temp("s3-test").unwrap();
+    files::write_bytes(tf.file(), bytes, WriteOptions::OVERWRITE_NONATOMIC)
+        .await
+        .unwrap();
+    tf
 }
 
 /// Builds an expected request (method + path-style URI, empty body) to match a
@@ -117,7 +115,7 @@ pub mod put {
         #[tokio::test]
         async fn put_streams_file_body_bytes() {
             let key = "artifacts/hello.txt";
-            let src = temp_file_with(b"hello world");
+            let src = temp_file_with(b"hello world").await;
             // The body streams off disk, so the replay client records it as an
             // unbuffered `SdkBody` whose `.bytes()` is `None` — `assert_requests_match`
             // can't byte-compare it, so we assert the method + path by hand instead.
@@ -127,10 +125,7 @@ pub mod put {
                 resp(200, &[]),
             );
 
-            store
-                .put_singlepart(&File::new(src.path()), &obj(key))
-                .await
-                .unwrap();
+            store.put_singlepart(src.file(), &obj(key)).await.unwrap();
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
             assert_eq!(requests.len(), 1);
@@ -153,13 +148,13 @@ pub mod get {
         async fn get_streams_body_to_file() {
             let key = "blobs/data.bin";
             let payload = b"\x00\x01\x02binary-body\xff".to_vec();
-            let dest = NamedTempFile::new().unwrap();
+            let dest = files::temp("s3-dest").unwrap();
             let (store, replay) = store_expecting(
                 req("GET", "blobs/data.bin?x-id=GetObject"),
                 resp(200, &payload),
             );
 
-            store.get(&obj(key), &File::new(dest.path())).await.unwrap();
+            store.get(&obj(key), dest.file()).await.unwrap();
 
             assert_eq!(std::fs::read(dest.path()).unwrap(), payload);
             replay.assert_requests_match(IGNORED_HEADERS);
@@ -196,16 +191,13 @@ pub mod get {
         #[tokio::test]
         async fn get_missing_maps_to_not_found() {
             let key = "missing.txt";
-            let dest = NamedTempFile::new().unwrap();
+            let dest = files::temp("s3-dest").unwrap();
             let (store, _replay) = store_expecting(
                 req("GET", "missing.txt?x-id=GetObject"),
                 resp_xml(404, NO_SUCH_KEY_XML),
             );
 
-            let err = store
-                .get(&obj(key), &File::new(dest.path()))
-                .await
-                .unwrap_err();
+            let err = store.get(&obj(key), dest.file()).await.unwrap_err();
 
             assert!(matches!(err, S3Err::ObjectNotFoundErr(_)));
             assert!(matches!(err.code(), Code::ResourceNotFound));
@@ -277,12 +269,14 @@ pub mod request_failed {
 
     #[tokio::test]
     async fn put_403_maps_to_request_failed() {
-        let src = temp_file_with(b"x");
-        let (store, _replay) =
-            store_expecting(req("PUT", "denied.txt?x-id=PutObject"), access_denied_resp());
+        let src = temp_file_with(b"x").await;
+        let (store, _replay) = store_expecting(
+            req("PUT", "denied.txt?x-id=PutObject"),
+            access_denied_resp(),
+        );
 
         let err = store
-            .put(File::new(src.path()), &obj("denied.txt"))
+            .put(src.to_file(), &obj("denied.txt"))
             .await
             .unwrap_err();
 
@@ -296,12 +290,14 @@ pub mod request_failed {
 
     #[tokio::test]
     async fn get_403_maps_to_request_failed() {
-        let dest = NamedTempFile::new().unwrap();
-        let (store, _replay) =
-            store_expecting(req("GET", "denied.txt?x-id=GetObject"), access_denied_resp());
+        let dest = files::temp("s3-dest").unwrap();
+        let (store, _replay) = store_expecting(
+            req("GET", "denied.txt?x-id=GetObject"),
+            access_denied_resp(),
+        );
 
         let err = store
-            .get(&obj("denied.txt"), &File::new(dest.path()))
+            .get(&obj("denied.txt"), dest.file())
             .await
             .unwrap_err();
 
@@ -335,13 +331,10 @@ pub mod request_failed {
         // With no replay events, the connector fails to dispatch the request,
         // which the SDK surfaces as `SdkError::DispatchFailure` — the mapper's
         // network-connection path.
-        let dest = NamedTempFile::new().unwrap();
+        let dest = files::temp("s3-dest").unwrap();
         let (store, _replay) = store_with(vec![]);
 
-        let err = store
-            .get(&obj("any.txt"), &File::new(dest.path()))
-            .await
-            .unwrap_err();
+        let err = store.get(&obj("any.txt"), dest.file()).await.unwrap_err();
 
         assert!(matches!(err, S3Err::ConnectionErr(_)));
         assert!(err.is_network_conn_err());
