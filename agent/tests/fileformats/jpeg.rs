@@ -8,7 +8,7 @@ const SOI: [u8; 2] = [0xFF, 0xD8];
 const EOI: [u8; 2] = [0xFF, 0xD9];
 
 /// A finalized JPEG (14 bytes): SOI + nonzero payload + EOI.
-fn valid_jpeg() -> Vec<u8> {
+pub(crate) fn valid_jpeg() -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&SOI);
     bytes.extend_from_slice(&[0x11; 10]);

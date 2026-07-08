@@ -4,7 +4,7 @@ use miru_agent::fileformats::Completeness;
 
 /// A plausible gzip file (18 bytes): magic + deflate method byte + flags,
 /// zero-padded to the 10-byte header + 8-byte trailer minimum.
-fn valid_gzip() -> Vec<u8> {
+pub(crate) fn valid_gzip() -> Vec<u8> {
     let mut bytes = vec![0x1F, 0x8B, 0x08, 0x00];
     bytes.resize(18, 0x00);
     bytes

@@ -12,7 +12,7 @@ fn mp4_box(fourcc: &[u8; 4], payload: &[u8]) -> Vec<u8> {
 }
 
 /// A finalized MP4 (40 bytes): ftyp + moov + mdat, tiling the file exactly.
-fn valid_mp4() -> Vec<u8> {
+pub(crate) fn valid_mp4() -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&mp4_box(b"ftyp", &[0u8; 8]));
     bytes.extend_from_slice(&mp4_box(b"moov", &[]));

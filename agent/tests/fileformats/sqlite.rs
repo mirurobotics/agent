@@ -5,7 +5,7 @@ use miru_agent::filesys::{dirs, files, WriteOptions};
 
 /// SQLite database of `file_len` zero-padded bytes with the magic, the
 /// big-endian page-size field, and the big-endian page count in place.
-fn sqlite_db(page_size_field: u16, page_count: u32, file_len: usize) -> Vec<u8> {
+pub(crate) fn sqlite_db(page_size_field: u16, page_count: u32, file_len: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; file_len];
     bytes[0..16].copy_from_slice(b"SQLite format 3\0");
     bytes[16..18].copy_from_slice(&page_size_field.to_be_bytes());

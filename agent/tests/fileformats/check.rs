@@ -1,5 +1,8 @@
 // internal crates
-use crate::fileformats::check_verdict;
+use crate::fileformats::{
+    check_verdict, gzip::valid_gzip, hdf5::superblock, jpeg::valid_jpeg, matroska::mkv,
+    mp4::valid_mp4, sqlite::sqlite_db,
+};
 use miru_agent::fileformats::{self, Completeness, FileFormatsErr};
 use miru_agent::filesys::{dirs, FileSysErr};
 
@@ -42,6 +45,37 @@ pub mod routing {
         assert_eq!(
             check_verdict("f.PNG", &minimal_png()).await,
             Completeness::Complete
+        );
+    }
+
+    #[tokio::test]
+    async fn alias_extensions_route_to_their_formats() {
+        // valid fixture bytes pin each alias to its checker: only the right
+        // format calls them Complete (empty files cannot distinguish, since
+        // every checker calls them Incomplete)
+        let cases: [(&str, Vec<u8>); 8] = [
+            ("db", sqlite_db(512, 1, 512)),
+            ("sqlite", sqlite_db(512, 1, 512)),
+            ("sqlite3", sqlite_db(512, 1, 512)),
+            ("mov", valid_mp4()),
+            ("m4v", valid_mp4()),
+            ("jpeg", valid_jpeg()),
+            ("hdf5", superblock(0, 8, 0, 64, 64)),
+            ("webm", mkv(&[0x88], &[0u8; 8])),
+        ];
+        for (ext, bytes) in cases {
+            let verdict = check_verdict(&format!("f.{ext}"), &bytes).await;
+            assert_eq!(verdict, Completeness::Complete, "extension: {ext}");
+        }
+    }
+
+    #[tokio::test]
+    async fn tgz_routes_to_gzip() {
+        // gzip is never Complete: a plausible gzip file is Unknown, which
+        // pins tgz to gzip (tar would call these 18 bytes Incomplete)
+        assert_eq!(
+            check_verdict("f.tgz", &valid_gzip()).await,
+            Completeness::Unknown
         );
     }
 

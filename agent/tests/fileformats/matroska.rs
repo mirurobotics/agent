@@ -9,7 +9,7 @@ const SEGMENT_ID: [u8; 4] = [0x18, 0x53, 0x80, 0x67];
 
 /// An EBML document: EBML header (4-byte payload) + Segment with the given
 /// size vint and payload.
-fn mkv(segment_size_vint: &[u8], segment_payload: &[u8]) -> Vec<u8> {
+pub(crate) fn mkv(segment_size_vint: &[u8], segment_payload: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&EBML_ID);
     bytes.push(0x84); // header size vint: 4-byte payload

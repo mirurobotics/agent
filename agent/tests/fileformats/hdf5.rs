@@ -8,7 +8,13 @@ const SIGNATURE: [u8; 8] = [0x89, b'H', b'D', b'F', 0x0D, 0x0A, 0x1A, 0x0A];
 /// A zero-padded superblock of `file_len` bytes with the signature, version,
 /// size-of-offsets byte, base address, and end-of-file address at the
 /// version's offsets.
-fn superblock(version: u8, size_of_offsets: u8, base: u64, eof: u64, file_len: usize) -> Vec<u8> {
+pub(crate) fn superblock(
+    version: u8,
+    size_of_offsets: u8,
+    base: u64,
+    eof: u64,
+    file_len: usize,
+) -> Vec<u8> {
     let mut bytes = vec![0u8; file_len];
     bytes[0..8].copy_from_slice(&SIGNATURE);
     bytes[8] = version;
