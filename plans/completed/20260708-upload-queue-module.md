@@ -30,21 +30,32 @@ Deliberately out of scope for this PR (deferred to follow-up PRs):
 - [x] Milestone 2: queue with dedup, prune, reject-on-full, plus unit tests. (2026-07-08: all tests pass, 8 new `upload::queue` tests)
 - [x] Milestone 3: executor trait, `LogExecutor`, mock test executor. (2026-07-08: all tests pass, 3 new `upload::executor` tests)
 - [x] Milestone 4: `Uploader` actor with interleaved run loop, retry/requeue/cap semantics, plus tests. (2026-07-08: all tests pass, 7 new `upload::uploader` tests)
-- [ ] Milestone 5: coverage ratchet, preflight, plan bookkeeping.
+- [x] Milestone 5: coverage ratchet, preflight, plan bookkeeping. (2026-07-08: added 9 targeted tests for uncovered branches, ratcheted `.covgate` to 96.00 against measured 96.42, `./scripts/preflight.sh` clean)
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- 2026-07-08: `lint.sh`'s import normalizer rewrites split sibling imports (`use crate::upload::errors::...;` + `use crate::upload::job::...;`) into a single nested `use crate::upload::{errors::..., job::...};` in place. The first `preflight.sh` run failed (lint=101, tests=1) because these auto-fixes landed mid-run while clippy also flagged a real finding; after fixing clippy and keeping the normalized imports, lint and preflight passed cleanly.
+- 2026-07-08: `cargo llvm-cov report` (reusing profdata without rerunning tests) reported 0% for the new module — stale profdata. The fresh `cargo llvm-cov --json` invocation that `covgate.sh` uses is the authoritative measurement.
+- 2026-07-08: coverage after Milestone 4 measured 88.18% for `upload` (queue 93.86, uploader 84.87) — between the neighboring floors. The uncovered regions were almost all reachable behavior (requeue-into-full-queue drop, shutdown during backoff sleep, handle-drop exit paths, `Arc<Uploader>` delegation, send-after-shutdown error, `is_empty`, mtime-only staleness), so Milestone 5 added tests instead of accepting the lower floor.
 
 ## Decision Log
 
 (Add implementation-time entries as you go. Design decisions locked at authoring time are embedded in Context and Orientation below; they are not open questions.)
 
+- 2026-07-08: clippy (`-D warnings`) rejects `UploaderExt::len` via `len_without_is_empty`. Resolved with `#[allow(clippy::len_without_is_empty)]` on the trait rather than widening the locked three-method surface: an `is_empty` would be an async actor round-trip returning `Result<bool, UploadErr>`, dead weight next to `len()`.
+- 2026-07-08: Milestone 5 added 9 tests beyond the plan's named list (queue: `is_empty::reflects_queue_contents`, `enqueue::changed_mtime_makes_job_stale`; uploader: `requeue_into_full_queue_drops_job`, `shutdown_during_backoff_sleep_returns_promptly`, `enqueue_after_shutdown_returns_send_err`, `worker_exits_when_all_handles_dropped`, `worker_exits_when_handles_dropped_during_in_flight_upload`, `arc_handle_delegates_to_uploader`, plus executor's `mock_empty_script_defaults_to_ok` split out in Milestone 3), following the Milestone 5 instruction to cover uncovered branches rather than accept a low floor. The mtime-staleness test lies about the job's recorded mtime instead of racing filesystem timestamps, keeping it deterministic.
+
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-07-08, five milestones, one commit each, on `feat/upload-queue-module`.
+
+- Delivered `agent/src/upload/{mod,errors,job,queue,executor,uploader}.rs` exactly per the locked design: `UploadJob`/`DedupKey`, FIFO `UploadQueue` (dedup, stale-prune, reject-on-full with `QueueFullErr`), RPITIT `UploadExecutor` seam with `LogExecutor` placeholder, and the `Uploader` actor with the `tokio::select!`-interleaved run loop (in-place retries with `cooldown` backoff, requeue-at-tail, 9-attempt global cap, in-flight dedup claim, prompt shutdown that drops the in-flight future).
+- 29 new tests under `upload::` (3 job, 10 queue, 3 executor, 13 uploader) plus the shared `MockUploadExecutor` (`agent/tests/mocks/upload_executor.rs`) with scripted steps, started-notifications, and hold-until-released hangs; every awaited step is timeout-wrapped and no test real-sleeps. Full suite: 1390 passed, 0 failed.
+- Coverage 96.42% region coverage for the module; `.covgate` ratcheted from provisional `0.00` to `96.00` (above both neighboring floors). `./scripts/preflight.sh` clean.
+- Nothing touches `scan`, `AppState`, or `app/run.rs`; production code does not construct an `Uploader` yet, as scoped. Follow-ups remain: bridge worker mapping scanner events to jobs, real executor, app wiring.
+- What went well: the plan's verified paths/signatures meant zero exploration surprises; all milestone test lists passed on first run. What to watch next time: run `lint.sh` before the first full `preflight.sh` — the import normalizer's in-place fixes plus a clippy finding made the first parallel preflight fail confusingly.
 
 ## Context and Orientation
 

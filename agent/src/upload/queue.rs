@@ -5,8 +5,10 @@ use std::time::SystemTime;
 // internal crates
 use crate::filesys::{files, FileSysErr};
 use crate::trace;
-use crate::upload::errors::{QueueFullErr, UploadErr};
-use crate::upload::job::{DedupKey, UploadJob};
+use crate::upload::{
+    errors::{QueueFullErr, UploadErr},
+    job::{DedupKey, UploadJob},
+};
 
 // external crates
 use chrono::{DateTime, Utc};
