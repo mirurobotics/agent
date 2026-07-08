@@ -9,7 +9,7 @@ use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
-use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
 
@@ -22,9 +22,9 @@ use chrono::{Duration, Utc};
 /// `auth/`, and pre-populate `device.json` with a known device id so that
 /// `resolve_device_id` and the JWT-signing path inside `reconcile` both work
 /// without contacting a real backend.
-async fn prepare_layout(name: &str) -> (Layout, filesys::Dir) {
-    let dir = dirs::create_temp(name).await.unwrap();
-    let layout = Layout::new(dir.clone());
+async fn prepare_layout(name: &str) -> (Layout, dirs::TempDir) {
+    let dir = dirs::temp(name).unwrap();
+    let layout = Layout::new(dir.to_dir());
 
     // generate a real RSA keypair under auth/
     let auth_dir = layout.auth();
@@ -85,7 +85,7 @@ mod reconcile {
 
     #[tokio::test]
     async fn is_noop_when_marker_matches() {
-        let (layout, _dir) = prepare_layout("upgrade_noop").await;
+        let (layout, _tmp) = prepare_layout("upgrade_noop").await;
 
         // pre-write the marker with the same version we're about to call reconcile
         // with; reconcile() should make zero HTTP calls.
@@ -107,7 +107,7 @@ mod reconcile {
 
     #[tokio::test]
     async fn rebootstraps_when_marker_missing() {
-        let (layout, _dir) = prepare_layout("upgrade_missing_marker").await;
+        let (layout, _tmp) = prepare_layout("upgrade_missing_marker").await;
 
         // remember the keys before so we can confirm they survive
         let (priv_before, pub_before) = read_keys(&layout).await;
@@ -143,7 +143,7 @@ mod reconcile {
 
     #[tokio::test]
     async fn rebootstraps_when_marker_version_differs() {
-        let (layout, _dir) = prepare_layout("upgrade_old_marker").await;
+        let (layout, _tmp) = prepare_layout("upgrade_old_marker").await;
 
         disk::agent_version::write(&layout.agent_version(), "v0.0.1")
             .await
@@ -166,7 +166,7 @@ mod reconcile {
 
     #[tokio::test]
     async fn retries_until_get_device_succeeds() {
-        let (layout, _dir) = prepare_layout("upgrade_retry").await;
+        let (layout, _tmp) = prepare_layout("upgrade_retry").await;
 
         let device = backend_device("dvc_4", "delta");
         let mock = make_mock_client(device.clone());
@@ -207,7 +207,7 @@ mod reconcile {
 
     #[tokio::test]
     async fn reports_attempt_count_and_recovers_after_repeated_failures() {
-        let (layout, _dir) = prepare_layout("reconcile_attempt_count").await;
+        let (layout, _tmp) = prepare_layout("reconcile_attempt_count").await;
         let device = backend_device("dvc_cs1", "counted");
         let mock = make_mock_client(device.clone());
 
@@ -241,13 +241,13 @@ mod needs_upgrade {
 
     #[tokio::test]
     async fn returns_true_when_marker_missing() {
-        let (layout, _dir) = prepare_layout("needs_upgrade_missing").await;
+        let (layout, _tmp) = prepare_layout("needs_upgrade_missing").await;
         assert!(needs_upgrade(&layout, "v1.0.0").await);
     }
 
     #[tokio::test]
     async fn returns_false_when_marker_matches() {
-        let (layout, _dir) = prepare_layout("needs_upgrade_match").await;
+        let (layout, _tmp) = prepare_layout("needs_upgrade_match").await;
         disk::agent_version::write(&layout.agent_version(), "v1.2.3")
             .await
             .unwrap();
@@ -256,7 +256,7 @@ mod needs_upgrade {
 
     #[tokio::test]
     async fn returns_true_when_marker_differs() {
-        let (layout, _dir) = prepare_layout("needs_upgrade_differs").await;
+        let (layout, _tmp) = prepare_layout("needs_upgrade_differs").await;
         disk::agent_version::write(&layout.agent_version(), "v1.0.0")
             .await
             .unwrap();
@@ -265,7 +265,7 @@ mod needs_upgrade {
 
     #[tokio::test]
     async fn returns_true_when_read_errors() {
-        let (layout, _dir) = prepare_layout("needs_upgrade_read_err").await;
+        let (layout, _tmp) = prepare_layout("needs_upgrade_read_err").await;
         // Force a read error: create a directory at the marker path. `exists()`
         // returns true for a directory, so `read_string` runs and fails with a
         // FileSysErr; `needs_upgrade` treats the error as "missing" and returns true.
@@ -281,7 +281,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn happy_path_writes_marker_and_updates_backend() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_happy").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_happy").await;
         let mock = make_mock_client(backend_device("dvc_ri1", "happy"));
 
         let version = "v3.4.5";
@@ -300,7 +300,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn returns_authn_err_when_private_key_missing() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_no_pk").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_no_pk").await;
         tokio::fs::remove_file(layout.auth().private_key().path())
             .await
             .unwrap();
@@ -317,7 +317,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn returns_http_err_when_get_device_fails() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_get_fail").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_get_fail").await;
         let mock = make_mock_client(backend_device("dvc_ri3", "get_fail"));
         mock.set_get_device(|| {
             Err(HTTPErr::MockErr(HTTPMockErr {
@@ -336,7 +336,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn returns_storage_err_when_reset_fails() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_reset_fail").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_reset_fail").await;
         // Place a directory at the device.json path so setup::reset's atomic
         // write of device.json cannot replace it and returns
         // DiskErr::FileSysErr(_).
@@ -356,7 +356,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn returns_http_err_when_update_device_fails() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_update_fail").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_update_fail").await;
         let mock = make_mock_client(backend_device("dvc_ri5", "update_fail"));
         mock.set_update_device(|| {
             Err(HTTPErr::MockErr(HTTPMockErr {
@@ -383,7 +383,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn preserves_customized_settings() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_preserves_settings").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_preserves_settings").await;
 
         let staging = Settings {
             backend: Backend {
@@ -418,7 +418,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn falls_back_to_defaults_when_settings_missing() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_settings_missing").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_settings_missing").await;
 
         let mock = make_mock_client(backend_device("dvc_sm1", "missing"));
         reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
@@ -433,7 +433,7 @@ mod reconcile_impl {
 
     #[tokio::test]
     async fn falls_back_to_defaults_when_settings_corrupt() {
-        let (layout, _dir) = prepare_layout("reconcile_impl_settings_corrupt").await;
+        let (layout, _tmp) = prepare_layout("reconcile_impl_settings_corrupt").await;
 
         files::write_string(
             &layout.settings(),

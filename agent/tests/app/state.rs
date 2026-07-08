@@ -21,8 +21,8 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_private_key_file() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         let result = AppState::init(
             &layout,
             Capacities::default(),
@@ -45,8 +45,8 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_public_key_file() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         // create a private key file (but no public key file)
         let private_key_file = layout.auth().private_key();
         files::write_string(&private_key_file, "test", WriteOptions::default())
@@ -75,8 +75,8 @@ pub mod init {
 
     #[tokio::test]
     async fn fail_missing_device_id() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
         // create a private key file
         let private_key_file = layout.auth().private_key();
         files::write_string(&private_key_file, "test", WriteOptions::default())
@@ -104,8 +104,8 @@ pub mod init {
     #[tokio::test]
     async fn success_missing_device_file_but_valid_token() {
         let begin_test = Utc::now().timestamp();
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
@@ -157,8 +157,8 @@ pub mod init {
     #[tokio::test]
     async fn success_missing_token_file() {
         let begin_test = Utc::now().timestamp();
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
@@ -200,8 +200,8 @@ pub mod init {
 
     #[tokio::test]
     async fn success_set_device_to_offline_on_boot() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
@@ -248,8 +248,8 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn success_device_offline() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
@@ -290,8 +290,8 @@ pub mod shutdown {
             log_dir: PathBuf::from("/tmp/miru"),
         });
 
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         // create a private key file
         let private_key_file = layout.auth().private_key();
