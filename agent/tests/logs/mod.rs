@@ -201,14 +201,15 @@ impl Drop for RustLogGuard {
     }
 }
 
-async fn build_layers_tempdir(prefix: &str) -> PathBuf {
-    let dir = dirs::create_temp(prefix).await.unwrap();
-    dir.path().clone()
+async fn build_layers_tempdir(prefix: &str) -> (dirs::TempDir, PathBuf) {
+    let dir = dirs::temp(prefix).unwrap();
+    let path = dir.path().clone();
+    (dir, path)
 }
 
 #[tokio::test]
 async fn test_build_layers_stdout_debug() {
-    let log_dir = build_layers_tempdir("miru_test_build_layers_stdout").await;
+    let (_tmp, log_dir) = build_layers_tempdir("miru_test_build_layers_stdout").await;
     let options = Options {
         stdout: true,
         log_level: LogLevel::Debug,
@@ -231,7 +232,7 @@ async fn test_build_layers_stdout_debug() {
 
 #[tokio::test]
 async fn test_build_layers_file_only_warn() {
-    let log_dir = build_layers_tempdir("miru_test_build_layers_file").await;
+    let (_tmp, log_dir) = build_layers_tempdir("miru_test_build_layers_file").await;
     let options = Options {
         stdout: false,
         log_level: LogLevel::Warn,
@@ -260,7 +261,7 @@ async fn test_build_layers_respects_rust_log_when_set() {
         std::env::set_var("RUST_LOG", "info");
     }
 
-    let log_dir = build_layers_tempdir("miru_test_build_layers_rustlog_set").await;
+    let (_tmp, log_dir) = build_layers_tempdir("miru_test_build_layers_rustlog_set").await;
     let options = Options {
         stdout: false,
         log_level: LogLevel::Debug,
@@ -282,7 +283,7 @@ async fn test_build_layers_uses_options_when_rust_log_unset() {
         std::env::remove_var("RUST_LOG");
     }
 
-    let log_dir = build_layers_tempdir("miru_test_build_layers_rustlog_unset").await;
+    let (_tmp, log_dir) = build_layers_tempdir("miru_test_build_layers_rustlog_unset").await;
     let options = Options {
         stdout: false,
         log_level: LogLevel::Debug,
@@ -312,7 +313,7 @@ async fn test_build_layers_reload_handle_changes_filter() {
         std::env::remove_var("RUST_LOG");
     }
 
-    let log_dir = build_layers_tempdir("miru_test_build_layers_reload").await;
+    let (_tmp, log_dir) = build_layers_tempdir("miru_test_build_layers_reload").await;
     let options = Options {
         stdout: true,
         log_level: LogLevel::Warn,

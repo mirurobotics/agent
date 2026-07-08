@@ -258,10 +258,10 @@ pub mod size {
     pub async fn size_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         assert_eq!(cache.size().await.unwrap(), 0);
 
         // create 10 entries
@@ -305,10 +305,10 @@ pub mod entry_map {
     pub async fn entry_map_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.entry_map().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -345,10 +345,10 @@ pub mod value_map {
     pub async fn value_map_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.value_map().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -379,10 +379,10 @@ pub mod entries {
     pub async fn entries_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.entries().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -416,10 +416,10 @@ pub mod values {
     pub async fn values_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.values().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -451,10 +451,10 @@ pub mod read_entry_optional {
     pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache
             .read_entry_optional(&"1234567890".to_string())
             .await
@@ -465,11 +465,11 @@ pub mod read_entry_optional {
     pub async fn exists_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
         // spawn the cache
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // write the entry
         let key = "key".to_string();
@@ -507,10 +507,10 @@ pub mod read_entry {
     pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         assert!(matches!(
             cache
                 .read_entry(&"1234567890".to_string())
@@ -523,11 +523,11 @@ pub mod read_entry {
     pub async fn exists_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
         // spawn the cache
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // write the entry
         let key = "key".to_string();
@@ -565,10 +565,10 @@ pub mod read_optional {
     pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let read_value = cache.read_optional(&key).await.unwrap();
         assert_eq!(read_value, None);
@@ -577,10 +577,10 @@ pub mod read_optional {
     pub async fn exists_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -606,10 +606,10 @@ pub mod read {
     pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         assert!(matches!(
             cache.read(&"1234567890".to_string()).await.unwrap_err(),
             CacheErr::CacheElementNotFound { .. }
@@ -619,10 +619,10 @@ pub mod read {
     pub async fn exists_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -649,10 +649,10 @@ pub mod write {
     pub async fn doesnt_exist_overwrite_false_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let before_write = Utc::now();
         let key = "1234567890".to_string();
         let value = "value".to_string();
@@ -677,10 +677,10 @@ pub mod write {
     pub async fn doesnt_exist_overwrite_true_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         let before_write = Utc::now();
@@ -705,10 +705,10 @@ pub mod write {
     pub async fn exists_overwrite_false_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -729,10 +729,10 @@ pub mod write {
     pub async fn exists_overwrite_true_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         let before_creation = Utc::now();
@@ -763,10 +763,10 @@ pub mod write {
     pub async fn trigger_prune_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
 
         // create 11 entries
         for i in 0..11 {
@@ -797,10 +797,10 @@ pub mod write_if_absent {
     pub async fn inserts_when_absent_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "key1".to_string();
         let value = "value1".to_string();
         cache
@@ -816,10 +816,10 @@ pub mod write_if_absent {
     pub async fn noop_when_present_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "key1".to_string();
         cache
             .write(
@@ -848,10 +848,10 @@ pub mod delete {
     pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         cache.delete(&key).await.unwrap();
     }
@@ -859,10 +859,10 @@ pub mod delete {
     pub async fn exists_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -887,20 +887,20 @@ pub mod prune {
     pub async fn empty_cache_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
         cache.prune().await.unwrap();
     }
 
     pub async fn cache_equal_to_max_size_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
 
         // create 10 entries
         for i in 0..10 {
@@ -926,10 +926,10 @@ pub mod prune {
     pub async fn remove_oldest_entries_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
 
         // create 20 entries
         for i in 0..20 {
@@ -965,10 +965,10 @@ pub mod find_entries_where {
     pub async fn find_entries_where_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1015,10 +1015,10 @@ pub mod find_where {
     pub async fn find_where_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1057,10 +1057,10 @@ pub mod find_one_entry_optional {
     pub async fn find_one_entry_optional_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1107,10 +1107,10 @@ pub mod find_one_optional {
     pub async fn find_one_optional_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1158,10 +1158,10 @@ pub mod find_one_entry {
     pub async fn find_one_entry_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1207,10 +1207,10 @@ pub mod find_one {
     pub async fn find_one_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1257,10 +1257,10 @@ pub mod get_dirty_entries {
     pub async fn get_dirty_entries_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<Output = SingleThreadCacheT>,
+        Fut: Future<Output = (miru_agent::filesys::dirs::TempDir, SingleThreadCacheT)>,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let mut cache = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {

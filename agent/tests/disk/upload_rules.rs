@@ -27,18 +27,18 @@ fn rule(id: &str, digest: &str, policy: DeletePolicy) -> UploadRule {
     }
 }
 
-async fn init_storage() -> Storage {
-    let dir = dirs::create_temp("upload_rules_test").await.unwrap();
-    let layout = Layout::new(dir);
+async fn init_storage() -> (dirs::TempDir, Storage) {
+    let dir = dirs::temp("upload_rules_test").unwrap();
+    let layout = Layout::new(dir.to_dir());
     let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
         .await
         .unwrap();
-    storage
+    (dir, storage)
 }
 
 #[tokio::test]
 async fn write_then_read_round_trips() {
-    let storage = init_storage().await;
+    let (_tmp, storage) = init_storage().await;
     let original = rule("upl_rule_1", "sha256:aaa", DeletePolicy::AfterUpload);
 
     storage
@@ -58,7 +58,7 @@ async fn write_then_read_round_trips() {
 
 #[tokio::test]
 async fn write_if_absent_does_not_overwrite_existing() {
-    let storage = init_storage().await;
+    let (_tmp, storage) = init_storage().await;
     let first = rule("upl_rule_x", "sha256:first", DeletePolicy::Never);
     let second = rule("upl_rule_x", "sha256:second", DeletePolicy::AfterUpload);
 

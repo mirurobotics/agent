@@ -54,6 +54,53 @@ pub async fn create_temp(prefix: &str) -> Result<Dir, FileSysErr> {
     Ok(Dir::new(temp_dir.keep()))
 }
 
+/// RAII temp directory for TESTS. Owns a `tempfile::TempDir` (Drop deletes the
+/// dir) plus our `Dir` handle; the directory lives exactly as long as this value.
+#[cfg(feature = "test")]
+#[derive(Debug)]
+pub struct TempDir {
+    _guard: tempfile::TempDir,
+    dir: Dir,
+}
+
+#[cfg(feature = "test")]
+impl TempDir {
+    pub fn dir(&self) -> &Dir {
+        &self.dir
+    }
+
+    /// Owned `Dir` to move into a longer-lived owner; valid only while `self` lives.
+    pub fn to_dir(&self) -> Dir {
+        self.dir.clone()
+    }
+}
+
+#[cfg(feature = "test")]
+impl std::ops::Deref for TempDir {
+    type Target = Dir;
+    fn deref(&self) -> &Dir {
+        &self.dir
+    }
+}
+
+/// Auto-cleaning temp dir for tests. Sync; keeps `prefix` for parity with
+/// [`create_temp`]. The returned [`TempDir`] deletes the directory on drop, so
+/// bind it to a named variable that lives as long as the directory is needed.
+#[cfg(feature = "test")]
+pub fn temp(prefix: &str) -> Result<TempDir, FileSysErr> {
+    let guard = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir()
+        .map_err(|e| {
+            FileSysErr::CreateTmpDirErr(CreateTmpDirErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+    let dir = Dir::new(guard.path().to_path_buf());
+    Ok(TempDir { _guard: guard, dir })
+}
+
 /// Create this directory and any missing parent directories. If the directory
 /// already exists, this is a no-op.
 pub async fn create(dir: &Dir) -> Result<(), FileSysErr> {
@@ -349,5 +396,35 @@ fn move_dir_err(src_dir: Dir, dest_dir: Dir, e: std::io::Error) -> FileSysErr {
             dest_dir,
             trace: trace!(),
         })
+    }
+}
+
+#[cfg(all(test, feature = "test"))]
+mod tests {
+    // internal crates
+    use super::*;
+
+    // ================================ temp ================================= //
+
+    #[test]
+    fn temp_dir_exists_while_guard_alive_and_deletes_on_drop() {
+        let tmp = temp("testing").unwrap();
+
+        // the directory exists while the guard is alive
+        let path = tmp.path().clone();
+        assert!(path.exists());
+
+        // `path()` and `subdir()` are reachable via `Deref<Target = Dir>`
+        assert_eq!(tmp.path(), &path);
+        let subdir = tmp.subdir("child");
+        assert_eq!(subdir.path(), &path.join("child"));
+
+        // `dir()`/`to_dir()` return the same underlying path
+        assert_eq!(tmp.dir().path(), &path);
+        assert_eq!(tmp.to_dir().path(), &path);
+
+        // dropping the guard deletes the directory
+        drop(tmp);
+        assert!(!path.exists());
     }
 }

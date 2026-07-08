@@ -294,13 +294,14 @@ pub mod shutdown {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, worker_handle) = spawn_cache().await;
+        let (_tmp, cache, worker_handle) = spawn_cache().await;
         cache.shutdown().await.unwrap();
         worker_handle.await.unwrap();
     }
@@ -314,13 +315,14 @@ pub mod size {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = new_cache().await;
+        let (_tmp, cache, _) = new_cache().await;
         assert_eq!(cache.size().await.unwrap(), 0);
 
         // create 10 entries
@@ -368,13 +370,14 @@ pub mod entry_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = new_cache().await;
+        let (_tmp, cache, _) = new_cache().await;
         let result = cache.entry_map().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -413,13 +416,14 @@ pub mod value_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = new_cache().await;
+        let (_tmp, cache, _) = new_cache().await;
         let result = cache.value_map().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -452,13 +456,14 @@ pub mod entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = new_cache().await;
+        let (_tmp, cache, _) = new_cache().await;
         let result = cache.entries().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -494,13 +499,14 @@ pub mod values {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = new_cache().await;
+        let (_tmp, cache, _) = new_cache().await;
         let result = cache.values().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -534,13 +540,14 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let result = cache
             .read_entry_optional("1234567890".to_string())
             .await
@@ -553,6 +560,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -560,7 +568,7 @@ pub mod read_entry_optional {
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
         // spawn the cache
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // write the entry
         let key = "key".to_string();
@@ -604,13 +612,14 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         assert!(matches!(
             cache
                 .read_entry("1234567890".to_string())
@@ -625,6 +634,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -632,7 +642,7 @@ pub mod read_entry {
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
         // spawn the cache
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // write the entry
         let key = "key".to_string();
@@ -672,13 +682,14 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let read_value = cache.read_optional(key.clone()).await.unwrap();
         assert_eq!(read_value, None);
@@ -689,13 +700,14 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -723,13 +735,14 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         assert!(matches!(
             cache.read("1234567890".to_string()).await.unwrap_err(),
             CacheErr::CacheElementNotFound(_)
@@ -741,13 +754,14 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -777,13 +791,14 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let before_write = Utc::now();
         let key = "1234567890".to_string();
         let value = "value".to_string();
@@ -810,13 +825,14 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         let before_write = Utc::now();
@@ -843,13 +859,14 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -872,13 +889,14 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         let before_creation = Utc::now();
@@ -911,13 +929,14 @@ pub mod write {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = new_cache(10).await;
+        let (_tmp, cache, _) = new_cache(10).await;
 
         // create 11 entries
         for i in 0..11 {
@@ -950,13 +969,14 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "key1".to_string();
         let value = "value1".to_string();
         cache
@@ -974,13 +994,14 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "key1".to_string();
         cache
             .write(
@@ -1011,13 +1032,14 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         cache.delete(key.clone()).await.unwrap();
     }
@@ -1027,13 +1049,14 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -1056,13 +1079,14 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache(10).await;
+        let (_tmp, cache, _) = spawn_cache(10).await;
         cache.prune().await.unwrap();
     }
 
@@ -1071,13 +1095,14 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache(10).await;
+        let (_tmp, cache, _) = spawn_cache(10).await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1105,13 +1130,14 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache(10).await;
+        let (_tmp, cache, _) = spawn_cache(10).await;
 
         // create 20 entries
         for i in 0..20 {
@@ -1149,13 +1175,14 @@ pub mod find_entries_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1204,13 +1231,14 @@ pub mod find_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1252,13 +1280,14 @@ pub mod find_one_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1307,13 +1336,14 @@ pub mod find_one_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1364,13 +1394,14 @@ pub mod find_one_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1418,13 +1449,14 @@ pub mod find_one {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1474,13 +1506,14 @@ pub mod get_dirty_entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
+                miru_agent::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
         >,
         SingleThreadCacheT: SingleThreadCache<String, String>,
     {
-        let (cache, _) = spawn_cache().await;
+        let (_tmp, cache, _) = spawn_cache().await;
 
         // create 10 entries
         for i in 0..10 {

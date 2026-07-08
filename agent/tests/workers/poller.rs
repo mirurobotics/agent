@@ -19,8 +19,8 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_not_in_cooldown() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -102,8 +102,8 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_in_cooldown() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -186,8 +186,8 @@ pub mod run {
 
     #[tokio::test]
     async fn sync_success_event_updates_last_synced_at() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -257,8 +257,8 @@ pub mod run {
 
     #[tokio::test]
     async fn cooldown_end_from_deployment_wait_triggers_sync() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -318,8 +318,8 @@ pub mod run {
 
     #[tokio::test]
     async fn ignored_syncer_events() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())
@@ -380,8 +380,8 @@ pub mod run {
 
     #[tokio::test]
     async fn syncer_cooldown_end_from_sync_failure_event() {
-        let dir = dirs::create_temp("testing").await.unwrap();
-        let layout = Layout::new(dir);
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
 
         let (device_file, _) =
             disk::Device::spawn_with_default(64, layout.device(), Device::default())

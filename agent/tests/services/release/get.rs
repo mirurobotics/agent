@@ -3,7 +3,7 @@ use crate::mocks::backend::{PanicBackend, StubBackend};
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::disk::Releases;
-use miru_agent::filesys::{self, dirs, Overwrite};
+use miru_agent::filesys::{dirs, Overwrite};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::Release;
@@ -13,8 +13,8 @@ use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
 
-async fn setup(name: &str) -> (filesys::Dir, Releases) {
-    let dir = dirs::create_temp(name).await.unwrap();
+async fn setup(name: &str) -> (dirs::TempDir, Releases) {
+    let dir = dirs::temp(name).unwrap();
     let (rls_stor, _) = Releases::spawn(16, dir.file("releases.json"), 1000)
         .await
         .unwrap();

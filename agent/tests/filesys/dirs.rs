@@ -14,7 +14,7 @@ pub mod assert_exists {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         dir.assert_exists().unwrap();
     }
 
@@ -39,7 +39,7 @@ pub mod assert_doesnt_exist {
 
     #[tokio::test]
     async fn failure() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert!(matches!(
             dir.assert_doesnt_exist().unwrap_err(),
             FileSysErr::PathExistsErr { .. }
@@ -52,7 +52,7 @@ pub mod delete {
 
     #[tokio::test]
     async fn exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert!(dir.exists());
         dirs::delete(&dir).await.unwrap();
         assert!(!dir.exists());
@@ -94,7 +94,7 @@ pub mod create_temp_dir {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert!(dir.exists());
         assert!(dir.path().to_str().unwrap().contains("testing"));
     }
@@ -108,7 +108,7 @@ mod create {
 
         #[tokio::test]
         async fn doesnt_exist() {
-            let temp_dir = dirs::create_temp("testing").await.unwrap();
+            let temp_dir = dirs::temp("testing").unwrap();
 
             let subdir = temp_dir.subdir(PathBuf::from("subdir"));
             dirs::create(&subdir).await.unwrap();
@@ -117,7 +117,7 @@ mod create {
 
         #[tokio::test]
         async fn parent_doesnt_exist() {
-            let temp_dir = dirs::create_temp("testing").await.unwrap();
+            let temp_dir = dirs::temp("testing").unwrap();
 
             let subdir = temp_dir.subdir(PathBuf::from("does/not/exist"));
             dirs::create(&subdir).await.unwrap();
@@ -126,7 +126,7 @@ mod create {
 
         #[tokio::test]
         async fn already_exists() {
-            let dir = dirs::create_temp("testing").await.unwrap();
+            let dir = dirs::temp("testing").unwrap();
             dirs::create(&dir).await.unwrap();
             assert!(dir.exists());
         }
@@ -138,7 +138,7 @@ mod create_if_absent {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let temp_dir = dirs::create_temp("testing").await.unwrap();
+        let temp_dir = dirs::temp("testing").unwrap();
 
         let subdir = temp_dir.subdir(PathBuf::from("subdir"));
         dirs::create_if_absent(&subdir).await.unwrap();
@@ -147,7 +147,7 @@ mod create_if_absent {
 
     #[tokio::test]
     async fn exists() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // create some files in the directory to check if they exist afterward
         let file = dir.file("test-file");
@@ -167,13 +167,13 @@ mod subdirs {
 
     #[tokio::test]
     async fn empty() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert_eq!(dirs::subdirs(&dir).await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // create some subdirs
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
@@ -196,13 +196,13 @@ mod list_files {
 
     #[tokio::test]
     async fn empty() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert_eq!(dirs::files(&dir).await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // create some files
         let file1 = dir.file("file1.txt");
@@ -227,13 +227,13 @@ mod is_empty {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert!(dirs::is_empty(&dir).await.unwrap());
     }
 
     #[tokio::test]
     async fn has_files() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test");
         files::write_string(&file, "arglechargle", WriteOptions::default())
             .await
@@ -243,7 +243,7 @@ mod is_empty {
 
     #[tokio::test]
     async fn has_subdirs() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
         dirs::create(&subdir).await.unwrap();
         assert!(!dirs::is_empty(&dir).await.unwrap());
@@ -255,14 +255,14 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn success_empty() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert!(dirs::delete_if_empty_recursive(&dir).await.is_ok());
         assert!(!dir.exists());
     }
 
     #[tokio::test]
     async fn has_files() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test");
         files::write_string(&file, "arglechargle", WriteOptions::default())
             .await
@@ -273,7 +273,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn has_a_non_empty_subdir() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
         dirs::create(&subdir).await.unwrap();
         let file = subdir.file("test");
@@ -286,7 +286,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn has_empty_subdir() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let subdir = dir.subdir(PathBuf::from("test"));
         dirs::create(&subdir).await.unwrap();
         assert!(dirs::delete_if_empty_recursive(&dir).await.is_ok());
@@ -295,7 +295,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn complex_nested_structure_all_empty() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create nested structure: dir/subdir1/subdir2/subdir3
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
@@ -313,7 +313,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn complex_nested_structure_mixed_content() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create nested structure with some files
         let subdir1 = dir.subdir(PathBuf::from("subdir1"));
@@ -340,7 +340,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn multiple_empty_subdirs_at_same_level() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create multiple empty subdirs at the same level
         let subdir1 = dir.subdir(PathBuf::from("empty1"));
@@ -358,7 +358,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn mixed_empty_and_non_empty_subdirs() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create empty subdir
         let empty_subdir = dir.subdir(PathBuf::from("empty"));
@@ -380,7 +380,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn deeply_nested_with_files_at_different_levels() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create structure: dir/level1/level2/level3/level4
         let level1 = dir.subdir(PathBuf::from("level1"));
@@ -417,7 +417,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn empty_subdirs_with_hidden_files() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         let subdir = dir.subdir(PathBuf::from("subdir"));
         dirs::create(&subdir).await.unwrap();
@@ -435,7 +435,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn stress_test_many_nested_directories() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create many nested directories
         let mut current_dir = dir.clone();
@@ -451,7 +451,7 @@ mod delete_if_empty_recursive {
 
     #[tokio::test]
     async fn partial_cleanup_with_remaining_structure() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
 
         // Create structure: dir/branch1/empty1, dir/branch1/empty2, dir/branch2/file
         let branch1 = dir.subdir(PathBuf::from("branch1"));
@@ -495,7 +495,7 @@ mod move_to {
 
     #[tokio::test]
     async fn src_doesnt_exist() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
         let src = base_dir.subdir("src-dir");
         let dest = base_dir.subdir("dest-dir");
 
@@ -520,7 +520,7 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_doesnt_exist() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -552,7 +552,7 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_exists_deny_overwrite() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -575,7 +575,7 @@ mod move_to {
 
     #[tokio::test]
     async fn dest_exists_allow_overwrite() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -619,7 +619,7 @@ mod move_to {
 
     #[tokio::test]
     async fn src_and_dest_are_same_dir() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src_dir = base_dir.subdir("test-dir");
@@ -653,7 +653,7 @@ mod move_to {
 
     #[tokio::test]
     async fn moves_nested_structure() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -724,7 +724,7 @@ mod move_to {
 
     #[tokio::test]
     async fn creates_missing_parent_directory() {
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -751,7 +751,7 @@ mod move_to {
         //   step 1: rename dest -> trash  (succeeds)
         //   step 2: rename src  -> dest   (fails — src missing)
         //   rollback: rename trash -> dest (restores original dest)
-        let base_dir = dirs::create_temp("testing").await.unwrap();
+        let base_dir = dirs::temp("testing").unwrap();
 
         // source directory
         let src = base_dir.subdir("src-dir");
@@ -787,7 +787,7 @@ pub mod set_permissions {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let target = dir.subdir("nonexistent-dir");
         let permissions = std::fs::Permissions::from_mode(0o755);
 
@@ -802,7 +802,7 @@ pub mod set_permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn basic_permissions() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let target = dir.subdir("test-dir");
         dirs::create(&target).await.unwrap();
 
@@ -829,7 +829,7 @@ pub mod set_permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn all_permission_combinations() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let target = dir.subdir("test-dir");
         dirs::create(&target).await.unwrap();
 
@@ -858,7 +858,7 @@ pub mod permissions {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let target = dir.subdir("nonexistent-dir");
 
         assert!(matches!(
@@ -870,7 +870,7 @@ pub mod permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn returns_current_permissions() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         let target = dir.subdir("test-dir");
         dirs::create(&target).await.unwrap();
 

@@ -38,10 +38,10 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
 
 #[tokio::test]
 async fn invalid_app_state_initialization() {
-    let dir = dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::temp("testing").unwrap();
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.to_dir()),
             ..Default::default()
         },
         ..Default::default()
@@ -60,11 +60,11 @@ async fn invalid_app_state_initialization() {
 #[serial]
 #[tokio::test]
 async fn max_runtime_reached() {
-    let dir = dirs::create_temp("testing").await.unwrap();
-    prepare_valid_server_storage(dir.clone()).await;
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.to_dir()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -93,12 +93,12 @@ async fn max_runtime_reached() {
 #[serial]
 #[tokio::test]
 async fn is_persistent() {
-    let dir = dirs::create_temp("testing").await.unwrap();
+    let dir = dirs::temp("testing").unwrap();
     let max_runtime = Duration::from_millis(100);
-    prepare_valid_server_storage(dir.clone()).await;
+    prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.to_dir()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -127,11 +127,11 @@ async fn is_persistent() {
 #[serial]
 #[tokio::test]
 async fn idle_timeout_reached() {
-    let dir = dirs::create_temp("testing").await.unwrap();
-    prepare_valid_server_storage(dir.clone()).await;
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.to_dir()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -162,15 +162,15 @@ async fn idle_timeout_reached() {
 #[serial]
 #[tokio::test]
 async fn shutdown_signal_received() {
-    let dir = dirs::create_temp("testing").await.unwrap();
-    prepare_valid_server_storage(dir.clone()).await;
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         lifecycle: LifecycleOptions {
             is_persistent: true,
             ..Default::default()
         },
         storage: StorageOptions {
-            layout: Layout::new(dir),
+            layout: Layout::new(dir.to_dir()),
             ..Default::default()
         },
         server: Options {

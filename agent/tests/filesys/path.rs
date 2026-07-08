@@ -13,7 +13,7 @@ pub mod exists {
 
     #[tokio::test]
     async fn existing_path() {
-        let dir = dirs::create_temp("testing").await.unwrap();
+        let dir = dirs::temp("testing").unwrap();
         assert!(dir.exists());
     }
 

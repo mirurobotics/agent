@@ -3,7 +3,7 @@ use crate::mocks::backend::{PanicBackend, StubBackend};
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::disk::{Deployments, Releases};
-use miru_agent::filesys::{self, dirs, Overwrite};
+use miru_agent::filesys::{dirs, Overwrite};
 use miru_agent::http::errors::{HTTPErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget, Release};
@@ -14,8 +14,8 @@ use miru_agent::sync::SyncErr;
 // external crates
 use chrono::{DateTime, Utc};
 
-async fn setup(name: &str) -> (filesys::Dir, Deployments, Releases) {
-    let dir = dirs::create_temp(name).await.unwrap();
+async fn setup(name: &str) -> (dirs::TempDir, Deployments, Releases) {
+    let dir = dirs::temp(name).unwrap();
     let (dpl_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
         .await
         .unwrap();

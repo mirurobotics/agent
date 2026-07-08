@@ -114,7 +114,7 @@ pub fn spawn(
 // ========================= FIXTURE ========================= //
 
 struct Fixture {
-    _dir: filesys::Dir,
+    _dir: dirs::TempDir,
     http_client: Arc<MockClient>,
     storage: Arc<Storage>,
     syncer: Syncer,
@@ -136,12 +136,12 @@ impl Fixture {
     }
 
     async fn new_with_backoff(name: &str, backoff: cooldown::Backoff) -> Self {
-        let dir = dirs::create_temp(name).await.unwrap();
+        let dir = dirs::temp(name).unwrap();
         let auth_client = Arc::new(MockClient::default());
-        let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
+        let (token_mngr, _) = create_token_manager(dir.dir(), auth_client.clone()).await;
         let token_mngr = Arc::new(token_mngr);
         let http_client = Arc::new(MockClient::default());
-        let storage = Arc::new(create_storage(&dir).await);
+        let storage = Arc::new(create_storage(dir.dir()).await);
 
         let log_file = dir.file("events.jsonl");
         let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
@@ -230,11 +230,11 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn shutdown() {
-        let dir = dirs::create_temp("spawn").await.unwrap();
+        let dir = dirs::temp("spawn").unwrap();
         let auth_client = Arc::new(MockClient::default());
-        let (token_mngr, _) = create_token_manager(&dir, auth_client.clone()).await;
+        let (token_mngr, _) = create_token_manager(dir.dir(), auth_client.clone()).await;
 
-        let storage = Arc::new(create_storage(&dir).await);
+        let storage = Arc::new(create_storage(dir.dir()).await);
 
         let log_file = dir.file("events.jsonl");
         let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
