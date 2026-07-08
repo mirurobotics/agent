@@ -3,7 +3,7 @@ use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
 use miru_agent::upload::{EnqueueOutcome, PendingJob, UploadErr, UploadJob, UploadQueue};
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 async fn make_file(dir: &filesys::Dir, name: &str, contents: &str) -> File {
     let file = dir.file(name);
@@ -96,7 +96,9 @@ mod enqueue {
 
     #[tokio::test]
     async fn changed_content_makes_job_stale() {
-        let dir = dirs::create_temp("upload_queue_stale_content").await.unwrap();
+        let dir = dirs::create_temp("upload_queue_stale_content")
+            .await
+            .unwrap();
         let file = make_file(&dir, "a.log", "original").await;
         let mut queue = UploadQueue::new(1);
         let job = make_job(&file).await;
@@ -119,8 +121,29 @@ mod enqueue {
     }
 
     #[tokio::test]
+    async fn changed_mtime_makes_job_stale() {
+        let dir = dirs::create_temp("upload_queue_stale_mtime").await.unwrap();
+        let file = make_file(&dir, "a.log", "contents a").await;
+        let mut queue = UploadQueue::new(1);
+        let mut job = make_job(&file).await;
+        // lie about the recorded mtime so the file appears rewritten
+        job.mtime += Duration::seconds(1);
+        let key = job.dedup_key();
+        queue.enqueue(job).await.unwrap();
+
+        let other = make_file(&dir, "b.log", "other contents").await;
+        let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
+
+        assert_eq!(outcome, EnqueueOutcome::Enqueued);
+        assert_eq!(queue.len(), 1);
+        assert!(!queue.contains(&key));
+    }
+
+    #[tokio::test]
     async fn missing_file_makes_job_stale() {
-        let dir = dirs::create_temp("upload_queue_stale_missing").await.unwrap();
+        let dir = dirs::create_temp("upload_queue_stale_missing")
+            .await
+            .unwrap();
         let file = make_file(&dir, "a.log", "original").await;
         let mut queue = UploadQueue::new(1);
         let job = make_job(&file).await;
@@ -134,6 +157,21 @@ mod enqueue {
         assert_eq!(outcome, EnqueueOutcome::Enqueued);
         assert_eq!(queue.len(), 1);
         assert!(!queue.contains(&key));
+    }
+}
+
+mod is_empty {
+    use super::*;
+
+    #[tokio::test]
+    async fn reflects_queue_contents() {
+        let dir = dirs::create_temp("upload_queue_is_empty").await.unwrap();
+        let file = make_file(&dir, "a.log", "contents a").await;
+        let mut queue = UploadQueue::new(4);
+        assert!(queue.is_empty());
+
+        queue.enqueue(make_job(&file).await).await.unwrap();
+        assert!(!queue.is_empty());
     }
 }
 

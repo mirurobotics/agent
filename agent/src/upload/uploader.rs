@@ -6,10 +6,12 @@ use std::time::Duration;
 // internal crates
 use crate::cooldown;
 use crate::trace;
-use crate::upload::errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr};
-use crate::upload::executor::UploadExecutor;
-use crate::upload::job::{DedupKey, UploadJob};
-use crate::upload::queue::{EnqueueOutcome, PendingJob, UploadQueue};
+use crate::upload::{
+    errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
+    executor::UploadExecutor,
+    job::{DedupKey, UploadJob},
+    queue::{EnqueueOutcome, PendingJob, UploadQueue},
+};
 
 // external crates
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -58,6 +60,8 @@ impl Default for UploaderOptions {
 
 // =================================== TRAIT ======================================= //
 #[allow(async_fn_in_trait)]
+// an async, actor-round-tripping is_empty would be dead weight next to len()
+#[allow(clippy::len_without_is_empty)]
 pub trait UploaderExt: Send + Sync {
     /// Push a job at the tail of the queue. Returns `Ok(Duplicate)` without
     /// enqueuing when a key-equal job is already queued or in flight.

@@ -1,6 +1,5 @@
 // internal crates
-use crate::upload::errors::UploadErr;
-use crate::upload::job::UploadJob;
+use crate::upload::{errors::UploadErr, job::UploadJob};
 
 // external crates
 use tracing::info;
