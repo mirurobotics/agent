@@ -11,7 +11,7 @@ use crate::filesys::{
 use crate::trace;
 
 /// File struct for interacting with files
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct File {
     path: PathBuf,
 }
