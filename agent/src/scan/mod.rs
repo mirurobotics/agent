@@ -3,5 +3,9 @@ pub mod errors;
 // into a consumer in this crate; the scanner that uses them lands separately.
 #[allow(dead_code)]
 pub(crate) mod state;
+// The collection scanner is exercised by its own inline tests but is not yet
+// wired into a consumer in this crate; the parent scanner actor lands separately.
+#[allow(dead_code)]
+pub(crate) mod collection;
 
 pub use self::errors::ScanErr;
