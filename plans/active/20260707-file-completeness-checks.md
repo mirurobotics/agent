@@ -29,8 +29,8 @@ There is no uploader yet; this lands as a self-contained module with no call sit
 - [x] M3 (source, 2026-07-07): tail/head-marker formats (MCAP, Parquet, PNG, JPEG, tar, ZIP, gzip) implemented; committed. Remaining: tests.
 - [x] M4 (source, 2026-07-07): header-parse formats (ROS1 bag, SQLite, HDF5, AVI) implemented; committed. Remaining: tests.
 - [x] M5 (source, 2026-07-07): bounded-walk formats (MP4/MOV, MKV/WebM, zstd) implemented; committed. Remaining: tests.
-- [ ] Consolidated test pass: all M1–M5 tests (`agent/tests/filesys/files.rs` additions, new `agent/tests/fileformats/`), registered in `agent/tests/mod.rs`; committed.
-- [ ] M6: coverage gate finalized, lint clean, `./scripts/preflight.sh` prints `Preflight clean`; committed.
+- [x] Consolidated test pass (2026-07-07): all M1–M5 tests (178 new: 163 in `agent/tests/fileformats/`, 15 in `agent/tests/filesys/files.rs` incl. two directory read-error tests), registered in `agent/tests/mod.rs`; full suite 1539 passed / 0 failed; committed.
+- [x] M6 — coverage (2026-07-07): `agent/src/fileformats/.covgate` raised 50.00 → 96.92 (measured); `./scripts/covgate.sh` all modules pass; `Cargo.lock` refreshed via `./scripts/update-deps.sh`; committed. Remaining: preflight loop until `Preflight clean`.
 
 Execution note (2026-07-07): work is executed via the implement-skill pipeline — all M1–M5 source landed in one pass (two atomic commits: filesys helpers, fileformats module), with tests following as a consolidated pass, then M6 gates. Milestone content is unchanged; only commit grouping differs from the original per-milestone sequencing.
 
@@ -38,10 +38,10 @@ Use timestamps when completing steps. Split partially completed work into "done"
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
-
-- Observation: …
-  Evidence: …
+- Observation: The new `read_tail`/`read_range` helpers initially dropped the `filesys` module below its own coverage gate (81.46% vs required 81.69%) — the seek/read error closures in the helpers were uncovered.
+  Evidence: first `./scripts/covgate.sh` run after the test pass failed only on `filesys`. Fixed by adding two tests that read a directory path (open succeeds on Linux, `read` fails EISDIR), covering the shared `read_at` read-error path; `filesys` now measures 81.94%. No gate was lowered.
+- Observation: `fileformats` measured 96.92% region coverage on the first covgate run, above the plan's ≥ 90 target; the residue is defensive guards documented as intentionally uncovered in the test-analysis notes (e.g. unreachable short-read arms behind size preconditions).
+  Evidence: `./scripts/covgate.sh` output `fileformats: 96.92%`.
 
 ## Decision Log
 
