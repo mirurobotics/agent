@@ -50,7 +50,7 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ### The repo in one paragraph
 
-This repo is a Cargo workspace. The main crate is `miru-agent` in `agent/` (source in `agent/src/`, integration tests in `agent/tests/`, config in `agent/Cargo.toml`). `agent/src/lib.rs` lists all public modules alphabetically. Test files in `agent/tests/` mirror the `agent/src/` module structure and are registered in `agent/tests/mod.rs`. Shared test mocks live in `agent/tests/mocks/` (registered in `agent/tests/mocks/mod.rs`). Every source module directory carries a `.covgate` file containing a single line with a minimum line-coverage percentage (e.g. `93.06`), enforced by `./scripts/covgate.sh`. Repo conventions live in `AGENTS.md`; read its "Import ordering" and "Error handling" sections if anything below is unclear.
+This repo is a Cargo workspace. The main crate is `miru-agent` in `agent/` (source in `agent/src/`, integration tests in `agent/tests/`, config in `agent/Cargo.toml`). `agent/src/lib.rs` lists all public modules alphabetically. Test files in `agent/tests/` mirror the `agent/src/` module structure and are registered in `agent/tests/mod.rs`. Shared test mocks live in `agent/tests/mocks/` (registered in `agent/tests/mocks/mod.rs`). Every source module directory carries a `.covgate` file containing a single line with a minimum region-coverage percentage (cargo llvm-cov region coverage — see `scripts/lib/covgate.sh`) (e.g. `93.06`), enforced by `./scripts/covgate.sh`. Repo conventions live in `AGENTS.md`; read its "Import ordering" and "Error handling" sections if anything below is unclear.
 
 Key commands, all run from the repo root `/home/ben/miru/workbench4/repos/agent`:
 
@@ -103,7 +103,7 @@ These were decided before authoring; implement them as written.
             release_id: String,
         }
 
-7. Executor seam: `pub trait UploadExecutor: Send + Sync { async fn upload(&self, job: &UploadJob) -> Result<(), UploadErr>; }` using the repo's `#[allow(async_fn_in_trait)]` style. This PR ships a placeholder `LogExecutor` (logs the job at `info!`, returns `Ok`). Tests use a scripted mock executor.
+7. Executor seam: the trait is declared in the repo's `http::ClientI` RPITIT style (`agent/src/http/client.rs` lines 30–38): `pub trait UploadExecutor: Send + Sync { fn upload(&self, job: &UploadJob) -> impl Future<Output = Result<(), UploadErr>> + Send; }`. The explicit `+ Send` on the returned future is what lets the generic `Uploader::spawn` hand `worker.run()` to `tokio::spawn` (exactly as `ClientI`'s `+ Send` does for `TokenManager::spawn`); plain `#[allow(async_fn_in_trait)]` leaves the future without a Send bound and fails E0277 at `tokio::spawn` in generic code — that AFIT style is reserved for handle-side ext traits (`TokenManagerExt`, `UploaderExt`), which are awaited at concrete call sites. Implementations still write `async fn upload(...)`, as `impl ClientI for Client` does (`client.rs:45`). This PR ships a placeholder `LogExecutor` (logs the job at `info!`, returns `Ok`). Tests use a scripted mock executor.
 8. The actor mirrors the TokenManager pattern (spawn returning `(handle, JoinHandle<()>)`, `Command` enum with `oneshot` respond_to channels, public `UploaderExt: Send + Sync` trait) with one critical difference spelled out under "The run loop" in Plan of Work: the run loop interleaves command intake with the in-flight upload using `tokio::select!`, so `enqueue`/`shutdown` stay responsive during a long upload. On shutdown the in-flight upload future is dropped (cancelled); future real executors must be cancel-safe (an interrupted transfer is re-driven later via scanner re-observation and backend digest dedup — document this on the trait). A `sleep_fn` (workers-style `Fn(Duration) -> Fut`) is injected into the actor for backoff so tests never real-sleep.
 
 ### Existing building blocks (verified paths and signatures)
@@ -157,7 +157,7 @@ Naming check — there is no existing `upload` module. `agent/src/models/upload_
 
 ## Plan of Work
 
-New files: `agent/src/upload/{mod.rs, errors.rs, job.rs, queue.rs, executor.rs, uploader.rs, .covgate}` and `agent/tests/upload/{mod.rs, job.rs, queue.rs, uploader.rs}` plus `agent/tests/mocks/upload_executor.rs`. Edits: `agent/src/lib.rs`, `agent/tests/mod.rs`, `agent/tests/mocks/mod.rs`. The five milestones below each end in one commit.
+New files: `agent/src/upload/{mod.rs, errors.rs, job.rs, queue.rs, executor.rs, uploader.rs, .covgate}` and `agent/tests/upload/{mod.rs, job.rs, queue.rs, executor.rs, uploader.rs}` plus `agent/tests/mocks/upload_executor.rs`. Edits: `agent/src/lib.rs`, `agent/tests/mod.rs`, `agent/tests/mocks/mod.rs`. The five milestones below each end in one commit.
 
 ### Milestone 1 — scaffold, errors, job type, registration
 
@@ -205,7 +205,7 @@ New files: `agent/src/upload/{mod.rs, errors.rs, job.rs, queue.rs, executor.rs, 
 
 with `impl UploadJob { pub fn dedup_key(&self) -> DedupKey { ... } }` cloning `self.file.path()` (requires `use crate::filesys::PathExt;`). Document on the struct that `digest` is the `files::hash` format `"sha256:<hex>"` and `mtime` must come from `DateTime::<Utc>::from(files::last_modified(...))`.
 
-Registration: add `pub mod upload;` to `agent/src/lib.rs` alphabetically (between `sync` and `telemetry`). Create `agent/src/upload/.covgate` containing the single line `0.00` (provisional; ratcheted in Milestone 5 — a real floor now would fail covgate before tests exist). Create `agent/tests/upload/mod.rs` containing `pub mod job;` and add `pub mod upload;` to `agent/tests/mod.rs` alphabetically (between `test_utils` and `version` — the tests list also contains `mocks` and `test_utils`, keep it alphabetical). Create `agent/tests/upload/job.rs` with a `mod dedup_key` block: same-key jobs produce equal `DedupKey`s; changing any of rule id, path, or digest produces unequal keys; equal size/mtime alone do not make keys equal.
+Registration: add `pub mod upload;` to `agent/src/lib.rs` alphabetically (between `telemetry` and `version`). Create `agent/src/upload/.covgate` containing the single line `0.00` (provisional; ratcheted in Milestone 5 — a real floor now would fail covgate before tests exist). Create `agent/tests/upload/mod.rs` containing `pub mod job;` and add `pub mod upload;` to `agent/tests/mod.rs` alphabetically (between `test_utils` and `version` — the tests list also contains `mocks` and `test_utils`, keep it alphabetical). Create `agent/tests/upload/job.rs` with a `mod dedup_key` block: same-key jobs produce equal `DedupKey`s; changing any of rule id, path, or digest produces unequal keys; equal size/mtime alone do not make keys equal.
 
 ### Milestone 2 — the queue
 
@@ -246,9 +246,11 @@ Tests in `agent/tests/upload/queue.rs` (register `pub mod queue;` in `agent/test
 
 `agent/src/upload/executor.rs`:
 
-    #[allow(async_fn_in_trait)]
     pub trait UploadExecutor: Send + Sync {
-        async fn upload(&self, job: &UploadJob) -> Result<(), UploadErr>;
+        fn upload(
+            &self,
+            job: &UploadJob,
+        ) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
     }
 
     pub struct LogExecutor;
@@ -278,9 +280,9 @@ Mock in `agent/tests/mocks/upload_executor.rs` (register `pub mod upload_executo
         started_tx: tokio::sync::mpsc::UnboundedSender<()>,
     }
 
-`MockUploadExecutor::new() -> (Arc<Self>, UnboundedReceiver<()>)` returns the started-notification receiver to the test. `upload` records the job in `calls`, pops the next `MockStep` (treat an empty script as `Ok`), drops the mutex guard, sends `()` on `started_tx`, then: `Ok` returns `Ok(())`; `Err` returns a scripted `UploadErr::ExecutorErr` built from `Box::new(std::io::Error::other("scripted failure"))` and `miru_agent::trace!()`; `Hang(rx)` awaits `rx` and returns the sent result (or `Ok(())` if the sender was dropped). `Hang` doubles as a test-controlled result: the test holds the `oneshot::Sender`, knows the upload started via the notification channel, and releases it with `Ok` or `Err` when ready. Never hold a `std::sync::Mutex` guard across an await.
+`MockUploadExecutor::new() -> (Arc<Self>, UnboundedReceiver<()>)` returns the started-notification receiver to the test. `upload` records the job in `calls`, pops the next `MockStep` (treat an empty script as `Ok`), drops the mutex guard, sends `()` on `started_tx`, then: `Ok` returns `Ok(())`; `Err` returns a scripted `UploadErr::ExecutorErr` built from `Box::new(std::io::Error::other("scripted failure"))` and `miru_agent::trace!()`; `Hang(rx)` awaits `rx` and returns the sent result (or `Ok(())` if the sender was dropped). `Hang` doubles as a test-controlled result: the test holds the `oneshot::Sender`, knows the upload started via the notification channel, and releases it with `Ok` or `Err` when ready. The mock implements the trait with a plain `async fn upload`, and its future is `Send` because no `std::sync::Mutex` guard is held across an await — never hold one across an await.
 
-Milestone tests: in `agent/tests/upload/uploader.rs` (created now, registered as `pub mod uploader;` in `agent/tests/upload/mod.rs`), a `mod executor` block covering `LogExecutor` returning `Ok` and the mock following its script (Ok, Err, empty-script default).
+Milestone tests: tests live in `agent/tests/upload/executor.rs` (registered as `pub mod executor;` in `agent/tests/upload/mod.rs`, mirroring `agent/src/upload/executor.rs`), covering `LogExecutor` returning `Ok` and the mock following its script (Ok, Err, empty-script default).
 
 ### Milestone 4 — the Uploader actor
 
@@ -366,11 +368,11 @@ Worker state: `receiver`, `queue: UploadQueue`, `executor: Arc<ExecutorT>`, `opt
 
 Update `agent/src/upload/mod.rs`: add `pub mod uploader;` and `pub use self::uploader::{Uploader, UploaderExt, UploaderOptions};`.
 
-Tests fill out `agent/tests/upload/uploader.rs` using the mock, the started-notification channel for deterministic sequencing, no-op sleeps (`|_: Duration| async {}`) except in the backoff test (a closure pushing each `Duration` into an `Arc<std::sync::Mutex<Vec<Duration>>>` before returning an immediately-ready future), and `tokio::time::timeout` to fail fast instead of hanging. Test list in Validation and Acceptance. Tests use only temp files (`dirs::create_temp`), so no `#[serial]` is needed.
+Tests live in a new `agent/tests/upload/uploader.rs` (registered as `pub mod uploader;` in `agent/tests/upload/mod.rs`) using the mock, the started-notification channel for deterministic sequencing, no-op sleeps (`|_: Duration| async {}`) except in the backoff test (a closure pushing each `Duration` into an `Arc<std::sync::Mutex<Vec<Duration>>>` before returning an immediately-ready future), and `tokio::time::timeout` to fail fast instead of hanging. Test list in Validation and Acceptance. Tests use only temp files (`dirs::create_temp`), so no `#[serial]` is needed.
 
 ### Milestone 5 — coverage ratchet, preflight, bookkeeping
 
-Measure coverage, replace the provisional `0.00` in `agent/src/upload/.covgate` with a floor just under the measured value (e.g. measured 91.4 → set `91.00`), run the full preflight, update this plan's living sections, and move the plan file to `plans/completed/`.
+Measure coverage, replace the provisional `0.00` in `agent/src/upload/.covgate` with a floor just under the measured value (e.g. measured 91.4 → set `91.00`), run the full preflight, update this plan's living sections, and move the plan file from `plans/active/` to `plans/completed/`.
 
 ## Concrete Steps
 
@@ -379,10 +381,16 @@ All commands run from the repo root `/home/ben/miru/workbench4/repos/agent` unle
     git status --short --branch
     # expect: ## feat/upload-queue-module
 
+Then promote this plan to active before implementing (plans follow the backlog → active → completed lifecycle; `plans/active/` does not yet exist in the repo):
+
+    mkdir -p plans/active
+    git mv plans/backlog/20260708-upload-queue-module.md plans/active/
+    git commit -m "docs(plans): promote upload-queue-module plan to active"
+
 ### Milestone 1
 
 1. Create `agent/src/upload/mod.rs`, `agent/src/upload/errors.rs`, `agent/src/upload/job.rs`, and `agent/src/upload/.covgate` (single line `0.00`) as described in Plan of Work.
-2. Edit `agent/src/lib.rs`: insert `pub mod upload;` between `pub mod sync;` and `pub mod telemetry;`.
+2. Edit `agent/src/lib.rs`: insert `pub mod upload;` between `pub mod telemetry;` and `pub mod version;`.
 3. Create `agent/tests/upload/mod.rs` (`pub mod job;`) and `agent/tests/upload/job.rs`; edit `agent/tests/mod.rs` to add `pub mod upload;` alphabetically.
 4. Run the tests:
 
@@ -408,7 +416,7 @@ All commands run from the repo root `/home/ben/miru/workbench4/repos/agent` unle
 
 1. Create `agent/src/upload/executor.rs`; add `pub mod executor;` plus re-exports to `agent/src/upload/mod.rs`.
 2. Create `agent/tests/mocks/upload_executor.rs`; add `pub mod upload_executor;` to `agent/tests/mocks/mod.rs` alphabetically.
-3. Create `agent/tests/upload/uploader.rs` with the `mod executor` tests; add `pub mod uploader;` to `agent/tests/upload/mod.rs`.
+3. Create `agent/tests/upload/executor.rs` with the executor tests; add `pub mod executor;` to `agent/tests/upload/mod.rs`.
 4. Run `./scripts/test.sh` — expect all tests pass.
 5. Commit:
 
@@ -418,7 +426,7 @@ All commands run from the repo root `/home/ben/miru/workbench4/repos/agent` unle
 ### Milestone 4
 
 1. Create `agent/src/upload/uploader.rs`; add `pub mod uploader;` plus re-exports to `agent/src/upload/mod.rs`.
-2. Extend `agent/tests/upload/uploader.rs` with the actor tests from Validation and Acceptance.
+2. Create `agent/tests/upload/uploader.rs` with the actor tests from Validation and Acceptance; add `pub mod uploader;` to `agent/tests/upload/mod.rs`.
 3. Run `./scripts/test.sh` — expect all tests pass; none of the new tests real-sleep, so the suite stays fast.
 4. Commit:
 
@@ -443,7 +451,7 @@ All commands run from the repo root `/home/ben/miru/workbench4/repos/agent` unle
 
 3. Update this plan: check off Progress items with timestamps, fill Surprises & Discoveries, Decision Log, and Outcomes & Retrospective; then move the plan file:
 
-        git mv plans/backlog/20260708-upload-queue-module.md plans/completed/
+        git mv plans/active/20260708-upload-queue-module.md plans/completed/
 
 4. Commit:
 
@@ -472,11 +480,13 @@ All validation is behavioral, via `./scripts/test.sh` from the repo root. Expect
 - `mod requeue`:
   - `preserves_attempts_and_appends_at_tail`: requeue a `PendingJob { attempts: 3 }` behind an existing job; pops return the other job first, then the requeued one with `attempts == 3`.
 
+`agent/tests/upload/executor.rs`:
+
+- `log_executor_returns_ok`: `LogExecutor.upload(&job)` returns `Ok`.
+- `mock_follows_script`: mock scripted `[Ok, Err]` returns `Ok` then `Err(ExecutorErr)`, records both calls; an empty script defaults to `Ok`.
+
 `agent/tests/upload/uploader.rs`:
 
-- `mod executor`:
-  - `log_executor_returns_ok`: `LogExecutor.upload(&job)` returns `Ok`.
-  - `mock_follows_script`: mock scripted `[Ok, Err]` returns `Ok` then `Err(ExecutorErr)`, records both calls; an empty script defaults to `Ok`.
 - `mod uploader` (nested per-behavior mods or flat, matching hub.rs style):
   - `processes_enqueued_job`: enqueue one job → `Ok(Enqueued)`; await the started notification; mock recorded exactly that job; `len()` returns 0 afterwards.
   - `duplicate_while_in_flight_returns_duplicate`: script `Hang`; enqueue job A; await started; enqueue key-equal A' → `Ok(Duplicate)`; release the hang with `Ok`; shutdown; mock recorded A exactly once.
