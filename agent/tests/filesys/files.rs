@@ -1495,6 +1495,18 @@ pub mod read_tail {
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
+
+    #[tokio::test]
+    async fn read_error_on_directory() {
+        // opening a directory read-only succeeds on linux, but reading it
+        // fails (EISDIR), exercising the read-error path
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = filesys::File::new(dir.path());
+        assert!(matches!(
+            files::read_tail(&file, 4).await.unwrap_err(),
+            FileSysErr::ReadFileErr { .. }
+        ));
+    }
 }
 
 pub mod read_range {
@@ -1555,6 +1567,18 @@ pub mod read_range {
         assert!(matches!(
             files::read_range(&file, 0, 4).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn read_error_on_directory() {
+        // opening a directory read-only succeeds on linux, but reading it
+        // fails (EISDIR), exercising the read-error path
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let file = filesys::File::new(dir.path());
+        assert!(matches!(
+            files::read_range(&file, 0, 4).await.unwrap_err(),
+            FileSysErr::ReadFileErr { .. }
         ));
     }
 }
