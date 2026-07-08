@@ -796,5 +796,36 @@ mod tests {
             assert_eq!(second.len(), 1);
             assert_eq!(scanner.ledger_count(), 1);
         }
+
+        // CollectionScanner::prune_ledger delegates to State::prune_ledger: a
+        // cutoff after the entry's first_observed_at drops it. Seed the ledger
+        // through the real discover -> advance clock -> evaluate path first.
+        #[tokio::test]
+        async fn prune_ledger_drops_old_entry() {
+            let dir = crate::filesys::dirs::temp("testing").unwrap();
+            let file = write(&dir, "prune.mcap", b"aaaa");
+            let mut scanner =
+                CollectionScanner::new(config("d", "coll", &glob_for(&dir), 10), ts(1000))
+                    .await
+                    .unwrap();
+
+            // the file appears after creation => a candidate first observed at ts(1000).
+            std::fs::write(file.path(), b"bbbb").unwrap();
+            let discovered = scanner.discover_candidates(ts(1000)).await.unwrap();
+            assert_eq!(discovered.len(), 1);
+
+            // advance past the stability window so the candidate lands in the ledger.
+            let stable = scanner.evaluate_candidates(ts(1010)).await.unwrap();
+            assert_eq!(stable.len(), 1);
+            assert_eq!(scanner.ledger_count(), 1);
+
+            // a cutoff at/before first_observed_at (>=) retains the entry.
+            scanner.prune_ledger(ts(1000)).unwrap();
+            assert_eq!(scanner.ledger_count(), 1);
+
+            // a cutoff strictly after first_observed_at drops it.
+            scanner.prune_ledger(ts(1001)).unwrap();
+            assert_eq!(scanner.ledger_count(), 0);
+        }
     }
 }
