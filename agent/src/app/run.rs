@@ -517,7 +517,12 @@ impl ShutdownManager {
 
 #[cfg(test)]
 mod tests {
+    // internal crates
     use super::*;
+    use crate::deploy::fsm;
+    use crate::disk::{Capacities, Layout};
+    use crate::filesys::{dirs, files, WriteOptions};
+    use crate::models::Device;
 
     fn new_shutdown_manager() -> ShutdownManager {
         let (shutdown_tx, _) = broadcast::channel(1);
@@ -526,6 +531,47 @@ mod tests {
 
     fn spawn_immediate_handle() -> tokio::task::JoinHandle<()> {
         tokio::spawn(async {})
+    }
+
+    fn spawn_panicking_handle() -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async { panic!("boom") })
+    }
+
+    fn sentinel_err() -> ServerErr {
+        ServerErr::ShutdownMngrDuplicateArgErr(ShutdownMngrDuplicateArgErr {
+            arg_name: "sentinel".to_string(),
+            trace: trace!(),
+        })
+    }
+
+    async fn init_app_state() -> (
+        dirs::TempDir,
+        Arc<AppState>,
+        Pin<Box<dyn Future<Output = ()> + Send>>,
+    ) {
+        let tmp = dirs::temp("shutdown_impl_tests").unwrap();
+        let layout = Layout::new(tmp.to_dir());
+
+        let opts = WriteOptions::default();
+        files::write_string(&layout.auth().private_key(), "test", opts)
+            .await
+            .unwrap();
+        files::write_string(&layout.auth().public_key(), "test", opts)
+            .await
+            .unwrap();
+        files::write_json(&layout.device(), &Device::default(), opts)
+            .await
+            .unwrap();
+
+        let (state, state_handle) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+        )
+        .await
+        .unwrap();
+        (tmp, Arc::new(state), Box::pin(state_handle))
     }
 
     #[tokio::test]
@@ -610,5 +656,143 @@ mod tests {
             }
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }
+    }
+
+    // ============================= shutdown_impl ============================= //
+
+    #[tokio::test]
+    async fn shutdown_impl_runs_app_state_shutdown_after_worker_panic() {
+        let mut mgr = new_shutdown_manager();
+        mgr.register_handle(
+            |mgr| &mut mgr.token_refresh_worker_handle,
+            "token_refresh_handle",
+            spawn_panicking_handle(),
+        )
+        .unwrap();
+        mgr.register_handle(
+            |mgr| &mut mgr.poller_worker_handle,
+            "poller_handle",
+            spawn_immediate_handle(),
+        )
+        .unwrap();
+        mgr.register_handle(
+            |mgr| &mut mgr.mqtt_worker_handle,
+            "mqtt_handle",
+            spawn_immediate_handle(),
+        )
+        .unwrap();
+        mgr.with_socket_server_handle(tokio::spawn(async { Ok(()) }))
+            .unwrap();
+        let (_tmp, state, state_handle) = init_app_state().await;
+        mgr.with_app_state(state, state_handle).unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("worker panic should surface");
+
+        // every slot drained proves all five steps were attempted despite the
+        // token refresh worker panicking in step 1
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.token_refresh_worker_handle.is_none());
+        assert!(mgr.poller_worker_handle.is_none());
+        assert!(mgr.mqtt_worker_handle.is_none());
+        assert!(mgr.socket_server_handle.is_none());
+        assert!(mgr.app_state.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_returns_first_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.register_handle(
+            |mgr| &mut mgr.poller_worker_handle,
+            "poller_handle",
+            spawn_panicking_handle(),
+        )
+        .unwrap();
+        mgr.register_handle(
+            |mgr| &mut mgr.mqtt_worker_handle,
+            "mqtt_handle",
+            spawn_panicking_handle(),
+        )
+        .unwrap();
+        mgr.with_socket_server_handle(tokio::spawn(async { Err(sentinel_err()) }))
+            .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("poller panic should surface");
+
+        // the poller's join error (step 2) wins over the mqtt join error
+        // (step 3) and the socket server's sentinel error (step 4)
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.socket_server_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_returns_socket_server_inner_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.with_socket_server_handle(tokio::spawn(async { Err(sentinel_err()) }))
+            .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("socket server error should surface");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "sentinel");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_maps_socket_server_join_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.with_socket_server_handle(tokio::spawn(async { panic!("boom") }))
+            .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("socket server panic should surface");
+
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.socket_server_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_ok_when_all_steps_succeed() {
+        let mut mgr = new_shutdown_manager();
+        mgr.register_handle(
+            |mgr| &mut mgr.token_refresh_worker_handle,
+            "token_refresh_handle",
+            spawn_immediate_handle(),
+        )
+        .unwrap();
+        mgr.register_handle(
+            |mgr| &mut mgr.poller_worker_handle,
+            "poller_handle",
+            spawn_immediate_handle(),
+        )
+        .unwrap();
+        mgr.register_handle(
+            |mgr| &mut mgr.mqtt_worker_handle,
+            "mqtt_handle",
+            spawn_immediate_handle(),
+        )
+        .unwrap();
+        mgr.with_socket_server_handle(tokio::spawn(async { Ok(()) }))
+            .unwrap();
+
+        mgr.shutdown_impl().await.unwrap();
+
+        assert!(mgr.token_refresh_worker_handle.is_none());
+        assert!(mgr.poller_worker_handle.is_none());
+        assert!(mgr.mqtt_worker_handle.is_none());
+        assert!(mgr.socket_server_handle.is_none());
     }
 }
