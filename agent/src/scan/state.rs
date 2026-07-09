@@ -59,6 +59,45 @@ impl State {
         preexisting.equal_metadata(obs)
     }
 
+    pub(crate) fn is_latest_ledger_entry(&self, obs: &Observation) -> bool {
+        let stable_files = if let Some(ledger) = self.ledger.get(&obs.file) {
+            ledger
+        } else {
+            return false;
+        };
+        let latest = if let Some(latest) = stable_files.last() {
+            latest
+        } else {
+            return false;
+        };
+        latest.equal_metadata(obs)
+    }
+
+    pub(crate) fn add_mtime_alias_to_latest_ledger_entry(
+        &mut self,
+        file: &File,
+        mtime: DateTime<Utc>,
+    ) -> Result<(), ScanErr> {
+        let stable_files = if let Some(stable_files) = self.ledger.get_mut(file) {
+            stable_files
+        } else {
+            return Err(ScanErr::InternalError(InternalError {
+                message: "File not found in ledger".to_string(),
+                trace: trace!(),
+            }));
+        };
+        let last = if let Some(last) = stable_files.last_mut() {
+            last
+        } else {
+            return Err(ScanErr::InternalError(InternalError {
+                message: "No last entry found in ledger".to_string(),
+                trace: trace!(),
+            }));
+        };
+        last.mtime_aliases.push(mtime);
+        Ok(())
+    }
+
     pub(crate) fn set_config(&mut self, cfg: Config) -> Result<(), ScanErr> {
         if self.cfg.rule.upload_collection_id != cfg.rule.upload_collection_id {
             return Err(ScanErr::InvalidRule(InvalidRule {
@@ -134,10 +173,22 @@ pub struct StableFile {
     pub size: u64,
     pub digest: String,
     pub mtime: DateTime<Utc>,
+    pub mtime_aliases: Vec<DateTime<Utc>>,
     pub first_observed_at: DateTime<Utc>,
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub upload_rule_id: String,
+}
+
+impl StableFile {
+    pub fn equal_metadata(&self, other: &Observation) -> bool {
+        self.size == other.size && self.has_mtime(other)
+    }
+
+    pub fn has_mtime(&self, other: &Observation) -> bool {
+        let other_mtime = DateTime::<Utc>::from(other.mtime);
+        self.mtime_aliases.contains(&other_mtime) || self.mtime == other_mtime
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +240,7 @@ mod tests {
             size: 4,
             digest: HASH_AAAA.to_string(),
             mtime: ts(0),
+            mtime_aliases: vec![],
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),

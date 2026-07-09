@@ -77,7 +77,15 @@ impl CollectionScanner {
                 EvalAction::Unstable => {
                     self.state.candidates.remove(&candidate.file);
                 }
+                EvalAction::AlreadyInLedger(observation) => {
+                    self.state.candidates.remove(&candidate.file);
+                    self.state.add_mtime_alias_to_latest_ledger_entry(
+                        &candidate.file,
+                        observation.mtime.into(),
+                    )?;
+                }
                 EvalAction::Stable(stable_file) => {
+                    self.state.candidates.remove(&candidate.file);
                     stable_files.push(stable_file.clone());
                     self.state
                         .ledger
@@ -123,6 +131,9 @@ pub async fn discover_candidates(
         if state.is_preexisting(&observation) {
             continue;
         }
+        if state.is_latest_ledger_entry(&observation) {
+            continue;
+        }
         candidates.push(Candidate {
             file,
             observations: vec![observation],
@@ -157,6 +168,7 @@ pub async fn observe_file(
 pub enum EvalAction {
     WaitForStabilityWindow,
     Unstable,
+    AlreadyInLedger(Observation),
     Stable(StableFile),
 }
 
@@ -177,22 +189,25 @@ async fn eval_candidate(
     let observation = observe_file(state, candidate.file.clone(), now).await?;
     let outcome = determine_stability(state, candidate, &observation).await?;
 
-    if let StabilityOutcome::Stable(digest) = outcome {
-        let first = candidate.first_observation()?;
-        let last = candidate.latest_observation()?;
-        debug_assert!(first.equal_metadata(&last));
-        Ok(EvalAction::Stable(StableFile {
-            file: candidate.file.clone(),
-            size: observation.size,
-            digest,
-            mtime: last.mtime.into(),
-            first_observed_at: first.timestamp,
-            last_observed_at: last.timestamp,
-            deployment_id: first.deployment_id.clone(),
-            upload_rule_id: first.upload_rule_id.clone(),
-        }))
-    } else {
-        Ok(EvalAction::Unstable)
+    match outcome {
+        StabilityOutcome::Stable(digest) => {
+            let first = candidate.first_observation()?;
+            let last = candidate.latest_observation()?;
+            debug_assert!(first.equal_metadata(&last));
+            Ok(EvalAction::Stable(StableFile {
+                file: candidate.file.clone(),
+                size: observation.size,
+                digest,
+                mtime: last.mtime.into(),
+                mtime_aliases: vec![],
+                first_observed_at: first.timestamp,
+                last_observed_at: last.timestamp,
+                deployment_id: first.deployment_id.clone(),
+                upload_rule_id: first.upload_rule_id.clone(),
+            }))
+        }
+        StabilityOutcome::AlreadyInLedger => Ok(EvalAction::AlreadyInLedger(observation)),
+        StabilityOutcome::Unstable => Ok(EvalAction::Unstable),
     }
 }
 
@@ -209,6 +224,7 @@ fn has_stability_window_elapsed(
 pub type Digest = String;
 
 pub enum StabilityOutcome {
+    AlreadyInLedger,
     Stable(Digest),
     Unstable,
 }
@@ -222,7 +238,7 @@ async fn determine_stability(
         return Ok(StabilityOutcome::Unstable);
     }
     // TODO: add file footer verification for various file types
-    differs_from_previous(state, candidate, observation).await
+    differs_from_previous(state, candidate).await
 }
 
 fn is_metadata_stable(candidate: &Candidate, observation: &Observation) -> Result<bool, ScanErr> {
@@ -239,7 +255,6 @@ fn is_metadata_stable(candidate: &Candidate, observation: &Observation) -> Resul
 async fn differs_from_previous(
     state: &State,
     candidate: &Candidate,
-    observation: &Observation,
 ) -> Result<StabilityOutcome, ScanErr> {
     // check if there is a previous stable file
     let previous = if let Some(previous) = find_previous_stable_file(state, candidate) {
@@ -250,17 +265,12 @@ async fn differs_from_previous(
         ));
     };
 
-    // check if stable file size has changed
-    if previous.size != observation.size {
-        return Ok(StabilityOutcome::Unstable);
-    }
-
-    // check if stable file digest has changed
+    // check if stable file digest has changed; any digest change is a new version
     let digest = files::hash(&candidate.file).await?;
     if digest != previous.digest {
-        return Ok(StabilityOutcome::Unstable);
+        return Ok(StabilityOutcome::Stable(digest));
     }
-    Ok(StabilityOutcome::Stable(digest))
+    Ok(StabilityOutcome::AlreadyInLedger)
 }
 
 fn find_previous_stable_file(state: &State, candidate: &Candidate) -> Option<StableFile> {
@@ -360,6 +370,7 @@ mod tests {
             size: 4,
             digest: HASH_AAAA.to_string(),
             mtime: ts(0),
+            mtime_aliases: vec![],
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
@@ -682,12 +693,11 @@ mod tests {
             let obs = observation(&state, file.clone(), ts(1000)).await;
             let cand = candidate(file, obs.clone());
 
-            let outcome = super::differs_from_previous(&state, &cand, &obs)
-                .await
-                .unwrap();
+            let outcome = super::differs_from_previous(&state, &cand).await.unwrap();
             assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
         }
 
+        // Same size + same digest as the latest ledger entry => already reported.
         #[tokio::test]
         async fn previous_same_size_dedup() {
             let dir = dirs::temp("testing").unwrap();
@@ -699,14 +709,14 @@ mod tests {
                 .ledger
                 .insert(file.clone(), vec![stable_file(file, ts(900))]);
 
-            let outcome = super::differs_from_previous(&state, &cand, &obs)
-                .await
-                .unwrap();
-            assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
+            let outcome = super::differs_from_previous(&state, &cand).await.unwrap();
+            assert!(matches!(outcome, StabilityOutcome::AlreadyInLedger));
         }
 
+        // A different-size new version is now reported (the HIGH-bug regression):
+        // size no longer gates, the digest change decides.
         #[tokio::test]
-        async fn previous_size_changed_unstable() {
+        async fn previous_size_changed_reports_new_version() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
@@ -714,16 +724,17 @@ mod tests {
             let cand = candidate(file.clone(), obs.clone());
             let mut prev = stable_file(file.clone(), ts(900));
             prev.size = 99;
+            prev.digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string();
             state.ledger.insert(file, vec![prev]);
 
-            let outcome = super::differs_from_previous(&state, &cand, &obs)
-                .await
-                .unwrap();
-            assert!(matches!(outcome, StabilityOutcome::Unstable));
+            let outcome = super::differs_from_previous(&state, &cand).await.unwrap();
+            assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
         }
 
+        // Same digest as the latest ledger entry => already reported.
         #[tokio::test]
-        async fn previous_same_digest_stable() {
+        async fn previous_same_digest_dedup() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
@@ -733,14 +744,13 @@ mod tests {
             prev.digest = HASH_AAAA.to_string();
             state.ledger.insert(file, vec![prev]);
 
-            let outcome = super::differs_from_previous(&state, &cand, &obs)
-                .await
-                .unwrap();
-            assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
+            let outcome = super::differs_from_previous(&state, &cand).await.unwrap();
+            assert!(matches!(outcome, StabilityOutcome::AlreadyInLedger));
         }
 
+        // A different digest than the latest ledger entry => new version reported.
         #[tokio::test]
-        async fn previous_different_digest_unstable() {
+        async fn previous_different_digest_reports_new_version() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
@@ -751,10 +761,8 @@ mod tests {
                 .to_string();
             state.ledger.insert(file, vec![prev]);
 
-            let outcome = super::differs_from_previous(&state, &cand, &obs)
-                .await
-                .unwrap();
-            assert!(matches!(outcome, StabilityOutcome::Unstable));
+            let outcome = super::differs_from_previous(&state, &cand).await.unwrap();
+            assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
         }
     }
 
@@ -813,7 +821,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn previous_matching_digest_is_stable() {
+        async fn previous_matching_digest_is_already_in_ledger() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
@@ -826,11 +834,11 @@ mod tests {
             let outcome = super::determine_stability(&state, &cand, &obs)
                 .await
                 .unwrap();
-            assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
+            assert!(matches!(outcome, StabilityOutcome::AlreadyInLedger));
         }
 
         #[tokio::test]
-        async fn previous_different_digest_is_unstable() {
+        async fn previous_different_digest_reports_new_version() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "s.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
@@ -844,7 +852,7 @@ mod tests {
             let outcome = super::determine_stability(&state, &cand, &obs)
                 .await
                 .unwrap();
-            assert!(matches!(outcome, StabilityOutcome::Unstable));
+            assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
         }
     }
 
@@ -865,6 +873,7 @@ mod tests {
                 size: 4,
                 digest: HASH_AAAA.to_string(),
                 mtime: DateTime::<Utc>::from(obs.mtime),
+                mtime_aliases: vec![],
                 first_observed_at: ts(1000),
                 last_observed_at: ts(1000),
                 deployment_id: "dpl-1".to_string(),
@@ -907,24 +916,32 @@ mod tests {
             assert!(matches!(action, EvalAction::WaitForStabilityWindow));
         }
 
-        // evaluate_candidates appends onto an existing ledger history for the file.
+        // Re-evaluating a file already in the ledger with identical content emits
+        // nothing, leaves the ledger history unchanged, retires the candidate, and
+        // records the fresh mtime as an alias on the latest ledger entry.
         #[tokio::test]
-        async fn evaluate_appends_stable() {
+        async fn evaluate_dedups_unchanged_ledgered_file() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "ins.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
+            // prior ledger entry: same size + digest as on-disk `b"aaaa"`.
             let prior = stable_file(file.clone(), ts(900));
             state.ledger.insert(file.clone(), vec![prior]);
             state
                 .candidates
-                .insert(file.clone(), candidate(file.clone(), obs));
+                .insert(file.clone(), candidate(file.clone(), obs.clone()));
             let mut scanner = CollectionScanner::from_state(state);
 
             let stable = scanner.evaluate_candidates(ts(1010)).await.unwrap();
-            assert_eq!(stable.len(), 1);
+            assert!(stable.is_empty());
             assert_eq!(scanner.ledger_count(), 1);
-            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 2);
+            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 1);
+            assert!(!scanner.state.candidates.contains_key(&file));
+            let latest = scanner.state.ledger.get(&file).unwrap().last().unwrap();
+            assert!(latest
+                .mtime_aliases
+                .contains(&DateTime::<Utc>::from(obs.mtime)));
         }
 
         // evaluate_candidates drops an Unstable (deleted) candidate: nothing
@@ -970,27 +987,36 @@ mod tests {
             assert_eq!(scanner.ledger_count(), 2);
         }
 
-        // Re-evaluating a still-stable candidate appends another ledger entry for
-        // the same file key (history grows; file count does not).
+        // A ledgered file is reported once: the first tick emits it and retires the
+        // candidate; re-promoting the same content and ticking again emits nothing
+        // and does not grow the ledger history.
         #[tokio::test]
-        async fn reevaluate_appends_ledger_entry() {
+        async fn reevaluate_dedups_unchanged_file() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "dedup.mcap", b"aaaa").await;
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
             state
                 .candidates
-                .insert(file.clone(), candidate(file.clone(), obs));
+                .insert(file.clone(), candidate(file.clone(), obs.clone()));
             let mut scanner = CollectionScanner::from_state(state);
 
             let first = scanner.evaluate_candidates(ts(1010)).await.unwrap();
             assert_eq!(first.len(), 1);
             assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 1);
+            // reported-once: the candidate is retired after the first emit.
+            assert!(!scanner.state.candidates.contains_key(&file));
 
+            // re-promote the same (unchanged) content and tick again.
+            scanner
+                .state
+                .candidates
+                .insert(file.clone(), candidate(file.clone(), obs));
             let second = scanner.evaluate_candidates(ts(1020)).await.unwrap();
-            assert_eq!(second.len(), 1);
+            assert!(second.is_empty());
             assert_eq!(scanner.ledger_count(), 1);
-            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 2);
+            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 1);
+            assert!(!scanner.state.candidates.contains_key(&file));
         }
     }
 
