@@ -218,7 +218,12 @@ async fn reset_deployment_retry_state(deployments: &Deployments) -> Result<(), S
         let mut dpl = entry.value;
         dpl.reset_retry_state();
         deployments
-            .write(id, dpl, |_, _| false, Overwrite::Allow)
+            .write(
+                id,
+                dpl,
+                |old, _| old.is_some_and(|e| e.is_dirty),
+                Overwrite::Allow,
+            )
             .await?;
     }
     Ok(())

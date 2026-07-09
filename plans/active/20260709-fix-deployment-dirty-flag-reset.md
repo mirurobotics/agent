@@ -20,14 +20,16 @@ After this change, an agent restart still resets retry state (attempts, cooldown
 
 ## Progress
 
-- [ ] Milestone 1: closure fix in `reset_deployment_retry_state`.
-- [ ] Milestone 1: regression test in `agent/tests/disk/init.rs`.
-- [ ] Milestone 1: `./scripts/test.sh` passes; `./scripts/preflight.sh` reports clean.
-- [ ] Milestone 1: commit.
+- [x] Milestone 1: closure fix in `reset_deployment_retry_state`.
+- [x] Milestone 1: regression test in `agent/tests/disk/init.rs` (bug-catch verified: fails against `|_, _| false`, passes with fix).
+- [x] Milestone 1: `./scripts/test.sh` passes (all `disk::init` tests green; only pre-existing root-environment failures remain — see Surprises & Discoveries). `./scripts/preflight.sh` deferred to the dedicated preflight pass.
+- [x] Milestone 1: commit.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- The sandbox runs the suite as root, so permission-based failure tests (chmod `0o555` to force EACCES) fail regardless of this change: 2 lib tests in `deploy::filesys::tests` and 12-13 integration tests (`deploy::*permission_denied*`, `filesys::dirs::new_home_dir::success`, `sync::deployments::apply_error_isolation::*`, occasionally `s3::get::dest_unwritable::*`). Verified identical failures on the untouched branch tip via `git stash`; this change introduces zero new failures. Because `cargo test` fail-fasts per target, the full suite was validated with `--no-fail-fast`.
+- The plan's test snippet omitted `.unwrap()` on `dirs::temp(...)` (it returns a `Result`); the implemented test follows the sibling tests' exact style.
+- rustfmt wraps the fixed `deployments.write(...)` call across multiple lines (same shape as the idiom's call site at `agent/src/services/deployment/get.rs:42`).
 
 ## Decision Log
 
@@ -37,7 +39,7 @@ After this change, an agent restart still resets retry state (attempts, cooldown
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Implemented as planned, single commit. The write closure in `reset_deployment_retry_state` (`agent/src/disk/mod.rs`) now preserves pre-existing entry dirtiness (`|old, _| old.is_some_and(|e| e.is_dirty)`) instead of forcing `is_dirty = false`, so status pushes pending at restart survive the retry-state reset and reach the backend on the next sync. `make_entry` in `agent/tests/disk/init.rs` takes dirtiness explicitly (four existing call sites pass `false`), and the new `preserves_dirty_flag_on_reset` test covers both the preserved-dirty and untouched-clean cases. Bug-catch verification passed: with the closure temporarily reverted to `|_, _| false`, the new test fails on the `entry.is_dirty` assertion ("dirty flag should survive the retry state reset"); with the fix it passes. `cargo fmt --check` and `cargo clippy -D warnings` are clean. The only test failures in this environment are pre-existing root-user artifacts (documented above), unrelated to this change. Preflight is handled by the dedicated preflight pass before publishing.
 
 ## Context and Orientation
 
