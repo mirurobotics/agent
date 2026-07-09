@@ -21,21 +21,50 @@ After this change, shutdown is best-effort: every step is attempted in the exist
 
 ## Progress
 
-- [ ] Milestone 1: rewrite `shutdown_impl` to best-effort; commit
-- [ ] Milestone 2: add unit tests in `run.rs` `mod tests`; commit
-- [ ] Milestone 3: full validation (`preflight.sh` reports `Preflight clean`); commit any fixes
+- [x] Milestone 1: rewrite `shutdown_impl` to best-effort; commit (49f007f, refined in bc50918)
+- [x] Milestone 2: add unit tests in `run.rs` `mod tests`; commit (844158b)
+- [x] Milestone 3: full validation (`preflight.sh` reports `Preflight clean`); no fixes needed
 
 ## Surprises & Discoveries
 
-Add entries as work proceeds.
+- The work environment runs as root, which breaks two pre-existing permission-based
+  tests in `deploy::filesys` (chmod-555 failure injection is bypassed by
+  CAP_DAC_OVERRIDE) and the `filesys::dirs::new_home_dir::success` test
+  (HOME=/root does not contain "home"). These failures exist on `main` and are
+  unrelated to this change. All validation was therefore run under
+  `HOME=/home/user unshare --user --map-user=1000 --map-group=1000`, which
+  emulates the supported non-root local/CI environment (see
+  `plans/completed/20260708-filesys-use-module-in-tests.md` for the non-root
+  assumption).
+- One full-coverage run aborted flakily ("test exited abnormally", exit 1) in the
+  integration binary under parallel execution with llvm-cov instrumentation; a
+  re-run passed cleanly and the filtered reproduction also passed. Not reproduced
+  since.
 
 ## Decision Log
 
-Add entries as work proceeds.
+- Used `Option::get_or_insert_with` instead of the plan's `get_or_insert` at the
+  four join-error sites so the `trace!()` backtrace capture and error boxing only
+  happen for the first failure (review finding; behavior unchanged).
+- Test B additionally registers a panicking MQTT handle (covers the step-3 error
+  branch) — the poller's earlier join error still wins, strengthening the
+  first-error assertion.
+- Added Test E (`shutdown_impl_maps_socket_server_join_error`) beyond the plan to
+  cover the socket server outer `JoinError` branch for the covgate.
+- The app-state `state.shutdown()` error branch remains uncovered (forcing a real
+  `AppState` shutdown failure is impractical in the unit context); `app` module
+  coverage is 93.43% against the 90.38% gate, so no fallback test was needed.
 
 ## Outcomes & Retrospective
 
-Fill in when the plan is completed.
+All three milestones completed on `claude/agent-bug-hunt-hujana-shutdown-joins`
+with commits 49f007f (fix), bc50918 (refactor), 844158b (tests).
+`shutdown_impl` now attempts all five steps in order, logs each failure with
+`error!`, and returns the first error after all steps have run; error types,
+step order, `.take()` semantics, and skip messages are unchanged. Five new unit
+tests cover the panic-does-not-skip-cleanup behavior, first-error precedence,
+both socket-server error layers, and the happy path. `./scripts/preflight.sh`
+prints `Preflight clean`; `app` module coverage 93.43% (gate 90.38%).
 
 ## Context and Orientation
 
