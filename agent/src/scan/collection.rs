@@ -1216,24 +1216,17 @@ mod tests {
         // first_observed_at from the FIRST (discovery) observation, not the
         // evaluation-time (LAST) observation, even when the config changed in
         // between. last_observed_at, by contrast, comes from the LAST observation
-        // — so the two timestamps diverge here. This pins build_stable_file's
-        // first-observation identity sourcing AND its last_observed_at-from-last
-        // sourcing; a regression sourcing either from the wrong observation breaks
-        // it. The file is unchanged (identical size+mtime), so equal_metadata holds
-        // (it compares only size+mtime, ignoring the ids) and the file is emitted.
+        // — so the two timestamps diverge here. 
         #[tokio::test]
         async fn stable_file_takes_identity_from_first_observation() {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "id.mcap", b"aaaa").await;
 
-            // FIRST observation: discovered at ts(1000) under deployment d1 /
-            // collection coll1.
+            // first observation
             let s1 = State::new(config("d1", "coll1", &glob_for(&dir), 0));
             let first_obs = observation(&s1, file.clone(), ts(1000)).await;
 
-            // Evaluate that candidate under a DIFFERENT config: deployment d2 /
-            // collection coll2. The eval-time observation observe_file takes will
-            // carry d2 / coll2, but the same (unchanged) size+mtime.
+            // swap config to deployment d2, collection coll2. 
             let mut s2 = State::new(config("d2", "coll2", &glob_for(&dir), 0));
             track(&mut s2, &file, first_obs);
             let mut scanner = CollectionScanner::from_state(s2);
@@ -1242,11 +1235,10 @@ mod tests {
             assert_eq!(emitted.len(), 1);
             let sf = &emitted[0];
 
-            // identity from the FIRST observation, not d2 / coll2.
+            // identity from the FIRST observation, not d2, coll2.
             assert_eq!(sf.deployment_id, "d1");
             assert_eq!(sf.upload_rule_id, "coll1");
-            // first_observed_at is the discovery ts; last_observed_at is the eval
-            // ts — these now diverge.
+            // first_observed_at is the discovery ts; last_observed_at is the eval ts 
             assert_eq!(sf.first_observed_at, ts(1000));
             assert_eq!(sf.last_observed_at, ts(1010));
 
