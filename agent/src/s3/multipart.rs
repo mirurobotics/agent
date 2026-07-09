@@ -3,9 +3,10 @@ use std::io::SeekFrom;
 
 // internal crates
 use crate::filesys::{file::File, path::PathExt};
-use crate::s3::{errors, Object, S3Err, Store, PART_SIZE};
+use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Store, PART_SIZE};
 
 // external crates
+use aws_sdk_s3::operation::list_parts::ListPartsOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -38,6 +39,118 @@ impl Store {
                 let _ = self.abort_multipart_upload(dst, &upload_id).await;
                 Err(err)
             }
+        }
+    }
+
+    /// Resumes an existing multipart upload: lists the parts that already landed
+    /// in S3, uploads only the missing parts, and completes. Never aborts, so a
+    /// resume is safe to retry.
+    ///
+    /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
+    /// against the same file bytes the upload was started for.
+    pub async fn resume_multipart_upload(
+        &self,
+        src: &Source,
+        dst: &Object,
+        upload_id: &str,
+    ) -> Result<(), S3Err> {
+        // Index the already-landed parts by number. `None` means S3 no longer
+        // knows this upload, so it cannot be resumed.
+        let landed: std::collections::HashMap<i32, CompletedPart> =
+            match self.list_parts(dst, upload_id).await? {
+                Some(parts) => parts
+                    .into_iter()
+                    .filter_map(|p| p.part_number().map(|n| (n, p)))
+                    .collect(),
+                None => {
+                    return Err(S3Err::NoSuchUploadErr(NoSuchUploadErr {
+                        key: dst.key.to_string(),
+                        upload_id: upload_id.to_string(),
+                        trace: crate::trace!(),
+                    }));
+                }
+            };
+
+        // Walk the full plan in order, reusing a landed part or uploading the
+        // missing range. `part_plan` is the single source of truth for part
+        // boundaries, shared with `put_multipart`.
+        let mut parts: Vec<CompletedPart> = Vec::new();
+        for (part_number, offset, len) in Self::part_plan(src.size) {
+            let part = match landed.get(&part_number) {
+                Some(existing) => existing.clone(),
+                None => {
+                    self.upload_part(&src.file, dst, upload_id, part_number, offset, len)
+                        .await?
+                }
+            };
+            parts.push(part);
+        }
+
+        self.complete_multipart_upload(dst, upload_id, &parts).await
+    }
+
+    /// Lists every part already uploaded for `upload_id`, following pagination.
+    /// `Ok(None)` when S3 reports the upload no longer exists (404 / NoSuchUpload).
+    async fn list_parts(
+        &self,
+        obj: &Object,
+        upload_id: &str,
+    ) -> Result<Option<Vec<CompletedPart>>, S3Err> {
+        let mut parts: Vec<CompletedPart> = Vec::new();
+        let mut marker: Option<String> = None;
+
+        loop {
+            let Some(page) = self
+                .list_parts_page(obj, upload_id, marker.as_deref())
+                .await?
+            else {
+                return Ok(None);
+            };
+
+            parts.extend(page.parts().iter().filter_map(|part| {
+                let number = part.part_number()?;
+                let etag = part.e_tag()?;
+                Some(
+                    CompletedPart::builder()
+                        .part_number(number)
+                        .e_tag(etag)
+                        .build(),
+                )
+            }));
+
+            match page.next_part_number_marker() {
+                Some(next) if page.is_truncated() == Some(true) => marker = Some(next.to_string()),
+                _ => return Ok(Some(parts)),
+            }
+        }
+    }
+
+    /// Fetches one page of [`Self::list_parts`], resuming after `marker` when given.
+    /// `Ok(None)` if S3 reports the upload no longer exists (404 / NoSuchUpload).
+    async fn list_parts_page(
+        &self,
+        obj: &Object,
+        upload_id: &str,
+        marker: Option<&str>,
+    ) -> Result<Option<ListPartsOutput>, S3Err> {
+        let mut req = self
+            .client
+            .list_parts()
+            .bucket(&obj.bucket)
+            .key(&obj.key)
+            .upload_id(upload_id);
+        if let Some(marker) = marker {
+            req = req.part_number_marker(marker);
+        }
+
+        match req.send().await {
+            Ok(page) => Ok(Some(page)),
+            Err(err) if errors::is_not_found(&err) => Ok(None),
+            Err(err) => Err(errors::map_sdk_err(
+                "list_parts",
+                Some(obj.key.to_string()),
+                err,
+            )),
         }
     }
 

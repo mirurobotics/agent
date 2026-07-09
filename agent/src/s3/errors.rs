@@ -25,6 +25,24 @@ impl crate::errors::Error for ObjectNotFoundErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("no such multipart upload '{upload_id}' for object '{key}'")]
+pub struct NoSuchUploadErr {
+    pub key: String,
+    pub upload_id: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for NoSuchUploadErr {
+    fn code(&self) -> Code {
+        Code::ResourceNotFound
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::NOT_FOUND
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 #[error("connection error for object '{key}': {msg}")]
 pub struct ConnectionErr {
     pub key: String,
@@ -90,6 +108,8 @@ pub enum S3Err {
     #[error(transparent)]
     ObjectNotFoundErr(ObjectNotFoundErr),
     #[error(transparent)]
+    NoSuchUploadErr(NoSuchUploadErr),
+    #[error(transparent)]
     ConnectionErr(ConnectionErr),
     #[error(transparent)]
     RequestFailedErr(RequestFailedErr),
@@ -109,6 +129,7 @@ impl From<filesys::FileSysErr> for S3Err {
 
 crate::impl_error!(S3Err {
     ObjectNotFoundErr,
+    NoSuchUploadErr,
     ConnectionErr,
     RequestFailedErr,
     InvalidResponseErr,
@@ -416,6 +437,19 @@ mod tests {
             assert_eq!(err.http_status().as_u16(), 404);
             assert!(!err.is_network_conn_err());
             assert!(err.to_string().contains("object not found"));
+        }
+
+        #[test]
+        fn no_such_upload_maps_to_resource_not_found() {
+            let err = S3Err::NoSuchUploadErr(NoSuchUploadErr {
+                key: "k".to_string(),
+                upload_id: "u".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(matches!(err.code(), Code::ResourceNotFound));
+            assert_eq!(err.http_status().as_u16(), 404);
+            assert!(!err.is_network_conn_err());
+            assert!(err.to_string().contains("no such multipart upload"));
         }
 
         #[test]
