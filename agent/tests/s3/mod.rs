@@ -296,6 +296,34 @@ pub mod put {
                     complete_shape(),
                 ]
             );
+
+            // The CompleteMultipartUpload manifest is a small in-memory XML body,
+            // so its bytes are readable off the recorded request. Assert it lists
+            // both parts in order with their matching etags.
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let complete_body = requests
+                .last()
+                .expect("a complete request was recorded")
+                .body()
+                .bytes()
+                .expect("the complete manifest is an in-memory body");
+            let manifest = std::str::from_utf8(complete_body).expect("manifest is UTF-8");
+
+            let part1 = manifest
+                .find("<PartNumber>1</PartNumber>")
+                .expect("manifest lists part 1");
+            let part2 = manifest
+                .find("<PartNumber>2</PartNumber>")
+                .expect("manifest lists part 2");
+            assert!(part1 < part2, "parts must appear in ascending order");
+            assert!(
+                manifest.contains("etag-part-1"),
+                "manifest carries part 1's etag"
+            );
+            assert!(
+                manifest.contains("etag-part-2"),
+                "manifest carries part 2's etag"
+            );
         }
     }
 }

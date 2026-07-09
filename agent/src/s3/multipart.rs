@@ -34,6 +34,16 @@ impl Store {
     /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
     /// parts, then the error propagates.
+    ///
+    /// The `Source` file is treated as an immutable snapshot of `size` bytes
+    /// captured at call time; if the file changes during the upload, behavior is
+    /// undefined (shrinking makes a part read fail; growth means only the original
+    /// `size` bytes are uploaded).
+    ///
+    /// If the returned future is dropped (caller cancellation/timeout) after the
+    /// upload is created, the best-effort abort does not run and an in-progress
+    /// upload is left on S3; deployments should configure an S3
+    /// `AbortIncompleteMultipartUpload` lifecycle rule.
     pub async fn put_multipart(&self, src: &Source, dst: &Object) -> Result<(), S3Err> {
         let upload_id = self.create_multipart_upload(dst).await?;
 
@@ -58,6 +68,26 @@ impl Store {
         } else {
             size.div_ceil(MAX_PARTS).max(MIN_PART_SIZE)
         }
+    }
+
+    /// The `(1-based part number, byte offset, byte length)` of each part for an
+    /// object of `size` bytes. Every byte is covered exactly once; the final part
+    /// carries the remainder. Uses [`Self::part_size_for`] to pick the part size,
+    /// so the plan always fits within S3's 10,000-part limit.
+    fn part_plan(size: u64) -> Vec<(i32, u64, u64)> {
+        let part_size = Self::part_size_for(size);
+        let mut plan = Vec::new();
+        let mut offset: u64 = 0;
+        let mut part_number: i32 = 1; // S3 part numbers are 1-based.
+
+        while offset < size {
+            let len = part_size.min(size - offset);
+            plan.push((part_number, offset, len));
+            offset += len;
+            part_number += 1;
+        }
+
+        plan
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
@@ -103,19 +133,13 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<Vec<CompletedPart>, S3Err> {
-        let part_size = Self::part_size_for(src.size);
         let mut parts: Vec<CompletedPart> = Vec::new();
-        let mut offset: u64 = 0;
-        let mut part_number: i32 = 1; // S3 part numbers are 1-based.
 
-        while offset < src.size {
-            let len = part_size.min(src.size - offset);
+        for (part_number, offset, len) in Self::part_plan(src.size) {
             let part = self
                 .upload_part(&src.file, dst, upload_id, part_number, offset, len)
                 .await?;
             parts.push(part);
-            offset += len;
-            part_number += 1;
         }
 
         Ok(parts)
@@ -124,6 +148,13 @@ impl Store {
     /// Streams a single part (`file[offset..offset+len]`) to S3 and returns the
     /// [`CompletedPart`] describing it. `InvalidResponseErr` if the response
     /// omits the ETag.
+    ///
+    /// Opening the source file for streaming maps to `LocalIoErr` via
+    /// [`errors::map_bytestream_err`], but a failure reading part bytes
+    /// *mid-stream* surfaces through the SDK `send()` as a dispatch error mapped by
+    /// [`errors::map_sdk_err`] to a (retryable) `ConnectionErr`. This is a known
+    /// classification limitation: a mid-stream local disk read error is currently
+    /// treated as retryable, unlike the `get()` path.
     async fn upload_part(
         &self,
         src: &File,
@@ -233,5 +264,54 @@ mod tests {
         // such sizes take the fixed-size branch; to hit the floor directly we
         // check the max() guard holds at the branch boundary.
         assert!(Store::part_size_for(u64::MAX) >= MIN_PART_SIZE);
+    }
+
+    #[test]
+    fn part_plan_final_part_carries_the_remainder() {
+        // A full part plus a small tail: two parts, the last carrying the leftover.
+        assert_eq!(
+            Store::part_plan(PART_SIZE + 1024),
+            vec![(1, 0, PART_SIZE), (2, PART_SIZE, 1024)]
+        );
+    }
+
+    #[test]
+    fn part_plan_exact_multiple_has_no_trailing_zero_part() {
+        // An exact multiple of the part size splits evenly with no zero-length tail.
+        assert_eq!(
+            Store::part_plan(3 * PART_SIZE),
+            vec![
+                (1, 0, PART_SIZE),
+                (2, PART_SIZE, PART_SIZE),
+                (3, 2 * PART_SIZE, PART_SIZE),
+            ]
+        );
+    }
+
+    #[test]
+    fn part_plan_single_full_part() {
+        // Exactly one part size yields a single full part.
+        assert_eq!(Store::part_plan(PART_SIZE), vec![(1, 0, PART_SIZE)]);
+    }
+
+    #[test]
+    fn part_plan_growing_part_size_stays_within_limit_and_covers_every_byte() {
+        // A size that forces `part_size_for` to grow past the fixed size. The plan
+        // must stay within the part limit, be contiguous with ascending 1-based
+        // part numbers, and cover every byte exactly once (no gap/overlap).
+        let size = PART_SIZE * MAX_PARTS + 1;
+        let plan = Store::part_plan(size);
+
+        assert!(plan.len() as u64 <= MAX_PARTS);
+
+        let mut expected_offset: u64 = 0;
+        let mut total_len: u64 = 0;
+        for (i, &(part_number, offset, len)) in plan.iter().enumerate() {
+            assert_eq!(part_number, (i + 1) as i32); // 1-based, ascending.
+            assert_eq!(offset, expected_offset); // contiguous.
+            expected_offset += len;
+            total_len += len;
+        }
+        assert_eq!(total_len, size); // full coverage, no gap/overlap.
     }
 }

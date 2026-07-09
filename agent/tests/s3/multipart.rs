@@ -43,7 +43,7 @@ pub(crate) fn complete_resp() -> http::Response<SdkBody> {
 pub(crate) fn create_req() -> http::Request<SdkBody> {
     http::Request::builder()
         .method("POST")
-        .uri(uri("big.bin?uploads&x-id=CreateMultipartUpload"))
+        .uri(uri("big.bin?uploads"))
         .body(SdkBody::empty())
         .unwrap()
 }
@@ -61,9 +61,7 @@ pub(crate) fn upload_part_req(number: i32) -> http::Request<SdkBody> {
 pub(crate) fn complete_req() -> http::Request<SdkBody> {
     http::Request::builder()
         .method("POST")
-        .uri(uri(&format!(
-            "big.bin?x-id=CompleteMultipartUpload&uploadId={UPLOAD_ID}"
-        )))
+        .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}")))
         .body(SdkBody::empty())
         .unwrap()
 }
