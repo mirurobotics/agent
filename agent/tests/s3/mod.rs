@@ -113,6 +113,20 @@ fn store_expecting(
     store_with(vec![ReplayEvent::new(request, response)])
 }
 
+/// Stable `(method, uri)` view of a request. Bodies and signing headers are
+/// intentionally dropped so sequence asserts stay comparable.
+fn shape(method: &str, path_and_query: &str) -> (String, String) {
+    (method.to_string(), uri(path_and_query))
+}
+
+/// Projects every request the replay client observed into [`shape`]s, in order.
+fn actual_shapes(replay: &StaticReplayClient) -> Vec<(String, String)> {
+    replay
+        .actual_requests()
+        .map(|r| (r.method().to_string(), r.uri().to_string()))
+        .collect()
+}
+
 pub mod multipart;
 
 pub mod construction {
@@ -227,6 +241,61 @@ pub mod put {
             let err = store.put(missing, &obj("k")).await.unwrap_err();
 
             assert!(matches!(err, S3Err::FileSysErr(_)));
+        }
+    }
+
+    /// Size-based routing in [`Store::put`]: small files take the single
+    /// `PutObject` path; larger-than-`PART_SIZE` files take the multipart path.
+    pub mod routing {
+        use super::*;
+        use crate::s3::multipart::{
+            complete_req, complete_resp, complete_shape, create_req, create_resp, create_shape,
+            upload_part_req, upload_part_resp, upload_part_shape,
+        };
+
+        #[tokio::test]
+        async fn small_file_routes_to_single_put() {
+            // A body well under PART_SIZE must take the single-part branch:
+            // exactly one PutObject, no multipart calls.
+            let src = temp_file_with(b"tiny").await;
+            let (store, replay) =
+                store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
+
+            store.put(src.to_file(), &obj("small.bin")).await.unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![shape("PUT", "small.bin?x-id=PutObject")]
+            );
+        }
+
+        #[tokio::test]
+        async fn large_file_routes_to_multipart() {
+            // The crate constant is private; re-declare it locally to size a
+            // fixture just past the routing threshold. 8 MiB + 1 KiB => 2 parts
+            // (8 MiB, 1 KiB).
+            const PART_SIZE: u64 = 8 * 1024 * 1024;
+            let big = vec![0u8; (PART_SIZE + 1024) as usize];
+            let src = temp_file_with(&big).await;
+
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
+                ReplayEvent::new(upload_part_req(2), upload_part_resp("\"etag-part-2\"")),
+                ReplayEvent::new(complete_req(), complete_resp()),
+            ]);
+
+            store.put(src.to_file(), &obj("big.bin")).await.unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![
+                    create_shape(),
+                    upload_part_shape(1),
+                    upload_part_shape(2),
+                    complete_shape(),
+                ]
+            );
         }
     }
 }

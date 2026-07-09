@@ -31,12 +31,9 @@ pub struct Source {
 impl Store {
     /// Streams a file to S3 as a **stateless** multipart upload, one part at a time.
     ///
-    /// A fresh upload is created every call: create → `upload_part` over
-    /// `part_size_for` chunks → complete. On any in-process failure the
+    /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
-    /// parts, then the error propagates. This variant is **stateless**: it carries
-    /// no durable state and cannot resume across a crash. A resumable variant will
-    /// be reintroduced in a later layer.
+    /// parts, then the error propagates.
     pub async fn put_multipart(&self, src: &Source, dst: &Object) -> Result<(), S3Err> {
         let upload_id = self.create_multipart_upload(dst).await?;
 
@@ -77,7 +74,9 @@ impl Store {
             })?;
         let upload_id = created
             .upload_id()
-            .ok_or_else(|| errors::missing_response_field("create_multipart_upload", "an upload id"))?
+            .ok_or_else(|| {
+                errors::missing_response_field("create_multipart_upload", "an upload id")
+            })?
             .to_string();
         Ok(upload_id)
     }
