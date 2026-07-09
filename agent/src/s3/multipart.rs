@@ -4,8 +4,13 @@
 //! parts: create an upload, upload each chunk, then complete (or abort) it. This
 //! module holds the stateless multipart surface ([`Store::put_multipart`]) over a
 //! set of internal per-part primitives (create / upload_part / complete / abort)
-//! plus the part-sizing policy ([`Store::part_size_for`]). The single-part path
-//! and the rest of the object API live in the parent [`crate::s3`] module.
+//! plus the part-sizing policy ([`Store::part_size_for`]). Parts are streamed
+//! part-by-part with a bounded per-part buffer, so peak memory is one part
+//! (`part_size_for`), never the whole file. The single-part path and the rest of
+//! the object API live in the parent [`crate::s3`] module.
+
+// standard crates
+use std::io::SeekFrom;
 
 // internal crates
 use crate::filesys::file::File;
@@ -14,8 +19,9 @@ use crate::s3::errors;
 use crate::s3::{Object, S3Err, Store, PART_SIZE};
 
 // external crates
-use aws_sdk_s3::primitives::{ByteStream, Length};
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 type UploadID = String;
 
@@ -145,16 +151,41 @@ impl Store {
         Ok(parts)
     }
 
+    /// Reads `src[offset..offset+length]` into an in-memory buffer, mapping any
+    /// open/seek/read failure to a terminal [`S3Err::LocalIoErr`] via
+    /// [`errors::map_body_io_err`]. Peak memory is one part (`length` bytes); the
+    /// caller uploads parts sequentially, so at most one part is buffered at a
+    /// time. A file that shrank below `offset + length` makes `read_exact` return
+    /// `UnexpectedEof`, which maps to the same terminal `LocalIoErr`.
+    async fn read_part_bytes(
+        src: &File,
+        dst: &Object,
+        offset: u64,
+        length: u64,
+    ) -> Result<Vec<u8>, S3Err> {
+        let mut f = tokio::fs::File::open(src.path())
+            .await
+            .map_err(|e| errors::map_body_io_err("upload_part", dst, src, e))?;
+        f.seek(SeekFrom::Start(offset))
+            .await
+            .map_err(|e| errors::map_body_io_err("upload_part", dst, src, e))?;
+        let mut buf = vec![0u8; length as usize];
+        f.read_exact(&mut buf)
+            .await
+            .map_err(|e| errors::map_body_io_err("upload_part", dst, src, e))?;
+        Ok(buf)
+    }
+
     /// Streams a single part (`file[offset..offset+len]`) to S3 and returns the
     /// [`CompletedPart`] describing it. `InvalidResponseErr` if the response
     /// omits the ETag.
     ///
-    /// Opening the source file for streaming maps to `LocalIoErr` via
-    /// [`errors::map_bytestream_err`], but a failure reading part bytes
-    /// *mid-stream* surfaces through the SDK `send()` as a dispatch error mapped by
-    /// [`errors::map_sdk_err`] to a (retryable) `ConnectionErr`. This is a known
-    /// classification limitation: a mid-stream local disk read error is currently
-    /// treated as retryable, unlike the `get()` path.
+    /// The part's byte range is read into a bounded in-memory buffer *before*
+    /// sending (peak memory is one part, not the whole file). Any local
+    /// open/seek/read failure — including the source shrinking mid-upload — is a
+    /// terminal [`S3Err::LocalIoErr`] via [`errors::map_body_io_err`], consistent
+    /// with the `get()` path. A local disk fault is never treated as a retryable
+    /// network condition.
     async fn upload_part(
         &self,
         src: &File,
@@ -164,13 +195,8 @@ impl Store {
         offset: u64,
         length: u64,
     ) -> Result<CompletedPart, S3Err> {
-        let body = ByteStream::read_from()
-            .path(src.path())
-            .offset(offset)
-            .length(Length::Exact(length))
-            .build()
-            .await
-            .map_err(|e| errors::map_bytestream_err("upload_part", dst, src, &e))?;
+        let buf = Self::read_part_bytes(src, dst, offset, length).await?;
+        let body = ByteStream::from(buf);
 
         let output = self
             .client

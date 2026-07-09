@@ -340,5 +340,46 @@ pub mod put {
             assert!(matches!(err, S3Err::LocalIoErr(_)));
             assert_eq!(actual_shapes(&replay), vec![create_shape(), abort_shape()]);
         }
+
+        #[tokio::test]
+        async fn put_multipart_shrunk_source_maps_to_local_io_err() {
+            // TOCTOU: the file was sized when the `Source` was built, then
+            // truncated on disk to fewer bytes than the recorded `size`. Reading
+            // the part range hits `read_exact` -> `UnexpectedEof`, which maps to a
+            // terminal `LocalIoErr`. This is now DETERMINISTIC: the old lazy-read
+            // path could surface EOF as a retryable `ConnectionErr` depending on
+            // SDK dispatch timing; the pre-read makes it terminal every time.
+            let src = temp_file_with(b"multipart-body").await;
+            let source = source_of(&src).await;
+            assert!(source.size > 4);
+
+            // Truncate the on-disk file below the recorded size so the part read
+            // runs short. The `TempFile` guard keeps the path alive.
+            let path = src.file().path();
+            tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .await
+                .unwrap()
+                .set_len(4)
+                .await
+                .unwrap();
+
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(abort_req(), resp(204, &[])),
+            ]);
+
+            let err = store
+                .put_multipart(&source, &obj("big.bin"))
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::LocalIoErr(_)));
+            // create succeeded; the short read fails locally before any
+            // upload_part request leaves the client, so abort is the only
+            // follow-up on the wire.
+            assert_eq!(actual_shapes(&replay), vec![create_shape(), abort_shape()]);
+        }
     }
 }
