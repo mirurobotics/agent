@@ -1281,6 +1281,37 @@ mod tests {
         }
     }
 
+    // ============================== ACCESSORS ================================= //
+
+    mod accessors {
+        use super::*;
+
+        // rule() exposes the active rule carried in the scanner's state.
+        #[tokio::test]
+        async fn rule_exposes_active_rule() {
+            let dir = dirs::temp("testing").unwrap();
+            let glob = glob_for(&dir);
+            let scanner = scanner_new(&dir, 7, ts(1000)).await;
+            assert_eq!(scanner.rule().upload_collection_id, "coll");
+            assert_eq!(scanner.rule().source.glob, glob);
+            assert_eq!(scanner.rule().source.stability_window_secs, 7);
+        }
+
+        // has_candidates() is false with no tracked candidates and true once a
+        // changed file is promoted into the candidate set.
+        #[tokio::test]
+        async fn has_candidates_reflects_candidate_set() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "pre.mcap", b"aaaa").await;
+            let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
+            assert!(!scanner.has_candidates());
+
+            write_file(&file, b"bbbbbbbb").await;
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+            assert!(scanner.has_candidates());
+        }
+    }
+
     // =============================== M9: LEDGER =============================== //
 
     mod ledger {
