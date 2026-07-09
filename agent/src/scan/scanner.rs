@@ -417,11 +417,8 @@ mod tests {
     // internal crates
     use super::{ScanEvent, ScannerExt, DEFAULT_BROADCAST_CAPACITY};
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
-    use crate::filesys::{self, Dir, PathExt};
+    use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, UploadRule, UploadRuleSource};
-
-    // standard crates
-    use std::path::PathBuf;
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -455,6 +452,10 @@ mod tests {
 
     // =============================== TEST HELPERS ================================= //
 
+    /// Default `UploadRule::upload_collection_id` for `single_coll` and tests that
+    /// redeploy the same scanner map entry.
+    const DEFAULT_COLL_ID: &str = "coll";
+
     /// A Deployed deployment with the given id (release_id mirrors the id).
     fn deployment(id: &str) -> Deployment {
         Deployment {
@@ -465,16 +466,16 @@ mod tests {
         }
     }
 
-    /// Build an UploadRule with a pinned upload_collection_id (plus id/glob/window).
+    /// Build an UploadRule with a pinned `upload_collection_id` (plus rule id/glob/window).
     fn rule_in_collection(
-        id: &str,
-        collection_id: &str,
+        rule_id: &str,
+        upload_collection_id: &str,
         glob: &str,
         stability_window_secs: i32,
     ) -> UploadRule {
         UploadRule {
-            id: id.to_string(),
-            upload_collection_id: collection_id.to_string(),
+            id: rule_id.to_string(),
+            upload_collection_id: upload_collection_id.to_string(),
             source: UploadRuleSource {
                 glob: glob.to_string(),
                 stability_window_secs,
@@ -503,23 +504,23 @@ mod tests {
         scanner
     }
 
-    /// temp dir + `*.mcap` glob + spawned scanner + one deployed "coll" rule
-    /// (deployment "d", rule "r", window `window`). Returns
-    /// (dir, base_path, clock, scanner). Hold `dir` to keep the temp tree alive.
-    async fn single_coll(window: i32) -> (Dir, PathBuf, Clock, Scanner) {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
+    /// temp dir + `*.mcap` glob + spawned scanner + one deployed rule whose
+    /// `upload_collection_id` is [`DEFAULT_UPLOAD_COLLECTION_ID`] (deployment "d",
+    /// rule "r", window `window`). Returns (dir, clock, scanner).
+    /// Hold `dir` to keep the temp tree alive.
+    async fn single_coll(window: i32) -> (dirs::TempDir, Clock, Scanner) {
+        let dir = dirs::temp("testing").unwrap();
+        let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
         let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, window)],
+                vec![rule_in_collection("r", DEFAULT_COLL_ID, &glob, window)],
             )
             .await
             .unwrap();
-        (dir, base, clock, scanner)
+        (dir, clock, scanner)
     }
 
     /// The set of rule ids currently held by the scanner.
@@ -527,7 +528,7 @@ mod tests {
         rules.iter().map(|r| r.id.clone()).collect()
     }
 
-    /// The set of collection ids currently held by the scanner.
+    /// The set of `upload_collection_id` values currently held by the scanner.
     fn collection_ids(rules: &[UploadRule]) -> BTreeSet<String> {
         rules
             .iter()
@@ -535,11 +536,13 @@ mod tests {
             .collect()
     }
 
-    /// Write `bytes` to `dir/name` and return the absolute path.
-    fn write(dir: &std::path::Path, name: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let path = dir.join(name);
-        std::fs::write(&path, bytes).unwrap();
-        path
+    /// Write `bytes` to `dir/name` and return the file.
+    async fn write(dir: &Dir, name: &str, bytes: &[u8]) -> File {
+        let file = dir.file(name);
+        files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        file
     }
 
     /// The file name of a StableFile's underlying File.
@@ -579,8 +582,9 @@ mod tests {
         scanner.get_ledger_count().await.unwrap()
     }
 
-    /// The set of collection ids the scanner currently holds rules for.
-    async fn deployed_collections(scanner: &Scanner) -> BTreeSet<String> {
+    /// Collection ids with live scanner state, including inactive legacy scanners
+    /// that are still draining candidates.
+    async fn active_collections(scanner: &Scanner) -> BTreeSet<String> {
         collection_ids(&scanner.get_rules().await.unwrap())
     }
 
@@ -596,22 +600,184 @@ mod tests {
         );
     }
 
+    mod construction {
+        use super::*;
+
+        #[tokio::test]
+        async fn worker_new_and_scanner_new_round_trip() {
+            let (tx, rx) = mpsc::channel(64);
+            let single = SingleThreadScanner::new(ScannerArgs::default());
+            let worker = Worker::new(single, rx);
+            let handle = tokio::spawn(worker.run());
+
+            let scanner = Scanner::new(tx);
+
+            // the hand-built actor answers commands: empty ledger.
+            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+
+            // and shuts down cleanly; later commands then error on a closed channel.
+            scanner.shutdown().await.unwrap();
+            handle.await.unwrap();
+            let err = scanner.get_ledger_count().await.unwrap_err();
+            assert!(matches!(err, crate::scan::ScanErr::SendActorMessageErr(_)));
+        }
+    }
+
+    mod subscribe {
+        use super::*;
+
+        // subscribe() before scan(): a StableFile event carries the expected payload.
+        #[tokio::test]
+        async fn subscribe_receives_stable_file_payload() {
+            let dir = dirs::temp("testing").unwrap();
+            let glob = format!("{}/*.mcap", dir.path().display());
+
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+            let rule = rule_in_collection("rule-1", DEFAULT_COLL_ID, &glob, 0);
+            scanner
+                .update_rules(deployment("dpl-1"), vec![rule])
+                .await
+                .unwrap();
+            let file = write(&dir, "emit.mcap", b"aaaa").await;
+
+            let digest = "sha256:61be55a8e2f6b4e172338bddf184d6dbee29c98853e0a0485ecee7f27b9af0b4"
+                .to_string();
+            let mtime = files::last_modified(&file).await.unwrap();
+            let expected = StableFile {
+                file: file.clone(),
+                size: 4,
+                digest,
+                mtime: DateTime::<Utc>::from(mtime),
+                mtime_aliases: vec![],
+                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                last_observed_at: DateTime::from_timestamp(1001, 0).unwrap(),
+                deployment_id: "dpl-1".to_string(),
+                upload_rule_id: DEFAULT_COLL_ID.to_string(),
+            };
+
+            let mut rx = subscribe(&scanner).await;
+
+            scan_once(&scanner).await; // discover
+            tick(&scanner, &clock, 1).await; // evaluate => emit
+
+            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+            assert_eq!(sf, expected);
+        }
+
+        // scan() producing stable files with NO subscriber does not error (debug branch).
+        #[tokio::test]
+        async fn emit_with_no_subscriber_does_not_error() {
+            let (dir, clock, scanner) = single_coll(0).await;
+            write(&dir, "nosub.mcap", b"aaa").await;
+
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await; // emits with no subscriber, must not error
+            assert_eq!(ledger_count(&scanner).await, 1);
+        }
+    }
+
+    mod clear_rules {
+        use super::*;
+
+        #[tokio::test]
+        async fn clear_rules_on_empty_is_noop() {
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+            scanner.clear_rules().await.unwrap();
+            scan_once(&scanner).await;
+            assert_eq!(ledger_count(&scanner).await, 0);
+        }
+
+        // clear_rules empties `deployed` but leaves scanners in place; a subsequent
+        // scan still evaluates their remaining candidates. Here the candidate goes
+        // stable while inactive (clear does not immediately drop the scanner or its
+        // pool).
+        #[tokio::test]
+        async fn clear_rules_still_evaluates_remaining_candidates() {
+            let (dir, clock, scanner) = single_coll(0).await;
+            write(&dir, "drain.mcap", b"aaa").await;
+
+            // discover a candidate while deployed.
+            scan_once(&scanner).await;
+            scanner.clear_rules().await.unwrap();
+
+            // The collection remains active while its existing candidate drains.
+            assert_eq!(active_collections(&scanner).await.len(), 1);
+
+            // subscribe before the evaluating scan so we observe the emitted StableFile.
+            let mut rx = subscribe(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_one_stable(&mut rx, "drain.mcap").await;
+
+            // the now-empty inactive scanner was pruned this tick.
+            assert!(scanner.get_rules().await.unwrap().is_empty());
+        }
+
+        // An inactive scanner whose candidate becomes Unstable (deleted) has no remaining
+        // candidates and is pruned on the next scan (drain-then-prune).
+        #[tokio::test]
+        async fn clear_rules_drains_unstable_candidate_then_prunes() {
+            let (dir, clock, scanner) = single_coll(5).await;
+            let file = write(&dir, "drain.mcap", b"aaa").await;
+
+            // discover a candidate while deployed.
+            scan_once(&scanner).await;
+            scanner.clear_rules().await.unwrap();
+            assert_eq!(active_collections(&scanner).await.len(), 1);
+
+            // delete the file so evaluation drops the candidate (Unstable), emptying the
+            // inactive scanner's pool.
+            files::delete(&file).await.unwrap();
+            clock.advance(5);
+            scan_once(&scanner).await;
+            assert!(scanner.get_rules().await.unwrap().is_empty());
+        }
+    }
+
     mod update_rules {
         use super::*;
 
-        // Pushing a new collection id creates a scanner reflected in get_rules.
+        // A rule set with two rules sharing one collection id is rejected BEFORE any
+        // state mutation.
+        #[tokio::test]
+        async fn update_rules_duplicate_collection_id_errors() {
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+
+            // seed a known-good single collection first.
+            let rule0 = rule_in_collection("r0", "coll-existing", "/none/*.mcap", 0);
+            deploy(&scanner, vec![rule0]).await;
+            let before = active_collections(&scanner).await;
+
+            // push a set with a duplicate collection id => error.
+            let rulea = rule_in_collection("a", "dup", "/none/*.mcap", 0);
+            let ruleb = rule_in_collection("b", "dup", "/none/*.mcap", 0);
+            let rules = vec![rulea, ruleb];
+            let err = scanner
+                .update_rules(deployment("d"), rules)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                crate::scan::ScanErr::DuplicateCollectionID(_)
+            ));
+
+            // No state mutated: the existing active collection is untouched and the
+            // duplicate set was not applied.
+            assert_eq!(active_collections(&scanner).await, before);
+        }
+
+        // Pushing a new collection id creates an active scanner reflected in get_rules.
         #[tokio::test]
         async fn update_rules_creates_collection() {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            deploy(
-                &scanner,
-                vec![rule_in_collection("r", "coll", "/none/*.mcap", 0)],
-            )
-            .await;
+            let rule = rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0);
+            deploy(&scanner, vec![rule]).await;
             assert_eq!(
-                deployed_collections(&scanner).await,
-                BTreeSet::from(["coll".to_string()])
+                active_collections(&scanner).await,
+                BTreeSet::from([DEFAULT_COLL_ID.to_string()])
             );
             assert_eq!(
                 rule_ids(&scanner.get_rules().await.unwrap()),
@@ -619,38 +785,35 @@ mod tests {
             );
         }
 
-        // Pushing the SAME collection id with a new rule updates config in place and
-        // carries over ledger state, so an already-reported file is not re-reported.
+        // Pushing the SAME upload_collection_id with a new rule updates config in place
+        // and carries over ledger state, so an already-reported file is not
+        // re-reported.
         #[tokio::test]
         async fn update_rules_updates_in_place_carrying_state() {
-            let dir = filesys::dirs::create_temp("testing").await.unwrap();
-            let base = dir.path().clone();
-            let glob = format!("{}/*.mcap", base.display());
+            let dir = dirs::temp("testing").unwrap();
+            let glob = format!("{}/*.mcap", dir.path().display());
+            let upload_collection_id = DEFAULT_COLL_ID;
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            let mut v1 = rule_in_collection("r1", "coll", &glob, 0);
+            let mut v1 = rule_in_collection("r1", upload_collection_id, &glob, 0);
             v1.digest = "d1".to_string();
             deploy(&scanner, vec![v1]).await;
 
             // file appears after creation and goes stable.
-            write(&base, "carry.mcap", b"ccc");
+            write(&dir, "carry.mcap", b"ccc").await;
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
 
-            // v2: SAME collection, new rule id + digest.
-            let mut v2 = rule_in_collection("r2", "coll", &glob, 0);
+            // v2: same upload_collection_id, new rule id + digest.
+            let mut v2 = rule_in_collection("r2", upload_collection_id, &glob, 0);
             v2.digest = "d2".to_string();
             deploy(&scanner, vec![v2]).await;
 
-            // subscribe before the post-swap rescan: the carried dedup state must
-            // suppress any re-emission of the already-reported file. A regression that
-            // re-emits while leaving the ledger at 1 is caught by the try_recv assert.
-            let mut rx = subscribe(&scanner).await;
-
             // the swap carried the dedup state: no re-report.
+            let mut rx = subscribe(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
             assert!(
@@ -663,42 +826,6 @@ mod tests {
             assert_eq!(rules[0].digest, "d2".to_string());
         }
 
-        // A rule set with two rules sharing one collection id is rejected BEFORE any state
-        // mutation.
-        #[tokio::test]
-        async fn update_rules_duplicate_collection_id_errors_without_mutation() {
-            let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
-
-            // seed a known-good single collection first.
-            deploy(
-                &scanner,
-                vec![rule_in_collection("r0", "coll-existing", "/none/*.mcap", 0)],
-            )
-            .await;
-            let before = deployed_collections(&scanner).await;
-
-            // push a set with a duplicate collection id => error.
-            let err = scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![
-                        rule_in_collection("a", "dup", "/none/*.mcap", 0),
-                        rule_in_collection("b", "dup", "/none/*.mcap", 0),
-                    ],
-                )
-                .await
-                .unwrap_err();
-            assert!(matches!(
-                err,
-                crate::scan::ScanErr::DuplicateCollectionID(_)
-            ));
-
-            // no state mutated: the pre-existing collection is untouched, the dup set was
-            // not applied.
-            assert_eq!(deployed_collections(&scanner).await, before);
-        }
-
         // The deployed set is replaced on each update_rules: after [A,B] then [C], only C
         // discovers; A and B drain-and-prune on subsequent scans.
         #[tokio::test]
@@ -706,42 +833,79 @@ mod tests {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            deploy(
-                &scanner,
-                vec![
-                    rule_in_collection("a", "coll-A", "/none/*.mcap", 0),
-                    rule_in_collection("b", "coll-B", "/none/*.mcap", 0),
-                ],
-            )
-            .await;
+            let rulea = rule_in_collection("a", "coll-A", "/none/*.mcap", 0);
+            let ruleb = rule_in_collection("b", "coll-B", "/none/*.mcap", 0);
+            deploy(&scanner, vec![rulea, ruleb]).await;
 
-            deploy(
-                &scanner,
-                vec![rule_in_collection("c", "coll-C", "/none/*.mcap", 0)],
-            )
-            .await;
+            let rulec = rule_in_collection("c", "coll-C", "/none/*.mcap", 0);
+            deploy(&scanner, vec![rulec]).await;
 
-            // A and B are no longer deployed and have no candidates => pruned next scan.
+            // A and B are no longer deployed and have no candidates, so the next scan
+            // removes them from the active scanner set.
             scan_once(&scanner).await;
             assert_eq!(
-                deployed_collections(&scanner).await,
+                active_collections(&scanner).await,
                 BTreeSet::from(["coll-C".to_string()])
             );
         }
 
-        // update_rules re-snapshots preexisting: pushing the same collection again after a
-        // new file appears suppresses that file (it is re-discovered as preexisting).
+        // Replacing collection A with collection B keeps A's scanner alive long enough
+        // to drain its existing candidates, while only B discovers newly added files.
+        #[tokio::test]
+        async fn update_rules_keeps_legacy_scanner_until_candidates_drain() {
+            let dir = dirs::temp("testing").unwrap();
+            let glob = format!("{}/*.mcap", dir.path().display());
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+
+            let rulelegacy = rule_in_collection("legacy-rule", "legacy", &glob, 10);
+            deploy(&scanner, vec![rulelegacy]).await;
+            write(&dir, "legacy.mcap", b"legacy").await;
+            scan_once(&scanner).await;
+
+            let rulecurrent = rule_in_collection("current-rule", "current", &glob, 10);
+            deploy(&scanner, vec![rulecurrent]).await;
+            // The deployed collection and draining legacy collection are both active.
+            assert_eq!(
+                active_collections(&scanner).await,
+                BTreeSet::from(["current".to_string(), "legacy".to_string()])
+            );
+
+            write(&dir, "current.mcap", b"current").await;
+            scan_once(&scanner).await;
+            let mut rx = subscribe(&scanner).await;
+            tick(&scanner, &clock, 10).await;
+
+            let mut emitted = BTreeSet::new();
+            while let Ok(ScanEvent::StableFile(stable)) = rx.try_recv() {
+                emitted.insert((stable.upload_rule_id.clone(), stable_name(&stable)));
+            }
+            let event1 = ("current".to_string(), "current.mcap".to_string());
+            let event2 = ("legacy".to_string(), "legacy.mcap".to_string());
+            assert_eq!(emitted, BTreeSet::from([event1, event2]));
+            // The legacy collection is no longer active once its candidate pool drains.
+            assert_eq!(
+                active_collections(&scanner).await,
+                BTreeSet::from(["current".to_string()])
+            );
+        }
+
+        // update_rules re-snapshots preexisting: redeploying the same
+        // upload_collection_id after a new file appears suppresses that file (it is
+        // re-discovered as preexisting).
         #[tokio::test]
         async fn update_rules_resnapshots_preexisting() {
-            let (_dir, base, clock, scanner) = single_coll(0).await;
-            let glob = format!("{}/*.mcap", base.display());
+            let (dir, clock, scanner) = single_coll(0).await;
+            let glob = format!("{}/*.mcap", dir.path().display());
 
             // a file appears after the collection was created.
-            write(&base, "late.mcap", b"aaa");
+            write(&dir, "late.mcap", b"aaa").await;
 
-            // push the SAME collection again: update_config re-runs discover_preexisting,
-            // so the now-present file is snapshotted as preexisting.
-            deploy(&scanner, vec![rule_in_collection("r2", "coll", &glob, 0)]).await;
+            // same upload_collection_id as single_coll (rule id differs): update_config
+            // re-runs discover_preexisting, so the now-present file is snapshotted as
+            // preexisting.
+            let rule = rule_in_collection("r2", DEFAULT_COLL_ID, &glob, 0);
+            deploy(&scanner, vec![rule]).await;
 
             scan_once(&scanner).await;
             tick(&scanner, &clock, 100).await;
@@ -753,14 +917,22 @@ mod tests {
     mod scan {
         use super::*;
 
-        // A deployed collection discovers a new (non-preexisting) file and later evaluates
-        // it to stable.
+        #[tokio::test]
+        async fn empty_set_scan_is_noop() {
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+            for _ in 0..5 {
+                scan_once(&scanner).await;
+            }
+            assert_eq!(ledger_count(&scanner).await, 0);
+        }
+
         #[tokio::test]
         async fn deployed_collection_discovers_and_evaluates() {
-            let (_dir, base, clock, scanner) = single_coll(0).await;
+            let (dir, clock, scanner) = single_coll(0).await;
 
             // file created after the collection => not preexisting => a candidate.
-            write(&base, "new.mcap", b"aaa");
+            write(&dir, "new.mcap", b"aaa").await;
 
             scan_once(&scanner).await;
             assert_eq!(ledger_count(&scanner).await, 0);
@@ -768,81 +940,55 @@ mod tests {
             assert_eq!(ledger_count(&scanner).await, 1);
         }
 
-        // A non-deployed scanner keeps evaluating its existing candidate pool but does NOT
-        // discover new files. clear_rules drops the collection from `deployed` but leaves
-        // the scanner in place.
+        // A non-deployed scanner keeps evaluating its existing candidate pool but does
+        // NOT discover new files. clear_rules drops the collection from `deployed` but
+        // leaves the scanner in place.
         #[tokio::test]
         async fn inactive_scanner_evaluates_but_does_not_discover() {
-            let (_dir, base, clock, scanner) = single_coll(10).await;
+            let (dir, clock, scanner) = single_coll(10).await;
 
-            // discover one candidate while deployed.
-            write(&base, "first.mcap", b"aaa");
+            // discover one candidate while deployed
+            write(&dir, "first.mcap", b"aaa").await;
             scan_once(&scanner).await;
 
-            // no longer deployed: keeps the scanner but stops discovering.
+            // inactive scanner should evaluate existing but not discover new files
             scanner.clear_rules().await.unwrap();
+            write(&dir, "second.mcap", b"bbb").await;
 
-            // a new file added now must NOT be discovered.
-            write(&base, "second.mcap", b"bbb");
-
-            // subscribe before the evaluating scan so we observe the emitted StableFile.
             let mut rx = subscribe(&scanner).await;
-
-            // advance past the window and evaluate: only the pre-existing candidate goes
-            // stable; the post-clear file was never discovered.
             clock.advance(10);
             scan_once(&scanner).await;
-
-            // Under #115's report-once model, promoting the last candidate empties the
-            // inactive scanner's pool, so it is pruned in this same scan() tick and its
-            // ledger is dropped. The observable outcome is the emitted StableFile, not a
-            // surviving ledger. Exactly one event fires, for first.mcap (proving the
-            // post-clear second.mcap was never discovered).
             assert_one_stable(&mut rx, "first.mcap").await;
-
-            // the now-empty inactive scanner was pruned this tick.
-            assert!(!deployed_collections(&scanner).await.contains("coll"));
+            // The now-empty inactive collection is no longer active after this tick.
+            assert!(!active_collections(&scanner).await.contains(DEFAULT_COLL_ID));
         }
 
-        // An inactive scanner with no remaining candidates is pruned from the map on the
-        // next scan (get_rules no longer reflects it).
+        // An inactive scanner with no remaining candidates is removed from the active
+        // collection set on the next scan (get_rules no longer reflects it).
         #[tokio::test]
         async fn inactive_empty_scanner_is_pruned() {
-            let (_dir, _base, _clock, scanner) = single_coll(0).await;
-            // no candidates were ever discovered (empty glob dir).
-            assert_eq!(deployed_collections(&scanner).await.len(), 1);
+            let (_dir, _clock, scanner) = single_coll(0).await;
+            assert_eq!(active_collections(&scanner).await.len(), 1);
 
             scanner.clear_rules().await.unwrap();
-            // first scan finds no candidates for the now-inactive scanner => prune it.
             scan_once(&scanner).await;
             assert!(scanner.get_rules().await.unwrap().is_empty());
         }
 
-        // Two distinct collections matching the same file do NOT share dedup state, so the
-        // summed ledger count is 2 (per-collection isolation).
+        // Two distinct collections matching the same file do NOT share dedup state, so
+        // the summed ledger count is 2 (per-collection isolation).
         #[tokio::test]
         async fn distinct_collections_do_not_share_dedup() {
-            let dir = filesys::dirs::create_temp("testing").await.unwrap();
-            let base = dir.path().clone();
-            let glob = format!("{}/*.mcap", base.display());
+            let dir = dirs::temp("testing").unwrap();
+            let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            deploy(
-                &scanner,
-                vec![
-                    rule_in_collection("c1", "coll-1", &glob, 0),
-                    rule_in_collection("c2", "coll-2", &glob, 0),
-                ],
-            )
-            .await;
-            write(&base, "shared.mcap", b"sss");
+            let rulec1 = rule_in_collection("c1", "coll-1", &glob, 0);
+            let rulec2 = rule_in_collection("c2", "coll-2", &glob, 0);
+            deploy(&scanner, vec![rulec1, rulec2]).await;
+            write(&dir, "shared.mcap", b"sss").await;
 
-            // subscribe before the emitting scan so we can attribute each StableFile to
-            // its collection. A summed ledger count of 2 alone passes even under
-            // cross-contamination (one collection reporting twice, the other zero);
-            // asserting the emitted upload_rule_id set is exactly {coll-1, coll-2}
-            // pins true per-collection isolation.
             let mut rx = subscribe(&scanner).await;
 
             scan_once(&scanner).await;
@@ -864,20 +1010,8 @@ mod tests {
             );
         }
 
-        // FIX 1 regression: a per-collection failure during scan() must NOT abort the
-        // tick or drop a sibling collection's already-stable emission. One collection
-        // ("bad") errors while discovering (a malformed glob makes discover_candidates
-        // return InvalidGlobErr); a sibling ("good") still emits its StableFile.
-        //
-        // Determinism / injection: FIX 2 pre-validates globs in update_rules, so a
-        // malformed glob can no longer enter a live scanner through the public path.
-        // We therefore build the SingleThreadScanner by hand and seed the bad
-        // collection via CollectionScanner::from_state (which does NOT glob at
-        // construction), leaving its malformed pattern to fail deterministically at
-        // scan() time inside discover_candidates. The good collection is pre-seeded
-        // with a window-0 candidate (discovered on a prior pass) so the very next
-        // evaluate() promotes it to stable within the same scan() call the bad
-        // collection errors in. No permissions trickery — holds even as root.
+        // A discovery error in one collection does not prevent a sibling collection
+        // from emitting its stable file.
         #[tokio::test]
         async fn scan_isolates_bad_glob_collection_from_emitting_sibling() {
             use crate::scan::collection::CollectionScanner;
@@ -890,7 +1024,7 @@ mod tests {
             });
 
             // --- good collection: a real file, discovered as a candidate at t=1000. ---
-            let good_dir = filesys::dirs::create_temp("testing").await.unwrap();
+            let good_dir = dirs::temp("testing").unwrap();
             let good_glob = format!("{}/*.mcap", good_dir.path().display());
             let good_cfg = Config {
                 deployment: deployment("d"),
@@ -899,7 +1033,7 @@ mod tests {
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
             let mut good = CollectionScanner::from_state(State::new(good_cfg));
-            write(good_dir.path(), "good.mcap", b"aaaa");
+            write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
             // --- bad collection: a MALFORMED glob that errors at discover time. ---
@@ -919,7 +1053,7 @@ mod tests {
             let mut rx = single.subscribe();
 
             // advance past the window and run one tick. The bad collection's discover
-            // errors; FIX 1 logs-and-continues so the good collection still emits.
+            // errors, so the good collection still emits.
             clock.advance(1);
             single.scan().await.unwrap();
 
@@ -932,83 +1066,6 @@ mod tests {
                 "only the good collection should emit"
             );
         }
-
-        // With no rules the scan is a repeated no-op.
-        #[tokio::test]
-        async fn empty_set_scan_is_noop() {
-            let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
-            for _ in 0..5 {
-                scan_once(&scanner).await;
-            }
-            assert_eq!(ledger_count(&scanner).await, 0);
-        }
-    }
-
-    mod clear_rules {
-        use super::*;
-
-        // clear_rules empties `deployed` but leaves scanners in place; a subsequent scan
-        // still evaluates their remaining candidates. Here the candidate goes stable while
-        // inactive (clear does not immediately drop the scanner or its pool).
-        #[tokio::test]
-        async fn clear_rules_still_evaluates_remaining_candidates() {
-            let (_dir, base, clock, scanner) = single_coll(0).await;
-            write(&base, "drain.mcap", b"aaa");
-
-            // discover a candidate while deployed.
-            scan_once(&scanner).await;
-            scanner.clear_rules().await.unwrap();
-
-            // the scanner is still present (clear only emptied the deployed set).
-            assert_eq!(deployed_collections(&scanner).await.len(), 1);
-
-            // subscribe before the evaluating scan so we observe the emitted StableFile.
-            let mut rx = subscribe(&scanner).await;
-
-            // evaluate: the still-present candidate goes stable even though inactive.
-            tick(&scanner, &clock, 1).await;
-
-            // Under #115's report-once model, promoting this last candidate empties the
-            // inactive scanner's pool, so it is pruned in this same scan() tick and its
-            // ledger is dropped. The observable outcome is the emitted StableFile, not a
-            // surviving ledger.
-            assert_one_stable(&mut rx, "drain.mcap").await;
-
-            // the now-empty inactive scanner was pruned this tick.
-            assert!(scanner.get_rules().await.unwrap().is_empty());
-        }
-
-        // An inactive scanner whose candidate becomes Unstable (deleted) has no remaining
-        // candidates and is pruned on the next scan (drain-then-prune).
-        #[tokio::test]
-        async fn clear_rules_drains_unstable_candidate_then_prunes() {
-            let (_dir, base, clock, scanner) = single_coll(5).await;
-            let path = write(&base, "drain.mcap", b"aaa");
-
-            // discover a candidate while deployed.
-            scan_once(&scanner).await;
-            scanner.clear_rules().await.unwrap();
-            assert_eq!(deployed_collections(&scanner).await.len(), 1);
-
-            // delete the file so evaluation drops the candidate (Unstable), emptying the
-            // inactive scanner's pool.
-            std::fs::remove_file(&path).unwrap();
-            clock.advance(5);
-            scan_once(&scanner).await; // evaluate => Unstable => candidate removed
-                                       // the now-empty inactive scanner is pruned on this pass.
-            assert!(scanner.get_rules().await.unwrap().is_empty());
-        }
-
-        // clear_rules on an empty scanner is a no-op (no panic).
-        #[tokio::test]
-        async fn clear_rules_on_empty_is_noop() {
-            let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
-            scanner.clear_rules().await.unwrap();
-            scan_once(&scanner).await;
-            assert_eq!(ledger_count(&scanner).await, 0);
-        }
     }
 
     mod prune {
@@ -1018,8 +1075,8 @@ mod tests {
         // ledger entry; with `before` earlier retains it.
         #[tokio::test]
         async fn prune_drops_and_retains() {
-            let (_dir, base, clock, scanner) = single_coll(0).await;
-            write(&base, "p.mcap", b"aaa");
+            let (dir, clock, scanner) = single_coll(0).await;
+            write(&dir, "p.mcap", b"aaa").await;
 
             // discover at t=1000, evaluate stable at t=1001. first_observed_at == 1000.
             scan_once(&scanner).await;
@@ -1039,91 +1096,6 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(ledger_count(&scanner).await, 0);
-        }
-    }
-
-    mod subscribe {
-        use super::*;
-
-        // subscribe() before scan(): a StableFile event carries the expected payload.
-        #[tokio::test]
-        async fn subscribe_receives_stable_file_payload() {
-            let dir = filesys::dirs::create_temp("testing").await.unwrap();
-            let base = dir.path().clone();
-            let glob = format!("{}/*.mcap", base.display());
-
-            let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
-            scanner
-                .update_rules(
-                    deployment("dpl-1"),
-                    vec![rule_in_collection("rule-1", "coll", &glob, 0)],
-                )
-                .await
-                .unwrap();
-            write(&base, "emit.mcap", b"aaaa");
-
-            let mut rx = subscribe(&scanner).await;
-
-            scan_once(&scanner).await; // discover
-            tick(&scanner, &clock, 1).await; // evaluate => emit
-
-            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
-            // lint:allow(field-by-field-assert)
-            assert_eq!(stable_name(&sf), "emit.mcap".to_string());
-            assert_eq!(sf.size, 4);
-            assert_eq!(sf.deployment_id, "dpl-1".to_string());
-            // NOTE: the src sets upload_rule_id from the collection id (observe_file).
-            assert_eq!(sf.upload_rule_id, "coll".to_string());
-            assert!(sf.first_observed_at <= sf.last_observed_at);
-        }
-
-        // scan() producing stable files with NO subscriber does not error (debug branch).
-        #[tokio::test]
-        async fn emit_with_no_subscriber_does_not_error() {
-            let (_dir, base, clock, scanner) = single_coll(0).await;
-            write(&base, "nosub.mcap", b"aaa");
-
-            scan_once(&scanner).await;
-            tick(&scanner, &clock, 1).await; // emits with no subscriber, must not error
-            assert_eq!(ledger_count(&scanner).await, 1);
-        }
-
-        // A subscriber that does not drain observes RecvError::Lagged once more events than
-        // the broadcast capacity are produced.
-        #[tokio::test]
-        async fn tiny_capacity_subscriber_lags() {
-            let dir = filesys::dirs::create_temp("testing").await.unwrap();
-            let base = dir.path().clone();
-            let glob = format!("{}/*.mcap", base.display());
-
-            let clock = Clock::new(1000);
-            let scanner = spawn_scanner_with_capacity(&clock, 1);
-            deploy(&scanner, vec![rule_in_collection("r", "coll", &glob, 0)]).await;
-
-            let mut rx = subscribe(&scanner).await;
-
-            // produce several stable files without draining rx (capacity is 1).
-            for i in 0..4 {
-                write(&base, &format!("f{i}.mcap"), b"aaa");
-                scanner.scan().await.unwrap(); // discover fN
-                clock.advance(1);
-                scanner.scan().await.unwrap(); // evaluate => emit fN
-            }
-
-            // the undrained receiver has lagged behind the capacity.
-            let mut lagged = false;
-            for _ in 0..8 {
-                match rx.try_recv() {
-                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
-                        lagged = true;
-                        break;
-                    }
-                    Ok(_) => continue,
-                    Err(_) => break,
-                }
-            }
-            assert!(lagged, "expected the undrained subscriber to lag");
         }
     }
 
@@ -1147,34 +1119,6 @@ mod tests {
             handle.await.unwrap();
 
             let err = scanner.scan().await.unwrap_err();
-            assert!(matches!(err, crate::scan::ScanErr::SendActorMessageErr(_)));
-        }
-    }
-
-    mod construction {
-        use super::*;
-
-        // Build the actor by hand rather than via `Scanner::spawn`: wire the channel,
-        // construct `SingleThreadScanner` + `Worker::new`, spawn `worker.run()`, and wrap
-        // the sender with `Scanner::new`. Covers `Worker::new` (only otherwise reached via
-        // spawn) and the dead `Scanner::new(sender)` (no production caller). A single
-        // get_ledger_count/shutdown round-trip proves the hand-built actor works.
-        #[tokio::test]
-        async fn worker_new_and_scanner_new_round_trip() {
-            let (tx, rx) = mpsc::channel(64);
-            let single = SingleThreadScanner::new(ScannerArgs::default());
-            let worker = Worker::new(single, rx);
-            let handle = tokio::spawn(worker.run());
-
-            let scanner = Scanner::new(tx);
-
-            // the hand-built actor answers commands: empty ledger.
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
-
-            // and shuts down cleanly; later commands then error on a closed channel.
-            scanner.shutdown().await.unwrap();
-            handle.await.unwrap();
-            let err = scanner.get_ledger_count().await.unwrap_err();
             assert!(matches!(err, crate::scan::ScanErr::SendActorMessageErr(_)));
         }
     }
