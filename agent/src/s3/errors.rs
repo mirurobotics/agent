@@ -1,9 +1,11 @@
 // internal crates
 use crate::errors::{Code, HTTPCode, Trace};
-use crate::filesys;
+use crate::filesys::{self, file::File};
+use crate::s3::Object;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::primitives::ByteStreamError;
 
 #[derive(Debug, thiserror::Error)]
 #[error("object not found: {key}")]
@@ -116,12 +118,6 @@ crate::impl_error!(S3Err {
 
 /// Whether an `SdkError` carries an HTTP 404 (checked against the raw response
 /// status, so it works for any operation's service-error enum `E`).
-///
-/// This is detection only. What a 404 *means* is operation-specific and cannot
-/// be decided here: some callers turn it into an error (`get` →
-/// `ObjectNotFoundErr`), while others treat it as a non-error success value
-/// (`exists` → `Ok(false)`). Callers must therefore check this and
-/// short-circuit before delegating to [`map_sdk_err`].
 pub fn is_not_found<E>(err: &SdkError<E>) -> bool {
     err.raw_response()
         .map(|r| r.status().as_u16() == 404)
@@ -192,18 +188,37 @@ where
     }
 }
 
+/// Maps a local filesystem I/O error hit while streaming an object body
+/// (opening the source, creating the destination, or copying) into
+/// [`S3Err::LocalIoErr`].
+pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io::Error) -> S3Err {
+    S3Err::LocalIoErr(LocalIoErr {
+        operation: operation.to_string(),
+        object: obj.to_string(),
+        msg: format!("filesystem I/O error at path '{file}': {err}"),
+        trace: crate::trace!(),
+    })
+}
+
+/// Maps a local `ByteStream` construction error (e.g. the file could not be
+/// opened or read) into [`S3Err::LocalIoErr`].
+pub fn map_bytestream_err(
+    operation: &str,
+    obj: &Object,
+    file: &File,
+    err: &ByteStreamError,
+) -> S3Err {
+    S3Err::LocalIoErr(LocalIoErr {
+        operation: operation.to_string(),
+        object: obj.to_string(),
+        msg: format!("failed to open '{file}' for streaming: {err}"),
+        trace: crate::trace!(),
+    })
+}
+
 /// Maps an error reading the object body off the wire (connection reset, TLS
 /// drop, truncated body) into a retryable [`S3Err::ConnectionErr`].
-///
-/// This is the read-side counterpart to [`crate::s3::Store::map_body_io_err`]:
-/// a failure pulling bytes *off the network* is a transport error and should be
-/// retried, whereas a failure *writing those bytes to disk* is a terminal local
-/// I/O error.
-pub fn map_body_read_err(
-    operation: &str,
-    key: &str,
-    err: &aws_sdk_s3::primitives::ByteStreamError,
-) -> S3Err {
+pub fn map_body_read_err(operation: &str, key: &str, err: &ByteStreamError) -> S3Err {
     S3Err::ConnectionErr(ConnectionErr {
         key: key.to_string(),
         msg: format!("failed to read object body during {operation}: {err}"),
@@ -312,6 +327,58 @@ mod tests {
         assert!(!is_not_found(&timeout));
     }
 
+    mod body_mappers {
+        use super::*;
+        use crate::filesys::file::File;
+
+        fn obj() -> Object {
+            Object {
+                bucket: "bucket".to_string(),
+                key: "key".to_string(),
+            }
+        }
+
+        #[test]
+        fn map_body_io_err_maps_to_local_io_err() {
+            // A failure writing bytes to the local destination is a terminal
+            // local I/O error, never a network condition.
+            let err = std::io::Error::other("no space left on device");
+            let mapped = map_body_io_err("get_object", &obj(), &File::new("/data/out.bin"), err);
+            assert!(matches!(mapped, S3Err::LocalIoErr(_)));
+            assert!(!mapped.is_network_conn_err());
+            assert_eq!(mapped.http_status().as_u16(), 500);
+            let msg = mapped.to_string();
+            assert!(msg.contains("s3://bucket/key"));
+            assert!(msg.contains("/data/out.bin"));
+            assert!(msg.contains("no space left on device"));
+        }
+
+        #[test]
+        fn map_bytestream_err_maps_to_local_io_err() {
+            // A failure opening the local source file for streaming is also a
+            // terminal local I/O error.
+            let err = ByteStreamError::from(std::io::Error::other("permission denied"));
+            let mapped = map_bytestream_err("put_object", &obj(), &File::new("/data/in.bin"), &err);
+            assert!(matches!(mapped, S3Err::LocalIoErr(_)));
+            assert!(!mapped.is_network_conn_err());
+            let msg = mapped.to_string();
+            assert!(msg.contains("s3://bucket/key"));
+            assert!(msg.contains("/data/in.bin"));
+        }
+
+        #[test]
+        fn map_body_read_err_maps_to_connection_err() {
+            // A failure reading the object body off the wire is a retryable
+            // transport error. `ByteStreamError` has no public constructor, but
+            // its public `From<std::io::Error>` impl builds a representative one.
+            let err = ByteStreamError::from(std::io::Error::other("connection reset"));
+            let mapped = map_body_read_err("get_object", "blobs/data.bin", &err);
+            assert!(matches!(mapped, S3Err::ConnectionErr(_)));
+            assert!(mapped.is_network_conn_err());
+            assert!(mapped.to_string().contains("connection error"));
+        }
+    }
+
     /// Direct assertions on the leaf error types' trait behavior. These do not
     /// go through the SDK; they pin the `crate::errors::Error` contract each
     /// variant promises (code / http_status / is_network_conn_err / Display).
@@ -331,20 +398,6 @@ mod tests {
             assert_eq!(err.http_status().as_u16(), 404);
             assert!(!err.is_network_conn_err());
             assert!(err.to_string().contains("object not found"));
-        }
-
-        #[test]
-        fn map_body_read_err_maps_to_connection_err() {
-            // A body-read failure off the wire is a retryable transport error.
-            // `ByteStreamError` has no public constructor, but its public
-            // `From<std::io::Error>` impl lets us build a representative one.
-            let bs_err = aws_sdk_s3::primitives::ByteStreamError::from(std::io::Error::other(
-                "connection reset",
-            ));
-            let mapped = map_body_read_err("get_object", "blobs/data.bin", &bs_err);
-            assert!(matches!(mapped, S3Err::ConnectionErr(_)));
-            assert!(mapped.is_network_conn_err());
-            assert!(mapped.to_string().contains("connection error"));
         }
 
         #[test]

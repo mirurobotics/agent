@@ -1,38 +1,17 @@
-//! Remote S3 object storage.
-//!
-//! This module talks to an S3 bucket over the network. It is distinct from
-//! [`crate::disk`], which manages local on-disk device state (device.json,
-//! settings.json, ...). Do not conflate the two.
-//!
-//! A [`Store`] is constructed **only** from caller-supplied temporary
-//! credentials (access key id, secret access key, session token) plus a region.
-//! It is bucket-agnostic: each operation targets an [`Object`] carrying its own
-//! bucket and key. It never reads ambient AWS configuration (environment
-//! variables, `~/.aws`, or EC2/ECS instance metadata): the Miru backend mints
-//! short-lived STS credentials and hands them to the agent.
-//!
-//! Object bodies are streamed to and from disk (never buffered whole in
-//! memory) so the agent can move multi-gigabyte artifacts on memory-constrained
-//! devices.
-//!
-//! [`Store`] is a thin, stateless CRUD client: [`Store::put`],
-//! [`Store::get`], [`Store::delete`], and [`Store::exists`].
-
 // internal crates
-use crate::filesys::file::File;
-use crate::filesys::path::PathExt;
+use crate::filesys::{file::File, path::PathExt};
 use crate::trace;
 
 // external crates
 use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
-use aws_sdk_s3::primitives::{ByteStream, ByteStreamError};
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::AsyncWriteExt;
 
 pub mod errors;
 
+use errors::ObjectNotFoundErr;
 pub use errors::S3Err;
-use errors::{LocalIoErr, ObjectNotFoundErr};
 
 pub struct Config {
     pub creds: Credentials,
@@ -130,7 +109,7 @@ impl Store {
     pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), S3Err> {
         let body = ByteStream::from_path(src.path())
             .await
-            .map_err(|e| self.map_bytestream_err("put_object", dst, src, &e))?;
+            .map_err(|e| errors::map_bytestream_err("put_object", dst, src, &e))?;
         self.client
             .put_object()
             .bucket(&dst.bucket)
@@ -178,16 +157,16 @@ impl Store {
         let mut body = output.body;
         let mut file = tokio::fs::File::create(dest.path())
             .await
-            .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
+            .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         while let Some(chunk) = body.next().await {
             let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", &src.key, &e))?;
             file.write_all(&chunk)
                 .await
-                .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
+                .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         }
         file.flush()
             .await
-            .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
+            .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         Ok(())
     }
 
@@ -228,40 +207,5 @@ impl Store {
                 }
             }
         }
-    }
-
-    /// Maps a local filesystem I/O error hit while streaming an object body
-    /// (opening the source, creating the destination, or copying) into
-    /// [`S3Err::LocalIoErr`].
-    fn map_body_io_err(
-        &self,
-        operation: &str,
-        obj: &Object,
-        file: &File,
-        err: std::io::Error,
-    ) -> S3Err {
-        S3Err::LocalIoErr(LocalIoErr {
-            operation: operation.to_string(),
-            object: obj.to_string(),
-            msg: format!("filesystem I/O error at path '{file}': {err}"),
-            trace: trace!(),
-        })
-    }
-
-    /// Maps a local [`ByteStream`] construction error (e.g. the file could not be
-    /// opened or read) into [`S3Err::LocalIoErr`].
-    fn map_bytestream_err(
-        &self,
-        operation: &str,
-        obj: &Object,
-        file: &File,
-        err: &ByteStreamError,
-    ) -> S3Err {
-        S3Err::LocalIoErr(LocalIoErr {
-            operation: operation.to_string(),
-            object: obj.to_string(),
-            msg: format!("failed to open '{file}' for streaming: {err}"),
-            trace: trace!(),
-        })
     }
 }
