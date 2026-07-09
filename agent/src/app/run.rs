@@ -419,17 +419,21 @@ impl ShutdownManager {
 
     async fn shutdown_impl(&mut self) -> Result<(), ServerErr> {
         // the shutdown order is important here. The refresh and server threads rely on
-        // the state so the state must be shutdown last.
+        // the state so the state must be shutdown last. Shutdown is best-effort: every
+        // step is attempted and the first error encountered is returned at the end.
         info!("Shutting down miru agent...");
+
+        let mut first_err: Option<ServerErr> = None;
 
         // 1. refresh
         if let Some(token_refresh_worker_handle) = self.token_refresh_worker_handle.take() {
-            token_refresh_worker_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(JoinHandleErr {
+            if let Err(e) = token_refresh_worker_handle.await {
+                error!("Failed to shutdown token refresh worker: {}", e);
+                first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                })
-            })?;
+                }));
+            }
         } else {
             info!(
                 "Token refresh worker handle not found, skipping token refresh worker shutdown..."
@@ -438,50 +442,68 @@ impl ShutdownManager {
 
         // 2. poller
         if let Some(poller_worker_handle) = self.poller_worker_handle.take() {
-            poller_worker_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(JoinHandleErr {
+            if let Err(e) = poller_worker_handle.await {
+                error!("Failed to shutdown poller worker: {}", e);
+                first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                })
-            })?;
+                }));
+            }
         } else {
             info!("Poller worker handle not found, skipping poller worker shutdown...");
         }
 
         // 3. mqtt
         if let Some(mqtt_worker_handle) = self.mqtt_worker_handle.take() {
-            mqtt_worker_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(JoinHandleErr {
+            if let Err(e) = mqtt_worker_handle.await {
+                error!("Failed to shutdown MQTT worker: {}", e);
+                first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
                     source: Box::new(e),
                     trace: trace!(),
-                })
-            })?;
+                }));
+            }
         } else {
             info!("MQTT worker handle not found, skipping MQTT worker shutdown...");
         }
 
         // 4. server
         if let Some(socket_server_handle) = self.socket_server_handle.take() {
-            socket_server_handle.await.map_err(|e| {
-                ServerErr::JoinHandleErr(JoinHandleErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                })
-            })??;
+            match socket_server_handle.await {
+                Err(e) => {
+                    error!("Failed to shutdown socket server: {}", e);
+                    first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    }));
+                }
+                Ok(Err(e)) => {
+                    error!("Failed to shutdown socket server: {}", e);
+                    first_err.get_or_insert(e);
+                }
+                Ok(Ok(())) => {}
+            }
         } else {
             info!("Socket server handle not found, skipping socket server shutdown...");
         }
 
         // 5. app state
         if let Some(app_state) = self.app_state.take() {
-            app_state.state.shutdown().await?;
+            if let Err(e) = app_state.state.shutdown().await {
+                error!("Failed to shutdown app state: {}", e);
+                first_err.get_or_insert(e);
+            }
             app_state.state_handle.await;
         } else {
             info!("App state not found, skipping app state shutdown...");
         }
 
-        info!("Program shutdown complete");
-        Ok(())
+        match first_err {
+            Some(e) => Err(e),
+            None => {
+                info!("Program shutdown complete");
+                Ok(())
+            }
+        }
     }
 }
 
