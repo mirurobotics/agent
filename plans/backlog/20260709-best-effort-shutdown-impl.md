@@ -9,7 +9,7 @@ This ExecPlan is a living document. Revise it as work proceeds and record decisi
 | mirurobotics/agent | /home/user/agent | write | agent/src/app/run.rs (including its inline `mod tests`) |
 | mirurobotics/agent | /home/user/agent | read | agent/src/server/errors.rs, agent/src/app/state.rs, agent/tests/app/state.rs, scripts/ |
 
-No other files change. Work happens on the already-checked-out branch `claude/agent-bug-hunt-hujana-shutdown-joins`. Do NOT create branches and do NOT push — commit locally only.
+This plan lives in `plans/backlog/` of the agent repo because all code changes are confined to that repository. No other files change. Work happens on the already-checked-out branch `claude/agent-bug-hunt-hujana-shutdown-joins`. Do NOT create branches and do NOT push — commit locally only.
 
 ## Purpose / Big Picture
 
