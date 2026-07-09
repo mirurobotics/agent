@@ -591,7 +591,6 @@ mod tests {
             }
         }
 
-        // A ledger entry whose size + mtime match the observation => true.
         #[test]
         fn matches() {
             let file = File::new("/none/l.mcap");
@@ -602,7 +601,6 @@ mod tests {
             assert!(state.is_latest_ledger_entry(&obs(file)));
         }
 
-        // A size or mtime mismatch against the latest entry => false.
         #[test]
         fn metadata_differs() {
             let file = File::new("/none/l.mcap");
@@ -620,7 +618,6 @@ mod tests {
             assert!(!state.is_latest_ledger_entry(&mtime_changed));
         }
 
-        // No ledger history for the file => false.
         #[test]
         fn absent() {
             let file = File::new("/none/l.mcap");
@@ -632,7 +629,6 @@ mod tests {
     mod add_mtime_alias_to_latest_ledger_entry {
         use super::*;
 
-        // Appends the mtime onto the latest ledger entry's aliases.
         #[test]
         fn appends() {
             let file = File::new("/none/l.mcap");
@@ -648,7 +644,6 @@ mod tests {
             assert_eq!(latest.mtime_aliases, vec![ts(1234)]);
         }
 
-        // Errors when the file has no ledger history.
         #[test]
         fn errors_when_absent() {
             let file = File::new("/none/l.mcap");
@@ -663,7 +658,6 @@ mod tests {
     mod stable_file {
         use super::*;
 
-        // external crates
         use std::time::Duration;
 
         fn obs(file: File) -> Observation {
@@ -677,7 +671,6 @@ mod tests {
             }
         }
 
-        // size + primary mtime match => equal_metadata / has_mtime true.
         #[test]
         fn matches_primary_mtime() {
             let file = File::new("/none/s.mcap");
@@ -688,7 +681,6 @@ mod tests {
             assert!(entry.equal_metadata(&observation));
         }
 
-        // mtime present only in aliases => has_mtime / equal_metadata true.
         #[test]
         fn matches_aliased_mtime() {
             let file = File::new("/none/s.mcap");
@@ -702,7 +694,6 @@ mod tests {
             assert!(entry.equal_metadata(&observation));
         }
 
-        // size mismatch => equal_metadata false (even if mtime matches).
         #[test]
         fn size_mismatch() {
             let file = File::new("/none/s.mcap");
@@ -713,7 +704,6 @@ mod tests {
             assert!(!entry.equal_metadata(&observation));
         }
 
-        // mtime not in primary or aliases => has_mtime / equal_metadata false.
         #[test]
         fn mtime_mismatch() {
             let file = File::new("/none/s.mcap");
