@@ -29,13 +29,7 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_private_key_missing() {
         let (layout, _tmp) = fresh_layout().await;
-        files::write_string(
-            &layout.auth().public_key(),
-            "public",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&layout.auth().public_key(), "public").await;
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -44,13 +38,7 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_public_key_missing() {
         let (layout, _tmp) = fresh_layout().await;
-        files::write_string(
-            &layout.auth().private_key(),
-            "private",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&layout.auth().private_key(), "private").await;
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -60,16 +48,8 @@ pub mod assert_activated {
     async fn returns_ok_when_both_keys_present() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
-        files::write_string(
-            &auth.private_key(),
-            "private",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&auth.private_key(), "private").await;
+        files::seed(&auth.public_key(), "public").await;
 
         assert_activated(&layout).unwrap();
     }

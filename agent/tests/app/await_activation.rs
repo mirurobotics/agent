@@ -6,7 +6,7 @@ use std::time::Duration as StdDuration;
 // internal crates
 use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{dirs, files};
 
 // (none — stdlib + tokio macros)
 
@@ -21,16 +21,8 @@ async fn fresh_layout(name: &str) -> (Layout, dirs::TempDir) {
 
 async fn write_keys(layout: &Layout) {
     let auth = layout.auth();
-    files::write_string(
-        &auth.private_key(),
-        "private",
-        WriteOptions::OVERWRITE_ATOMIC,
-    )
-    .await
-    .unwrap();
-    files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
+    files::seed(&auth.private_key(), "private").await;
+    files::seed(&auth.public_key(), "public").await;
 }
 
 // ============================ TESTS ============================ //
@@ -80,16 +72,8 @@ async fn activates_after_n_cycles() {
         async move {
             if n + 1 == activate_after {
                 let auth = layout.auth();
-                files::write_string(
-                    &auth.private_key(),
-                    "private",
-                    WriteOptions::OVERWRITE_ATOMIC,
-                )
-                .await
-                .unwrap();
-                files::write_string(&auth.public_key(), "public", WriteOptions::OVERWRITE_ATOMIC)
-                    .await
-                    .unwrap();
+                files::seed(&auth.private_key(), "private").await;
+                files::seed(&auth.public_key(), "public").await;
             }
         }
     };

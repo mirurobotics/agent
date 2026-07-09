@@ -269,9 +269,11 @@ mod needs_upgrade {
         // Force a read error: create a directory at the marker path. `exists()`
         // returns true for a directory, so `read_string` runs and fails with a
         // FileSysErr; `needs_upgrade` treats the error as "missing" and returns true.
-        tokio::fs::create_dir_all(layout.agent_version().path())
-            .await
-            .unwrap();
+        dirs::create(&miru_agent::filesys::Dir::new(
+            layout.agent_version().path().clone(),
+        ))
+        .await
+        .unwrap();
         assert!(needs_upgrade(&layout, "v1.0.0").await);
     }
 }
@@ -301,9 +303,7 @@ mod reconcile_impl {
     #[tokio::test]
     async fn returns_authn_err_when_private_key_missing() {
         let (layout, _tmp) = prepare_layout("reconcile_impl_no_pk").await;
-        tokio::fs::remove_file(layout.auth().private_key().path())
-            .await
-            .unwrap();
+        files::delete(&layout.auth().private_key()).await.unwrap();
 
         let mock = make_mock_client(backend_device("dvc_ri2", "no_pk"));
         let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
@@ -340,9 +340,11 @@ mod reconcile_impl {
         // Place a directory at the device.json path so setup::reset's atomic
         // write of device.json cannot replace it and returns
         // DiskErr::FileSysErr(_).
-        tokio::fs::create_dir_all(layout.device().path())
-            .await
-            .unwrap();
+        dirs::create(&miru_agent::filesys::Dir::new(
+            layout.device().path().clone(),
+        ))
+        .await
+        .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_ri4", "reset_fail"));
         let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
@@ -435,13 +437,7 @@ mod reconcile_impl {
     async fn falls_back_to_defaults_when_settings_corrupt() {
         let (layout, _tmp) = prepare_layout("reconcile_impl_settings_corrupt").await;
 
-        files::write_string(
-            &layout.settings(),
-            "not-json",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&layout.settings(), "not-json").await;
 
         let mock = make_mock_client(backend_device("dvc_sc1", "corrupt"));
         reconcile_impl(mock.as_ref(), &layout, "v1.0.0")

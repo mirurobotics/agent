@@ -253,6 +253,17 @@ pub async fn write_string(file: &File, s: &str, opts: WriteOptions) -> Result<()
     write_bytes(file, s.as_bytes(), opts).await
 }
 
+/// Test-only convenience: atomically (over)write `contents` to `file`, panicking
+/// on error. Collapses the common `write_string(f, s, OVERWRITE_ATOMIC).await
+/// .unwrap()` seed pattern to a single line. For non-default write options, call
+/// [`write_string`] directly.
+#[cfg(feature = "test")]
+pub async fn seed(file: &File, contents: &str) {
+    write_string(file, contents, WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+}
+
 pub async fn write_json<T: serde::Serialize>(
     file: &File,
     obj: &T,

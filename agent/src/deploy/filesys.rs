@@ -548,28 +548,30 @@ mod tests {
         // PAST the failing first iteration to reach the second one. If
         // rollback bailed on the first error, dne_parent/dst.json would
         // still be on disk and the assertion would fail.
-        let existed_parent = tmp.path().join("existed_parent");
-        let dne_parent = tmp.path().join("dne_parent");
-        std::fs::create_dir_all(&existed_parent).unwrap();
-        std::fs::create_dir_all(&dne_parent).unwrap();
+        let existed_parent = tmp.subdir("existed_parent");
+        let dne_parent = tmp.subdir("dne_parent");
+        filesys::dirs::create(&existed_parent).await.unwrap();
+        filesys::dirs::create(&dne_parent).await.unwrap();
 
-        std::fs::write(existed_parent.join("backup.json"), "backup content").unwrap();
-        std::fs::write(dne_parent.join("dst.json"), "leftover").unwrap();
+        files::seed(&existed_parent.file("backup.json"), "backup content").await;
+        files::seed(&dne_parent.file("dst.json"), "leftover").await;
 
         // Only lock existed_parent so its rename-back fails with EACCES.
         // Leave dne_parent at default 0o755 so its remove_file succeeds.
-        std::fs::set_permissions(&existed_parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+        filesys::dirs::set_permissions(&existed_parent, std::fs::Permissions::from_mode(0o555))
+            .await
+            .unwrap();
 
         // Vec order matters: rollback walks `.iter().rev()`, so index 1
         // (Existed, locked) is processed first and index 0 (DidNotExist,
         // writable) is processed second.
         let snapshots = vec![
             Snapshot::DidNotExist {
-                dst: filesys::File::new(dne_parent.join("dst.json")),
+                dst: dne_parent.file("dst.json"),
             },
             Snapshot::Existed {
-                dst: filesys::File::new(existed_parent.join("dst.json")),
-                backup: filesys::File::new(existed_parent.join("backup.json")),
+                dst: existed_parent.file("dst.json"),
+                backup: existed_parent.file("backup.json"),
             },
         ];
 
@@ -577,18 +579,20 @@ mod tests {
 
         // Restore permissions BEFORE assertions so tempdir Drop can recurse
         // and clean up even if an assertion fails.
-        std::fs::set_permissions(&existed_parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        filesys::dirs::set_permissions(&existed_parent, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
 
         assert!(
-            existed_parent.join("backup.json").exists(),
+            existed_parent.file("backup.json").exists(),
             "Existed backup file should remain when rename-back into a chmod-555 parent fails"
         );
         assert!(
-            !dne_parent.join("dst.json").exists(),
+            !dne_parent.file("dst.json").exists(),
             "DidNotExist dst.json should have been removed by the second rollback step, proving rollback continued past the first failure"
         );
         assert!(
-            !existed_parent.join("dst.json").exists(),
+            !existed_parent.file("dst.json").exists(),
             "Existed dst was never populated; rename-back failed so it should still be absent"
         );
     }
@@ -599,17 +603,19 @@ mod tests {
         let tmp = filesys::dirs::temp("remove_backups_continues_when_delete_fails").unwrap();
 
         // Writable dir: backup can be deleted
-        let writable_dir = tmp.path().join("writable");
-        std::fs::create_dir_all(&writable_dir).unwrap();
-        std::fs::write(writable_dir.join("dst.json"), "content").unwrap();
-        std::fs::write(writable_dir.join("miru.backup.dst.json"), "backup").unwrap();
+        let writable_dir = tmp.subdir("writable");
+        filesys::dirs::create(&writable_dir).await.unwrap();
+        files::seed(&writable_dir.file("dst.json"), "content").await;
+        files::seed(&writable_dir.file("miru.backup.dst.json"), "backup").await;
 
         // Locked dir: backup cannot be deleted (EACCES)
-        let locked_dir = tmp.path().join("locked");
-        std::fs::create_dir_all(&locked_dir).unwrap();
-        std::fs::write(locked_dir.join("dst.json"), "content").unwrap();
-        std::fs::write(locked_dir.join("miru.backup.dst.json"), "backup").unwrap();
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let locked_dir = tmp.subdir("locked");
+        filesys::dirs::create(&locked_dir).await.unwrap();
+        files::seed(&locked_dir.file("dst.json"), "content").await;
+        files::seed(&locked_dir.file("miru.backup.dst.json"), "backup").await;
+        filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
+            .await
+            .unwrap();
 
         // Vec order matters: remove_backups iterates forward, so index 0
         // (locked) is processed first and fails, index 1 (writable) is
@@ -617,29 +623,31 @@ mod tests {
         // the writable backup would still be on disk.
         let snapshots = vec![
             Snapshot::Existed {
-                dst: filesys::File::new(locked_dir.join("dst.json")),
-                backup: filesys::File::new(locked_dir.join("miru.backup.dst.json")),
+                dst: locked_dir.file("dst.json"),
+                backup: locked_dir.file("miru.backup.dst.json"),
             },
             Snapshot::Existed {
-                dst: filesys::File::new(writable_dir.join("dst.json")),
-                backup: filesys::File::new(writable_dir.join("miru.backup.dst.json")),
+                dst: writable_dir.file("dst.json"),
+                backup: writable_dir.file("miru.backup.dst.json"),
             },
         ];
 
         remove_backups(&snapshots).await;
 
         // Restore permissions BEFORE assertions so tempdir Drop can recurse
-        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
 
         // Writable backup was successfully deleted
         assert!(
-            !writable_dir.join("miru.backup.dst.json").exists(),
+            !writable_dir.file("miru.backup.dst.json").exists(),
             "writable backup should have been deleted"
         );
 
         // Locked backup still exists — delete failed, error was logged at warn!
         assert!(
-            locked_dir.join("miru.backup.dst.json").exists(),
+            locked_dir.file("miru.backup.dst.json").exists(),
             "locked backup should still exist since delete was blocked by permissions"
         );
     }

@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::agent_version;
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{dirs, files};
 
 pub mod read {
     use super::*;
@@ -17,9 +17,7 @@ pub mod read {
     async fn returns_some_when_file_present() {
         let dir = dirs::temp("agent_version_read_present").unwrap();
         let file = dir.file("agent_version");
-        files::write_string(&file, "v1.2.3\n", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&file, "v1.2.3\n").await;
 
         let result = agent_version::read(&file).await.unwrap();
         assert_eq!(result, Some("v1.2.3".to_string()));
@@ -29,9 +27,7 @@ pub mod read {
     async fn trims_surrounding_whitespace() {
         let dir = dirs::temp("agent_version_read_trim").unwrap();
         let file = dir.file("agent_version");
-        files::write_string(&file, "  v0.4.0  \n\n", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&file, "  v0.4.0  \n\n").await;
 
         let result = agent_version::read(&file).await.unwrap();
         assert_eq!(result, Some("v0.4.0".to_string()));
