@@ -15,7 +15,7 @@ use miru_agent::disk::{
 };
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, dirs, files, Overwrite, WriteOptions};
+use miru_agent::filesys::{self, dirs, files, Overwrite};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
@@ -37,21 +37,9 @@ pub async fn create_token_manager(
         .await
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
-    files::write_string(
-        &private_key_file,
-        "private_key",
-        WriteOptions::OVERWRITE_ATOMIC,
-    )
-    .await
-    .unwrap();
+    files::seed(&private_key_file, "private_key").await;
     let public_key_file = dir.file("public_key.pem");
-    files::write_string(
-        &public_key_file,
-        "public_key",
-        WriteOptions::OVERWRITE_ATOMIC,
-    )
-    .await
-    .unwrap();
+    files::seed(&public_key_file, "public_key").await;
 
     TokenManager::spawn(
         32,

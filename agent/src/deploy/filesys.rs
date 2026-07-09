@@ -553,20 +553,8 @@ mod tests {
         filesys::dirs::create(&existed_parent).await.unwrap();
         filesys::dirs::create(&dne_parent).await.unwrap();
 
-        files::write_string(
-            &existed_parent.file("backup.json"),
-            "backup content",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(
-            &dne_parent.file("dst.json"),
-            "leftover",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&existed_parent.file("backup.json"), "backup content").await;
+        files::seed(&dne_parent.file("dst.json"), "leftover").await;
 
         // Only lock existed_parent so its rename-back fails with EACCES.
         // Leave dne_parent at default 0o755 so its remove_file succeeds.
@@ -617,38 +605,14 @@ mod tests {
         // Writable dir: backup can be deleted
         let writable_dir = tmp.subdir("writable");
         filesys::dirs::create(&writable_dir).await.unwrap();
-        files::write_string(
-            &writable_dir.file("dst.json"),
-            "content",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(
-            &writable_dir.file("miru.backup.dst.json"),
-            "backup",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&writable_dir.file("dst.json"), "content").await;
+        files::seed(&writable_dir.file("miru.backup.dst.json"), "backup").await;
 
         // Locked dir: backup cannot be deleted (EACCES)
         let locked_dir = tmp.subdir("locked");
         filesys::dirs::create(&locked_dir).await.unwrap();
-        files::write_string(
-            &locked_dir.file("dst.json"),
-            "content",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(
-            &locked_dir.file("miru.backup.dst.json"),
-            "backup",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&locked_dir.file("dst.json"), "content").await;
+        files::seed(&locked_dir.file("miru.backup.dst.json"), "backup").await;
         filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
             .await
             .unwrap();

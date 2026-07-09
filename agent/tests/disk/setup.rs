@@ -52,13 +52,9 @@ pub mod bootstrap {
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
         let temp_dir = layout.temp_dir();
         let private_key_file = temp_dir.file("private_key.pem");
-        files::write_string(&private_key_file, "test", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&private_key_file, "test").await;
         let public_key_file = temp_dir.file("public_key.pem");
-        files::write_string(&public_key_file, "test", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&public_key_file, "test").await;
 
         (private_key_file, public_key_file)
     }
@@ -267,9 +263,7 @@ pub mod bootstrap {
         // create the storage directory
         let resources_dir = layout.resources();
         let subfile = resources_dir.file("test");
-        files::write_string(&subfile, "test", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&subfile, "test").await;
         assert!(subfile.exists());
 
         // setup the storage
@@ -304,9 +298,7 @@ pub mod bootstrap {
         // create the events directory with a stale log file
         let events_dir = layout.events_dir();
         let subfile = events_dir.file("events.jsonl");
-        files::write_string(&subfile, "{\"id\":1}\n", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&subfile, "{\"id\":1}\n").await;
         assert!(subfile.exists());
 
         // setup the storage
@@ -339,20 +331,8 @@ pub mod reset {
     async fn write_existing_keys(layout: &Layout) {
         let auth_dir = layout.auth();
         dirs::create_if_absent(&auth_dir.root).await.unwrap();
-        files::write_string(
-            &auth_dir.private_key(),
-            PRIVATE_KEY_CONTENTS,
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(
-            &auth_dir.public_key(),
-            PUBLIC_KEY_CONTENTS,
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&auth_dir.private_key(), PRIVATE_KEY_CONTENTS).await;
+        files::seed(&auth_dir.public_key(), PUBLIC_KEY_CONTENTS).await;
     }
 
     async fn assert_keys_preserved(layout: &Layout) {
@@ -389,13 +369,7 @@ pub mod reset {
         write_existing_keys(&layout).await;
 
         // pre-write a stale device file with arbitrary content
-        files::write_string(
-            &layout.device(),
-            "{\"some\":\"stale\"}",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&layout.device(), "{\"some\":\"stale\"}").await;
 
         let device = Device::default();
         let settings = Settings::default();
@@ -430,9 +404,7 @@ pub mod reset {
 
         // pre-create something under resources/config_instances/contents/
         let stale = layout.config_instance_content().file("stale.json");
-        files::write_string(&stale, "{}", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&stale, "{}").await;
         assert!(stale.exists());
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
@@ -451,9 +423,7 @@ pub mod reset {
 
         // pre-create something under events/
         let stale = layout.events_dir().file("events.jsonl");
-        files::write_string(&stale, "{}", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        files::seed(&stale, "{}").await;
         assert!(stale.exists());
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")

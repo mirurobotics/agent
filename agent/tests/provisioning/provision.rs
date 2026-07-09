@@ -3,7 +3,7 @@ use super::shared::{
     mock_failing_provision, mock_ok_provision, validate_storage, Env, StorageSnapshot, DEVICE_ID,
 };
 use crate::mocks::http_client as mock;
-use miru_agent::filesys::{dirs, files, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, PathExt};
 use miru_agent::provisioning::{errors::*, provision};
 
 pub mod provision_fn {
@@ -120,13 +120,11 @@ pub mod provision_fn {
             "last_connected_at": "1970-01-01T00:00:00Z",
             "last_disconnected_at": "1970-01-01T00:00:00Z",
         });
-        files::write_string(
+        files::seed(
             &env.layout.device(),
             &serde_json::to_string(&stub_device).unwrap(),
-            WriteOptions::OVERWRITE_ATOMIC,
         )
-        .await
-        .unwrap();
+        .await;
 
         let mock = mock_ok_provision("after-fallthrough");
         let outcome = provision::provision(
@@ -181,13 +179,7 @@ pub mod provision_fn {
 
         // corrupt device.json so read_json fails, but keep the keys intact so
         // assert_activated still succeeds and the short-circuit branch runs
-        files::write_string(
-            &env.layout.device(),
-            "not valid json",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&env.layout.device(), "not valid json").await;
 
         // a failing mock — short-circuit must still fire even when device.json
         // is unreadable, so the backend should never be called

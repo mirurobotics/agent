@@ -437,13 +437,7 @@ mod reconcile_impl {
     async fn falls_back_to_defaults_when_settings_corrupt() {
         let (layout, _tmp) = prepare_layout("reconcile_impl_settings_corrupt").await;
 
-        files::write_string(
-            &layout.settings(),
-            "not-json",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&layout.settings(), "not-json").await;
 
         let mock = make_mock_client(backend_device("dvc_sc1", "corrupt"));
         reconcile_impl(mock.as_ref(), &layout, "v1.0.0")

@@ -319,23 +319,11 @@ pub mod deploy_func_success {
 
         // Pre-populate a.json with old content
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        files::write_string(
-            &filesys::File::new(&a_path),
-            "old_a",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&a_path), "old_a").await;
 
         // Simulate a stale backup left by a prior interrupted deploy
         let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
-        files::write_string(
-            &filesys::File::new(&stale_backup),
-            "stale_backup",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&stale_backup), "stale_backup").await;
         assert!(stale_backup.exists());
 
         let a_cfg = ConfigInstance {
@@ -596,13 +584,7 @@ pub mod deploy_func_backup_errs {
         let locked_dir = f.temp_dir.subdir("locked");
         dirs::create(&locked_dir).await.unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
-        files::write_string(
-            &filesys::File::new(&c_path),
-            "old",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&c_path), "old").await;
 
         // now lock the parent directory so snapshot_destination's sibling
         // backup copy cannot succeed
@@ -649,33 +631,15 @@ pub mod deploy_func_backup_errs {
         // Pre-populate a.json and b.json in writable temp_dir root
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
         let b_path = f.temp_dir.path().join("b.json").display().to_string();
-        files::write_string(
-            &filesys::File::new(&a_path),
-            "old_a",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(
-            &filesys::File::new(&b_path),
-            "old_b",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&a_path), "old_a").await;
+        files::seed(&filesys::File::new(&b_path), "old_b").await;
 
         // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
         // backup copy cannot create miru.backup.c.json (EACCES)
         let locked_dir = f.temp_dir.subdir("locked");
         dirs::create(&locked_dir).await.unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
-        files::write_string(
-            &filesys::File::new(&c_path),
-            "old_c",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&c_path), "old_c").await;
         dirs::set_permissions(&locked_dir, read_only())
             .await
             .unwrap();
@@ -776,20 +740,8 @@ pub mod deploy_func_write_errs {
         // pre-seed two files with old content via filesys::File::write_string
         let a_path = f.temp_dir.file("a.json").path().display().to_string();
         let b_path = f.temp_dir.file("b.json").path().display().to_string();
-        files::write_string(
-            &filesys::File::new(&a_path),
-            "old_a",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        files::write_string(
-            &filesys::File::new(&b_path),
-            "old_b",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&a_path), "old_a").await;
+        files::seed(&filesys::File::new(&b_path), "old_b").await;
 
         // create locked subdir
         let locked_dir = f.temp_dir.subdir("locked");
@@ -918,13 +870,7 @@ pub mod deploy_func_write_errs {
 
         // Existed: pre-populate a.json with "old_a"
         let a_path = f.temp_dir.file("a.json").path().display().to_string();
-        files::write_string(
-            &filesys::File::new(&a_path),
-            "old_a",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&a_path), "old_a").await;
 
         // DidNotExist: fresh path b.json
         let b_path = f.temp_dir.file("b.json").path().display().to_string();
@@ -1190,13 +1136,7 @@ pub mod remove_func_errs {
         // Create the good file up front. If validation happened in-loop rather
         // than as a pre-pass, this file would be removed before the bad path is
         // discovered.
-        files::write_string(
-            &filesys::File::new(&good_path),
-            "on_disk_before_remove",
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
+        files::seed(&filesys::File::new(&good_path), "on_disk_before_remove").await;
 
         let deployment = f.new_removing(&[good_cfg, bad_cfg]);
         let result = f.remove(&deployment, &[]).await;
