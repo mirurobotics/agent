@@ -25,9 +25,9 @@ use crate::trace;
 
 // external crates
 use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
-use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::primitives::{ByteStream, ByteStreamError};
 use aws_sdk_s3::Client;
+use tokio::io::AsyncWriteExt;
 
 pub mod errors;
 
@@ -45,6 +45,7 @@ pub struct Credentials {
     pub session_token: String,
 }
 
+#[cfg(feature = "test")]
 impl Default for Credentials {
     fn default() -> Self {
         Self {
@@ -155,9 +156,7 @@ impl Store {
         {
             Ok(output) => output,
             Err(err) => {
-                let is_not_found = errors::is_not_found(&err)
-                    || matches!(err.as_service_error(), Some(GetObjectError::NoSuchKey(_)));
-                if is_not_found {
+                if errors::is_not_found(&err) {
                     return Err(S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
                         key: src.key.to_string(),
                         trace: trace!(),
@@ -171,11 +170,22 @@ impl Store {
             }
         };
 
-        let mut reader = output.body.into_async_read();
+        // Stream the body straight to `dest`, chunk by chunk, so a body-read
+        // failure (a retryable transport error) is classified distinctly from a
+        // local write failure. `File::create` truncates any existing file. On
+        // failure a partially-written `dest` may remain; cleaning that up is the
+        // caller's responsibility.
+        let mut body = output.body;
         let mut file = tokio::fs::File::create(dest.path())
             .await
             .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
-        tokio::io::copy(&mut reader, &mut file)
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", &src.key, &e))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
+        }
+        file.flush()
             .await
             .map_err(|e| self.map_body_io_err("get_object", src, dest, e))?;
         Ok(())

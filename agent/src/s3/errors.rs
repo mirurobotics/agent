@@ -192,6 +192,25 @@ where
     }
 }
 
+/// Maps an error reading the object body off the wire (connection reset, TLS
+/// drop, truncated body) into a retryable [`S3Err::ConnectionErr`].
+///
+/// This is the read-side counterpart to [`crate::s3::Store::map_body_io_err`]:
+/// a failure pulling bytes *off the network* is a transport error and should be
+/// retried, whereas a failure *writing those bytes to disk* is a terminal local
+/// I/O error.
+pub fn map_body_read_err(
+    operation: &str,
+    key: &str,
+    err: &aws_sdk_s3::primitives::ByteStreamError,
+) -> S3Err {
+    S3Err::ConnectionErr(ConnectionErr {
+        key: key.to_string(),
+        msg: format!("failed to read object body during {operation}: {err}"),
+        trace: crate::trace!(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +331,20 @@ mod tests {
             assert_eq!(err.http_status().as_u16(), 404);
             assert!(!err.is_network_conn_err());
             assert!(err.to_string().contains("object not found"));
+        }
+
+        #[test]
+        fn map_body_read_err_maps_to_connection_err() {
+            // A body-read failure off the wire is a retryable transport error.
+            // `ByteStreamError` has no public constructor, but its public
+            // `From<std::io::Error>` impl lets us build a representative one.
+            let bs_err = aws_sdk_s3::primitives::ByteStreamError::from(std::io::Error::other(
+                "connection reset",
+            ));
+            let mapped = map_body_read_err("get_object", "blobs/data.bin", &bs_err);
+            assert!(matches!(mapped, S3Err::ConnectionErr(_)));
+            assert!(mapped.is_network_conn_err());
+            assert!(mapped.to_string().contains("connection error"));
         }
 
         #[test]

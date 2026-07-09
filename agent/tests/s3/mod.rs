@@ -1,6 +1,7 @@
 // internal crates
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
+use miru_agent::filesys::path::PathExt;
 use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 
@@ -308,6 +309,38 @@ pub mod get {
             let err = store.get(&obj(key), &dest).await.unwrap_err();
 
             assert!(matches!(err, S3Err::LocalIoErr(_)));
+            // Creating the file failed, so nothing was written at `dest`.
+            assert!(!dest.path().exists());
+        }
+    }
+
+    pub mod truncated_body {
+        use super::*;
+
+        /// Builds a 200 response whose `content-length` header OVERSTATES the
+        /// actual body bytes (declares 100, delivers ~15), simulating a body
+        /// truncated mid-stream on the wire.
+        fn truncated_resp() -> http::Response<SdkBody> {
+            http::Response::builder()
+                .status(200)
+                .header("content-length", "100")
+                .body(SdkBody::from(&b"short-body-1234"[..]))
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn get_truncated_body_maps_to_connection_err() {
+            let key = "blobs/truncated.bin";
+            let dest = files::temp("s3-dest").unwrap();
+            let (store, _replay) = store_expecting(
+                req("GET", "blobs/truncated.bin?x-id=GetObject"),
+                truncated_resp(),
+            );
+
+            let err = store.get(&obj(key), dest.file()).await.unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)));
+            assert!(err.is_network_conn_err());
         }
     }
 
