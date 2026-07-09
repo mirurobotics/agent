@@ -18,15 +18,15 @@ After this change, a developer (or CI) can run `./scripts/covgate.sh` or `./scri
 
 ## Progress
 
-- [ ] Edit `agent/tests/app/run.rs`: add shared duration constants with rationale comments.
-- [ ] Harden `max_runtime_reached` (widen safety net, pin idle timeout away, pin shutdown watchdog above the safety net).
-- [ ] Harden `idle_timeout_reached` (widen safety net, pin max runtime away, raise shutdown watchdog above the safety net).
-- [ ] Harden `shutdown_signal_received` (widen safety net, pin shutdown watchdog; comment why the 100 ms startup sleep is not correctness-critical).
-- [ ] Widen `invalid_app_state_initialization` safety net for consistency.
-- [ ] Add comment to `is_persistent` explaining why it is intentionally left unchanged.
-- [ ] Run scoped tests (`app::run::`) and full `./scripts/test.sh` — all pass.
-- [ ] Run `./scripts/covgate.sh` at least 3 times — all runs pass tests and coverage gates.
-- [ ] Run `./scripts/preflight.sh` — reports `Preflight clean`.
+- [x] Edit `agent/tests/app/run.rs`: add shared duration constants with rationale comments.
+- [x] Harden `max_runtime_reached` (widen safety net, pin idle timeout away, pin shutdown watchdog above the safety net).
+- [x] Harden `idle_timeout_reached` (widen safety net, pin max runtime away, raise shutdown watchdog above the safety net).
+- [x] Harden `shutdown_signal_received` (widen safety net, pin shutdown watchdog; comment why the 100 ms startup sleep is not correctness-critical).
+- [x] Widen `invalid_app_state_initialization` safety net for consistency.
+- [x] Add comment to `is_persistent` explaining why it is intentionally left unchanged.
+- [x] Run scoped tests (`app::run::`) — 5 passed, 0 failed, 3 consecutive runs. (Full `./scripts/test.sh` deferred to the preflight stage.)
+- [ ] Run `./scripts/covgate.sh` at least 3 times — all runs pass tests and coverage gates. (Preflight stage.)
+- [ ] Run `./scripts/preflight.sh` — reports `Preflight clean`. (Preflight stage.)
 
 ## Surprises & Discoveries
 
