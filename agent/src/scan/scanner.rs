@@ -552,6 +552,50 @@ mod tests {
             .to_string()
     }
 
+    /// Deploy `rules` under the fixed deployment "d". The rule vec stays explicit
+    /// at the call site; only the boilerplate deployment + `.await.unwrap()` hides.
+    async fn deploy(scanner: &Scanner, rules: Vec<UploadRule>) {
+        scanner.update_rules(deployment("d"), rules).await.unwrap();
+    }
+
+    /// Advance the clock by `secs` and run one scan tick.
+    async fn tick(scanner: &Scanner, clock: &Clock, secs: i64) {
+        clock.advance(secs);
+        scanner.scan().await.unwrap();
+    }
+
+    /// Run one scan tick.
+    async fn scan_once(scanner: &Scanner) {
+        scanner.scan().await.unwrap();
+    }
+
+    /// Subscribe to the scanner's event stream.
+    async fn subscribe(scanner: &Scanner) -> tokio::sync::broadcast::Receiver<ScanEvent> {
+        scanner.subscribe().await.unwrap()
+    }
+
+    /// The number of entries in the scanner's ledger.
+    async fn ledger_count(scanner: &Scanner) -> usize {
+        scanner.get_ledger_count().await.unwrap()
+    }
+
+    /// The set of collection ids the scanner currently holds rules for.
+    async fn deployed_collections(scanner: &Scanner) -> BTreeSet<String> {
+        collection_ids(&scanner.get_rules().await.unwrap())
+    }
+
+    /// Receive exactly one `StableFile` event, assert its file name is `name`, and
+    /// assert no further event follows. The caller supplies the WHY exactly-one
+    /// holds at its own site.
+    async fn assert_one_stable(rx: &mut tokio::sync::broadcast::Receiver<ScanEvent>, name: &str) {
+        let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+        assert_eq!(stable_name(&sf), name.to_string());
+        assert!(
+            rx.try_recv().is_err(),
+            "expected exactly one StableFile event"
+        );
+    }
+
     mod update_rules {
         use super::*;
 
@@ -560,15 +604,13 @@ mod tests {
         async fn update_rules_creates_collection() {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![rule_in_collection("r", "coll", "/none/*.mcap", 0)],
-                )
-                .await
-                .unwrap();
+            deploy(
+                &scanner,
+                vec![rule_in_collection("r", "coll", "/none/*.mcap", 0)],
+            )
+            .await;
             assert_eq!(
-                collection_ids(&scanner.get_rules().await.unwrap()),
+                deployed_collections(&scanner).await,
                 BTreeSet::from(["coll".to_string()])
             );
             assert_eq!(
@@ -590,35 +632,27 @@ mod tests {
 
             let mut v1 = rule_in_collection("r1", "coll", &glob, 0);
             v1.digest = "d1".to_string();
-            scanner
-                .update_rules(deployment("d"), vec![v1])
-                .await
-                .unwrap();
+            deploy(&scanner, vec![v1]).await;
 
             // file appears after creation and goes stable.
             write(&base, "carry.mcap", b"ccc");
-            scanner.scan().await.unwrap();
-            clock.advance(1);
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
 
             // v2: SAME collection, new rule id + digest.
             let mut v2 = rule_in_collection("r2", "coll", &glob, 0);
             v2.digest = "d2".to_string();
-            scanner
-                .update_rules(deployment("d"), vec![v2])
-                .await
-                .unwrap();
+            deploy(&scanner, vec![v2]).await;
 
             // subscribe before the post-swap rescan: the carried dedup state must
             // suppress any re-emission of the already-reported file. A regression that
             // re-emits while leaving the ledger at 1 is caught by the try_recv assert.
-            let mut rx = scanner.subscribe().await.unwrap();
+            let mut rx = subscribe(&scanner).await;
 
             // the swap carried the dedup state: no re-report.
-            clock.advance(1);
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
             assert!(
                 rx.try_recv().is_err(),
                 "carried dedup state must not re-emit the already-reported file"
@@ -637,14 +671,12 @@ mod tests {
             let scanner = spawn_scanner(&clock);
 
             // seed a known-good single collection first.
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![rule_in_collection("r0", "coll-existing", "/none/*.mcap", 0)],
-                )
-                .await
-                .unwrap();
-            let before = collection_ids(&scanner.get_rules().await.unwrap());
+            deploy(
+                &scanner,
+                vec![rule_in_collection("r0", "coll-existing", "/none/*.mcap", 0)],
+            )
+            .await;
+            let before = deployed_collections(&scanner).await;
 
             // push a set with a duplicate collection id => error.
             let err = scanner
@@ -664,7 +696,7 @@ mod tests {
 
             // no state mutated: the pre-existing collection is untouched, the dup set was
             // not applied.
-            assert_eq!(collection_ids(&scanner.get_rules().await.unwrap()), before);
+            assert_eq!(deployed_collections(&scanner).await, before);
         }
 
         // The deployed set is replaced on each update_rules: after [A,B] then [C], only C
@@ -674,29 +706,25 @@ mod tests {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![
-                        rule_in_collection("a", "coll-A", "/none/*.mcap", 0),
-                        rule_in_collection("b", "coll-B", "/none/*.mcap", 0),
-                    ],
-                )
-                .await
-                .unwrap();
+            deploy(
+                &scanner,
+                vec![
+                    rule_in_collection("a", "coll-A", "/none/*.mcap", 0),
+                    rule_in_collection("b", "coll-B", "/none/*.mcap", 0),
+                ],
+            )
+            .await;
 
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![rule_in_collection("c", "coll-C", "/none/*.mcap", 0)],
-                )
-                .await
-                .unwrap();
+            deploy(
+                &scanner,
+                vec![rule_in_collection("c", "coll-C", "/none/*.mcap", 0)],
+            )
+            .await;
 
             // A and B are no longer deployed and have no candidates => pruned next scan.
-            scanner.scan().await.unwrap();
+            scan_once(&scanner).await;
             assert_eq!(
-                collection_ids(&scanner.get_rules().await.unwrap()),
+                deployed_collections(&scanner).await,
                 BTreeSet::from(["coll-C".to_string()])
             );
         }
@@ -713,19 +741,12 @@ mod tests {
 
             // push the SAME collection again: update_config re-runs discover_preexisting,
             // so the now-present file is snapshotted as preexisting.
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![rule_in_collection("r2", "coll", &glob, 0)],
-                )
-                .await
-                .unwrap();
+            deploy(&scanner, vec![rule_in_collection("r2", "coll", &glob, 0)]).await;
 
-            scanner.scan().await.unwrap();
-            clock.advance(100);
-            scanner.scan().await.unwrap();
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 100).await;
+            scan_once(&scanner).await;
+            assert_eq!(ledger_count(&scanner).await, 0);
         }
     }
 
@@ -741,11 +762,10 @@ mod tests {
             // file created after the collection => not preexisting => a candidate.
             write(&base, "new.mcap", b"aaa");
 
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
-            clock.advance(1);
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+            scan_once(&scanner).await;
+            assert_eq!(ledger_count(&scanner).await, 0);
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
         }
 
         // A non-deployed scanner keeps evaluating its existing candidate pool but does NOT
@@ -757,7 +777,7 @@ mod tests {
 
             // discover one candidate while deployed.
             write(&base, "first.mcap", b"aaa");
-            scanner.scan().await.unwrap();
+            scan_once(&scanner).await;
 
             // no longer deployed: keeps the scanner but stops discovering.
             scanner.clear_rules().await.unwrap();
@@ -766,27 +786,22 @@ mod tests {
             write(&base, "second.mcap", b"bbb");
 
             // subscribe before the evaluating scan so we observe the emitted StableFile.
-            let mut rx = scanner.subscribe().await.unwrap();
+            let mut rx = subscribe(&scanner).await;
 
             // advance past the window and evaluate: only the pre-existing candidate goes
             // stable; the post-clear file was never discovered.
             clock.advance(10);
-            scanner.scan().await.unwrap();
+            scan_once(&scanner).await;
 
             // Under #115's report-once model, promoting the last candidate empties the
             // inactive scanner's pool, so it is pruned in this same scan() tick and its
             // ledger is dropped. The observable outcome is the emitted StableFile, not a
             // surviving ledger. Exactly one event fires, for first.mcap (proving the
             // post-clear second.mcap was never discovered).
-            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
-            assert_eq!(stable_name(&sf), "first.mcap".to_string());
-            assert!(
-                rx.try_recv().is_err(),
-                "expected exactly one StableFile event"
-            );
+            assert_one_stable(&mut rx, "first.mcap").await;
 
             // the now-empty inactive scanner was pruned this tick.
-            assert!(!collection_ids(&scanner.get_rules().await.unwrap()).contains("coll"));
+            assert!(!deployed_collections(&scanner).await.contains("coll"));
         }
 
         // An inactive scanner with no remaining candidates is pruned from the map on the
@@ -795,11 +810,11 @@ mod tests {
         async fn inactive_empty_scanner_is_pruned() {
             let (_dir, _base, _clock, scanner) = single_coll(0).await;
             // no candidates were ever discovered (empty glob dir).
-            assert_eq!(collection_ids(&scanner.get_rules().await.unwrap()).len(), 1);
+            assert_eq!(deployed_collections(&scanner).await.len(), 1);
 
             scanner.clear_rules().await.unwrap();
             // first scan finds no candidates for the now-inactive scanner => prune it.
-            scanner.scan().await.unwrap();
+            scan_once(&scanner).await;
             assert!(scanner.get_rules().await.unwrap().is_empty());
         }
 
@@ -813,16 +828,14 @@ mod tests {
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![
-                        rule_in_collection("c1", "coll-1", &glob, 0),
-                        rule_in_collection("c2", "coll-2", &glob, 0),
-                    ],
-                )
-                .await
-                .unwrap();
+            deploy(
+                &scanner,
+                vec![
+                    rule_in_collection("c1", "coll-1", &glob, 0),
+                    rule_in_collection("c2", "coll-2", &glob, 0),
+                ],
+            )
+            .await;
             write(&base, "shared.mcap", b"sss");
 
             // subscribe before the emitting scan so we can attribute each StableFile to
@@ -830,12 +843,11 @@ mod tests {
             // cross-contamination (one collection reporting twice, the other zero);
             // asserting the emitted upload_rule_id set is exactly {coll-1, coll-2}
             // pins true per-collection isolation.
-            let mut rx = scanner.subscribe().await.unwrap();
+            let mut rx = subscribe(&scanner).await;
 
-            scanner.scan().await.unwrap();
-            clock.advance(1);
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 2);
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 2);
 
             // exactly two StableFiles, one per distinct collection (upload_rule_id is
             // stamped from the collection id in observe_file).
@@ -927,9 +939,9 @@ mod tests {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
             for _ in 0..5 {
-                scanner.scan().await.unwrap();
+                scan_once(&scanner).await;
             }
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+            assert_eq!(ledger_count(&scanner).await, 0);
         }
     }
 
@@ -945,29 +957,23 @@ mod tests {
             write(&base, "drain.mcap", b"aaa");
 
             // discover a candidate while deployed.
-            scanner.scan().await.unwrap();
+            scan_once(&scanner).await;
             scanner.clear_rules().await.unwrap();
 
             // the scanner is still present (clear only emptied the deployed set).
-            assert_eq!(collection_ids(&scanner.get_rules().await.unwrap()).len(), 1);
+            assert_eq!(deployed_collections(&scanner).await.len(), 1);
 
             // subscribe before the evaluating scan so we observe the emitted StableFile.
-            let mut rx = scanner.subscribe().await.unwrap();
+            let mut rx = subscribe(&scanner).await;
 
             // evaluate: the still-present candidate goes stable even though inactive.
-            clock.advance(1);
-            scanner.scan().await.unwrap();
+            tick(&scanner, &clock, 1).await;
 
             // Under #115's report-once model, promoting this last candidate empties the
             // inactive scanner's pool, so it is pruned in this same scan() tick and its
             // ledger is dropped. The observable outcome is the emitted StableFile, not a
             // surviving ledger.
-            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
-            assert_eq!(stable_name(&sf), "drain.mcap".to_string());
-            assert!(
-                rx.try_recv().is_err(),
-                "expected exactly one StableFile event"
-            );
+            assert_one_stable(&mut rx, "drain.mcap").await;
 
             // the now-empty inactive scanner was pruned this tick.
             assert!(scanner.get_rules().await.unwrap().is_empty());
@@ -981,16 +987,16 @@ mod tests {
             let path = write(&base, "drain.mcap", b"aaa");
 
             // discover a candidate while deployed.
-            scanner.scan().await.unwrap();
+            scan_once(&scanner).await;
             scanner.clear_rules().await.unwrap();
-            assert_eq!(collection_ids(&scanner.get_rules().await.unwrap()).len(), 1);
+            assert_eq!(deployed_collections(&scanner).await.len(), 1);
 
             // delete the file so evaluation drops the candidate (Unstable), emptying the
             // inactive scanner's pool.
             std::fs::remove_file(&path).unwrap();
             clock.advance(5);
-            scanner.scan().await.unwrap(); // evaluate => Unstable => candidate removed
-                                           // the now-empty inactive scanner is pruned on this pass.
+            scan_once(&scanner).await; // evaluate => Unstable => candidate removed
+                                       // the now-empty inactive scanner is pruned on this pass.
             assert!(scanner.get_rules().await.unwrap().is_empty());
         }
 
@@ -1000,8 +1006,8 @@ mod tests {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
             scanner.clear_rules().await.unwrap();
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+            scan_once(&scanner).await;
+            assert_eq!(ledger_count(&scanner).await, 0);
         }
     }
 
@@ -1016,24 +1022,23 @@ mod tests {
             write(&base, "p.mcap", b"aaa");
 
             // discover at t=1000, evaluate stable at t=1001. first_observed_at == 1000.
-            scanner.scan().await.unwrap();
-            clock.advance(1);
-            scanner.scan().await.unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
 
             // retain: before (t=999) <= first_observed_at (1000) => keep.
             scanner
                 .prune(chrono::DateTime::from_timestamp(999, 0).unwrap())
                 .await
                 .unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+            assert_eq!(ledger_count(&scanner).await, 1);
 
             // drop: before (t=1001) > first_observed_at (1000) => remove.
             scanner
                 .prune(chrono::DateTime::from_timestamp(1001, 0).unwrap())
                 .await
                 .unwrap();
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
+            assert_eq!(ledger_count(&scanner).await, 0);
         }
     }
 
@@ -1058,11 +1063,10 @@ mod tests {
                 .unwrap();
             write(&base, "emit.mcap", b"aaaa");
 
-            let mut rx = scanner.subscribe().await.unwrap();
+            let mut rx = subscribe(&scanner).await;
 
-            scanner.scan().await.unwrap(); // discover
-            clock.advance(1);
-            scanner.scan().await.unwrap(); // evaluate => emit
+            scan_once(&scanner).await; // discover
+            tick(&scanner, &clock, 1).await; // evaluate => emit
 
             let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
             // lint:allow(field-by-field-assert)
@@ -1080,10 +1084,9 @@ mod tests {
             let (_dir, base, clock, scanner) = single_coll(0).await;
             write(&base, "nosub.mcap", b"aaa");
 
-            scanner.scan().await.unwrap();
-            clock.advance(1);
-            scanner.scan().await.unwrap(); // emits with no subscriber, must not error
-            assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await; // emits with no subscriber, must not error
+            assert_eq!(ledger_count(&scanner).await, 1);
         }
 
         // A subscriber that does not drain observes RecvError::Lagged once more events than
@@ -1096,15 +1099,9 @@ mod tests {
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner_with_capacity(&clock, 1);
-            scanner
-                .update_rules(
-                    deployment("d"),
-                    vec![rule_in_collection("r", "coll", &glob, 0)],
-                )
-                .await
-                .unwrap();
+            deploy(&scanner, vec![rule_in_collection("r", "coll", &glob, 0)]).await;
 
-            let mut rx = scanner.subscribe().await.unwrap();
+            let mut rx = subscribe(&scanner).await;
 
             // produce several stable files without draining rx (capacity is 1).
             for i in 0..4 {
