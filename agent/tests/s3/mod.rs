@@ -113,6 +113,22 @@ fn store_expecting(
     store_with(vec![ReplayEvent::new(request, response)])
 }
 
+/// Stable `(method, uri)` view of a request. Bodies and signing headers are
+/// intentionally dropped so sequence asserts stay comparable.
+fn shape(method: &str, path_and_query: &str) -> (String, String) {
+    (method.to_string(), uri(path_and_query))
+}
+
+/// Projects every request the replay client observed into [`shape`]s, in order.
+fn actual_shapes(replay: &StaticReplayClient) -> Vec<(String, String)> {
+    replay
+        .actual_requests()
+        .map(|r| (r.method().to_string(), r.uri().to_string()))
+        .collect()
+}
+
+pub mod multipart;
+
 pub mod construction {
     use super::*;
 
@@ -215,15 +231,119 @@ pub mod put {
         use super::*;
 
         #[tokio::test]
-        async fn put_missing_source_maps_to_local_io_err() {
-            // A missing LOCAL source surfaces as `LocalIoErr` (the streaming body
-            // fails to read off disk before the request completes).
+        async fn put_missing_source_maps_to_filesys_err() {
+            // A missing LOCAL source surfaces as `FileSysErr`: `put` stats the
+            // file first (to route by size), so the failure is caught reading the
+            // file's metadata before any request is dispatched.
             let (store, _replay) = store_with(vec![]);
             let missing = File::new("/nonexistent/definitely/not/here.bin");
 
             let err = store.put(missing, &obj("k")).await.unwrap_err();
 
-            assert!(matches!(err, S3Err::LocalIoErr(_)));
+            assert!(matches!(err, S3Err::FileSysErr(_)));
+        }
+    }
+
+    /// Size-based routing in [`Store::put`]: small files take the single
+    /// `PutObject` path; larger-than-`PART_SIZE` files take the multipart path.
+    pub mod routing {
+        use super::*;
+        use crate::s3::multipart::{
+            complete_req, complete_resp, complete_shape, create_req, create_resp, create_shape,
+            upload_part_req, upload_part_resp, upload_part_shape,
+        };
+
+        #[tokio::test]
+        async fn small_file_routes_to_single_put() {
+            // A body well under PART_SIZE must take the single-part branch:
+            // exactly one PutObject, no multipart calls.
+            let src = temp_file_with(b"tiny").await;
+            let (store, replay) =
+                store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
+
+            store.put(src.to_file(), &obj("small.bin")).await.unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![shape("PUT", "small.bin?x-id=PutObject")]
+            );
+        }
+
+        #[tokio::test]
+        async fn large_file_routes_to_multipart() {
+            // The crate constant is private; re-declare it locally to size a
+            // fixture just past the routing threshold. 8 MiB + 1 KiB => 2 parts
+            // (8 MiB, 1 KiB).
+            const PART_SIZE: u64 = 8 * 1024 * 1024;
+            // Recognizable byte pattern so each part's body can be checked against its slice.
+            let big: Vec<u8> = (0..(PART_SIZE + 1024)).map(|i| i as u8).collect();
+            let src = temp_file_with(&big).await;
+
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
+                ReplayEvent::new(upload_part_req(2), upload_part_resp("\"etag-part-2\"")),
+                ReplayEvent::new(complete_req(), complete_resp()),
+            ]);
+
+            store.put(src.to_file(), &obj("big.bin")).await.unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![
+                    create_shape(),
+                    upload_part_shape(1),
+                    upload_part_shape(2),
+                    complete_shape(),
+                ]
+            );
+
+            // The CompleteMultipartUpload manifest is a small in-memory XML body,
+            // so its bytes are readable off the recorded request. Assert it lists
+            // both parts in order with their matching etags.
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let complete_body = requests
+                .last()
+                .expect("a complete request was recorded")
+                .body()
+                .bytes()
+                .expect("the complete manifest is an in-memory body");
+            let manifest = std::str::from_utf8(complete_body).expect("manifest is UTF-8");
+
+            let part1 = manifest
+                .find("<PartNumber>1</PartNumber>")
+                .expect("manifest lists part 1");
+            let part2 = manifest
+                .find("<PartNumber>2</PartNumber>")
+                .expect("manifest lists part 2");
+            assert!(part1 < part2, "parts must appear in ascending order");
+            assert!(
+                manifest.contains("etag-part-1"),
+                "manifest carries part 1's etag"
+            );
+            assert!(
+                manifest.contains("etag-part-2"),
+                "manifest carries part 2's etag"
+            );
+
+            // Parts are sent as in-memory buffers, so their exact bytes are recorded:
+            // each part must carry its own file slice (right offset and length).
+            assert!(
+                requests[1]
+                    .body()
+                    .bytes()
+                    .expect("part 1 body is in-memory")
+                    == &big[..PART_SIZE as usize],
+                "part 1 must be the first PART_SIZE bytes of the source"
+            );
+            assert!(
+                requests[2]
+                    .body()
+                    .bytes()
+                    .expect("part 2 body is in-memory")
+                    == &big[PART_SIZE as usize..],
+                "part 2 must be the remaining bytes of the source"
+            );
         }
     }
 }

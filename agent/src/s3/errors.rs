@@ -226,6 +226,15 @@ pub fn map_body_read_err(operation: &str, key: &str, err: &ByteStreamError) -> S
     })
 }
 
+/// Maps a missing/unparseable required field in an S3 response to InvalidResponseErr.
+pub fn missing_response_field(operation: &str, field: &str) -> S3Err {
+    S3Err::InvalidResponseErr(InvalidResponseErr {
+        operation: operation.to_string(),
+        msg: format!("response did not include {field}"),
+        trace: crate::trace!(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,6 +334,15 @@ mod tests {
         let timeout: SdkError<DummyErr> =
             SdkError::timeout_error(Box::<dyn std::error::Error + Send + Sync>::from("slow"));
         assert!(!is_not_found(&timeout));
+    }
+
+    #[test]
+    fn missing_response_field_maps_to_invalid_response() {
+        let mapped = missing_response_field("create_multipart_upload", "an upload id");
+        assert!(matches!(mapped, S3Err::InvalidResponseErr(_)));
+        assert_eq!(mapped.http_status().as_u16(), 500);
+        // The Display echoes the field into the message.
+        assert!(mapped.to_string().contains("an upload id"));
     }
 
     mod body_mappers {
