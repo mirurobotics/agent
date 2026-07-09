@@ -33,7 +33,6 @@ macro_rules! dispatch {
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct ScannerArgs {
-    pub min_poll_interval_secs: i64,
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub broadcast_capacity: usize,
 }
@@ -41,7 +40,6 @@ pub struct ScannerArgs {
 impl Default for ScannerArgs {
     fn default() -> Self {
         Self {
-            min_poll_interval_secs: 1,
             now_fn: Arc::new(Utc::now),
             broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
         }
@@ -78,6 +76,7 @@ impl SingleThreadScanner {
         }
     }
 
+    #[cfg(feature = "test")]
     async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
         let rules = self
             .scanners
@@ -87,6 +86,7 @@ impl SingleThreadScanner {
         Ok(rules)
     }
 
+    #[cfg(feature = "test")]
     async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
         let count = self
             .scanners
@@ -143,9 +143,12 @@ impl SingleThreadScanner {
         let mut stable_files = Vec::new();
         let mut inactive_colls = Vec::new();
 
+        // one timestamp for the whole tick so every sub-scanner evaluates against
+        // the same `now`.
+        let now = (self.now_fn)();
+
         // evaluate the candidates for all scanners
         for (cid, scanner) in self.scanners.iter_mut() {
-            let now = (self.now_fn)();
             stable_files.extend(scanner.evaluate_candidates(now).await?);
 
             // only deployed scanners discover candidates, other scanners continue
@@ -209,9 +212,11 @@ pub enum Command {
     Shutdown {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
+    #[cfg(feature = "test")]
     GetRules {
         respond_to: oneshot::Sender<Result<Vec<UploadRule>, ScanErr>>,
     },
+    #[cfg(feature = "test")]
     GetLedgerCount {
         respond_to: oneshot::Sender<Result<usize, ScanErr>>,
     },
@@ -270,6 +275,7 @@ impl Worker {
                         error!("Actor failed to send subscribe response");
                     }
                 }
+                #[cfg(feature = "test")]
                 Command::GetRules { respond_to } => {
                     dispatch!(
                         self.scanner.get_rules().await,
@@ -277,6 +283,7 @@ impl Worker {
                         "Actor failed to send get rules response"
                     );
                 }
+                #[cfg(feature = "test")]
                 Command::GetLedgerCount { respond_to } => {
                     dispatch!(
                         self.scanner.get_ledger_count().await,
@@ -296,9 +303,11 @@ impl Worker {
     }
 }
 
-/// Cloneable handle to the poll-based file [`SingleThreadScanner`] actor. The
-/// scanner polls the filesystem on a cadence (cadence-driven, not OS/inotify
-/// event-driven) and reports newly-stable files exactly once.
+/// Command handle to the [`SingleThreadScanner`] actor. Reactive, not
+/// self-scheduling: each [`scan`](ScannerExt::scan) call performs exactly one
+/// discover/evaluate pass and reports newly-stable files exactly once. The
+/// cadence that drives repeated passes is imposed by an external driver (future
+/// PR), not by this type.
 #[derive(Debug)]
 pub struct Scanner {
     sender: mpsc::Sender<Command>,
@@ -338,11 +347,13 @@ impl Scanner {
         })
     }
 
+    #[cfg(feature = "test")]
     pub async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
         self.send_command(|tx| Command::GetRules { respond_to: tx })
             .await?
     }
 
+    #[cfg(feature = "test")]
     pub async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
         self.send_command(|tx| Command::GetLedgerCount { respond_to: tx })
             .await?
@@ -402,10 +413,13 @@ mod tests {
     use std::sync::Arc;
 
     // internal crates
-    use super::{ScanEvent, ScannerExt};
+    use super::{ScanEvent, ScannerExt, DEFAULT_BROADCAST_CAPACITY};
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
-    use crate::filesys::{self, PathExt};
+    use crate::filesys::{self, Dir, PathExt};
     use crate::models::{Deployment, DplActivity, UploadRule, UploadRuleSource};
+
+    // standard crates
+    use std::path::PathBuf;
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -467,33 +481,43 @@ mod tests {
         }
     }
 
-    /// Spawn a scanner actor with a deterministic injected clock. `..Default::default()`
-    /// keeps future ScannerArgs fields from re-breaking these tests.
-    fn spawn_scanner(clock: &Clock, min_poll: i64) -> Scanner {
-        let (scanner, _h) = Scanner::spawn(
-            64,
-            ScannerArgs {
-                min_poll_interval_secs: min_poll,
-                now_fn: Arc::new(clock.now_fn()),
-                ..ScannerArgs::default()
-            },
-        )
-        .unwrap();
-        scanner
+    /// Spawn a scanner actor with a deterministic injected clock and the default
+    /// broadcast capacity.
+    fn spawn_scanner(clock: &Clock) -> Scanner {
+        spawn_scanner_with_capacity(clock, DEFAULT_BROADCAST_CAPACITY)
     }
 
-    /// Spawn a scanner with an explicit broadcast capacity.
+    /// Spawn a scanner with a deterministic injected clock and an explicit broadcast
+    /// capacity.
     fn spawn_scanner_with_capacity(clock: &Clock, capacity: usize) -> Scanner {
         let (scanner, _h) = Scanner::spawn(
             64,
             ScannerArgs {
-                min_poll_interval_secs: 1,
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: capacity,
             },
         )
         .unwrap();
         scanner
+    }
+
+    /// temp dir + `*.mcap` glob + spawned scanner + one deployed "coll" rule
+    /// (deployment "d", rule "r", window `window`). Returns
+    /// (dir, base_path, clock, scanner). Hold `dir` to keep the temp tree alive.
+    async fn single_coll(window: i32) -> (Dir, PathBuf, Clock, Scanner) {
+        let dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let base = dir.path().clone();
+        let glob = format!("{}/*.mcap", base.display());
+        let clock = Clock::new(1000);
+        let scanner = spawn_scanner(&clock);
+        scanner
+            .update_rules(
+                deployment("d"),
+                vec![rule_in_collection("r", "coll", &glob, window)],
+            )
+            .await
+            .unwrap();
+        (dir, base, clock, scanner)
     }
 
     /// The set of rule ids currently held by the scanner.
@@ -538,7 +562,7 @@ mod tests {
         let glob = format!("{}/*.mcap", base.display());
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("d"),
@@ -565,7 +589,7 @@ mod tests {
         let glob = format!("{}/*.mcap", base.display());
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("d"),
@@ -589,19 +613,8 @@ mod tests {
     // new file appears suppresses that file (it is re-discovered as preexisting).
     #[tokio::test]
     async fn update_rules_resnapshots_preexisting() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
         let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
 
         // a file appears after the collection was created.
         write(&base, "late.mcap", b"aaa");
@@ -629,19 +642,7 @@ mod tests {
     // it to stable.
     #[tokio::test]
     async fn deployed_collection_discovers_and_evaluates() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
 
         // file created after the collection => not preexisting => a candidate.
         write(&base, "new.mcap", b"aaa");
@@ -658,19 +659,7 @@ mod tests {
     // the scanner in place.
     #[tokio::test]
     async fn inactive_scanner_evaluates_but_does_not_discover() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 10)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(10).await;
 
         // discover one candidate while deployed.
         write(&base, "first.mcap", b"aaa");
@@ -710,19 +699,7 @@ mod tests {
     // next scan (get_rules no longer reflects it).
     #[tokio::test]
     async fn inactive_empty_scanner_is_pruned() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, _base, _clock, scanner) = single_coll(0).await;
         // no candidates were ever discovered (empty glob dir).
         assert_eq!(collection_ids(&scanner.get_rules().await.unwrap()).len(), 1);
 
@@ -737,19 +714,7 @@ mod tests {
     // Unchanged for exactly the window (>= boundary) => stable.
     #[tokio::test]
     async fn window_boundary_is_stable() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 10)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(10).await;
         write(&base, "z.mcap", b"zzz");
 
         // discover at t=1000 (first observation).
@@ -764,19 +729,7 @@ mod tests {
     // Not-yet-elapsed (window - 1) => not stable.
     #[tokio::test]
     async fn window_not_yet_elapsed() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 10)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(10).await;
         write(&base, "y.mcap", b"yyy");
 
         scanner.scan().await.unwrap();
@@ -795,7 +748,7 @@ mod tests {
         let path = write(&base, "chg.mcap", b"aaa");
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("d"),
@@ -826,19 +779,7 @@ mod tests {
     // and is never reported.
     #[tokio::test]
     async fn deleted_before_stable_is_dropped() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 10)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(10).await;
         let path = write(&base, "gone.mcap", b"aaa");
 
         scanner.scan().await.unwrap(); // discover candidate at t=1000
@@ -852,19 +793,7 @@ mod tests {
     // pass to become stable.
     #[tokio::test]
     async fn window_zero_needs_prior_observation() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
         write(&base, "w.mcap", b"aaa");
 
         scanner.scan().await.unwrap(); // discover only
@@ -879,19 +808,7 @@ mod tests {
     // A stable file is reported exactly once across repeated scans.
     #[tokio::test]
     async fn dedup_reports_once() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
         write(&base, "once.mcap", b"aaa");
 
         scanner.scan().await.unwrap();
@@ -906,19 +823,7 @@ mod tests {
     // ledger entry; with `before` earlier retains it.
     #[tokio::test]
     async fn prune_drops_and_retains() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
         write(&base, "p.mcap", b"aaa");
 
         // discover at t=1000, evaluate stable at t=1001. first_observed_at == 1000.
@@ -951,7 +856,7 @@ mod tests {
         let glob = format!("{}/*.mcap", base.display());
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("d"),
@@ -976,7 +881,7 @@ mod tests {
     #[tokio::test]
     async fn update_rules_creates_collection() {
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("d"),
@@ -1003,7 +908,7 @@ mod tests {
         let glob = format!("{}/*.mcap", base.display());
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
 
         let mut v1 = rule_in_collection("r1", "coll", &glob, 0);
         v1.digest = "d1".to_string();
@@ -1042,7 +947,7 @@ mod tests {
     #[tokio::test]
     async fn update_rules_duplicate_collection_id_errors_without_mutation() {
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
 
         // seed a known-good single collection first.
         scanner
@@ -1080,7 +985,7 @@ mod tests {
     #[tokio::test]
     async fn update_rules_replaces_deployed_set() {
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
 
         scanner
             .update_rules(
@@ -1116,19 +1021,7 @@ mod tests {
     // inactive (clear does not immediately drop the scanner or its pool).
     #[tokio::test]
     async fn clear_rules_still_evaluates_remaining_candidates() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
         write(&base, "drain.mcap", b"aaa");
 
         // discover a candidate while deployed.
@@ -1164,19 +1057,7 @@ mod tests {
     // candidates and is pruned on the next scan (drain-then-prune).
     #[tokio::test]
     async fn clear_rules_drains_unstable_candidate_then_prunes() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 5)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(5).await;
         let path = write(&base, "drain.mcap", b"aaa");
 
         // discover a candidate while deployed.
@@ -1197,7 +1078,7 @@ mod tests {
     #[tokio::test]
     async fn clear_rules_on_empty_is_noop() {
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner.clear_rules().await.unwrap();
         scanner.scan().await.unwrap();
         assert_eq!(scanner.get_ledger_count().await.unwrap(), 0);
@@ -1213,7 +1094,7 @@ mod tests {
         let glob = format!("{}/*.mcap", base.display());
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("dpl-1"),
@@ -1249,7 +1130,7 @@ mod tests {
         let glob = format!("{}/*.mcap", base.display());
 
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         scanner
             .update_rules(
                 deployment("dpl-1"),
@@ -1280,19 +1161,7 @@ mod tests {
     // scan() producing stable files with NO subscriber does not error (debug branch).
     #[tokio::test]
     async fn emit_with_no_subscriber_does_not_error() {
-        let dir = filesys::dirs::create_temp("testing").await.unwrap();
-        let base = dir.path().clone();
-        let glob = format!("{}/*.mcap", base.display());
-
-        let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
-        scanner
-            .update_rules(
-                deployment("d"),
-                vec![rule_in_collection("r", "coll", &glob, 0)],
-            )
-            .await
-            .unwrap();
+        let (_dir, base, clock, scanner) = single_coll(0).await;
         write(&base, "nosub.mcap", b"aaa");
 
         scanner.scan().await.unwrap();
@@ -1353,7 +1222,6 @@ mod tests {
         let (scanner, handle) = Scanner::spawn(
             64,
             ScannerArgs {
-                min_poll_interval_secs: 1,
                 now_fn: Arc::new(clock.now_fn()),
                 ..ScannerArgs::default()
             },
@@ -1371,7 +1239,7 @@ mod tests {
     #[tokio::test]
     async fn empty_set_scan_is_noop() {
         let clock = Clock::new(1000);
-        let scanner = spawn_scanner(&clock, 1);
+        let scanner = spawn_scanner(&clock);
         for _ in 0..5 {
             scanner.scan().await.unwrap();
         }
