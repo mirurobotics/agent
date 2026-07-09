@@ -885,7 +885,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn delegates_to_differs_from_previous_when_metadata_stable() {
+        async fn no_previous_stable() {
             let c = case("s.mcap", 0).await;
             assert_stable(
                 super::determine_stability(&c.state, &c.cand, &c.obs)
