@@ -51,26 +51,16 @@ impl State {
     }
 
     pub(crate) fn is_preexisting(&self, obs: &Observation) -> bool {
-        let preexisting = if let Some(preexisting) = self.preexisting.get(&obs.file) {
-            preexisting
-        } else {
-            return false;
-        };
-        preexisting.equal_metadata(obs)
+        self.preexisting
+            .get(&obs.file)
+            .is_some_and(|preexisting| preexisting.equal_metadata(obs))
     }
 
     pub(crate) fn is_latest_ledger_entry(&self, obs: &Observation) -> bool {
-        let stable_files = if let Some(ledger) = self.ledger.get(&obs.file) {
-            ledger
-        } else {
-            return false;
-        };
-        let latest = if let Some(latest) = stable_files.last() {
-            latest
-        } else {
-            return false;
-        };
-        latest.equal_metadata(obs)
+        self.ledger
+            .get(&obs.file)
+            .and_then(|entries| entries.last())
+            .is_some_and(|latest| latest.equal_metadata(obs))
     }
 
     pub(crate) fn latest_ledger_entry_mut(&mut self, file: &File) -> Option<&mut StableFile> {

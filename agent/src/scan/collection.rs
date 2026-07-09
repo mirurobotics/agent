@@ -71,35 +71,38 @@ impl CollectionScanner {
         now: DateTime<Utc>,
     ) -> Result<Vec<StableFile>, ScanErr> {
         let mut stable_files = Vec::new();
-        let candidates = self.state.candidates.clone();
-        for candidate in candidates.values() {
-            let outcome = match eval_candidate(&self.state, candidate, now).await {
+        // Take the candidate map so we can iterate it while mutating `self.state`
+        // (ledger, and re-inserting survivors). Because the map starts empty,
+        // "removed" is simply "not re-inserted" and "stays" is "re-inserted".
+        let candidates = std::mem::take(&mut self.state.candidates);
+        for (file, candidate) in candidates {
+            let outcome = match eval_candidate(&self.state, &candidate, now).await {
                 Ok(outcome) => outcome,
                 Err(err) => {
                     warn!("skipping candidate {} this tick: {err}", candidate.file);
+                    // leave the candidate tracked so a later tick can retry
+                    self.state.candidates.insert(file, candidate);
                     continue;
                 }
             };
             match outcome {
-                Outcome::WaitForStabilityWindow => continue,
+                Outcome::WaitForStabilityWindow => {
+                    // the window has not elapsed; keep the candidate
+                    self.state.candidates.insert(file, candidate);
+                }
                 Outcome::Unstable => {
-                    self.state.candidates.remove(&candidate.file);
+                    // drop the candidate (do not re-insert)
                 }
                 Outcome::AlreadyInLedger { mtime } => {
-                    self.state.candidates.remove(&candidate.file);
-                    // add the mtime alias to the latest ledger entry
-                    if let Some(entry) = self.state.latest_ledger_entry_mut(&candidate.file) {
+                    // drop the candidate; add the mtime alias to the latest ledger entry
+                    if let Some(entry) = self.state.latest_ledger_entry_mut(&file) {
                         entry.push_mtime_alias(mtime.into());
                     }
                 }
                 Outcome::Stable(stable_file) => {
-                    self.state.candidates.remove(&candidate.file);
+                    // drop the candidate; emit and append to the ledger
                     stable_files.push(stable_file.clone());
-                    self.state
-                        .ledger
-                        .entry(candidate.file.clone())
-                        .or_default()
-                        .push(stable_file);
+                    self.state.ledger.entry(file).or_default().push(stable_file);
                 }
             }
         }
@@ -111,51 +114,45 @@ impl CollectionScanner {
     }
 }
 
+/// Glob the rule's source, skip already-tracked candidates, observe each
+/// remaining file, and return the `(file, observation)` pairs. A file that
+/// cannot be observed is warned about and skipped (skip-and-continue); a glob
+/// pattern error propagates.
+async fn observe_untracked(
+    state: &State,
+    now: DateTime<Utc>,
+) -> Result<Vec<(File, Observation)>, ScanErr> {
+    let mut observed = Vec::new();
+    for file in files::glob(&state.cfg.rule.source.glob)? {
+        if state.is_candidate(&file) {
+            continue;
+        }
+        let observation = match observe_file(state, file.clone(), now).await {
+            Ok(observation) => observation,
+            Err(err) => {
+                warn!("skipping unreadable file {}: {err}", file.path().display());
+                continue;
+            }
+        };
+        observed.push((file, observation));
+    }
+    Ok(observed)
+}
+
 async fn discover_preexisting(
     state: &State,
     now: DateTime<Utc>,
 ) -> Result<HashMap<File, Observation>, ScanErr> {
-    let mut preexisting = HashMap::new();
-    for file in files::glob(&state.cfg.rule.source.glob)? {
-        if state.is_candidate(&file) {
-            continue;
-        }
-        let observation = match observe_file(state, file.clone(), now).await {
-            Ok(observation) => observation,
-            Err(err) => {
-                warn!("skipping preexisting file {}: {err}", file.path().display());
-                continue;
-            }
-        };
-        preexisting.insert(file, observation);
-    }
-    Ok(preexisting)
+    Ok(observe_untracked(state, now).await?.into_iter().collect())
 }
 
 async fn discover_candidates(state: &State, now: DateTime<Utc>) -> Result<Vec<Candidate>, ScanErr> {
-    let mut candidates = Vec::new();
-    for file in files::glob(&state.cfg.rule.source.glob)? {
-        if state.is_candidate(&file) {
-            continue;
-        }
-        let observation = match observe_file(state, file.clone(), now).await {
-            Ok(observation) => observation,
-            Err(err) => {
-                warn!("skipping candidate {}: {err}", file.path().display());
-                continue;
-            }
-        };
-        if state.is_preexisting(&observation) {
-            continue;
-        }
-        if state.is_latest_ledger_entry(&observation) {
-            continue;
-        }
-        candidates.push(Candidate {
-            file,
-            first_obs: observation,
-        });
-    }
+    let candidates = observe_untracked(state, now)
+        .await?
+        .into_iter()
+        .filter(|(_, obs)| !state.is_preexisting(obs) && !state.is_latest_ledger_entry(obs))
+        .map(|(file, first_obs)| Candidate { file, first_obs })
+        .collect();
     Ok(candidates)
 }
 
@@ -258,17 +255,6 @@ async fn differs_from_previous(
     )))
 }
 
-/// Build the emitted `StableFile` for a candidate that has been confirmed stable.
-///
-/// Every metadata/identity field is sourced from `candidate.first_obs` (the
-/// discovery observation), which is the single source of truth: this is only
-/// reached when the discovery and evaluation observations are metadata-equal
-/// (size + mtime, enforced by `is_metadata_stable` upstream), so size/mtime are
-/// provably identical between them. Using the first observation for identity is
-/// intentional — the evaluation-time observation may belong to a different
-/// deployment / upload rule, but the file is always attributed to the deployment
-/// and rule that discovered it. Only `last_observed_at` diverges, so it is the
-/// sole field passed in from the evaluation-time observation.
 fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
@@ -290,11 +276,14 @@ fn build_stable_file(
 
 type Digest = String;
 
-fn find_previous_stable_file(state: &State, candidate: &Candidate) -> Option<StableFile> {
+fn find_previous_stable_file<'a>(
+    state: &'a State,
+    candidate: &Candidate,
+) -> Option<&'a StableFile> {
     state
         .ledger
         .get(&candidate.file)
-        .and_then(|stable_files| stable_files.last().cloned())
+        .and_then(|stable_files| stable_files.last())
 }
 
 #[cfg(test)]
@@ -737,21 +726,10 @@ mod tests {
         // external crates
         use std::time::Duration;
 
-        fn base_observation(file: File) -> Observation {
-            Observation {
-                file,
-                timestamp: ts(1000),
-                size: 4,
-                mtime: SystemTime::UNIX_EPOCH,
-                deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
-            }
-        }
-
         #[test]
         fn unchanged() {
             let file = File::new("/none/x.mcap");
-            let base = base_observation(file.clone());
+            let base = bare_observation(file.clone());
             let cand = candidate(file, base.clone());
             assert!(is_metadata_stable(&cand, &base));
         }
@@ -759,7 +737,7 @@ mod tests {
         #[test]
         fn size_differs() {
             let file = File::new("/none/x.mcap");
-            let base = base_observation(file.clone());
+            let base = bare_observation(file.clone());
             let cand = candidate(file, base.clone());
             let mut diff_size = base;
             diff_size.size = 5;
@@ -769,7 +747,7 @@ mod tests {
         #[test]
         fn mtime_differs() {
             let file = File::new("/none/x.mcap");
-            let base = base_observation(file.clone());
+            let base = bare_observation(file.clone());
             let cand = candidate(file, base.clone());
             let mut diff_mtime = base;
             diff_mtime.mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
@@ -798,7 +776,7 @@ mod tests {
             let last = stable_file(file.clone(), ts(1000));
             state.ledger.insert(file.clone(), vec![first, last.clone()]);
             let cand = candidate(file.clone(), bare_observation(file));
-            assert_eq!(super::find_previous_stable_file(&state, &cand), Some(last));
+            assert_eq!(super::find_previous_stable_file(&state, &cand), Some(&last));
         }
     }
 
