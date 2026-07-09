@@ -12,7 +12,7 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 // =============================== SCANNER EVENTS ================================== //
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +106,11 @@ impl SingleThreadScanner {
         deployment: Deployment,
         rules: Vec<UploadRule>,
     ) -> Result<(), ScanErr> {
+        // Pre-validate the whole rule set (duplicate ids + glob syntax) BEFORE any
+        // state mutation. Rejecting a malformed glob here keeps the mutation loop
+        // below infallible/atomic: its only reachable error is InvalidGlobErr from
+        // discover_preexisting, which we surface up front instead. set_config's
+        // InvalidRule can't fire there — get_mut keys by the same collection id.
         let mut deployed: HashSet<UploadCollectionID> = HashSet::new();
         for rule in rules.iter() {
             if deployed.contains(&rule.upload_collection_id) {
@@ -114,6 +119,8 @@ impl SingleThreadScanner {
                     trace: trace!(),
                 }));
             }
+            // validate the pattern up front; the walk result is discarded.
+            crate::filesys::files::glob(&rule.source.glob)?;
             deployed.insert(rule.upload_collection_id.clone());
         }
 
@@ -147,15 +154,22 @@ impl SingleThreadScanner {
         // the same `now`.
         let now = (self.now_fn)();
 
-        // evaluate the candidates for all scanners
+        // evaluate the candidates for all scanners. Per-collection failures are
+        // isolated (logged and skipped) so one collection's error never aborts the
+        // tick: files already committed to sibling ledgers must still be emitted.
+        // Under report-once dedup a dropped emission is permanent data loss.
         for (cid, scanner) in self.scanners.iter_mut() {
-            stable_files.extend(scanner.evaluate_candidates(now).await?);
+            match scanner.evaluate_candidates(now).await {
+                Ok(stable) => stable_files.extend(stable),
+                Err(err) => warn!("scan: evaluate failed for collection {cid}: {err}"),
+            }
 
             // only deployed scanners discover candidates, other scanners continue
             // scanning their candidate pool until no candidates remain
             if self.deployed.contains(cid) {
-                scanner.discover_candidates(now).await?;
-                continue;
+                if let Err(err) = scanner.discover_candidates(now).await {
+                    warn!("scan: discover failed for collection {cid}: {err}");
+                }
             } else if !scanner.has_candidates() {
                 inactive_colls.push(cid.clone());
             }
@@ -869,10 +883,99 @@ mod tests {
             .unwrap();
         write(&base, "shared.mcap", b"sss");
 
+        // subscribe before the emitting scan so we can attribute each StableFile to
+        // its collection. A summed ledger count of 2 alone passes even under
+        // cross-contamination (one collection reporting twice, the other zero);
+        // asserting the emitted upload_rule_id set is exactly {coll-1, coll-2}
+        // pins true per-collection isolation.
+        let mut rx = scanner.subscribe().await.unwrap();
+
         scanner.scan().await.unwrap();
         clock.advance(1);
         scanner.scan().await.unwrap();
         assert_eq!(scanner.get_ledger_count().await.unwrap(), 2);
+
+        // exactly two StableFiles, one per distinct collection (upload_rule_id is
+        // stamped from the collection id in observe_file).
+        let mut emitted = Vec::new();
+        while let Ok(ScanEvent::StableFile(sf)) = rx.try_recv() {
+            emitted.push(sf);
+        }
+        assert_eq!(emitted.len(), 2, "expected exactly two StableFiles");
+        let colls: BTreeSet<String> = emitted.iter().map(|sf| sf.upload_rule_id.clone()).collect();
+        assert_eq!(
+            colls,
+            BTreeSet::from(["coll-1".to_string(), "coll-2".to_string()])
+        );
+    }
+
+    // FIX 1 regression: a per-collection failure during scan() must NOT abort the
+    // tick or drop a sibling collection's already-stable emission. One collection
+    // ("bad") errors while discovering (a malformed glob makes discover_candidates
+    // return InvalidGlobErr); a sibling ("good") still emits its StableFile.
+    //
+    // Determinism / injection: FIX 2 pre-validates globs in update_rules, so a
+    // malformed glob can no longer enter a live scanner through the public path.
+    // We therefore build the SingleThreadScanner by hand and seed the bad
+    // collection via CollectionScanner::from_state (which does NOT glob at
+    // construction), leaving its malformed pattern to fail deterministically at
+    // scan() time inside discover_candidates. The good collection is pre-seeded
+    // with a window-0 candidate (discovered on a prior pass) so the very next
+    // evaluate() promotes it to stable within the same scan() call the bad
+    // collection errors in. No permissions trickery — holds even as root.
+    #[tokio::test]
+    async fn scan_isolates_bad_glob_collection_from_emitting_sibling() {
+        use crate::scan::collection::CollectionScanner;
+        use crate::scan::state::{Config, State};
+
+        let clock = Clock::new(1000);
+        let mut single = SingleThreadScanner::new(ScannerArgs {
+            now_fn: Arc::new(clock.now_fn()),
+            broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+        });
+
+        // --- good collection: a real file, discovered as a candidate at t=1000. ---
+        let good_dir = filesys::dirs::create_temp("testing").await.unwrap();
+        let good_glob = format!("{}/*.mcap", good_dir.path().display());
+        let good_cfg = Config {
+            deployment: deployment("d"),
+            rule: rule_in_collection("r-good", "good", &good_glob, 0),
+        };
+        // build empty (no preexisting), then create the file and discover it so it
+        // is a tracked candidate BEFORE the scan under test.
+        let mut good = CollectionScanner::from_state(State::new(good_cfg));
+        write(good_dir.path(), "good.mcap", b"aaaa");
+        good.discover_candidates(clock.now_fn()()).await.unwrap();
+
+        // --- bad collection: a MALFORMED glob that errors at discover time. ---
+        let bad_cfg = Config {
+            deployment: deployment("d"),
+            rule: rule_in_collection("r-bad", "bad", "[", 0),
+        };
+        // from_state skips the constructor glob, so the bad pattern only bites at
+        // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
+        let bad = CollectionScanner::from_state(State::new(bad_cfg));
+
+        single.scanners.insert("good".to_string(), good);
+        single.scanners.insert("bad".to_string(), bad);
+        single.deployed.insert("good".to_string());
+        single.deployed.insert("bad".to_string());
+
+        let mut rx = single.subscribe();
+
+        // advance past the window and run one tick. The bad collection's discover
+        // errors; FIX 1 logs-and-continues so the good collection still emits.
+        clock.advance(1);
+        single.scan().await.unwrap();
+
+        // the good collection's StableFile was emitted despite the sibling error.
+        let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+        assert_eq!(stable_name(&sf), "good.mcap".to_string());
+        assert_eq!(sf.upload_rule_id, "good".to_string());
+        assert!(
+            rx.try_recv().is_err(),
+            "only the good collection should emit"
+        );
     }
 
     // ================================ B5: update_rules =========================== //
@@ -932,10 +1035,19 @@ mod tests {
             .await
             .unwrap();
 
+        // subscribe before the post-swap rescan: the carried dedup state must
+        // suppress any re-emission of the already-reported file. A regression that
+        // re-emits while leaving the ledger at 1 is caught by the try_recv assert.
+        let mut rx = scanner.subscribe().await.unwrap();
+
         // the swap carried the dedup state: no re-report.
         clock.advance(1);
         scanner.scan().await.unwrap();
         assert_eq!(scanner.get_ledger_count().await.unwrap(), 1);
+        assert!(
+            rx.try_recv().is_err(),
+            "carried dedup state must not re-emit the already-reported file"
+        );
 
         let rules = scanner.get_rules().await.unwrap();
         assert_eq!(rules.len(), 1);
