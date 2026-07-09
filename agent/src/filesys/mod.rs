@@ -43,6 +43,7 @@ pub enum Sync {
 pub struct WriteOptions {
     pub overwrite: Overwrite,
     pub atomic: Atomic,
+    pub mode: Option<u32>,
 }
 
 impl WriteOptions {
@@ -50,18 +51,21 @@ impl WriteOptions {
     pub const OVERWRITE_ATOMIC: Self = Self {
         overwrite: Overwrite::Allow,
         atomic: Atomic::Yes,
+        mode: None,
     };
 
     /// Overwrite existing files, non-atomic.
     pub const OVERWRITE_NONATOMIC: Self = Self {
         overwrite: Overwrite::Allow,
         atomic: Atomic::No,
+        mode: None,
     };
 
     /// Atomic write no overwrite.
     pub const ATOMIC: Self = Self {
         overwrite: Overwrite::Deny,
         atomic: Atomic::Yes,
+        mode: None,
     };
 }
 

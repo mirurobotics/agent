@@ -76,6 +76,7 @@ where
             WriteOptions {
                 overwrite,
                 atomic: Atomic::Yes,
+                mode: None,
             },
         )
         .await?;

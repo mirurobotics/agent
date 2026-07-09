@@ -88,6 +88,7 @@ where
         let opts = WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
+            mode: None,
         };
         files::write_json(&entry_file, &entry, opts).await?;
         Ok(())

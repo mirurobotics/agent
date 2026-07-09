@@ -1,6 +1,3 @@
-// standard crates
-use std::os::unix::fs::PermissionsExt;
-
 // internal crates
 use crate::crypt::errors::*;
 use crate::filesys::{self, files, Atomic, Overwrite, PathExt, WriteOptions};
@@ -34,9 +31,11 @@ macro_rules! ssl_err {
 /// read and write to their respective files so their existence in memory is as brief as
 /// possible. The public key technically doesn't need such security measures since it
 /// can be shared publicly, but it's simpler to treat both keys the same. The private
-/// key file is given read/write permissions only to the owner (600). The public key
-/// file is given read/write permissions for the owner and read permissions for the
-/// group (640). https://www.redhat.com/sysadmin/linux-file-permissions-explained
+/// key file is created with read/write permissions only for the owner (600) and the
+/// public key file with read/write for the owner and read for the group (640). These
+/// modes are applied at file-creation time, so the keys are never briefly written at a
+/// more permissive mode and no follow-up chmod is required.
+/// https://www.redhat.com/sysadmin/linux-file-permissions-explained
 pub async fn gen_key_pair(
     num_bits: u32,
     private_key_file: &filesys::File,
@@ -63,13 +62,10 @@ pub async fn gen_key_pair(
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
+            mode: Some(0o600),
         },
     )
     .await?;
-    // 600 gives the owner read/write permissions. Permissions to the group and others
-    // are not granted.
-    let permissions = std::fs::Permissions::from_mode(0o600);
-    files::set_permissions(private_key_file, permissions).await?;
 
     // Extract and write the public key
     let public_key_pem = ssl_err!(ConvertPublicKeyToPEMErr, rsa.public_key_to_pem())?;
@@ -79,13 +75,10 @@ pub async fn gen_key_pair(
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
+            mode: Some(0o640),
         },
     )
     .await?;
-    // 640 gives the owner read/write permissions, the group read permissions, and
-    // nothing for other
-    let permissions = std::fs::Permissions::from_mode(0o640);
-    files::set_permissions(public_key_file, permissions).await?;
 
     Ok(())
 }

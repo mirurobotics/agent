@@ -605,6 +605,7 @@ pub mod write_bytes {
                 WriteOptions {
                     overwrite,
                     atomic: Atomic::Yes,
+                    mode: None,
                 },
             )
             .await
@@ -625,6 +626,7 @@ pub mod write_bytes {
                 WriteOptions {
                     overwrite,
                     atomic: Atomic::No,
+                    mode: None,
                 },
             )
             .await
@@ -694,6 +696,44 @@ pub mod write_bytes {
             assert_eq!(files::read_bytes(&file).await.unwrap(), b"arglebargle");
         }
     }
+
+    #[tokio::test]
+    async fn honors_mode_atomic() {
+        let dir = dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        files::write_bytes(
+            &file,
+            b"secret",
+            WriteOptions {
+                overwrite: Overwrite::Allow,
+                atomic: Atomic::Yes,
+                mode: Some(0o600),
+            },
+        )
+        .await
+        .unwrap();
+        let perms = files::permissions(&file).await.unwrap();
+        assert_eq!(perms.mode() & 0o777, 0o600);
+    }
+
+    #[tokio::test]
+    async fn honors_mode_non_atomic() {
+        let dir = dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        files::write_bytes(
+            &file,
+            b"secret",
+            WriteOptions {
+                overwrite: Overwrite::Allow,
+                atomic: Atomic::No,
+                mode: Some(0o600),
+            },
+        )
+        .await
+        .unwrap();
+        let perms = files::permissions(&file).await.unwrap();
+        assert_eq!(perms.mode() & 0o777, 0o600);
+    }
 }
 
 pub mod write_string {
@@ -713,6 +753,7 @@ pub mod write_string {
                 WriteOptions {
                     overwrite,
                     atomic: Atomic::Yes,
+                    mode: None,
                 },
             )
             .await
@@ -733,6 +774,7 @@ pub mod write_string {
                 WriteOptions {
                     overwrite,
                     atomic: Atomic::No,
+                    mode: None,
                 },
             )
             .await
@@ -820,6 +862,7 @@ mod write_json {
                 WriteOptions {
                     overwrite,
                     atomic: Atomic::Yes,
+                    mode: None,
                 },
             )
             .await
@@ -840,6 +883,7 @@ mod write_json {
                 WriteOptions {
                     overwrite,
                     atomic: Atomic::No,
+                    mode: None,
                 },
             )
             .await
