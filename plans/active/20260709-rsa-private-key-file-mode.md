@@ -34,10 +34,10 @@ and by the new `filesys::write_bytes` mode tests.
 
 ## Progress
 
-- [ ] Milestone 1 — filesys plumbing: add `WriteOptions.mode`, honor it in `write_bytes`, update all existing construction sites to `mode: None`.
-- [ ] Milestone 2 — crypt hardening: create keys with `mode: Some(0o600)` / `Some(0o640)`, remove the two `set_permissions` calls and the now-unused import, update the doc comment.
-- [ ] Milestone 3 — tests: add `filesys::write_bytes` mode tests for the atomic and non-atomic branches.
-- [ ] Preflight gate: `scripts/preflight.sh` reports `Preflight clean`.
+- [x] Milestone 1 — filesys plumbing: add `WriteOptions.mode`, honor it in `write_bytes`, update all existing construction sites to `mode: None`.
+- [x] Milestone 2 — crypt hardening: create keys with `mode: Some(0o600)` / `Some(0o640)`, remove the two `set_permissions` calls and the now-unused import, update the doc comment.
+- [x] Milestone 3 — tests: add `filesys::write_bytes` mode tests for the atomic and non-atomic branches.
+- [ ] Preflight gate: `scripts/preflight.sh` reports `Preflight clean`. (Deferred — preflight/lint is a separate downstream step and was not run in this session.)
 
 ## Surprises & Discoveries
 
@@ -47,6 +47,30 @@ and by the new `filesys::write_bytes` mode tests.
   already exists as `gen_key_pair::file_permissions` in `agent/tests/crypt/rsa.rs`
   (asserts private `& 0o777 == 0o600`, public `& 0o777 == 0o640`). We reuse it
   rather than add a duplicate; after Milestone 2 it guards the *create-time* mode.
+- **`rsa.rs` had to be touched in Milestone 1, not only Milestone 2.** The plan's
+  Milestone 1 construction-site list named only `cached_file.rs` and `dir.rs` as the
+  "two other source sites," but `crypt/rsa.rs` has two explicit `WriteOptions { .. }`
+  literals that do *not* use `..Default::default()`. Adding a non-defaulted `mode`
+  field makes those literals a hard compile error (`E0063 missing field mode`), so
+  the Milestone 1 tree cannot compile unless they are updated. Resolution: Milestone
+  1 adds `mode: None` to both `rsa.rs` literals (pure plumbing, no behavior change —
+  the chmod path is untouched), and Milestone 1's commit stages `rsa.rs` in addition
+  to the plan's listed files. Milestone 2 then flips those literals to
+  `Some(0o600)` / `Some(0o640)` and deletes the chmod calls. Each milestone's
+  committed tree compiles.
+- **Test environment runs as root; 14 permission-denial tests fail regardless of
+  this change.** `./scripts/test.sh` reports 2 lib failures
+  (`deploy::filesys::tests::{remove_backups_continues_when_delete_fails,
+  rollback_returns_errors_when_restores_fail_synthetic}`) and the integration `mod`
+  binary reports 12 failures (all `permission_denied` / EACCES-dependent deploy,
+  `filesys::dirs::new_home_dir::success`, and `sync::deployments::apply_error_isolation`
+  cases). These rely on `chmod 0o555`/read-only paths to force I/O failures, which
+  root bypasses. Verified pre-existing: the failing set is **identical** on the base
+  commit (`21b3a89`) with changes stashed and with all changes applied — zero new
+  failures introduced. All tests targeted by this plan pass:
+  `filesys::files::*` (incl. the new `honors_mode_atomic` / `honors_mode_non_atomic`),
+  `crypt::rsa::*` (incl. `gen_key_pair::file_permissions` after the chmod removal),
+  and the lib `filesys` suite. `cargo fmt --check` is clean.
 
 ## Decision Log
 
@@ -61,10 +85,34 @@ and by the new `filesys::write_bytes` mode tests.
   existing caller. Alternative considered and rejected: keep the write-then-chmod
   shape but shrink the window — rejected because it cannot close the crash window
   and leaves the anti-pattern in place.
+- **Decision (made during execution):** Stage `crypt/rsa.rs` in the Milestone 1
+  commit (with `mode: None`) rather than deferring all `rsa.rs` edits to Milestone 2.
+  Rationale: adding a required field forces every explicit literal to be updated for
+  the tree to compile, and the invariant "each milestone's committed tree compiles
+  and keeps the suite green" outranks the plan's file-staging list. The `mode: None`
+  addition is behavior-preserving, so Milestone 1 remains a pure no-op plumbing
+  change as intended.
+- **Decision (made during execution):** The Milestone 3 tests assert mode as
+  `assert_eq!(perms.mode() & 0o777, 0o600)` (actual-first), matching every existing
+  mode assertion in `agent/tests/filesys/files.rs` (the `set_permissions` module),
+  rather than the expected-first order shown in the plan's Concrete-Steps sketch.
+  Rationale: the directive to match the touched file's neighboring conventions;
+  ordering is semantically irrelevant for Rust's `assert_eq!`.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+All three code milestones landed as three commits on `claude/agent-security-hunt-lwnvzy`:
+
+- `44cf18c` feat(filesys): add optional create-time mode to WriteOptions
+- `3018ff5` fix(crypt): create device RSA keys at 0600/0640 without chmod
+- `eed6741` test(filesys): assert write_bytes honors create-time mode
+
+The device RSA private key is now created at `0o600` and the public key at `0o640`
+directly by the atomic write path — `crypt::rsa::gen_key_pair` no longer calls
+`set_permissions`, closing the widen-then-narrow window and the crash window. The
+`gen_key_pair::file_permissions` test still passes with both chmod calls removed,
+proving the correct modes come from file creation. The preflight/lint gate was not
+run in this session (deferred downstream step).
 
 ## Context and Orientation
 
