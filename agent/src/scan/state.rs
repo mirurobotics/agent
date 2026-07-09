@@ -73,8 +73,6 @@ impl State {
         latest.equal_metadata(obs)
     }
 
-    /// The latest (most recent) ledger entry for `file`, if any, for in-place
-    /// mutation. Returns `None` when the file has no ledger history.
     pub(crate) fn latest_ledger_entry_mut(&mut self, file: &File) -> Option<&mut StableFile> {
         self.ledger
             .get_mut(file)
@@ -126,7 +124,7 @@ impl Observation {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub file: File,
-    pub observation: Observation,
+    pub first_obs: Observation,
 }
 
 // A file that has been determined stable enough for upload.
@@ -153,10 +151,7 @@ impl StableFile {
         self.mtime_aliases.contains(&other_mtime) || self.mtime == other_mtime
     }
 
-    /// Record `mtime` as an alias for this stable content, deduped: a mtime that
-    /// already equals the primary `mtime` or is already in `mtime_aliases` is not
-    /// pushed. This bounds `mtime_aliases` growth for a repeatedly-touched but
-    /// otherwise-unchanged file (whose distinct mtimes are few in practice).
+    // adds the mtime alias to the stable file if it is not already present
     pub fn push_mtime_alias(&mut self, mtime: DateTime<Utc>) {
         if self.mtime == mtime || self.mtime_aliases.contains(&mtime) {
             return;
@@ -281,7 +276,7 @@ mod tests {
                 file.clone(),
                 Candidate {
                     file: file.clone(),
-                    observation: observation(file.clone()),
+                    first_obs: observation(file.clone()),
                 },
             );
             assert!(state.has_candidates());
@@ -298,7 +293,7 @@ mod tests {
                 file.clone(),
                 Candidate {
                     file: file.clone(),
-                    observation: observation(file.clone()),
+                    first_obs: observation(file.clone()),
                 },
             );
             assert!(state.is_candidate(&file));
@@ -510,11 +505,11 @@ mod tests {
             let obs = observation(file.clone());
             let cand = Candidate {
                 file: file.clone(),
-                observation: obs.clone(),
+                first_obs: obs.clone(),
             };
 
             assert_eq!(cand.file, file);
-            assert_eq!(cand.observation, obs);
+            assert_eq!(cand.first_obs, obs);
         }
     }
 
