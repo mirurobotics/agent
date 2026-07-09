@@ -31,5 +31,16 @@ fi
 # Reset the /srv/miru directory to be owned by the miru user and group
 sudo chown -R miru:miru /srv/miru
 
-# Execute the installer
-sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
+# Execute the installer. The activation token is a secret, so it is streamed to
+# the miru user over stdin and exported inside the privileged shell rather than
+# passed as an `env VAR=...` argument. Command arguments are world-readable via
+# /proc/<pid>/cmdline on Linux, so keeping the token out of argv stops local
+# users from reading it while the installer runs. Exporting after the sudo
+# transition also avoids relying on the sudoers environment-preservation policy.
+sudo -u miru -E sh -c '
+    IFS= read -r MIRU_ACTIVATION_TOKEN
+    export MIRU_ACTIVATION_TOKEN
+    exec /usr/sbin/miru-agent --install "$@"
+' miru-agent $args <<EOF
+$MIRU_ACTIVATION_TOKEN
+EOF

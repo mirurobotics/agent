@@ -3,7 +3,7 @@ set -e
 
 # Script: provision.sh
 # Jinja Template: provision.j2
-# Build Timestamp: 2026-05-09T19:53:58.827613
+# Build Timestamp: 2026-07-09T20:30:58.308042
 # Description: Provision a device & install the Miru Agent
 
 # DISPLAY #
@@ -192,16 +192,22 @@ if [ -z "$MIRU_API_KEY" ]; then
     exit 1
 fi
 
+# The API key is streamed to curl over stdin (--header @-) instead of being
+# passed on the command line, since process arguments are world-readable via
+# /proc/<pid>/cmdline on Linux and would leak the secret to local users.
 response_body=$(curl --request POST \
   --url "$BACKEND_HOST"/v1/devices \
   --header 'Content-Type: application/json' \
-  --header "X-API-Key: $MIRU_API_KEY" \
+  --header @- \
   --header "Miru-Version: 2026-03-09.tetons" \
   --data "{
   \"name\": \"$DEVICE_NAME\"
 }" \
   --write-out "\n%{http_code}" \
-  --silent)
+  --silent <<EOF
+X-API-Key: $MIRU_API_KEY
+EOF
+)
 
 # Extract HTTP status code (last line) and response body (everything else)
 http_code=$(echo "$response_body" | tail -n1)
@@ -214,12 +220,16 @@ if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
 elif [ "$http_code" -eq 409 ]; then
     log "Device '$DEVICE_NAME' already exists"
     # Search for the device by name
+    # API key streamed over stdin (see note above) to keep it out of argv.
     response_body=$(curl --request GET \
     --url "$BACKEND_HOST"/v1/devices?name="$DEVICE_NAME" \
-    --header "X-API-Key: $MIRU_API_KEY" \
+    --header @- \
     --header "Miru-Version: 2026-03-09.tetons" \
     --write-out "\n%{http_code}" \
-    --silent)
+    --silent <<EOF
+X-API-Key: $MIRU_API_KEY
+EOF
+)
 
     http_code=$(echo "$response_body" | tail -n1)
     response_body=$(echo "$response_body" | head -n -1)
@@ -244,15 +254,19 @@ device_name=$(echo "$device" | jq -r '.name')
 
 log "Creating activation token for device '$device_name'"
 log "Allow reactivation: $ALLOW_REACTIVATION (must be true if the device has been activated before)"
+# API key streamed over stdin (see note above) to keep it out of argv.
 response_body=$(curl --request POST \
   --url "$BACKEND_HOST"/v1/devices/"$device_id"/activation_token \
-  --header "X-API-Key: $MIRU_API_KEY" \
+  --header @- \
   --header "Miru-Version: 2026-03-09.tetons" \
   --data "{
   \"allow_reactivation\": $ALLOW_REACTIVATION
 }" \
   --write-out "\n%{http_code}" \
-  --silent)
+  --silent <<EOF
+X-API-Key: $MIRU_API_KEY
+EOF
+)
 
 # Extract HTTP status code (last line) and response body (everything else)
 http_code=$(echo "$response_body" | tail -n1)
@@ -384,6 +398,17 @@ fi
 # Reset the /srv/miru directory to be owned by the miru user and group
 sudo chown -R miru:miru /srv/miru
 
-# Execute the installer
-sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
+# Execute the installer. The activation token is a secret, so it is streamed to
+# the miru user over stdin and exported inside the privileged shell rather than
+# passed as an `env VAR=...` argument. Command arguments are world-readable via
+# /proc/<pid>/cmdline on Linux, so keeping the token out of argv stops local
+# users from reading it while the installer runs. Exporting after the sudo
+# transition also avoids relying on the sudoers environment-preservation policy.
+sudo -u miru -E sh -c '
+    IFS= read -r MIRU_ACTIVATION_TOKEN
+    export MIRU_ACTIVATION_TOKEN
+    exec /usr/sbin/miru-agent --install "$@"
+' miru-agent $args <<EOF
+$MIRU_ACTIVATION_TOKEN
+EOF
 exit 0
