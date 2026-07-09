@@ -1,6 +1,6 @@
 # Use `filesys` Module In Tests (Replace Raw `std::fs` / `tokio::fs`)
 
-**Status**: active
+**Status**: completed
 **Branch**: refactor/filesys-use-module-in-tests (off latest origin/main)
 **Date**: 20260708
 
