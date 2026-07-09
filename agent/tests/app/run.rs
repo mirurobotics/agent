@@ -163,7 +163,6 @@ async fn idle_timeout_reached() {
             idle_timeout_poll_interval: Duration::from_millis(10),
             max_runtime: NEVER,
             max_shutdown_delay: SHUTDOWN_WATCHDOG,
-            ..Default::default()
         },
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
