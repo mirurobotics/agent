@@ -106,11 +106,6 @@ impl SingleThreadScanner {
         deployment: Deployment,
         rules: Vec<UploadRule>,
     ) -> Result<(), ScanErr> {
-        // Pre-validate the whole rule set (duplicate ids + glob syntax) BEFORE any
-        // state mutation. Rejecting a malformed glob here keeps the mutation loop
-        // below infallible/atomic: its only reachable error is InvalidGlobErr from
-        // discover_preexisting, which we surface up front instead. set_config's
-        // InvalidRule can't fire there — get_mut keys by the same collection id.
         let mut deployed: HashSet<UploadCollectionID> = HashSet::new();
         for rule in rules.iter() {
             if deployed.contains(&rule.upload_collection_id) {
@@ -119,8 +114,6 @@ impl SingleThreadScanner {
                     trace: trace!(),
                 }));
             }
-            // validate the pattern up front; the walk result is discarded.
-            crate::filesys::files::glob(&rule.source.glob)?;
             deployed.insert(rule.upload_collection_id.clone());
         }
 
@@ -150,26 +143,21 @@ impl SingleThreadScanner {
         let mut stable_files = Vec::new();
         let mut inactive_colls = Vec::new();
 
-        // one timestamp for the whole tick so every sub-scanner evaluates against
-        // the same `now`.
         let now = (self.now_fn)();
 
-        // evaluate the candidates for all scanners. Per-collection failures are
-        // isolated (logged and skipped) so one collection's error never aborts the
-        // tick: files already committed to sibling ledgers must still be emitted.
-        // Under report-once dedup a dropped emission is permanent data loss.
+        // evaludate candidates for all scanners
         for (cid, scanner) in self.scanners.iter_mut() {
             match scanner.evaluate_candidates(now).await {
                 Ok(stable) => stable_files.extend(stable),
                 Err(err) => warn!("scan: evaluate failed for collection {cid}: {err}"),
             }
 
-            // only deployed scanners discover candidates, other scanners continue
-            // scanning their candidate pool until no candidates remain
+            // discover candidates for deployed scanners
             if self.deployed.contains(cid) {
                 if let Err(err) = scanner.discover_candidates(now).await {
                     warn!("scan: discover failed for collection {cid}: {err}");
                 }
+            // if the scanner has no candidates, it is inactive
             } else if !scanner.has_candidates() {
                 inactive_colls.push(cid.clone());
             }
