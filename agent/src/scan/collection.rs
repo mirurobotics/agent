@@ -564,6 +564,25 @@ mod tests {
             scanner.discover_candidates(ts(1002)).await.unwrap();
             assert_eq!(scanner.state.candidates.len(), 1);
         }
+
+        // A file whose on-disk size+mtime match the latest ledger entry is skipped
+        // at discovery (already reported, untouched).
+        #[tokio::test]
+        async fn discovery_skips_latest_ledger_entry() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "led.mcap", b"aaaa").await;
+            let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
+            // build a ledger entry from the file's actual observed metadata.
+            let obs = observation(&state, file.clone(), ts(1000)).await;
+            let mut entry = stable_file(file.clone(), ts(900));
+            entry.size = obs.size;
+            entry.mtime = DateTime::<Utc>::from(obs.mtime);
+            state.ledger.insert(file.clone(), vec![entry]);
+            let mut scanner = CollectionScanner::from_state(state);
+
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+            assert!(scanner.state.candidates.is_empty());
+        }
     }
 
     // ========================= M4: STABILITY WINDOWS ========================== //
@@ -1017,6 +1036,126 @@ mod tests {
             assert_eq!(scanner.ledger_count(), 1);
             assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 1);
             assert!(!scanner.state.candidates.contains_key(&file));
+        }
+    }
+
+    // ===================== M10: DEDUP / CHANGED VERSIONS ====================== //
+
+    mod dedup {
+        use super::*;
+
+        // A file reported once via the full discover -> evaluate cycle is not
+        // re-discovered or re-emitted on later ticks; its ledger stays length 1.
+        #[tokio::test]
+        async fn static_reported_file_goes_quiet_across_ticks() {
+            let dir = dirs::temp("testing").unwrap();
+            write(&dir, "static.mcap", b"aaaa").await;
+            // window 0 so the appearing file is immediately stable, but note it is
+            // preexisting at creation — create the scanner first, then the file.
+            let cfg = config("d", "coll", &glob_for(&dir), 0);
+            let mut scanner = CollectionScanner::new(cfg, ts(1000)).await.unwrap();
+
+            let file = write(&dir, "new.mcap", b"aaaa").await;
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+            let first = scanner.evaluate_candidates(ts(1001)).await.unwrap();
+            assert_eq!(first.len(), 1);
+            assert_eq!(scanner.ledger_count(), 1);
+            assert!(!scanner.state.candidates.contains_key(&file));
+
+            // later tick: the untouched file is skipped at discovery, emits nothing.
+            scanner.discover_candidates(ts(1002)).await.unwrap();
+            assert!(scanner.state.candidates.is_empty());
+            let second = scanner.evaluate_candidates(ts(1002)).await.unwrap();
+            assert!(second.is_empty());
+            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 1);
+        }
+
+        // A touched-but-unchanged file (mtime moved, size+digest identical) is
+        // evaluated once, retired, and its new mtime recorded as an alias on the
+        // latest ledger entry; a later discovery with that aliased mtime is skipped.
+        #[tokio::test]
+        async fn touched_unchanged_file_records_mtime_alias_then_quiet() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "touch.mcap", b"aaaa").await;
+            let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
+            // The candidate is observed from disk (real, non-deterministic mtime);
+            // the ledger entry deliberately carries an OLD mtime so the file's real
+            // mtime differs from it. Content (size + digest) is identical, so the
+            // outcome is AlreadyInLedger and the real mtime is recorded as an alias.
+            let base = observation(&state, file.clone(), ts(1000)).await;
+            let mut entry = stable_file(file.clone(), ts(900));
+            entry.size = base.size;
+            entry.mtime = ts(500);
+            state.ledger.insert(file.clone(), vec![entry]);
+            state
+                .candidates
+                .insert(file.clone(), candidate(file.clone(), base.clone()));
+            let mut scanner = CollectionScanner::from_state(state);
+
+            let stable = scanner.evaluate_candidates(ts(1010)).await.unwrap();
+            assert!(stable.is_empty());
+            assert!(!scanner.state.candidates.contains_key(&file));
+            let latest = scanner.state.ledger.get(&file).unwrap().last().unwrap();
+            assert!(latest
+                .mtime_aliases
+                .contains(&DateTime::<Utc>::from(base.mtime)));
+
+            // a subsequent discovery observing the aliased mtime is skipped.
+            assert!(scanner.state.is_latest_ledger_entry(&base));
+        }
+
+        // Changed content at a DIFFERENT size is reported as a new version — the
+        // HIGH-bug regression that previously looped Unstable forever.
+        #[tokio::test]
+        async fn changed_content_different_size_reports_new_version() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "grow.mcap", b"aaaa").await;
+            let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
+            // ledger entry for the original 4-byte content.
+            let orig = observation(&state, file.clone(), ts(1000)).await;
+            let mut entry = stable_file(file.clone(), ts(900));
+            entry.size = orig.size;
+            entry.mtime = DateTime::<Utc>::from(orig.mtime);
+            state.ledger.insert(file.clone(), vec![entry]);
+
+            // rewrite to a larger, different-digest content and re-promote.
+            write_file(&file, b"bbbbbbbb").await;
+            let changed = observation(&state, file.clone(), ts(1001)).await;
+            state
+                .candidates
+                .insert(file.clone(), candidate(file.clone(), changed));
+            let mut scanner = CollectionScanner::from_state(state);
+
+            let stable = scanner.evaluate_candidates(ts(1011)).await.unwrap();
+            assert_eq!(stable.len(), 1);
+            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 2);
+        }
+
+        // Changed content at the SAME size (different digest) is reported as a new
+        // version.
+        #[tokio::test]
+        async fn changed_content_same_size_reports_new_version() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "same.mcap", b"aaaa").await;
+            let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
+            let orig = observation(&state, file.clone(), ts(1000)).await;
+            let mut entry = stable_file(file.clone(), ts(900));
+            entry.size = orig.size;
+            entry.mtime = DateTime::<Utc>::from(orig.mtime);
+            state.ledger.insert(file.clone(), vec![entry]);
+
+            // rewrite to same-size but different-digest content and re-promote.
+            write_file(&file, b"bbbb").await;
+            let changed = observation(&state, file.clone(), ts(1001)).await;
+            assert_eq!(changed.size, orig.size);
+            state
+                .candidates
+                .insert(file.clone(), candidate(file.clone(), changed));
+            let mut scanner = CollectionScanner::from_state(state);
+
+            let stable = scanner.evaluate_candidates(ts(1011)).await.unwrap();
+            assert_eq!(stable.len(), 1);
+            assert_eq!(scanner.state.ledger.get(&file).unwrap().len(), 2);
         }
     }
 
