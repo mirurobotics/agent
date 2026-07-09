@@ -121,16 +121,17 @@ fn writeable() -> std::fs::Permissions {
 
 /// Returns the entries in `dir` whose filename starts with the literal
 /// `miru.backup.` prefix emitted by `backup_location`.
-fn detect_backup_files(dir: &filesys::Dir) -> Vec<filesys::File> {
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir.path()).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(BACKUP_FILE_PREFIX) {
-            out.push(filesys::File::new(entry.path()));
-        }
-    }
-    out
+async fn detect_backup_files(dir: &filesys::Dir) -> Vec<filesys::File> {
+    dirs::files(dir)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|file| {
+            file.name()
+                .map(|name| name.starts_with(BACKUP_FILE_PREFIX))
+                .unwrap_or(false)
+        })
+        .collect()
 }
 
 pub mod deploy_func_success {
@@ -239,7 +240,7 @@ pub mod deploy_func_success {
             .unwrap();
         assert_eq!(b_actual, "new_b");
 
-        let leftover = detect_backup_files(f.temp_dir.dir());
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -328,7 +329,13 @@ pub mod deploy_func_success {
 
         // Simulate a stale backup left by a prior interrupted deploy
         let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
-        std::fs::write(&stale_backup, "stale_backup").unwrap();
+        files::write_string(
+            &filesys::File::new(&stale_backup),
+            "stale_backup",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
         assert!(stale_backup.exists());
 
         let a_cfg = ConfigInstance {
@@ -347,7 +354,7 @@ pub mod deploy_func_success {
         assert_eq!(actual, "new_a");
 
         // stale backup overwritten by snapshot then removed by cleanup_backups
-        let leftover = detect_backup_files(f.temp_dir.dir());
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected stale backup to be cleaned up, found {leftover:?}"
@@ -628,7 +635,7 @@ pub mod deploy_func_backup_errs {
         assert_eq!(c_actual, "old");
 
         // no backup siblings leaked next to c.json
-        let leftover = detect_backup_files(&locked_dir);
+        let leftover = detect_backup_files(&locked_dir).await;
         assert!(
             leftover.is_empty(),
             "expected no miru.backup.* siblings near c.json, found {leftover:?}"
@@ -716,7 +723,7 @@ pub mod deploy_func_backup_errs {
         assert_eq!(c_actual, "old_c");
 
         // backup files consumed by rollback (rename-back), none should remain
-        let leftover = detect_backup_files(f.temp_dir.dir());
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected no miru.backup.* siblings in temp_dir root, found {leftover:?}"
@@ -755,7 +762,7 @@ pub mod deploy_func_write_errs {
         );
 
         // backups should not be leaked
-        let leftover = detect_backup_files(&locked_dir);
+        let leftover = detect_backup_files(&locked_dir).await;
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -834,7 +841,7 @@ pub mod deploy_func_write_errs {
         );
 
         // backups should not be leaked
-        let leftover = detect_backup_files(f.temp_dir.dir());
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -898,7 +905,7 @@ pub mod deploy_func_write_errs {
         );
 
         // backups should not be leaked
-        let leftover = detect_backup_files(f.temp_dir.dir());
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
@@ -975,7 +982,7 @@ pub mod deploy_func_write_errs {
 
         // the backup created for a.json's Existed snapshot should have been
         // renamed back over a.json, leaving no .miru-backup-* sibling
-        let leftover = detect_backup_files(f.temp_dir.dir());
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected no .miru-backup-* siblings, found {leftover:?}"
