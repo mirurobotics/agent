@@ -73,29 +73,12 @@ impl State {
         latest.equal_metadata(obs)
     }
 
-    pub(crate) fn add_mtime_alias_to_latest_ledger_entry(
-        &mut self,
-        file: &File,
-        mtime: DateTime<Utc>,
-    ) -> Result<(), ScanErr> {
-        let stable_files = if let Some(stable_files) = self.ledger.get_mut(file) {
-            stable_files
-        } else {
-            return Err(ScanErr::InternalError(InternalError {
-                message: "File not found in ledger".to_string(),
-                trace: trace!(),
-            }));
-        };
-        let last = if let Some(last) = stable_files.last_mut() {
-            last
-        } else {
-            return Err(ScanErr::InternalError(InternalError {
-                message: "No last entry found in ledger".to_string(),
-                trace: trace!(),
-            }));
-        };
-        last.mtime_aliases.push(mtime);
-        Ok(())
+    /// The latest (most recent) ledger entry for `file`, if any, for in-place
+    /// mutation. Returns `None` when the file has no ledger history.
+    pub(crate) fn latest_ledger_entry_mut(&mut self, file: &File) -> Option<&mut StableFile> {
+        self.ledger
+            .get_mut(file)
+            .and_then(|entries| entries.last_mut())
     }
 
     pub(crate) fn set_config(&mut self, cfg: Config) -> Result<(), ScanErr> {
@@ -137,33 +120,13 @@ impl Observation {
     }
 }
 
-// A file that is a candidate for upload.
+// A file that is a candidate for upload. Holds the single observation taken at
+// discovery; re-discovery of a tracked candidate is skipped (see
+// `State::is_candidate`), so a candidate never accumulates a second observation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub file: File,
-    pub observations: Vec<Observation>,
-}
-
-impl Candidate {
-    pub fn latest_observation(&self) -> Result<Observation, ScanErr> {
-        self.observations
-            .last()
-            .cloned()
-            .ok_or(ScanErr::InternalError(InternalError {
-                message: "No observations found".to_string(),
-                trace: trace!(),
-            }))
-    }
-
-    pub fn first_observation(&self) -> Result<Observation, ScanErr> {
-        self.observations
-            .first()
-            .cloned()
-            .ok_or(ScanErr::InternalError(InternalError {
-                message: "No observations found".to_string(),
-                trace: trace!(),
-            }))
-    }
+    pub observation: Observation,
 }
 
 // A file that has been determined stable enough for upload.
@@ -188,6 +151,17 @@ impl StableFile {
     pub fn has_mtime(&self, other: &Observation) -> bool {
         let other_mtime = DateTime::<Utc>::from(other.mtime);
         self.mtime_aliases.contains(&other_mtime) || self.mtime == other_mtime
+    }
+
+    /// Record `mtime` as an alias for this stable content, deduped: a mtime that
+    /// already equals the primary `mtime` or is already in `mtime_aliases` is not
+    /// pushed. This bounds `mtime_aliases` growth for a repeatedly-touched but
+    /// otherwise-unchanged file (whose distinct mtimes are few in practice).
+    pub fn push_mtime_alias(&mut self, mtime: DateTime<Utc>) {
+        if self.mtime == mtime || self.mtime_aliases.contains(&mtime) {
+            return;
+        }
+        self.mtime_aliases.push(mtime);
     }
 }
 
@@ -248,6 +222,18 @@ mod tests {
         }
     }
 
+    /// A size-4 observation at ts(1000) with the epoch mtime for `file`.
+    fn observation(file: File) -> Observation {
+        Observation {
+            file,
+            timestamp: ts(1000),
+            size: 4,
+            mtime: SystemTime::UNIX_EPOCH,
+            deployment_id: "d".to_string(),
+            upload_rule_id: "coll".to_string(),
+        }
+    }
+
     mod accessors {
         use super::*;
 
@@ -295,7 +281,7 @@ mod tests {
                 file.clone(),
                 Candidate {
                     file: file.clone(),
-                    observations: vec![],
+                    observation: observation(file.clone()),
                 },
             );
             assert!(state.has_candidates());
@@ -308,19 +294,11 @@ mod tests {
 
             assert!(!state.is_candidate(&file));
 
-            let obs = Observation {
-                file: file.clone(),
-                timestamp: ts(1000),
-                size: 4,
-                mtime: SystemTime::UNIX_EPOCH,
-                deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
-            };
             state.candidates.insert(
                 file.clone(),
                 Candidate {
                     file: file.clone(),
-                    observations: vec![obs],
+                    observation: observation(file.clone()),
                 },
             );
             assert!(state.is_candidate(&file));
@@ -527,50 +505,16 @@ mod tests {
         use super::*;
 
         #[test]
-        fn first_and_latest_observation() {
+        fn holds_single_observation() {
             let file = File::new("/none/x.mcap");
-            let first = Observation {
-                file: file.clone(),
-                timestamp: ts(1000),
-                size: 4,
-                mtime: SystemTime::UNIX_EPOCH,
-                deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
-            };
-            let latest = Observation {
-                file: file.clone(),
-                timestamp: ts(2000),
-                size: 4,
-                mtime: SystemTime::UNIX_EPOCH,
-                deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
-            };
+            let obs = observation(file.clone());
             let cand = Candidate {
-                file,
-                observations: vec![first.clone(), latest.clone()],
+                file: file.clone(),
+                observation: obs.clone(),
             };
 
-            assert_eq!(cand.first_observation().unwrap().timestamp, first.timestamp);
-            assert_eq!(
-                cand.latest_observation().unwrap().timestamp,
-                latest.timestamp
-            );
-        }
-
-        #[test]
-        fn empty_observations_error() {
-            let cand = Candidate {
-                file: File::new("/none/x.mcap"),
-                observations: vec![],
-            };
-            assert!(matches!(
-                cand.latest_observation(),
-                Err(ScanErr::InternalError(_))
-            ));
-            assert!(matches!(
-                cand.first_observation(),
-                Err(ScanErr::InternalError(_))
-            ));
+            assert_eq!(cand.file, file);
+            assert_eq!(cand.observation, obs);
         }
     }
 
@@ -626,11 +570,11 @@ mod tests {
         }
     }
 
-    mod add_mtime_alias_to_latest_ledger_entry {
+    mod latest_ledger_entry_mut {
         use super::*;
 
         #[test]
-        fn appends() {
+        fn appends_alias() {
             let file = File::new("/none/l.mcap");
             let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
             state
@@ -638,20 +582,42 @@ mod tests {
                 .insert(file.clone(), vec![stable_file(file.clone(), ts(900))]);
 
             state
-                .add_mtime_alias_to_latest_ledger_entry(&file, ts(1234))
-                .unwrap();
+                .latest_ledger_entry_mut(&file)
+                .unwrap()
+                .push_mtime_alias(ts(1234));
             let latest = state.ledger.get(&file).unwrap().last().unwrap();
             assert_eq!(latest.mtime_aliases, vec![ts(1234)]);
         }
 
         #[test]
-        fn errors_when_absent() {
+        fn none_when_absent() {
             let file = File::new("/none/l.mcap");
             let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
-            let err = state
-                .add_mtime_alias_to_latest_ledger_entry(&file, ts(1234))
-                .unwrap_err();
-            assert!(matches!(err, ScanErr::InternalError(_)));
+            assert!(state.latest_ledger_entry_mut(&file).is_none());
+        }
+    }
+
+    mod push_mtime_alias {
+        use super::*;
+
+        #[test]
+        fn dedups_against_primary_mtime() {
+            let file = File::new("/none/l.mcap");
+            let mut entry = stable_file(file, ts(900));
+            entry.mtime = ts(500);
+            entry.push_mtime_alias(ts(500));
+            assert!(entry.mtime_aliases.is_empty());
+        }
+
+        #[test]
+        fn dedups_repeated_alias() {
+            let file = File::new("/none/l.mcap");
+            let mut entry = stable_file(file, ts(900));
+            entry.push_mtime_alias(ts(1234));
+            entry.push_mtime_alias(ts(1234));
+            entry.push_mtime_alias(ts(5678));
+            entry.push_mtime_alias(ts(1234));
+            assert_eq!(entry.mtime_aliases, vec![ts(1234), ts(5678)]);
         }
     }
 

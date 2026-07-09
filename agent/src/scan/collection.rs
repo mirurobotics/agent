@@ -1,5 +1,6 @@
 // standard crates
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{errors::*, files, File, PathExt};
@@ -12,6 +13,7 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
+use tracing::warn;
 
 /// Owned (non-actor) sub-scanner for a single upload collection.
 pub(crate) struct CollectionScanner {
@@ -71,20 +73,39 @@ impl CollectionScanner {
         let mut stable_files = Vec::new();
         let candidates = self.state.candidates.clone();
         for candidate in candidates.values() {
-            let action = eval_candidate(&self.state, candidate, now).await?;
-            match action {
-                EvalAction::WaitForStabilityWindow => continue,
-                EvalAction::Unstable => {
+            // Isolate per-file failures: a file deleted or briefly unreadable
+            // mid-scan must not abort the whole tick (and must not leave the
+            // ledger and the returned Vec inconsistent). Skip-and-continue on a
+            // file-specific I/O error, matching `filesys::glob`'s design; only
+            // genuine internal failures propagate.
+            let outcome = match eval_candidate(&self.state, candidate, now).await {
+                Ok(outcome) => outcome,
+                Err(err) if is_file_specific_err(&err) => {
+                    warn!(
+                        "skipping candidate {} this tick: {err}",
+                        candidate.file.path().display()
+                    );
+                    // Leave the candidate in place: a transient error may clear
+                    // on the next tick. A genuinely-vanished file is handled by
+                    // the `Unstable` branch, which drops it.
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
+            match outcome {
+                Outcome::WaitForStabilityWindow => continue,
+                Outcome::Unstable => {
                     self.state.candidates.remove(&candidate.file);
                 }
-                EvalAction::AlreadyInLedger(observation) => {
+                Outcome::AlreadyInLedger { mtime } => {
                     self.state.candidates.remove(&candidate.file);
-                    self.state.add_mtime_alias_to_latest_ledger_entry(
-                        &candidate.file,
-                        observation.mtime.into(),
-                    )?;
+                    // `AlreadyInLedger` is only produced after a non-empty ledger
+                    // entry was located for this file, so the entry is present.
+                    if let Some(entry) = self.state.latest_ledger_entry_mut(&candidate.file) {
+                        entry.push_mtime_alias(mtime.into());
+                    }
                 }
-                EvalAction::Stable(stable_file) => {
+                Outcome::Stable(stable_file) => {
                     self.state.candidates.remove(&candidate.file);
                     stable_files.push(stable_file.clone());
                     self.state
@@ -103,46 +124,75 @@ impl CollectionScanner {
     }
 }
 
-pub async fn discover_preexisting(
+async fn discover_preexisting(
     state: &State,
     now: DateTime<Utc>,
 ) -> Result<HashMap<File, Observation>, ScanErr> {
     let mut preexisting = HashMap::new();
+    // A `glob` pattern error is a hard failure; a per-file `observe_file` error
+    // (file deleted/unreadable mid-scan) is skipped so one bad file cannot abort
+    // the whole snapshot.
     for file in files::glob(&state.cfg.rule.source.glob)? {
         if state.is_candidate(&file) {
             continue;
         }
-        let observation = observe_file(state, file.clone(), now).await?;
+        let observation = match observe_file(state, file.clone(), now).await {
+            Ok(observation) => observation,
+            Err(err) if is_file_specific_err(&err) => {
+                warn!("skipping preexisting file {}: {err}", file.path().display());
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
         preexisting.insert(file, observation);
     }
     Ok(preexisting)
 }
 
-pub async fn discover_candidates(
-    state: &State,
-    now: DateTime<Utc>,
-) -> Result<Vec<Candidate>, ScanErr> {
+async fn discover_candidates(state: &State, now: DateTime<Utc>) -> Result<Vec<Candidate>, ScanErr> {
     let mut candidates = Vec::new();
+    // A `glob` pattern error is a hard failure; a per-file `observe_file` error
+    // is skipped so one bad file cannot abort discovery for the rest.
     for file in files::glob(&state.cfg.rule.source.glob)? {
         if state.is_candidate(&file) {
             continue;
         }
-        let observation = observe_file(state, file.clone(), now).await?;
+        let observation = match observe_file(state, file.clone(), now).await {
+            Ok(observation) => observation,
+            Err(err) if is_file_specific_err(&err) => {
+                warn!("skipping candidate {}: {err}", file.path().display());
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
         if state.is_preexisting(&observation) {
             continue;
         }
         if state.is_latest_ledger_entry(&observation) {
             continue;
         }
-        candidates.push(Candidate {
-            file,
-            observations: vec![observation],
-        });
+        candidates.push(Candidate { file, observation });
     }
     Ok(candidates)
 }
 
-pub async fn observe_file(
+/// True for I/O errors that are specific to a single file (deleted or briefly
+/// unreadable mid-scan) and should be skipped for that file rather than aborting
+/// the whole tick. Non-file failures (e.g. an invalid glob pattern) return false
+/// and propagate.
+fn is_file_specific_err(err: &ScanErr) -> bool {
+    matches!(
+        err,
+        ScanErr::FileSysErr(
+            FileSysErr::PathDoesNotExistErr(_)
+                | FileSysErr::FileMetadataErr(_)
+                | FileSysErr::OpenFileErr(_)
+                | FileSysErr::ReadFileErr(_)
+        )
+    )
+}
+
+async fn observe_file(
     state: &State,
     file: File,
     timestamp: DateTime<Utc>,
@@ -165,10 +215,17 @@ pub async fn observe_file(
     })
 }
 
-pub enum EvalAction {
+/// The single decision `eval_candidate` produces for a candidate. Each arm
+/// carries exactly the data the evaluate loop needs to act — no rewrapping.
+enum Outcome {
+    /// The stability window has not yet elapsed; re-evaluate on a later tick.
     WaitForStabilityWindow,
+    /// The file vanished or its metadata changed since discovery; drop it.
     Unstable,
-    AlreadyInLedger(Observation),
+    /// The file's content matches the latest ledger entry; record its current
+    /// mtime as an alias on that entry (`mtime` is the freshly observed mtime).
+    AlreadyInLedger { mtime: SystemTime },
+    /// A new stable version to emit and append to the ledger.
     Stable(StableFile),
 }
 
@@ -176,102 +233,90 @@ async fn eval_candidate(
     state: &State,
     candidate: &Candidate,
     now: DateTime<Utc>,
-) -> Result<EvalAction, ScanErr> {
-    if !has_stability_window_elapsed(state, candidate, now)? {
-        return Ok(EvalAction::WaitForStabilityWindow);
+) -> Result<Outcome, ScanErr> {
+    if !has_stability_window_elapsed(state, candidate, now) {
+        return Ok(Outcome::WaitForStabilityWindow);
     }
 
     if !candidate.file.exists() {
         // file was deleted
-        return Ok(EvalAction::Unstable);
+        return Ok(Outcome::Unstable);
     }
 
     let observation = observe_file(state, candidate.file.clone(), now).await?;
-    let outcome = determine_stability(state, candidate, &observation).await?;
-
-    match outcome {
-        StabilityOutcome::Stable(digest) => {
-            let first = candidate.first_observation()?;
-            let last = candidate.latest_observation()?;
-            debug_assert!(first.equal_metadata(&last));
-            Ok(EvalAction::Stable(StableFile {
-                file: candidate.file.clone(),
-                size: observation.size,
-                digest,
-                mtime: last.mtime.into(),
-                mtime_aliases: vec![],
-                first_observed_at: first.timestamp,
-                last_observed_at: last.timestamp,
-                deployment_id: first.deployment_id.clone(),
-                upload_rule_id: first.upload_rule_id.clone(),
-            }))
-        }
-        StabilityOutcome::AlreadyInLedger => Ok(EvalAction::AlreadyInLedger(observation)),
-        StabilityOutcome::Unstable => Ok(EvalAction::Unstable),
-    }
+    determine_stability(state, candidate, &observation).await
 }
 
-fn has_stability_window_elapsed(
-    state: &State,
-    candidate: &Candidate,
-    now: DateTime<Utc>,
-) -> Result<bool, ScanErr> {
+fn has_stability_window_elapsed(state: &State, candidate: &Candidate, now: DateTime<Utc>) -> bool {
     let window = state.cfg.rule.source.stability_window_secs as i64;
-    let stable_since = candidate.first_observation()?.timestamp;
-    Ok(now.signed_duration_since(stable_since).num_seconds() >= window)
-}
-
-pub type Digest = String;
-
-pub enum StabilityOutcome {
-    AlreadyInLedger,
-    Stable(Digest),
-    Unstable,
+    // The candidate's stored observation is the "observation at discovery".
+    let stable_since = candidate.observation.timestamp;
+    now.signed_duration_since(stable_since).num_seconds() >= window
 }
 
 async fn determine_stability(
     state: &State,
     candidate: &Candidate,
     observation: &Observation,
-) -> Result<StabilityOutcome, ScanErr> {
-    if !is_metadata_stable(candidate, observation)? {
-        return Ok(StabilityOutcome::Unstable);
+) -> Result<Outcome, ScanErr> {
+    // Compare the observation taken at discovery against the one taken now.
+    if !is_metadata_stable(candidate, observation) {
+        return Ok(Outcome::Unstable);
     }
     // TODO: add file footer verification for various file types
-    differs_from_previous(state, candidate).await
+    differs_from_previous(state, candidate, observation).await
 }
 
-fn is_metadata_stable(candidate: &Candidate, observation: &Observation) -> Result<bool, ScanErr> {
-    let latest = candidate.latest_observation()?;
-    if latest.size != observation.size {
-        return Ok(false);
-    }
-    if latest.mtime != observation.mtime {
-        return Ok(false);
-    }
-    Ok(true)
+fn is_metadata_stable(candidate: &Candidate, observation: &Observation) -> bool {
+    candidate.observation.equal_metadata(observation)
 }
 
 async fn differs_from_previous(
     state: &State,
     candidate: &Candidate,
-) -> Result<StabilityOutcome, ScanErr> {
-    // check if there is a previous stable file
-    let previous = if let Some(previous) = find_previous_stable_file(state, candidate) {
-        previous
-    } else {
-        return Ok(StabilityOutcome::Stable(
-            files::hash(&candidate.file).await?,
-        ));
-    };
-
-    // check if stable file digest has changed; any digest change is a new version
+    observation: &Observation,
+) -> Result<Outcome, ScanErr> {
+    // A new digest (or no prior ledger entry at all) is a new stable version.
     let digest = files::hash(&candidate.file).await?;
-    if digest != previous.digest {
-        return Ok(StabilityOutcome::Stable(digest));
+    if let Some(previous) = find_previous_stable_file(state, candidate) {
+        if digest == previous.digest {
+            // Content unchanged since the latest ledger entry.
+            return Ok(Outcome::AlreadyInLedger {
+                mtime: observation.mtime,
+            });
+        }
     }
-    Ok(StabilityOutcome::AlreadyInLedger)
+    Ok(Outcome::Stable(build_stable_file(
+        candidate,
+        observation,
+        digest,
+    )))
 }
+
+/// Build the `StableFile` to emit. The candidate holds a single observation
+/// (taken at discovery); reaching here means the fresh `observation` has
+/// metadata equal to it, so size/mtime are taken from the stored observation and
+/// both `first_observed_at`/`last_observed_at` derive from it.
+fn build_stable_file(
+    candidate: &Candidate,
+    observation: &Observation,
+    digest: Digest,
+) -> StableFile {
+    let discovered = &candidate.observation;
+    StableFile {
+        file: candidate.file.clone(),
+        size: observation.size,
+        digest,
+        mtime: discovered.mtime.into(),
+        mtime_aliases: vec![],
+        first_observed_at: discovered.timestamp,
+        last_observed_at: discovered.timestamp,
+        deployment_id: discovered.deployment_id.clone(),
+        upload_rule_id: discovered.upload_rule_id.clone(),
+    }
+}
+
+type Digest = String;
 
 fn find_previous_stable_file(state: &State, candidate: &Candidate) -> Option<StableFile> {
     state
@@ -363,7 +408,20 @@ mod tests {
     fn candidate(file: File, obs: Observation) -> Candidate {
         Candidate {
             file,
-            observations: vec![obs],
+            observation: obs,
+        }
+    }
+
+    /// A minimal size-4 observation at ts(1000) for `file`; used where the
+    /// observation content is irrelevant to the assertion.
+    fn bare_observation(file: File) -> Observation {
+        Observation {
+            file,
+            timestamp: ts(1000),
+            size: 4,
+            mtime: SystemTime::UNIX_EPOCH,
+            deployment_id: "d".to_string(),
+            upload_rule_id: "coll".to_string(),
         }
     }
 
@@ -444,16 +502,16 @@ mod tests {
         assert_eq!(scanner.state.ledger.get(file), Some(&history));
     }
 
-    fn assert_stable(outcome: StabilityOutcome) {
-        assert!(matches!(outcome, StabilityOutcome::Stable(digest) if digest == HASH_AAAA));
+    fn assert_stable(outcome: Outcome) {
+        assert!(matches!(outcome, Outcome::Stable(sf) if sf.digest == HASH_AAAA));
     }
 
-    fn assert_already_in_ledger(outcome: StabilityOutcome) {
-        assert!(matches!(outcome, StabilityOutcome::AlreadyInLedger));
+    fn assert_already_in_ledger(outcome: Outcome) {
+        assert!(matches!(outcome, Outcome::AlreadyInLedger { .. }));
     }
 
-    fn assert_unstable(outcome: StabilityOutcome) {
-        assert!(matches!(outcome, StabilityOutcome::Unstable));
+    fn assert_unstable(outcome: Outcome) {
+        assert!(matches!(outcome, Outcome::Unstable));
     }
 
     /// Temp dir + `aaaa` file + state/obs/candidate at ts(1000).
@@ -679,19 +737,19 @@ mod tests {
         #[tokio::test]
         async fn elapsed_at_boundary() {
             let c = case("w.mcap", 10).await;
-            assert!(has_stability_window_elapsed(&c.state, &c.cand, ts(1010)).unwrap());
+            assert!(has_stability_window_elapsed(&c.state, &c.cand, ts(1010)));
         }
 
         #[tokio::test]
         async fn not_elapsed_one_second_short() {
             let c = case("w.mcap", 10).await;
-            assert!(!has_stability_window_elapsed(&c.state, &c.cand, ts(1009)).unwrap());
+            assert!(!has_stability_window_elapsed(&c.state, &c.cand, ts(1009)));
         }
 
         #[tokio::test]
         async fn window_zero_at_first_timestamp() {
             let c = case("w.mcap", 0).await;
-            assert!(has_stability_window_elapsed(&c.state, &c.cand, ts(1000)).unwrap());
+            assert!(has_stability_window_elapsed(&c.state, &c.cand, ts(1000)));
         }
     }
 
@@ -717,7 +775,7 @@ mod tests {
             let file = File::new("/none/x.mcap");
             let base = base_observation(file.clone());
             let cand = candidate(file, base.clone());
-            assert!(is_metadata_stable(&cand, &base).unwrap());
+            assert!(is_metadata_stable(&cand, &base));
         }
 
         #[test]
@@ -727,7 +785,7 @@ mod tests {
             let cand = candidate(file, base.clone());
             let mut diff_size = base;
             diff_size.size = 5;
-            assert!(!is_metadata_stable(&cand, &diff_size).unwrap());
+            assert!(!is_metadata_stable(&cand, &diff_size));
         }
 
         #[test]
@@ -737,7 +795,7 @@ mod tests {
             let cand = candidate(file, base.clone());
             let mut diff_mtime = base;
             diff_mtime.mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
-            assert!(!is_metadata_stable(&cand, &diff_mtime).unwrap());
+            assert!(!is_metadata_stable(&cand, &diff_mtime));
         }
     }
 
@@ -750,10 +808,7 @@ mod tests {
         fn absent() {
             let file = File::new("/none/s.mcap");
             let state = State::new(config("d", "coll", "/none/*.mcap", 0));
-            let cand = Candidate {
-                file: file.clone(),
-                observations: vec![],
-            };
+            let cand = candidate(file.clone(), bare_observation(file));
             assert_eq!(super::find_previous_stable_file(&state, &cand), None);
         }
 
@@ -764,10 +819,7 @@ mod tests {
             let first = stable_file(file.clone(), ts(900));
             let last = stable_file(file.clone(), ts(1000));
             state.ledger.insert(file.clone(), vec![first, last.clone()]);
-            let cand = Candidate {
-                file,
-                observations: vec![],
-            };
+            let cand = candidate(file.clone(), bare_observation(file));
             assert_eq!(super::find_previous_stable_file(&state, &cand), Some(last));
         }
     }
@@ -780,7 +832,7 @@ mod tests {
         async fn no_previous() {
             let c = case("s.mcap", 0).await;
             assert_stable(
-                super::differs_from_previous(&c.state, &c.cand)
+                super::differs_from_previous(&c.state, &c.cand, &c.obs)
                     .await
                     .unwrap(),
             );
@@ -795,7 +847,7 @@ mod tests {
                 prior_with_digest(c.file.clone(), HASH_AAAA),
             );
             assert_already_in_ledger(
-                super::differs_from_previous(&c.state, &c.cand)
+                super::differs_from_previous(&c.state, &c.cand, &c.obs)
                     .await
                     .unwrap(),
             );
@@ -813,7 +865,7 @@ mod tests {
                 ),
             );
             assert_stable(
-                super::differs_from_previous(&c.state, &c.cand)
+                super::differs_from_previous(&c.state, &c.cand, &c.obs)
                     .await
                     .unwrap(),
             );
@@ -825,7 +877,7 @@ mod tests {
             let mut c = case("s.mcap", 0).await;
             seed_ledger(&mut c.state, &c.file, stable_file(c.file.clone(), ts(900)));
             assert_already_in_ledger(
-                super::differs_from_previous(&c.state, &c.cand)
+                super::differs_from_previous(&c.state, &c.cand, &c.obs)
                     .await
                     .unwrap(),
             );
@@ -843,7 +895,7 @@ mod tests {
             prev.size = 99;
             seed_ledger(&mut c.state, &c.file, prev);
             assert_stable(
-                super::differs_from_previous(&c.state, &c.cand)
+                super::differs_from_previous(&c.state, &c.cand, &c.obs)
                     .await
                     .unwrap(),
             );
@@ -934,7 +986,7 @@ mod tests {
         async fn not_yet_elapsed_waits() {
             let c = case("wait.mcap", 10).await;
             let action = eval_candidate(&c.state, &c.cand, ts(1009)).await.unwrap();
-            assert!(matches!(action, EvalAction::WaitForStabilityWindow));
+            assert!(matches!(action, Outcome::WaitForStabilityWindow));
         }
 
         // A candidate whose file was deleted hits the Unstable (deleted) branch —
@@ -944,7 +996,7 @@ mod tests {
             let c = case("gone.mcap", 10).await;
             files::delete(&c.file).await.unwrap();
             let action = eval_candidate(&c.state, &c.cand, ts(1010)).await.unwrap();
-            assert!(matches!(action, EvalAction::Unstable));
+            assert!(matches!(action, Outcome::Unstable));
         }
 
         // A stable candidate produces a StableFile with the expected payload.
@@ -958,7 +1010,7 @@ mod tests {
             let cand = candidate(file, obs);
 
             let action = eval_candidate(&state, &cand, ts(1010)).await.unwrap();
-            let EvalAction::Stable(sf) = action else {
+            let Outcome::Stable(sf) = action else {
                 panic!("expected Stable");
             };
             assert_eq!(sf, expected);
@@ -1047,19 +1099,16 @@ mod tests {
             );
             assert_retired_with_ledger(&scanner, &file, vec![expected.clone()]);
 
-            // re-promote the same (unchanged) content and tick again.
-            // AlreadyInLedger records the observation mtime as an alias.
+            // re-promote the same (unchanged) content and tick again. The
+            // observed mtime equals the ledger entry's primary mtime, so the
+            // AlreadyInLedger alias is deduped away — history is unchanged.
             track(&mut scanner.state, &file, c.obs.clone());
             assert!(scanner
                 .evaluate_candidates(ts(1020))
                 .await
                 .unwrap()
                 .is_empty());
-            assert_retired_with_ledger(
-                &scanner,
-                &file,
-                vec![with_mtime_alias(expected, c.obs.mtime)],
-            );
+            assert_retired_with_ledger(&scanner, &file, vec![expected]);
         }
 
         // A file reported once via the full discover -> evaluate cycle is not
@@ -1160,6 +1209,75 @@ mod tests {
                 vec![expected.clone()]
             );
             assert_retired_with_ledger(&scanner, &file, vec![prior, expected]);
+        }
+
+        // A candidate that vanished mid-tick does not abort evaluation of the
+        // others: the surviving stable candidate is still emitted and ledgered,
+        // and the vanished one is dropped. Guards the data-loss regression where
+        // a per-file failure aborted the whole loop.
+        #[tokio::test]
+        async fn vanished_candidate_does_not_abort_others() {
+            let dir = dirs::temp("testing").unwrap();
+            let gone = write(&dir, "gone.mcap", b"aaaa").await;
+            let live = write(&dir, "live.mcap", b"aaaa").await;
+            let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
+            let gone_obs = observation(&state, gone.clone(), ts(1000)).await;
+            let live_obs = observation(&state, live.clone(), ts(1000)).await;
+            let expected = stable_from_obs(&live_obs, HASH_AAAA, ts(1000));
+            track(&mut state, &gone, gone_obs);
+            track(&mut state, &live, live_obs);
+            let mut scanner = CollectionScanner::from_state(state);
+
+            // delete one candidate's file before the tick
+            files::delete(&gone).await.unwrap();
+
+            let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
+            assert_eq!(emitted, vec![expected.clone()]);
+            // the live file is retired + ledgered; the ledger and returned Vec
+            // agree (exactly the emitted set is recorded).
+            assert_retired_with_ledger(&scanner, &live, vec![expected]);
+            // the vanished file is dropped and never ledgered.
+            assert!(!scanner.state.candidates.contains_key(&gone));
+            assert!(!scanner.state.ledger.contains_key(&gone));
+        }
+    }
+
+    // ========================= is_file_specific_err =========================== //
+
+    mod is_file_specific_err {
+        use super::*;
+
+        fn scan_filesys_err(inner: FileSysErr) -> ScanErr {
+            ScanErr::FileSysErr(inner)
+        }
+
+        #[test]
+        fn path_missing_is_file_specific() {
+            let err = scan_filesys_err(FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                path: std::path::PathBuf::from("/gone.mcap"),
+                trace: trace!(),
+            }));
+            assert!(super::is_file_specific_err(&err));
+        }
+
+        #[test]
+        fn invalid_glob_is_not_file_specific() {
+            // A pattern-level failure must propagate, not be swallowed per-file.
+            let err = scan_filesys_err(FileSysErr::InvalidGlobErr(InvalidGlobErr {
+                pattern: "[".to_string(),
+                source: Box::new(glob::Pattern::new("[").unwrap_err()),
+                trace: trace!(),
+            }));
+            assert!(!super::is_file_specific_err(&err));
+        }
+
+        #[test]
+        fn internal_error_is_not_file_specific() {
+            let err = ScanErr::InternalError(InternalError {
+                message: "boom".to_string(),
+                trace: trace!(),
+            });
+            assert!(!super::is_file_specific_err(&err));
         }
     }
 
