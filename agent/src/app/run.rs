@@ -429,10 +429,12 @@ impl ShutdownManager {
         if let Some(token_refresh_worker_handle) = self.token_refresh_worker_handle.take() {
             if let Err(e) = token_refresh_worker_handle.await {
                 error!("Failed to shutdown token refresh worker: {}", e);
-                first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                }));
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
             }
         } else {
             info!(
@@ -444,10 +446,12 @@ impl ShutdownManager {
         if let Some(poller_worker_handle) = self.poller_worker_handle.take() {
             if let Err(e) = poller_worker_handle.await {
                 error!("Failed to shutdown poller worker: {}", e);
-                first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                }));
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
             }
         } else {
             info!("Poller worker handle not found, skipping poller worker shutdown...");
@@ -457,10 +461,12 @@ impl ShutdownManager {
         if let Some(mqtt_worker_handle) = self.mqtt_worker_handle.take() {
             if let Err(e) = mqtt_worker_handle.await {
                 error!("Failed to shutdown MQTT worker: {}", e);
-                first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
-                    source: Box::new(e),
-                    trace: trace!(),
-                }));
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
             }
         } else {
             info!("MQTT worker handle not found, skipping MQTT worker shutdown...");
@@ -471,10 +477,12 @@ impl ShutdownManager {
             match socket_server_handle.await {
                 Err(e) => {
                     error!("Failed to shutdown socket server: {}", e);
-                    first_err.get_or_insert(ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    }));
+                    first_err.get_or_insert_with(|| {
+                        ServerErr::JoinHandleErr(JoinHandleErr {
+                            source: Box::new(e),
+                            trace: trace!(),
+                        })
+                    });
                 }
                 Ok(Err(e)) => {
                     error!("Failed to shutdown socket server: {}", e);
