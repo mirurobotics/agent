@@ -1,7 +1,7 @@
 // internal crates
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
-use miru_agent::filesys::{files, PathExt, WriteOptions};
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::s3::errors::{
     ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
 };
@@ -135,6 +135,30 @@ pub mod put {
                 uri("artifacts/hello.txt?x-id=PutObject")
             );
         }
+
+        #[tokio::test]
+        async fn put_empty_file_succeeds() {
+            let key = "artifacts/empty.txt";
+            // A 0-byte source must still produce exactly one PUT — an empty body
+            // is a valid object, not a skipped request.
+            let src = temp_file_with(b"").await;
+            let (store, replay) = store_expecting(
+                req("PUT", "artifacts/empty.txt?x-id=PutObject"),
+                resp(200, &[]),
+            );
+
+            store.put_singlepart(src.file(), &obj(key)).await.unwrap();
+
+            // The streamed body can't be byte-compared, so assert the method +
+            // path by hand (see `put_streams_file_body_bytes`).
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].method(), "PUT");
+            assert_eq!(
+                requests[0].uri().to_string(),
+                uri("artifacts/empty.txt?x-id=PutObject")
+            );
+        }
     }
 }
 
@@ -156,7 +180,47 @@ pub mod get {
 
             store.get(&obj(key), dest.file()).await.unwrap();
 
-            assert_eq!(std::fs::read(dest.path()).unwrap(), payload);
+            assert_eq!(files::read_bytes(dest.file()).await.unwrap(), payload);
+            replay.assert_requests_match(IGNORED_HEADERS);
+        }
+
+        #[tokio::test]
+        async fn get_overwrites_existing_destination() {
+            let key = "blobs/data.bin";
+            // Pre-write stale content that is LONGER than the new payload, so an
+            // accidental append (or a failure to truncate) would leave trailing
+            // bytes and be caught by the exact-equality assertion below.
+            let dest = files::temp("s3-dest").unwrap();
+            files::write_bytes(
+                dest.file(),
+                b"OLD-STALE-CONTENT",
+                WriteOptions::OVERWRITE_NONATOMIC,
+            )
+            .await
+            .unwrap();
+            let new_payload = b"NEW".to_vec();
+            let (store, replay) = store_expecting(
+                req("GET", "blobs/data.bin?x-id=GetObject"),
+                resp(200, &new_payload),
+            );
+
+            store.get(&obj(key), dest.file()).await.unwrap();
+
+            assert_eq!(files::read_bytes(dest.file()).await.unwrap(), new_payload);
+            replay.assert_requests_match(IGNORED_HEADERS);
+        }
+
+        #[tokio::test]
+        async fn get_empty_object_writes_empty_file() {
+            let key = "blobs/empty.bin";
+            // An empty object body is a success: a 0-byte file is written.
+            let dest = files::temp("s3-dest").unwrap();
+            let (store, replay) =
+                store_expecting(req("GET", "blobs/empty.bin?x-id=GetObject"), resp(200, &[]));
+
+            store.get(&obj(key), dest.file()).await.unwrap();
+
+            assert!(files::read_bytes(dest.file()).await.unwrap().is_empty());
             replay.assert_requests_match(IGNORED_HEADERS);
         }
     }
@@ -217,6 +281,21 @@ pub mod delete {
             let key = "blobs/data.bin";
             let (store, replay) = store_expecting(
                 req("DELETE", "blobs/data.bin?x-id=DeleteObject"),
+                resp(204, &[]),
+            );
+
+            store.delete(&obj(key)).await.unwrap();
+
+            replay.assert_requests_match(IGNORED_HEADERS);
+        }
+
+        #[tokio::test]
+        async fn delete_missing_key_is_idempotent() {
+            // S3 returns 204 whether or not the key existed — this documents the
+            // module's "delete is idempotent for missing keys" contract.
+            let key = "blobs/never-existed.bin";
+            let (store, replay) = store_expecting(
+                req("DELETE", "blobs/never-existed.bin?x-id=DeleteObject"),
                 resp(204, &[]),
             );
 
@@ -347,7 +426,9 @@ pub mod put_source_missing {
     use super::*;
 
     #[tokio::test]
-    async fn put_missing_source_maps_to_filesys_err() {
+    async fn put_missing_source_maps_to_invalid_response() {
+        // A missing LOCAL source surfaces as `InvalidResponseErr` (the streaming
+        // body fails to read off disk before the request completes).
         let (store, _replay) = store_with(vec![]);
         let missing = File::new("/nonexistent/definitely/not/here.bin");
 
