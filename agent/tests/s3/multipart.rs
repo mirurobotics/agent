@@ -22,11 +22,7 @@ fn create_resp() -> http::Response<SdkBody> {
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId></InitiateMultipartUploadResult>"#
     );
-    http::Response::builder()
-        .status(200)
-        .header("content-type", "application/xml")
-        .body(SdkBody::from(xml))
-        .unwrap()
+    resp_xml(200, &xml)
 }
 
 fn upload_part_resp(etag: &str) -> http::Response<SdkBody> {
@@ -42,11 +38,7 @@ fn complete_resp() -> http::Response<SdkBody> {
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Location>https://s3.amazonaws.com/{BUCKET}/big.bin</Location><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><ETag>"final-etag"</ETag></CompleteMultipartUploadResult>"#
     );
-    http::Response::builder()
-        .status(200)
-        .header("content-type", "application/xml")
-        .body(SdkBody::from(xml))
-        .unwrap()
+    resp_xml(200, &xml)
 }
 
 fn create_req() -> http::Request<SdkBody> {
@@ -83,13 +75,6 @@ fn abort_req() -> http::Request<SdkBody> {
         .uri(uri(&format!(
             "big.bin?x-id=AbortMultipartUpload&uploadId={UPLOAD_ID}"
         )))
-        .body(SdkBody::empty())
-        .unwrap()
-}
-
-fn abort_resp() -> http::Response<SdkBody> {
-    http::Response::builder()
-        .status(204)
         .body(SdkBody::empty())
         .unwrap()
 }
@@ -178,7 +163,7 @@ pub mod put {
         let (store, replay) = store_with(vec![
             ReplayEvent::new(create_req(), create_resp()),
             ReplayEvent::new(upload_part_req(1), part_no_etag),
-            ReplayEvent::new(abort_req(), abort_resp()),
+            ReplayEvent::new(abort_req(), resp(204, &[])),
         ]);
 
         let err = store
@@ -223,7 +208,7 @@ pub mod put {
         let (store, replay) = store_with(vec![
             ReplayEvent::new(create_req(), create_resp()),
             ReplayEvent::new(upload_part_req(1), access_denied_resp()),
-            ReplayEvent::new(abort_req(), abort_resp()),
+            ReplayEvent::new(abort_req(), resp(204, &[])),
         ]);
 
         let err = store
@@ -253,7 +238,7 @@ pub mod put {
             ReplayEvent::new(create_req(), create_resp()),
             ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
             ReplayEvent::new(complete_req(), access_denied_resp()),
-            ReplayEvent::new(abort_req(), abort_resp()),
+            ReplayEvent::new(abort_req(), resp(204, &[])),
         ]);
 
         let err = store

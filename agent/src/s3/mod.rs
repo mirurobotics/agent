@@ -13,7 +13,7 @@ pub mod multipart;
 
 use errors::ObjectNotFoundErr;
 pub use errors::S3Err;
-pub use multipart::{PartToUpload, Source, UploadedPart};
+pub use multipart::Source;
 
 /// Objects larger than this stream through a multipart upload; objects at or
 /// below it go through a single `PutObject`. S3's own multipart part-size
