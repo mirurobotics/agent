@@ -818,6 +818,36 @@ mod tests {
                     .unwrap(),
             );
         }
+
+        // Same size + same digest as the latest ledger entry => already reported.
+        #[tokio::test]
+        async fn previous_same_size_dedup() {
+            let mut c = case("s.mcap", 0).await;
+            seed_ledger(&mut c.state, &c.file, stable_file(c.file.clone(), ts(900)));
+            assert_already_in_ledger(
+                super::differs_from_previous(&c.state, &c.cand)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        // Size no longer gates: a different-size prior with a different digest still
+        // reports a new version (digest change decides).
+        #[tokio::test]
+        async fn previous_size_changed_reports_new_version() {
+            let mut c = case("s.mcap", 0).await;
+            let mut prev = prior_with_digest(
+                c.file.clone(),
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            );
+            prev.size = 99;
+            seed_ledger(&mut c.state, &c.file, prev);
+            assert_stable(
+                super::differs_from_previous(&c.state, &c.cand)
+                    .await
+                    .unwrap(),
+            );
+        }
     }
 
     // =================== M7: determine_stability / outcome =================== //
@@ -857,6 +887,35 @@ mod tests {
         #[tokio::test]
         async fn delegates_to_differs_from_previous_when_metadata_stable() {
             let c = case("s.mcap", 0).await;
+            assert_stable(
+                super::determine_stability(&c.state, &c.cand, &c.obs)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        #[tokio::test]
+        async fn previous_matching_digest_is_already_in_ledger() {
+            let mut c = case("s.mcap", 0).await;
+            seed_ledger(&mut c.state, &c.file, stable_file(c.file.clone(), ts(900)));
+            assert_already_in_ledger(
+                super::determine_stability(&c.state, &c.cand, &c.obs)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        #[tokio::test]
+        async fn previous_different_digest_reports_new_version() {
+            let mut c = case("s.mcap", 0).await;
+            seed_ledger(
+                &mut c.state,
+                &c.file,
+                prior_with_digest(
+                    c.file.clone(),
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+            );
             assert_stable(
                 super::determine_stability(&c.state, &c.cand, &c.obs)
                     .await

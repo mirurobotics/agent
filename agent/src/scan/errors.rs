@@ -87,3 +87,59 @@ crate::impl_error!(ScanErr {
     FileSysErr,
     CacheErr,
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trace;
+
+    fn boxed_source() -> Box<dyn std::error::Error + Send + Sync> {
+        Box::new(std::io::Error::other("boom"))
+    }
+
+    #[test]
+    fn from_send_actor_message_err() {
+        let err = SendActorMessageErr {
+            source: boxed_source(),
+            trace: trace!(),
+        };
+        assert!(matches!(
+            ScanErr::from(err),
+            ScanErr::SendActorMessageErr(_)
+        ));
+    }
+
+    #[test]
+    fn from_receive_actor_message_err() {
+        let err = ReceiveActorMessageErr {
+            source: boxed_source(),
+            trace: trace!(),
+        };
+        assert!(matches!(
+            ScanErr::from(err),
+            ScanErr::ReceiveActorMessageErr(_)
+        ));
+    }
+
+    #[test]
+    fn from_filesys_err() {
+        let err = crate::filesys::FileSysErr::PathDoesNotExistErr(
+            crate::filesys::errors::PathDoesNotExistErr {
+                path: std::path::PathBuf::from("/nope"),
+                trace: trace!(),
+            },
+        );
+        assert!(matches!(ScanErr::from(err), ScanErr::FileSysErr(_)));
+    }
+
+    #[test]
+    fn from_cache_err() {
+        let err = crate::cache::CacheErr::CacheElementNotFound(
+            crate::cache::errors::CacheElementNotFound {
+                msg: "missing".to_string(),
+                trace: trace!(),
+            },
+        );
+        assert!(matches!(ScanErr::from(err), ScanErr::CacheErr(_)));
+    }
+}
