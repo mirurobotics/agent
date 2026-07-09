@@ -680,21 +680,18 @@ mod tests {
         async fn elapsed_at_boundary() {
             let c = case("w.mcap", 10).await;
             assert!(has_stability_window_elapsed(&c.state, &c.cand, ts(1010)).unwrap());
-        
         }
 
         #[tokio::test]
         async fn not_elapsed_one_second_short() {
             let c = case("w.mcap", 10).await;
             assert!(!has_stability_window_elapsed(&c.state, &c.cand, ts(1009)).unwrap());
-        
         }
 
         #[tokio::test]
         async fn window_zero_at_first_timestamp() {
             let c = case("w.mcap", 0).await;
             assert!(has_stability_window_elapsed(&c.state, &c.cand, ts(1000)).unwrap());
-        
         }
     }
 
@@ -782,16 +779,26 @@ mod tests {
         #[tokio::test]
         async fn no_previous() {
             let c = case("s.mcap", 0).await;
-            assert_stable(super::differs_from_previous(&c.state, &c.cand).await.unwrap());
-        
+            assert_stable(
+                super::differs_from_previous(&c.state, &c.cand)
+                    .await
+                    .unwrap(),
+            );
         }
 
         #[tokio::test]
         async fn previous_same_digest_dedup() {
             let mut c = case("s.mcap", 0).await;
-            seed_ledger(&mut c.state, &c.file, prior_with_digest(c.file.clone(), HASH_AAAA));
-            assert_already_in_ledger(super::differs_from_previous(&c.state, &c.cand).await.unwrap());
-        
+            seed_ledger(
+                &mut c.state,
+                &c.file,
+                prior_with_digest(c.file.clone(), HASH_AAAA),
+            );
+            assert_already_in_ledger(
+                super::differs_from_previous(&c.state, &c.cand)
+                    .await
+                    .unwrap(),
+            );
         }
 
         #[tokio::test]
@@ -805,8 +812,11 @@ mod tests {
                     "sha256:0000000000000000000000000000000000000000000000000000000000000000",
                 ),
             );
-            assert_stable(super::differs_from_previous(&c.state, &c.cand).await.unwrap());
-        
+            assert_stable(
+                super::differs_from_previous(&c.state, &c.cand)
+                    .await
+                    .unwrap(),
+            );
         }
     }
 
@@ -830,7 +840,6 @@ mod tests {
                     .await
                     .unwrap(),
             );
-        
         }
 
         #[tokio::test]
@@ -843,7 +852,6 @@ mod tests {
                     .await
                     .unwrap(),
             );
-        
         }
 
         #[tokio::test]
@@ -854,7 +862,6 @@ mod tests {
                     .await
                     .unwrap(),
             );
-        
         }
     }
 
@@ -869,7 +876,6 @@ mod tests {
             let c = case("wait.mcap", 10).await;
             let action = eval_candidate(&c.state, &c.cand, ts(1009)).await.unwrap();
             assert!(matches!(action, EvalAction::WaitForStabilityWindow));
-        
         }
 
         // A candidate whose file was deleted hits the Unstable (deleted) branch —
@@ -880,7 +886,6 @@ mod tests {
             files::delete(&c.file).await.unwrap();
             let action = eval_candidate(&c.state, &c.cand, ts(1010)).await.unwrap();
             assert!(matches!(action, EvalAction::Unstable));
-        
         }
 
         // A stable candidate produces a StableFile with the expected payload.
@@ -917,9 +922,12 @@ mod tests {
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
 
-            assert!(scanner.evaluate_candidates(ts(1010)).await.unwrap().is_empty());
+            assert!(scanner
+                .evaluate_candidates(ts(1010))
+                .await
+                .unwrap()
+                .is_empty());
             assert_retired_with_ledger(&scanner, &file, vec![expected]);
-        
         }
 
         // A new Stable version appends onto existing ledger history: the prior
@@ -942,7 +950,6 @@ mod tests {
                 vec![expected.clone()]
             );
             assert_retired_with_ledger(&scanner, &file, vec![prior, expected]);
-        
         }
 
         // evaluate_candidates drops an Unstable (deleted) candidate: nothing
@@ -955,10 +962,13 @@ mod tests {
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
 
-            assert!(scanner.evaluate_candidates(ts(1010)).await.unwrap().is_empty());
+            assert!(scanner
+                .evaluate_candidates(ts(1010))
+                .await
+                .unwrap()
+                .is_empty());
             assert!(!scanner.state.candidates.contains_key(&file));
             assert!(scanner.state.ledger.is_empty());
-        
         }
 
         // A ledgered file is reported once: the first tick emits it and retires the
@@ -981,13 +991,16 @@ mod tests {
             // re-promote the same (unchanged) content and tick again.
             // AlreadyInLedger records the observation mtime as an alias.
             track(&mut scanner.state, &file, c.obs.clone());
-            assert!(scanner.evaluate_candidates(ts(1020)).await.unwrap().is_empty());
+            assert!(scanner
+                .evaluate_candidates(ts(1020))
+                .await
+                .unwrap()
+                .is_empty());
             assert_retired_with_ledger(
                 &scanner,
                 &file,
                 vec![with_mtime_alias(expected, c.obs.mtime)],
             );
-        
         }
 
         // A file reported once via the full discover -> evaluate cycle is not
@@ -1009,7 +1022,11 @@ mod tests {
             // later tick: the untouched file is skipped at discovery, emits nothing.
             scanner.discover_candidates(ts(1002)).await.unwrap();
             assert!(scanner.state.candidates.is_empty());
-            assert!(scanner.evaluate_candidates(ts(1002)).await.unwrap().is_empty());
+            assert!(scanner
+                .evaluate_candidates(ts(1002))
+                .await
+                .unwrap()
+                .is_empty());
             assert_eq!(scanner.state.ledger.get(&file), Some(&first));
         }
 
@@ -1032,10 +1049,13 @@ mod tests {
             let base = c.obs.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
 
-            assert!(scanner.evaluate_candidates(ts(1010)).await.unwrap().is_empty());
+            assert!(scanner
+                .evaluate_candidates(ts(1010))
+                .await
+                .unwrap()
+                .is_empty());
             assert_retired_with_ledger(&scanner, &file, vec![expected]);
             assert!(scanner.state.is_latest_ledger_entry(&base));
-        
         }
 
         // Changed content at a DIFFERENT size is reported as a new version.
@@ -1047,11 +1067,8 @@ mod tests {
 
             write_file(&c.file, b"bbbbbbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
-            let expected = stable_from_obs(
-                &changed,
-                &files::hash(&c.file).await.unwrap(),
-                ts(1001),
-            );
+            let expected =
+                stable_from_obs(&changed, &files::hash(&c.file).await.unwrap(), ts(1001));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1061,7 +1078,6 @@ mod tests {
                 vec![expected.clone()]
             );
             assert_retired_with_ledger(&scanner, &file, vec![prior, expected]);
-        
         }
 
         // Changed content at the SAME size (different digest) is reported as a new
@@ -1085,7 +1101,6 @@ mod tests {
                 vec![expected.clone()]
             );
             assert_retired_with_ledger(&scanner, &file, vec![prior, expected]);
-        
         }
     }
 
