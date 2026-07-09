@@ -71,38 +71,40 @@ impl CollectionScanner {
         now: DateTime<Utc>,
     ) -> Result<Vec<StableFile>, ScanErr> {
         let mut stable_files = Vec::new();
-        // Take the candidate map so we can iterate it while mutating `self.state`
-        // (ledger, and re-inserting survivors). Because the map starts empty,
-        // "removed" is simply "not re-inserted" and "stays" is "re-inserted".
-        let candidates = std::mem::take(&mut self.state.candidates);
-        for (file, candidate) in candidates {
-            let outcome = match eval_candidate(&self.state, &candidate, now).await {
+        // Iterate a clone so we can mutate `self.state` (candidate set + ledger)
+        // inside the loop without a borrow conflict. The candidate set holds only
+        // in-flight files, and each iteration hashes file contents anyway, so the
+        // clone is negligible.
+        let candidates = self.state.candidates.clone();
+        for candidate in candidates.values() {
+            let outcome = match eval_candidate(&self.state, candidate, now).await {
                 Ok(outcome) => outcome,
                 Err(err) => {
-                    warn!("skipping candidate {} this tick: {err}", candidate.file);
                     // leave the candidate tracked so a later tick can retry
-                    self.state.candidates.insert(file, candidate);
+                    warn!("skipping candidate {} this tick: {err}", candidate.file);
                     continue;
                 }
             };
             match outcome {
-                Outcome::WaitForStabilityWindow => {
-                    // the window has not elapsed; keep the candidate
-                    self.state.candidates.insert(file, candidate);
-                }
+                // the window has not elapsed; keep the candidate for a later tick
+                Outcome::WaitForStabilityWindow => continue,
                 Outcome::Unstable => {
-                    // drop the candidate (do not re-insert)
+                    self.state.candidates.remove(&candidate.file);
                 }
                 Outcome::AlreadyInLedger { mtime } => {
-                    // drop the candidate; add the mtime alias to the latest ledger entry
-                    if let Some(entry) = self.state.latest_ledger_entry_mut(&file) {
+                    self.state.candidates.remove(&candidate.file);
+                    if let Some(entry) = self.state.latest_ledger_entry_mut(&candidate.file) {
                         entry.push_mtime_alias(mtime.into());
                     }
                 }
                 Outcome::Stable(stable_file) => {
-                    // drop the candidate; emit and append to the ledger
+                    self.state.candidates.remove(&candidate.file);
                     stable_files.push(stable_file.clone());
-                    self.state.ledger.entry(file).or_default().push(stable_file);
+                    self.state
+                        .ledger
+                        .entry(candidate.file.clone())
+                        .or_default()
+                        .push(stable_file);
                 }
             }
         }
