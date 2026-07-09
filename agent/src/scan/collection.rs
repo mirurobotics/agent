@@ -403,10 +403,16 @@ mod tests {
     }
 
     /// A StableFile built from an observation's metadata and a known digest.
+    ///
+    /// `first_observed_at` (discovery) and `last_observed_at` (evaluation) are
+    /// passed explicitly because they now diverge: the emitted StableFile stamps
+    /// `first_observed_at` from the discovery observation and `last_observed_at`
+    /// from the evaluation-time observation.
     fn stable_from_obs(
         obs: &Observation,
         digest: &str,
         first_observed_at: DateTime<Utc>,
+        last_observed_at: DateTime<Utc>,
     ) -> StableFile {
         StableFile {
             file: obs.file.clone(),
@@ -415,7 +421,7 @@ mod tests {
             mtime: DateTime::<Utc>::from(obs.mtime),
             mtime_aliases: vec![],
             first_observed_at,
-            last_observed_at: obs.timestamp,
+            last_observed_at,
             deployment_id: obs.deployment_id.clone(),
             upload_rule_id: obs.upload_rule_id.clone(),
         }
@@ -968,7 +974,7 @@ mod tests {
             let file = write(&dir, "e.mcap", b"aaaa").await;
             let state = State::new(config("dpl-1", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&obs, HASH_AAAA, ts(1000));
+            let expected = stable_from_obs(&obs, HASH_AAAA, ts(1000), ts(1010));
             let cand = candidate(file, obs);
 
             let action = eval_candidate(&state, &cand, ts(1010)).await.unwrap();
@@ -1013,7 +1019,7 @@ mod tests {
 
             write_file(&c.file, b"bbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1000));
+            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1000), ts(1010));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1050,7 +1056,7 @@ mod tests {
         #[tokio::test]
         async fn reevaluate_dedups_unchanged_file() {
             let mut c = case("dedup.mcap", 10).await;
-            let expected = stable_from_obs(&c.obs, HASH_AAAA, ts(1000));
+            let expected = stable_from_obs(&c.obs, HASH_AAAA, ts(1000), ts(1010));
             track(&mut c.state, &c.file, c.obs.clone());
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1137,8 +1143,12 @@ mod tests {
 
             write_file(&c.file, b"bbbbbbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
-            let expected =
-                stable_from_obs(&changed, &files::hash(&c.file).await.unwrap(), ts(1001));
+            let expected = stable_from_obs(
+                &changed,
+                &files::hash(&c.file).await.unwrap(),
+                ts(1001),
+                ts(1011),
+            );
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1161,7 +1171,7 @@ mod tests {
             write_file(&c.file, b"bbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
             assert_eq!(changed.size, c.obs.size);
-            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1001));
+            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1001), ts(1011));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1185,7 +1195,7 @@ mod tests {
             let mut state = State::new(config("d", "coll", &glob_for(&dir), 10));
             let gone_obs = observation(&state, gone.clone(), ts(1000)).await;
             let live_obs = observation(&state, live.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&live_obs, HASH_AAAA, ts(1000));
+            let expected = stable_from_obs(&live_obs, HASH_AAAA, ts(1000), ts(1010));
             track(&mut state, &gone, gone_obs);
             track(&mut state, &live, live_obs);
             let mut scanner = CollectionScanner::from_state(state);
@@ -1201,6 +1211,50 @@ mod tests {
             // the vanished file is dropped and never ledgered.
             assert!(!scanner.state.candidates.contains_key(&gone));
             assert!(!scanner.state.ledger.contains_key(&gone));
+        }
+
+        // The emitted StableFile takes its deployment_id / upload_rule_id and
+        // first_observed_at from the FIRST (discovery) observation, not the
+        // evaluation-time (LAST) observation, even when the config changed in
+        // between. last_observed_at, by contrast, comes from the LAST observation
+        // — so the two timestamps diverge here. This pins build_stable_file's
+        // first-observation identity sourcing AND its last_observed_at-from-last
+        // sourcing; a regression sourcing either from the wrong observation breaks
+        // it. The file is unchanged (identical size+mtime), so equal_metadata holds
+        // (it compares only size+mtime, ignoring the ids) and the file is emitted.
+        #[tokio::test]
+        async fn stable_file_takes_identity_from_first_observation() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "id.mcap", b"aaaa").await;
+
+            // FIRST observation: discovered at ts(1000) under deployment d1 /
+            // collection coll1.
+            let s1 = State::new(config("d1", "coll1", &glob_for(&dir), 0));
+            let first_obs = observation(&s1, file.clone(), ts(1000)).await;
+
+            // Evaluate that candidate under a DIFFERENT config: deployment d2 /
+            // collection coll2. The eval-time observation observe_file takes will
+            // carry d2 / coll2, but the same (unchanged) size+mtime.
+            let mut s2 = State::new(config("d2", "coll2", &glob_for(&dir), 0));
+            track(&mut s2, &file, first_obs);
+            let mut scanner = CollectionScanner::from_state(s2);
+
+            let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
+            assert_eq!(emitted.len(), 1);
+            let sf = &emitted[0];
+
+            // identity from the FIRST observation, not d2 / coll2.
+            assert_eq!(sf.deployment_id, "d1");
+            assert_eq!(sf.upload_rule_id, "coll1");
+            // first_observed_at is the discovery ts; last_observed_at is the eval
+            // ts — these now diverge.
+            assert_eq!(sf.first_observed_at, ts(1000));
+            assert_eq!(sf.last_observed_at, ts(1010));
+
+            // sanity: size + mtime match the on-disk file (the LAST observation).
+            let meta = files::metadata(&file).await.unwrap();
+            assert_eq!(sf.size, meta.len());
+            assert_eq!(sf.mtime, DateTime::<Utc>::from(meta.modified().unwrap()));
         }
     }
 
