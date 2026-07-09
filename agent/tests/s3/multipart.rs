@@ -270,6 +270,37 @@ pub mod put {
             .to_string()
             .contains("x-id=AbortMultipartUpload"));
     }
+
+    #[tokio::test]
+    async fn failing_abort_does_not_mask_original_error() {
+        let key = "big.bin";
+        let src = temp_file_with(b"multipart-body").await;
+
+        // The part upload fails, triggering a best-effort abort — but the abort
+        // itself also fails (403). The abort is best-effort, so its failure is
+        // swallowed and the ORIGINAL upload_part error still surfaces.
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(create_req(), create_resp()),
+            ReplayEvent::new(upload_part_req(1), access_denied_resp()),
+            ReplayEvent::new(abort_req(), access_denied_resp()),
+        ]);
+
+        let err = store
+            .put_multipart(&source_of(&src).await, &obj(key))
+            .await
+            .unwrap_err();
+        // The surfaced error is the original part failure, not the abort failure.
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
+
+        // The abort was still attempted (best-effort) as the final request.
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[2].method(), "DELETE");
+        assert!(requests[2]
+            .uri()
+            .to_string()
+            .contains("x-id=AbortMultipartUpload"));
+    }
 }
 
 /// Size-based routing in [`Store::put`]: small files take the single `PutObject`
@@ -282,10 +313,8 @@ pub mod routing {
         // A body well under PART_SIZE must take the single-part branch: exactly
         // one PutObject, no multipart calls.
         let src = temp_file_with(b"tiny").await;
-        let (store, replay) = store_expecting(
-            req("PUT", "small.bin?x-id=PutObject"),
-            resp(200, &[]),
-        );
+        let (store, replay) =
+            store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
 
         store.put(src.to_file(), &obj("small.bin")).await.unwrap();
 
