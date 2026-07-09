@@ -292,4 +292,126 @@ mod tests {
             SdkError::timeout_error(Box::<dyn std::error::Error + Send + Sync>::from("slow"));
         assert!(!is_not_found(&timeout));
     }
+
+    /// Direct assertions on the leaf error types' trait behavior. These do not
+    /// go through the SDK; they pin the `crate::errors::Error` contract each
+    /// variant promises (code / http_status / is_network_conn_err / Display).
+    mod error_types {
+        use super::*;
+        use crate::errors::Code;
+        use crate::filesys::file::File;
+        use crate::filesys::files;
+
+        #[test]
+        fn object_not_found_maps_to_resource_not_found() {
+            let err = S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
+                key: "k".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(matches!(err.code(), Code::ResourceNotFound));
+            assert_eq!(err.http_status().as_u16(), 404);
+            assert!(!err.is_network_conn_err());
+            assert!(err.to_string().contains("object not found"));
+        }
+
+        #[test]
+        fn connection_err_is_network_conn_err() {
+            let err = S3Err::ConnectionErr(ConnectionErr {
+                key: "k".to_string(),
+                msg: "boom".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(err.is_network_conn_err());
+            assert!(matches!(err.code(), Code::InternalServerError));
+            assert!(err.to_string().contains("connection error"));
+        }
+
+        #[test]
+        fn request_failed_err_defaults_to_internal_server_error() {
+            let err = S3Err::RequestFailedErr(RequestFailedErr {
+                operation: "get_object".to_string(),
+                object: None,
+                status: None,
+                msg: "nope".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(matches!(err.code(), Code::InternalServerError));
+            assert_eq!(err.http_status().as_u16(), 500);
+            assert!(!err.is_network_conn_err());
+            // Display with no object / no status hits the fallback formatting.
+            let msg = err.to_string();
+            assert!(msg.contains("<none>"));
+            assert!(msg.contains("unknown"));
+        }
+
+        #[test]
+        fn invalid_response_err_defaults_to_internal_server_error() {
+            let err = S3Err::InvalidResponseErr(InvalidResponseErr {
+                operation: "get_object".to_string(),
+                msg: "bad body".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(matches!(err.code(), Code::InternalServerError));
+            assert_eq!(err.http_status().as_u16(), 500);
+            assert!(err.to_string().contains("invalid response"));
+        }
+
+        #[test]
+        fn local_io_err_defaults_to_internal_server_error() {
+            let err = S3Err::LocalIoErr(LocalIoErr {
+                operation: "get_object".to_string(),
+                object: "s3://bucket/key".to_string(),
+                msg: "no such file or directory".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(matches!(err.code(), Code::InternalServerError));
+            assert_eq!(err.http_status().as_u16(), 500);
+            assert!(!err.is_network_conn_err());
+            let msg = err.to_string();
+            assert!(msg.contains("s3://bucket/key"));
+            assert!(msg.contains("no such file or directory"));
+        }
+
+        #[test]
+        fn request_failed_err_display_includes_object_and_status() {
+            // The non-`<none>`/`unknown` branch: both object and status are
+            // `Some`, so Display echoes the s3:// URI and the numeric status.
+            let err = S3Err::RequestFailedErr(RequestFailedErr {
+                operation: "put_object".to_string(),
+                object: Some("s3://bucket/key".to_string()),
+                status: Some(403),
+                msg: "denied".to_string(),
+                trace: crate::trace!(),
+            });
+            let msg = err.to_string();
+            assert!(msg.contains("s3://bucket/key"));
+            assert!(msg.contains("403"));
+        }
+
+        // A `FileSysErr` produced by a real (failing) filesystem op converts
+        // into an `S3Err` via `From<filesys::FileSysErr>`, and the resulting
+        // variant delegates its trait behavior (code / http_status / Display)
+        // to the underlying error.
+        #[tokio::test]
+        async fn filesys_err_delegates_to_underlying_error() {
+            let fs_err: filesys::FileSysErr =
+                files::read_bytes(&File::new("/nonexistent/definitely/not/here.bin"))
+                    .await
+                    .unwrap_err();
+            // Capture the underlying values to assert delegation. `Code` is not
+            // `PartialEq`, so compare its `Debug` form.
+            let want_code = format!("{:?}", fs_err.code());
+            let want_status = fs_err.http_status().as_u16();
+            let want_display = fs_err.to_string();
+
+            // Explicitly exercise `From<filesys::FileSysErr> for S3Err`.
+            let err: S3Err = fs_err.into();
+
+            assert!(matches!(err, S3Err::FileSysErr(_)));
+            assert_eq!(format!("{:?}", err.code()), want_code);
+            assert_eq!(err.http_status().as_u16(), want_status);
+            assert!(!err.is_network_conn_err());
+            assert_eq!(err.to_string(), want_display);
+        }
+    }
 }

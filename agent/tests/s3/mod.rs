@@ -2,9 +2,6 @@
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::{files, WriteOptions};
-use miru_agent::s3::errors::{
-    ConnectionErr, InvalidResponseErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
-};
 use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 
 // external crates
@@ -97,6 +94,15 @@ fn resp_xml(status: u16, xml: &str) -> http::Response<SdkBody> {
         .unwrap()
 }
 
+const ACCESS_DENIED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>REQ403</RequestId></Error>"#;
+
+/// Canned 403 AccessDenied response. S3 returns non-404 failures as a modeled
+/// service error, which the common mapper turns into `RequestFailedErr`.
+fn access_denied_resp() -> http::Response<SdkBody> {
+    resp_xml(403, ACCESS_DENIED_XML)
+}
+
 /// Wires a `Store` to a replay client expecting exactly one request/response
 /// exchange — the shape of nearly every test here.
 fn store_expecting(
@@ -104,6 +110,24 @@ fn store_expecting(
     response: http::Response<SdkBody>,
 ) -> (Store, StaticReplayClient) {
     store_with(vec![ReplayEvent::new(request, response)])
+}
+
+pub mod construction {
+    use super::*;
+
+    #[tokio::test]
+    async fn new_builds_without_network() {
+        let cfg = Config {
+            creds: Credentials {
+                access_key_id: "AKIA_TEST".to_string(),
+                secret_access_key: "secret".to_string(),
+                session_token: "session".to_string(),
+            },
+            region: "us-west-2".to_string(),
+        };
+        // Constructing must not panic or touch the network.
+        let _store = Store::new(cfg);
+    }
 }
 
 pub mod put {
@@ -158,6 +182,47 @@ pub mod put {
                 requests[0].uri().to_string(),
                 uri("artifacts/empty.txt?x-id=PutObject")
             );
+        }
+    }
+
+    pub mod access_denied {
+        use super::*;
+
+        #[tokio::test]
+        async fn put_403_maps_to_request_failed() {
+            let src = temp_file_with(b"x").await;
+            let (store, _replay) = store_expecting(
+                req("PUT", "denied.txt?x-id=PutObject"),
+                access_denied_resp(),
+            );
+
+            let err = store
+                .put(src.to_file(), &obj("denied.txt"))
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::RequestFailedErr(_)));
+            assert!(matches!(err.code(), Code::InternalServerError));
+            assert_eq!(err.http_status().as_u16(), 500);
+            assert!(!err.is_network_conn_err());
+            // Exercise the RequestFailedErr Display impl (status + operation).
+            assert!(err.to_string().contains("put_object"));
+        }
+    }
+
+    pub mod source_missing {
+        use super::*;
+
+        #[tokio::test]
+        async fn put_missing_source_maps_to_local_io_err() {
+            // A missing LOCAL source surfaces as `LocalIoErr` (the streaming body
+            // fails to read off disk before the request completes).
+            let (store, _replay) = store_with(vec![]);
+            let missing = File::new("/nonexistent/definitely/not/here.bin");
+
+            let err = store.put(missing, &obj("k")).await.unwrap_err();
+
+            assert!(matches!(err, S3Err::LocalIoErr(_)));
         }
     }
 }
@@ -268,6 +333,44 @@ pub mod get {
             assert_eq!(err.http_status().as_u16(), 404);
         }
     }
+
+    pub mod access_denied {
+        use super::*;
+
+        #[tokio::test]
+        async fn get_403_maps_to_request_failed() {
+            let dest = files::temp("s3-dest").unwrap();
+            let (store, _replay) = store_expecting(
+                req("GET", "denied.txt?x-id=GetObject"),
+                access_denied_resp(),
+            );
+
+            let err = store
+                .get(&obj("denied.txt"), dest.file())
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::RequestFailedErr(_)));
+        }
+    }
+
+    pub mod transport_failure {
+        use super::*;
+
+        #[tokio::test]
+        async fn transport_failure_maps_to_connection_err() {
+            // With no replay events, the connector fails to dispatch the request,
+            // which the SDK surfaces as `SdkError::DispatchFailure` — the mapper's
+            // network-connection path.
+            let dest = files::temp("s3-dest").unwrap();
+            let (store, _replay) = store_with(vec![]);
+
+            let err = store.get(&obj("any.txt"), dest.file()).await.unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)));
+            assert!(err.is_network_conn_err());
+        }
+    }
 }
 
 pub mod delete {
@@ -304,6 +407,22 @@ pub mod delete {
             replay.assert_requests_match(IGNORED_HEADERS);
         }
     }
+
+    pub mod access_denied {
+        use super::*;
+
+        #[tokio::test]
+        async fn delete_403_maps_to_request_failed() {
+            let (store, _replay) = store_expecting(
+                req("DELETE", "denied.txt?x-id=DeleteObject"),
+                access_denied_resp(),
+            );
+
+            let err = store.delete(&obj("denied.txt")).await.unwrap_err();
+
+            assert!(matches!(err, S3Err::RequestFailedErr(_)));
+        }
+    }
 }
 
 pub mod exists {
@@ -332,246 +451,18 @@ pub mod exists {
             assert!(!store.exists(&obj(key)).await.unwrap());
         }
     }
-}
 
-/// S3 returns non-404 failures (e.g. 403 AccessDenied) as a modeled service
-/// error, which the common mapper turns into `RequestFailedErr`.
-pub mod request_failed {
-    use super::*;
+    pub mod access_denied {
+        use super::*;
 
-    const ACCESS_DENIED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>REQ403</RequestId></Error>"#;
+        #[tokio::test]
+        async fn head_403_propagates_as_request_failed() {
+            // HEAD has no response body; a 403 has no XML payload.
+            let (store, _replay) = store_expecting(req("HEAD", "denied.txt"), resp(403, &[]));
 
-    fn access_denied_resp() -> http::Response<SdkBody> {
-        resp_xml(403, ACCESS_DENIED_XML)
-    }
+            let err = store.exists(&obj("denied.txt")).await.unwrap_err();
 
-    #[tokio::test]
-    async fn put_403_maps_to_request_failed() {
-        let src = temp_file_with(b"x").await;
-        let (store, _replay) = store_expecting(
-            req("PUT", "denied.txt?x-id=PutObject"),
-            access_denied_resp(),
-        );
-
-        let err = store
-            .put(src.to_file(), &obj("denied.txt"))
-            .await
-            .unwrap_err();
-
-        assert!(matches!(err, S3Err::RequestFailedErr(_)));
-        assert!(matches!(err.code(), Code::InternalServerError));
-        assert_eq!(err.http_status().as_u16(), 500);
-        assert!(!err.is_network_conn_err());
-        // Exercise the RequestFailedErr Display impl (status + operation).
-        assert!(err.to_string().contains("put_object"));
-    }
-
-    #[tokio::test]
-    async fn get_403_maps_to_request_failed() {
-        let dest = files::temp("s3-dest").unwrap();
-        let (store, _replay) = store_expecting(
-            req("GET", "denied.txt?x-id=GetObject"),
-            access_denied_resp(),
-        );
-
-        let err = store
-            .get(&obj("denied.txt"), dest.file())
-            .await
-            .unwrap_err();
-
-        assert!(matches!(err, S3Err::RequestFailedErr(_)));
-    }
-
-    #[tokio::test]
-    async fn delete_403_maps_to_request_failed() {
-        let (store, _replay) = store_expecting(
-            req("DELETE", "denied.txt?x-id=DeleteObject"),
-            access_denied_resp(),
-        );
-
-        let err = store.delete(&obj("denied.txt")).await.unwrap_err();
-
-        assert!(matches!(err, S3Err::RequestFailedErr(_)));
-    }
-
-    #[tokio::test]
-    async fn head_403_propagates_as_request_failed() {
-        // HEAD has no response body; a 403 has no XML payload.
-        let (store, _replay) = store_expecting(req("HEAD", "denied.txt"), resp(403, &[]));
-
-        let err = store.exists(&obj("denied.txt")).await.unwrap_err();
-
-        assert!(matches!(err, S3Err::RequestFailedErr(_)));
-    }
-
-    #[tokio::test]
-    async fn transport_failure_maps_to_connection_err() {
-        // With no replay events, the connector fails to dispatch the request,
-        // which the SDK surfaces as `SdkError::DispatchFailure` — the mapper's
-        // network-connection path.
-        let dest = files::temp("s3-dest").unwrap();
-        let (store, _replay) = store_with(vec![]);
-
-        let err = store.get(&obj("any.txt"), dest.file()).await.unwrap_err();
-
-        assert!(matches!(err, S3Err::ConnectionErr(_)));
-        assert!(err.is_network_conn_err());
-    }
-}
-
-/// A put over a missing source file surfaces the filesystem error (mapped to
-/// `FileSysErr`) before any network call is made.
-pub mod put_source_missing {
-    use super::*;
-
-    #[tokio::test]
-    async fn put_missing_source_maps_to_local_io_err() {
-        // A missing LOCAL source surfaces as `LocalIoErr` (the streaming body
-        // fails to read off disk before the request completes).
-        let (store, _replay) = store_with(vec![]);
-        let missing = File::new("/nonexistent/definitely/not/here.bin");
-
-        let err = store.put(missing, &obj("k")).await.unwrap_err();
-
-        assert!(matches!(err, S3Err::LocalIoErr(_)));
-    }
-}
-
-/// The production constructor performs no network I/O, so it can be built and
-/// dropped in a unit test to exercise that code path.
-pub mod construction {
-    use super::*;
-
-    #[tokio::test]
-    async fn new_builds_without_network() {
-        let cfg = Config {
-            creds: Credentials {
-                access_key_id: "AKIA_TEST".to_string(),
-                secret_access_key: "secret".to_string(),
-                session_token: "session".to_string(),
-            },
-            region: "us-west-2".to_string(),
-        };
-        // Constructing must not panic or touch the network.
-        let _store = Store::new(cfg);
-    }
-}
-
-/// Direct assertions on the leaf error types' trait behavior. These do not go
-/// through the SDK; they pin the `crate::errors::Error` contract each variant
-/// promises (code / http_status / is_network_conn_err / Display).
-pub mod error_types {
-    use super::*;
-
-    #[test]
-    fn object_not_found_maps_to_resource_not_found() {
-        let err = S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
-            key: "k".to_string(),
-            trace: miru_agent::trace!(),
-        });
-        assert!(matches!(err.code(), Code::ResourceNotFound));
-        assert_eq!(err.http_status().as_u16(), 404);
-        assert!(!err.is_network_conn_err());
-        assert!(err.to_string().contains("object not found"));
-    }
-
-    #[test]
-    fn connection_err_is_network_conn_err() {
-        let err = S3Err::ConnectionErr(ConnectionErr {
-            key: "k".to_string(),
-            msg: "boom".to_string(),
-            trace: miru_agent::trace!(),
-        });
-        assert!(err.is_network_conn_err());
-        assert!(matches!(err.code(), Code::InternalServerError));
-        assert!(err.to_string().contains("connection error"));
-    }
-
-    #[test]
-    fn request_failed_err_defaults_to_internal_server_error() {
-        let err = S3Err::RequestFailedErr(RequestFailedErr {
-            operation: "get_object".to_string(),
-            object: None,
-            status: None,
-            msg: "nope".to_string(),
-            trace: miru_agent::trace!(),
-        });
-        assert!(matches!(err.code(), Code::InternalServerError));
-        assert_eq!(err.http_status().as_u16(), 500);
-        assert!(!err.is_network_conn_err());
-        // Display with no object / no status hits the fallback formatting.
-        let msg = err.to_string();
-        assert!(msg.contains("<none>"));
-        assert!(msg.contains("unknown"));
-    }
-
-    #[test]
-    fn invalid_response_err_defaults_to_internal_server_error() {
-        let err = S3Err::InvalidResponseErr(InvalidResponseErr {
-            operation: "get_object".to_string(),
-            msg: "bad body".to_string(),
-            trace: miru_agent::trace!(),
-        });
-        assert!(matches!(err.code(), Code::InternalServerError));
-        assert_eq!(err.http_status().as_u16(), 500);
-        assert!(err.to_string().contains("invalid response"));
-    }
-
-    #[test]
-    fn local_io_err_defaults_to_internal_server_error() {
-        let err = S3Err::LocalIoErr(LocalIoErr {
-            operation: "get_object".to_string(),
-            object: "s3://bucket/key".to_string(),
-            msg: "no such file or directory".to_string(),
-            trace: miru_agent::trace!(),
-        });
-        assert!(matches!(err.code(), Code::InternalServerError));
-        assert_eq!(err.http_status().as_u16(), 500);
-        assert!(!err.is_network_conn_err());
-        let msg = err.to_string();
-        assert!(msg.contains("s3://bucket/key"));
-        assert!(msg.contains("no such file or directory"));
-    }
-
-    #[test]
-    fn request_failed_err_display_includes_object_and_status() {
-        // The non-`<none>`/`unknown` branch: both object and status are `Some`,
-        // so Display echoes the s3:// URI and the numeric status.
-        let err = S3Err::RequestFailedErr(RequestFailedErr {
-            operation: "put_object".to_string(),
-            object: Some("s3://bucket/key".to_string()),
-            status: Some(403),
-            msg: "denied".to_string(),
-            trace: miru_agent::trace!(),
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("s3://bucket/key"));
-        assert!(msg.contains("403"));
-    }
-
-    // A `FileSysErr` produced by a real (failing) filesystem op converts into an
-    // `S3Err` via `From<filesys::FileSysErr>`, and the resulting variant delegates
-    // its trait behavior (code / http_status / Display) to the underlying error.
-    #[tokio::test]
-    async fn filesys_err_delegates_to_underlying_error() {
-        let fs_err: miru_agent::filesys::FileSysErr =
-            files::read_bytes(&File::new("/nonexistent/definitely/not/here.bin"))
-                .await
-                .unwrap_err();
-        // Capture the underlying values to assert delegation. `Code` is not
-        // `PartialEq`, so compare its `Debug` form.
-        let want_code = format!("{:?}", fs_err.code());
-        let want_status = fs_err.http_status().as_u16();
-        let want_display = fs_err.to_string();
-
-        // Explicitly exercise `From<filesys::FileSysErr> for S3Err`.
-        let err: S3Err = fs_err.into();
-
-        assert!(matches!(err, S3Err::FileSysErr(_)));
-        assert_eq!(format!("{:?}", err.code()), want_code);
-        assert_eq!(err.http_status().as_u16(), want_status);
-        assert!(!err.is_network_conn_err());
-        assert_eq!(err.to_string(), want_display);
+            assert!(matches!(err, S3Err::RequestFailedErr(_)));
+        }
     }
 }
