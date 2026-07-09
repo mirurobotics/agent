@@ -1,14 +1,3 @@
-//! Multipart upload machinery for [`Store`].
-//!
-//! S3 requires objects larger than a single `PutObject` to be uploaded in
-//! parts: create an upload, upload each chunk, then complete (or abort) it. This
-//! module holds the stateless multipart surface ([`Store::put_multipart`]) over a
-//! set of internal per-part primitives (create / upload_part / complete / abort)
-//! plus the part-sizing policy ([`Store::part_size_for`]). Parts are streamed
-//! part-by-part with a bounded per-part buffer, so peak memory is one part
-//! (`part_size_for`), never the whole file. The single-part path and the rest of
-//! the object API live in the parent [`crate::s3`] module.
-
 // standard crates
 use std::io::SeekFrom;
 
@@ -40,16 +29,6 @@ impl Store {
     /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
     /// parts, then the error propagates.
-    ///
-    /// The `Source` file is treated as an immutable snapshot of `size` bytes
-    /// captured at call time; if the file changes during the upload, behavior is
-    /// undefined (shrinking makes a part read fail; growth means only the original
-    /// `size` bytes are uploaded).
-    ///
-    /// If the returned future is dropped (caller cancellation/timeout) after the
-    /// upload is created, the best-effort abort does not run and an in-progress
-    /// upload is left on S3; deployments should configure an S3
-    /// `AbortIncompleteMultipartUpload` lifecycle rule.
     pub async fn put_multipart(&self, src: &Source, dst: &Object) -> Result<(), S3Err> {
         let upload_id = self.create_multipart_upload(dst).await?;
 
@@ -179,13 +158,6 @@ impl Store {
     /// Streams a single part (`file[offset..offset+len]`) to S3 and returns the
     /// [`CompletedPart`] describing it. `InvalidResponseErr` if the response
     /// omits the ETag.
-    ///
-    /// The part's byte range is read into a bounded in-memory buffer *before*
-    /// sending (peak memory is one part, not the whole file). Any local
-    /// open/seek/read failure — including the source shrinking mid-upload — is a
-    /// terminal [`S3Err::LocalIoErr`] via [`errors::map_body_io_err`], consistent
-    /// with the `get()` path. A local disk fault is never treated as a retryable
-    /// network condition.
     async fn upload_part(
         &self,
         src: &File,

@@ -346,9 +346,7 @@ pub mod put {
             // TOCTOU: the file was sized when the `Source` was built, then
             // truncated on disk to fewer bytes than the recorded `size`. Reading
             // the part range hits `read_exact` -> `UnexpectedEof`, which maps to a
-            // terminal `LocalIoErr`. This is now DETERMINISTIC: the old lazy-read
-            // path could surface EOF as a retryable `ConnectionErr` depending on
-            // SDK dispatch timing; the pre-read makes it terminal every time.
+            // terminal `LocalIoErr`.
             let src = temp_file_with(b"multipart-body").await;
             let source = source_of(&src).await;
             assert!(source.size > 4);
