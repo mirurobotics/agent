@@ -54,12 +54,7 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
-        let landed: std::collections::HashMap<i32, CompletedPart> = self
-            .list_parts(dst, upload_id)
-            .await?
-            .into_iter()
-            .filter_map(|p| p.part_number().map(|n| (n, p)))
-            .collect();
+        let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(src, dst, upload_id, &landed).await?;
         self.complete_multipart_upload(dst, upload_id, &parts).await
     }
@@ -88,9 +83,15 @@ impl Store {
         Ok(parts)
     }
 
-    /// Lists every part already uploaded for `upload_id`, following pagination.
-    async fn list_parts(&self, obj: &Object, upload_id: &str) -> Result<Vec<CompletedPart>, S3Err> {
-        let mut parts: Vec<CompletedPart> = Vec::new();
+    /// Lists every part already uploaded for `upload_id`, following pagination,
+    /// keyed by part number for reuse by [`Self::upload_parts`].
+    async fn list_parts(
+        &self,
+        obj: &Object,
+        upload_id: &str,
+    ) -> Result<std::collections::HashMap<i32, CompletedPart>, S3Err> {
+        let mut parts: std::collections::HashMap<i32, CompletedPart> =
+            std::collections::HashMap::new();
         let mut marker: Option<String> = None;
 
         loop {
@@ -105,16 +106,18 @@ impl Store {
                 }));
             };
 
-            parts.extend(page.parts().iter().filter_map(|part| {
-                let number = part.part_number()?;
-                let etag = part.e_tag()?;
-                Some(
+            for part in page.parts() {
+                let (Some(number), Some(etag)) = (part.part_number(), part.e_tag()) else {
+                    continue;
+                };
+                parts.insert(
+                    number,
                     CompletedPart::builder()
                         .part_number(number)
                         .e_tag(etag)
                         .build(),
-                )
-            }));
+                );
+            }
 
             match page.next_part_number_marker() {
                 Some(next) if page.is_truncated() == Some(true) => marker = Some(next.to_string()),

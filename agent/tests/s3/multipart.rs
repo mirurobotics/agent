@@ -387,6 +387,9 @@ pub mod put {
 pub mod resume {
     use super::*;
 
+    const NO_SUCH_UPLOAD_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist.</Message></Error>"#;
+
     /// Canned `ListPartsResult` XML for `parts` (`(number, etag, size)`), optionally
     /// truncated with a `NextPartNumberMarker`.
     fn list_parts_xml(parts: &[(i32, &str, u64)], next_marker: Option<i32>) -> String {
@@ -413,19 +416,14 @@ pub mod resume {
         parts: &[(i32, &str, u64)],
         next_marker: Option<i32>,
     ) -> http::Response<SdkBody> {
-        http::Response::builder()
-            .status(200)
-            .header("content-type", "application/xml")
-            .body(SdkBody::from(list_parts_xml(parts, next_marker)))
-            .unwrap()
+        resp_xml(200, &list_parts_xml(parts, next_marker))
     }
 
     fn list_parts_req() -> http::Request<SdkBody> {
-        http::Request::builder()
-            .method("GET")
-            .uri(uri(&format!("big.bin?x-id=ListParts&uploadId={UPLOAD_ID}")))
-            .body(SdkBody::empty())
-            .unwrap()
+        req(
+            "GET",
+            &format!("big.bin?x-id=ListParts&uploadId={UPLOAD_ID}"),
+        )
     }
 
     fn list_parts_shape() -> (String, String) {
@@ -433,6 +431,16 @@ pub mod resume {
             "GET",
             &format!("big.bin?x-id=ListParts&uploadId={UPLOAD_ID}"),
         )
+    }
+
+    /// The `part-number-marker` follow-up page the SDK emits for a truncated
+    /// listing (query order mirrors the real SDK output).
+    fn list_parts_page2_query() -> String {
+        format!("big.bin?x-id=ListParts&part-number-marker=1&uploadId={UPLOAD_ID}")
+    }
+
+    fn list_parts_page2_shape() -> (String, String) {
+        shape("GET", &list_parts_page2_query())
     }
 
     /// A two-part source file (8 MiB + 1 KiB ⇒ parts `(1, 0, 8 MiB)` and
@@ -501,16 +509,10 @@ pub mod resume {
         let tf = two_part_file().await;
         let src = source_of(&tf).await;
 
-        let not_found = http::Response::builder()
-            .status(404)
-            .header("content-type", "application/xml")
-            .body(SdkBody::from(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist.</Message></Error>"#,
-            ))
-            .unwrap();
-
-        let (store, replay) = store_with(vec![ReplayEvent::new(list_parts_req(), not_found)]);
+        let (store, replay) = store_with(vec![ReplayEvent::new(
+            list_parts_req(),
+            resp_xml(404, NO_SUCH_UPLOAD_XML),
+        )]);
 
         let err = store
             .resume_multipart_upload(&src, &obj("big.bin"), UPLOAD_ID)
@@ -530,13 +532,7 @@ pub mod resume {
         let tf = two_part_file().await;
         let src = source_of(&tf).await;
 
-        let page2_req = http::Request::builder()
-            .method("GET")
-            .uri(uri(&format!(
-                "big.bin?part-number-marker=1&uploadId={UPLOAD_ID}&x-id=ListParts"
-            )))
-            .body(SdkBody::empty())
-            .unwrap();
+        let page2_req = req("GET", &list_parts_page2_query());
 
         let (store, replay) = store_with(vec![
             ReplayEvent::new(
@@ -555,17 +551,140 @@ pub mod resume {
             .await
             .unwrap();
 
+        // Two list pages (the second following the marker), then complete —
+        // every part landed via the listing, so nothing is re-uploaded.
+        assert_eq!(
+            actual_shapes(&replay),
+            vec![
+                list_parts_shape(),
+                list_parts_page2_shape(),
+                complete_shape()
+            ]
+        );
+
         let requests = replay.actual_requests().collect::<Vec<_>>();
-        assert_eq!(requests.len(), 3); // two list pages, then complete
         assert!(requests[1]
             .uri()
             .to_string()
             .contains("part-number-marker=1"));
+    }
+
+    #[tokio::test]
+    async fn resume_part_failure_does_not_abort() {
+        // Part 1 landed; uploading part 2 fails (403). A resume must NOT abort —
+        // no abort (or complete) event is queued, so an abort would panic the
+        // replay client on an unexpected request.
+        let tf = two_part_file().await;
+        let src = source_of(&tf).await;
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(&[(1, "\"landed-1\"", 8 * 1024 * 1024)], None),
+            ),
+            ReplayEvent::new(upload_part_req(2), access_denied_resp()),
+        ]);
+
+        let err = store
+            .resume_multipart_upload(&src, &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, S3Err::RequestFailedErr(_)));
+
+        // list_parts → upload part 2 (which failed). No abort, no complete.
+        assert_eq!(
+            actual_shapes(&replay),
+            vec![list_parts_shape(), upload_part_shape(2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_zero_landed_uploads_all() {
+        // A valid upload with zero landed parts (empty listing) is NOT a missing
+        // upload: every part is uploaded, then complete.
+        let tf = two_part_file().await;
+        let src = source_of(&tf).await;
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(list_parts_req(), list_parts_resp(&[], None)),
+            ReplayEvent::new(upload_part_req(1), upload_part_resp("\"fresh-1\"")),
+            ReplayEvent::new(upload_part_req(2), upload_part_resp("\"fresh-2\"")),
+            ReplayEvent::new(complete_req(), complete_resp()),
+        ]);
+
+        store
+            .resume_multipart_upload(&src, &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            actual_shapes(&replay),
+            vec![
+                list_parts_shape(),
+                upload_part_shape(1),
+                upload_part_shape(2),
+                complete_shape(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_all_landed_uploads_nothing() {
+        // Both parts already landed (single page): nothing is re-uploaded, and
+        // the complete manifest carries both landed etags in ascending order.
+        let tf = two_part_file().await;
+        let src = source_of(&tf).await;
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(
+                    &[
+                        (1, "\"landed-1\"", 8 * 1024 * 1024),
+                        (2, "\"landed-2\"", 1024),
+                    ],
+                    None,
+                ),
+            ),
+            ReplayEvent::new(complete_req(), complete_resp()),
+        ]);
+
+        store
+            .resume_multipart_upload(&src, &obj("big.bin"), UPLOAD_ID)
+            .await
+            .unwrap();
+
+        // list_parts → complete. No upload_part: every part was already landed.
+        assert_eq!(
+            actual_shapes(&replay),
+            vec![list_parts_shape(), complete_shape()]
+        );
+
+        // The complete manifest lists both landed parts in ascending order.
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        let manifest = std::str::from_utf8(
+            requests
+                .last()
+                .unwrap()
+                .body()
+                .bytes()
+                .expect("in-memory complete body"),
+        )
+        .unwrap();
+        let p1 = manifest
+            .find("<PartNumber>1</PartNumber>")
+            .expect("part 1 listed");
+        let p2 = manifest
+            .find("<PartNumber>2</PartNumber>")
+            .expect("part 2 listed");
+        assert!(p1 < p2, "parts ascending");
         assert!(
-            !requests
-                .iter()
-                .any(|r| r.uri().to_string().contains("x-id=UploadPart")),
-            "all parts landed via the listing — nothing re-uploaded"
+            manifest.contains("landed-1"),
+            "part 1 reuses its landed etag"
+        );
+        assert!(
+            manifest.contains("landed-2"),
+            "part 2 reuses its landed etag"
         );
     }
 }
