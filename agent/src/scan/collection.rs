@@ -253,25 +253,36 @@ async fn differs_from_previous(
     }
     Ok(Outcome::Stable(build_stable_file(
         candidate,
-        observation,
+        observation.timestamp,
         digest,
     )))
 }
 
-fn build_stable_file(candidate: &Candidate, last_obs: &Observation, digest: Digest) -> StableFile {
+/// Build the emitted `StableFile` for a candidate that has been confirmed stable.
+///
+/// Every metadata/identity field is sourced from `candidate.first_obs` (the
+/// discovery observation), which is the single source of truth: this is only
+/// reached when the discovery and evaluation observations are metadata-equal
+/// (size + mtime, enforced by `is_metadata_stable` upstream), so size/mtime are
+/// provably identical between them. Using the first observation for identity is
+/// intentional — the evaluation-time observation may belong to a different
+/// deployment / upload rule, but the file is always attributed to the deployment
+/// and rule that discovered it. Only `last_observed_at` diverges, so it is the
+/// sole field passed in from the evaluation-time observation.
+fn build_stable_file(
+    candidate: &Candidate,
+    last_observed_at: DateTime<Utc>,
+    digest: Digest,
+) -> StableFile {
     let first_obs = &candidate.first_obs;
-    debug_assert!(last_obs.equal_metadata(first_obs));
     StableFile {
         file: candidate.file.clone(),
-        size: last_obs.size,
+        size: first_obs.size,
         digest,
-        mtime: last_obs.mtime.into(),
+        mtime: first_obs.mtime.into(),
         mtime_aliases: vec![],
         first_observed_at: first_obs.timestamp,
-        last_observed_at: last_obs.timestamp,
-        // using first observation is intentional here, the last observation may be
-        // from a different deployment / upload rule than the first one but we always
-        // go with the observation that discovered the file as the source of truth
+        last_observed_at,
         deployment_id: first_obs.deployment_id.clone(),
         upload_rule_id: first_obs.upload_rule_id.clone(),
     }
@@ -1212,11 +1223,61 @@ mod tests {
             assert!(!scanner.state.ledger.contains_key(&gone));
         }
 
+        // A candidate whose evaluation ERRORS (not merely Unstable) is skipped
+        // for the tick without aborting its siblings, and — unlike an Unstable
+        // drop — is LEFT tracked so a later tick can retry. This pins the
+        // Err(err) => { warn!; continue } arm in evaluate_candidates: reverting
+        // that `continue` to `return Err(err)` (the whole-tick data-loss
+        // regression) would fail this test.
+        //
+        // The poisoned candidate is a DIRECTORY, not a regular file. This drives
+        // the Err arm deterministically and root-safely: the stability window is
+        // 0 so evaluation proceeds; `file.exists()` is true for a directory (so
+        // it does NOT short-circuit to Unstable); `observe_file`/`metadata`
+        // succeeds (directories have metadata); `is_metadata_stable` passes
+        // because first_obs was observed from the same directory; then
+        // `differs_from_previous` calls `files::hash`, which opens the path and
+        // reads it — reading a directory fails with EISDIR → ReadFileErr →
+        // eval_candidate returns Err. No permissions trickery, so it holds even
+        // when the suite runs as root.
+        #[tokio::test]
+        async fn erroring_candidate_is_skipped_without_aborting_siblings() {
+            let dir = dirs::temp("testing").unwrap();
+            let good = write(&dir, "good.mcap", b"aaaa").await;
+            let mut state = State::new(config("d", "coll", &glob_for(&dir), 0));
+            let good_obs = observation(&state, good.clone(), ts(1000)).await;
+            let expected = stable_from_obs(&good_obs, HASH_AAAA, ts(1000), ts(1010));
+
+            // the poisoned candidate is a directory living at a *.mcap path.
+            let poison = dir.file("poison.mcap");
+            dirs::create(&Dir::new(poison.path().clone()))
+                .await
+                .unwrap();
+            let poison_obs = observation(&state, poison.clone(), ts(1000)).await;
+
+            track(&mut state, &good, good_obs);
+            track(&mut state, &poison, poison_obs);
+            let mut scanner = CollectionScanner::from_state(state);
+
+            let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
+
+            // (a) + (b): the loop did NOT abort — the good file is emitted and
+            // ledgered exactly once.
+            assert_eq!(emitted, vec![expected.clone()]);
+            assert_retired_with_ledger(&scanner, &good, vec![expected]);
+
+            // (c): the poisoned candidate REMAINS tracked (the Err arm continues
+            // without removing it), never emitted and never ledgered. This is
+            // what distinguishes an Err-skip from an Unstable-drop.
+            assert!(scanner.state.candidates.contains_key(&poison));
+            assert!(!scanner.state.ledger.contains_key(&poison));
+        }
+
         // The emitted StableFile takes its deployment_id / upload_rule_id and
         // first_observed_at from the FIRST (discovery) observation, not the
         // evaluation-time (LAST) observation, even when the config changed in
         // between. last_observed_at, by contrast, comes from the LAST observation
-        // — so the two timestamps diverge here. 
+        // — so the two timestamps diverge here.
         #[tokio::test]
         async fn stable_file_takes_identity_from_first_observation() {
             let dir = dirs::temp("testing").unwrap();
@@ -1226,7 +1287,7 @@ mod tests {
             let s1 = State::new(config("d1", "coll1", &glob_for(&dir), 0));
             let first_obs = observation(&s1, file.clone(), ts(1000)).await;
 
-            // swap config to deployment d2, collection coll2. 
+            // swap config to deployment d2, collection coll2.
             let mut s2 = State::new(config("d2", "coll2", &glob_for(&dir), 0));
             track(&mut s2, &file, first_obs);
             let mut scanner = CollectionScanner::from_state(s2);
@@ -1238,7 +1299,7 @@ mod tests {
             // identity from the FIRST observation, not d2, coll2.
             assert_eq!(sf.deployment_id, "d1");
             assert_eq!(sf.upload_rule_id, "coll1");
-            // first_observed_at is the discovery ts; last_observed_at is the eval ts 
+            // first_observed_at is the discovery ts; last_observed_at is the eval ts
             assert_eq!(sf.first_observed_at, ts(1000));
             assert_eq!(sf.last_observed_at, ts(1010));
 
