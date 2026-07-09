@@ -28,15 +28,6 @@ pub struct DuplicateCollectionID {
 impl crate::errors::Error for DuplicateCollectionID {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("internal scan error: {message}")]
-pub struct InternalError {
-    pub message: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for InternalError {}
-
-#[derive(Debug, thiserror::Error)]
 pub enum ScanErr {
     #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
@@ -46,8 +37,6 @@ pub enum ScanErr {
     InvalidRule(InvalidRule),
     #[error(transparent)]
     DuplicateCollectionID(DuplicateCollectionID),
-    #[error(transparent)]
-    InternalError(InternalError),
     #[error(transparent)]
     FileSysErr(crate::filesys::FileSysErr),
     #[error(transparent)]
@@ -83,7 +72,6 @@ crate::impl_error!(ScanErr {
     ReceiveActorMessageErr,
     InvalidRule,
     DuplicateCollectionID,
-    InternalError,
     FileSysErr,
     CacheErr,
 });

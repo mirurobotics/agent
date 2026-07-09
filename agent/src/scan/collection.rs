@@ -43,7 +43,7 @@ impl CollectionScanner {
         self.state.has_candidates()
     }
 
-    /// Replace only the active rule, carrying over observation/dedupe/cadence state.
+    /// Replace only the active rule, carrying over observation/dedupe state.
     pub(crate) async fn update_config(
         &mut self,
         config: Config,
