@@ -3,7 +3,7 @@ use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::s3::errors::{
-    ConnectionErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
+    ConnectionErr, InvalidResponseErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
 };
 use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 
@@ -229,7 +229,7 @@ pub mod get {
         use super::*;
 
         #[tokio::test]
-        async fn get_to_missing_parent_dir_maps_to_invalid_response() {
+        async fn get_to_missing_parent_dir_maps_to_local_io_err() {
             let key = "blobs/data.bin";
             // The destination's parent directory does not exist, so creating the
             // file fails after the object is fetched — exercising the streaming
@@ -242,7 +242,7 @@ pub mod get {
 
             let err = store.get(&obj(key), &dest).await.unwrap_err();
 
-            assert!(matches!(err, S3Err::InvalidResponseErr(_)));
+            assert!(matches!(err, S3Err::LocalIoErr(_)));
         }
     }
 
@@ -426,15 +426,15 @@ pub mod put_source_missing {
     use super::*;
 
     #[tokio::test]
-    async fn put_missing_source_maps_to_invalid_response() {
-        // A missing LOCAL source surfaces as `InvalidResponseErr` (the streaming
-        // body fails to read off disk before the request completes).
+    async fn put_missing_source_maps_to_local_io_err() {
+        // A missing LOCAL source surfaces as `LocalIoErr` (the streaming body
+        // fails to read off disk before the request completes).
         let (store, _replay) = store_with(vec![]);
         let missing = File::new("/nonexistent/definitely/not/here.bin");
 
         let err = store.put(missing, &obj("k")).await.unwrap_err();
 
-        assert!(matches!(err, S3Err::InvalidResponseErr(_)));
+        assert!(matches!(err, S3Err::LocalIoErr(_)));
     }
 }
 
@@ -516,6 +516,22 @@ pub mod error_types {
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(err.to_string().contains("invalid response"));
+    }
+
+    #[test]
+    fn local_io_err_defaults_to_internal_server_error() {
+        let err = S3Err::LocalIoErr(LocalIoErr {
+            operation: "get_object".to_string(),
+            object: "s3://bucket/key".to_string(),
+            msg: "no such file or directory".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(!err.is_network_conn_err());
+        let msg = err.to_string();
+        assert!(msg.contains("s3://bucket/key"));
+        assert!(msg.contains("no such file or directory"));
     }
 
     #[test]

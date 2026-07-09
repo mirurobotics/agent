@@ -73,6 +73,17 @@ pub struct InvalidResponseErr {
 impl crate::errors::Error for InvalidResponseErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("local I/O error during {operation} for object '{object}': {msg}")]
+pub struct LocalIoErr {
+    pub operation: String,
+    pub object: String,
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for LocalIoErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum S3Err {
     #[error(transparent)]
     ObjectNotFoundErr(ObjectNotFoundErr),
@@ -82,6 +93,8 @@ pub enum S3Err {
     RequestFailedErr(RequestFailedErr),
     #[error(transparent)]
     InvalidResponseErr(InvalidResponseErr),
+    #[error(transparent)]
+    LocalIoErr(LocalIoErr),
     #[error(transparent)]
     FileSysErr(filesys::FileSysErr),
 }
@@ -97,6 +110,7 @@ crate::impl_error!(S3Err {
     ConnectionErr,
     RequestFailedErr,
     InvalidResponseErr,
+    LocalIoErr,
     FileSysErr,
 });
 

@@ -32,7 +32,7 @@ use aws_sdk_s3::Client;
 pub mod errors;
 
 pub use errors::S3Err;
-use errors::{InvalidResponseErr, ObjectNotFoundErr};
+use errors::{LocalIoErr, ObjectNotFoundErr};
 
 pub struct Config {
     pub creds: Credentials,
@@ -220,8 +220,9 @@ impl Store {
         }
     }
 
-    /// Maps a filesystem I/O error hit while streaming an object body (opening the
-    /// source, creating the destination, or copying) into an `S3Err`.
+    /// Maps a local filesystem I/O error hit while streaming an object body
+    /// (opening the source, creating the destination, or copying) into
+    /// [`S3Err::LocalIoErr`].
     fn map_body_io_err(
         &self,
         operation: &str,
@@ -229,15 +230,16 @@ impl Store {
         file: &File,
         err: std::io::Error,
     ) -> S3Err {
-        S3Err::InvalidResponseErr(InvalidResponseErr {
+        S3Err::LocalIoErr(LocalIoErr {
             operation: operation.to_string(),
-            msg: format!("filesystem I/O error for object '{obj}' at path '{file}': {err}"),
+            object: obj.to_string(),
+            msg: format!("filesystem I/O error at path '{file}': {err}"),
             trace: trace!(),
         })
     }
 
-    /// Maps a [`ByteStream`] construction error (e.g. the file could not be opened or
-    /// read) into an `S3Err`.
+    /// Maps a local [`ByteStream`] construction error (e.g. the file could not be
+    /// opened or read) into [`S3Err::LocalIoErr`].
     fn map_bytestream_err(
         &self,
         operation: &str,
@@ -245,9 +247,10 @@ impl Store {
         file: &File,
         err: &ByteStreamError,
     ) -> S3Err {
-        S3Err::InvalidResponseErr(InvalidResponseErr {
+        S3Err::LocalIoErr(LocalIoErr {
             operation: operation.to_string(),
-            msg: format!("failed to open '{file}' for streaming object '{obj}': {err}"),
+            object: obj.to_string(),
+            msg: format!("failed to open '{file}' for streaming: {err}"),
             trace: trace!(),
         })
     }
