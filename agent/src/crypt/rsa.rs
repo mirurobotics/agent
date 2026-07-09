@@ -63,6 +63,7 @@ pub async fn gen_key_pair(
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
+            mode: None,
         },
     )
     .await?;
@@ -79,6 +80,7 @@ pub async fn gen_key_pair(
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
+            mode: None,
         },
     )
     .await?;

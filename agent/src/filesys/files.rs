@@ -1,5 +1,6 @@
 // standard crates
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::time::SystemTime;
 
 // internal crates
@@ -202,8 +203,15 @@ pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<
             Overwrite::Allow => AtomicFile::new(file.path(), AllowOverwrite),
             Overwrite::Deny => AtomicFile::new(file.path(), DisallowOverwrite),
         };
-        let io_err: Result<(), std::io::Error> =
-            af.write(|f| f.write_all(buf)).map_err(|e| e.into());
+        let write_res = match opts.mode {
+            Some(m) => {
+                let mut open_opts = std::fs::OpenOptions::new();
+                open_opts.write(true).create(true).truncate(true).mode(m);
+                af.write_with_options(|f| f.write_all(buf), open_opts)
+            }
+            None => af.write(|f| f.write_all(buf)),
+        };
+        let io_err: Result<(), std::io::Error> = write_res.map_err(|e| e.into());
         io_err.map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
@@ -222,13 +230,21 @@ pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<
     } else {
         let mut f = match opts.overwrite {
             Overwrite::Deny => {
-                tokio::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(file.path())
-                    .await
+                let mut open_opts = tokio::fs::OpenOptions::new();
+                open_opts.write(true).create_new(true);
+                if let Some(m) = opts.mode {
+                    open_opts.mode(m);
+                }
+                open_opts.open(file.path()).await
             }
-            Overwrite::Allow => TokioFile::create(file.path()).await,
+            Overwrite::Allow => {
+                let mut open_opts = tokio::fs::OpenOptions::new();
+                open_opts.write(true).create(true).truncate(true);
+                if let Some(m) = opts.mode {
+                    open_opts.mode(m);
+                }
+                open_opts.open(file.path()).await
+            }
         }
         .map_err(|e| map_io_err_for_create(e, file, opts.overwrite))?;
         f.write_all(buf).await.map_err(|e| {
