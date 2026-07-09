@@ -151,7 +151,10 @@ async fn discover_candidates(state: &State, now: DateTime<Utc>) -> Result<Vec<Ca
         if state.is_latest_ledger_entry(&observation) {
             continue;
         }
-        candidates.push(Candidate { file, first_obs: observation });
+        candidates.push(Candidate {
+            file,
+            first_obs: observation,
+        });
     }
     Ok(candidates)
 }
@@ -255,11 +258,7 @@ async fn differs_from_previous(
     )))
 }
 
-fn build_stable_file(
-    candidate: &Candidate,
-    last_obs: &Observation,
-    digest: Digest,
-) -> StableFile {
+fn build_stable_file(candidate: &Candidate, last_obs: &Observation, digest: Digest) -> StableFile {
     let first_obs = &candidate.first_obs;
     debug_assert!(last_obs.equal_metadata(first_obs));
     StableFile {
