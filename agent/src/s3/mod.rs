@@ -137,7 +137,7 @@ impl Store {
             .body(body)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err_common("put_object", Some(dst.key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err("put_object", Some(dst.key.to_string()), e))?;
         Ok(())
     }
 
@@ -163,7 +163,7 @@ impl Store {
                         trace: trace!(),
                     }));
                 }
-                return Err(errors::map_sdk_err_common(
+                return Err(errors::map_sdk_err(
                     "get_object",
                     Some(src.key.to_string()),
                     err,
@@ -190,9 +190,7 @@ impl Store {
             .key(&obj.key)
             .send()
             .await
-            .map_err(|e| {
-                errors::map_sdk_err_common("delete_object", Some(obj.key.to_string()), e)
-            })?;
+            .map_err(|e| errors::map_sdk_err("delete_object", Some(obj.key.to_string()), e))?;
         Ok(())
     }
 
@@ -212,7 +210,7 @@ impl Store {
                 if errors::is_not_found(&err) {
                     Ok(false)
                 } else {
-                    Err(errors::map_sdk_err_common(
+                    Err(errors::map_sdk_err(
                         "head_object",
                         Some(obj.key.to_string()),
                         err,

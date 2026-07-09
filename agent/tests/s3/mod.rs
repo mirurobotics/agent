@@ -436,4 +436,45 @@ pub mod error_types {
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(err.to_string().contains("invalid response"));
     }
+
+    #[test]
+    fn request_failed_err_display_includes_object_and_status() {
+        // The non-`<none>`/`unknown` branch: both object and status are `Some`,
+        // so Display echoes the s3:// URI and the numeric status.
+        let err = S3Err::RequestFailedErr(RequestFailedErr {
+            operation: "put_object".to_string(),
+            object: Some("s3://bucket/key".to_string()),
+            status: Some(403),
+            msg: "denied".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("s3://bucket/key"));
+        assert!(msg.contains("403"));
+    }
+
+    // A `FileSysErr` produced by a real (failing) filesystem op converts into an
+    // `S3Err` via `From<filesys::FileSysErr>`, and the resulting variant delegates
+    // its trait behavior (code / http_status / Display) to the underlying error.
+    #[tokio::test]
+    async fn filesys_err_delegates_to_underlying_error() {
+        let fs_err: miru_agent::filesys::FileSysErr =
+            files::read_bytes(&File::new("/nonexistent/definitely/not/here.bin"))
+                .await
+                .unwrap_err();
+        // Capture the underlying values to assert delegation. `Code` is not
+        // `PartialEq`, so compare its `Debug` form.
+        let want_code = format!("{:?}", fs_err.code());
+        let want_status = fs_err.http_status().as_u16();
+        let want_display = fs_err.to_string();
+
+        // Explicitly exercise `From<filesys::FileSysErr> for S3Err`.
+        let err: S3Err = fs_err.into();
+
+        assert!(matches!(err, S3Err::FileSysErr(_)));
+        assert_eq!(format!("{:?}", err.code()), want_code);
+        assert_eq!(err.http_status().as_u16(), want_status);
+        assert!(!err.is_network_conn_err());
+        assert_eq!(err.to_string(), want_display);
+    }
 }
