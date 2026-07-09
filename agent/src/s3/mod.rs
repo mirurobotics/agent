@@ -1,5 +1,5 @@
 // internal crates
-use crate::filesys::{file::File, path::PathExt};
+use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
 
 // external crates
@@ -9,9 +9,16 @@ use aws_sdk_s3::Client;
 use tokio::io::AsyncWriteExt;
 
 pub mod errors;
+pub mod multipart;
 
 use errors::ObjectNotFoundErr;
 pub use errors::S3Err;
+pub use multipart::{PartToUpload, Source, UploadedPart};
+
+/// Objects larger than this stream through a multipart upload; objects at or
+/// below it go through a single `PutObject`. S3's own multipart part-size
+/// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
+pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 
 pub struct Config {
     pub creds: Credentials,
@@ -98,11 +105,18 @@ impl Store {
 
     /// Creates or overwrites an object by streaming a file off disk.
     ///
-    /// This CRUD client streams the whole file through a single `PutObject`
-    /// (see [`Self::put_singlepart`]). Size-based routing to a multipart upload
-    /// for large files arrives with the multipart module in a follow-up PR.
+    /// The whole file is never held in memory: files at or below [`PART_SIZE`]
+    /// stream through one `PutObject` ([`Self::put_singlepart`]); larger files
+    /// stream part-by-part through a stateless multipart upload
+    /// ([`Self::put_multipart`]).
     pub async fn put(&self, src: File, dst: &Object) -> Result<(), S3Err> {
-        self.put_singlepart(&src, dst).await
+        let size = files::size(&src).await?;
+        if size > PART_SIZE {
+            self.put_multipart(&multipart::Source { file: src, size }, dst)
+                .await
+        } else {
+            self.put_singlepart(&src, dst).await
+        }
     }
 
     /// Streams a file to S3 as a single-part upload.

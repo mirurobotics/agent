@@ -113,6 +113,8 @@ fn store_expecting(
     store_with(vec![ReplayEvent::new(request, response)])
 }
 
+pub mod multipart;
+
 pub mod construction {
     use super::*;
 
@@ -215,15 +217,16 @@ pub mod put {
         use super::*;
 
         #[tokio::test]
-        async fn put_missing_source_maps_to_local_io_err() {
-            // A missing LOCAL source surfaces as `LocalIoErr` (the streaming body
-            // fails to read off disk before the request completes).
+        async fn put_missing_source_maps_to_filesys_err() {
+            // A missing LOCAL source surfaces as `FileSysErr`: `put` stats the
+            // file first (to route by size), so the failure is caught reading the
+            // file's metadata before any request is dispatched.
             let (store, _replay) = store_with(vec![]);
             let missing = File::new("/nonexistent/definitely/not/here.bin");
 
             let err = store.put(missing, &obj("k")).await.unwrap_err();
 
-            assert!(matches!(err, S3Err::LocalIoErr(_)));
+            assert!(matches!(err, S3Err::FileSysErr(_)));
         }
     }
 }
