@@ -2,10 +2,8 @@
 use std::io::SeekFrom;
 
 // internal crates
-use crate::filesys::file::File;
-use crate::filesys::path::PathExt;
-use crate::s3::errors;
-use crate::s3::{Object, S3Err, Store, PART_SIZE};
+use crate::filesys::{file::File, path::PathExt};
+use crate::s3::{errors, Object, S3Err, Store, PART_SIZE};
 
 // external crates
 use aws_sdk_s3::primitives::ByteStream;
@@ -110,7 +108,7 @@ impl Store {
         self.complete_multipart_upload(dst, upload_id, &parts).await
     }
 
-    /// Streams each part of `src` (from byte 0) to S3 in order, returning the
+    /// Streams each part of `src` to S3 in order, returning the
     /// [`CompletedPart`]s (part number, ETag) needed to complete the upload.
     async fn upload_parts(
         &self,

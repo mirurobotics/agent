@@ -275,7 +275,8 @@ pub mod put {
             // fixture just past the routing threshold. 8 MiB + 1 KiB => 2 parts
             // (8 MiB, 1 KiB).
             const PART_SIZE: u64 = 8 * 1024 * 1024;
-            let big = vec![0u8; (PART_SIZE + 1024) as usize];
+            // Recognizable byte pattern so each part's body can be checked against its slice.
+            let big: Vec<u8> = (0..(PART_SIZE + 1024)).map(|i| i as u8).collect();
             let src = temp_file_with(&big).await;
 
             let (store, replay) = store_with(vec![
@@ -323,6 +324,25 @@ pub mod put {
             assert!(
                 manifest.contains("etag-part-2"),
                 "manifest carries part 2's etag"
+            );
+
+            // Parts are sent as in-memory buffers, so their exact bytes are recorded:
+            // each part must carry its own file slice (right offset and length).
+            assert!(
+                requests[1]
+                    .body()
+                    .bytes()
+                    .expect("part 1 body is in-memory")
+                    == &big[..PART_SIZE as usize],
+                "part 1 must be the first PART_SIZE bytes of the source"
+            );
+            assert!(
+                requests[2]
+                    .body()
+                    .bytes()
+                    .expect("part 2 body is in-memory")
+                    == &big[PART_SIZE as usize..],
+                "part 2 must be the remaining bytes of the source"
             );
         }
     }
