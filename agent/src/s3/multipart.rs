@@ -54,26 +54,26 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
-        // Index the already-landed parts by number. `None` means S3 no longer
-        // knows this upload, so it cannot be resumed.
-        let landed: std::collections::HashMap<i32, CompletedPart> =
-            match self.list_parts(dst, upload_id).await? {
-                Some(parts) => parts
-                    .into_iter()
-                    .filter_map(|p| p.part_number().map(|n| (n, p)))
-                    .collect(),
-                None => {
-                    return Err(S3Err::NoSuchUploadErr(NoSuchUploadErr {
-                        key: dst.key.to_string(),
-                        upload_id: upload_id.to_string(),
-                        trace: crate::trace!(),
-                    }));
-                }
-            };
+        let landed: std::collections::HashMap<i32, CompletedPart> = self
+            .list_parts(dst, upload_id)
+            .await?
+            .into_iter()
+            .filter_map(|p| p.part_number().map(|n| (n, p)))
+            .collect();
+        let parts = self.upload_parts(src, dst, upload_id, &landed).await?;
+        self.complete_multipart_upload(dst, upload_id, &parts).await
+    }
 
-        // Walk the full plan in order, reusing a landed part or uploading the
-        // missing range. `part_plan` is the single source of truth for part
-        // boundaries, shared with `put_multipart`.
+    /// Walks [`Self::part_plan`] in order. For each part number present in
+    /// `landed`, reuses that [`CompletedPart`]; otherwise uploads the range.
+    /// Pass an empty map to upload every part (the fresh-upload path).
+    async fn upload_parts(
+        &self,
+        src: &Source,
+        dst: &Object,
+        upload_id: &str,
+        landed: &std::collections::HashMap<i32, CompletedPart>,
+    ) -> Result<Vec<CompletedPart>, S3Err> {
         let mut parts: Vec<CompletedPart> = Vec::new();
         for (part_number, offset, len) in Self::part_plan(src.size) {
             let part = match landed.get(&part_number) {
@@ -85,17 +85,11 @@ impl Store {
             };
             parts.push(part);
         }
-
-        self.complete_multipart_upload(dst, upload_id, &parts).await
+        Ok(parts)
     }
 
     /// Lists every part already uploaded for `upload_id`, following pagination.
-    /// `Ok(None)` when S3 reports the upload no longer exists (404 / NoSuchUpload).
-    async fn list_parts(
-        &self,
-        obj: &Object,
-        upload_id: &str,
-    ) -> Result<Option<Vec<CompletedPart>>, S3Err> {
+    async fn list_parts(&self, obj: &Object, upload_id: &str) -> Result<Vec<CompletedPart>, S3Err> {
         let mut parts: Vec<CompletedPart> = Vec::new();
         let mut marker: Option<String> = None;
 
@@ -104,7 +98,11 @@ impl Store {
                 .list_parts_page(obj, upload_id, marker.as_deref())
                 .await?
             else {
-                return Ok(None);
+                return Err(S3Err::NoSuchUploadErr(NoSuchUploadErr {
+                    key: obj.key.to_string(),
+                    upload_id: upload_id.to_string(),
+                    trace: crate::trace!(),
+                }));
             };
 
             parts.extend(page.parts().iter().filter_map(|part| {
@@ -120,13 +118,14 @@ impl Store {
 
             match page.next_part_number_marker() {
                 Some(next) if page.is_truncated() == Some(true) => marker = Some(next.to_string()),
-                _ => return Ok(Some(parts)),
+                _ => return Ok(parts),
             }
         }
     }
 
     /// Fetches one page of [`Self::list_parts`], resuming after `marker` when given.
-    /// `Ok(None)` if S3 reports the upload no longer exists (404 / NoSuchUpload).
+    /// `Ok(None)` if S3 reports the upload no longer exists (404 / NoSuchUpload);
+    /// [`Self::list_parts`] turns that into [`S3Err::NoSuchUploadErr`].
     async fn list_parts_page(
         &self,
         obj: &Object,
@@ -217,28 +216,10 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
-        let parts = self.upload_parts(src, dst, upload_id).await?;
+        let parts = self
+            .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
+            .await?;
         self.complete_multipart_upload(dst, upload_id, &parts).await
-    }
-
-    /// Streams each part of `src` to S3 in order, returning the
-    /// [`CompletedPart`]s (part number, ETag) needed to complete the upload.
-    async fn upload_parts(
-        &self,
-        src: &Source,
-        dst: &Object,
-        upload_id: &str,
-    ) -> Result<Vec<CompletedPart>, S3Err> {
-        let mut parts: Vec<CompletedPart> = Vec::new();
-
-        for (part_number, offset, len) in Self::part_plan(src.size) {
-            let part = self
-                .upload_part(&src.file, dst, upload_id, part_number, offset, len)
-                .await?;
-            parts.push(part);
-        }
-
-        Ok(parts)
     }
 
     /// Reads `src[offset..offset+length]` into an in-memory buffer, mapping any
