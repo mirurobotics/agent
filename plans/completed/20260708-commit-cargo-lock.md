@@ -1,6 +1,6 @@
 # Track root `Cargo.lock` and pin `crossbeam-epoch` (fix RUSTSEC-2026-0204)
 
-**Status**: active
+**Status**: completed
 **Branch**: build/commit-cargo-lock (off latest origin/main)
 **Date**: 20260708
 
@@ -30,13 +30,18 @@ Context / why this is the right vehicle:
 Two tracked files change; no source code changes.
 
 ### 1. `.gitignore`
-Anchor the ignore to the root workspace only, so `./Cargo.lock` becomes tracked
-while the separate dev-tool workspace lock (`tools/lint/Cargo.lock`) stays
-ignored:
-- Change line 8 from `Cargo.lock` to `/Cargo.lock`.
-- Update the adjacent comment (lines 6-7) to reflect the decision (agent is an
-  executable → its lock is tracked; the leading `/` keeps it scoped to the root
-  workspace).
+Narrow the ignore so the root workspace lock becomes tracked while the separate
+dev-tool workspace lock (`tools/lint/Cargo.lock`) stays ignored. A `.gitignore`
+line is always an *ignore* rule, so the fix is to REPLACE the broad `Cargo.lock`
+pattern with an anchored ignore of only the nested lock (NOT `/Cargo.lock`,
+which would ignore the root lock and expose the tool lock — the inverse):
+- Change the bare `Cargo.lock` line to `/tools/lint/Cargo.lock`. The broad
+  pattern no longer matches the root `Cargo.lock`, so it becomes trackable.
+- Update the adjacent comment to reflect the decision (agent is an executable →
+  its root-workspace lock is tracked; only the nested `tools/lint` lock stays
+  ignored).
+- Verify: `git check-ignore Cargo.lock` prints nothing (root lock trackable) and
+  `git check-ignore tools/lint/Cargo.lock` still matches.
 
 ### 2. `Cargo.lock` (root workspace, `/home/ben/miru/workbench1/repos/agent/Cargo.lock`)
 - Refresh to a current, fully-resolved lock that mirrors what CI resolves today
