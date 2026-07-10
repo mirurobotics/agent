@@ -1,3 +1,23 @@
+//! Remote GCS object storage over the network: create, download, delete, and
+//! existence checks for objects addressed by bucket + key.
+//!
+//! A [`Store`] is constructed from a caller-supplied short-lived OAuth2 access
+//! token only. Credentials are never sourced from Application Default
+//! Credentials, environment variables, or the instance metadata server: the
+//! backend mints and hands down the token, which is turned into a fixed
+//! `Authorization: Bearer <token>` header for every request.
+//!
+//! Uploads and downloads stream to and from disk in bounded chunks, so an
+//! artifact of arbitrary size is never held whole in memory.
+//!
+//! Two transports back the store. The HTTP data client ([`Storage`]) handles
+//! the object payload path ([`Store::put`] and [`Store::get`]); the gRPC control
+//! client ([`StorageControl`]) handles the metadata path ([`Store::delete`] and
+//! [`Store::exists`]). A missing object surfaces as `Code::ResourceNotFound`.
+//!
+//! TODO: a live-bucket integration test against real GCS is deferred; see
+//! `plans/completed/20260704-gcs-object-storage-crud.md`.
+
 // internal crates
 use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
@@ -36,8 +56,7 @@ pub struct Object {
 
 impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // GCS's canonical URI scheme is `gs://`, the one honest deviation from
-        // s3's `s3://` prefix.
+        // GCS's canonical URI scheme is `gs://`.
         write!(f, "gs://{}/{}", self.bucket, self.key)
     }
 }
@@ -96,11 +115,11 @@ impl Store {
     /// Builds a store from caller-supplied credentials (a short-lived OAuth2
     /// access token).
     ///
-    /// Unlike s3's `new`, this is fallible and async: fallible because the token
-    /// is turned into an `Authorization` header value and an invalid byte in the
-    /// token makes that conversion fail; async because the GCS client builders
-    /// are async. Building performs async client setup but makes no real GCS
-    /// call, so it is safe to run in a `#[tokio::test]`.
+    /// This is fallible and async: fallible because the token is turned into an
+    /// `Authorization` header value and an invalid byte in the token makes that
+    /// conversion fail; async because the GCS client builders are async.
+    /// Building performs async client setup but makes no real GCS call, so it is
+    /// safe to run in a `#[tokio::test]`.
     pub async fn new(creds: Credentials) -> Result<Self, GcsErr> {
         Self::build(creds, None, None).await
     }
@@ -115,11 +134,8 @@ impl Store {
 
     /// Test-only seam that injects a stubbed [`StorageControl`] for the gRPC
     /// delete/exists ops while pointing the HTTP data client at `endpoint`.
-    ///
-    /// s3 injects one HTTP client via `from_http_client`; GCS must inject a gRPC
-    /// control stub AND point the HTTP data client at `endpoint`, so this seam
-    /// takes both — the closest the dual-transport reality gets to s3's single
-    /// `(http_client, credentials)` pairing.
+    /// Both transports are covered by a single seam: the gRPC control stub for
+    /// the metadata path and the endpoint override for the HTTP data path.
     #[cfg(feature = "test")]
     pub async fn from_stub<T>(stub: T, creds: Credentials, endpoint: String) -> Result<Self, GcsErr>
     where
@@ -139,7 +155,7 @@ impl Store {
         control_override: Option<StorageControl>,
     ) -> Result<Self, GcsErr> {
         // Token -> header can fail on an invalid byte, which is why `new` is
-        // fallible where s3's is not.
+        // fallible.
         let header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
             .map_err(|e| {
                 GcsErr::InvalidResponseErr(InvalidResponseErr {
@@ -183,9 +199,9 @@ impl Store {
     ///
     /// The whole file is never held in memory: the `write_object` path reads it
     /// in bounded chunks. `put` reads the source size up front so a missing
-    /// local source surfaces as a [`GcsErr::FileSysErr`] exactly like s3's `put`.
-    /// Unlike s3 there is no size-routed second path: GCS's `write_object` folds
-    /// the multipart/resumable decision inside the SDK, so `put` delegates
+    /// local source surfaces as a [`GcsErr::FileSysErr`] before any request is
+    /// dispatched. GCS's `write_object` folds the simple-vs-resumable decision
+    /// inside the SDK, so there is no size-routed second path: `put` delegates
     /// straight to [`Self::put_singlepart`] after the size read.
     pub async fn put(&self, src: File, dst: &Object) -> Result<(), GcsErr> {
         let _size = files::size(&src).await?;
@@ -227,7 +243,7 @@ impl Store {
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         while let Some(chunk) = resp.next().await {
             // A wire read error is a `google_cloud_gax::error::Error`, mapped by
-            // `map_gcs_err` (GCS has no `ByteStream`, so no separate body-read mapper).
+            // `map_gcs_err`.
             let bytes = chunk.map_err(|e| map_gcs_err("get_object", Some(&src.key), e))?;
             file.write_all(&bytes)
                 .await
@@ -240,8 +256,7 @@ impl Store {
     }
 
     /// Deletes an object. Idempotent: a `NOT_FOUND` from the control plane (the
-    /// object was already gone) is treated as success, matching s3's idempotent
-    /// delete.
+    /// object was already gone) is treated as success.
     pub async fn delete(&self, obj: &Object) -> Result<(), GcsErr> {
         let resource_name = obj.resource_name();
         match self

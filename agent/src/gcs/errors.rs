@@ -40,8 +40,7 @@ impl crate::errors::Error for ConnectionErr {
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailedErr {
     pub operation: String,
-    // s3 names this field `object`; matched here for parity. Carries the
-    // `gs://bucket/key` URI (or the bare key) of the target object, when known.
+    /// The `gs://bucket/key` URI (or the bare key) of the target object, when known.
     pub object: Option<String>,
     pub status: Option<u16>,
     pub msg: String,
@@ -100,9 +99,6 @@ pub enum GcsErr {
     LocalIoErr(LocalIoErr),
     #[error(transparent)]
     FileSysErr(filesys::FileSysErr),
-    // s3's `S3Err::NoSuchUploadErr` has no GCS analog: GCS's `write_object` folds
-    // the multipart/resumable decision inside the SDK, so there is no user-visible
-    // upload-id surface to report a missing upload against (see `gcs/mod.rs`).
 }
 
 impl From<filesys::FileSysErr> for GcsErr {
@@ -122,7 +118,7 @@ crate::impl_error!(GcsErr {
 
 /// Returns whether a GCS SDK error represents a missing object (gRPC
 /// `NOT_FOUND` or HTTP 404). The four ops classify not-found themselves before
-/// delegating to [`map_gcs_err`], mirroring how s3 classifies `NoSuchKey`/404.
+/// delegating to [`map_gcs_err`].
 pub fn is_not_found(err: &GaxError) -> bool {
     err.status()
         .map(|s| s.code == google_cloud_gax::error::rpc::Code::NotFound)
@@ -135,12 +131,9 @@ pub fn is_not_found(err: &GaxError) -> bool {
 /// status (when present) and the error's own message. Not-found is classified
 /// by the caller before reaching here.
 ///
-/// This is the analog of s3's `map_sdk_err`, but it takes the concrete
-/// `google_cloud_gax::error::Error` (GCS has a single crate error type, not a
-/// generic `SdkError<E>`). It also absorbs the body-read-error role that s3
-/// splits into a separate `map_body_read_err`: GCS has no `ByteStream`, so a
-/// failure reading the download body off the wire surfaces here as the same
-/// `google_cloud_gax::error::Error` and is mapped by this function.
+/// Takes the concrete `google_cloud_gax::error::Error`, the single crate error
+/// type. A failure reading the download body off the wire surfaces as the same
+/// error type and is mapped by this function too.
 pub fn map_gcs_err(operation: &str, key: Option<&str>, err: GaxError) -> GcsErr {
     if err.is_timeout() {
         return GcsErr::ConnectionErr(ConnectionErr {
@@ -161,7 +154,7 @@ pub fn map_gcs_err(operation: &str, key: Option<&str>, err: GaxError) -> GcsErr 
 
 /// Maps a local filesystem I/O error hit while streaming an object body
 /// (opening the source, creating the destination, or copying) into
-/// [`GcsErr::LocalIoErr`]. Mirrors s3's `map_body_io_err`.
+/// [`GcsErr::LocalIoErr`].
 pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io::Error) -> GcsErr {
     GcsErr::LocalIoErr(LocalIoErr {
         operation: operation.to_string(),
@@ -206,8 +199,8 @@ mod tests {
         assert!(!mapped.is_network_conn_err());
     }
 
-    /// Mirrors s3's `body_mappers` submodule: the local-I/O body mapper always
-    /// yields a terminal `LocalIoErr`, never a network condition.
+    /// The local-I/O body mapper always yields a terminal `LocalIoErr`, never a
+    /// network condition.
     mod body_mappers {
         use super::*;
         use crate::gcs::Object;

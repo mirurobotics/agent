@@ -1,7 +1,11 @@
-//! Offline test suite for the `gcs` object-storage module, laid out to mirror
-//! `tests/s3/mod.rs`. There is deliberately no `multipart` submodule (and no
-//! `tests/gcs/multipart.rs`): GCS's `write_object` folds the multipart/resumable
-//! decision inside the SDK, so the module exposes no multipart surface to test.
+//! Offline test suite for the `gcs` object-storage module. The put/get data
+//! path is exercised against an axum HTTP mock via the client's endpoint
+//! override; the delete/exists control path is exercised against a `mockall`
+//! `StorageControl` gRPC stub. Both run fully offline, with no real GCS calls.
+//!
+//! There is deliberately no `multipart` submodule: GCS's `write_object` folds
+//! the simple-vs-resumable decision inside the SDK, so the module exposes no
+//! multipart surface to test.
 
 // standard crates
 use std::sync::{Arc, Mutex};
@@ -31,7 +35,7 @@ use google_cloud_storage as gcs;
 const BUCKET: &str = "test-bucket";
 
 /// Builds an [`Object`] in the test bucket for the given key, keeping call sites
-/// terse (mirrors s3's `obj` helper).
+/// terse.
 fn obj(key: &str) -> Object {
     Object {
         bucket: BUCKET.to_string(),
@@ -207,8 +211,8 @@ pub mod put {
         #[tokio::test]
         async fn upload_missing_source_maps_to_filesys_err() {
             // A missing LOCAL source surfaces as `FileSysErr`: `put` stats the
-            // file first (mirroring s3), so the failure is caught reading the
-            // file's metadata before any request is dispatched.
+            // file first, so the failure is caught reading the file's metadata
+            // before any request is dispatched.
             let rec = HttpRecorder::default();
             let store = http_store(rec).await;
             let missing = File::new("/nonexistent/definitely/not/here.bin");
@@ -308,11 +312,10 @@ pub mod get {
         }
     }
 
-    // note: s3's `get::truncated_body` and `get::transport_failure` cases have no
-    // clean GCS mock analog. The axum data-path mock finalizes each download via
-    // the `x-goog-generation` header, so a truncated-body or dispatch-failure
-    // condition cannot be simulated the way s3's `StaticReplayClient` allows;
-    // both are intentionally omitted.
+    // note: the axum data-path mock finalizes each download via the
+    // `x-goog-generation` response header, so truncated-body and
+    // dispatch-failure conditions cannot be simulated with it and are not
+    // covered here.
 }
 
 // ============================ gRPC CONTROL-PATH MOCK ============================ //
@@ -520,9 +523,9 @@ pub mod construction {
     }
 }
 
-/// Direct assertions on the leaf error types' trait behavior, mirroring s3's
-/// `error_types` module. These pin the `crate::errors::Error` contract each
-/// variant promises (code / http_status / is_network_conn_err / Display).
+/// Direct assertions on the leaf error types' trait behavior. These pin the
+/// `crate::errors::Error` contract each variant promises (code / http_status /
+/// is_network_conn_err / Display).
 pub mod error_types {
     use super::*;
 
