@@ -1,40 +1,3 @@
-//! Remote Google Cloud Storage (GCS) object storage.
-//!
-//! This module talks to a GCS bucket over the network. Its public API mirrors
-//! the S3 object-storage module: a [`Store`] exposes [`Store::put`],
-//! [`Store::put_singlepart`], [`Store::get`], [`Store::delete`], and
-//! [`Store::exists`] over the [`Credentials`], [`Object`], and
-//! [`crate::filesys::file::File`] value types, so `gcs::Store` reads as a
-//! faithful sibling of `s3::Store`. Like the S3 module it is distinct from
-//! [`crate::disk`], which manages local on-disk device state (device.json,
-//! settings.json, ...). Do not conflate the two.
-//!
-//! A [`Store`] is constructed **only** from a caller-supplied short-lived
-//! OAuth2 access token. It never reads ambient Google configuration
-//! (Application Default Credentials, environment variables, the GCE/GKE
-//! metadata server): the Miru backend mints short-lived tokens and hands them
-//! to the agent, mirroring how the S3 module takes short-lived STS credentials.
-//! The target bucket is not held on the `Store`; it rides on each [`Object`],
-//! mirroring s3 where the bucket travels with the `Object`.
-//!
-//! Object bodies are streamed to and from disk (never buffered whole in memory)
-//! so the agent can move multi-gigabyte artifacts on memory-constrained devices.
-//! Uploads use the resumable `write_object` path (256 KiB chunks, `Seek`-based),
-//! and downloads copy the response body chunk-by-chunk.
-//!
-//! GCS exposes two transports: the object-data client ([`Storage`], HTTP/JSON)
-//! handles uploads/downloads, and the control-plane client ([`StorageControl`],
-//! gRPC) handles delete and existence checks. s3 has a single HTTP client; this
-//! is a genuine GCS-forced deviation that also shapes the test seams below.
-//!
-//! A missing object surfaces as [`Code::ResourceNotFound`](crate::errors::Code)
-//! (HTTP 404), exactly as in the S3 module.
-//!
-//! TODO: a real-cloud GCS integration test (mirroring
-//! `backend/tests/pkg/gcp/gcs/gcs_test.go`, run against a live bucket via
-//! Workload Identity Federation) is a deferred follow-up blocked on infra; see
-//! `plans/completed/20260704-gcs-object-storage-crud.md`.
-
 // internal crates
 use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
@@ -52,10 +15,6 @@ pub mod errors;
 pub use errors::GcsErr;
 use errors::{is_not_found, map_gcs_err, InvalidResponseErr};
 
-/// Caller-facing credentials: the short-lived OAuth2 access token the backend
-/// mints. Internally this is turned into the [`StaticTokenCredentials`] provider
-/// the GCS SDK plumbs through; `Credentials` is the value type callers see,
-/// mirroring `s3::Credentials`.
 pub struct Credentials {
     pub access_token: String,
 }
@@ -84,13 +43,8 @@ impl std::fmt::Display for Object {
 }
 
 impl Object {
-    /// The GCS resource name of this object's bucket
-    /// (`projects/_/buckets/<bucket>`). Both transports address a bucket by this
-    /// path, so an `Object` fully identifies its target — mirroring how s3 takes
-    /// the bucket straight from the `Object`. This wire-path assembly has no s3
-    /// analog: it is a GCS-forced detail, kept in one place instead of rebuilt at
-    /// each call site.
-    fn bucket_resource(&self) -> String {
+    /// The GCS resource name of this object's bucket (`projects/_/buckets/<bucket>`).
+    fn resource_name(&self) -> String {
         format!("projects/_/buckets/{}", self.bucket)
     }
 }
@@ -131,9 +85,8 @@ impl CredentialsProvider for StaticTokenCredentials {
     }
 }
 
-/// An async GCS client holding the HTTP data client ([`Storage`]) for
-/// uploads/downloads and the gRPC control client ([`StorageControl`]) for
-/// delete/exists.
+/// An async GCS client holding the HTTP data client ([`Storage`]) for uploads/downloads
+/// and the gRPC control client ([`StorageControl`]) for delete/exists.
 pub struct Store {
     data: Storage,
     control: StorageControl,
@@ -242,12 +195,12 @@ impl Store {
     /// Streams a file to GCS via a single `write_object` call. The SDK internally
     /// chooses simple vs resumable transfer by payload size.
     pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), GcsErr> {
-        let resource = dst.bucket_resource();
+        let resource_name = dst.resource_name();
         let file = tokio::fs::File::open(src.path())
             .await
             .map_err(|e| errors::map_body_io_err("put_object", dst, src, e))?;
         self.data
-            .write_object(&resource, &dst.key, file)
+            .write_object(&resource_name, &dst.key, file)
             .send_unbuffered()
             .await
             .map_err(|e| map_gcs_err("put_object", Some(&dst.key), e))?;
@@ -257,8 +210,8 @@ impl Store {
     /// Streams an object's body to a destination file, chunk-by-chunk. A missing
     /// object maps to [`GcsErr::ObjectNotFoundErr`].
     pub async fn get(&self, src: &Object, dest: &File) -> Result<(), GcsErr> {
-        let resource = src.bucket_resource();
-        let mut resp = match self.data.read_object(&resource, &src.key).send().await {
+        let resource_name = src.resource_name();
+        let mut resp = match self.data.read_object(&resource_name, &src.key).send().await {
             Ok(resp) => resp,
             Err(e) if is_not_found(&e) => {
                 return Err(GcsErr::ObjectNotFoundErr(errors::ObjectNotFoundErr {
@@ -290,11 +243,11 @@ impl Store {
     /// object was already gone) is treated as success, matching s3's idempotent
     /// delete.
     pub async fn delete(&self, obj: &Object) -> Result<(), GcsErr> {
-        let resource = obj.bucket_resource();
+        let resource_name = obj.resource_name();
         match self
             .control
             .delete_object()
-            .set_bucket(&resource)
+            .set_bucket(&resource_name)
             .set_object(&obj.key)
             .send()
             .await
@@ -308,11 +261,11 @@ impl Store {
     /// Returns `true` if the object exists, `false` on a `NOT_FOUND`. Other
     /// errors propagate.
     pub async fn exists(&self, obj: &Object) -> Result<bool, GcsErr> {
-        let resource = obj.bucket_resource();
+        let resource_name = obj.resource_name();
         match self
             .control
             .get_object()
-            .set_bucket(&resource)
+            .set_bucket(&resource_name)
             .set_object(&obj.key)
             .send()
             .await
