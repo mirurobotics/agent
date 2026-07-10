@@ -52,6 +52,8 @@ pub enum ScanErr {
     FileSysErr(crate::filesys::FileSysErr),
     #[error(transparent)]
     CacheErr(crate::cache::CacheErr),
+    #[error(transparent)]
+    DiskErr(crate::disk::DiskErr),
 }
 
 impl From<SendActorMessageErr> for ScanErr {
@@ -78,6 +80,12 @@ impl From<crate::cache::CacheErr> for ScanErr {
     }
 }
 
+impl From<crate::disk::DiskErr> for ScanErr {
+    fn from(e: crate::disk::DiskErr) -> Self {
+        Self::DiskErr(e)
+    }
+}
+
 crate::impl_error!(ScanErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
@@ -86,6 +94,7 @@ crate::impl_error!(ScanErr {
     InternalError,
     FileSysErr,
     CacheErr,
+    DiskErr,
 });
 
 #[cfg(test)]
@@ -141,5 +150,16 @@ mod tests {
             },
         );
         assert!(matches!(ScanErr::from(err), ScanErr::CacheErr(_)));
+    }
+
+    #[test]
+    fn from_disk_err() {
+        let err = crate::disk::DiskErr::CacheErr(crate::cache::CacheErr::CacheElementNotFound(
+            crate::cache::errors::CacheElementNotFound {
+                msg: "missing".to_string(),
+                trace: trace!(),
+            },
+        ));
+        assert!(matches!(ScanErr::from(err), ScanErr::DiskErr(_)));
     }
 }
