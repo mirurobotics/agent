@@ -1,11 +1,12 @@
 // standard crates
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
 use crate::mocks::{scanner::MockScanner, syncer::MockSyncer};
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::dirs;
+use miru_agent::filesys::{dirs, Overwrite};
 use miru_agent::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
 use miru_agent::scan::ScanErr;
 use miru_agent::sync::syncer::SyncEvent;
@@ -13,6 +14,7 @@ use miru_agent::workers::scan_bridge;
 
 // external crates
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 pub mod run {
     use super::*;
@@ -102,6 +104,33 @@ pub mod run {
                 .await
                 .unwrap();
         }
+
+        /// Add an upload rule body (glob only) under `id`, leaving any existing
+        /// release wiring untouched.
+        async fn put_rule(&self, id: &str, glob: &str) {
+            self.upload_rules
+                .write_if_absent(id.to_string(), rule_with(id, glob, 0), |_, _| false)
+                .await
+                .unwrap();
+        }
+
+        /// Point the release at exactly `rule_ids`, overwriting whatever it
+        /// referenced before.
+        async fn set_release_rules(&self, release_id: &str, rule_ids: &[&str]) {
+            self.releases
+                .write(
+                    release_id.to_string(),
+                    Release {
+                        id: release_id.to_string(),
+                        upload_rule_ids: rule_ids.iter().map(|id| id.to_string()).collect(),
+                        ..Default::default()
+                    },
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+        }
     }
 
     /// Build an UploadRule with only its id + source fields set.
@@ -117,8 +146,14 @@ pub mod run {
     }
 
     /// The set of rule ids of an update_rules call payload, order-independent.
-    fn rule_ids(rules: &[UploadRule]) -> std::collections::BTreeSet<String> {
+    fn rule_ids(rules: &[UploadRule]) -> BTreeSet<String> {
         rules.iter().map(|r| r.id.clone()).collect()
+    }
+
+    /// The expected rule-id set built from `&str` literals — complements
+    /// `rule_ids` (which reads a payload) for `assert_eq!` comparisons.
+    fn rule_id_set<const N: usize>(ids: [&str; N]) -> BTreeSet<String> {
+        ids.iter().map(|id| id.to_string()).collect()
     }
 
     /// Poll `cond` until it returns true, yielding between attempts. Fails the
@@ -138,6 +173,23 @@ pub mod run {
             .expect("condition not met within timeout");
     }
 
+    /// Wait until the scanner has recorded `n` update_rules calls, then return
+    /// the nth call's rules payload. Fuses the `wait_until(len == n)` +
+    /// `[n - 1].1` idiom used by the resolution assertions.
+    async fn await_nth_update_rules(scanner: &MockScanner, n: usize) -> Vec<UploadRule> {
+        wait_until(|| scanner.update_rules_calls().len() == n).await;
+        scanner.update_rules_calls()[n - 1].1.clone()
+    }
+
+    /// Fire a SyncSuccess event on the syncer's watch channel; the worker
+    /// re-resolves from disk in response.
+    fn fire_sync_success(syncer: &MockSyncer) {
+        syncer
+            .get_transmitter()
+            .send(SyncEvent::SyncSuccess)
+            .unwrap();
+    }
+
     /// Spawn the scan bridge worker against the given mocks/stores with a
     /// oneshot-driven shutdown. Returns the run task handle and the shutdown
     /// trigger; sending on the trigger fires the shutdown future.
@@ -145,7 +197,7 @@ pub mod run {
         scanner: Arc<MockScanner>,
         syncer: Arc<MockSyncer>,
         stores: Arc<Stores>,
-    ) -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
+    ) -> (JoinHandle<()>, oneshot::Sender<()>) {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let shutdown_signal = Box::pin(async move {
             let _ = shutdown_rx.await;
@@ -164,6 +216,45 @@ pub mod run {
         (handle, shutdown_tx)
     }
 
+    /// A running scan bridge worker plus the mocks/stores it drives. Built with
+    /// [`Bridge::start`] over an already-seeded `Arc<Stores>` — the worker does a
+    /// single startup disk read before its event loop, so seeding must precede
+    /// start. Dropping the fixture resolves the retained shutdown sender (which
+    /// fires the worker's shutdown select) and aborts the task as a backstop.
+    struct Bridge {
+        stores: Arc<Stores>,
+        scanner: Arc<MockScanner>,
+        syncer: Arc<MockSyncer>,
+        handle: JoinHandle<()>,
+        _shutdown: oneshot::Sender<()>,
+    }
+
+    impl Bridge {
+        /// Spawn the worker over the (already-seeded) stores. Seed the stores
+        /// first: the worker reads disk once at startup, so spawning before
+        /// seeding would race that read.
+        async fn start(
+            stores: Arc<Stores>,
+            scanner: Arc<MockScanner>,
+            syncer: Arc<MockSyncer>,
+        ) -> Bridge {
+            let (handle, shutdown) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+            Bridge {
+                stores,
+                scanner,
+                syncer,
+                handle,
+                _shutdown: shutdown,
+            }
+        }
+    }
+
+    impl Drop for Bridge {
+        fn drop(&mut self) {
+            self.handle.abort();
+        }
+    }
+
     // =============================== TESTS ======================================= //
 
     // (1) At startup the worker seeds the scanner exactly once from the currently
@@ -175,18 +266,17 @@ pub mod run {
         let r2 = rule_with("r2", "/none/*.mcap", 0);
         stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
 
-        let scanner = Arc::new(MockScanner::default());
-        let syncer = Arc::new(MockSyncer::default());
-        let (_handle, _shutdown) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+        let b = Bridge::start(
+            stores,
+            Arc::new(MockScanner::default()),
+            Arc::new(MockSyncer::default()),
+        )
+        .await;
 
-        wait_until(|| scanner.update_rules_calls().len() == 1).await;
-        let calls = scanner.update_rules_calls();
-        assert_eq!(calls[0].0.id, "dpl");
-        assert_eq!(
-            rule_ids(&calls[0].1),
-            std::collections::BTreeSet::from(["r1".to_string(), "r2".to_string()])
-        );
-        assert_eq!(scanner.clear_rules_calls(), 0);
+        let payload = await_nth_update_rules(&b.scanner, 1).await;
+        assert_eq!(b.scanner.update_rules_calls()[0].0.id, "dpl");
+        assert_eq!(rule_ids(&payload), rule_id_set(["r1", "r2"]));
+        assert_eq!(b.scanner.clear_rules_calls(), 0);
     }
 
     // (2) A SyncSuccess event re-resolves from disk: after mutating the deployed
@@ -199,49 +289,25 @@ pub mod run {
             .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
             .await;
 
-        let scanner = Arc::new(MockScanner::default());
-        let syncer = Arc::new(MockSyncer::default());
-        let (_handle, _shutdown) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+        let b = Bridge::start(
+            stores,
+            Arc::new(MockScanner::default()),
+            Arc::new(MockSyncer::default()),
+        )
+        .await;
 
         // startup seed resolves to [r1].
-        wait_until(|| scanner.update_rules_calls().len() == 1).await;
-        assert_eq!(
-            rule_ids(&scanner.update_rules_calls()[0].1),
-            std::collections::BTreeSet::from(["r1".to_string()])
-        );
+        let payload = await_nth_update_rules(&b.scanner, 1).await;
+        assert_eq!(rule_ids(&payload), rule_id_set(["r1"]));
 
         // add r2's body and point the release at [r1, r2].
-        let r2 = rule_with("r2", "/none/*.mcap", 0);
-        stores
-            .upload_rules
-            .write_if_absent("r2".to_string(), r2, |_, _| false)
-            .await
-            .unwrap();
-        stores
-            .releases
-            .write(
-                "rel".to_string(),
-                Release {
-                    id: "rel".to_string(),
-                    upload_rule_ids: vec!["r1".to_string(), "r2".to_string()],
-                    ..Default::default()
-                },
-                |_, _| false,
-                miru_agent::filesys::Overwrite::Allow,
-            )
-            .await
-            .unwrap();
+        b.stores.put_rule("r2", "/none/*.mcap").await;
+        b.stores.set_release_rules("rel", &["r1", "r2"]).await;
 
         // fire a SyncSuccess event; the worker re-resolves and pushes [r1, r2].
-        syncer
-            .get_transmitter()
-            .send(SyncEvent::SyncSuccess)
-            .unwrap();
-        wait_until(|| scanner.update_rules_calls().len() == 2).await;
-        assert_eq!(
-            rule_ids(&scanner.update_rules_calls()[1].1),
-            std::collections::BTreeSet::from(["r1".to_string(), "r2".to_string()])
-        );
+        fire_sync_success(&b.syncer);
+        let payload = await_nth_update_rules(&b.scanner, 2).await;
+        assert_eq!(rule_ids(&payload), rule_id_set(["r1", "r2"]));
     }
 
     // (3) With no Deployed deployment (only a Queued one), the worker clears the
@@ -251,12 +317,15 @@ pub mod run {
         let stores = Arc::new(Stores::new().await);
         stores.seed_queued("dpl", "rel").await;
 
-        let scanner = Arc::new(MockScanner::default());
-        let syncer = Arc::new(MockSyncer::default());
-        let (_handle, _shutdown) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+        let b = Bridge::start(
+            stores,
+            Arc::new(MockScanner::default()),
+            Arc::new(MockSyncer::default()),
+        )
+        .await;
 
-        wait_until(|| scanner.clear_rules_calls() == 1).await;
-        assert_eq!(scanner.update_rules_calls().len(), 0);
+        wait_until(|| b.scanner.clear_rules_calls() == 1).await;
+        assert_eq!(b.scanner.update_rules_calls().len(), 0);
     }
 
     // (4) A failing update_rules is logged, not propagated: the worker survives to
@@ -279,19 +348,15 @@ pub mod run {
                 },
             ))
         });
-        let syncer = Arc::new(MockSyncer::default());
-        let (_handle, _shutdown) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+        let b = Bridge::start(stores, scanner, Arc::new(MockSyncer::default())).await;
 
         // startup seed: the update_rules call happened but returned Err (logged).
-        wait_until(|| scanner.update_rules_calls().len() == 1).await;
+        wait_until(|| b.scanner.update_rules_calls().len() == 1).await;
 
         // recover: subsequent calls succeed, and a new event is still handled.
-        scanner.set_update_rules(|| Ok(()));
-        syncer
-            .get_transmitter()
-            .send(SyncEvent::SyncSuccess)
-            .unwrap();
-        wait_until(|| scanner.update_rules_calls().len() == 2).await;
+        b.scanner.set_update_rules(|| Ok(()));
+        fire_sync_success(&b.syncer);
+        wait_until(|| b.scanner.update_rules_calls().len() == 2).await;
     }
 
     // (5) Firing the shutdown future makes run() return: the spawned task's
