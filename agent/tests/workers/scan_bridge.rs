@@ -326,6 +326,57 @@ pub mod run {
 
         wait_until(|| b.scanner.clear_rules_calls() == 1).await;
         assert_eq!(b.scanner.update_rules_calls().len(), 0);
+
+        // a subsequent SyncSuccess re-resolves and clears again (clear on every event).
+        fire_sync_success(&b.syncer);
+        wait_until(|| b.scanner.clear_rules_calls() == 2).await;
+        assert_eq!(b.scanner.update_rules_calls().len(), 0);
+    }
+
+    // A failing resolve (Deployed deployment whose release is missing → DiskErr::CacheErr
+    // → ScanErr::CacheErr) is logged, not propagated: it produces neither an update_rules
+    // nor a clear_rules call, and the worker survives to handle the next event.
+    #[tokio::test]
+    async fn resolve_error_is_logged_and_worker_survives() {
+        let stores = Arc::new(Stores::new().await);
+        // Deployed deployment whose release_id "absent" is never written, so
+        // find_deployed returns Some but reading the release errors.
+        stores
+            .deployments
+            .write_if_absent(
+                "dpl".to_string(),
+                Deployment {
+                    id: "dpl".to_string(),
+                    activity_status: DplActivity::Deployed,
+                    release_id: "absent".to_string(),
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+
+        let b = Bridge::start(
+            stores,
+            Arc::new(MockScanner::default()),
+            Arc::new(MockSyncer::default()),
+        )
+        .await;
+
+        // The startup resolve errors: neither update_rules nor clear_rules is called.
+        // Give the worker a chance to reach its event loop, then assert both are 0.
+        wait_until(|| true).await;
+        assert_eq!(b.scanner.update_rules_calls().len(), 0);
+        assert_eq!(b.scanner.clear_rules_calls(), 0);
+
+        // Recover: wire up r1 + the previously-absent release, then fire a sync.
+        // The first successful update_rules is call #1 (the error path produced none),
+        // proving the worker survived the resolve error.
+        b.stores.put_rule("r1", "/none/*.mcap").await;
+        b.stores.set_release_rules("absent", &["r1"]).await;
+        fire_sync_success(&b.syncer);
+        let payload = await_nth_update_rules(&b.scanner, 1).await;
+        assert_eq!(rule_ids(&payload), rule_id_set(["r1"]));
     }
 
     // A failing update_rules is logged, not propagated: the worker survives to handle
@@ -357,6 +408,36 @@ pub mod run {
         b.scanner.set_update_rules(|| Ok(()));
         fire_sync_success(&b.syncer);
         wait_until(|| b.scanner.update_rules_calls().len() == 2).await;
+    }
+
+    // A failing clear_rules is logged, not propagated: with no Deployed deployment the
+    // worker clears at startup (returning Err → logged), then survives to clear again on
+    // the next SyncSuccess event.
+    #[tokio::test]
+    async fn clear_rules_error_is_logged_and_worker_survives() {
+        let stores = Arc::new(Stores::new().await);
+        stores.seed_queued("dpl", "rel").await;
+
+        let scanner = Arc::new(MockScanner::default());
+        // first clear_rules errors; flip to Ok before the next event.
+        scanner.set_clear_rules(|| {
+            Err(ScanErr::InternalError(
+                miru_agent::scan::errors::InternalError {
+                    message: "boom".to_string(),
+                    trace: miru_agent::trace!(),
+                },
+            ))
+        });
+        let b = Bridge::start(stores, scanner, Arc::new(MockSyncer::default())).await;
+
+        // startup clear: the clear_rules call happened but returned Err (logged).
+        wait_until(|| b.scanner.clear_rules_calls() == 1).await;
+
+        // recover: subsequent clears succeed, and a new event is still handled.
+        b.scanner.set_clear_rules(|| Ok(()));
+        fire_sync_success(&b.syncer);
+        wait_until(|| b.scanner.clear_rules_calls() == 2).await;
+        assert_eq!(b.scanner.update_rules_calls().len(), 0);
     }
 
     // Firing the shutdown future makes run() return: the spawned task's JoinHandle
