@@ -451,6 +451,28 @@ pub mod resume {
         temp_file_with(&bytes).await
     }
 
+    /// Asserts the last recorded request's CompleteMultipartUpload manifest lists
+    /// each `(part_number, etag)` in the given order.
+    fn assert_complete_manifest(replay: &StaticReplayClient, parts: &[(i32, &str)]) {
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        let body = requests
+            .last()
+            .unwrap()
+            .body()
+            .bytes()
+            .expect("in-memory body");
+        let manifest = std::str::from_utf8(body).unwrap();
+        let mut prev = 0;
+        for (number, etag) in parts {
+            let at = manifest
+                .find(&format!("<PartNumber>{number}</PartNumber>"))
+                .unwrap_or_else(|| panic!("part {number} not listed"));
+            assert!(at >= prev, "part {number} out of order");
+            prev = at;
+            assert!(manifest.contains(etag), "part {number} missing etag {etag}");
+        }
+    }
+
     #[tokio::test]
     async fn resume_skips_landed_parts() {
         let tf = two_part_file().await;
@@ -476,32 +498,8 @@ pub mod resume {
             vec![list_parts_shape(), upload_part_shape(2), complete_shape()]
         );
 
-        // Complete manifest lists both parts in order with the landed + fresh etags.
-        let requests = replay.actual_requests().collect::<Vec<_>>();
-        let manifest = std::str::from_utf8(
-            requests
-                .last()
-                .unwrap()
-                .body()
-                .bytes()
-                .expect("in-memory complete body"),
-        )
-        .unwrap();
-        let p1 = manifest
-            .find("<PartNumber>1</PartNumber>")
-            .expect("part 1 listed");
-        let p2 = manifest
-            .find("<PartNumber>2</PartNumber>")
-            .expect("part 2 listed");
-        assert!(p1 < p2, "parts ascending");
-        assert!(
-            manifest.contains("landed-1"),
-            "part 1 reuses its landed etag"
-        );
-        assert!(
-            manifest.contains("fresh-2"),
-            "part 2 carries the freshly-uploaded etag"
-        );
+        // Both parts listed in order: part 1 reuses its landed etag, part 2 the fresh one.
+        assert_complete_manifest(&replay, &[(1, "landed-1"), (2, "fresh-2")]);
     }
 
     #[tokio::test]
@@ -660,31 +658,7 @@ pub mod resume {
             vec![list_parts_shape(), complete_shape()]
         );
 
-        // The complete manifest lists both landed parts in ascending order.
-        let requests = replay.actual_requests().collect::<Vec<_>>();
-        let manifest = std::str::from_utf8(
-            requests
-                .last()
-                .unwrap()
-                .body()
-                .bytes()
-                .expect("in-memory complete body"),
-        )
-        .unwrap();
-        let p1 = manifest
-            .find("<PartNumber>1</PartNumber>")
-            .expect("part 1 listed");
-        let p2 = manifest
-            .find("<PartNumber>2</PartNumber>")
-            .expect("part 2 listed");
-        assert!(p1 < p2, "parts ascending");
-        assert!(
-            manifest.contains("landed-1"),
-            "part 1 reuses its landed etag"
-        );
-        assert!(
-            manifest.contains("landed-2"),
-            "part 2 reuses its landed etag"
-        );
+        // Both landed parts listed in ascending order.
+        assert_complete_manifest(&replay, &[(1, "landed-1"), (2, "landed-2")]);
     }
 }
