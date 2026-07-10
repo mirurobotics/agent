@@ -83,6 +83,18 @@ impl std::fmt::Display for Object {
     }
 }
 
+impl Object {
+    /// The GCS resource name of this object's bucket
+    /// (`projects/_/buckets/<bucket>`). Both transports address a bucket by this
+    /// path, so an `Object` fully identifies its target — mirroring how s3 takes
+    /// the bucket straight from the `Object`. This wire-path assembly has no s3
+    /// analog: it is a GCS-forced detail, kept in one place instead of rebuilt at
+    /// each call site.
+    fn bucket_resource(&self) -> String {
+        format!("projects/_/buckets/{}", self.bucket)
+    }
+}
+
 /// A [`CredentialsProvider`] that emits a fixed `Authorization: Bearer <token>`
 /// header. Built once at [`Store`] construction from a caller-supplied
 /// short-lived access token; the SDK re-invokes [`Self::headers`] per request.
@@ -230,9 +242,7 @@ impl Store {
     /// Streams a file to GCS via a single `write_object` call. The SDK internally
     /// chooses simple vs resumable transfer by payload size.
     pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), GcsErr> {
-        // Rebuild the resource path from `dst.bucket` so an `Object` fully
-        // identifies its target, mirroring how s3 takes the bucket from `dst`.
-        let resource = format!("projects/_/buckets/{}", dst.bucket);
+        let resource = dst.bucket_resource();
         let file = tokio::fs::File::open(src.path())
             .await
             .map_err(|e| errors::map_body_io_err("put_object", dst, src, e))?;
@@ -247,13 +257,17 @@ impl Store {
     /// Streams an object's body to a destination file, chunk-by-chunk. A missing
     /// object maps to [`GcsErr::ObjectNotFoundErr`].
     pub async fn get(&self, src: &Object, dest: &File) -> Result<(), GcsErr> {
-        let resource = format!("projects/_/buckets/{}", src.bucket);
-        let mut resp = self
-            .data
-            .read_object(&resource, &src.key)
-            .send()
-            .await
-            .map_err(|e| self.classify_read_err(src, e))?;
+        let resource = src.bucket_resource();
+        let mut resp = match self.data.read_object(&resource, &src.key).send().await {
+            Ok(resp) => resp,
+            Err(e) if is_not_found(&e) => {
+                return Err(GcsErr::ObjectNotFoundErr(errors::ObjectNotFoundErr {
+                    key: src.key.to_string(),
+                    trace: trace!(),
+                }))
+            }
+            Err(e) => return Err(map_gcs_err("get_object", Some(&src.key), e)),
+        };
 
         let mut file = tokio::fs::File::create(dest.path())
             .await
@@ -276,7 +290,7 @@ impl Store {
     /// object was already gone) is treated as success, matching s3's idempotent
     /// delete.
     pub async fn delete(&self, obj: &Object) -> Result<(), GcsErr> {
-        let resource = format!("projects/_/buckets/{}", obj.bucket);
+        let resource = obj.bucket_resource();
         match self
             .control
             .delete_object()
@@ -294,7 +308,7 @@ impl Store {
     /// Returns `true` if the object exists, `false` on a `NOT_FOUND`. Other
     /// errors propagate.
     pub async fn exists(&self, obj: &Object) -> Result<bool, GcsErr> {
-        let resource = format!("projects/_/buckets/{}", obj.bucket);
+        let resource = obj.bucket_resource();
         match self
             .control
             .get_object()
@@ -306,20 +320,6 @@ impl Store {
             Ok(_) => Ok(true),
             Err(e) if is_not_found(&e) => Ok(false),
             Err(e) => Err(map_gcs_err("get_object", Some(&obj.key), e)),
-        }
-    }
-
-    /// Classifies a `read_object` send error: a not-found becomes
-    /// [`GcsErr::ObjectNotFoundErr`]; everything else delegates to the common
-    /// mapper.
-    fn classify_read_err(&self, src: &Object, err: google_cloud_gax::error::Error) -> GcsErr {
-        if is_not_found(&err) {
-            GcsErr::ObjectNotFoundErr(errors::ObjectNotFoundErr {
-                key: src.key.to_string(),
-                trace: trace!(),
-            })
-        } else {
-            map_gcs_err("get_object", Some(&src.key), err)
         }
     }
 
