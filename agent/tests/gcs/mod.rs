@@ -15,7 +15,7 @@ use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::gcs::errors::{
     ConnectionErr, InvalidResponseErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
 };
-use miru_agent::gcs::{Config, Credentials, GcsErr, Object, Store};
+use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
 
 // external crates
 use axum::body::Bytes;
@@ -154,11 +154,9 @@ fn http_router(rec: HttpRecorder) -> Router {
 /// Builds a `Store` pointed at a freshly started HTTP mock server.
 async fn http_store(rec: HttpRecorder) -> Store {
     let server = run_server(http_router(rec)).await;
-    let cfg = Config {
-        creds: Credentials::default(),
-        bucket: BUCKET.to_string(),
-    };
-    Store::from_endpoint(cfg, server.base_url).await.unwrap()
+    Store::from_endpoint(Credentials::default(), server.base_url)
+        .await
+        .unwrap()
 }
 
 pub mod put {
@@ -377,13 +375,13 @@ mockall::mock! {
 /// Builds a `Store` whose control client is the given mock. The data client is
 /// pointed at an unused loopback endpoint (never called by delete/exists).
 async fn control_store(mock: MockStorageControl) -> Store {
-    let cfg = Config {
-        creds: Credentials::default(),
-        bucket: BUCKET.to_string(),
-    };
-    Store::from_stub(mock, cfg, "http://127.0.0.1:0".to_string())
-        .await
-        .unwrap()
+    Store::from_stub(
+        mock,
+        Credentials::default(),
+        "http://127.0.0.1:0".to_string(),
+    )
+    .await
+    .unwrap()
 }
 
 fn not_found_err() -> GaxError {
@@ -500,26 +498,20 @@ pub mod construction {
 
     #[tokio::test]
     async fn new_builds_with_valid_token() {
-        let cfg = Config {
-            creds: Credentials {
-                access_token: "valid-token".to_string(),
-            },
-            bucket: "prod-bucket".to_string(),
+        let creds = Credentials {
+            access_token: "valid-token".to_string(),
         };
-        let store = Store::new(cfg).await;
+        let store = Store::new(creds).await;
         assert!(store.is_ok());
     }
 
     #[tokio::test]
     async fn new_rejects_bad_token() {
         // A newline is not a valid HTTP header value byte.
-        let cfg = Config {
-            creds: Credentials {
-                access_token: "bad\ntoken".to_string(),
-            },
-            bucket: "prod-bucket".to_string(),
+        let creds = Credentials {
+            access_token: "bad\ntoken".to_string(),
         };
-        let result = Store::new(cfg).await;
+        let result = Store::new(creds).await;
         match result {
             Err(GcsErr::InvalidResponseErr(_)) => {}
             Ok(_) => panic!("expected InvalidResponseErr, got Ok"),

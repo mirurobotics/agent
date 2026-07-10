@@ -3,18 +3,19 @@
 //! This module talks to a GCS bucket over the network. Its public API mirrors
 //! the S3 object-storage module: a [`Store`] exposes [`Store::put`],
 //! [`Store::put_singlepart`], [`Store::get`], [`Store::delete`], and
-//! [`Store::exists`] over the [`Config`], [`Credentials`], [`Object`], and
+//! [`Store::exists`] over the [`Credentials`], [`Object`], and
 //! [`crate::filesys::file::File`] value types, so `gcs::Store` reads as a
 //! faithful sibling of `s3::Store`. Like the S3 module it is distinct from
 //! [`crate::disk`], which manages local on-disk device state (device.json,
 //! settings.json, ...). Do not conflate the two.
 //!
 //! A [`Store`] is constructed **only** from a caller-supplied short-lived
-//! OAuth2 access token plus a bucket name. It never reads ambient Google
-//! configuration (Application Default Credentials, environment variables, the
-//! GCE/GKE metadata server): the Miru backend mints short-lived tokens and hands
-//! them to the agent, mirroring how the S3 module takes short-lived STS
-//! credentials.
+//! OAuth2 access token. It never reads ambient Google configuration
+//! (Application Default Credentials, environment variables, the GCE/GKE
+//! metadata server): the Miru backend mints short-lived tokens and hands them
+//! to the agent, mirroring how the S3 module takes short-lived STS credentials.
+//! The target bucket is not held on the `Store`; it rides on each [`Object`],
+//! mirroring s3 where the bucket travels with the `Object`.
 //!
 //! Object bodies are streamed to and from disk (never buffered whole in memory)
 //! so the agent can move multi-gigabyte artifacts on memory-constrained devices.
@@ -50,13 +51,6 @@ pub mod errors;
 
 pub use errors::GcsErr;
 use errors::{is_not_found, map_gcs_err, InvalidResponseErr};
-
-pub struct Config {
-    pub creds: Credentials,
-    // GCS has no region; `bucket` occupies the structural slot `s3::Config::region`
-    // holds and forms the `projects/_/buckets/<bucket>` resource path.
-    pub bucket: String,
-}
 
 /// Caller-facing credentials: the short-lived OAuth2 access token the backend
 /// mints. Internally this is turned into the [`StaticTokenCredentials`] provider
@@ -125,9 +119,9 @@ impl CredentialsProvider for StaticTokenCredentials {
     }
 }
 
-/// An async GCS client scoped to a single bucket, holding the HTTP data client
-/// ([`Storage`]) for uploads/downloads and the gRPC control client
-/// ([`StorageControl`]) for delete/exists.
+/// An async GCS client holding the HTTP data client ([`Storage`]) for
+/// uploads/downloads and the gRPC control client ([`StorageControl`]) for
+/// delete/exists.
 pub struct Store {
     data: Storage,
     control: StorageControl,
@@ -135,23 +129,23 @@ pub struct Store {
 
 impl Store {
     /// Builds a store from caller-supplied credentials (a short-lived OAuth2
-    /// access token) and bucket.
+    /// access token).
     ///
     /// Unlike s3's `new`, this is fallible and async: fallible because the token
     /// is turned into an `Authorization` header value and an invalid byte in the
     /// token makes that conversion fail; async because the GCS client builders
     /// are async. Building performs async client setup but makes no real GCS
     /// call, so it is safe to run in a `#[tokio::test]`.
-    pub async fn new(cfg: Config) -> Result<Self, GcsErr> {
-        Self::build(cfg, None, None).await
+    pub async fn new(creds: Credentials) -> Result<Self, GcsErr> {
+        Self::build(creds, None, None).await
     }
 
     /// Test-only seam pointing the HTTP data client at `endpoint` (a local mock
     /// server) while building a real gRPC control client. Used by the put/get
     /// data-path tests; the control client is never called by those ops.
     #[cfg(feature = "test")]
-    pub async fn from_endpoint(cfg: Config, endpoint: String) -> Result<Self, GcsErr> {
-        Self::build(cfg, Some(endpoint), None).await
+    pub async fn from_endpoint(creds: Credentials, endpoint: String) -> Result<Self, GcsErr> {
+        Self::build(creds, Some(endpoint), None).await
     }
 
     /// Test-only seam that injects a stubbed [`StorageControl`] for the gRPC
@@ -160,13 +154,13 @@ impl Store {
     /// s3 injects one HTTP client via `from_http_client`; GCS must inject a gRPC
     /// control stub AND point the HTTP data client at `endpoint`, so this seam
     /// takes both — the closest the dual-transport reality gets to s3's single
-    /// `(http_client, cfg)` pairing.
+    /// `(http_client, credentials)` pairing.
     #[cfg(feature = "test")]
-    pub async fn from_stub<T>(stub: T, cfg: Config, endpoint: String) -> Result<Self, GcsErr>
+    pub async fn from_stub<T>(stub: T, creds: Credentials, endpoint: String) -> Result<Self, GcsErr>
     where
         T: google_cloud_storage::stub::StorageControl + 'static,
     {
-        Self::build(cfg, Some(endpoint), Some(StorageControl::from_stub(stub))).await
+        Self::build(creds, Some(endpoint), Some(StorageControl::from_stub(stub))).await
     }
 
     /// Shared constructor body: builds the `Bearer` header from the token and
@@ -175,13 +169,13 @@ impl Store {
     /// building a real one. The target bucket rides on each [`Object`], so it is
     /// not stored on the `Store`.
     async fn build(
-        cfg: Config,
+        creds: Credentials,
         endpoint: Option<String>,
         control_override: Option<StorageControl>,
     ) -> Result<Self, GcsErr> {
         // Token -> header can fail on an invalid byte, which is why `new` is
         // fallible where s3's is not.
-        let header_value = HeaderValue::from_str(&format!("Bearer {}", cfg.creds.access_token))
+        let header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
             .map_err(|e| {
                 GcsErr::InvalidResponseErr(InvalidResponseErr {
                     operation: "new".to_string(),
@@ -217,10 +211,6 @@ impl Store {
             }
         };
 
-        // `cfg.bucket` is validated by construction but not stored: each
-        // `Object` carries its own bucket, mirroring s3 where the bucket rides
-        // on the `Object` rather than the `Store`.
-        let _ = cfg.bucket;
         Ok(Self { data, control })
     }
 
