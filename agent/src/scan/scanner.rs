@@ -174,7 +174,7 @@ impl SingleThreadScanner {
     }
 
     async fn prune(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        for (_, scanner) in self.scanners.iter_mut() {
+        for scanner in self.scanners.values_mut() {
             scanner.prune_ledger(before)?;
         }
         Ok(())
