@@ -1,14 +1,21 @@
+//! Offline test suite for the `gcs` object-storage module, laid out to mirror
+//! `tests/s3/mod.rs`. There is deliberately no `multipart` submodule (and no
+//! `tests/gcs/multipart.rs`): GCS's `write_object` folds the multipart/resumable
+//! decision inside the SDK, so the module exposes no multipart surface to test.
+
 // standard crates
-use std::io::Write as _;
 use std::sync::{Arc, Mutex};
 
 // internal crates
 use crate::mocks::http_client::run_server;
 use miru_agent::errors::{Code, Error};
+use miru_agent::filesys::file::File;
+use miru_agent::filesys::path::PathExt;
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::gcs::errors::{
-    ConnectionErr, GcsErr, InvalidResponseErr, ObjectNotFoundErr, RequestFailedErr,
+    ConnectionErr, InvalidResponseErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
 };
-use miru_agent::gcs::GcsStore;
+use miru_agent::gcs::{Config, Credentials, GcsErr, Object, Store};
 
 // external crates
 use axum::body::Bytes;
@@ -20,17 +27,26 @@ use google_cloud_gax::error::rpc::{Code as GaxCode, Status};
 use google_cloud_gax::error::Error as GaxError;
 use google_cloud_gax::response::Response as GaxResponse;
 use google_cloud_storage as gcs;
-use tempfile::NamedTempFile;
 
 const BUCKET: &str = "test-bucket";
 
-/// Writes `bytes` to a fresh temp file and returns the handle (kept alive so the
+/// Builds an [`Object`] in the test bucket for the given key, keeping call sites
+/// terse (mirrors s3's `obj` helper).
+fn obj(key: &str) -> Object {
+    Object {
+        bucket: BUCKET.to_string(),
+        key: key.to_string(),
+    }
+}
+
+/// Writes `bytes` to a fresh temp file and returns the guard (kept alive so the
 /// file is not deleted until the test drops it).
-fn temp_file_with(bytes: &[u8]) -> NamedTempFile {
-    let mut f = NamedTempFile::new().unwrap();
-    f.write_all(bytes).unwrap();
-    f.flush().unwrap();
-    f
+async fn temp_file_with(bytes: &[u8]) -> files::TempFile {
+    let tf = files::temp("gcs-test").unwrap();
+    files::write_bytes(tf.file(), bytes, WriteOptions::OVERWRITE_NONATOMIC)
+        .await
+        .unwrap();
+    tf
 }
 
 // ============================ HTTP DATA-PATH MOCK ============================ //
@@ -135,142 +151,178 @@ fn http_router(rec: HttpRecorder) -> Router {
         .with_state(rec)
 }
 
-/// Builds a `GcsStore` pointed at a freshly started HTTP mock server.
-async fn http_store(rec: HttpRecorder) -> GcsStore {
+/// Builds a `Store` pointed at a freshly started HTTP mock server.
+async fn http_store(rec: HttpRecorder) -> Store {
     let server = run_server(http_router(rec)).await;
-    GcsStore::new(
-        "test-token".to_string(),
-        BUCKET.to_string(),
-        Some(server.base_url),
-    )
-    .await
-    .unwrap()
+    let cfg = Config {
+        creds: Credentials::default(),
+        bucket: BUCKET.to_string(),
+    };
+    Store::from_endpoint(cfg, server.base_url).await.unwrap()
 }
 
 pub mod put {
     use super::*;
 
-    #[tokio::test]
-    async fn upload_streams_file_body() {
-        let rec = HttpRecorder::default();
-        let store = http_store(rec.clone()).await;
-        let src = temp_file_with(b"hello world");
+    pub mod single {
+        use super::*;
 
-        store
-            .put_object("artifacts/hello.txt", src.path())
-            .await
-            .unwrap();
+        #[tokio::test]
+        async fn upload_streams_file_body() {
+            let rec = HttpRecorder::default();
+            let store = http_store(rec.clone()).await;
+            let src = temp_file_with(b"hello world").await;
 
-        let r = rec.inner.lock().unwrap();
-        assert_eq!(r.upload_hits, 1);
-        assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
+            store
+                .put(src.to_file(), &obj("artifacts/hello.txt"))
+                .await
+                .unwrap();
+
+            let r = rec.inner.lock().unwrap();
+            assert_eq!(r.upload_hits, 1);
+            assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
+        }
     }
 
-    #[tokio::test]
-    async fn upload_missing_source_maps_to_invalid_response() {
-        let rec = HttpRecorder::default();
-        let store = http_store(rec).await;
-        let missing = std::path::Path::new("/nonexistent/definitely/not/here.bin");
+    pub mod access_denied {
+        use super::*;
 
-        let err = store.put_object("k", missing).await.unwrap_err();
+        #[tokio::test]
+        async fn upload_error_maps_to_request_failed() {
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().upload_status = Some(StatusCode::FORBIDDEN);
+            let store = http_store(rec).await;
+            let src = temp_file_with(b"payload").await;
 
-        assert!(matches!(err, GcsErr::InvalidResponseErr(_)));
+            let err = store
+                .put(src.to_file(), &obj("denied.txt"))
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+        }
     }
 
-    #[tokio::test]
-    async fn upload_error_maps_to_request_failed() {
-        let rec = HttpRecorder::default();
-        rec.inner.lock().unwrap().upload_status = Some(StatusCode::FORBIDDEN);
-        let store = http_store(rec).await;
-        let src = temp_file_with(b"payload");
+    pub mod source_missing {
+        use super::*;
 
-        let err = store
-            .put_object("denied.txt", src.path())
-            .await
-            .unwrap_err();
+        #[tokio::test]
+        async fn upload_missing_source_maps_to_filesys_err() {
+            // A missing LOCAL source surfaces as `FileSysErr`: `put` stats the
+            // file first (mirroring s3), so the failure is caught reading the
+            // file's metadata before any request is dispatched.
+            let rec = HttpRecorder::default();
+            let store = http_store(rec).await;
+            let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+            let err = store.put(missing, &obj("k")).await.unwrap_err();
+
+            assert!(matches!(err, GcsErr::FileSysErr(_)));
+        }
     }
 }
 
 pub mod get {
     use super::*;
 
-    #[tokio::test]
-    async fn download_streams_body_to_file() {
-        let payload = b"\x00\x01\x02binary-body\xff".to_vec();
-        let rec = HttpRecorder::default();
-        rec.inner.lock().unwrap().download_body = payload.clone();
-        let store = http_store(rec.clone()).await;
-        let dest = NamedTempFile::new().unwrap();
+    pub mod success {
+        use super::*;
 
-        store
-            .get_object("blobs/data.bin", dest.path())
-            .await
-            .unwrap();
+        #[tokio::test]
+        async fn download_streams_body_to_file() {
+            let payload = b"\x00\x01\x02binary-body\xff".to_vec();
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_body = payload.clone();
+            let store = http_store(rec.clone()).await;
+            let dest = files::temp("gcs-dest").unwrap();
 
-        let written = std::fs::read(dest.path()).unwrap();
-        assert_eq!(written, payload);
-        let r = rec.inner.lock().unwrap();
-        assert_eq!(r.download_hits, 1);
-        assert!(r.saw_bearer, "download must carry Authorization: Bearer");
+            store
+                .get(&obj("blobs/data.bin"), dest.file())
+                .await
+                .unwrap();
+
+            assert_eq!(files::read_bytes(dest.file()).await.unwrap(), payload);
+            let r = rec.inner.lock().unwrap();
+            assert_eq!(r.download_hits, 1);
+            assert!(r.saw_bearer, "download must carry Authorization: Bearer");
+        }
     }
 
-    #[tokio::test]
-    async fn download_missing_maps_to_not_found() {
-        let rec = HttpRecorder::default();
-        rec.inner.lock().unwrap().download_status = Some(StatusCode::NOT_FOUND);
-        let store = http_store(rec).await;
-        let dest = NamedTempFile::new().unwrap();
+    pub mod dest_unwritable {
+        use super::*;
 
-        let err = store
-            .get_object("missing.txt", dest.path())
-            .await
-            .unwrap_err();
+        #[tokio::test]
+        async fn download_to_unwritable_dest_maps_to_local_io_err() {
+            let payload = b"body".to_vec();
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_body = payload;
+            let store = http_store(rec).await;
+            // The destination's parent directory does not exist, so creating the
+            // file fails after the object is fetched.
+            let dest = File::new("/nonexistent/dir/out.bin");
 
-        assert!(matches!(err, GcsErr::ObjectNotFoundErr(_)));
-        assert!(matches!(err.code(), Code::ResourceNotFound));
-        assert_eq!(err.http_status().as_u16(), 404);
+            let err = store.get(&obj("blobs/data.bin"), &dest).await.unwrap_err();
+
+            assert!(matches!(err, GcsErr::LocalIoErr(_)));
+            // Creating the file failed, so nothing was written at `dest`.
+            assert!(!dest.path().exists());
+        }
     }
 
-    #[tokio::test]
-    async fn download_error_maps_to_request_failed() {
-        // A non-404 download failure (403) delegates to the common mapper.
-        let rec = HttpRecorder::default();
-        rec.inner.lock().unwrap().download_status = Some(StatusCode::FORBIDDEN);
-        let store = http_store(rec).await;
-        let dest = NamedTempFile::new().unwrap();
+    pub mod not_found {
+        use super::*;
 
-        let err = store
-            .get_object("denied.txt", dest.path())
-            .await
-            .unwrap_err();
+        #[tokio::test]
+        async fn download_missing_maps_to_not_found() {
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_status = Some(StatusCode::NOT_FOUND);
+            let store = http_store(rec).await;
+            let dest = files::temp("gcs-dest").unwrap();
 
-        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+            let err = store
+                .get(&obj("missing.txt"), dest.file())
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, GcsErr::ObjectNotFoundErr(_)));
+            assert!(matches!(err.code(), Code::ResourceNotFound));
+            assert_eq!(err.http_status().as_u16(), 404);
+        }
     }
 
-    #[tokio::test]
-    async fn download_to_unwritable_dest_maps_to_invalid_response() {
-        let payload = b"body".to_vec();
-        let rec = HttpRecorder::default();
-        rec.inner.lock().unwrap().download_body = payload;
-        let store = http_store(rec).await;
-        // The destination's parent directory does not exist, so creating the
-        // file fails after the object is fetched.
-        let dest = std::path::Path::new("/nonexistent/dir/out.bin");
+    pub mod access_denied {
+        use super::*;
 
-        let err = store.get_object("blobs/data.bin", dest).await.unwrap_err();
+        #[tokio::test]
+        async fn download_error_maps_to_request_failed() {
+            // A non-404 download failure (403) delegates to the common mapper.
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_status = Some(StatusCode::FORBIDDEN);
+            let store = http_store(rec).await;
+            let dest = files::temp("gcs-dest").unwrap();
 
-        assert!(matches!(err, GcsErr::InvalidResponseErr(_)));
+            let err = store
+                .get(&obj("denied.txt"), dest.file())
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+        }
     }
+
+    // note: s3's `get::truncated_body` and `get::transport_failure` cases have no
+    // clean GCS mock analog. The axum data-path mock finalizes each download via
+    // the `x-goog-generation` header, so a truncated-body or dispatch-failure
+    // condition cannot be simulated the way s3's `StaticReplayClient` allows;
+    // both are intentionally omitted.
 }
 
 // ============================ gRPC CONTROL-PATH MOCK ============================ //
 //
 // The `StorageControl` client's delete/get-object go over gRPC. Rather than
 // stand up a tonic server, we mock the public `gcs::stub::StorageControl` trait
-// with `mockall` and inject it via `GcsStore::with_control_stub` (which builds
-// the control client with `StorageControl::from_stub`). Only `delete_object` and
+// with `mockall` and inject it via `Store::from_stub` (which builds the control
+// client with `StorageControl::from_stub`). Only `delete_object` and
 // `get_object` are ever exercised; the rest of the 33-method trait surface must
 // be listed for `mockall` but is never called.
 
@@ -322,10 +374,14 @@ mockall::mock! {
     }
 }
 
-/// Builds a `GcsStore` whose control client is the given mock. The data client
-/// is pointed at an unused loopback endpoint (never called by delete/exists).
-async fn control_store(mock: MockStorageControl) -> GcsStore {
-    GcsStore::with_control_stub(mock, BUCKET.to_string(), "http://127.0.0.1:0".to_string())
+/// Builds a `Store` whose control client is the given mock. The data client is
+/// pointed at an unused loopback endpoint (never called by delete/exists).
+async fn control_store(mock: MockStorageControl) -> Store {
+    let cfg = Config {
+        creds: Credentials::default(),
+        bucket: BUCKET.to_string(),
+    };
+    Store::from_stub(mock, cfg, "http://127.0.0.1:0".to_string())
         .await
         .unwrap()
 }
@@ -341,79 +397,99 @@ fn permission_denied_err() -> GaxError {
 pub mod delete {
     use super::*;
 
-    #[tokio::test]
-    async fn delete_removes_object() {
-        let mut mock = MockStorageControl::new();
-        mock.expect_delete_object()
-            .times(1)
-            .returning(|_, _| Ok(GaxResponse::from(())));
-        let store = control_store(mock).await;
+    pub mod success {
+        use super::*;
 
-        store.delete_object("blobs/data.bin").await.unwrap();
+        #[tokio::test]
+        async fn delete_removes_object() {
+            let mut mock = MockStorageControl::new();
+            mock.expect_delete_object()
+                .times(1)
+                .returning(|_, _| Ok(GaxResponse::from(())));
+            let store = control_store(mock).await;
+
+            store.delete(&obj("blobs/data.bin")).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn delete_missing_is_idempotent() {
+            let mut mock = MockStorageControl::new();
+            mock.expect_delete_object()
+                .times(1)
+                .returning(|_, _| Err(not_found_err()));
+            let store = control_store(mock).await;
+
+            // A NOT_FOUND delete is a success (idempotent).
+            store.delete(&obj("missing.txt")).await.unwrap();
+        }
     }
 
-    #[tokio::test]
-    async fn delete_missing_is_idempotent() {
-        let mut mock = MockStorageControl::new();
-        mock.expect_delete_object()
-            .times(1)
-            .returning(|_, _| Err(not_found_err()));
-        let store = control_store(mock).await;
+    pub mod access_denied {
+        use super::*;
 
-        // A NOT_FOUND delete is a success (idempotent).
-        store.delete_object("missing.txt").await.unwrap();
-    }
+        #[tokio::test]
+        async fn delete_error_maps_to_request_failed() {
+            let mut mock = MockStorageControl::new();
+            mock.expect_delete_object()
+                .times(1)
+                .returning(|_, _| Err(permission_denied_err()));
+            let store = control_store(mock).await;
 
-    #[tokio::test]
-    async fn delete_error_maps_to_request_failed() {
-        let mut mock = MockStorageControl::new();
-        mock.expect_delete_object()
-            .times(1)
-            .returning(|_, _| Err(permission_denied_err()));
-        let store = control_store(mock).await;
+            let err = store.delete(&obj("denied.txt")).await.unwrap_err();
 
-        let err = store.delete_object("denied.txt").await.unwrap_err();
-
-        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+            assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+        }
     }
 }
 
 pub mod exists {
     use super::*;
 
-    #[tokio::test]
-    async fn present_returns_true() {
-        let mut mock = MockStorageControl::new();
-        mock.expect_get_object()
-            .times(1)
-            .returning(|_, _| Ok(GaxResponse::from(gcs::model::Object::default())));
-        let store = control_store(mock).await;
+    pub mod present {
+        use super::*;
 
-        assert!(store.object_exists("blobs/data.bin").await.unwrap());
+        #[tokio::test]
+        async fn present_returns_true() {
+            let mut mock = MockStorageControl::new();
+            mock.expect_get_object()
+                .times(1)
+                .returning(|_, _| Ok(GaxResponse::from(gcs::model::Object::default())));
+            let store = control_store(mock).await;
+
+            assert!(store.exists(&obj("blobs/data.bin")).await.unwrap());
+        }
     }
 
-    #[tokio::test]
-    async fn absent_returns_false() {
-        let mut mock = MockStorageControl::new();
-        mock.expect_get_object()
-            .times(1)
-            .returning(|_, _| Err(not_found_err()));
-        let store = control_store(mock).await;
+    pub mod absent {
+        use super::*;
 
-        assert!(!store.object_exists("missing.txt").await.unwrap());
+        #[tokio::test]
+        async fn absent_returns_false() {
+            let mut mock = MockStorageControl::new();
+            mock.expect_get_object()
+                .times(1)
+                .returning(|_, _| Err(not_found_err()));
+            let store = control_store(mock).await;
+
+            assert!(!store.exists(&obj("missing.txt")).await.unwrap());
+        }
     }
 
-    #[tokio::test]
-    async fn error_propagates() {
-        let mut mock = MockStorageControl::new();
-        mock.expect_get_object()
-            .times(1)
-            .returning(|_, _| Err(permission_denied_err()));
-        let store = control_store(mock).await;
+    pub mod access_denied {
+        use super::*;
 
-        let err = store.object_exists("denied.txt").await.unwrap_err();
+        #[tokio::test]
+        async fn error_propagates() {
+            let mut mock = MockStorageControl::new();
+            mock.expect_get_object()
+                .times(1)
+                .returning(|_, _| Err(permission_denied_err()));
+            let store = control_store(mock).await;
 
-        assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+            let err = store.exists(&obj("denied.txt")).await.unwrap_err();
+
+            assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+        }
     }
 }
 
@@ -424,14 +500,26 @@ pub mod construction {
 
     #[tokio::test]
     async fn new_builds_with_valid_token() {
-        let store = GcsStore::new("valid-token".to_string(), "prod-bucket".to_string(), None).await;
+        let cfg = Config {
+            creds: Credentials {
+                access_token: "valid-token".to_string(),
+            },
+            bucket: "prod-bucket".to_string(),
+        };
+        let store = Store::new(cfg).await;
         assert!(store.is_ok());
     }
 
     #[tokio::test]
     async fn new_rejects_bad_token() {
         // A newline is not a valid HTTP header value byte.
-        let result = GcsStore::new("bad\ntoken".to_string(), "prod-bucket".to_string(), None).await;
+        let cfg = Config {
+            creds: Credentials {
+                access_token: "bad\ntoken".to_string(),
+            },
+            bucket: "prod-bucket".to_string(),
+        };
+        let result = Store::new(cfg).await;
         match result {
             Err(GcsErr::InvalidResponseErr(_)) => {}
             Ok(_) => panic!("expected InvalidResponseErr, got Ok"),
@@ -474,7 +562,7 @@ pub mod error_types {
     fn request_failed_err_defaults_to_internal_server_error() {
         let err = GcsErr::RequestFailedErr(RequestFailedErr {
             operation: "get_object".to_string(),
-            key: None,
+            object: None,
             status: None,
             msg: "nope".to_string(),
             trace: miru_agent::trace!(),
@@ -482,7 +570,7 @@ pub mod error_types {
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(!err.is_network_conn_err());
-        // Display with no key / no status hits the fallback formatting.
+        // Display with no object / no status hits the fallback formatting.
         let msg = err.to_string();
         assert!(msg.contains("<none>"));
         assert!(msg.contains("unknown"));
@@ -499,5 +587,21 @@ pub mod error_types {
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(err.to_string().contains("invalid response"));
+    }
+
+    #[test]
+    fn local_io_err_defaults_to_internal_server_error() {
+        let err = GcsErr::LocalIoErr(LocalIoErr {
+            operation: "get_object".to_string(),
+            object: "gs://bucket/key".to_string(),
+            msg: "no such file or directory".to_string(),
+            trace: miru_agent::trace!(),
+        });
+        assert!(matches!(err.code(), Code::InternalServerError));
+        assert_eq!(err.http_status().as_u16(), 500);
+        assert!(!err.is_network_conn_err());
+        let msg = err.to_string();
+        assert!(msg.contains("gs://bucket/key"));
+        assert!(msg.contains("no such file or directory"));
     }
 }
