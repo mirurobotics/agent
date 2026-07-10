@@ -257,8 +257,8 @@ pub mod run {
 
     // =============================== TESTS ======================================= //
 
-    // (1) At startup the worker seeds the scanner exactly once from the currently
-    // Deployed deployment's rules, without waiting for any event.
+    // At startup the worker seeds the scanner exactly once from the currently Deployed
+    // deployment's rules, without waiting for any event.
     #[tokio::test]
     async fn startup_seeds_scanner_with_deployed_rules() {
         let stores = Arc::new(Stores::new().await);
@@ -279,8 +279,8 @@ pub mod run {
         assert_eq!(b.scanner.clear_rules_calls(), 0);
     }
 
-    // (2) A SyncSuccess event re-resolves from disk: after mutating the deployed
-    // release to reference a different rule set, the next update_rules reflects it.
+    // A SyncSuccess event re-resolves from disk: after mutating the deployed release to
+    // reference a different rule set, the next update_rules reflects it.
     #[tokio::test]
     async fn sync_success_reresolves_changed_disk() {
         let stores = Arc::new(Stores::new().await);
@@ -310,8 +310,8 @@ pub mod run {
         assert_eq!(rule_ids(&payload), rule_id_set(["r1", "r2"]));
     }
 
-    // (3) With no Deployed deployment (only a Queued one), the worker clears the
-    // scanner rules and never calls update_rules.
+    // With no Deployed deployment (only a Queued one), the worker clears the scanner
+    // rules and never calls update_rules.
     #[tokio::test]
     async fn no_deployed_clears_rules() {
         let stores = Arc::new(Stores::new().await);
@@ -328,8 +328,8 @@ pub mod run {
         assert_eq!(b.scanner.update_rules_calls().len(), 0);
     }
 
-    // (4) A failing update_rules is logged, not propagated: the worker survives to
-    // handle the next SyncSuccess event, producing a second (successful) call.
+    // A failing update_rules is logged, not propagated: the worker survives to handle
+    // the next SyncSuccess event, producing a second (successful) call.
     #[tokio::test]
     async fn update_rules_error_is_logged_and_worker_survives() {
         let stores = Arc::new(Stores::new().await);
@@ -359,8 +359,8 @@ pub mod run {
         wait_until(|| b.scanner.update_rules_calls().len() == 2).await;
     }
 
-    // (5) Firing the shutdown future makes run() return: the spawned task's
-    // JoinHandle completes.
+    // Firing the shutdown future makes run() return: the spawned task's JoinHandle
+    // completes.
     #[tokio::test]
     async fn shutdown_future_completes_run() {
         let stores = Arc::new(Stores::new().await);
