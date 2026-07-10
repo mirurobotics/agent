@@ -11,10 +11,5 @@ pub(crate) mod collection;
 // yet wired into a consumer in this crate; the driving worker lands separately.
 #[allow(dead_code)]
 pub(crate) mod scanner;
-// The upload-rule resolution functions are exercised by their own inline tests
-// but are not yet wired into a consumer in this crate; the scanner that calls
-// them lands separately.
-#[allow(dead_code)]
-pub(crate) mod upload_rules;
 
 pub use self::errors::ScanErr;
