@@ -363,13 +363,13 @@ mod tests {
     #[tokio::test]
     async fn headers_returns_not_modified_for_matching_tag() {
         let provider = provider();
-        let mut extensions = Extensions::new();
         // Extract the tag from the first (New) response, then present it back.
         let CacheableResource::New { entity_tag, .. } =
-            provider.headers(extensions.clone()).await.unwrap()
+            provider.headers(Extensions::new()).await.unwrap()
         else {
             panic!("expected New headers");
         };
+        let mut extensions = Extensions::new();
         extensions.insert(entity_tag);
         let result = provider.headers(extensions).await.unwrap();
         assert!(matches!(result, CacheableResource::NotModified));
