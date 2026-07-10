@@ -164,7 +164,7 @@ pub mod run {
         (handle, shutdown_tx)
     }
 
-    // =============================== TESTS ======================================== //
+    // =============================== TESTS ======================================= //
 
     // (1) At startup the worker seeds the scanner exactly once from the currently
     // Deployed deployment's rules, without waiting for any event.
