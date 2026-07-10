@@ -99,12 +99,8 @@ async fn resolve_active_rules(
 ) -> Result<Option<(Deployment, Vec<UploadRule>)>, ScanErr> {
     match crate::disk::deployments::find_deployed(deployments).await? {
         Some(deployment) => {
-            let rules = disk::upload_rules_for_deployment(
-                releases,
-                upload_rules,
-                &deployment,
-            )
-            .await?;
+            let rules =
+                disk::upload_rules_for_deployment(releases, upload_rules, &deployment).await?;
             Ok(Some((deployment, rules)))
         }
         None => Ok(None),
