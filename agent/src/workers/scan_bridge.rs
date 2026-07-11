@@ -4,9 +4,9 @@ use std::pin::Pin;
 
 // internal crates
 use crate::disk;
-use crate::models::{Deployment, UploadRule};
 use crate::scan::{errors::ScanErr, ScannerExt};
 use crate::sync::{syncer::SyncEvent, SyncerExt};
+use crate::workers::next_sync_event;
 
 // external crates
 use tracing::{error, info};
@@ -49,14 +49,12 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
 ) {
     info!("Running scan bridge worker");
 
-    // subscribe to syncer events; on a transient subscribe failure, idle rather
-    // than fall through to a dead loop (a dummy receiver's Sender is already
-    // dropped, so changed() would Err on the first poll and disable the worker).
-    let mut subscriber = if let Ok(rx) = syncer.subscribe().await {
-        rx
-    } else {
-        error!("scan bridge: error subscribing to syncer events; idling until shutdown");
-        return idle_forever().await;
+    let mut subscriber = match syncer.subscribe().await {
+        Ok(subscriber) => subscriber,
+        Err(e) => {
+            error!("scan bridge: error subscribing to syncer events: {e:?}; idling until shutdown");
+            return idle_forever().await;
+        }
     };
 
     // Consume the seed value FIRST so a SyncSuccess landing during the startup
@@ -68,8 +66,9 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     // redundant re-resolve on the next event is harmless.
     resolve_and_push(scanner, deployments, releases, upload_rules).await;
 
-    while subscriber.changed().await.is_ok() {
-        if matches!(&*subscriber.borrow_and_update(), SyncEvent::SyncSuccess) {
+    let mut subscriber = Some(subscriber);
+    while let Some(event) = next_sync_event(&mut subscriber).await {
+        if matches!(event, SyncEvent::SyncSuccess) {
             resolve_and_push(scanner, deployments, releases, upload_rules).await;
         }
     }
@@ -90,7 +89,10 @@ async fn resolve_and_push<ScannerT: ScannerExt>(
     releases: &disk::Releases,
     upload_rules: &disk::UploadRules,
 ) {
-    match resolve_active_rules(deployments, releases, upload_rules).await {
+    let result = disk::upload_rules_for_deployed(deployments, releases, upload_rules)
+        .await
+        .map_err(disk_err_to_scan_err);
+    match result {
         Ok(Some((deployment, rules))) => {
             if let Err(e) = scanner.update_rules(deployment, rules).await {
                 error!("scan bridge: failed to update scanner rules: {e:?}");
@@ -105,18 +107,6 @@ async fn resolve_and_push<ScannerT: ScannerExt>(
             error!("scan bridge: failed to resolve active upload rules: {e:?}");
         }
     }
-}
-
-/// Resolve the currently Deployed deployment (if any) and its active upload
-/// rules from the disk stores, mapping the disk error space onto the scanner's.
-async fn resolve_active_rules(
-    deployments: &disk::Deployments,
-    releases: &disk::Releases,
-    upload_rules: &disk::UploadRules,
-) -> Result<Option<(Deployment, Vec<UploadRule>)>, ScanErr> {
-    disk::upload_rules_for_deployed(deployments, releases, upload_rules)
-        .await
-        .map_err(disk_err_to_scan_err)
 }
 
 /// Map the disk errors reachable from the deployed-rules query onto the
