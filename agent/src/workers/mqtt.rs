@@ -19,10 +19,10 @@ use crate::mqtt::{
     topics,
 };
 use crate::sync::{syncer::SyncEvent, SyncerExt};
+use crate::workers::next_sync_event;
 
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};
-use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
@@ -83,12 +83,13 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
 {
     info!("Running mqtt worker");
 
-    // subscribe to syncer events
-    let mut syncer_subscriber = syncer.subscribe().await.unwrap_or_else(|e| {
-        error!("error subscribing to syncer events: {e:?}");
-        // Create a dummy receiver that never sends anything
-        watch::channel(SyncEvent::SyncSuccess).1
-    });
+    let mut syncer_subscriber = match syncer.subscribe().await {
+        Ok(subscriber) => Some(subscriber),
+        Err(e) => {
+            error!("error subscribing to syncer events: {e:?}; disabling event subscription");
+            None
+        }
+    };
 
     let device = device_stor
         .read()
@@ -113,13 +114,17 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
     loop {
         tokio::select! {
             // listen for syncer events from the syncer worker (this device)
-            _ = syncer_subscriber.changed() => {
-                let syncer_event = syncer_subscriber.borrow().clone();
-                handle_syncer_event(
-                    &syncer_event,
-                    &device.id,
-                    &state.client,
-                ).await;
+            event = next_sync_event(&mut syncer_subscriber) => {
+                if let Some(event) = event {
+                    handle_syncer_event(
+                        &event,
+                        &device.id,
+                        &state.client,
+                    ).await;
+                } else {
+                    error!("syncer event stream ended; disabling event subscription");
+                    syncer_subscriber = None;
+                }
             }
 
             // listen for sync commands from the backend (via mqtt broker)
