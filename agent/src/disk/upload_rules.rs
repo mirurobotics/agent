@@ -1,5 +1,6 @@
 // internal crates
 use crate::cache;
+use crate::disk::{Deployments, Releases};
 use crate::models;
 
 pub type UploadRules = cache::FileCache<models::UploadRuleID, models::UploadRule>;
@@ -23,8 +24,8 @@ pub async fn upload_rules_for_deployment(
 /// rules from the disk stores. Composes `deployments::find_deployed` with
 /// `upload_rules_for_deployment` so callers touch a single curated disk API.
 pub async fn upload_rules_for_deployed(
-    deployments: &super::Deployments,
-    releases: &super::Releases,
+    deployments: &Deployments,
+    releases: &Releases,
     upload_rules: &UploadRules,
 ) -> Result<Option<(models::Deployment, Vec<models::UploadRule>)>, super::DiskErr> {
     match super::deployments::find_deployed(deployments).await? {
@@ -96,12 +97,27 @@ mod tests {
         /// Seed a Deployed deployment -> release -> upload rule bodies so the
         /// deployment-scoped traversal resolves to the given rules.
         async fn seed_deployed(&self, dpl_id: &str, release_id: &str, rules: &[UploadRule]) {
+            let rule_ids = rules.iter().map(|rule| rule.id.clone()).collect::<Vec<_>>();
+            self.seed_deployment(dpl_id, DplActivity::Deployed, release_id)
+                .await;
+            self.seed_release(release_id, &rule_ids).await;
+            for rule in rules {
+                self.put_rule(rule.clone()).await;
+            }
+        }
+
+        async fn seed_deployment(
+            &self,
+            dpl_id: &str,
+            activity_status: DplActivity,
+            release_id: &str,
+        ) {
             self.deployments
                 .write_if_absent(
                     dpl_id.to_string(),
                     Deployment {
                         id: dpl_id.to_string(),
-                        activity_status: DplActivity::Deployed,
+                        activity_status,
                         release_id: release_id.to_string(),
                         ..Default::default()
                     },
@@ -109,24 +125,28 @@ mod tests {
                 )
                 .await
                 .unwrap();
+        }
+
+        async fn seed_release(&self, release_id: &str, rule_ids: &[String]) {
             self.releases
                 .write_if_absent(
                     release_id.to_string(),
                     Release {
                         id: release_id.to_string(),
-                        upload_rule_ids: rules.iter().map(|r| r.id.clone()).collect(),
+                        upload_rule_ids: rule_ids.to_vec(),
                         ..Default::default()
                     },
                     |_, _| false,
                 )
                 .await
                 .unwrap();
-            for rule in rules {
-                self.upload_rules
-                    .write_if_absent(rule.id.clone(), rule.clone(), |_, _| false)
-                    .await
-                    .unwrap();
-            }
+        }
+
+        async fn put_rule(&self, rule: UploadRule) {
+            self.upload_rules
+                .write_if_absent(rule.id.clone(), rule, |_, _| false)
+                .await
+                .unwrap();
         }
 
         async fn find_deployed(&self) -> Result<Option<Deployment>, disk::DiskErr> {
@@ -139,263 +159,227 @@ mod tests {
         ) -> Result<Vec<UploadRule>, disk::DiskErr> {
             super::upload_rules_for_deployment(&self.releases, &self.upload_rules, deployment).await
         }
+
+        async fn upload_rules_for_deployed(
+            &self,
+        ) -> Result<Option<(Deployment, Vec<UploadRule>)>, disk::DiskErr> {
+            super::upload_rules_for_deployed(&self.deployments, &self.releases, &self.upload_rules)
+                .await
+        }
     }
 
-    // Deployed deployment -> release ids [r1,r2] with both bodies present resolves
-    // to both rules.
-    #[tokio::test]
-    async fn resolves_active_set() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        let r2 = rule_with("r2", "/none/*.mcap", 0);
-        stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
+    mod upload_rules_for_deployment {
+        use super::*;
 
-        let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-        let rules = stores.upload_rules_for_deployment(&deployed).await.unwrap();
-        assert_eq!(
-            ids(&rules),
-            BTreeSet::from(["r1".to_string(), "r2".to_string()])
-        );
+        // Deployed deployment -> release ids [r1,r2] with both bodies present resolves
+        // to both rules.
+        #[tokio::test]
+        async fn resolves_active_set() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            let r2 = rule_with("r2", "/none/*.mcap", 0);
+            stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
+
+            let deployed = stores.find_deployed().await.unwrap().expect("deployed");
+            let rules = stores.upload_rules_for_deployment(&deployed).await.unwrap();
+            assert_eq!(
+                ids(&rules),
+                BTreeSet::from(["r1".to_string(), "r2".to_string()])
+            );
+        }
+
+        // A rule body present in the store but NOT referenced by the deployed release is
+        // not resolved.
+        #[tokio::test]
+        async fn stale_rule_not_acted_on() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            // release references only r1, but r2's body also lives in the store.
+            stores
+                .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
+                .await;
+            stores
+                .upload_rules
+                .write_if_absent(
+                    "r2".to_string(),
+                    rule_with("r2", "/none/*.mcap", 0),
+                    |_, _| false,
+                )
+                .await
+                .unwrap();
+
+            let deployed = stores.find_deployed().await.unwrap().expect("deployed");
+            let rules = stores.upload_rules_for_deployment(&deployed).await.unwrap();
+            assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string()]));
+        }
+
+        // The release references [r1,r2] but only r1's body is in the store: the missing
+        // rule body propagates as an error (NOT silently skipped — the API is a Result).
+        #[tokio::test]
+        async fn missing_rule_body_errors() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            let r2 = rule_with("r2", "/none/*.mcap", 0);
+            stores
+                .deployments
+                .write_if_absent(
+                    "dpl".to_string(),
+                    Deployment {
+                        id: "dpl".to_string(),
+                        activity_status: DplActivity::Deployed,
+                        release_id: "rel".to_string(),
+                        ..Default::default()
+                    },
+                    |_, _| false,
+                )
+                .await
+                .unwrap();
+            stores
+                .releases
+                .write_if_absent(
+                    "rel".to_string(),
+                    Release {
+                        id: "rel".to_string(),
+                        upload_rule_ids: vec![r1.id.clone(), r2.id.clone()],
+                        ..Default::default()
+                    },
+                    |_, _| false,
+                )
+                .await
+                .unwrap();
+            stores
+                .upload_rules
+                .write_if_absent(r1.id.clone(), r1, |_, _| false)
+                .await
+                .unwrap();
+
+            let deployed = stores.find_deployed().await.unwrap().expect("deployed");
+            let err = stores
+                .upload_rules_for_deployment(&deployed)
+                .await
+                .unwrap_err();
+            // a missing body reads as CacheElementNotFound, wrapped as DiskErr::CacheErr.
+            assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
+        }
+
+        // A Deployed deployment whose release_id is not cached errors.
+        #[tokio::test]
+        async fn missing_release_errors() {
+            let stores = Stores::new().await;
+            stores
+                .deployments
+                .write_if_absent(
+                    "dpl".to_string(),
+                    Deployment {
+                        id: "dpl".to_string(),
+                        activity_status: DplActivity::Deployed,
+                        release_id: "absent".to_string(),
+                        ..Default::default()
+                    },
+                    |_, _| false,
+                )
+                .await
+                .unwrap();
+
+            let deployed = stores.find_deployed().await.unwrap().expect("deployed");
+            let err = stores
+                .upload_rules_for_deployment(&deployed)
+                .await
+                .unwrap_err();
+            assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
+        }
+
+        // A shut-down releases store makes upload_rules_for_deployment error (replacing the old
+        // "treated as empty" assertion which no longer holds).
+        #[tokio::test]
+        async fn release_store_shutdown_errors() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            stores
+                .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
+                .await;
+            let deployed = stores.find_deployed().await.unwrap().expect("deployed");
+            stores.releases.shutdown().await.unwrap();
+
+            let err = stores
+                .upload_rules_for_deployment(&deployed)
+                .await
+                .unwrap_err();
+            assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
+        }
+
+        // A shut-down upload_rules store makes upload_rules_for_deployment error.
+        #[tokio::test]
+        async fn rule_store_shutdown_errors() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            stores
+                .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
+                .await;
+            let deployed = stores.find_deployed().await.unwrap().expect("deployed");
+            stores.upload_rules.shutdown().await.unwrap();
+
+            let err = stores
+                .upload_rules_for_deployment(&deployed)
+                .await
+                .unwrap_err();
+            assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
+        }
     }
 
-    // A rule body present in the store but NOT referenced by the deployed release is
-    // not resolved.
-    #[tokio::test]
-    async fn stale_rule_not_acted_on() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        // release references only r1, but r2's body also lives in the store.
-        stores
-            .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
-            .await;
-        stores
-            .upload_rules
-            .write_if_absent(
-                "r2".to_string(),
-                rule_with("r2", "/none/*.mcap", 0),
-                |_, _| false,
-            )
-            .await
-            .unwrap();
+    mod upload_rules_for_deployed {
+        use super::*;
 
-        let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-        let rules = stores.upload_rules_for_deployment(&deployed).await.unwrap();
-        assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string()]));
-    }
+        // upload_rules_for_deployed composes find_deployed + upload_rules_for_deployment:
+        // a Deployed deployment resolves to (deployment, rules).
+        #[tokio::test]
+        async fn deployed_resolves_to_rules() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            let r2 = rule_with("r2", "/none/*.mcap", 0);
+            stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
 
-    // The release references [r1,r2] but only r1's body is in the store: the missing
-    // rule body propagates as an error (NOT silently skipped — the API is a Result).
-    #[tokio::test]
-    async fn missing_rule_body_errors() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        let r2 = rule_with("r2", "/none/*.mcap", 0);
-        stores
-            .deployments
-            .write_if_absent(
-                "dpl".to_string(),
-                Deployment {
-                    id: "dpl".to_string(),
-                    activity_status: DplActivity::Deployed,
-                    release_id: "rel".to_string(),
-                    ..Default::default()
-                },
-                |_, _| false,
-            )
-            .await
-            .unwrap();
-        stores
-            .releases
-            .write_if_absent(
-                "rel".to_string(),
-                Release {
-                    id: "rel".to_string(),
-                    upload_rule_ids: vec![r1.id.clone(), r2.id.clone()],
-                    ..Default::default()
-                },
-                |_, _| false,
-            )
-            .await
-            .unwrap();
-        stores
-            .upload_rules
-            .write_if_absent(r1.id.clone(), r1, |_, _| false)
-            .await
-            .unwrap();
+            let (deployment, rules) = stores
+                .upload_rules_for_deployed()
+                .await
+                .unwrap()
+                .expect("expected a deployed deployment");
+            assert_eq!(deployment.id, "dpl");
+            assert_eq!(
+                ids(&rules),
+                BTreeSet::from(["r1".to_string(), "r2".to_string()])
+            );
+        }
 
-        let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-        let err = stores
-            .upload_rules_for_deployment(&deployed)
-            .await
-            .unwrap_err();
-        // a missing body reads as CacheElementNotFound, wrapped as DiskErr::CacheErr.
-        assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
-    }
+        // With only a Queued deployment, upload_rules_for_deployed returns None.
+        #[tokio::test]
+        async fn none_when_not_deployed() {
+            let stores = Stores::new().await;
+            stores
+                .seed_deployment("dpl", DplActivity::Queued, "rel")
+                .await;
 
-    // A Deployed deployment whose release_id is not cached errors.
-    #[tokio::test]
-    async fn missing_release_errors() {
-        let stores = Stores::new().await;
-        stores
-            .deployments
-            .write_if_absent(
-                "dpl".to_string(),
-                Deployment {
-                    id: "dpl".to_string(),
-                    activity_status: DplActivity::Deployed,
-                    release_id: "absent".to_string(),
-                    ..Default::default()
-                },
-                |_, _| false,
-            )
-            .await
-            .unwrap();
+            let resolved = stores.upload_rules_for_deployed().await.unwrap();
+            assert!(resolved.is_none());
+        }
 
-        let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-        let err = stores
-            .upload_rules_for_deployment(&deployed)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
-    }
+        // A Deployed deployment whose release references [r1,r2] but only r1's body is
+        // present surfaces the missing body as DiskErr::CacheErr through the composed fn.
+        #[tokio::test]
+        async fn missing_body_errors() {
+            let stores = Stores::new().await;
+            let r1 = rule_with("r1", "/none/*.mcap", 0);
+            let r2 = rule_with("r2", "/none/*.mcap", 0);
+            stores
+                .seed_deployment("dpl", DplActivity::Deployed, "rel")
+                .await;
+            stores
+                .seed_release("rel", &[r1.id.clone(), r2.id.clone()])
+                .await;
+            stores.put_rule(r1).await;
 
-    // A shut-down releases store makes upload_rules_for_deployment error (replacing the old
-    // "treated as empty" assertion which no longer holds).
-    #[tokio::test]
-    async fn release_store_shutdown_errors() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        stores
-            .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
-            .await;
-        let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-        stores.releases.shutdown().await.unwrap();
-
-        let err = stores
-            .upload_rules_for_deployment(&deployed)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
-    }
-
-    // upload_rules_for_deployed composes find_deployed + upload_rules_for_deployment:
-    // a Deployed deployment resolves to (deployment, rules).
-    #[tokio::test]
-    async fn deployed_resolves_to_rules() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        let r2 = rule_with("r2", "/none/*.mcap", 0);
-        stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
-
-        let (deployment, rules) = super::upload_rules_for_deployed(
-            &stores.deployments,
-            &stores.releases,
-            &stores.upload_rules,
-        )
-        .await
-        .unwrap()
-        .expect("expected a deployed deployment");
-        assert_eq!(deployment.id, "dpl");
-        assert_eq!(
-            ids(&rules),
-            BTreeSet::from(["r1".to_string(), "r2".to_string()])
-        );
-    }
-
-    // With only a Queued deployment, upload_rules_for_deployed returns None.
-    #[tokio::test]
-    async fn none_when_not_deployed() {
-        let stores = Stores::new().await;
-        stores
-            .deployments
-            .write_if_absent(
-                "dpl".to_string(),
-                Deployment {
-                    id: "dpl".to_string(),
-                    activity_status: DplActivity::Queued,
-                    release_id: "rel".to_string(),
-                    ..Default::default()
-                },
-                |_, _| false,
-            )
-            .await
-            .unwrap();
-
-        let resolved = super::upload_rules_for_deployed(
-            &stores.deployments,
-            &stores.releases,
-            &stores.upload_rules,
-        )
-        .await
-        .unwrap();
-        assert!(resolved.is_none());
-    }
-
-    // A Deployed deployment whose release references [r1,r2] but only r1's body is
-    // present surfaces the missing body as DiskErr::CacheErr through the composed fn.
-    #[tokio::test]
-    async fn missing_body_errors() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        let r2 = rule_with("r2", "/none/*.mcap", 0);
-        stores
-            .deployments
-            .write_if_absent(
-                "dpl".to_string(),
-                Deployment {
-                    id: "dpl".to_string(),
-                    activity_status: DplActivity::Deployed,
-                    release_id: "rel".to_string(),
-                    ..Default::default()
-                },
-                |_, _| false,
-            )
-            .await
-            .unwrap();
-        stores
-            .releases
-            .write_if_absent(
-                "rel".to_string(),
-                Release {
-                    id: "rel".to_string(),
-                    upload_rule_ids: vec![r1.id.clone(), r2.id.clone()],
-                    ..Default::default()
-                },
-                |_, _| false,
-            )
-            .await
-            .unwrap();
-        stores
-            .upload_rules
-            .write_if_absent(r1.id.clone(), r1, |_, _| false)
-            .await
-            .unwrap();
-
-        let err = super::upload_rules_for_deployed(
-            &stores.deployments,
-            &stores.releases,
-            &stores.upload_rules,
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
-    }
-
-    // A shut-down upload_rules store makes upload_rules_for_deployment error.
-    #[tokio::test]
-    async fn rule_store_shutdown_errors() {
-        let stores = Stores::new().await;
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        stores
-            .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
-            .await;
-        let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-        stores.upload_rules.shutdown().await.unwrap();
-
-        let err = stores
-            .upload_rules_for_deployment(&deployed)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
+            let err = stores.upload_rules_for_deployed().await.unwrap_err();
+            assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
+        }
     }
 }
