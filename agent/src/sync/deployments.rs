@@ -79,6 +79,14 @@ pub async fn sync<HTTPClientT: http::ClientI>(
 }
 
 // =================================== PULL ======================================== //
+// Unlike `pull_content_for_cfg_insts`, this function intentionally short-circuits
+// on the first per-deployment error rather than collecting errors and continuing.
+// If ingesting a new deployment fails, we must not proceed with a partial view of
+// the active set — apply runs off whatever ends up in local storage, and a
+// partial pull could cause us to remove the currently-deployed config instances
+// before their replacement is fully in place. Aborting the whole pull keeps the
+// local state internally consistent and lets the next sync cycle retry from
+// scratch.
 async fn pull_deployments<'a, HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     storage: &Storage<'a>,
