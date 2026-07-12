@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{errors::*, issue::issue_token, token, token::Token};
-use crate::filesys::{cached_file::SingleThreadCachedFile, file::File, path::PathExt};
+use crate::filesys::{file::File, path::PathExt, state_file::SingleThreadStateFile};
 use crate::http;
 use crate::trace;
 
@@ -22,7 +22,7 @@ macro_rules! dispatch {
     }};
 }
 
-pub type TokenFile = SingleThreadCachedFile<Token, token::Updates>;
+pub type TokenFile = SingleThreadStateFile<Token, token::Updates>;
 
 // =================================== TRAIT ======================================= //
 #[allow(async_fn_in_trait)]
