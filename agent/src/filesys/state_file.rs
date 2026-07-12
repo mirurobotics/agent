@@ -26,29 +26,29 @@ macro_rules! dispatch {
 
 // ============================== SINGLE THREADED ================================== //
 #[derive(Debug)]
-pub struct SingleThreadCachedFile<ContentT, PatchT>
+pub struct SingleThreadStateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub file: File,
-    cache: Arc<ContentT>,
+    state: Arc<ContentT>,
     _phantom: std::marker::PhantomData<PatchT>,
 }
 
-impl<ContentT, PatchT> SingleThreadCachedFile<ContentT, PatchT>
+impl<ContentT, PatchT> SingleThreadStateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
     pub async fn new(file: File) -> Result<Self, FileSysErr> {
-        let cache = files::read_json::<ContentT>(&file).await?;
+        let state = files::read_json::<ContentT>(&file).await?;
 
         // initialize the struct with the read data
-        let cached_file = Self {
+        let state_file = Self {
             file,
-            cache: Arc::new(cache),
+            state: Arc::new(state),
             _phantom: std::marker::PhantomData,
         };
-        Ok(cached_file)
+        Ok(state_file)
     }
 
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
@@ -57,7 +57,7 @@ where
     {
         let result = Self::new(file.clone()).await;
         match result {
-            Ok(cached_file) => Ok(cached_file),
+            Ok(state_file) => Ok(state_file),
             Err(_) => Self::create(file, &default, Overwrite::Allow).await,
         }
     }
@@ -84,18 +84,18 @@ where
     }
 
     pub fn read(&self) -> Arc<ContentT> {
-        self.cache.clone()
+        self.state.clone()
     }
 
     pub async fn write(&mut self, data: ContentT) -> Result<(), FileSysErr> {
         files::write_json(&self.file, &data, WriteOptions::OVERWRITE_ATOMIC).await?;
-        self.cache = Arc::new(data);
+        self.state = Arc::new(data);
         Ok(())
     }
 
     pub async fn patch(&mut self, patch: PatchT) -> Result<(), FileSysErr> {
-        let copy = (*self.cache).clone();
-        let mut content = (*self.cache).clone();
+        let copy = (*self.state).clone();
+        let mut content = (*self.state).clone();
         content.patch(patch);
         // only write the content if it has changed
         if content == copy {
@@ -143,7 +143,7 @@ pub struct Worker<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
-    pub file: SingleThreadCachedFile<ContentT, PatchT>,
+    pub file: SingleThreadStateFile<ContentT, PatchT>,
     pub receiver: Receiver<Command<ContentT, PatchT>>,
 }
 
@@ -183,7 +183,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct ConcurrentCachedFile<ContentT, PatchT>
+pub struct ConcurrentStateFile<ContentT, PatchT>
 where
     PatchT: ConcurrentPatchT,
     ContentT: ConcurrentContentT<PatchT>,
@@ -191,7 +191,7 @@ where
     sender: Sender<Command<ContentT, PatchT>>,
 }
 
-impl<ContentT, PatchT> ConcurrentCachedFile<ContentT, PatchT>
+impl<ContentT, PatchT> ConcurrentStateFile<ContentT, PatchT>
 where
     PatchT: ConcurrentPatchT,
     ContentT: ConcurrentContentT<PatchT>,
@@ -202,7 +202,7 @@ where
     ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            file: SingleThreadCachedFile::new(file).await?,
+            file: SingleThreadStateFile::new(file).await?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
@@ -216,7 +216,7 @@ where
     ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            file: SingleThreadCachedFile::new_with_default(file, default).await?,
+            file: SingleThreadStateFile::new_with_default(file, default).await?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
@@ -249,7 +249,7 @@ where
         self.send_command("shutdown", |tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!(
-            "{} cached file shutdown complete",
+            "{} state file shutdown complete",
             std::any::type_name::<ContentT>()
         );
         Ok(())

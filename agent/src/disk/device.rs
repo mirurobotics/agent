@@ -5,11 +5,11 @@ use crate::disk::{
     errors::{DeviceNotActivatedErr, DiskErr, ResolveDeviceIDErr},
     layout::Layout,
 };
-use crate::filesys::{cached_file::ConcurrentCachedFile, files, PathExt};
+use crate::filesys::{files, state_file::ConcurrentStateFile, PathExt};
 use crate::models::{self, device};
 use crate::trace;
 
-pub type Device = ConcurrentCachedFile<models::Device, device::Updates>;
+pub type Device = ConcurrentStateFile<models::Device, device::Updates>;
 
 pub fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
     let auth_dir = layout.auth();

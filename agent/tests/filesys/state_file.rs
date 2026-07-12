@@ -1,8 +1,9 @@
 // internal crates
 use miru_agent::authn::token::{Token, Updates};
 use miru_agent::filesys::{
-    cached_file::{ConcurrentCachedFile, SingleThreadCachedFile},
-    dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions,
+    dirs, files,
+    state_file::{ConcurrentStateFile, SingleThreadStateFile},
+    FileSysErr, Overwrite, PathExt, WriteOptions,
 };
 
 // external crates
@@ -10,8 +11,8 @@ use chrono::{Duration, Utc};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
 
-// ========================= SINGLE THREADED CACHED FILE =========================== //
-type SingleThreadTokenFile = SingleThreadCachedFile<Token, Updates>;
+// ========================= SINGLE THREADED STATE FILE =========================== //
+type SingleThreadTokenFile = SingleThreadStateFile<Token, Updates>;
 
 pub mod new {
     use super::*;
@@ -54,8 +55,8 @@ pub mod new {
             .unwrap();
 
         // ensure the contents is correct
-        let cached_file = SingleThreadTokenFile::new(file).await.unwrap();
-        assert_eq!(cached_file.read().as_ref(), &token);
+        let state_file = SingleThreadTokenFile::new(file).await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 }
 
@@ -67,10 +68,10 @@ pub mod new_with_default {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+        let state_file = SingleThreadTokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -83,10 +84,10 @@ pub mod new_with_default {
             .await
             .unwrap();
 
-        let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+        let state_file = SingleThreadTokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -104,10 +105,10 @@ pub mod new_with_default {
             .unwrap();
 
         // ensure the contents is correct
-        let cached_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+        let state_file = SingleThreadTokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &token);
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 }
 
@@ -119,10 +120,10 @@ pub mod create {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
+        let state_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -130,10 +131,10 @@ pub mod create {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
+        let state_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -165,10 +166,10 @@ pub mod create {
             .unwrap();
 
         // should throw an error since already exists
-        let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
+        let state_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Allow)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 }
 
@@ -180,10 +181,10 @@ pub mod read {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let cached_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
+        let state_file = SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -192,7 +193,7 @@ pub mod read {
         let file = dir.file("test-file");
 
         // create the file
-        let cached_file =
+        let state_file =
             SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Allow)
                 .await
                 .unwrap();
@@ -202,7 +203,7 @@ pub mod read {
         assert!(!file.exists());
 
         // should still be able to read the file since it's cached in memory
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 }
 
@@ -215,19 +216,19 @@ pub mod write {
         let file = dir.file("test-file");
 
         // create the file
-        let mut cached_file =
+        let mut state_file =
             SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // write to the file
         let token = Token {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        cached_file.write(token.clone()).await.unwrap();
-        assert_eq!(cached_file.read().as_ref(), &token);
+        state_file.write(token.clone()).await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -236,11 +237,11 @@ pub mod write {
         let file = dir.file("test-file");
 
         // create the file
-        let mut cached_file =
+        let mut state_file =
             SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // delete the file
         files::delete(&file).await.unwrap();
@@ -251,8 +252,8 @@ pub mod write {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        cached_file.write(token.clone()).await.unwrap();
-        assert_eq!(cached_file.read().as_ref(), &token);
+        state_file.write(token.clone()).await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 }
 
@@ -264,11 +265,11 @@ pub mod patch {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let mut cached_file =
+        let mut state_file =
             SingleThreadTokenFile::create(file, &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // patch the file
         let updates = Updates {
@@ -279,8 +280,8 @@ pub mod patch {
             token: updates.token.clone().unwrap(),
             expires_at: updates.expires_at.unwrap(),
         };
-        cached_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, cached_file.read().as_ref());
+        state_file.patch(updates).await.unwrap();
+        assert_eq!(&expected, state_file.read().as_ref());
     }
 
     #[tokio::test]
@@ -292,7 +293,7 @@ pub mod patch {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        let mut cached_file = SingleThreadTokenFile::create(file.clone(), &token, Overwrite::Deny)
+        let mut state_file = SingleThreadTokenFile::create(file.clone(), &token, Overwrite::Deny)
             .await
             .unwrap();
 
@@ -301,8 +302,8 @@ pub mod patch {
         assert!(!file.exists());
 
         // patch with empty updates — merge produces no change, so write is skipped
-        cached_file.patch(Updates::empty()).await.unwrap();
-        assert_eq!(cached_file.read().as_ref(), &token);
+        state_file.patch(Updates::empty()).await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
 
         // backing file should still not exist (no write occurred)
         assert!(!file.exists());
@@ -313,11 +314,11 @@ pub mod patch {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let mut cached_file =
+        let mut state_file =
             SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // delete the file
         files::delete(&file).await.unwrap();
@@ -332,13 +333,13 @@ pub mod patch {
             token: updates.token.clone().unwrap(),
             expires_at: updates.expires_at.unwrap(),
         };
-        cached_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, cached_file.read().as_ref());
+        state_file.patch(updates).await.unwrap();
+        assert_eq!(&expected, state_file.read().as_ref());
     }
 }
 
-// ========================= MULTI THREADED CACHED FILE =========================== //
-type ConcurrentTokenFile = ConcurrentCachedFile<Token, Updates>;
+// ========================= MULTI THREADED STATE FILE =========================== //
+type ConcurrentTokenFile = ConcurrentStateFile<Token, Updates>;
 
 pub mod spawn {
     use super::*;
@@ -379,8 +380,8 @@ pub mod spawn {
             .await
             .unwrap();
 
-        let (cached_file, _) = ConcurrentTokenFile::spawn(64, file).await.unwrap();
-        assert_eq!(cached_file.read().await.unwrap().as_ref(), &token);
+        let (state_file, _) = ConcurrentTokenFile::spawn(64, file).await.unwrap();
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
     }
 }
 
@@ -392,13 +393,10 @@ pub mod spawn_with_default {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
+        let (state_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
             .await
             .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -411,13 +409,10 @@ pub mod spawn_with_default {
             .await
             .unwrap();
 
-        let (cached_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
+        let (state_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
             .await
             .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -433,10 +428,10 @@ pub mod spawn_with_default {
             .await
             .unwrap();
 
-        let (cached_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
+        let (state_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
             .await
             .unwrap();
-        assert_eq!(cached_file.read().await.unwrap().as_ref(), &token);
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
     }
 }
 
@@ -456,14 +451,14 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        let (cached_file, handle) =
+        let (state_file, handle) =
             ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
                 .await
                 .unwrap();
-        assert_eq!(cached_file.read().await.unwrap().as_ref(), &token);
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
 
         // shutdown the file
-        cached_file.shutdown().await.unwrap();
+        state_file.shutdown().await.unwrap();
         handle.await.unwrap();
     }
 }
@@ -476,16 +471,16 @@ pub mod after_shutdown {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, handle) =
+        let (state_file, handle) =
             ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
                 .await
                 .unwrap();
 
-        cached_file.shutdown().await.unwrap();
+        state_file.shutdown().await.unwrap();
         handle.await.unwrap();
 
         assert!(matches!(
-            cached_file.read().await.unwrap_err(),
+            state_file.read().await.unwrap_err(),
             FileSysErr::SendActorMessageErr { .. }
         ));
     }
@@ -495,16 +490,16 @@ pub mod after_shutdown {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, handle) =
+        let (state_file, handle) =
             ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
                 .await
                 .unwrap();
 
-        cached_file.shutdown().await.unwrap();
+        state_file.shutdown().await.unwrap();
         handle.await.unwrap();
 
         assert!(matches!(
-            cached_file.write(Token::default()).await.unwrap_err(),
+            state_file.write(Token::default()).await.unwrap_err(),
             FileSysErr::SendActorMessageErr { .. }
         ));
     }
@@ -514,12 +509,12 @@ pub mod after_shutdown {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, handle) =
+        let (state_file, handle) =
             ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
                 .await
                 .unwrap();
 
-        cached_file.shutdown().await.unwrap();
+        state_file.shutdown().await.unwrap();
         handle.await.unwrap();
 
         let updates = Updates {
@@ -527,7 +522,7 @@ pub mod after_shutdown {
             expires_at: None,
         };
         assert!(matches!(
-            cached_file.patch(updates).await.unwrap_err(),
+            state_file.patch(updates).await.unwrap_err(),
             FileSysErr::SendActorMessageErr { .. }
         ));
     }
@@ -537,16 +532,16 @@ pub mod after_shutdown {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, handle) =
+        let (state_file, handle) =
             ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
                 .await
                 .unwrap();
 
-        cached_file.shutdown().await.unwrap();
+        state_file.shutdown().await.unwrap();
         handle.await.unwrap();
 
         assert!(matches!(
-            cached_file.shutdown().await.unwrap_err(),
+            state_file.shutdown().await.unwrap_err(),
             FileSysErr::SendActorMessageErr { .. }
         ));
     }
@@ -560,13 +555,10 @@ pub mod concurrent_read {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
+        let (state_file, _) = ConcurrentTokenFile::spawn_with_default(64, file, Token::default())
             .await
             .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -574,7 +566,7 @@ pub mod concurrent_read {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) =
+        let (state_file, _) =
             ConcurrentTokenFile::spawn_with_default(64, file.clone(), Token::default())
                 .await
                 .unwrap();
@@ -584,10 +576,7 @@ pub mod concurrent_read {
         assert!(!file.exists());
 
         // should still be able to read the file since it's cached in memory
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
     }
 }
 
@@ -599,22 +588,19 @@ pub mod concurrent_write {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) =
+        let (state_file, _) =
             ConcurrentTokenFile::spawn_with_default(64, file.clone(), Token::default())
                 .await
                 .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
 
         // write to the file
         let token = Token {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        cached_file.write(token.clone()).await.unwrap();
-        assert_eq!(cached_file.read().await.unwrap().as_ref(), &token);
+        state_file.write(token.clone()).await.unwrap();
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -622,14 +608,11 @@ pub mod concurrent_write {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) =
+        let (state_file, _) =
             ConcurrentTokenFile::spawn_with_default(64, file.clone(), Token::default())
                 .await
                 .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
 
         // delete the file
         files::delete(&file).await.unwrap();
@@ -640,8 +623,8 @@ pub mod concurrent_write {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        cached_file.write(token.clone()).await.unwrap();
-        assert_eq!(cached_file.read().await.unwrap().as_ref(), &token);
+        state_file.write(token.clone()).await.unwrap();
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
     }
 }
 
@@ -653,14 +636,11 @@ pub mod concurrent_patch {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) =
+        let (state_file, _) =
             ConcurrentTokenFile::spawn_with_default(64, file.clone(), Token::default())
                 .await
                 .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
 
         // patch the file
 
@@ -672,8 +652,8 @@ pub mod concurrent_patch {
             token: updates.token.clone().unwrap(),
             expires_at: updates.expires_at.unwrap(),
         };
-        cached_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, cached_file.read().await.unwrap().as_ref());
+        state_file.patch(updates).await.unwrap();
+        assert_eq!(&expected, state_file.read().await.unwrap().as_ref());
     }
 
     #[tokio::test]
@@ -689,15 +669,15 @@ pub mod concurrent_patch {
             .await
             .unwrap();
 
-        let (cached_file, _) = ConcurrentTokenFile::spawn(64, file.clone()).await.unwrap();
+        let (state_file, _) = ConcurrentTokenFile::spawn(64, file.clone()).await.unwrap();
 
         // delete the backing file so any real write would fail
         files::delete(&file).await.unwrap();
         assert!(!file.exists());
 
         // patch with empty updates — merge produces no change, so write is skipped
-        cached_file.patch(Updates::empty()).await.unwrap();
-        assert_eq!(cached_file.read().await.unwrap().as_ref(), &token);
+        state_file.patch(Updates::empty()).await.unwrap();
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
 
         // backing file should still not exist (no write occurred)
         assert!(!file.exists());
@@ -708,14 +688,11 @@ pub mod concurrent_patch {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (cached_file, _) =
+        let (state_file, _) =
             ConcurrentTokenFile::spawn_with_default(64, file.clone(), Token::default())
                 .await
                 .unwrap();
-        assert_eq!(
-            cached_file.read().await.unwrap().as_ref(),
-            &Token::default()
-        );
+        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
 
         // delete the file
         files::delete(&file).await.unwrap();
@@ -730,7 +707,7 @@ pub mod concurrent_patch {
             token: updates.token.clone().unwrap(),
             expires_at: updates.expires_at.unwrap(),
         };
-        cached_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, cached_file.read().await.unwrap().as_ref());
+        state_file.patch(updates).await.unwrap();
+        assert_eq!(&expected, state_file.read().await.unwrap().as_ref());
     }
 }
