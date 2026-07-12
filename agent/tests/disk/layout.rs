@@ -53,7 +53,7 @@ pub mod storage_layout {
     fn scanner_state() {
         let layout = Layout::default();
         let file = layout.scanner_state();
-        assert_eq!(file.to_string(), "/var/lib/miru/scanner_state.json");
+        assert_eq!(file.to_string(), "/var/lib/miru/scanner.json");
     }
 
     #[test]

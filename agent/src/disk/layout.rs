@@ -43,7 +43,7 @@ impl Layout {
     }
 
     pub fn scanner_state(&self) -> filesys::File {
-        self.root().file("scanner_state.json")
+        self.root().file("scanner.json")
     }
 
     fn config_instances(&self) -> filesys::Dir {
