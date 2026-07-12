@@ -5,8 +5,11 @@ use std::sync::Arc;
 // internal crates
 use crate::models::{Deployment, UploadCollectionID, UploadRule};
 pub use crate::scan::state::{Config, StableFile};
-use crate::scan::state::{PersistedState, ScanStateFile, State};
-use crate::scan::{collection::CollectionScanner, errors::*};
+use crate::scan::{
+    collection::CollectionScanner,
+    errors::*,
+    state::{PersistedState, ScanStateFile, State},
+};
 use crate::trace;
 
 // external crates

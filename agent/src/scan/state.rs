@@ -2,8 +2,7 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::filesys::state_file::SingleThreadStateFile;
-use crate::filesys::File;
+use crate::filesys::{state_file::SingleThreadStateFile, File};
 use crate::models::{Deployment, Patch, UploadCollectionID, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
