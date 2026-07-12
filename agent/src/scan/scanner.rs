@@ -8,7 +8,7 @@ pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
     collection::CollectionScanner,
     errors::*,
-    state::{PersistedState, ScanStateFile, State},
+    state::{CollectionState, ScanSnapshotFile, ScannerSnapshot},
 };
 use crate::trace;
 
@@ -39,7 +39,7 @@ macro_rules! dispatch {
 pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub broadcast_capacity: usize,
-    pub state_file: Option<ScanStateFile>,
+    pub snapshot_file: Option<ScanSnapshotFile>,
 }
 
 impl Default for ScannerArgs {
@@ -47,7 +47,7 @@ impl Default for ScannerArgs {
         Self {
             now_fn: Arc::new(Utc::now),
             broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
-            state_file: None,
+            snapshot_file: None,
         }
     }
 }
@@ -57,63 +57,51 @@ pub struct SingleThreadScanner {
     deployed: HashSet<UploadCollectionID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     subscriber_tx: broadcast::Sender<ScanEvent>,
-    state_file: Option<ScanStateFile>,
+    snapshot_file: Option<ScanSnapshotFile>,
 }
 
 impl SingleThreadScanner {
     pub fn new(args: ScannerArgs) -> Result<Self, ScanErr> {
         let (subscriber_tx, _) = broadcast::channel(args.broadcast_capacity);
-        let (scanners, deployed) = Self::load_persisted(&args.state_file);
-        Ok(Self {
-            scanners,
-            deployed,
-            now_fn: args.now_fn,
-            subscriber_tx,
-            state_file: args.state_file,
-        })
-    }
-
-    /// Rebuild the collection scanners and the deployed set from the persisted
-    /// snapshot. Restoring `deployed` lets previously deployed collections
-    /// resume discovery on the first scan tick — before the next deployment
-    /// sync — so files that appeared while the agent was down are picked up as
-    /// candidates rather than re-snapshotted as preexisting.
-    #[allow(clippy::type_complexity)]
-    fn load_persisted(
-        state_file: &Option<ScanStateFile>,
-    ) -> (
-        HashMap<UploadCollectionID, CollectionScanner>,
-        HashSet<UploadCollectionID>,
-    ) {
-        let Some(state_file) = state_file.as_ref() else {
-            return (HashMap::new(), HashSet::new());
-        };
-        let persisted = state_file.read();
+        let persisted = Self::load_snapshot(&args.snapshot_file);
         let scanners = persisted
             .collections
             .iter()
             .map(|(cid, state)| (cid.clone(), CollectionScanner::from_state(state.clone())))
             .collect();
-        (scanners, persisted.deployed.clone())
+        Ok(Self {
+            scanners,
+            deployed: persisted.deployed,
+            now_fn: args.now_fn,
+            subscriber_tx,
+            snapshot_file: args.snapshot_file,
+        })
     }
 
-    /// Persist a snapshot of every collection's state and the deployed set to
-    /// the state file. Failures are logged and swallowed: degraded dedup
-    /// beats no uploads.
-    async fn persist(&mut self) {
-        let Some(state_file) = self.state_file.as_mut() else {
+    fn load_snapshot(state_file: &Option<ScanSnapshotFile>) -> ScannerSnapshot {
+        let Some(state_file) = state_file.as_ref() else {
+            return ScannerSnapshot {
+                collections: HashMap::new(),
+                deployed: HashSet::new(),
+            };
+        };
+        return state_file.read();
+    }
+
+    async fn persist_snapshot(&mut self) {
+        let Some(state_file) = self.snapshot_file.as_mut() else {
             return;
         };
-        let collections: HashMap<UploadCollectionID, State> = self
+        let collections: HashMap<UploadCollectionID, CollectionState> = self
             .scanners
             .iter()
             .map(|(cid, scanner)| (cid.clone(), scanner.state().clone()))
             .collect();
-        let state = PersistedState {
+        let snapshot = ScannerSnapshot {
             collections,
             deployed: self.deployed.clone(),
         };
-        if let Err(err) = state_file.patch(state).await {
+        if let Err(err) = state_file.patch(snapshot).await {
             warn!("scan: failed to persist scanner state: {err}");
         }
     }
@@ -152,6 +140,7 @@ impl SingleThreadScanner {
 
     async fn clear_rules(&mut self) -> Result<(), ScanErr> {
         self.deployed.clear();
+        self.persist_snapshot().await;
         Ok(())
     }
 
@@ -189,7 +178,7 @@ impl SingleThreadScanner {
         }
 
         self.deployed = deployed;
-        self.persist().await;
+        self.persist_snapshot().await;
 
         Ok(())
     }
@@ -223,7 +212,7 @@ impl SingleThreadScanner {
             self.scanners.remove(&cid);
         }
 
-        self.persist().await;
+        self.persist_snapshot().await;
         self.emit_stable_files(stable_files);
 
         Ok(())
@@ -233,7 +222,7 @@ impl SingleThreadScanner {
         for scanner in self.scanners.values_mut() {
             scanner.prune_ledger(before)?;
         }
-        self.persist().await;
+        self.persist_snapshot().await;
         Ok(())
     }
 }
@@ -299,7 +288,7 @@ impl Worker {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
                 Command::Shutdown { respond_to } => {
-                    self.scanner.persist().await;
+                    self.scanner.persist_snapshot().await;
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send shutdown response: {:?}", e);
                     }
@@ -556,7 +545,7 @@ mod tests {
             ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: capacity,
-                state_file: None,
+                snapshot_file: None,
             },
         )
         .unwrap();
@@ -1074,13 +1063,13 @@ mod tests {
         #[tokio::test]
         async fn scan_isolates_bad_glob_collection_from_emitting_sibling() {
             use crate::scan::collection::CollectionScanner;
-            use crate::scan::state::{Config, State};
+            use crate::scan::state::{CollectionState, Config};
 
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
-                state_file: None,
+                snapshot_file: None,
             })
             .unwrap();
 
@@ -1093,7 +1082,7 @@ mod tests {
             };
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
-            let mut good = CollectionScanner::from_state(State::new(good_cfg));
+            let mut good = CollectionScanner::from_state(CollectionState::new(good_cfg));
             write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
@@ -1104,7 +1093,7 @@ mod tests {
             };
             // from_state skips the constructor glob, so the bad pattern only bites at
             // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
-            let bad = CollectionScanner::from_state(State::new(bad_cfg));
+            let bad = CollectionScanner::from_state(CollectionState::new(bad_cfg));
 
             single.scanners.insert("good".to_string(), good);
             single.scanners.insert("bad".to_string(), bad);
@@ -1164,12 +1153,12 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::state::{PersistedState, ScanStateFile};
+        use crate::scan::state::{ScanSnapshotFile, ScannerSnapshot};
 
         /// Open (or create with an empty default) the scanner state file at `file`.
         /// `new_with_default` creates the file on disk at construction.
-        async fn state_file(file: &File) -> ScanStateFile {
-            ScanStateFile::new_with_default(file.clone(), PersistedState::default())
+        async fn state_file(file: &File) -> ScanSnapshotFile {
+            ScanSnapshotFile::new_with_default(file.clone(), ScannerSnapshot::default())
                 .await
                 .unwrap()
         }
@@ -1182,7 +1171,7 @@ mod tests {
                 ScannerArgs {
                     now_fn: Arc::new(clock.now_fn()),
                     broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
-                    state_file: Some(state_file(file).await),
+                    snapshot_file: Some(state_file(file).await),
                 },
             )
             .unwrap();
@@ -1199,7 +1188,7 @@ mod tests {
         }
 
         /// Parse the persisted snapshot straight off disk.
-        async fn read_snapshot(file: &File) -> PersistedState {
+        async fn read_snapshot(file: &File) -> ScannerSnapshot {
             files::read_json(file).await.unwrap()
         }
 
