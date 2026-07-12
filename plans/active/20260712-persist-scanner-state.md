@@ -21,13 +21,18 @@ The scanner is not yet driven from `agent/src/main.rs` (see the `#[allow(dead_co
 
 ## Progress
 
-- [ ] Milestone 1: serde derives + `PersistedState`/`ScanStateFile` types + unit tests; commit.
-- [ ] Milestone 2: `Layout::scanner_state()`, restore/persist wiring in the scanner, inline restart tests; commit.
+- [x] Milestone 1: serde derives + `PersistedState`/`ScanStateFile` types + unit tests; commit.
+- [x] Milestone 2: `Layout::scanner_state()`, restore/persist wiring in the scanner, inline restart tests; commit.
 - [ ] Milestone 3: local validation (build, test, lint) and CI green on the pushed head.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The local default rustc (1.94.0) can no longer build the lockfile (`aws-types@1.4.0` requires 1.94.1); all local builds/tests ran with `RUSTUP_TOOLCHAIN=1.97.0`. Pre-existing environment gap, unrelated to this change.
+- `gh` turned out to be available in the execution environment, so CI is watched via `gh pr checks` rather than the GitHub MCP tools the plan anticipated.
+- `SingleThreadStateFile::new_with_default` writes the default to disk at construction on any read failure, so `scanner_state.json` exists before the first scan — the missing-file test asserts existence but notes the earlier creation point.
+- The anticipated ~15 root-permission test failures did not reproduce in this environment; the full suite ran 1702 passed / 0 failed.
+- Milestone ordering deviation: source for both milestones was implemented and committed first (`feat(scan): make scanner state serializable`, `feat(scan): persist scanner state via StateFile`, plus a `style(scan)` import-linter fix from the refine pass), then all tests landed in one `test(scan)` commit — same content as the planned per-milestone commits, different slicing.
+- Tests added beyond the plan's list (coverage-driven): `restore_rejects_collection_id_change` (the `set_config` error line in `restore` is unreachable via the actor), `Layout::scanner_state` path test, and `persist_failure_is_swallowed` (directory planted at the state-file path makes the atomic rename fail with EISDIR even as root, exercising the warn-and-continue arm).
 
 ## Decision Log
 
