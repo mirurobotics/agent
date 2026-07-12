@@ -2,15 +2,17 @@
 use std::collections::HashMap;
 
 // internal crates
+use crate::filesys::state_file::SingleThreadStateFile;
 use crate::filesys::File;
-use crate::models::{Deployment, UploadRule};
+use crate::models::{Deployment, Patch, UploadCollectionID, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct State {
     pub(crate) cfg: Config,
     pub(crate) preexisting: HashMap<File, Observation>,
@@ -18,7 +20,7 @@ pub struct State {
     pub(crate) ledger: HashMap<File, Vec<StableFile>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     pub deployment: Deployment,
     pub rule: UploadRule,
@@ -92,7 +94,7 @@ impl State {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
     pub file: File,
     pub timestamp: DateTime<Utc>,
@@ -111,14 +113,14 @@ impl Observation {
 // A file that is a candidate for upload. Holds the single observation taken at
 // discovery; re-discovery of a tracked candidate is skipped (see
 // `State::is_candidate`), so a candidate never accumulates a second observation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub file: File,
     pub first_obs: Observation,
 }
 
 // A file that has been determined stable enough for upload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StableFile {
     pub file: File,
     pub size: u64,
@@ -149,6 +151,23 @@ impl StableFile {
         self.mtime_aliases.push(mtime);
     }
 }
+
+// The scanner's full persisted memory: one `State` per upload collection,
+// written to disk as a single JSON document.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PersistedState {
+    pub(crate) collections: HashMap<UploadCollectionID, State>,
+}
+
+// Full replacement: scanner mutations touch arbitrary subsets of the maps, so
+// a field-level patch struct buys nothing.
+impl Patch<PersistedState> for PersistedState {
+    fn patch(&mut self, patch: PersistedState) {
+        *self = patch;
+    }
+}
+
+pub(crate) type ScanStateFile = SingleThreadStateFile<PersistedState, PersistedState>;
 
 #[cfg(test)]
 mod tests {
