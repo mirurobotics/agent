@@ -42,6 +42,10 @@ impl Layout {
         self.root().file("agent_version")
     }
 
+    pub fn scanner_state(&self) -> filesys::File {
+        self.root().file("scanner_state.json")
+    }
+
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }

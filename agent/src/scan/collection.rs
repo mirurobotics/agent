@@ -31,6 +31,33 @@ impl CollectionScanner {
         Self { state }
     }
 
+    /// Rebuild a scanner from persisted state under a freshly deployed config.
+    /// When the incoming rule's digest matches the persisted one, the persisted
+    /// `preexisting` snapshot is kept so files that appeared while the agent was
+    /// down are still discovered; a changed digest re-snapshots preexisting
+    /// exactly like `update_config`.
+    pub(crate) async fn restore(
+        state: State,
+        config: Config,
+        now: DateTime<Utc>,
+    ) -> Result<Self, ScanErr> {
+        let digest_unchanged = state.cfg.rule.digest == config.rule.digest;
+        let mut scanner = Self::from_state(state);
+        scanner.state.set_config(config)?;
+
+        if !digest_unchanged {
+            // rediscover preexisting files
+            let preexisting = discover_preexisting(&scanner.state, now).await?;
+            scanner.state.preexisting = preexisting;
+        }
+
+        Ok(scanner)
+    }
+
+    pub(crate) fn state(&self) -> &State {
+        &self.state
+    }
+
     pub(crate) fn rule(&self) -> &UploadRule {
         self.state.rule()
     }

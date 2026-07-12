@@ -5,6 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::models::{Deployment, UploadCollectionID, UploadRule};
 pub use crate::scan::state::{Config, StableFile};
+use crate::scan::state::{PersistedState, ScanStateFile, State};
 use crate::scan::{collection::CollectionScanner, errors::*};
 use crate::trace;
 
@@ -35,6 +36,7 @@ macro_rules! dispatch {
 pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub broadcast_capacity: usize,
+    pub state_file: Option<ScanStateFile>,
 }
 
 impl Default for ScannerArgs {
@@ -42,6 +44,7 @@ impl Default for ScannerArgs {
         Self {
             now_fn: Arc::new(Utc::now),
             broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+            state_file: None,
         }
     }
 }
@@ -51,16 +54,49 @@ pub struct SingleThreadScanner {
     deployed: HashSet<UploadCollectionID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     subscriber_tx: broadcast::Sender<ScanEvent>,
+    state_file: Option<ScanStateFile>,
+    // Persisted collection states waiting for their collection id to be
+    // deployed again; consumed by `update_rules` via `CollectionScanner::restore`.
+    restored: HashMap<UploadCollectionID, State>,
 }
 
 impl SingleThreadScanner {
     pub fn new(args: ScannerArgs) -> Self {
         let (subscriber_tx, _) = broadcast::channel(args.broadcast_capacity);
+        let restored = args
+            .state_file
+            .as_ref()
+            .map(|state_file| state_file.read().collections.clone())
+            .unwrap_or_default();
         Self {
             scanners: HashMap::new(),
             deployed: HashSet::new(),
             now_fn: args.now_fn,
             subscriber_tx,
+            state_file: args.state_file,
+            restored,
+        }
+    }
+
+    /// Persist a snapshot of every collection's state (live and restored) to
+    /// the state file. Failures are logged and swallowed: degraded dedup
+    /// beats no uploads.
+    async fn persist(&mut self) {
+        let Some(state_file) = self.state_file.as_mut() else {
+            return;
+        };
+        let mut collections: HashMap<UploadCollectionID, State> = self
+            .scanners
+            .iter()
+            .map(|(cid, scanner)| (cid.clone(), scanner.state().clone()))
+            .collect();
+        collections.extend(
+            self.restored
+                .iter()
+                .map(|(cid, state)| (cid.clone(), state.clone())),
+        );
+        if let Err(err) = state_file.patch(PersistedState { collections }).await {
+            warn!("scan: failed to persist scanner state: {err}");
         }
     }
 
@@ -126,15 +162,19 @@ impl SingleThreadScanner {
             match self.scanners.get_mut(&rule.upload_collection_id) {
                 Some(scanner) => scanner.update_config(config, now).await?,
                 None => {
-                    self.scanners.insert(
-                        rule.upload_collection_id.clone(),
-                        CollectionScanner::new(config, now).await?,
-                    );
+                    let scanner = match self.restored.remove(&rule.upload_collection_id) {
+                        Some(state) => CollectionScanner::restore(state, config, now).await?,
+                        None => CollectionScanner::new(config, now).await?,
+                    };
+                    self.scanners
+                        .insert(rule.upload_collection_id.clone(), scanner);
                 }
             }
         }
 
         self.deployed = deployed;
+
+        self.persist().await;
 
         Ok(())
     }
@@ -170,6 +210,8 @@ impl SingleThreadScanner {
 
         self.emit_stable_files(stable_files);
 
+        self.persist().await;
+
         Ok(())
     }
 
@@ -177,6 +219,14 @@ impl SingleThreadScanner {
         for scanner in self.scanners.values_mut() {
             scanner.prune_ledger(before)?;
         }
+        for state in self.restored.values_mut() {
+            state.prune_ledger(before)?;
+        }
+        // a restored entry with nothing left in its ledger and no in-flight
+        // candidates holds nothing worth restoring
+        self.restored
+            .retain(|_, state| state.ledger_count() > 0 || state.has_candidates());
+        self.persist().await;
         Ok(())
     }
 }
@@ -242,6 +292,8 @@ impl Worker {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
                 Command::Shutdown { respond_to } => {
+                    // land the final state so a graceful shutdown never loses it
+                    self.scanner.persist().await;
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send shutdown response: {:?}", e);
                     }
@@ -498,6 +550,7 @@ mod tests {
             ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: capacity,
+                state_file: None,
             },
         )
         .unwrap();
@@ -1021,6 +1074,7 @@ mod tests {
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                state_file: None,
             });
 
             // --- good collection: a real file, discovered as a candidate at t=1000. ---
