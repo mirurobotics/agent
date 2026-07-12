@@ -1,6 +1,6 @@
-// This module is named `scan_driver` (not `scan`) to avoid aliasing the
-// `crate::scan` subsystem module: it names its role — it *drives* the scanner
-// actor, which is reactive and not self-scheduling, on a fixed cadence.
+// External driver for the `crate::scan` scanner actor. The actor is reactive,
+// not self-scheduling: this worker imposes the cadence that drives repeated
+// scan passes.
 
 // standard crates
 use std::future::Future;
@@ -20,10 +20,6 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        // scanning is a cheap local filesystem discover/evaluate pass (no
-        // network) and rule stability windows are second-to-minute scale, so a
-        // 1-minute cadence keeps newly-stable files flowing promptly without
-        // busy-looping.
         Self {
             scan_interval_secs: 60,
         }

@@ -7,7 +7,7 @@ use crate::mocks::{error::SleepController, scanner::MockScanner};
 use miru_agent::scan::errors::InternalError;
 use miru_agent::scan::ScanErr;
 use miru_agent::trace;
-use miru_agent::workers::scan_driver;
+use miru_agent::workers::scan;
 
 // external crates
 use tokio::sync::oneshot;
@@ -24,7 +24,7 @@ pub mod run {
 
     #[tokio::test]
     async fn drives_scan_on_each_tick() {
-        let options = scan_driver::Options::default();
+        let options = scan::Options::default();
         let scanner = Arc::new(MockScanner::default());
         let sleep_ctrl = Arc::new(SleepController::new());
 
@@ -35,7 +35,7 @@ pub mod run {
             std::future::pending::<()>().await;
         });
         let _handle = tokio::spawn(async move {
-            scan_driver::run(
+            scan::run(
                 &options_for_spawn,
                 scanner_for_spawn.as_ref(),
                 sleep_ctrl_for_spawn.sleep_fn(),
@@ -66,7 +66,7 @@ pub mod run {
 
     #[tokio::test]
     async fn survives_scan_error_and_continues() {
-        let options = scan_driver::Options::default();
+        let options = scan::Options::default();
         let scanner = Arc::new(MockScanner::default());
         let sleep_ctrl = Arc::new(SleepController::new());
 
@@ -77,7 +77,7 @@ pub mod run {
             std::future::pending::<()>().await;
         });
         let handle = tokio::spawn(async move {
-            scan_driver::run(
+            scan::run(
                 &options_for_spawn,
                 scanner_for_spawn.as_ref(),
                 sleep_ctrl_for_spawn.sleep_fn(),
@@ -113,7 +113,7 @@ pub mod run {
 
     #[tokio::test]
     async fn shuts_down_cleanly() {
-        let options = scan_driver::Options::default();
+        let options = scan::Options::default();
         let scanner = Arc::new(MockScanner::default());
         let sleep_ctrl = Arc::new(SleepController::new());
 
@@ -125,7 +125,7 @@ pub mod run {
             let _ = shutdown_rx.await;
         });
         let handle = tokio::spawn(async move {
-            scan_driver::run(
+            scan::run(
                 &options_for_spawn,
                 scanner_for_spawn.as_ref(),
                 sleep_ctrl_for_spawn.sleep_fn(),
