@@ -31,29 +31,6 @@ impl CollectionScanner {
         Self { state }
     }
 
-    /// Rebuild a scanner from persisted state under a freshly deployed config.
-    /// When the incoming rule's digest matches the persisted one, the persisted
-    /// `preexisting` snapshot is kept so files that appeared while the agent was
-    /// down are still discovered; a changed digest re-snapshots preexisting
-    /// exactly like `update_config`.
-    pub(crate) async fn restore(
-        state: State,
-        config: Config,
-        now: DateTime<Utc>,
-    ) -> Result<Self, ScanErr> {
-        let digest_unchanged = state.cfg.rule.digest == config.rule.digest;
-        let mut scanner = Self::from_state(state);
-        scanner.state.set_config(config)?;
-
-        if !digest_unchanged {
-            // rediscover preexisting files
-            let preexisting = discover_preexisting(&scanner.state, now).await?;
-            scanner.state.preexisting = preexisting;
-        }
-
-        Ok(scanner)
-    }
-
     pub(crate) fn state(&self) -> &State {
         &self.state
     }
@@ -640,30 +617,6 @@ mod tests {
                 .candidates
                 .insert(candidate_file, expected_candidate);
             assert_eq!(scanner.state, expected_state);
-        }
-    }
-
-    // =============================== restore ==================================== //
-
-    mod restore {
-        use super::*;
-
-        // restore rejects a config whose collection id differs from the persisted
-        // state's. Unreachable via the actor (restored states are keyed by the
-        // deployed collection id), so the guard is pinned directly.
-        #[tokio::test]
-        async fn restore_rejects_collection_id_change() {
-            let state = State::new(config("d", "coll_a", "/none/*.mcap", 0));
-            // CollectionScanner has no Debug impl, so unwrap_err is unavailable.
-            let err = CollectionScanner::restore(
-                state,
-                config("d", "coll_b", "/none/*.mcap", 0),
-                ts(1000),
-            )
-            .await
-            .err()
-            .expect("restore must reject a collection id change");
-            assert!(matches!(err, ScanErr::InvalidRule(_)));
         }
     }
 

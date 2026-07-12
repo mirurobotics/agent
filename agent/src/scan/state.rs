@@ -1,5 +1,5 @@
 // standard crates
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
@@ -156,6 +156,7 @@ impl StableFile {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct PersistedState {
     pub(crate) collections: HashMap<UploadCollectionID, State>,
+    pub(crate) deployed: HashSet<UploadCollectionID>,
 }
 
 // Full replacement: scanner mutations touch arbitrary subsets of the maps, so
@@ -652,6 +653,7 @@ mod tests {
         fn persisted_state_round_trips_serde_json() {
             let original = PersistedState {
                 collections: HashMap::from([("coll".to_string(), populated_state())]),
+                deployed: HashSet::from(["coll".to_string()]),
             };
             let json = serde_json::to_string(&original).unwrap();
             let back: PersistedState = serde_json::from_str(&json).unwrap();
@@ -662,12 +664,14 @@ mod tests {
         fn patch_replaces_whole_value() {
             let mut old = PersistedState {
                 collections: HashMap::from([("coll".to_string(), populated_state())]),
+                deployed: HashSet::from(["coll".to_string()]),
             };
             let new = PersistedState {
                 collections: HashMap::from([(
                     "coll2".to_string(),
                     State::new(config("d2", "coll2", "/none/*.mcap", 0)),
                 )]),
+                deployed: HashSet::from(["coll2".to_string()]),
             };
             old.patch(new.clone());
             assert_eq!(old, new);
