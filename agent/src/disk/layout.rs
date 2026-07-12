@@ -42,7 +42,7 @@ impl Layout {
         self.root().file("agent_version")
     }
 
-    pub fn scanner_state(&self) -> filesys::File {
+    pub fn scanner_snapshot(&self) -> filesys::File {
         self.root().file("scanner.json")
     }
 
