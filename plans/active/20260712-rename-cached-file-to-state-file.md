@@ -19,12 +19,14 @@ There is no behavior change: same files on disk, same JSON format, same actor lo
 
 ## Progress
 
-- [ ] Milestone 1: rename files, symbols, references; commit.
+- [x] Milestone 1: rename files, symbols, references; commit. (commit `6d46a39`)
 - [ ] Milestone 2: local validation (build, test, lint, grep gate) and CI green on pushed head.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- `cargo fmt` legitimately joined lines in `agent/tests/filesys/state_file.rs` that now fit the 88-char width with the shorter identifiers (net −23 lines there), so acceptance criterion 5 ("insertions equal deletions") does not hold literally. Every reflow is a pure rustfmt line-join; both file moves are still recorded as renames (89% / 73% similarity).
+- 15 tests (2 lib, 13 integration: `deploy::*`, `s3::get::dest_unwritable::*`, `sync::deployments::apply_error_isolation::*`, `filesys::dirs::new_home_dir::success`) fail locally both before and after the rename — verified by stashing and re-running on the unmodified HEAD. They rely on `0o555` permissions producing EACCES, which root (uid 0, this sandbox) ignores. Zero test deltas are attributable to the rename; CI runs as non-root.
+- `cargo-machete` and `cargo-audit` are not installed in the local sandbox, so `./scripts/lint.sh` stops at the machete step locally; the import linter and `cargo fmt --check` sections passed. Those checks are validated by the CI lint job.
 
 ## Decision Log
 
@@ -32,6 +34,8 @@ There is no behavior change: same files on disk, same JSON format, same actor lo
   Rationale: The abstraction is durable state, not a discardable cache. Field rename keeps the module internally consistent; the traits/actor plumbing do not embed the old name. Date/Author: 2026-07-12 / agents@miruml.com.
 - Decision: Leave the two test comments "should still be able to read the file since it's cached in memory" (`agent/tests/filesys/cached_file.rs` lines 204 and 586 pre-rename) untouched.
   Rationale: They describe real behavior (content held in memory), do not embed the type name, and do not match the verification grep patterns. Date/Author: 2026-07-12 / agents@miruml.com.
+- Decision: Commit the `scripts/update-deps.sh` Cargo.lock refresh (step 6 prerequisite) as a separate `build(deps): refresh Cargo.lock` commit instead of folding it into the rename commit via `git add -A`.
+  Rationale: Keeps the rename commit a pure zero-behavior-change rename; matches repo convention (cf. commit `6867666 build(deps): ...`) and atomic-commit hygiene. Full build + test suite re-ran identically after the lock refresh. Date/Author: 2026-07-12 / agents@miruml.com.
 
 ## Outcomes & Retrospective
 
