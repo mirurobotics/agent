@@ -254,6 +254,35 @@ impl Drop for Bridge {
 
 // =============================== TESTS ======================================= //
 
+pub mod run {
+    use super::*;
+
+    // Firing the shutdown future makes run() return: the spawned task's JoinHandle
+    // completes.
+    #[tokio::test]
+    async fn shutdown_future_completes_run() {
+        let stores = Arc::new(Stores::new().await);
+        let r1 = rule_with("r1", "/none/*.mcap", 0);
+        stores
+            .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
+            .await;
+
+        let scanner = Arc::new(MockScanner::default());
+        let syncer = Arc::new(MockSyncer::default());
+        let (handle, shutdown_tx) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+
+        // let the startup seed run so the worker is in its event loop.
+        wait_until(|| scanner.update_rules_calls().len() == 1).await;
+
+        // fire shutdown; run() must return and the task must complete.
+        shutdown_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("run did not return after shutdown fired")
+            .expect("run task panicked");
+    }
+}
+
 pub mod run_impl {
     use super::*;
 
@@ -314,8 +343,7 @@ pub mod run_impl {
 pub mod resolve_and_push {
     use super::*;
 
-    // With no Deployed deployment (only a Queued one), the worker clears the scanner
-    // rules and never calls update_rules.
+    // A Queued deployment clears scanner rules.
     #[tokio::test]
     async fn no_deployed_clears_rules() {
         let stores = Arc::new(Stores::new().await);
@@ -331,20 +359,17 @@ pub mod resolve_and_push {
         wait_until(|| b.scanner.clear_rules_calls() == 1).await;
         assert_eq!(b.scanner.update_rules_calls().len(), 0);
 
-        // a subsequent SyncSuccess re-resolves and clears again (clear on every event).
+        // SyncSuccess clears again.
         fire_sync_success(&b.syncer);
         wait_until(|| b.scanner.clear_rules_calls() == 2).await;
         assert_eq!(b.scanner.update_rules_calls().len(), 0);
     }
 
-    // A failing resolve (Deployed deployment whose release is missing → DiskErr::CacheErr
-    // → ScanErr::CacheErr) is logged, not propagated: it produces neither an update_rules
-    // nor a clear_rules call, and the worker survives to handle the next event.
+    // A resolve error does not stop the worker.
     #[tokio::test]
-    async fn resolve_error_is_logged_and_worker_survives() {
+    async fn resolve_error_worker_survives() {
         let stores = Arc::new(Stores::new().await);
-        // Deployed deployment whose release_id "absent" is never written, so
-        // find_deployed returns Some but reading the release errors.
+        // Reference a missing release to force a resolve error.
         stores
             .deployments
             .write_if_absent(
@@ -367,15 +392,12 @@ pub mod resolve_and_push {
         )
         .await;
 
-        // The startup resolve errors: neither update_rules nor clear_rules is called.
-        // Give the worker a chance to reach its event loop, then assert both are 0.
+        // The failed resolve does not change scanner rules.
         wait_until(|| true).await;
         assert_eq!(b.scanner.update_rules_calls().len(), 0);
         assert_eq!(b.scanner.clear_rules_calls(), 0);
 
-        // Recover: wire up r1 + the previously-absent release, then fire a sync.
-        // The first successful update_rules is call #1 (the error path produced none),
-        // proving the worker survived the resolve error.
+        // Repair the release and verify the worker handles another sync.
         b.stores.put_rule("r1", "/none/*.mcap").await;
         b.stores.set_release_rules("absent", &["r1"]).await;
         fire_sync_success(&b.syncer);
@@ -383,10 +405,9 @@ pub mod resolve_and_push {
         assert_eq!(rule_ids(&payload), rule_id_set(["r1"]));
     }
 
-    // A failing update_rules is logged, not propagated: the worker survives to handle
-    // the next SyncSuccess event, producing a second (successful) call.
+    // An update_rules error does not stop the worker.
     #[tokio::test]
-    async fn update_rules_error_is_logged_and_worker_survives() {
+    async fn update_rules_error_worker_survives() {
         let stores = Arc::new(Stores::new().await);
         let r1 = rule_with("r1", "/none/*.mcap", 0);
         stores
@@ -394,7 +415,7 @@ pub mod resolve_and_push {
             .await;
 
         let scanner = Arc::new(MockScanner::default());
-        // first update_rules errors; flip to Ok before the next event.
+        // Fail the startup update.
         scanner.set_update_rules(|| {
             Err(ScanErr::InternalError(
                 miru_agent::scan::errors::InternalError {
@@ -405,25 +426,23 @@ pub mod resolve_and_push {
         });
         let b = Bridge::start(stores, scanner, Arc::new(MockSyncer::default())).await;
 
-        // startup seed: the update_rules call happened but returned Err (logged).
+        // The failed update is recorded.
         wait_until(|| b.scanner.update_rules_calls().len() == 1).await;
 
-        // recover: subsequent calls succeed, and a new event is still handled.
+        // Recover and handle another sync.
         b.scanner.set_update_rules(|| Ok(()));
         fire_sync_success(&b.syncer);
         wait_until(|| b.scanner.update_rules_calls().len() == 2).await;
     }
 
-    // A failing clear_rules is logged, not propagated: with no Deployed deployment the
-    // worker clears at startup (returning Err → logged), then survives to clear again on
-    // the next SyncSuccess event.
+    // A clear_rules error does not stop the worker.
     #[tokio::test]
-    async fn clear_rules_error_is_logged_and_worker_survives() {
+    async fn clear_rules_error_worker_survives() {
         let stores = Arc::new(Stores::new().await);
         stores.seed_queued("dpl", "rel").await;
 
         let scanner = Arc::new(MockScanner::default());
-        // first clear_rules errors; flip to Ok before the next event.
+        // Fail the startup clear.
         scanner.set_clear_rules(|| {
             Err(ScanErr::InternalError(
                 miru_agent::scan::errors::InternalError {
@@ -434,42 +453,13 @@ pub mod resolve_and_push {
         });
         let b = Bridge::start(stores, scanner, Arc::new(MockSyncer::default())).await;
 
-        // startup clear: the clear_rules call happened but returned Err (logged).
+        // The failed clear is recorded.
         wait_until(|| b.scanner.clear_rules_calls() == 1).await;
 
-        // recover: subsequent clears succeed, and a new event is still handled.
+        // Recover and handle another sync.
         b.scanner.set_clear_rules(|| Ok(()));
         fire_sync_success(&b.syncer);
         wait_until(|| b.scanner.clear_rules_calls() == 2).await;
         assert_eq!(b.scanner.update_rules_calls().len(), 0);
-    }
-}
-
-pub mod run {
-    use super::*;
-
-    // Firing the shutdown future makes run() return: the spawned task's JoinHandle
-    // completes.
-    #[tokio::test]
-    async fn shutdown_future_completes_run() {
-        let stores = Arc::new(Stores::new().await);
-        let r1 = rule_with("r1", "/none/*.mcap", 0);
-        stores
-            .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
-            .await;
-
-        let scanner = Arc::new(MockScanner::default());
-        let syncer = Arc::new(MockSyncer::default());
-        let (handle, shutdown_tx) = spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
-
-        // let the startup seed run so the worker is in its event loop.
-        wait_until(|| scanner.update_rules_calls().len() == 1).await;
-
-        // fire shutdown; run() must return and the task must complete.
-        shutdown_tx.send(()).unwrap();
-        tokio::time::timeout(Duration::from_secs(5), handle)
-            .await
-            .expect("run did not return after shutdown fired")
-            .expect("run task panicked");
     }
 }

@@ -13,10 +13,10 @@ use tokio::sync::broadcast;
 type ResultFn = Box<dyn Fn() -> Result<(), ScanErr> + Send + Sync>;
 type UpdateRulesCalls = Arc<Mutex<Vec<(Deployment, Vec<UploadRule>)>>>;
 
-/// A test double for [`ScannerExt`] that records `update_rules` / `clear_rules`
-/// calls and lets a test inject an error result for those two methods (mirrors
-/// how `MockSyncer` exposes a settable `sync_fn`). All other trait methods
-/// return sensible defaults.
+/// A test double for [`ScannerExt`] that records `update_rules` / `clear_rules` calls
+/// and lets a test inject an error result for those two methods (mirrors how
+/// `MockSyncer` exposes a settable `sync_fn`). All other trait methods return sensible
+/// defaults.
 pub struct MockScanner {
     update_rules_calls: UpdateRulesCalls,
     clear_rules_calls: AtomicUsize,

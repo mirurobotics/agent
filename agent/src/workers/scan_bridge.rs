@@ -11,12 +11,6 @@ use crate::workers::next_sync_event;
 // external crates
 use tracing::{error, info};
 
-/// Park forever. Used when the worker has nothing left to react to but must not
-/// return — run()'s shutdown arm is the only intended exit.
-async fn idle_forever() {
-    std::future::pending::<()>().await
-}
-
 pub async fn run<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     scanner: &ScannerT,
     syncer: &SyncerT,
@@ -57,13 +51,11 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
         }
     };
 
-    // Consume the seed value FIRST so a SyncSuccess landing during the startup
-    // disk read is not coalesced away by borrow_and_update after the read.
+    // consume the seed value FIRST so a SyncSuccess landing during the startup disk
+    // read is not coalesced away by borrow_and_update after the read.
     let _ = subscriber.borrow_and_update();
 
-    // Resolve and push once at startup so the scanner reflects the deployed
-    // rules even if no sync happens after this worker starts. Idempotent, so a
-    // redundant re-resolve on the next event is harmless.
+    // resolve and push once at startup so the scanner reflects current deployment
     resolve_and_push(scanner, deployments, releases, upload_rules).await;
 
     let mut subscriber = Some(subscriber);
@@ -73,16 +65,20 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
         }
     }
 
-    // The sync stream ended (all Senders dropped). Do NOT return — that would
-    // silently retire the worker while the app believes it is live. Log and idle
-    // so the only exit is run()'s shutdown arm.
+    // sync stream ended (all Senders dropped). Do NOT return — that would silently
+    // retire the worker while the app believes it is live. Log and idle so the only
+    // exit is run()'s shutdown arm.
     error!("scan bridge: syncer event stream ended; worker idling until shutdown");
     idle_forever().await
 }
 
-/// Resolve the active upload rules from disk and push them into the scanner,
-/// logging (never propagating) any error so the worker survives to handle the
-/// next event.
+/// Park forever. Used when the worker has nothing left to react to but must not return
+/// — run()'s shutdown arm is the only intended exit.
+async fn idle_forever() {
+    std::future::pending::<()>().await
+}
+
+/// Resolve active upload rules from disk and push them into the scanner
 async fn resolve_and_push<ScannerT: ScannerExt>(
     scanner: &ScannerT,
     deployments: &disk::Deployments,
@@ -109,9 +105,6 @@ async fn resolve_and_push<ScannerT: ScannerExt>(
     }
 }
 
-/// Map the disk errors reachable from the deployed-rules query onto the
-/// scanner's own error space. Only cache/filesystem reads occur here; any other
-/// DiskErr variant is unexpected and surfaces as an internal error.
 fn disk_err_to_scan_err(e: disk::DiskErr) -> ScanErr {
     match e {
         disk::DiskErr::CacheErr(c) => ScanErr::CacheErr(c),
