@@ -23,10 +23,10 @@ The fix extends #125's best-effort idiom one level down: attempt every shutdown 
 
 ## Progress
 
-- [ ] Milestone 1: rewrite `Storage::shutdown` in `agent/src/disk/mod.rs` to best-effort; commit.
-- [ ] Milestone 2: rewrite `AppState::shutdown` in `agent/src/app/state.rs` to best-effort; commit.
-- [ ] Milestone 3: add tests in `agent/tests/disk/caches.rs` and `agent/tests/app/state.rs`; commit.
-- [ ] Milestone 4: full validation (`./scripts/preflight.sh` reports `Preflight clean`); fix and commit anything flagged.
+- [x] Milestone 1: rewrite `Storage::shutdown` in `agent/src/disk/mod.rs` to best-effort (2026-07-12).
+- [x] Milestone 2: rewrite `AppState::shutdown` in `agent/src/app/state.rs` to best-effort (2026-07-12).
+- [x] Milestone 3: tests added in `agent/tests/disk/caches.rs` (new `pub mod shutdown`, 3 tests) and `agent/tests/app/state.rs` (existing `pub mod shutdown`, 4 tests + `setup()` helper) (2026-07-12). Deliberate-revert check performed: with `agent/src/disk/mod.rs` temporarily reverted to the pre-fix `?` version (tests kept), `disk::caches::shutdown::attempts_all_stores_after_early_failure` and `returns_first_error_with_multiple_failures` both hang until `HANG_GUARD` (60s) and fail on the timeout `unwrap` — proving the tests guard the fix. Fix restored; all 9 shutdown tests green in <1s.
+- [x] Milestone 4 (partial per caller instruction): `./scripts/test.sh` fully green under `HOME=/home/user unshare --user --map-user=1000 --map-group=1000` (284 lib + 1407 integration + 2 log-init tests, 0 failures) (2026-07-12). Remaining: `./scripts/preflight.sh` is deliberately deferred — the caller runs preflight as a separate step. All milestones folded into a single commit per caller instruction (see Decision Log).
 
 Use timestamps when completing steps. Split partially completed work into "done" and "remaining" as needed.
 
@@ -36,6 +36,8 @@ Use timestamps when completing steps. Split partially completed work into "done"
 
 - Observation (pre-implementation, from #125's retrospective): this work environment runs as root, which breaks two pre-existing permission-based tests in `deploy::filesys` (chmod-based failure injection is bypassed by CAP_DAC_OVERRIDE). These failures exist on `main` and are unrelated to this change — ignore them, or run under `HOME=/home/user unshare --user --map-user=1000 --map-group=1000` to emulate the supported non-root environment.
 - Observation (pre-implementation): `agent/tests/disk/caches.rs` already contains `Storage::shutdown` failure tests (`shutdown_twice_returns_error`, `shutdown_with_pre_closed_substore`, `shutdown_with_pre_closed_releases`, `shutdown_with_pre_closed_upload_rules`, lines 63-125). They only assert `unwrap_err()` and never join the workers, so they pass unchanged before and after this fix. Keep them; the new tests strengthen them with join-handle assertions.
+- Discovery (2026-07-12): a prior root-mode test run had created `/nonexistent/dir` on the sandbox filesystem (several tests use `/nonexistent/...` as an "unreachable path" for failure injection). With that directory existing, 3 integration tests (`s3::get::dest_unwritable::get_to_missing_parent_dir_maps_to_local_io_err`, both `sync::deployments::apply_error_isolation` tests) failed even under the unshare emulation — and on the clean tree too, so it is pure environmental pollution unrelated to this change. Removing `/nonexistent` restored a fully green unshare run. Note: any root-mode test run re-creates it, so clean it before an unshare validation run.
+- Observation (2026-07-12): a raw root-mode `--no-fail-fast` run shows 2 lib + 12 integration failures, all in the same category — chmod/permission failure-injection defeated by root's CAP_DAC_OVERRIDE (plus the `$HOME`-dependent `filesys::dirs::new_home_dir::success`). All pre-existing and environmental; the unshare run is the authoritative green signal.
 
 ## Decision Log
 
@@ -56,10 +58,19 @@ Use timestamps when completing steps. Split partially completed work into "done"
 - Decision: assert "the remaining workers actually shut down" by awaiting the join handle returned by `Storage::init` / `AppState::init` under a generous hang-protection timeout, mirroring the `HANG_GUARD` pattern in `agent/tests/app/run.rs` lines 16-20 (60s, value not part of verified behavior).
   Rationale: handle completion is the strongest observable — it is exactly the thing that hangs today. A second `shutdown()` returning an error only proves the channel closed, not that the worker exited.
   Date/Author: 2026-07-09 / plan author.
+- Decision: deliver all milestones as ONE commit (`fix(disk): attempt all store shutdowns before returning first error`, covering source + tests + this plan) instead of the per-milestone commits sketched in Concrete Steps, and defer `./scripts/preflight.sh` to the caller.
+  Rationale: explicit instruction from the orchestrating session for this execution run; preflight runs as a separate follow-up step.
+  Date/Author: 2026-07-12 / implementer.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-07-12. Both shutdown functions now use the #125 best-effort idiom: `Storage::shutdown` (agent/src/disk/mod.rs) attempts the device read/offline-patch preamble and all seven store shutdowns in the original order via a private `record` helper, logging each failure and returning the first error at the end; `AppState::shutdown` (agent/src/app/state.rs) does the same across syncer → event hub → storage → token manager, and the event hub error is no longer swallowed. Signatures, ordering, and error types are unchanged.
+
+Seven integration tests were added (3 in `agent/tests/disk/caches.rs` `shutdown` mod, 4 in `agent/tests/app/state.rs` `shutdown` mod), each asserting both the returned error variant and that the init join handle completes under a 60s `HANG_GUARD`. The deliberate-revert verification confirmed the tests bite: reverting only `agent/src/disk/mod.rs` to the pre-fix version made both disk hang-guard tests hang for the full 60s and fail on the timeout unwrap; restoring the fix returned them to sub-second green.
+
+Validation: full `./scripts/test.sh` under the unshare non-root emulation is entirely green (284 lib + 1407 integration + 2 log-init tests). Raw root-mode failures are all pre-existing permission-injection environmental issues (see Surprises). `./scripts/preflight.sh` deferred to the caller per instruction.
+
+What went well: the plan's target shapes compiled nearly verbatim; the existing `From` impls made `e.into()` folding seamless. What surprised: sandbox filesystem pollution (`/nonexistent/dir` left by earlier root runs) masqueraded as 3 unrelated test failures until diagnosed against the clean tree.
 
 ## Context and Orientation
 
