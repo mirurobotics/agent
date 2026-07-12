@@ -1156,6 +1156,370 @@ mod tests {
         }
     }
 
+    mod persistence {
+        use super::*;
+
+        // internal crates
+        use crate::scan::state::{PersistedState, ScanStateFile};
+
+        /// Open (or create with an empty default) the scanner state file at `file`.
+        /// `new_with_default` creates the file on disk at construction.
+        async fn state_file(file: &File) -> ScanStateFile {
+            ScanStateFile::new_with_default(file.clone(), PersistedState::default())
+                .await
+                .unwrap()
+        }
+
+        /// Spawn a scanner actor with a deterministic injected clock, backed by a
+        /// state file at `file`.
+        async fn spawn_persisted(clock: &Clock, file: &File) -> Scanner {
+            let (scanner, _h) = Scanner::spawn(
+                64,
+                ScannerArgs {
+                    now_fn: Arc::new(clock.now_fn()),
+                    broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                    state_file: Some(state_file(file).await),
+                },
+            )
+            .unwrap();
+            scanner
+        }
+
+        /// Shut down `scanner` (the shutdown arm persists the final snapshot before
+        /// responding, so the file is final once this returns) and spawn a fresh
+        /// scanner over the same state file. `ScanStateFile` is not `Clone`, so
+        /// re-opening the path is the restart mechanism.
+        async fn restart(scanner: Scanner, clock: &Clock, file: &File) -> Scanner {
+            scanner.shutdown().await.unwrap();
+            spawn_persisted(clock, file).await
+        }
+
+        /// `rule_in_collection` with an explicit rule digest (restore keys the
+        /// keep-vs-resnapshot decision on the digest).
+        fn rule_with_digest(
+            rule_id: &str,
+            upload_collection_id: &str,
+            glob: &str,
+            stability_window_secs: i32,
+            digest: &str,
+        ) -> UploadRule {
+            let mut rule =
+                rule_in_collection(rule_id, upload_collection_id, glob, stability_window_secs);
+            rule.digest = digest.to_string();
+            rule
+        }
+
+        /// Parse the persisted snapshot straight off disk.
+        async fn read_snapshot(file: &File) -> PersistedState {
+            files::read_json(file).await.unwrap()
+        }
+
+        /// The `*.mcap` glob for a directory.
+        fn mcap_glob(dir: &Dir) -> String {
+            format!("{}/*.mcap", dir.path().display())
+        }
+
+        /// [`single_coll`] with persistence: temp dir + `*.mcap` glob + scanner
+        /// backed by a state file at `dir/scanner_state.json` + one deployed rule
+        /// (id "r", collection [`DEFAULT_COLL_ID`], deployment "d", digest
+        /// `digest`, window `window`). Returns (dir, clock, scanner, state_path).
+        /// Hold `dir` to keep the temp tree alive.
+        async fn persisted_coll(
+            window: i32,
+            digest: &str,
+        ) -> (dirs::TempDir, Clock, Scanner, File) {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner_state.json");
+            let clock = Clock::new(1000);
+            let scanner = spawn_persisted(&clock, &state_path).await;
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    window,
+                    digest,
+                )],
+            )
+            .await;
+            (dir, clock, scanner, state_path)
+        }
+
+        // A file reported before a restart is not re-reported after the restart:
+        // the restored ledger carries the dedup state across processes.
+        #[tokio::test]
+        async fn dedup_survives_restart() {
+            let (dir, clock, scanner, state_path) = persisted_coll(0, "dg").await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
+
+            let scanner = restart(scanner, &clock, &state_path).await;
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    0,
+                    "dg",
+                )],
+            )
+            .await;
+            let mut rx = subscribe(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            scan_once(&scanner).await;
+            assert!(
+                rx.try_recv().is_err(),
+                "restored ledger must suppress a re-report"
+            );
+            assert_eq!(ledger_count(&scanner).await, 1);
+        }
+
+        // A file that appears while the agent is down is uploaded on restart when
+        // the redeployed rule's digest is unchanged: restore keeps the persisted
+        // preexisting snapshot, so the downtime file is not mistaken for
+        // preexisting.
+        #[tokio::test]
+        async fn downtime_file_uploaded_when_digest_unchanged() {
+            let (dir, clock, scanner, state_path) = persisted_coll(0, "dg").await;
+            scan_once(&scanner).await; // persists a snapshot (empty preexisting)
+            scanner.shutdown().await.unwrap();
+
+            // appears while the agent is down.
+            write(&dir, "down.mcap", b"dddd").await;
+
+            let scanner = spawn_persisted(&clock, &state_path).await;
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    0,
+                    "dg",
+                )],
+            )
+            .await;
+            let mut rx = subscribe(&scanner).await;
+            scan_once(&scanner).await; // discover
+            tick(&scanner, &clock, 1).await; // evaluate => emit
+            assert_one_stable(&mut rx, "down.mcap").await;
+            assert_eq!(ledger_count(&scanner).await, 1);
+        }
+
+        // A changed rule digest re-snapshots preexisting at restore time, so a
+        // file that appeared during downtime is treated as preexisting and
+        // suppressed.
+        #[tokio::test]
+        async fn downtime_file_suppressed_when_digest_changed() {
+            let (dir, clock, scanner, state_path) = persisted_coll(0, "d1").await;
+            scan_once(&scanner).await;
+            scanner.shutdown().await.unwrap();
+
+            write(&dir, "down.mcap", b"dddd").await;
+
+            let scanner = spawn_persisted(&clock, &state_path).await;
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r2",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    0,
+                    "d2",
+                )],
+            )
+            .await;
+            let mut rx = subscribe(&scanner).await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            scan_once(&scanner).await;
+            assert!(
+                rx.try_recv().is_err(),
+                "a changed digest must re-snapshot the downtime file as preexisting"
+            );
+            assert_eq!(ledger_count(&scanner).await, 0);
+        }
+
+        // A candidate discovered mid-stability-window survives a restart: after
+        // the window elapses it is emitted with the ORIGINAL first_observed_at,
+        // proving the restored candidate was evaluated rather than re-discovered
+        // (a re-discovered file would carry a post-restart timestamp).
+        #[tokio::test]
+        async fn midwindow_candidate_survives_restart() {
+            let (dir, clock, scanner, state_path) = persisted_coll(10, "dg").await;
+            write(&dir, "mid.mcap", b"mmmm").await;
+            scan_once(&scanner).await; // candidate discovered at ts(1000)
+
+            clock.advance(1);
+            let scanner = restart(scanner, &clock, &state_path).await; // t=1001
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    10,
+                    "dg",
+                )],
+            )
+            .await;
+            let mut rx = subscribe(&scanner).await;
+            tick(&scanner, &clock, 10).await; // t=1011 >= 1000+10
+
+            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+            assert_eq!(stable_name(&sf), "mid.mcap".to_string());
+            assert_eq!(
+                sf.first_observed_at,
+                DateTime::from_timestamp(1000, 0).unwrap()
+            );
+            assert!(
+                rx.try_recv().is_err(),
+                "expected exactly one StableFile event"
+            );
+        }
+
+        // No state file on disk: the scanner starts fresh and creates the file
+        // (new_with_default writes the default snapshot at construction).
+        #[tokio::test]
+        async fn missing_state_file_starts_fresh() {
+            // persisted_coll's state path starts absent on disk.
+            let (dir, clock, scanner, state_path) = persisted_coll(0, "dg").await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
+
+            assert!(state_path.exists());
+            let snapshot = read_snapshot(&state_path).await;
+            assert!(snapshot.collections.contains_key(DEFAULT_COLL_ID));
+        }
+
+        // A corrupt (unparseable) state file is replaced with the default
+        // snapshot instead of poisoning startup.
+        #[tokio::test]
+        async fn corrupt_state_file_starts_fresh() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner_state.json");
+            files::seed(&state_path, "not json").await;
+
+            let clock = Clock::new(1000);
+            let scanner = spawn_persisted(&clock, &state_path).await; // must not panic
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    0,
+                    "dg",
+                )],
+            )
+            .await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
+
+            let snapshot = read_snapshot(&state_path).await;
+            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            assert_eq!(state.ledger.len(), 1);
+        }
+
+        // Each scan persists the snapshot: the on-disk document reflects the
+        // ledgered file without any shutdown.
+        #[tokio::test]
+        async fn persisted_snapshot_written() {
+            let (dir, clock, scanner, state_path) = persisted_coll(0, "dg").await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+
+            let snapshot = read_snapshot(&state_path).await;
+            assert_eq!(snapshot.collections.len(), 1);
+            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            assert_eq!(state.ledger.len(), 1);
+            let ledgered = state.ledger.keys().next().unwrap();
+            assert_eq!(
+                ledgered.path().file_name().unwrap().to_string_lossy(),
+                "a.mcap"
+            );
+        }
+
+        // prune reaches restored (never-redeployed) entries: an early cutoff
+        // retains the restored collection, a late cutoff empties its ledger and —
+        // with no candidates — drops it from the snapshot entirely.
+        #[tokio::test]
+        async fn prune_drops_restored_entries() {
+            // session 1: ledger one file (first_observed_at == ts(1000)).
+            let (dir, clock, scanner, state_path) = persisted_coll(0, "dg").await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            scanner.shutdown().await.unwrap();
+
+            // session 2: restore the snapshot but never re-deploy the collection.
+            let scanner = spawn_persisted(&clock, &state_path).await;
+
+            // early cutoff: the restored ledger entry is kept.
+            scanner
+                .prune(DateTime::from_timestamp(500, 0).unwrap())
+                .await
+                .unwrap();
+            let snapshot = read_snapshot(&state_path).await;
+            assert!(snapshot.collections.contains_key(DEFAULT_COLL_ID));
+
+            // late cutoff: ledger pruned empty + no candidates => entry dropped.
+            scanner
+                .prune(DateTime::from_timestamp(2000, 0).unwrap())
+                .await
+                .unwrap();
+            let snapshot = read_snapshot(&state_path).await;
+            assert!(snapshot.collections.is_empty());
+            drop(dir);
+        }
+
+        // A persist failure is warned about and swallowed: the mutating command
+        // still succeeds and the scanner keeps reporting stable files.
+        #[tokio::test]
+        async fn persist_failure_is_swallowed() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner_state.json");
+            let clock = Clock::new(1000);
+            let scanner = spawn_persisted(&clock, &state_path).await; // creates the file
+
+            // replace the state file with a DIRECTORY: persist's atomic rename
+            // onto the path then fails (EISDIR) even when running as root.
+            files::delete(&state_path).await.unwrap();
+            dirs::create(&Dir::new(state_path.path().clone()))
+                .await
+                .unwrap();
+
+            // update_rules mutates state -> persist fails -> warn-and-swallow;
+            // the deploy helper's unwrap asserts the command still returned Ok.
+            deploy(
+                &scanner,
+                vec![rule_with_digest(
+                    "r",
+                    DEFAULT_COLL_ID,
+                    &mcap_glob(&dir),
+                    0,
+                    "dg",
+                )],
+            )
+            .await;
+
+            // the scanner still functions despite the persist failure.
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
+        }
+    }
+
     mod shutdown {
         use super::*;
 

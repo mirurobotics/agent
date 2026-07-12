@@ -624,6 +624,59 @@ mod tests {
         }
     }
 
+    mod persistence {
+        use super::*;
+
+        /// A State with one preexisting file, one candidate, and one ledger
+        /// entry, so every map in the snapshot is exercised.
+        fn populated_state() -> State {
+            let file = File::new("/none/p.mcap");
+            let mut state = State::new(config("d", "coll", "/none/*.mcap", 10));
+            state
+                .preexisting
+                .insert(file.clone(), observation(file.clone()));
+            state.candidates.insert(
+                file.clone(),
+                Candidate {
+                    file: file.clone(),
+                    first_obs: observation(file.clone()),
+                },
+            );
+            state
+                .ledger
+                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
+            state
+        }
+
+        #[test]
+        fn persisted_state_round_trips_serde_json() {
+            let original = PersistedState {
+                collections: HashMap::from([("coll".to_string(), populated_state())]),
+            };
+            let json = serde_json::to_string(&original).unwrap();
+            let back: PersistedState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, original);
+        }
+
+        #[test]
+        fn patch_replaces_whole_value() {
+            let mut old = PersistedState {
+                collections: HashMap::from([("coll".to_string(), populated_state())]),
+            };
+            let new = PersistedState {
+                collections: HashMap::from([(
+                    "coll2".to_string(),
+                    State::new(config("d2", "coll2", "/none/*.mcap", 0)),
+                )]),
+            };
+            old.patch(new.clone());
+            assert_eq!(old, new);
+
+            old.patch(PersistedState::default());
+            assert_eq!(old, PersistedState::default());
+        }
+    }
+
     mod stable_file {
         use super::*;
 
