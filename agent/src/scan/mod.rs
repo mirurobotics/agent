@@ -7,10 +7,9 @@ pub(crate) mod state;
 // wired into a consumer in this crate; the parent scanner actor lands separately.
 #[allow(dead_code)]
 pub(crate) mod collection;
-// The parent scanner actor is exercised by its own inline tests but is not
-// yet wired into a consumer in this crate; the driving worker lands separately.
-#[allow(dead_code)]
-pub(crate) mod scanner;
+// Public (mirroring `sync`) so external drivers and integration tests can name
+// the actor surface; the scan driver worker consumes `ScannerExt`.
+pub mod scanner;
 
 pub use self::errors::ScanErr;
-pub use self::scanner::{ScanEvent, ScannerExt};
+pub use self::scanner::{ScanEvent, Scanner, ScannerArgs, ScannerExt};
