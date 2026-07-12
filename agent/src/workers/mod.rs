@@ -9,6 +9,10 @@ use tokio::sync::watch;
 
 pub mod mqtt;
 pub mod poller;
+// The scan bridge worker is exercised by its own tests but is not yet wired
+// into app::run; the app integration (spawn order, shutdown) lands separately.
+#[allow(dead_code)]
+pub mod scan_bridge;
 pub mod token_refresh;
 
 /// Wait for the next sync event. A missing subscription remains pending so

@@ -13,3 +13,4 @@ pub(crate) mod collection;
 pub(crate) mod scanner;
 
 pub use self::errors::ScanErr;
+pub use self::scanner::{ScanEvent, ScannerExt};
