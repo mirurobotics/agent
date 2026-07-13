@@ -159,8 +159,11 @@ paths:
       operationId: createUpload
       description: |
         Request an upload for a captured file. The backend verifies the calling
-        device from its session token, creates a ledger entry, and returns a
-        short-lived V4-presigned URL the device PUTs the file to. The device's
+        device from its session token, creates a ledger entry, authorizes the exact
+        `object_key` and provenance, performs digest dedup, and vends short-lived
+        downscoped cloud credentials scoped to that one object key. The device
+        uploads the file directly via the native cloud SDK (S3 multipart / GCS
+        resumable), then calls `POST /uploads/{upload_id}/confirm`. The device's
         identity is derived from the token and is never read from the request body.
       requestBody:
         required: true
@@ -170,11 +173,29 @@ paths:
               $ref: '#/components/schemas/CreateUploadRequest'
       responses:
         '200':
-          description: Successfully created the upload and minted a presigned URL.
+          description: Successfully created the upload ledger entry and vended downscoped credentials.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PresignedUpload'
+                $ref: '#/components/schemas/UploadWithCredentials'
+  /uploads/{upload_id}/credentials:
+    parameters:
+      - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+        - Uploads
+      summary: Vend Credentials
+      operationId: vendUploadCredentials
+      description: Re-vend the downscoped credentials for an in-progress upload, e.g. after the previous credentials expired mid-upload.
+      parameters:
+        - $ref: '#/components/parameters/upload_id'
+      responses:
+        '200':
+          description: Successfully vended downscoped credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadCredentials'
   /uploads/{upload_id}/confirm:
     parameters:
       - $ref: '#/components/parameters/MiruVersion'
@@ -1262,125 +1283,173 @@ components:
           type: string
           example: dpl_123
           description: ID of the deployment the device is currently on.
-    UploadRequiredHeaders:
-      title: Upload Required Headers
+    UploadWithCredentials:
+      title: Upload With Credentials
       type: object
       description: |
-        Provenance metadata the device MUST send as headers on the presigned PUT.
-        These values are echoed into the bucket object's metadata and are populated
-        server-side from the authenticated device's identity; the device never
-        supplies them as request input.
+        Response to a broker upload request. The backend verified the calling
+        device, created the upload ledger entry, authorized the exact `object_key`
+        and provenance, performed digest dedup, and vended short-lived downscoped
+        cloud credentials bound to that one object key. The device uploads directly
+        via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`.
       required:
-        - device_id
-        - release_id
-        - deployment_id
-        - config_version
-        - digest
-        - file_modified_at
+        - upload
+        - credentials
       properties:
-        device_id:
-          type: string
-          example: dvc_123
-          description: The verified ID of the device that produced the upload.
-        release_id:
-          type: string
-          example: rls_123
-          description: The ID of the release the device was on when the file was captured.
-        deployment_id:
-          type: string
-          example: dpl_123
-          description: The ID of the deployment the device was on when the file was captured.
-        config_version:
-          type: string
-          example: v1.0.0
-          description: The config version active on the device when the file was captured.
-        digest:
-          type: string
-          example: sha256:1234567890
-          description: The digest of the file being uploaded.
-        file_modified_at:
-          type: string
-          example: '2021-01-01T00:00:00Z'
-          description: The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
-      example:
-        device_id: dvc_123
-        release_id: rls_123
-        deployment_id: dpl_123
-        config_version: v1.0.0
-        digest: sha256:1234567890
-        file_modified_at: '2021-01-01T00:00:00Z'
-    PresignedUpload:
-      title: Presigned Upload
+        upload:
+          $ref: '#/components/schemas/Upload'
+        credentials:
+          $ref: '#/components/schemas/UploadCredentials'
+    UploadCredentials:
+      title: Upload Credentials
       type: object
+      description: |
+        Short-lived downscoped cloud credentials bound to a single object key.
+        `scheme` selects which credential arm is populated; the other arm is null.
       required:
-        - upload_id
-        - upload_url
-        - object_key
+        - scheme
+        - s3_credentials
+        - gcs_credentials
         - expires_at
-        - required_headers
-        - already_uploaded
       properties:
-        upload_id:
+        scheme:
           type: string
-          example: upl_123
-          description: ID of the upload ledger entry created for this request.
-        upload_url:
-          type: string
-          example: https://storage.googleapis.com/my-uploads-bucket/logs/dvc_123/robot.log?X-Goog-Signature=...
-          description: The short-lived V4-presigned PUT URL the device uploads the file to.
-        object_key:
-          type: string
-          example: logs/dvc_123/robot.log
-          description: The object path in the destination bucket. Carries the device's verified ID.
+          enum:
+            - s3
+            - gcs
+          example: gcs
+          x-enum-varnames:
+            - UPLOAD_SCHEME_S3
+            - UPLOAD_SCHEME_GCS
+          description: The storage access scheme. Mirrors the populated credential arm so the device can select its SDK before parsing `credentials`.
+        s3_credentials:
+          allOf:
+            - $ref: '#/components/schemas/S3UploadCredentials'
+          nullable: true
+          description: The vended S3 downscoped credentials, or null when `scheme` is not `s3`.
+        gcs_credentials:
+          allOf:
+            - $ref: '#/components/schemas/GcsUploadCredentials'
+          nullable: true
+          description: The vended GCS downscoped credentials, or null when `scheme` is not `gcs`.
         expires_at:
           type: string
           format: date-time
-          example: '2021-01-01T00:15:00Z'
-          description: Timestamp after which the presigned URL is no longer valid.
-        required_headers:
-          $ref: '#/components/schemas/UploadRequiredHeaders'
-        already_uploaded:
-          type: boolean
-          example: false
-          description: True if a durable upload with the same digest already exists, in which case the device may skip the PUT.
-      example:
-        upload_id: upl_123
-        upload_url: https://storage.googleapis.com/my-uploads-bucket/logs/dvc_123/robot.log?X-Goog-Signature=...
-        object_key: logs/dvc_123/robot.log
-        expires_at: '2021-01-01T00:15:00Z'
-        required_headers:
-          device_id: dvc_123
-          release_id: rls_123
-          deployment_id: dpl_123
-          config_version: v1.0.0
-          digest: sha256:1234567890
-          file_modified_at: '2021-01-01T00:00:00Z'
-        already_uploaded: false
+          example: '2021-01-01T01:00:00Z'
+          description: Timestamp after which the vended credentials expire. On mid-upload expiry the device re-requests exact-key credentials and resumes.
+    S3UploadCredentials:
+      title: S3 Upload Credentials
+      type: object
+      description: |
+        Short-lived credentials for the broker upload flow to any S3-compatible
+        object store (AWS S3, Cloudflare R2, MinIO, ...). The device drives a native
+        S3 multipart upload with the standard AWS S3 SDK, configured from `endpoint`
+        + `region` plus the access key / secret / session token.
+      required:
+        - scheme
+        - access_key_id
+        - secret_access_key
+        - session_token
+        - region
+        - endpoint
+        - expires_at
+      properties:
+        scheme:
+          type: string
+          enum:
+            - s3
+          example: s3
+          x-stainless-const: true
+          description: The storage access scheme, which is always `s3` for these credentials.
+        access_key_id:
+          type: string
+          example: ASIAIOSFODNN7EXAMPLE
+          description: The STS session access key ID.
+        secret_access_key:
+          type: string
+          example: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+          description: The STS session secret access key.
+        session_token:
+          type: string
+          example: FwoGZXIvYXdzEBaDOEXAMPLE
+          description: The STS session token that must accompany the access key pair.
+        region:
+          type: string
+          example: us-east-1
+          description: The region used for SigV4 signing. For Cloudflare R2 this is `auto`.
+        endpoint:
+          type: string
+          format: uri
+          example: https://s3.us-east-1.amazonaws.com
+          description: |
+            The S3 API endpoint URL the device points its S3 SDK at. AWS uses a
+            regional endpoint, e.g. `https://s3.us-east-1.amazonaws.com`; Cloudflare
+            R2 uses `https://<account_id>.r2.cloudflarestorage.com` with `region: auto`.
+        expires_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T01:00:00Z'
+          description: Timestamp after which the session credentials are no longer valid.
+    GcsUploadCredentials:
+      title: GCS Upload Credentials
+      type: object
+      description: |
+        Short-lived Google Cloud Storage credentials for the broker upload flow.
+        The backend downscopes the token with a Credential Access Boundary to
+        `storage.objects.create` on the exact object name, so the device can drive
+        a native resumable upload directly.
+      required:
+        - scheme
+        - access_token
+        - expires_at
+      properties:
+        scheme:
+          type: string
+          enum:
+            - gcs
+          example: gcs
+          x-stainless-const: true
+          description: The storage access scheme, which is always `gcs` for these credentials.
+        access_token:
+          type: string
+          example: ya29.c.b0Aaekm1J
+          description: 'A downscoped GCS OAuth2 bearer token the device sends as an `Authorization: Bearer <token>` header on the resumable upload.'
+        expires_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T01:00:00Z'
+          description: Timestamp after which the access token is no longer valid.
     UploadDestination:
       title: Upload Destination
       type: object
       description: Destination-side details of where an upload was written.
       required:
         - bucket_id
+        - bucket_name
         - object_key
       properties:
         bucket_id:
           type: string
           example: bkt_123
           description: ID of the registered bucket the file was uploaded to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Physical name of the bucket in the object store. This is the bucket parameter the device passes to the native cloud SDK (it is not the Miru `bucket_id`).
         object_key:
           type: string
           example: logs/dvc_123/robot.log
           description: The object path the file was written to in the destination bucket. Carries the device's verified ID.
       example:
         bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
         object_key: logs/dvc_123/robot.log
     UploadStatus:
       title: Upload Status
       type: string
       description: |
         The lifecycle status of an upload in the ledger.
-        - `pending`: a presigned URL has been minted but the device has not yet confirmed a durable write.
+        - `pending`: credentials have been minted but the device has not yet confirmed a durable write.
         - `uploaded`: the device confirmed a durable write to the bucket.
       enum:
         - pending

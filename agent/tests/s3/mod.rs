@@ -50,6 +50,7 @@ fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
     let cfg = Config {
         region: REGION.to_string(),
         creds: Credentials::default(),
+        endpoint: None,
     };
     let store = Store::from_http_client(replay.clone(), cfg);
     (store, replay)
@@ -141,6 +142,7 @@ pub mod construction {
                 session_token: "session".to_string(),
             },
             region: "us-west-2".to_string(),
+            endpoint: None,
         };
         // Constructing must not panic or touch the network.
         let _store = Store::new(cfg);
