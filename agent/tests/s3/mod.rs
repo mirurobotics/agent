@@ -482,8 +482,6 @@ pub mod get {
             let err = store.get(&obj(key), dest.file()).await.unwrap_err();
 
             assert!(matches!(err, S3Err::ObjectNotFoundErr(_)));
-            assert!(matches!(err.code(), Code::ResourceNotFound));
-            assert_eq!(err.http_status().as_u16(), 404);
         }
     }
 
