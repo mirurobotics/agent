@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{UploadErr, UploadExecutor, UploadJob};
+use miru_agent::upload::{UploadErr, UploadExecutor, Job};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
@@ -21,7 +21,7 @@ pub enum MockStep {
 
 pub struct MockUploadExecutor {
     script: Mutex<VecDeque<MockStep>>,
-    pub calls: Mutex<Vec<UploadJob>>,
+    pub calls: Mutex<Vec<Job>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -45,13 +45,13 @@ impl MockUploadExecutor {
         self.script.lock().unwrap().push_back(step);
     }
 
-    pub fn recorded_calls(&self) -> Vec<UploadJob> {
+    pub fn recorded_calls(&self) -> Vec<Job> {
         self.calls.lock().unwrap().clone()
     }
 }
 
 impl UploadExecutor for MockUploadExecutor {
-    async fn upload(&self, job: &UploadJob) -> Result<(), UploadErr> {
+    async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         self.calls.lock().unwrap().push(job.clone());
         let step = self.script.lock().unwrap().pop_front();
         // both mutex guards above are already dropped: never hold a

@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
-use miru_agent::upload::{EnqueueOutcome, PendingJob, UploadErr, UploadJob, UploadQueue};
+use miru_agent::upload::{Outcome, PendingJob, UploadErr, Job, Queue};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
@@ -13,8 +13,8 @@ async fn make_file(dir: &filesys::Dir, name: &str, contents: &str) -> File {
     file
 }
 
-async fn make_job(file: &File) -> UploadJob {
-    UploadJob {
+async fn make_job(file: &File) -> Job {
+    Job {
         file: file.clone(),
         size: files::size(file).await.unwrap(),
         digest: files::hash(file).await.unwrap(),
@@ -32,11 +32,11 @@ mod enqueue {
     async fn returns_enqueued_for_new_job() {
         let dir = dirs::create_temp("upload_queue_new").await.unwrap();
         let file = make_file(&dir, "a.log", "contents a").await;
-        let mut queue = UploadQueue::new(4);
+        let mut queue = Queue::new(4);
 
         let outcome = queue.enqueue(make_job(&file).await).await.unwrap();
 
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
+        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 1);
     }
 
@@ -44,7 +44,7 @@ mod enqueue {
     async fn returns_duplicate_for_same_key() {
         let dir = dirs::create_temp("upload_queue_dup").await.unwrap();
         let file = make_file(&dir, "a.log", "contents a").await;
-        let mut queue = UploadQueue::new(4);
+        let mut queue = Queue::new(4);
         let job = make_job(&file).await;
         queue.enqueue(job.clone()).await.unwrap();
 
@@ -53,7 +53,7 @@ mod enqueue {
         dup.release_id = "rls_2".to_string();
         let outcome = queue.enqueue(dup).await.unwrap();
 
-        assert_eq!(outcome, EnqueueOutcome::Duplicate);
+        assert_eq!(outcome, Outcome::Duplicate);
         assert_eq!(queue.len(), 1);
     }
 
@@ -62,7 +62,7 @@ mod enqueue {
         let dir = dirs::create_temp("upload_queue_prune").await.unwrap();
         let fresh_file = make_file(&dir, "fresh.log", "fresh contents").await;
         let stale_file = make_file(&dir, "stale.log", "stale contents").await;
-        let mut queue = UploadQueue::new(2);
+        let mut queue = Queue::new(2);
         let stale_job = make_job(&stale_file).await;
         let stale_key = stale_job.dedup_key();
         queue.enqueue(make_job(&fresh_file).await).await.unwrap();
@@ -72,7 +72,7 @@ mod enqueue {
         let new_file = make_file(&dir, "new.log", "new contents").await;
         let outcome = queue.enqueue(make_job(&new_file).await).await.unwrap();
 
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
+        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 2);
         assert!(!queue.contains(&stale_key));
     }
@@ -82,7 +82,7 @@ mod enqueue {
         let dir = dirs::create_temp("upload_queue_full").await.unwrap();
         let file_a = make_file(&dir, "a.log", "contents a").await;
         let file_b = make_file(&dir, "b.log", "contents b").await;
-        let mut queue = UploadQueue::new(1);
+        let mut queue = Queue::new(1);
         queue.enqueue(make_job(&file_a).await).await.unwrap();
 
         let result = queue.enqueue(make_job(&file_b).await).await;
@@ -100,7 +100,7 @@ mod enqueue {
             .await
             .unwrap();
         let file = make_file(&dir, "a.log", "original").await;
-        let mut queue = UploadQueue::new(1);
+        let mut queue = Queue::new(1);
         let job = make_job(&file).await;
         let key = job.dedup_key();
         queue.enqueue(job).await.unwrap();
@@ -115,7 +115,7 @@ mod enqueue {
         let other = make_file(&dir, "b.log", "other contents").await;
         let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
 
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
+        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 1);
         assert!(!queue.contains(&key));
     }
@@ -124,7 +124,7 @@ mod enqueue {
     async fn changed_mtime_makes_job_stale() {
         let dir = dirs::create_temp("upload_queue_stale_mtime").await.unwrap();
         let file = make_file(&dir, "a.log", "contents a").await;
-        let mut queue = UploadQueue::new(1);
+        let mut queue = Queue::new(1);
         let mut job = make_job(&file).await;
         // lie about the recorded mtime so the file appears rewritten
         job.mtime += Duration::seconds(1);
@@ -134,7 +134,7 @@ mod enqueue {
         let other = make_file(&dir, "b.log", "other contents").await;
         let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
 
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
+        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 1);
         assert!(!queue.contains(&key));
     }
@@ -145,7 +145,7 @@ mod enqueue {
             .await
             .unwrap();
         let file = make_file(&dir, "a.log", "original").await;
-        let mut queue = UploadQueue::new(1);
+        let mut queue = Queue::new(1);
         let job = make_job(&file).await;
         let key = job.dedup_key();
         queue.enqueue(job).await.unwrap();
@@ -154,7 +154,7 @@ mod enqueue {
         let other = make_file(&dir, "b.log", "other contents").await;
         let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
 
-        assert_eq!(outcome, EnqueueOutcome::Enqueued);
+        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 1);
         assert!(!queue.contains(&key));
     }
@@ -167,7 +167,7 @@ mod is_empty {
     async fn reflects_queue_contents() {
         let dir = dirs::create_temp("upload_queue_is_empty").await.unwrap();
         let file = make_file(&dir, "a.log", "contents a").await;
-        let mut queue = UploadQueue::new(4);
+        let mut queue = Queue::new(4);
         assert!(queue.is_empty());
 
         queue.enqueue(make_job(&file).await).await.unwrap();
@@ -181,7 +181,7 @@ mod pop_front {
     #[tokio::test]
     async fn returns_jobs_in_fifo_order() {
         let dir = dirs::create_temp("upload_queue_fifo").await.unwrap();
-        let mut queue = UploadQueue::new(4);
+        let mut queue = Queue::new(4);
         let mut jobs = Vec::new();
         for name in ["a.log", "b.log", "c.log"] {
             let file = make_file(&dir, name, name).await;
@@ -207,7 +207,7 @@ mod requeue {
         let dir = dirs::create_temp("upload_queue_requeue").await.unwrap();
         let file_a = make_file(&dir, "a.log", "contents a").await;
         let file_b = make_file(&dir, "b.log", "contents b").await;
-        let mut queue = UploadQueue::new(4);
+        let mut queue = Queue::new(4);
         let job_a = make_job(&file_a).await;
         queue.enqueue(job_a.clone()).await.unwrap();
         let requeued_job = make_job(&file_b).await;

@@ -1,5 +1,5 @@
 // internal crates
-use crate::upload::{errors::UploadErr, job::UploadJob};
+use crate::upload::{errors::UploadErr, job::Job};
 
 // external crates
 use tracing::info;
@@ -20,7 +20,7 @@ use tracing::info;
 pub trait UploadExecutor: Send + Sync {
     fn upload(
         &self,
-        job: &UploadJob,
+        job: &Job,
     ) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
@@ -29,7 +29,7 @@ pub trait UploadExecutor: Send + Sync {
 pub struct LogExecutor;
 
 impl UploadExecutor for LogExecutor {
-    async fn upload(&self, job: &UploadJob) -> Result<(), UploadErr> {
+    async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         info!("LogExecutor: pretending to upload {job:?}");
         Ok(())
     }

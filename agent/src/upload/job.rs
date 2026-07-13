@@ -7,15 +7,8 @@ use crate::filesys::{File, PathExt};
 // external crates
 use chrono::{DateTime, Utc};
 
-/// A single file upload awaiting processing.
-///
-/// `digest` is the content digest in the `files::hash` format
-/// (`"sha256:<hex>"`). `mtime` must be recorded via
-/// `DateTime::<Utc>::from(files::last_modified(...))` — the same conversion the
-/// queue uses when checking staleness — so equality comparisons against fresh
-/// metadata are exact.
 #[derive(Clone, Debug, PartialEq)]
-pub struct UploadJob {
+pub struct Job {
     pub file: File,
     pub size: u64,
     pub digest: String,
@@ -34,7 +27,7 @@ pub struct DedupKey {
     pub digest: String,
 }
 
-impl UploadJob {
+impl Job {
     pub fn dedup_key(&self) -> DedupKey {
         DedupKey {
             upload_rule_id: self.upload_rule_id.clone(),

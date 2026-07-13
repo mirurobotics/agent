@@ -1,13 +1,13 @@
 // internal crates
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
 use miru_agent::filesys::File;
-use miru_agent::upload::{LogExecutor, UploadErr, UploadExecutor, UploadJob};
+use miru_agent::upload::{LogExecutor, UploadErr, UploadExecutor, Job};
 
 // external crates
 use chrono::Utc;
 
-fn make_job(name: &str) -> UploadJob {
-    UploadJob {
+fn make_job(name: &str) -> Job {
+    Job {
         file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
