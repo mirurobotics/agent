@@ -187,9 +187,6 @@ impl Store {
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         let file = writer.into_inner();
-        // flush() only reaches the page cache; make the download durable before
-        // reporting success, or a power cut after Ok(()) can lose the file a
-        // caller has already recorded as complete.
         file.sync_data()
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;

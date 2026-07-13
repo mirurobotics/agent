@@ -141,8 +141,6 @@ impl Store {
                     trace: trace!(),
                 })
             })?;
-        // Redact the token from all Debug output: the CredentialsProvider trait
-        // requires Debug, and hyper/reqwest print request headers in trace logs.
         header_value.set_sensitive(true);
         let credentials = GcsCredentials::from(StaticTokenCredentials {
             header_value,
@@ -254,9 +252,6 @@ impl Store {
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         let file = writer.into_inner();
-        // flush() only reaches the page cache; make the download durable before
-        // reporting success, or a power cut after Ok(()) can lose the file a
-        // caller has already recorded as complete.
         file.sync_data()
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
@@ -277,9 +272,6 @@ impl Store {
         {
             Ok(()) => Ok(()),
             Err(e) if is_not_found(&e) => {
-                // GCS also returns NOT_FOUND for a nonexistent *bucket*, which
-                // this arm would silently swallow forever on a misconfigured
-                // bucket — log the service message so that is observable.
                 tracing::warn!(
                     "delete of '{obj}' returned NOT_FOUND, treating as already deleted: {e}"
                 );
