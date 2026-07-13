@@ -130,7 +130,9 @@ impl AppState {
         // shutdown the scanner before the syncer (it uses syncer to determine the
         // correct set of rules to use for scannning)
         if let Some(scanner) = &self.scanner {
-            scanner.shutdown().await?;
+            if let Err(e) = scanner.shutdown().await {
+                tracing::error!("failed to shutdown scanner: {e}");
+            }
         }
 
         // shutdown the syncer before storage (it uses storage during sync)

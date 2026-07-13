@@ -13,6 +13,7 @@ use miru_agent::filesys::{dirs, files, FileSysErr, PathExt, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
+use miru_agent::scan::ScannerExt;
 use miru_agent::server::ServerErr;
 
 // external crates
@@ -279,6 +280,25 @@ pub mod shutdown {
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);
         assert!(device.last_disconnected_at <= Utc::now());
+    }
+
+    #[tokio::test]
+    async fn scanner_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // stop the scanner actor directly so AppState::shutdown's scanner
+        // step errors (send on a closed actor channel)
+        state.scanner.as_ref().unwrap().shutdown().await.unwrap();
+
+        // teardown still completes Ok and the rest of the chain ran
+        state.shutdown().await.unwrap();
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
     }
 
     #[tokio::test]
