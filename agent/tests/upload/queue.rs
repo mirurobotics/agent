@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
-use miru_agent::upload::{Outcome, PendingJob, UploadErr, Job, Queue};
+use miru_agent::upload::{Job, Outcome, PendingJob, Queue, UploadErr};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};

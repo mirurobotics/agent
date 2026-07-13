@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{UploadErr, UploadExecutor, Job};
+use miru_agent::upload::{Job, UploadErr, UploadExecutor};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
