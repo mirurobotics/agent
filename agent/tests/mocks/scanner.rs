@@ -21,9 +21,11 @@ pub struct MockScanner {
     update_rules_calls: UpdateRulesCalls,
     clear_rules_calls: AtomicUsize,
     num_scan_calls: AtomicUsize,
+    prune_calls: Arc<Mutex<Vec<DateTime<Utc>>>>,
     update_rules_fn: Arc<Mutex<ResultFn>>,
     clear_rules_fn: Arc<Mutex<ResultFn>>,
     scan_fn: Arc<Mutex<ResultFn>>,
+    prune_fn: Arc<Mutex<ResultFn>>,
 
     // subscriptions
     subscribe_tx: broadcast::Sender<ScanEvent>,
@@ -42,9 +44,11 @@ impl MockScanner {
             update_rules_calls: Arc::new(Mutex::new(Vec::new())),
             clear_rules_calls: AtomicUsize::new(0),
             num_scan_calls: AtomicUsize::new(0),
+            prune_calls: Arc::new(Mutex::new(Vec::new())),
             update_rules_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
             clear_rules_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
             scan_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
+            prune_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
             subscribe_tx,
         }
     }
@@ -90,6 +94,20 @@ impl MockScanner {
     {
         *self.scan_fn.lock().unwrap() = Box::new(f);
     }
+
+    /// The recorded `prune` cutoffs, in order.
+    pub fn prune_calls(&self) -> Vec<DateTime<Utc>> {
+        self.prune_calls.lock().unwrap().clone()
+    }
+
+    /// Override the result returned by `prune` (the call is still recorded
+    /// before the result is produced).
+    pub fn set_prune<F>(&self, f: F)
+    where
+        F: Fn() -> Result<(), ScanErr> + Send + Sync + 'static,
+    {
+        *self.prune_fn.lock().unwrap() = Box::new(f);
+    }
 }
 
 impl ScannerExt for MockScanner {
@@ -123,7 +141,8 @@ impl ScannerExt for MockScanner {
         Ok(())
     }
 
-    async fn prune(&self, _before: DateTime<Utc>) -> Result<(), ScanErr> {
-        Ok(())
+    async fn prune(&self, before: DateTime<Utc>) -> Result<(), ScanErr> {
+        self.prune_calls.lock().unwrap().push(before);
+        (*self.prune_fn.lock().unwrap())()
     }
 }
