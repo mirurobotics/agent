@@ -68,6 +68,8 @@ struct HttpRecord {
     download_body: Vec<u8>,
     /// If set, downloads respond with this status instead of 200 + body.
     download_status: Option<StatusCode>,
+    /// If set, downloads send one partial chunk and then break the connection.
+    download_truncate: bool,
     /// If set, uploads respond with this status instead of 200 + Object JSON.
     upload_status: Option<StatusCode>,
 }
@@ -116,26 +118,41 @@ async fn upload_handler(
 async fn download_handler(
     State(rec): State<HttpRecorder>,
     headers: HeaderMap,
-) -> (
-    StatusCode,
-    [(axum::http::HeaderName, &'static str); 1],
-    Vec<u8>,
-) {
-    let mut r = rec.inner.lock().unwrap();
-    r.download_hits += 1;
-    r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    let (status, body, truncate) = {
+        let mut r = rec.inner.lock().unwrap();
+        r.download_hits += 1;
+        r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+        (r.download_status, r.download_body.clone(), r.download_truncate)
+    };
     let gen_header = (
         axum::http::HeaderName::from_static("x-goog-generation"),
         "123456",
     );
-    if let Some(status) = r.download_status {
+    if let Some(status) = status {
         return (
             status,
             [gen_header],
             b"{\"error\":{\"code\":404,\"message\":\"Not Found\"}}".to_vec(),
-        );
+        )
+            .into_response();
     }
-    (StatusCode::OK, [gen_header], r.download_body.clone())
+    if truncate {
+        // One partial chunk, then a broken connection mid-body.
+        let stream = futures::stream::iter(vec![
+            Ok::<Bytes, std::io::Error>(Bytes::from_static(b"partial-")),
+            Err(std::io::Error::other("connection reset by peer")),
+        ]);
+        return (
+            StatusCode::OK,
+            [gen_header],
+            axum::body::Body::from_stream(stream),
+        )
+            .into_response();
+    }
+    (StatusCode::OK, [gen_header], body).into_response()
 }
 
 /// Builds the data-path router and returns it alongside the recorder.
@@ -342,6 +359,31 @@ pub mod get {
 
             assert!(dest.file().path().exists());
             assert!(files::read_bytes(dest.file()).await.unwrap().is_empty());
+        }
+    }
+
+    pub mod mid_stream {
+        use super::*;
+
+        #[tokio::test]
+        async fn download_body_error_maps_to_connection_err() {
+            // The connection breaks after one body chunk: a retryable network
+            // condition. A partial destination file may remain; the next get's
+            // File::create truncates it.
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_truncate = true;
+            let store = http_store(rec.clone()).await;
+            let dest = files::temp("gcs-dest").unwrap();
+
+            let err = store
+                .get(&obj("blobs/data.bin"), dest.file())
+                .await
+                .unwrap_err();
+
+            assert!(err.is_network_conn_err(), "expected network error: {err}");
+            assert!(matches!(err, GcsErr::ConnectionErr(_)));
+            let leftover = files::read_bytes(dest.file()).await.unwrap();
+            assert!(leftover.len() <= b"partial-".len());
         }
     }
 
