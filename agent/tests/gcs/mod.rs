@@ -1,12 +1,3 @@
-//! Offline test suite for the `gcs` object-storage module. The put/get data
-//! path is exercised against an axum HTTP mock via the client's endpoint
-//! override; the delete/exists control path is exercised against a `mockall`
-//! `StorageControl` gRPC stub. Both run fully offline, with no real GCS calls.
-//!
-//! There is deliberately no `multipart` submodule: GCS's `write_object` folds
-//! the simple-vs-resumable decision inside the SDK, so the module exposes no
-//! multipart surface to test.
-
 // standard crates
 use std::sync::{Arc, Mutex};
 

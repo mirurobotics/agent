@@ -1,23 +1,3 @@
-//! Remote GCS object storage over the network: create, download, delete, and
-//! existence checks for objects addressed by bucket + key.
-//!
-//! A [`Store`] is constructed from a caller-supplied short-lived OAuth2 access
-//! token only. Credentials are never sourced from Application Default
-//! Credentials, environment variables, or the instance metadata server: the
-//! backend mints and hands down the token, which is turned into a fixed
-//! `Authorization: Bearer <token>` header for every request.
-//!
-//! Uploads and downloads stream to and from disk in bounded chunks, so an
-//! artifact of arbitrary size is never held whole in memory.
-//!
-//! Two transports back the store. The HTTP data client ([`Storage`]) handles
-//! the object payload path ([`Store::put`] and [`Store::get`]); the gRPC control
-//! client ([`StorageControl`]) handles the metadata path ([`Store::delete`] and
-//! [`Store::exists`]). A missing object surfaces as `Code::ResourceNotFound`.
-//!
-//! TODO: a live-bucket integration test against real GCS is deferred; see
-//! `plans/completed/20260704-gcs-object-storage-crud.md`.
-
 // internal crates
 use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
@@ -112,14 +92,6 @@ pub struct Store {
 }
 
 impl Store {
-    /// Builds a store from caller-supplied credentials (a short-lived OAuth2
-    /// access token).
-    ///
-    /// This is fallible and async: fallible because the token is turned into an
-    /// `Authorization` header value and an invalid byte in the token makes that
-    /// conversion fail; async because the GCS client builders are async.
-    /// Building performs async client setup but makes no real GCS call, so it is
-    /// safe to run in a `#[tokio::test]`.
     pub async fn new(creds: Credentials) -> Result<Self, GcsErr> {
         Self::build(creds, None, None).await
     }
@@ -144,18 +116,11 @@ impl Store {
         Self::build(creds, Some(endpoint), Some(StorageControl::from_stub(stub))).await
     }
 
-    /// Shared constructor body: builds the `Bearer` header from the token and
-    /// constructs both clients (optionally endpoint-overridden for tests).
-    /// `control_override` lets tests inject a stubbed control client instead of
-    /// building a real one. The target bucket rides on each [`Object`], so it is
-    /// not stored on the `Store`.
     async fn build(
         creds: Credentials,
         endpoint: Option<String>,
         control_override: Option<StorageControl>,
     ) -> Result<Self, GcsErr> {
-        // Token -> header can fail on an invalid byte, which is why `new` is
-        // fallible.
         let header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
             .map_err(|e| {
                 GcsErr::InvalidResponseErr(InvalidResponseErr {
