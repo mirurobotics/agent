@@ -1,12 +1,12 @@
 // internal crates
 use miru_agent::filesys::File;
-use miru_agent::upload::UploadJob;
+use miru_agent::upload::Job;
 
 // external crates
 use chrono::{Duration, Utc};
 
-fn make_job(upload_rule_id: &str, path: &str, digest: &str) -> UploadJob {
-    UploadJob {
+fn make_job(upload_rule_id: &str, path: &str, digest: &str) -> Job {
+    Job {
         file: File::new(path),
         size: 42,
         digest: digest.to_string(),

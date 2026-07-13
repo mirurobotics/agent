@@ -9,8 +9,8 @@ use crate::trace;
 use crate::upload::{
     errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
     executor::UploadExecutor,
-    job::{DedupKey, UploadJob},
-    queue::{EnqueueOutcome, PendingJob, UploadQueue},
+    job::{DedupKey, Job},
+    queue::{Outcome, PendingJob, Queue},
 };
 
 // external crates
@@ -65,7 +65,7 @@ impl Default for UploaderOptions {
 pub trait UploaderExt: Send + Sync {
     /// Push a job at the tail of the queue. Returns `Ok(Duplicate)` without
     /// enqueuing when a key-equal job is already queued or in flight.
-    async fn enqueue(&self, job: UploadJob) -> Result<EnqueueOutcome, UploadErr>;
+    async fn enqueue(&self, job: Job) -> Result<Outcome, UploadErr>;
     /// The number of queued jobs, excluding any in-flight job.
     async fn len(&self) -> Result<usize, UploadErr>;
     /// Stop the actor, dropping any in-flight upload future (see the cancel
@@ -76,8 +76,8 @@ pub trait UploaderExt: Send + Sync {
 // ================================== WORKER ======================================= //
 pub(crate) enum Command {
     Enqueue {
-        job: UploadJob,
-        respond_to: oneshot::Sender<Result<EnqueueOutcome, UploadErr>>,
+        job: Job,
+        respond_to: oneshot::Sender<Result<Outcome, UploadErr>>,
     },
     Len {
         respond_to: oneshot::Sender<Result<usize, UploadErr>>,
@@ -100,7 +100,7 @@ where
     Fut: Future<Output = ()> + Send + 'static,
 {
     receiver: Receiver<Command>,
-    queue: UploadQueue,
+    queue: Queue,
     executor: Arc<ExecutorT>,
     options: UploaderOptions,
     sleep_fn: F,
@@ -250,7 +250,7 @@ where
                         "upload job for file {} (rule {}) is in flight; skipping enqueue",
                         job.file, job.upload_rule_id
                     );
-                    Ok(EnqueueOutcome::Duplicate)
+                    Ok(Outcome::Duplicate)
                 } else {
                     self.queue.enqueue(job).await
                 };
@@ -290,7 +290,7 @@ impl Uploader {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            queue: UploadQueue::new(options.queue_capacity),
+            queue: Queue::new(options.queue_capacity),
             executor,
             options,
             sleep_fn,
@@ -324,7 +324,7 @@ impl Uploader {
 }
 
 impl UploaderExt for Uploader {
-    async fn enqueue(&self, job: UploadJob) -> Result<EnqueueOutcome, UploadErr> {
+    async fn enqueue(&self, job: Job) -> Result<Outcome, UploadErr> {
         self.send_command("enqueue", |tx| Command::Enqueue {
             job,
             respond_to: tx,
@@ -347,7 +347,7 @@ impl UploaderExt for Uploader {
 }
 
 impl UploaderExt for Arc<Uploader> {
-    async fn enqueue(&self, job: UploadJob) -> Result<EnqueueOutcome, UploadErr> {
+    async fn enqueue(&self, job: Job) -> Result<Outcome, UploadErr> {
         self.as_ref().enqueue(job).await
     }
 

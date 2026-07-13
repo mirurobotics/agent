@@ -7,7 +7,7 @@ use crate::filesys::{files, FileSysErr};
 use crate::trace;
 use crate::upload::{
     errors::{QueueFullErr, UploadErr},
-    job::{DedupKey, UploadJob},
+    job::{DedupKey, Job},
 };
 
 // external crates
@@ -16,30 +16,27 @@ use tracing::{info, warn};
 
 /// The result of a successful enqueue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EnqueueOutcome {
+pub enum Outcome {
     Enqueued,
     /// A job with the same dedup key is already pending; the enqueue was a
     /// no-op.
     Duplicate,
 }
 
-/// A queued job plus its total executor attempt count so far, across rounds.
-/// Requeued jobs keep their history so the global attempt cap holds.
 #[derive(Clone, Debug)]
 pub struct PendingJob {
-    pub job: UploadJob,
+    pub job: Job,
     pub attempts: u32,
 }
 
-/// An in-memory FIFO queue of upload jobs with dedup by [`DedupKey`], stale-job
-/// pruning when full, and rejection (with [`QueueFullErr`]) when full of fresh
-/// jobs.
-pub struct UploadQueue {
+/// An in-memory FIFO queue of upload jobs with dedup by [`DedupKey`], stale-job pruning
+/// when full, and rejection (with [`QueueFullErr`]) when full of fresh jobs.
+pub struct Queue {
     jobs: VecDeque<PendingJob>,
     capacity: usize,
 }
 
-impl UploadQueue {
+impl Queue {
     pub fn new(capacity: usize) -> Self {
         Self {
             jobs: VecDeque::new(),
@@ -66,17 +63,17 @@ impl UploadQueue {
     /// the queue is full). When full, stale jobs are pruned first; if the
     /// queue is still full, the enqueue is rejected with
     /// `UploadErr::QueueFullErr`.
-    pub async fn enqueue(&mut self, job: UploadJob) -> Result<EnqueueOutcome, UploadErr> {
+    pub async fn enqueue(&mut self, job: Job) -> Result<Outcome, UploadErr> {
         if self.contains(&job.dedup_key()) {
             info!(
                 "upload job for file {} (rule {}) is already queued; skipping enqueue",
                 job.file, job.upload_rule_id
             );
-            return Ok(EnqueueOutcome::Duplicate);
+            return Ok(Outcome::Duplicate);
         }
         self.reserve_slot(&job).await?;
         self.jobs.push_back(PendingJob { job, attempts: 0 });
-        Ok(EnqueueOutcome::Enqueued)
+        Ok(Outcome::Enqueued)
     }
 
     /// Push a previously popped job back at the tail, preserving its attempt
@@ -95,7 +92,7 @@ impl UploadQueue {
     /// Ensure at least one slot is free, pruning stale jobs if the queue is
     /// full. Errors with `QueueFullErr` when the queue remains full of fresh
     /// jobs.
-    async fn reserve_slot(&mut self, job: &UploadJob) -> Result<(), UploadErr> {
+    async fn reserve_slot(&mut self, job: &Job) -> Result<(), UploadErr> {
         if self.jobs.len() < self.capacity {
             return Ok(());
         }
@@ -139,7 +136,7 @@ impl UploadQueue {
 /// Returns why `job` is stale, or `None` when it is fresh. A transient IO
 /// error (anything but NotFound) is not proof of staleness, so the job is
 /// treated as fresh — dropping work on a hiccup is worse than a full queue.
-async fn stale_reason(job: &UploadJob) -> Option<String> {
+async fn stale_reason(job: &Job) -> Option<String> {
     let md = match files::metadata(&job.file).await {
         Ok(md) => md,
         Err(FileSysErr::PathDoesNotExistErr(_)) => {
