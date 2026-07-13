@@ -1,7 +1,7 @@
 // standard crates
-use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 // internal crates
 use crate::disk;
@@ -76,14 +76,14 @@ async fn idle_forever() {
 }
 
 /// Resolve active upload rules from disk and push them into the scanner
-async fn resolve_and_push<ScannerT: ScannerExt>(
-    scanner: &ScannerT,
-    storage: &Storage,
-) {
+async fn resolve_and_push<ScannerT: ScannerExt>(scanner: &ScannerT, storage: &Storage) {
     let result = disk::upload_rules_for_deployed(
-        &storage.deployments, &storage.releases, &storage.upload_rules,
-    ).await
-        .map_err(disk_err_to_scan_err);
+        &storage.deployments,
+        &storage.releases,
+        &storage.upload_rules,
+    )
+    .await
+    .map_err(disk_err_to_scan_err);
     match result {
         Ok(Some((deployment, rules))) => {
             if let Err(e) = scanner.update_rules(deployment, rules).await {

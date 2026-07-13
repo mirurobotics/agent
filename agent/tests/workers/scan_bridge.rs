@@ -205,13 +205,7 @@ fn spawn_bridge(
         upload_rules: stores.upload_rules.clone(),
     };
     let handle = tokio::spawn(async move {
-        scan_bridge::run(
-            scanner.as_ref(),
-            syncer.as_ref(),
-            &storage,
-            shutdown_signal,
-        )
-        .await;
+        scan_bridge::run(scanner.as_ref(), syncer.as_ref(), &storage, shutdown_signal).await;
     });
     (handle, shutdown_tx)
 }
