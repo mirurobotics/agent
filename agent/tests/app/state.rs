@@ -7,7 +7,7 @@ use miru_agent::app::state::AppState;
 use miru_agent::authn::Token;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
-use miru_agent::filesys::{dirs, files, FileSysErr, WriteOptions};
+use miru_agent::filesys::{dirs, files, FileSysErr, PathExt, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
@@ -247,6 +247,91 @@ pub mod init {
         let device = files::read_json::<Device>(&device_file).await.unwrap();
         assert_eq!(device.status, DeviceStatus::Offline);
     }
+
+    #[tokio::test]
+    async fn scanner_spawned_when_enabled() {
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+
+        // create a private key file
+        let private_key_file = layout.auth().private_key();
+        files::write_string(&private_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        files::write_string(&public_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create the device file
+        let device_file = layout.device();
+        let device = Device::default();
+        files::write_json(&device_file, &device, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, state_handle) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        // the scanner actor is spawned and its snapshot file is seeded on disk
+        assert!(state.scanner.is_some());
+        assert!(layout.scanner_snapshot().exists());
+
+        // clean up the spawned actors so they don't leak
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn scanner_absent_when_disabled() {
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+
+        // create a private key file
+        let private_key_file = layout.auth().private_key();
+        files::write_string(&private_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        files::write_string(&public_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create the device file
+        let device_file = layout.device();
+        let device = Device::default();
+        files::write_json(&device_file, &device, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, state_handle) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        // no scanner actor is spawned and nothing touches the snapshot file
+        assert!(state.scanner.is_none());
+        assert!(!layout.scanner_snapshot().exists());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
 }
 
 pub mod shutdown {
@@ -347,5 +432,46 @@ pub mod shutdown {
         assert_eq!(device.status, DeviceStatus::Offline);
         assert!(device.last_disconnected_at >= before_shutdown);
         assert!(device.last_disconnected_at <= Utc::now());
+    }
+
+    #[tokio::test]
+    async fn success_with_scanner_enabled() {
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+
+        // create a private key file
+        let private_key_file = layout.auth().private_key();
+        files::write_string(&private_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create a public key file
+        let public_key_file = layout.auth().public_key();
+        files::write_string(&public_key_file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // create the device file
+        let device_file = layout.device();
+        let device = Device::default();
+        files::write_json(&device_file, &device, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (state, state_handle) = AppState::init(
+            &layout,
+            Capacities::default(),
+            Arc::new(http::Client::new("doesntmatter").unwrap()),
+            fsm::RetryPolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        // shutdown completing (and the bundled shutdown handle resolving)
+        // proves the scanner actor shut down and its JoinHandle joined; a hung
+        // bundle would hang the test and trip the suite-level timeout
+        state.shutdown().await.unwrap();
+        state_handle.await;
     }
 }
