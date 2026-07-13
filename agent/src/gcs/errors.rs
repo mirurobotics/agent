@@ -124,19 +124,28 @@ pub fn is_not_found(err: &GaxError) -> bool {
         || err.http_status_code() == Some(404)
 }
 
-/// Maps a GCS SDK error into a `GcsErr`. Timeouts become [`ConnectionErr`]
-/// (network); everything else becomes a [`RequestFailedErr`] carrying the HTTP
-/// status (when present) and the error's own message. Not-found is classified
-/// by the caller before reaching here.
+/// Maps a GCS SDK error into a `GcsErr`. Transport-level failures — timeouts,
+/// connect failures (DNS, connection refused), broken connections mid-request,
+/// and retry-window exhaustion over transient errors — become [`ConnectionErr`]
+/// (network, retryable); everything else becomes a [`RequestFailedErr`]
+/// carrying the HTTP status (when present) and the error's own message.
+/// Not-found is classified by the caller before reaching here.
 ///
 /// Takes the concrete `google_cloud_gax::error::Error`, the single crate error
 /// type. A failure reading the download body off the wire surfaces as the same
 /// error type and is mapped by this function too.
 pub fn map_gcs_err(operation: &str, object: &Object, err: GaxError) -> GcsErr {
-    if err.is_timeout() {
+    // The `is_connect`/`is_io`/`is_exhausted`/`is_transport` predicates are
+    // `doc(hidden)` but public; the version is workspace-pinned.
+    if err.is_timeout()
+        || err.is_connect()
+        || err.is_io()
+        || err.is_exhausted()
+        || (err.is_transport() && err.http_status_code().is_none())
+    {
         return GcsErr::ConnectionErr(ConnectionErr {
             object: object.clone(),
-            msg: format!("request timed out: {err}"),
+            msg: format!("network failure: {err}"),
             trace: crate::trace!(),
         });
     }
@@ -196,6 +205,36 @@ mod tests {
         match mapped {
             GcsErr::ConnectionErr(e) => assert_eq!(e.object, object()),
             other => panic!("expected ConnectionErr, got {other:?}"),
+        }
+    }
+
+    // Connect failures (DNS, connection refused), broken connections
+    // mid-request, and retry-window exhaustion are all retryable network
+    // conditions, exactly like timeouts.
+    #[test]
+    fn transport_failures_map_to_connection_err() {
+        let cases = [
+            GaxError::connect("connection refused"),
+            GaxError::io("connection reset by peer"),
+            GaxError::exhausted("retry window expired"),
+        ];
+        for err in cases {
+            let mapped = map_gcs_err("put_object", &object(), err);
+            assert!(mapped.is_network_conn_err(), "not network: {mapped}");
+            assert!(matches!(mapped, GcsErr::ConnectionErr(_)));
+        }
+    }
+
+    // An HTTP error that carries a status is a server response, not a
+    // connectivity failure.
+    #[test]
+    fn http_error_with_status_is_not_a_connection_err() {
+        let err = GaxError::http(500, http::HeaderMap::new(), Vec::<u8>::new().into());
+        let mapped = map_gcs_err("put_object", &object(), err);
+        assert!(!mapped.is_network_conn_err());
+        match mapped {
+            GcsErr::RequestFailedErr(e) => assert_eq!(e.status, Some(500)),
+            other => panic!("expected RequestFailedErr, got {other:?}"),
         }
     }
 
