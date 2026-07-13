@@ -89,35 +89,7 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         // initialize the scanner (optional)
-        let (scanner, scanner_handle) = if enable_scanner {
-            let snapshot_file = match ScanSnapshotFile::new_with_default(
-                layout.scanner_snapshot(),
-                Default::default(),
-            )
-            .await
-            {
-                Ok(file) => Some(file),
-                Err(e) => {
-                    tracing::error!(
-                            "failed to initialize scanner snapshot file; scanning will run without persistence: {e}"
-                        );
-                    None
-                }
-            };
-            let args = ScannerArgs {
-                snapshot_file,
-                ..ScannerArgs::default()
-            };
-            match scan::Scanner::spawn(64, args) {
-                Ok((scanner, handle)) => (Some(Arc::new(scanner)), Some(handle)),
-                Err(e) => {
-                    tracing::error!("failed to spawn scanner; continuing without scanning: {e}");
-                    (None, None)
-                }
-            }
-        } else {
-            (None, None)
-        };
+        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_scanner).await;
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
@@ -140,6 +112,49 @@ impl AppState {
             },
             shutdown_handle,
         ))
+    }
+
+    /// Spawn the scanner actor with an on-disk snapshot. Fail-open by design:
+    /// a snapshot-file error degrades to scanning without persistence, and a
+    /// spawn error degrades to no scanner at all — the agent must boot even
+    /// when the scanner cannot.
+    async fn init_scanner(
+        layout: &disk::Layout,
+        enable_scanner: bool,
+    ) -> (
+        Option<Arc<scan::Scanner>>,
+        Option<tokio::task::JoinHandle<()>>,
+    ) {
+        if !enable_scanner {
+            return (None, None);
+        }
+
+        let snapshot_file = match ScanSnapshotFile::new_with_default(
+            layout.scanner_snapshot(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                        "failed to initialize scanner snapshot file; scanning will run without persistence: {e}"
+                    );
+                None
+            }
+        };
+
+        let args = ScannerArgs {
+            snapshot_file,
+            ..ScannerArgs::default()
+        };
+        match scan::Scanner::spawn(64, args) {
+            Ok((scanner, handle)) => (Some(Arc::new(scanner)), Some(handle)),
+            Err(e) => {
+                tracing::error!("failed to spawn scanner; continuing without scanning: {e}");
+                (None, None)
+            }
+        }
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
