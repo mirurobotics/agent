@@ -609,7 +609,7 @@ pub mod error_types {
     #[test]
     fn object_not_found_maps_to_resource_not_found() {
         let err = GcsErr::ObjectNotFoundErr(ObjectNotFoundErr {
-            key: "k".to_string(),
+            object: obj("k"),
             trace: miru_agent::trace!(),
         });
         assert!(matches!(err.code(), Code::ResourceNotFound));
@@ -621,7 +621,7 @@ pub mod error_types {
     #[test]
     fn connection_err_is_network_conn_err() {
         let err = GcsErr::ConnectionErr(ConnectionErr {
-            key: "k".to_string(),
+            object: obj("k"),
             msg: "boom".to_string(),
             trace: miru_agent::trace!(),
         });
@@ -634,7 +634,7 @@ pub mod error_types {
     fn request_failed_err_defaults_to_internal_server_error() {
         let err = GcsErr::RequestFailedErr(RequestFailedErr {
             operation: "get_object".to_string(),
-            object: None,
+            object: obj("key"),
             status: None,
             msg: "nope".to_string(),
             trace: miru_agent::trace!(),
@@ -642,9 +642,9 @@ pub mod error_types {
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(!err.is_network_conn_err());
-        // Display with no object / no status hits the fallback formatting.
+        // Display with no status hits the fallback formatting.
         let msg = err.to_string();
-        assert!(msg.contains("<none>"));
+        assert!(msg.contains("gs://test-bucket/key"));
         assert!(msg.contains("unknown"));
         assert!(msg.contains("get_object"));
     }
@@ -665,7 +665,7 @@ pub mod error_types {
     fn local_io_err_defaults_to_internal_server_error() {
         let err = GcsErr::LocalIoErr(LocalIoErr {
             operation: "get_object".to_string(),
-            object: "gs://bucket/key".to_string(),
+            object: obj("key"),
             msg: "no such file or directory".to_string(),
             trace: miru_agent::trace!(),
         });
@@ -673,7 +673,7 @@ pub mod error_types {
         assert_eq!(err.http_status().as_u16(), 500);
         assert!(!err.is_network_conn_err());
         let msg = err.to_string();
-        assert!(msg.contains("gs://bucket/key"));
+        assert!(msg.contains("gs://test-bucket/key"));
         assert!(msg.contains("no such file or directory"));
     }
 }

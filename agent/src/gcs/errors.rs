@@ -7,9 +7,9 @@ use crate::gcs::Object;
 use google_cloud_gax::error::Error as GaxError;
 
 #[derive(Debug, thiserror::Error)]
-#[error("object not found: {key}")]
+#[error("object not found: {object}")]
 pub struct ObjectNotFoundErr {
-    pub key: String,
+    pub object: Object,
     pub trace: Box<Trace>,
 }
 
@@ -24,9 +24,9 @@ impl crate::errors::Error for ObjectNotFoundErr {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("connection error for object '{key}': {msg}")]
+#[error("connection error for object '{object}': {msg}")]
 pub struct ConnectionErr {
-    pub key: String,
+    pub object: Object,
     pub msg: String,
     pub trace: Box<Trace>,
 }
@@ -40,8 +40,7 @@ impl crate::errors::Error for ConnectionErr {
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailedErr {
     pub operation: String,
-    /// The `gs://bucket/key` URI (or the bare key) of the target object, when known.
-    pub object: Option<String>,
+    pub object: Object,
     pub status: Option<u16>,
     pub msg: String,
     pub trace: Box<Trace>,
@@ -49,7 +48,6 @@ pub struct RequestFailedErr {
 
 impl std::fmt::Display for RequestFailedErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let object = self.object.as_deref().unwrap_or("<none>");
         let status = self
             .status
             .map(|s| s.to_string())
@@ -57,7 +55,7 @@ impl std::fmt::Display for RequestFailedErr {
         write!(
             f,
             "GCS {} request for object '{}' failed with status {}: {}",
-            self.operation, object, status, self.msg
+            self.operation, self.object, status, self.msg
         )
     }
 }
@@ -78,7 +76,7 @@ impl crate::errors::Error for InvalidResponseErr {}
 #[error("local I/O error during {operation} for object '{object}': {msg}")]
 pub struct LocalIoErr {
     pub operation: String,
-    pub object: String,
+    pub object: Object,
     pub msg: String,
     pub trace: Box<Trace>,
 }
@@ -134,10 +132,10 @@ pub fn is_not_found(err: &GaxError) -> bool {
 /// Takes the concrete `google_cloud_gax::error::Error`, the single crate error
 /// type. A failure reading the download body off the wire surfaces as the same
 /// error type and is mapped by this function too.
-pub fn map_gcs_err(operation: &str, key: Option<&str>, err: GaxError) -> GcsErr {
+pub fn map_gcs_err(operation: &str, object: &Object, err: GaxError) -> GcsErr {
     if err.is_timeout() {
         return GcsErr::ConnectionErr(ConnectionErr {
-            key: key.unwrap_or_default().to_string(),
+            object: object.clone(),
             msg: format!("request timed out: {err}"),
             trace: crate::trace!(),
         });
@@ -145,7 +143,7 @@ pub fn map_gcs_err(operation: &str, key: Option<&str>, err: GaxError) -> GcsErr 
     let status = err.http_status_code();
     GcsErr::RequestFailedErr(RequestFailedErr {
         operation: operation.to_string(),
-        object: key.map(str::to_string),
+        object: object.clone(),
         status,
         msg: err.to_string(),
         trace: crate::trace!(),
@@ -158,7 +156,7 @@ pub fn map_gcs_err(operation: &str, key: Option<&str>, err: GaxError) -> GcsErr 
 pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io::Error) -> GcsErr {
     GcsErr::LocalIoErr(LocalIoErr {
         operation: operation.to_string(),
-        object: obj.to_string(),
+        object: obj.clone(),
         msg: format!("filesystem I/O error at path '{file}': {err}"),
         trace: crate::trace!(),
     })
@@ -170,14 +168,21 @@ mod tests {
     use crate::errors::Error as _;
     use google_cloud_gax::error::rpc::{Code, Status};
 
+    fn object() -> Object {
+        Object {
+            bucket: "bucket".to_string(),
+            key: "key".to_string(),
+        }
+    }
+
     #[test]
     fn service_error_maps_to_request_failed() {
         let err = GaxError::service(Status::default().set_code(Code::PermissionDenied));
-        let mapped = map_gcs_err("get_object", Some("k"), err);
+        let mapped = map_gcs_err("get_object", &object(), err);
         match mapped {
             GcsErr::RequestFailedErr(e) => {
                 assert_eq!(e.operation, "get_object");
-                assert_eq!(e.object.as_deref(), Some("k"));
+                assert_eq!(e.object, object());
             }
             other => panic!("expected RequestFailedErr, got {other:?}"),
         }
@@ -186,10 +191,10 @@ mod tests {
     #[test]
     fn timeout_maps_to_connection_err() {
         let err = GaxError::timeout("deadline exceeded");
-        let mapped = map_gcs_err("get_object", Some("k"), err);
+        let mapped = map_gcs_err("get_object", &object(), err);
         assert!(mapped.is_network_conn_err());
         match mapped {
-            GcsErr::ConnectionErr(e) => assert_eq!(e.key, "k"),
+            GcsErr::ConnectionErr(e) => assert_eq!(e.object, object()),
             other => panic!("expected ConnectionErr, got {other:?}"),
         }
     }
@@ -218,7 +223,7 @@ mod tests {
         // and the numeric status.
         let err = GcsErr::RequestFailedErr(RequestFailedErr {
             operation: "put_object".to_string(),
-            object: Some("gs://bucket/key".to_string()),
+            object: object(),
             status: Some(403),
             msg: "denied".to_string(),
             trace: crate::trace!(),
@@ -254,7 +259,7 @@ mod tests {
     #[test]
     fn service_error_is_not_a_network_conn_err() {
         let err = GaxError::service(Status::default().set_code(Code::Aborted));
-        let mapped = map_gcs_err("delete_object", None, err);
+        let mapped = map_gcs_err("delete_object", &object(), err);
         assert!(!mapped.is_network_conn_err());
     }
 

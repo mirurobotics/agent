@@ -177,7 +177,7 @@ impl Store {
             .write_object(&resource_name, &dst.key, file)
             .send_unbuffered()
             .await
-            .map_err(|e| map_gcs_err("put_object", Some(&dst.key), e))?;
+            .map_err(|e| map_gcs_err("put_object", dst, e))?;
         Ok(())
     }
 
@@ -189,11 +189,11 @@ impl Store {
             Ok(resp) => resp,
             Err(e) if is_not_found(&e) => {
                 return Err(GcsErr::ObjectNotFoundErr(errors::ObjectNotFoundErr {
-                    key: src.key.to_string(),
+                    object: src.clone(),
                     trace: trace!(),
                 }))
             }
-            Err(e) => return Err(map_gcs_err("get_object", Some(&src.key), e)),
+            Err(e) => return Err(map_gcs_err("get_object", src, e)),
         };
 
         let mut file = tokio::fs::File::create(dest.path())
@@ -202,7 +202,7 @@ impl Store {
         while let Some(chunk) = resp.next().await {
             // A wire read error is a `google_cloud_gax::error::Error`, mapped by
             // `map_gcs_err`.
-            let bytes = chunk.map_err(|e| map_gcs_err("get_object", Some(&src.key), e))?;
+            let bytes = chunk.map_err(|e| map_gcs_err("get_object", src, e))?;
             file.write_all(&bytes)
                 .await
                 .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
@@ -227,7 +227,7 @@ impl Store {
         {
             Ok(()) => Ok(()),
             Err(e) if is_not_found(&e) => Ok(()),
-            Err(e) => Err(map_gcs_err("delete_object", Some(&obj.key), e)),
+            Err(e) => Err(map_gcs_err("delete_object", obj, e)),
         }
     }
 
@@ -245,7 +245,7 @@ impl Store {
         {
             Ok(_) => Ok(true),
             Err(e) if is_not_found(&e) => Ok(false),
-            Err(e) => Err(map_gcs_err("get_object", Some(&obj.key), e)),
+            Err(e) => Err(map_gcs_err("get_object", obj, e)),
         }
     }
 
