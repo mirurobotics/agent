@@ -90,15 +90,31 @@ impl AppState {
 
         // initialize the scanner (optional)
         let (scanner, scanner_handle) = if enable_scanner {
-            let snapshot_file =
-                ScanSnapshotFile::new_with_default(layout.scanner_snapshot(), Default::default())
-                    .await?;
+            let snapshot_file = match ScanSnapshotFile::new_with_default(
+                layout.scanner_snapshot(),
+                Default::default(),
+            )
+            .await
+            {
+                Ok(file) => Some(file),
+                Err(e) => {
+                    tracing::error!(
+                            "failed to initialize scanner snapshot file; scanning will run without persistence: {e}"
+                        );
+                    None
+                }
+            };
             let args = ScannerArgs {
-                snapshot_file: Some(snapshot_file),
+                snapshot_file,
                 ..ScannerArgs::default()
             };
-            let (scanner, handle) = scan::Scanner::spawn(64, args)?;
-            (Some(Arc::new(scanner)), Some(handle))
+            match scan::Scanner::spawn(64, args) {
+                Ok((scanner, handle)) => (Some(Arc::new(scanner)), Some(handle)),
+                Err(e) => {
+                    tracing::error!("failed to spawn scanner; continuing without scanning: {e}");
+                    (None, None)
+                }
+            }
         } else {
             (None, None)
         };
