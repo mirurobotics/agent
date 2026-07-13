@@ -305,13 +305,11 @@ async fn init_scanner(options: &AppOptions) -> Result<(scan::Scanner, JoinHandle
         Default::default(),
     )
     .await?;
-    let (scanner, handle) = scan::Scanner::spawn(
-        64,
-        ScannerArgs {
-            snapshot_file: Some(snapshot_file),
-            ..ScannerArgs::default()
-        },
-    )?;
+    let args = ScannerArgs {
+        snapshot_file: Some(snapshot_file),
+        ..ScannerArgs::default()
+    };
+    let (scanner, handle) = scan::Scanner::spawn(64, args)?;
     Ok((scanner, handle))
 }
 
@@ -349,16 +347,16 @@ async fn init_scan_bridge_worker(
 ) -> Result<(), ServerErr> {
     info!("Initializing scan bridge worker...");
     let syncer = app_state.syncer.clone();
-    let deployments = app_state.storage.deployments.clone();
-    let releases = app_state.storage.releases.clone();
-    let upload_rules = app_state.storage.upload_rules.clone();
+    let storage = scan_bridge::Storage {
+        deployments: app_state.storage.deployments.clone(),
+        releases: app_state.storage.releases.clone(),
+        upload_rules: app_state.storage.upload_rules.clone(),
+    };
     let bridge_handle = tokio::spawn(async move {
         scan_bridge::run(
             scanner.as_ref(),
             syncer.as_ref(),
-            deployments.as_ref(),
-            releases.as_ref(),
-            upload_rules.as_ref(),
+            &storage,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
             }),

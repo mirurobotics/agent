@@ -23,9 +23,9 @@ use tokio::task::JoinHandle;
 /// `disk/upload_rules.rs` inline tests.
 struct Stores {
     _dir: dirs::TempDir,
-    deployments: disk::Deployments,
-    releases: disk::Releases,
-    upload_rules: disk::UploadRules,
+    deployments: Arc<disk::Deployments>,
+    releases: Arc<disk::Releases>,
+    upload_rules: Arc<disk::UploadRules>,
 }
 
 impl Stores {
@@ -43,9 +43,9 @@ impl Stores {
             .unwrap();
         Self {
             _dir: dir,
-            deployments,
-            releases,
-            upload_rules,
+            deployments: Arc::new(deployments),
+            releases: Arc::new(releases),
+            upload_rules: Arc::new(upload_rules),
         }
     }
 
@@ -199,13 +199,16 @@ fn spawn_bridge(
     let shutdown_signal = Box::pin(async move {
         let _ = shutdown_rx.await;
     });
+    let storage = scan_bridge::Storage {
+        deployments: stores.deployments.clone(),
+        releases: stores.releases.clone(),
+        upload_rules: stores.upload_rules.clone(),
+    };
     let handle = tokio::spawn(async move {
         scan_bridge::run(
             scanner.as_ref(),
             syncer.as_ref(),
-            &stores.deployments,
-            &stores.releases,
-            &stores.upload_rules,
+            &storage,
             shutdown_signal,
         )
         .await;

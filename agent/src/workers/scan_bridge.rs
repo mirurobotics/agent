@@ -1,4 +1,5 @@
 // standard crates
+use std::sync::Arc;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -11,12 +12,16 @@ use crate::workers::next_sync_event;
 // external crates
 use tracing::{error, info};
 
+pub struct Storage {
+    pub deployments: Arc<disk::Deployments>,
+    pub releases: Arc<disk::Releases>,
+    pub upload_rules: Arc<disk::UploadRules>,
+}
+
 pub async fn run<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     scanner: &ScannerT,
     syncer: &SyncerT,
-    deployments: &disk::Deployments,
-    releases: &disk::Releases,
-    upload_rules: &disk::UploadRules,
+    storage: &Storage,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) {
     tokio::select! {
@@ -24,22 +29,14 @@ pub async fn run<ScannerT: ScannerExt, SyncerT: SyncerExt>(
             info!("Scan bridge worker shutdown complete");
         }
         // doesn't return but we do need to run it in the background
-        _ = run_impl(
-            scanner,
-            syncer,
-            deployments,
-            releases,
-            upload_rules,
-        ) => {}
+        _ = run_impl(scanner, syncer, storage) => {}
     }
 }
 
 async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     scanner: &ScannerT,
     syncer: &SyncerT,
-    deployments: &disk::Deployments,
-    releases: &disk::Releases,
-    upload_rules: &disk::UploadRules,
+    storage: &Storage,
 ) {
     info!("Running scan bridge worker");
 
@@ -56,12 +53,12 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     let _ = subscriber.borrow_and_update();
 
     // resolve and push once at startup so the scanner reflects current deployment
-    resolve_and_push(scanner, deployments, releases, upload_rules).await;
+    resolve_and_push(scanner, storage).await;
 
     let mut subscriber = Some(subscriber);
     while let Some(event) = next_sync_event(&mut subscriber).await {
         if matches!(event, SyncEvent::SyncSuccess) {
-            resolve_and_push(scanner, deployments, releases, upload_rules).await;
+            resolve_and_push(scanner, storage).await;
         }
     }
 
@@ -81,12 +78,11 @@ async fn idle_forever() {
 /// Resolve active upload rules from disk and push them into the scanner
 async fn resolve_and_push<ScannerT: ScannerExt>(
     scanner: &ScannerT,
-    deployments: &disk::Deployments,
-    releases: &disk::Releases,
-    upload_rules: &disk::UploadRules,
+    storage: &Storage,
 ) {
-    let result = disk::upload_rules_for_deployed(deployments, releases, upload_rules)
-        .await
+    let result = disk::upload_rules_for_deployed(
+        &storage.deployments, &storage.releases, &storage.upload_rules,
+    ).await
         .map_err(disk_err_to_scan_err);
     match result {
         Ok(Some((deployment, rules))) => {
