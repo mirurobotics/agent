@@ -9,7 +9,7 @@ use miru_agent::app::state::AppState;
 use miru_agent::authn::Token;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
-use miru_agent::filesys::{dirs, files, FileSysErr, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, Dir, FileSysErr, PathExt, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
@@ -221,6 +221,27 @@ pub mod init {
         // clean up the spawned actors so they don't leak
         state.shutdown().await.unwrap();
         state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn scanner_degrades_when_snapshot_path_unwritable() {
+        let env = TestEnv::valid().await;
+        // a directory at the snapshot FILE path makes
+        // ScanSnapshotFile::new_with_default fail on both read and create
+        dirs::create(&Dir::new(env.layout.scanner_snapshot().path().clone()))
+            .await
+            .unwrap();
+
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // fail-open: the agent boots and the scanner runs without persistence
+        assert!(state.scanner.is_some());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+
+        // nothing replaced the blocking directory with a snapshot file
+        assert!(env.layout.scanner_snapshot().path().is_dir());
     }
 
     #[tokio::test]
