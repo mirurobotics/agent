@@ -2,7 +2,7 @@
 
 This ExecPlan is a living document. The sections Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective must be kept up to date as work proceeds.
 
-**Status**: backlog
+**Status**: in progress (M1–M2 complete, M3 CI validation pending)
 
 ## Scope
 
@@ -20,14 +20,16 @@ The observable outcome: the audit grep below returns zero in-scope hits, the dif
 
 ## Progress
 
-- [ ] M1 — hoist the 5 in-scope function-body imports (5 files).
-- [ ] M2 — local validation: `cargo check`, `scripts/lint.sh`, `scripts/test.sh` (optionally full `scripts/preflight.sh`).
+- [x] M1 — hoist the 6 in-scope function-body imports (5 files). Audit grep now returns only the documented out-of-scope nested-module hits.
+- [x] M2 — local validation: `cargo check --features test` clean, `scripts/lint.sh` clean (no auto-fixes produced), `scripts/test.sh` all green (1718 tests, 0 failures). Local `preflight.sh` skipped (optional; known workers covgate local-vs-CI gap) — CI is the authoritative gate.
 - [ ] M3 — push branch, run preflight until CI reports `CLEAN`, open PR.
 
 ## Surprises & Discoveries
 
 - (planning, 2026-07-13) Most raw grep hits are **not** function-body imports. Of the 20 hits from the audit grep, 15 are module-level imports at the top of nested `#[cfg(test)]` submodules (or inside `macro_rules!`-generated modules) — already at the correct hoist target and explicitly out of scope per the task's verification rule. Only 6 lines across 5 files are actual function-body imports. The task's "known examples" list (`scan/state.rs`, `scan/collection.rs`, `s3/errors.rs`, `models/status.rs`, `tests/models/harnesses.rs`, `tests/s3/mod.rs`) was compiled from the raw grep; those entries were verified and excluded (see inventory below).
 - (planning, 2026-07-13) The two function-body imports in `agent/src/scan/scanner.rs` are exact duplicates of imports already present at the top of its `mod tests` block — the fix there is pure deletion, no hoist needed.
+- (implementation, 2026-07-13) The out-of-scope hit count is 13, not 15 as stated in the planning note above — the inventory table itself lists 13 lines and the post-edit audit grep confirms exactly those 13 remain. The "15" in the planning note was a miscount; no scope change.
+- (implementation, 2026-07-13) The local default rust toolchain (1.94.0) is older than what the locked AWS SDK deps require (1.94.1); all local checks were run with the installed 1.97.0 toolchain via `RUSTUP_TOOLCHAIN=1.97.0`. Pre-existing environment issue, unrelated to this change.
 - (planning, 2026-07-13) A supplementary scan for 4-space-indented `use` inside top-level `fn` bodies (which the 8+-indent grep would miss) found zero hits, and `libs/`, `api/`, `tools/` have zero 8+-indent hits at all. The inventory below is complete for the whole workspace.
 
 ## Decision Log
@@ -141,11 +143,11 @@ This change is complete only when **preflight reports `CLEAN` — i.e., the CI w
 
 Acceptance checklist:
 
-- [ ] Audit grep shows no remaining function-body `use` imports (only the 15 documented nested-module-level hits remain).
-- [ ] Diff contains only import moves/deletions — no logic, signature, or test changes.
-- [ ] `./scripts/lint.sh` passes; import linter is clean on `agent/src`.
-- [ ] `./scripts/test.sh` passes with the same test counts as base.
-- [ ] `./scripts/preflight.sh` prints `Preflight clean`.
+- [x] Audit grep shows no remaining function-body `use` imports (only the 13 documented nested-module-level hits remain).
+- [x] Diff contains only import moves/deletions — no logic, signature, or test changes.
+- [x] `./scripts/lint.sh` passes; import linter is clean on `agent/src`.
+- [x] `./scripts/test.sh` passes with the same test counts as base (1718 passed, 0 failed).
+- [ ] `./scripts/preflight.sh` prints `Preflight clean` (skipped locally — known workers covgate local-vs-CI gap; CI is the gate).
 - [ ] CI green on the pushed branch head (preflight `CLEAN`) before the PR leaves draft.
 
 ## Outcomes & Retrospective

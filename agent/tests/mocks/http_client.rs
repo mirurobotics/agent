@@ -12,6 +12,7 @@ use miru_agent::http::{self, request::Params, HTTPErr};
 use axum::http::StatusCode;
 use axum::Json;
 use axum::Router;
+use reqwest::Method;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::time::Duration;
@@ -193,7 +194,6 @@ impl MockClient {
     }
 
     fn match_route(method: &reqwest::Method, path: &str) -> Call {
-        use reqwest::Method;
         match (method, path) {
             (m, p) if *m == Method::POST && p == "/devices/provision" => Call::ProvisionDevice,
             (m, p) if *m == Method::POST && p == "/devices/reprovision" => Call::ReprovisionDevice,
