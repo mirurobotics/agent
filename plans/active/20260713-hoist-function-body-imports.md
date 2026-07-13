@@ -2,7 +2,7 @@
 
 This ExecPlan is a living document. The sections Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective must be kept up to date as work proceeds.
 
-**Status**: in progress (M1–M2 complete, M3 CI validation pending)
+**Status**: complete (PR #141 draft; CI green on branch head)
 
 ## Scope
 
@@ -22,7 +22,7 @@ The observable outcome: the audit grep below returns zero in-scope hits, the dif
 
 - [x] M1 — hoist the 6 in-scope function-body imports (5 files). Audit grep now returns only the documented out-of-scope nested-module hits.
 - [x] M2 — local validation: `cargo check --features test` clean, `scripts/lint.sh` clean (no auto-fixes produced), `scripts/test.sh` all green (1718 tests, 0 failures). Local `preflight.sh` skipped (optional; known workers covgate local-vs-CI gap) — CI is the authoritative gate.
-- [ ] M3 — push branch, run preflight until CI reports `CLEAN`, open PR.
+- [x] M3 — branch pushed, draft PR #141 opened (https://github.com/mirurobotics/agent/pull/141); CI (lint, test, tools) green on commit `212d7b9` on the first run — preflight `CLEAN`, zero repair rounds.
 
 ## Surprises & Discoveries
 
@@ -148,8 +148,11 @@ Acceptance checklist:
 - [x] `./scripts/lint.sh` passes; import linter is clean on `agent/src`.
 - [x] `./scripts/test.sh` passes with the same test counts as base (1718 passed, 0 failed).
 - [ ] `./scripts/preflight.sh` prints `Preflight clean` (skipped locally — known workers covgate local-vs-CI gap; CI is the gate).
-- [ ] CI green on the pushed branch head (preflight `CLEAN`) before the PR leaves draft.
+- [x] CI green on the pushed branch head (preflight `CLEAN`) before the PR leaves draft — all three jobs (lint, test, tools) passed on the first run.
 
 ## Outcomes & Retrospective
 
-(To be filled in on completion.)
+- Delivered as planned: 6 function-body imports hoisted/deduped across 5 files, 9 line-level edits total, zero logic changes. Draft PR #141; CI green first try (lint 51s, test 1m25s, tools 1m9s).
+- The planning-phase inventory was accurate — every edit landed exactly as specified (anchor lines, merge targets, alphabetization) with no mid-flight adjustments. The only corrections were bookkeeping: the out-of-scope hit count is 13 (the plan prose said 15; the table was right), and M1's title said "5 imports" where the body correctly said 6.
+- Environment note for future runs: the machine's default rust toolchain lagged the locked deps' MSRV; `RUSTUP_TOOLCHAIN=1.97.0` was needed for all local cargo/script invocations.
+- Local `preflight.sh` was skipped in favor of CI as the gate (known workers covgate local-vs-CI measurement gap); this proved fine — CI passed without any covgate issues since no code lines were added or removed inside covered functions.
