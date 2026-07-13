@@ -1,3 +1,5 @@
+pub mod harnesses;
+
 // standard crates
 use std::fmt;
 use std::time::Duration;
