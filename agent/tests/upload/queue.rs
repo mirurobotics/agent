@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
-use miru_agent::upload::{Job, Outcome, PendingJob, Queue, UploadErr};
+use miru_agent::upload::{Job, PendingJob, Queue, UploadErr};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
@@ -25,36 +25,42 @@ async fn make_job(file: &File) -> Job {
     }
 }
 
+/// Drains the queue into the list of files still queued, in FIFO order.
+fn drain_files(queue: &mut Queue) -> Vec<File> {
+    let mut files = Vec::new();
+    while let Some(pending) = queue.pop_front() {
+        files.push(pending.job.file);
+    }
+    files
+}
+
 mod enqueue {
     use super::*;
 
     #[tokio::test]
-    async fn returns_enqueued_for_new_job() {
+    async fn appends_new_job() {
         let dir = dirs::create_temp("upload_queue_new").await.unwrap();
         let file = make_file(&dir, "a.log", "contents a").await;
         let mut queue = Queue::new(4);
 
-        let outcome = queue.enqueue(make_job(&file).await).await.unwrap();
+        queue.enqueue(make_job(&file).await).await.unwrap();
 
-        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 1);
     }
 
     #[tokio::test]
-    async fn returns_duplicate_for_same_key() {
+    async fn duplicate_jobs_are_both_queued() {
+        // With dedup removed the queue no longer coalesces; a key-equal job is
+        // appended like any other.
         let dir = dirs::create_temp("upload_queue_dup").await.unwrap();
         let file = make_file(&dir, "a.log", "contents a").await;
         let mut queue = Queue::new(4);
         let job = make_job(&file).await;
+
         queue.enqueue(job.clone()).await.unwrap();
+        queue.enqueue(job).await.unwrap();
 
-        let mut dup = job.clone();
-        dup.deployment_id = "dpl_2".to_string();
-        dup.release_id = "rls_2".to_string();
-        let outcome = queue.enqueue(dup).await.unwrap();
-
-        assert_eq!(outcome, Outcome::Duplicate);
-        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.len(), 2);
     }
 
     #[tokio::test]
@@ -63,18 +69,18 @@ mod enqueue {
         let fresh_file = make_file(&dir, "fresh.log", "fresh contents").await;
         let stale_file = make_file(&dir, "stale.log", "stale contents").await;
         let mut queue = Queue::new(2);
-        let stale_job = make_job(&stale_file).await;
-        let stale_key = stale_job.dedup_key();
         queue.enqueue(make_job(&fresh_file).await).await.unwrap();
-        queue.enqueue(stale_job).await.unwrap();
+        queue.enqueue(make_job(&stale_file).await).await.unwrap();
         files::delete(&stale_file).await.unwrap();
 
         let new_file = make_file(&dir, "new.log", "new contents").await;
-        let outcome = queue.enqueue(make_job(&new_file).await).await.unwrap();
+        queue.enqueue(make_job(&new_file).await).await.unwrap();
 
-        assert_eq!(outcome, Outcome::Enqueued);
         assert_eq!(queue.len(), 2);
-        assert!(!queue.contains(&stale_key));
+        let remaining = drain_files(&mut queue);
+        assert!(remaining.contains(&fresh_file));
+        assert!(remaining.contains(&new_file));
+        assert!(!remaining.contains(&stale_file));
     }
 
     #[tokio::test]
@@ -101,9 +107,7 @@ mod enqueue {
             .unwrap();
         let file = make_file(&dir, "a.log", "original").await;
         let mut queue = Queue::new(1);
-        let job = make_job(&file).await;
-        let key = job.dedup_key();
-        queue.enqueue(job).await.unwrap();
+        queue.enqueue(make_job(&file).await).await.unwrap();
         files::write_string(
             &file,
             "rewritten with different size",
@@ -113,11 +117,9 @@ mod enqueue {
         .unwrap();
 
         let other = make_file(&dir, "b.log", "other contents").await;
-        let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
+        queue.enqueue(make_job(&other).await).await.unwrap();
 
-        assert_eq!(outcome, Outcome::Enqueued);
-        assert_eq!(queue.len(), 1);
-        assert!(!queue.contains(&key));
+        assert_eq!(drain_files(&mut queue), vec![other]);
     }
 
     #[tokio::test]
@@ -128,15 +130,12 @@ mod enqueue {
         let mut job = make_job(&file).await;
         // lie about the recorded mtime so the file appears rewritten
         job.mtime += Duration::seconds(1);
-        let key = job.dedup_key();
         queue.enqueue(job).await.unwrap();
 
         let other = make_file(&dir, "b.log", "other contents").await;
-        let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
+        queue.enqueue(make_job(&other).await).await.unwrap();
 
-        assert_eq!(outcome, Outcome::Enqueued);
-        assert_eq!(queue.len(), 1);
-        assert!(!queue.contains(&key));
+        assert_eq!(drain_files(&mut queue), vec![other]);
     }
 
     #[tokio::test]
@@ -146,17 +145,13 @@ mod enqueue {
             .unwrap();
         let file = make_file(&dir, "a.log", "original").await;
         let mut queue = Queue::new(1);
-        let job = make_job(&file).await;
-        let key = job.dedup_key();
-        queue.enqueue(job).await.unwrap();
+        queue.enqueue(make_job(&file).await).await.unwrap();
         files::delete(&file).await.unwrap();
 
         let other = make_file(&dir, "b.log", "other contents").await;
-        let outcome = queue.enqueue(make_job(&other).await).await.unwrap();
+        queue.enqueue(make_job(&other).await).await.unwrap();
 
-        assert_eq!(outcome, Outcome::Enqueued);
-        assert_eq!(queue.len(), 1);
-        assert!(!queue.contains(&key));
+        assert_eq!(drain_files(&mut queue), vec![other]);
     }
 }
 

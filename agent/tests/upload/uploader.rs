@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
 use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{Job, Outcome, UploadErr, Uploader, UploaderExt, UploaderOptions};
+use miru_agent::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -71,8 +71,7 @@ async fn processes_enqueued_job() {
     let (uploader, handle) = spawn_uploader(mock.clone());
     let job = make_job("a.log");
 
-    let outcome = within(uploader.enqueue(job.clone())).await.unwrap();
-    assert_eq!(outcome, Outcome::Enqueued);
+    within(uploader.enqueue(job.clone())).await.unwrap();
     within(started_rx.recv()).await.unwrap();
 
     assert_eq!(mock.recorded_calls(), vec![job]);
@@ -80,30 +79,6 @@ async fn processes_enqueued_job() {
 
     within(uploader.shutdown()).await.unwrap();
     within(handle).await.unwrap();
-}
-
-#[tokio::test]
-async fn duplicate_while_in_flight_returns_duplicate() {
-    let (mock, mut started_rx) = MockUploadExecutor::new();
-    let (release_tx, release_rx) = oneshot::channel();
-    mock.push_step(MockStep::Hang(release_rx));
-    let (uploader, handle) = spawn_uploader(mock.clone());
-    let job = make_job("a.log");
-
-    within(uploader.enqueue(job.clone())).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
-
-    // key-equal despite different deployment/release ids
-    let mut dup = job.clone();
-    dup.deployment_id = "dpl_2".to_string();
-    dup.release_id = "rls_2".to_string();
-    let outcome = within(uploader.enqueue(dup)).await.unwrap();
-    assert_eq!(outcome, Outcome::Duplicate);
-
-    release_tx.send(Ok(())).unwrap();
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
-    assert_eq!(mock.recorded_calls(), vec![job]);
 }
 
 #[tokio::test]
@@ -324,8 +299,7 @@ async fn arc_handle_delegates_to_uploader() {
     let uploader = Arc::new(uploader);
     let job = make_job("a.log");
 
-    let outcome = within(uploader.enqueue(job.clone())).await.unwrap();
-    assert_eq!(outcome, Outcome::Enqueued);
+    within(uploader.enqueue(job.clone())).await.unwrap();
     within(started_rx.recv()).await.unwrap();
     assert_eq!(within(uploader.len()).await.unwrap(), 0);
 

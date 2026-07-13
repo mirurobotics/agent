@@ -9,8 +9,8 @@ use crate::trace;
 use crate::upload::{
     errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
     executor::UploadExecutor,
-    job::{DedupKey, Job},
-    queue::{Outcome, PendingJob, Queue},
+    job::Job,
+    queue::{PendingJob, Queue},
 };
 
 // external crates
@@ -63,9 +63,8 @@ impl Default for UploaderOptions {
 // an async, actor-round-tripping is_empty would be dead weight next to len()
 #[allow(clippy::len_without_is_empty)]
 pub trait UploaderExt: Send + Sync {
-    /// Push a job at the tail of the queue. Returns `Ok(Duplicate)` without
-    /// enqueuing when a key-equal job is already queued or in flight.
-    async fn enqueue(&self, job: Job) -> Result<Outcome, UploadErr>;
+    /// Push a job at the tail of the queue.
+    async fn enqueue(&self, job: Job) -> Result<(), UploadErr>;
     /// The number of queued jobs, excluding any in-flight job.
     async fn len(&self) -> Result<usize, UploadErr>;
     /// Stop the actor, dropping any in-flight upload future (see the cancel
@@ -77,7 +76,7 @@ pub trait UploaderExt: Send + Sync {
 pub(crate) enum Command {
     Enqueue {
         job: Job,
-        respond_to: oneshot::Sender<Result<Outcome, UploadErr>>,
+        respond_to: oneshot::Sender<Result<(), UploadErr>>,
     },
     Len {
         respond_to: oneshot::Sender<Result<usize, UploadErr>>,
@@ -104,10 +103,6 @@ where
     executor: Arc<ExecutorT>,
     options: UploaderOptions,
     sleep_fn: F,
-    /// The dedup key of the job currently being processed, claimed for the
-    /// whole round (uploads and backoff sleeps) so duplicate enqueues of the
-    /// in-flight job are rejected with no window for one to slip in.
-    in_flight: Option<DedupKey>,
 }
 
 impl<ExecutorT, F, Fut> Worker<ExecutorT, F, Fut>
@@ -130,21 +125,12 @@ where
                     }
                 },
                 Some(pending) => {
-                    if let Flow::Shutdown = self.process(pending).await {
+                    if let Flow::Shutdown = self.run_round(pending).await {
                         break;
                     }
                 }
             }
         }
-    }
-
-    /// Run one round of in-place attempts on `pending`, claiming its dedup
-    /// key as in-flight for the whole round.
-    async fn process(&mut self, pending: PendingJob) -> Flow {
-        self.in_flight = Some(pending.job.dedup_key());
-        let flow = self.run_round(pending).await;
-        self.in_flight = None;
-        flow
     }
 
     /// Drive up to `options.in_place_attempts` executor attempts on `pending`
@@ -245,16 +231,11 @@ where
                 Flow::Shutdown
             }
             Command::Enqueue { job, respond_to } => {
-                let result = if self.in_flight.as_ref() == Some(&job.dedup_key()) {
-                    info!(
-                        "upload job for file {} (rule {}) is in flight; skipping enqueue",
-                        job.file, job.upload_rule_id
-                    );
-                    Ok(Outcome::Duplicate)
-                } else {
-                    self.queue.enqueue(job).await
-                };
-                dispatch!(result, respond_to, "Actor failed to send enqueue response");
+                dispatch!(
+                    self.queue.enqueue(job).await,
+                    respond_to,
+                    "Actor failed to send enqueue response"
+                );
                 Flow::Continue
             }
             Command::Len { respond_to } => {
@@ -294,7 +275,6 @@ impl Uploader {
             executor,
             options,
             sleep_fn,
-            in_flight: None,
         };
         let worker_handle = tokio::spawn(worker.run());
         Ok((Self { sender }, worker_handle))
@@ -324,7 +304,7 @@ impl Uploader {
 }
 
 impl UploaderExt for Uploader {
-    async fn enqueue(&self, job: Job) -> Result<Outcome, UploadErr> {
+    async fn enqueue(&self, job: Job) -> Result<(), UploadErr> {
         self.send_command("enqueue", |tx| Command::Enqueue {
             job,
             respond_to: tx,
@@ -347,7 +327,7 @@ impl UploaderExt for Uploader {
 }
 
 impl UploaderExt for Arc<Uploader> {
-    async fn enqueue(&self, job: Job) -> Result<Outcome, UploadErr> {
+    async fn enqueue(&self, job: Job) -> Result<(), UploadErr> {
         self.as_ref().enqueue(job).await
     }
 

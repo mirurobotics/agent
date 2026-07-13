@@ -7,21 +7,12 @@ use crate::filesys::{files, FileSysErr};
 use crate::trace;
 use crate::upload::{
     errors::{QueueFullErr, UploadErr},
-    job::{DedupKey, Job},
+    job::Job,
 };
 
 // external crates
 use chrono::{DateTime, Utc};
-use tracing::{info, warn};
-
-/// The result of a successful enqueue.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Enqueued,
-    /// A job with the same dedup key is already pending; the enqueue was a
-    /// no-op.
-    Duplicate,
-}
+use tracing::warn;
 
 #[derive(Clone, Debug)]
 pub struct PendingJob {
@@ -29,8 +20,8 @@ pub struct PendingJob {
     pub attempts: u32,
 }
 
-/// An in-memory FIFO queue of upload jobs with dedup by [`DedupKey`], stale-job pruning
-/// when full, and rejection (with [`QueueFullErr`]) when full of fresh jobs.
+/// An in-memory FIFO queue of upload jobs with stale-job pruning when full, and
+/// rejection (with [`QueueFullErr`]) when full of fresh jobs.
 pub struct Queue {
     jobs: VecDeque<PendingJob>,
     capacity: usize,
@@ -52,33 +43,17 @@ impl Queue {
         self.jobs.is_empty()
     }
 
-    pub fn contains(&self, key: &DedupKey) -> bool {
-        self.jobs
-            .iter()
-            .any(|pending| pending.job.dedup_key() == *key)
-    }
-
-    /// Push a new job at the tail. Returns `Ok(Duplicate)` without modifying
-    /// the queue when a key-equal job is already pending (dedup wins even when
-    /// the queue is full). When full, stale jobs are pruned first; if the
-    /// queue is still full, the enqueue is rejected with
+    /// Push a new job at the tail. When full, stale jobs are pruned first; if
+    /// the queue is still full, the enqueue is rejected with
     /// `UploadErr::QueueFullErr`.
-    pub async fn enqueue(&mut self, job: Job) -> Result<Outcome, UploadErr> {
-        if self.contains(&job.dedup_key()) {
-            info!(
-                "upload job for file {} (rule {}) is already queued; skipping enqueue",
-                job.file, job.upload_rule_id
-            );
-            return Ok(Outcome::Duplicate);
-        }
+    pub async fn enqueue(&mut self, job: Job) -> Result<(), UploadErr> {
         self.reserve_slot(&job).await?;
         self.jobs.push_back(PendingJob { job, attempts: 0 });
-        Ok(Outcome::Enqueued)
+        Ok(())
     }
 
     /// Push a previously popped job back at the tail, preserving its attempt
-    /// count. No dedup check: the job's key was claimed as in-flight the
-    /// entire time, so it cannot already be in the queue.
+    /// count.
     pub async fn requeue(&mut self, pending: PendingJob) -> Result<(), UploadErr> {
         self.reserve_slot(&pending.job).await?;
         self.jobs.push_back(pending);
