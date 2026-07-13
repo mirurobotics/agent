@@ -6,7 +6,9 @@ use crate::trace;
 use google_cloud_auth::credentials::{
     CacheableResource, Credentials as GcsCredentials, CredentialsProvider, EntityTag,
 };
+use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
+use google_cloud_storage::retry_policy::RetryableErrors;
 use http::{Extensions, HeaderMap, HeaderValue};
 use tokio::io::AsyncWriteExt as _;
 
@@ -137,7 +139,14 @@ impl Store {
             entity_tag: EntityTag::new(),
         });
 
-        let mut data_builder = Storage::builder().with_credentials(credentials.clone());
+        // The SDK default retries transient errors for up to 300 s per op.
+        // Callers own retry/backoff scheduling (keyed on ConnectionErr), so
+        // fail fast after a few attempts instead of stacking retry layers.
+        let retry_policy = || RetryableErrors.with_attempt_limit(3);
+
+        let mut data_builder = Storage::builder()
+            .with_credentials(credentials.clone())
+            .with_retry_policy(retry_policy());
         if let Some(ep) = endpoint.clone() {
             data_builder = data_builder.with_endpoint(ep);
         }
@@ -149,7 +158,9 @@ impl Store {
         let control = match control_override {
             Some(control) => control,
             None => {
-                let mut control_builder = StorageControl::builder().with_credentials(credentials);
+                let mut control_builder = StorageControl::builder()
+                    .with_credentials(credentials)
+                    .with_retry_policy(retry_policy());
                 if let Some(ep) = endpoint {
                     control_builder = control_builder.with_endpoint(ep);
                 }
