@@ -15,7 +15,18 @@ use tokio::io::AsyncWriteExt as _;
 pub mod errors;
 
 pub use errors::GcsErr;
-use errors::{is_not_found, map_gcs_err, InvalidResponseErr};
+use errors::{is_not_found, map_gcs_err, ConnectionErr, InvalidResponseErr};
+
+/// Per-attempt timeout for the gRPC control-plane ops (delete/exists) — tiny
+/// metadata RPCs. Without it the underlying client has no request timeout, no
+/// connect timeout, and no TCP keepalive, so a silently dropped connection
+/// (NAT expiry, cellular drop) hangs the call forever.
+const CONTROL_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Maximum time `get` waits for the response to start or for the next body
+/// chunk. Bounds *progress* rather than the whole transfer, so it holds for
+/// arbitrarily large objects.
+const READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct Credentials {
     pub access_token: String,
@@ -160,7 +171,8 @@ impl Store {
             None => {
                 let mut control_builder = StorageControl::builder()
                     .with_credentials(credentials)
-                    .with_retry_policy(retry_policy());
+                    .with_retry_policy(retry_policy())
+                    .with_attempt_timeout(CONTROL_ATTEMPT_TIMEOUT);
                 if let Some(ep) = endpoint {
                     control_builder = control_builder.with_endpoint(ep);
                 }
@@ -181,6 +193,11 @@ impl Store {
     /// local source surfaces as a [`GcsErr::FileSysErr`] before any request is
     /// dispatched. The GCS SDK chooses between simple and resumable transfer
     /// based on the payload size.
+    ///
+    /// The upload itself carries no timeout — a single attempt spans the whole
+    /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
+    /// can stall this call; callers that need a bound must enforce their own
+    /// size-scaled deadline (e.g. `tokio::time::timeout`) around it.
     pub async fn put(&self, src: File, dst: &Object) -> Result<(), GcsErr> {
         files::size(&src).await?;
         let resource_name = dst.resource_name();
@@ -199,7 +216,11 @@ impl Store {
     /// object maps to [`GcsErr::ObjectNotFoundErr`].
     pub async fn get(&self, src: &Object, dest: &File) -> Result<(), GcsErr> {
         let resource_name = src.resource_name();
-        let mut resp = match self.data.read_object(&resource_name, &src.key).send().await {
+        let send = self.data.read_object(&resource_name, &src.key).send();
+        let mut resp = match tokio::time::timeout(READ_IDLE_TIMEOUT, send)
+            .await
+            .map_err(|_| Self::idle_timeout_err(src))?
+        {
             Ok(resp) => resp,
             Err(e) if is_not_found(&e) => {
                 return Err(GcsErr::ObjectNotFoundErr(errors::ObjectNotFoundErr {
@@ -213,7 +234,10 @@ impl Store {
         let mut file = tokio::fs::File::create(dest.path())
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
-        while let Some(chunk) = resp.next().await {
+        while let Some(chunk) = tokio::time::timeout(READ_IDLE_TIMEOUT, resp.next())
+            .await
+            .map_err(|_| Self::idle_timeout_err(src))?
+        {
             // A wire read error is a `google_cloud_gax::error::Error`, mapped by
             // `map_gcs_err`.
             let bytes = chunk.map_err(|e| map_gcs_err("get_object", src, e))?;
@@ -261,6 +285,19 @@ impl Store {
             Err(e) if is_not_found(&e) => Ok(false),
             Err(e) => Err(map_gcs_err("get_object", obj, e)),
         }
+    }
+
+    /// A read made no progress within [`READ_IDLE_TIMEOUT`] — a silently dead
+    /// connection, surfaced as a retryable network error.
+    fn idle_timeout_err(src: &Object) -> GcsErr {
+        GcsErr::ConnectionErr(ConnectionErr {
+            object: src.clone(),
+            msg: format!(
+                "no data received for {}s",
+                READ_IDLE_TIMEOUT.as_secs()
+            ),
+            trace: trace!(),
+        })
     }
 
     /// Maps a client-builder error into a `GcsErr`.
