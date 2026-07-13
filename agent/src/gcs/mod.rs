@@ -230,9 +230,13 @@ impl Store {
             Err(e) => return Err(map_gcs_err("get_object", src, e)),
         };
 
-        let mut file = tokio::fs::File::create(dest.path())
+        let file = tokio::fs::File::create(dest.path())
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
+        // Body chunks arrive one HTTP/2 frame (16 KiB) at a time, and every
+        // write on an unbuffered tokio File dispatches a blocking task —
+        // buffer so multi-GB downloads don't pay one dispatch per frame.
+        let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
         while let Some(chunk) = tokio::time::timeout(READ_IDLE_TIMEOUT, resp.next())
             .await
             .map_err(|_| Self::idle_timeout_err(src))?
@@ -240,13 +244,16 @@ impl Store {
             // A wire read error is a `google_cloud_gax::error::Error`, mapped by
             // `map_gcs_err`.
             let bytes = chunk.map_err(|e| map_gcs_err("get_object", src, e))?;
-            file.write_all(&bytes)
+            writer
+                .write_all(&bytes)
                 .await
                 .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         }
-        file.flush()
+        writer
+            .flush()
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
+        let file = writer.into_inner();
         // flush() only reaches the page cache; make the download durable before
         // reporting success, or a power cut after Ok(()) can lose the file a
         // caller has already recorded as complete.

@@ -169,18 +169,24 @@ impl Store {
         // failure a partially-written `dest` may remain; cleaning that up is the
         // caller's responsibility.
         let mut body = output.body;
-        let mut file = tokio::fs::File::create(dest.path())
+        let file = tokio::fs::File::create(dest.path())
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
+        // Every write on an unbuffered tokio File dispatches a blocking task —
+        // buffer so large downloads don't pay one dispatch per body chunk.
+        let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
         while let Some(chunk) = body.next().await {
             let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", &src.key, &e))?;
-            file.write_all(&chunk)
+            writer
+                .write_all(&chunk)
                 .await
                 .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         }
-        file.flush()
+        writer
+            .flush()
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
+        let file = writer.into_inner();
         // flush() only reaches the page cache; make the download durable before
         // reporting success, or a power cut after Ok(()) can lose the file a
         // caller has already recorded as complete.
