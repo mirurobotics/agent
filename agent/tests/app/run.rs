@@ -201,6 +201,7 @@ async fn shutdown_signal_received() {
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
+        enable_scanner: true,
         ..Default::default()
     };
 
@@ -384,6 +385,6 @@ async fn scanner_disabled() {
     .await
     .unwrap();
 
-    // both flags off => the scanner block is skipped => no snapshot file
+    // enable_scanner: false => the scanner block is skipped => no snapshot file
     assert!(!layout.scanner_snapshot().exists());
 }
