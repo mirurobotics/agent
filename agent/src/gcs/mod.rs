@@ -280,7 +280,9 @@ impl Store {
                 // GCS also returns NOT_FOUND for a nonexistent *bucket*, which
                 // this arm would silently swallow forever on a misconfigured
                 // bucket — log the service message so that is observable.
-                tracing::warn!("delete of '{obj}' returned NOT_FOUND, treating as already deleted: {e}");
+                tracing::warn!(
+                    "delete of '{obj}' returned NOT_FOUND, treating as already deleted: {e}"
+                );
                 Ok(())
             }
             Err(e) => Err(map_gcs_err("delete_object", obj, e)),
@@ -310,10 +312,7 @@ impl Store {
     fn idle_timeout_err(src: &Object) -> GcsErr {
         GcsErr::ConnectionErr(ConnectionErr {
             object: src.clone(),
-            msg: format!(
-                "no data received for {}s",
-                READ_IDLE_TIMEOUT.as_secs()
-            ),
+            msg: format!("no data received for {}s", READ_IDLE_TIMEOUT.as_secs()),
             trace: trace!(),
         })
     }

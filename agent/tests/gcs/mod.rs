@@ -135,7 +135,11 @@ async fn download_handler(
         r.download_hits += 1;
         r.saw_bearer = r.saw_bearer || bearer_present(&headers);
         r.download_uri = uri.0.to_string();
-        (r.download_status, r.download_body.clone(), r.download_truncate)
+        (
+            r.download_status,
+            r.download_body.clone(),
+            r.download_truncate,
+        )
     };
     let gen_header = (
         axum::http::HeaderName::from_static("x-goog-generation"),
