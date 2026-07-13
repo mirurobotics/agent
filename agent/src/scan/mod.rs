@@ -1,11 +1,7 @@
 pub mod errors;
-// The state types are exercised by their own inline tests but are not yet wired
-// into a consumer in this crate; the scanner that uses them lands separately.
-#[allow(dead_code)]
+// State types persisted by the scanner actor (candidate ledgers, deployed set).
 pub(crate) mod state;
-// The collection scanner is exercised by its own inline tests but is not yet
-// wired into a consumer in this crate; the parent scanner actor lands separately.
-#[allow(dead_code)]
+// Per-collection scanner used by the parent scanner actor.
 pub(crate) mod collection;
 // Public (mirroring `sync`) so external drivers and integration tests can name
 // the actor surface; the scan driver worker consumes `ScannerExt`.

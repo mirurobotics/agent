@@ -12,10 +12,11 @@ use crate::app::{
 };
 use crate::authn::{self, TokenManagerExt};
 use crate::http;
+use crate::scan::{self, ScannerArgs, ScannerExt};
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
-    mqtt, poller,
+    mqtt, poller, scan_bridge,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
 };
 
@@ -153,6 +154,30 @@ async fn init(
         .await?;
     }
 
+    if options.enable_scan_worker || options.enable_scan_bridge_worker {
+        let (scanner, scanner_handle) = init_scanner(options).await?;
+        let scanner = Arc::new(scanner);
+        shutdown_manager.with_scanner(scanner.clone(), scanner_handle)?;
+        if options.enable_scan_worker {
+            init_scan_worker(
+                options.scan_worker.clone(),
+                scanner.clone(),
+                shutdown_manager,
+                shutdown_tx.subscribe(),
+            )
+            .await?;
+        }
+        if options.enable_scan_bridge_worker {
+            init_scan_bridge_worker(
+                scanner.clone(),
+                app_state.clone(),
+                shutdown_manager,
+                shutdown_tx.subscribe(),
+            )
+            .await?;
+        }
+    }
+
     Ok(app_state)
 }
 
@@ -278,6 +303,80 @@ async fn init_mqtt_worker(
     Ok(())
 }
 
+async fn init_scanner(options: &AppOptions) -> Result<(scan::Scanner, JoinHandle<()>), ServerErr> {
+    let snapshot_file = crate::scan::state::ScanSnapshotFile::new_with_default(
+        options.storage.layout.scanner_snapshot(),
+        crate::scan::state::ScannerSnapshot::default(),
+    )
+    .await?;
+    let (scanner, handle) = scan::Scanner::spawn(
+        64,
+        ScannerArgs {
+            snapshot_file: Some(snapshot_file),
+            ..ScannerArgs::default()
+        },
+    )?;
+    Ok((scanner, handle))
+}
+
+async fn init_scan_worker(
+    options: crate::workers::scan::Options,
+    scanner: Arc<scan::Scanner>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing scan driver worker...");
+    let scan_handle = tokio::spawn(async move {
+        crate::workers::scan::run(
+            &options,
+            scanner.as_ref(),
+            tokio::time::sleep,
+            Box::pin(async move {
+                let _ = shutdown_rx.recv().await;
+            }),
+        )
+        .await;
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.scan_worker_handle,
+        "scan_handle",
+        scan_handle,
+    )?;
+    Ok(())
+}
+
+async fn init_scan_bridge_worker(
+    scanner: Arc<scan::Scanner>,
+    app_state: Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing scan bridge worker...");
+    let syncer = app_state.syncer.clone();
+    let deployments = app_state.storage.deployments.clone();
+    let releases = app_state.storage.releases.clone();
+    let upload_rules = app_state.storage.upload_rules.clone();
+    let bridge_handle = tokio::spawn(async move {
+        scan_bridge::run(
+            scanner.as_ref(),
+            syncer.as_ref(),
+            deployments.as_ref(),
+            releases.as_ref(),
+            upload_rules.as_ref(),
+            Box::pin(async move {
+                let _ = shutdown_rx.recv().await;
+            }),
+        )
+        .await;
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.scan_bridge_worker_handle,
+        "scan_bridge_handle",
+        bridge_handle,
+    )?;
+    Ok(())
+}
+
 async fn init_socket_server(
     options: &AppOptions,
     app_state: Arc<AppState>,
@@ -323,6 +422,9 @@ struct ShutdownManager {
     poller_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
+    scanner: Option<(Arc<scan::Scanner>, JoinHandle<()>)>,
+    scan_worker_handle: Option<JoinHandle<()>>,
+    scan_bridge_worker_handle: Option<JoinHandle<()>>,
 }
 
 impl ShutdownManager {
@@ -335,6 +437,9 @@ impl ShutdownManager {
             poller_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
+            scanner: None,
+            scan_worker_handle: None,
+            scan_bridge_worker_handle: None,
         }
     }
 
@@ -355,6 +460,23 @@ impl ShutdownManager {
             state,
             state_handle,
         });
+        Ok(())
+    }
+
+    pub fn with_scanner(
+        &mut self,
+        scanner: Arc<scan::Scanner>,
+        handle: JoinHandle<()>,
+    ) -> Result<(), ServerErr> {
+        if self.scanner.is_some() {
+            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
+                ShutdownMngrDuplicateArgErr {
+                    arg_name: "scanner".to_string(),
+                    trace: trace!(),
+                },
+            ));
+        }
+        self.scanner = Some((scanner, handle));
         Ok(())
     }
 
@@ -494,7 +616,63 @@ impl ShutdownManager {
             info!("Socket server handle not found, skipping socket server shutdown...");
         }
 
-        // 5. app state
+        // The scan components must be torn down in driver -> bridge -> actor
+        // order. Both the scan driver and scan bridge workers send commands
+        // (scan(), update_rules()) INTO the scanner actor. If we closed the
+        // actor first, those in-flight commands would fail with
+        // SendActorMessageErr. So we join both workers first, then shut down
+        // the actor itself.
+
+        // 5. scan driver worker
+        if let Some(scan_worker_handle) = self.scan_worker_handle.take() {
+            if let Err(e) = scan_worker_handle.await {
+                error!("Failed to shutdown scan driver worker: {}", e);
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
+            }
+        } else {
+            info!("Scan driver worker handle not found, skipping scan driver worker shutdown...");
+        }
+
+        // 6. scan bridge worker
+        if let Some(scan_bridge_worker_handle) = self.scan_bridge_worker_handle.take() {
+            if let Err(e) = scan_bridge_worker_handle.await {
+                error!("Failed to shutdown scan bridge worker: {}", e);
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
+            }
+        } else {
+            info!("Scan bridge worker handle not found, skipping scan bridge worker shutdown...");
+        }
+
+        // 7. scanner actor
+        if let Some((scanner, handle)) = self.scanner.take() {
+            if let Err(e) = scanner.shutdown().await {
+                error!("Failed to shutdown scanner actor: {}", e);
+                first_err.get_or_insert(e.into());
+            }
+            if let Err(e) = handle.await {
+                error!("Failed to join scanner actor: {}", e);
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
+            }
+        } else {
+            info!("Scanner not found, skipping scanner actor shutdown...");
+        }
+
+        // 8. app state
         if let Some(app_state) = self.app_state.take() {
             if let Err(e) = app_state.state.shutdown().await {
                 error!("Failed to shutdown app state: {}", e);
