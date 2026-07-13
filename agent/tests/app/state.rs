@@ -15,6 +15,7 @@ use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
 use miru_agent::scan::ScannerExt;
 use miru_agent::server::ServerErr;
+use miru_agent::sync::SyncerExt;
 
 // external crates
 use chrono::Utc;
@@ -308,12 +309,54 @@ pub mod shutdown {
         let env = TestEnv::valid().await;
         let (state, state_handle) = env.init(true).await.unwrap();
 
+        // set the device online so the offline assertion below proves the
+        // storage shutdown actually ran
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
         // stop the scanner actor directly so AppState::shutdown's scanner
         // step errors (send on a closed actor channel)
         state.scanner.as_ref().unwrap().shutdown().await.unwrap();
 
-        // teardown still completes Ok and the rest of the chain ran
-        state.shutdown().await.unwrap();
+        // the scanner failure surfaces as the returned error, but the rest
+        // of the chain still ran
+        let err = state.shutdown().await.expect_err("scanner error surfaces");
+        assert!(matches!(err, ServerErr::ScanErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn syncer_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // set the device online so the offline assertion below proves the
+        // storage shutdown actually ran
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the syncer actor directly so AppState::shutdown's syncer step
+        // errors (send on a closed actor channel)
+        state.syncer.shutdown().await.unwrap();
+
+        // the syncer failure surfaces as the returned error, but storage and
+        // the token manager still shut down: the device is persisted offline
+        // and the bundled state handle resolves instead of hanging
+        let err = state.shutdown().await.expect_err("syncer error surfaces");
+        assert!(matches!(err, ServerErr::SyncErr(_)));
         state_handle.await;
 
         let device = files::read_json::<Device>(&env.layout.device())

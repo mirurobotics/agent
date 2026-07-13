@@ -143,28 +143,50 @@ impl AppState {
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
+        // best-effort teardown: attempt every component's shutdown in order,
+        // record the first error, and return it at the end. An early return
+        // would skip the remaining steps (most importantly the storage
+        // shutdown, which persists the device as offline) and leave actors
+        // running, hanging the bundled state handle until the shutdown
+        // watchdog kills the process.
+        let mut first_err: Option<server::ServerErr> = None;
+
         // shutdown the scanner before the syncer (it uses syncer to determine the
-        // correct set of rules to use for scannning)
+        // correct set of rules to use for scanning)
         if let Some(scanner) = &self.scanner {
             if let Err(e) = scanner.shutdown().await {
                 tracing::error!("failed to shutdown scanner: {e}");
+                first_err.get_or_insert(e.into());
             }
         }
 
         // shutdown the syncer before storage (it uses storage during sync)
-        self.syncer.shutdown().await?;
+        if let Err(e) = self.syncer.shutdown().await {
+            tracing::error!("failed to shutdown syncer: {e}");
+            first_err.get_or_insert(e.into());
+        }
 
         // shutdown the event hub
         if let Err(e) = self.event_hub.shutdown().await {
             tracing::error!("failed to shutdown event hub: {e}");
+            first_err.get_or_insert(e.into());
         }
 
         // shutdown storage (sets device offline + shuts down all stores)
-        self.storage.shutdown().await?;
+        if let Err(e) = self.storage.shutdown().await {
+            tracing::error!("failed to shutdown storage: {e}");
+            first_err.get_or_insert(e.into());
+        }
 
         // shutdown the token manager
-        self.token_mngr.shutdown().await?;
+        if let Err(e) = self.token_mngr.shutdown().await {
+            tracing::error!("failed to shutdown token manager: {e}");
+            first_err.get_or_insert(e.into());
+        }
 
-        Ok(())
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
