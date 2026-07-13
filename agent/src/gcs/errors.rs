@@ -219,8 +219,8 @@ mod tests {
 
     #[test]
     fn request_failed_err_display_includes_object_and_status() {
-        // Both object and status are `Some`, so Display echoes the gs:// URI
-        // and the numeric status.
+        // The status is `Some`, so Display echoes the gs:// URI and the
+        // numeric status.
         let err = GcsErr::RequestFailedErr(RequestFailedErr {
             operation: "put_object".to_string(),
             object: object(),
@@ -267,21 +267,13 @@ mod tests {
     /// network condition.
     mod body_mappers {
         use super::*;
-        use crate::gcs::Object;
-
-        fn obj() -> Object {
-            Object {
-                bucket: "bucket".to_string(),
-                key: "key".to_string(),
-            }
-        }
 
         #[test]
         fn map_body_io_err_maps_to_local_io_err() {
             // A failure writing bytes to the local destination is a terminal
             // local I/O error, never a network condition.
             let err = std::io::Error::other("no space left on device");
-            let mapped = map_body_io_err("get_object", &obj(), &File::new("/data/out.bin"), err);
+            let mapped = map_body_io_err("get_object", &object(), &File::new("/data/out.bin"), err);
             assert!(matches!(mapped, GcsErr::LocalIoErr(_)));
             assert!(!mapped.is_network_conn_err());
             assert_eq!(mapped.http_status().as_u16(), 500);
