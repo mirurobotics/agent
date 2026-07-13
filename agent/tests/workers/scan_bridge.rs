@@ -317,7 +317,10 @@ pub mod run {
 
         let scanner = Arc::new(MockScanner::default());
         let syncer = Arc::new(MockSyncer::default());
-        let (mut handle, shutdown_tx) = spawn_bridge(scanner.clone(), syncer.clone(), stores);
+        // keep `stores` alive: dropping it would delete the temp dir out from
+        // under the worker's startup disk read.
+        let (mut handle, shutdown_tx) =
+            spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
 
         // let the startup resolve run so the worker is in its event loop.
         wait_until(|| scanner.clear_rules_calls() == 1).await;
