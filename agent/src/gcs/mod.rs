@@ -121,7 +121,7 @@ impl Store {
         endpoint: Option<String>,
         control_override: Option<StorageControl>,
     ) -> Result<Self, GcsErr> {
-        let header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
+        let mut header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
             .map_err(|e| {
                 GcsErr::InvalidResponseErr(InvalidResponseErr {
                     operation: "new".to_string(),
@@ -129,6 +129,9 @@ impl Store {
                     trace: trace!(),
                 })
             })?;
+        // Redact the token from all Debug output: the CredentialsProvider trait
+        // requires Debug, and hyper/reqwest print request headers in trace logs.
+        header_value.set_sensitive(true);
         let credentials = GcsCredentials::from(StaticTokenCredentials {
             header_value,
             entity_tag: EntityTag::new(),
@@ -264,10 +267,20 @@ mod tests {
     use super::*;
 
     fn provider() -> StaticTokenCredentials {
+        let mut header_value = HeaderValue::from_static("Bearer abc123");
+        header_value.set_sensitive(true);
         StaticTokenCredentials {
-            header_value: HeaderValue::from_static("Bearer abc123"),
+            header_value,
             entity_tag: EntityTag::new(),
         }
+    }
+
+    /// The token never appears in Debug output (the SDK requires Debug on
+    /// credential providers, and request headers reach trace-level logs).
+    #[test]
+    fn debug_output_redacts_token() {
+        let debug = format!("{:?}", provider());
+        assert!(!debug.contains("abc123"), "token leaked: {debug}");
     }
 
     /// Fresh extensions (no cached `EntityTag`) yield a `New` result carrying an
