@@ -165,21 +165,14 @@ impl Store {
     /// The whole file is never held in memory: the `write_object` path reads it
     /// in bounded chunks. `put` reads the source size up front so a missing
     /// local source surfaces as a [`GcsErr::FileSysErr`] before any request is
-    /// dispatched. GCS's `write_object` folds the simple-vs-resumable decision
-    /// inside the SDK, so there is no size-routed second path: `put` delegates
-    /// straight to [`Self::put_singlepart`] after the size read.
+    /// dispatched. The GCS SDK chooses between simple and resumable transfer
+    /// based on the payload size.
     pub async fn put(&self, src: File, dst: &Object) -> Result<(), GcsErr> {
-        let _size = files::size(&src).await?;
-        self.put_singlepart(&src, dst).await
-    }
-
-    /// Streams a file to GCS via a single `write_object` call. The SDK internally
-    /// chooses simple vs resumable transfer by payload size.
-    pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), GcsErr> {
+        files::size(&src).await?;
         let resource_name = dst.resource_name();
         let file = tokio::fs::File::open(src.path())
             .await
-            .map_err(|e| errors::map_body_io_err("put_object", dst, src, e))?;
+            .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?;
         self.data
             .write_object(&resource_name, &dst.key, file)
             .send_unbuffered()

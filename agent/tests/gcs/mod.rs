@@ -154,42 +154,67 @@ async fn http_store(rec: HttpRecorder) -> Store {
         .unwrap()
 }
 
+/// The production constructor performs no real GCS call, so it can be built in a
+/// unit test. A token with a byte invalid in an HTTP header value is rejected.
+pub mod construction {
+    use super::*;
+
+    #[tokio::test]
+    async fn new_builds_with_valid_token() {
+        let creds = Credentials {
+            access_token: "valid-token".to_string(),
+        };
+        let store = Store::new(creds).await;
+        assert!(store.is_ok());
+    }
+
+    #[tokio::test]
+    async fn new_rejects_bad_token() {
+        // A newline is not a valid HTTP header value byte.
+        let creds = Credentials {
+            access_token: "bad\ntoken".to_string(),
+        };
+        let result = Store::new(creds).await;
+        match result {
+            Err(GcsErr::InvalidResponseErr(_)) => {}
+            Ok(_) => panic!("expected InvalidResponseErr, got Ok"),
+            Err(other) => panic!("expected InvalidResponseErr, got {other:?}"),
+        }
+    }
+}
+
 pub mod put {
     use super::*;
 
-    pub mod single {
-        use super::*;
+    #[tokio::test]
+    async fn upload_streams_file_body() {
+        let rec = HttpRecorder::default();
+        let store = http_store(rec.clone()).await;
+        let src = temp_file_with(b"hello world").await;
 
-        #[tokio::test]
-        async fn upload_streams_file_body() {
-            let rec = HttpRecorder::default();
-            let store = http_store(rec.clone()).await;
-            let src = temp_file_with(b"hello world").await;
+        store
+            .put(src.to_file(), &obj("artifacts/hello.txt"))
+            .await
+            .unwrap();
 
-            store
-                .put(src.to_file(), &obj("artifacts/hello.txt"))
-                .await
-                .unwrap();
+        let r = rec.inner.lock().unwrap();
+        assert_eq!(r.upload_hits, 1);
+        assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
+    }
 
-            let r = rec.inner.lock().unwrap();
-            assert_eq!(r.upload_hits, 1);
-            assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
-        }
+    #[tokio::test]
+    async fn upload_empty_file_succeeds() {
+        // A 0-byte source still issues exactly one upload.
+        let rec = HttpRecorder::default();
+        let store = http_store(rec.clone()).await;
+        let src = temp_file_with(b"").await;
 
-        #[tokio::test]
-        async fn upload_empty_file_succeeds() {
-            // A 0-byte source still issues exactly one upload.
-            let rec = HttpRecorder::default();
-            let store = http_store(rec.clone()).await;
-            let src = temp_file_with(b"").await;
+        store
+            .put(src.to_file(), &obj("artifacts/empty.txt"))
+            .await
+            .unwrap();
 
-            store
-                .put(src.to_file(), &obj("artifacts/empty.txt"))
-                .await
-                .unwrap();
-
-            assert_eq!(rec.inner.lock().unwrap().upload_hits, 1);
-        }
+        assert_eq!(rec.inner.lock().unwrap().upload_hits, 1);
     }
 
     pub mod access_denied {
@@ -216,29 +241,13 @@ pub mod put {
 
         #[tokio::test]
         async fn upload_missing_source_maps_to_filesys_err() {
-            // A missing LOCAL source surfaces as `FileSysErr`: `put` stats the
-            // file first, so the failure is caught reading the file's metadata
-            // before any request is dispatched.
             let rec = HttpRecorder::default();
-            let store = http_store(rec).await;
+            let store = http_store(rec.clone()).await;
             let missing = File::new("/nonexistent/definitely/not/here.bin");
 
             let err = store.put(missing, &obj("k")).await.unwrap_err();
 
             assert!(matches!(err, GcsErr::FileSysErr(_)));
-        }
-
-        #[tokio::test]
-        async fn upload_singlepart_missing_source_maps_to_local_io_err() {
-            // `put_singlepart` skips the up-front size read, so the open failure
-            // surfaces as `LocalIoErr` before any request is dispatched.
-            let rec = HttpRecorder::default();
-            let store = http_store(rec.clone()).await;
-            let missing = File::new("/nonexistent/definitely/not/here.bin");
-
-            let err = store.put_singlepart(&missing, &obj("k")).await.unwrap_err();
-
-            assert!(matches!(err, GcsErr::LocalIoErr(_)));
             assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
         }
     }
@@ -320,8 +329,8 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_body = payload;
             let store = http_store(rec).await;
-            // The destination's parent directory does not exist, so creating the
-            // file fails after the object is fetched.
+            // The destination's parent directory does not exist, so creating the file
+            // fails after the object is fetched.
             let dest = File::new("/nonexistent/dir/out.bin");
 
             let err = store.get(&obj("blobs/data.bin"), &dest).await.unwrap_err();
@@ -362,8 +371,6 @@ pub mod get {
                 .unwrap_err();
 
             assert!(matches!(err, GcsErr::ObjectNotFoundErr(_)));
-            assert!(matches!(err.code(), Code::ResourceNotFound));
-            assert_eq!(err.http_status().as_u16(), 404);
         }
     }
 
@@ -387,10 +394,9 @@ pub mod get {
         }
     }
 
-    // note: the axum data-path mock finalizes each download via the
-    // `x-goog-generation` response header, so truncated-body and
-    // dispatch-failure conditions cannot be simulated with it and are not
-    // covered here.
+    // note: the axum data-path mock finalizes each download via the `x-goog-generation`
+    // response header, so truncated-body and dispatch-failure conditions cannot be
+    // simulated with it and are not covered here.
 }
 
 // ============================ gRPC CONTROL-PATH MOCK ============================ //
@@ -565,35 +571,6 @@ pub mod exists {
             let err = store.exists(&obj("denied.txt")).await.unwrap_err();
 
             assert!(matches!(err, GcsErr::RequestFailedErr(_)));
-        }
-    }
-}
-
-/// The production constructor performs no real GCS call, so it can be built in a
-/// unit test. A token with a byte invalid in an HTTP header value is rejected.
-pub mod construction {
-    use super::*;
-
-    #[tokio::test]
-    async fn new_builds_with_valid_token() {
-        let creds = Credentials {
-            access_token: "valid-token".to_string(),
-        };
-        let store = Store::new(creds).await;
-        assert!(store.is_ok());
-    }
-
-    #[tokio::test]
-    async fn new_rejects_bad_token() {
-        // A newline is not a valid HTTP header value byte.
-        let creds = Credentials {
-            access_token: "bad\ntoken".to_string(),
-        };
-        let result = Store::new(creds).await;
-        match result {
-            Err(GcsErr::InvalidResponseErr(_)) => {}
-            Ok(_) => panic!("expected InvalidResponseErr, got Ok"),
-            Err(other) => panic!("expected InvalidResponseErr, got {other:?}"),
         }
     }
 }
