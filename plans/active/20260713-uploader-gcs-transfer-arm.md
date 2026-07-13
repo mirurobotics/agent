@@ -21,7 +21,7 @@ The upload executor (`agent/src/upload/executor.rs`) asks the backend to vend sh
 ## Progress
 
 - [x] Milestone 1 — implement `transfer_gcs`, `gcs_credentials`, and the test-only endpoint seam in `agent/src/upload/transfer.rs`; `cargo build --features test` succeeds. (2026-07-13: both `--features test` and no-feature builds pass; `executor_err` helper also reused by `transfer_s3` per the plan's cost-nothing clause.)
-- [ ] Milestone 2 — tests in `agent/tests/upload/transfer.rs`; `./scripts/test.sh` and `./scripts/covgate.sh` pass.
+- [x] Milestone 2 — tests in `agent/tests/upload/transfer.rs`; `./scripts/test.sh` and `./scripts/covgate.sh` pass. (2026-07-13: 1483 tests, 0 failures; upload coverage 92.33% ≥ 91.00, all modules pass.)
 - [ ] Milestone 3 — `./scripts/lint.sh` clean; `./scripts/preflight.sh` prints `Preflight clean`.
 
 ## Surprises & Discoveries
