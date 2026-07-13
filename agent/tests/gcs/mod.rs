@@ -6,7 +6,7 @@ use crate::mocks::http_client::run_server;
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;
-use miru_agent::filesys::{files, WriteOptions};
+use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::gcs::errors::{
     ConnectionErr, InvalidResponseErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
 };
@@ -175,6 +175,21 @@ pub mod put {
             assert_eq!(r.upload_hits, 1);
             assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
         }
+
+        #[tokio::test]
+        async fn upload_empty_file_succeeds() {
+            // A 0-byte source still issues exactly one upload.
+            let rec = HttpRecorder::default();
+            let store = http_store(rec.clone()).await;
+            let src = temp_file_with(b"").await;
+
+            store
+                .put(src.to_file(), &obj("artifacts/empty.txt"))
+                .await
+                .unwrap();
+
+            assert_eq!(rec.inner.lock().unwrap().upload_hits, 1);
+        }
     }
 
     pub mod access_denied {
@@ -212,6 +227,20 @@ pub mod put {
 
             assert!(matches!(err, GcsErr::FileSysErr(_)));
         }
+
+        #[tokio::test]
+        async fn upload_singlepart_missing_source_maps_to_local_io_err() {
+            // `put_singlepart` skips the up-front size read, so the open failure
+            // surfaces as `LocalIoErr` before any request is dispatched.
+            let rec = HttpRecorder::default();
+            let store = http_store(rec.clone()).await;
+            let missing = File::new("/nonexistent/definitely/not/here.bin");
+
+            let err = store.put_singlepart(&missing, &obj("k")).await.unwrap_err();
+
+            assert!(matches!(err, GcsErr::LocalIoErr(_)));
+            assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
+        }
     }
 }
 
@@ -239,6 +268,47 @@ pub mod get {
             assert_eq!(r.download_hits, 1);
             assert!(r.saw_bearer, "download must carry Authorization: Bearer");
         }
+
+        #[tokio::test]
+        async fn download_overwrites_existing_destination() {
+            // Stale dest content is LONGER than the new payload, so a failure to
+            // truncate would leave trailing bytes.
+            let payload = b"NEW".to_vec();
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_body = payload.clone();
+            let store = http_store(rec).await;
+            let dest = files::temp("gcs-dest").unwrap();
+            files::write_bytes(
+                dest.file(),
+                b"OLD-STALE-CONTENT",
+                WriteOptions::OVERWRITE_NONATOMIC,
+            )
+            .await
+            .unwrap();
+
+            store
+                .get(&obj("blobs/data.bin"), dest.file())
+                .await
+                .unwrap();
+
+            assert_eq!(files::read_bytes(dest.file()).await.unwrap(), payload);
+        }
+
+        #[tokio::test]
+        async fn download_empty_object_writes_empty_file() {
+            // The recorder's default body is zero bytes.
+            let rec = HttpRecorder::default();
+            let store = http_store(rec).await;
+            let dest = files::temp("gcs-dest").unwrap();
+
+            store
+                .get(&obj("blobs/empty.bin"), dest.file())
+                .await
+                .unwrap();
+
+            assert!(dest.file().path().exists());
+            assert!(files::read_bytes(dest.file()).await.unwrap().is_empty());
+        }
     }
 
     pub mod dest_unwritable {
@@ -258,6 +328,20 @@ pub mod get {
 
             assert!(matches!(err, GcsErr::LocalIoErr(_)));
             // Creating the file failed, so nothing was written at `dest`.
+            assert!(!dest.path().exists());
+        }
+
+        #[tokio::test]
+        async fn download_to_missing_parent_dir_maps_to_local_io_err() {
+            let rec = HttpRecorder::default();
+            rec.inner.lock().unwrap().download_body = b"body".to_vec();
+            let store = http_store(rec).await;
+            let tmp = dirs::temp("gcs-dest").unwrap();
+            let dest = File::new(tmp.path().join("no-such-dir").join("out.bin"));
+
+            let err = store.get(&obj("blobs/data.bin"), &dest).await.unwrap_err();
+
+            assert!(matches!(err, GcsErr::LocalIoErr(_)));
             assert!(!dest.path().exists());
         }
     }

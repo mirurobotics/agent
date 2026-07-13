@@ -184,12 +184,71 @@ mod tests {
     }
 
     #[test]
+    fn timeout_maps_to_connection_err() {
+        let err = GaxError::timeout("deadline exceeded");
+        let mapped = map_gcs_err("get_object", Some("k"), err);
+        assert!(mapped.is_network_conn_err());
+        match mapped {
+            GcsErr::ConnectionErr(e) => assert_eq!(e.key, "k"),
+            other => panic!("expected ConnectionErr, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn not_found_status_is_recognized() {
         let err = GaxError::service(Status::default().set_code(Code::NotFound));
         assert!(is_not_found(&err));
         // A non-not-found service error is not misclassified.
         let other = GaxError::service(Status::default().set_code(Code::PermissionDenied));
         assert!(!is_not_found(&other));
+    }
+
+    #[test]
+    fn http_404_is_recognized_as_not_found() {
+        let err = GaxError::http(404, http::HeaderMap::new(), Vec::<u8>::new().into());
+        assert!(is_not_found(&err));
+        // A non-404 HTTP error is not misclassified.
+        let other = GaxError::http(403, http::HeaderMap::new(), Vec::<u8>::new().into());
+        assert!(!is_not_found(&other));
+    }
+
+    #[test]
+    fn request_failed_err_display_includes_object_and_status() {
+        // Both object and status are `Some`, so Display echoes the gs:// URI
+        // and the numeric status.
+        let err = GcsErr::RequestFailedErr(RequestFailedErr {
+            operation: "put_object".to_string(),
+            object: Some("gs://bucket/key".to_string()),
+            status: Some(403),
+            msg: "denied".to_string(),
+            trace: crate::trace!(),
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("gs://bucket/key"));
+        assert!(msg.contains("403"));
+    }
+
+    // A `FileSysErr` from a real (failing) filesystem op converts via `From`,
+    // and the resulting variant delegates its trait behavior to the underlying
+    // error.
+    #[tokio::test]
+    async fn filesys_err_delegates_to_underlying_error() {
+        let fs_err: filesys::FileSysErr =
+            filesys::files::read_bytes(&File::new("/nonexistent/definitely/not/here.bin"))
+                .await
+                .unwrap_err();
+        // `Code` is not `PartialEq`, so compare its `Debug` form.
+        let want_code = format!("{:?}", fs_err.code());
+        let want_status = fs_err.http_status().as_u16();
+        let want_display = fs_err.to_string();
+
+        let err: GcsErr = fs_err.into();
+
+        assert!(matches!(err, GcsErr::FileSysErr(_)));
+        assert_eq!(format!("{:?}", err.code()), want_code);
+        assert_eq!(err.http_status().as_u16(), want_status);
+        assert!(!err.is_network_conn_err());
+        assert_eq!(err.to_string(), want_display);
     }
 
     #[test]
