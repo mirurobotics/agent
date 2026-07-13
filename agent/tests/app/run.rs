@@ -4,9 +4,9 @@ use std::path::PathBuf;
 // internal crates
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
-use miru_agent::disk::Layout;
+use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::{self, dirs, files, PathExt, WriteOptions};
-use miru_agent::models::Device;
+use miru_agent::models::{Deployment, Device, DplActivity, Release, UploadRule, UploadRuleSource};
 use miru_agent::server::Options;
 
 // external crates
@@ -237,15 +237,70 @@ async fn scanner_enabled() {
     let dir = dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
     let layout = Layout::new(dir.to_dir());
+
+    // seed a Deployed deployment -> release -> upload rule so the scan
+    // bridge's startup resolve_and_push has something to push into the
+    // scanner (mirrors Stores::seed_deployed in tests/workers/scan_bridge.rs)
+    {
+        let (deployments, _h) = disk::Deployments::spawn(64, layout.deployments(), 1000)
+            .await
+            .unwrap();
+        let (releases, _h) = disk::Releases::spawn(64, layout.releases(), 1000)
+            .await
+            .unwrap();
+        let (upload_rules, _h) = disk::UploadRules::spawn(64, layout.upload_rules(), 1000)
+            .await
+            .unwrap();
+        deployments
+            .write_if_absent(
+                "dpl".to_string(),
+                Deployment {
+                    id: "dpl".to_string(),
+                    activity_status: DplActivity::Deployed,
+                    release_id: "rel".to_string(),
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+        releases
+            .write_if_absent(
+                "rel".to_string(),
+                Release {
+                    id: "rel".to_string(),
+                    upload_rule_ids: vec!["r1".to_string()],
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+        upload_rules
+            .write_if_absent(
+                "r1".to_string(),
+                UploadRule {
+                    id: "r1".to_string(),
+                    upload_collection_id: "coll".to_string(),
+                    source: UploadRuleSource {
+                        glob: "/none/*.mcap".to_string(),
+                        stability_window_secs: 0,
+                    },
+                    ..Default::default()
+                },
+                |_, _| false,
+            )
+            .await
+            .unwrap();
+    }
+
     let options = AppOptions {
         storage: StorageOptions {
             layout: Layout::new(dir.to_dir()),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
-            is_persistent: false,
-            max_runtime: Duration::from_millis(100),
-            idle_timeout: NEVER,
+            is_persistent: true,
             max_shutdown_delay: SHUTDOWN_WATCHDOG,
             ..Default::default()
         },
@@ -256,18 +311,42 @@ async fn scanner_enabled() {
         ..Default::default()
     };
 
-    tokio::time::timeout(HANG_GUARD, async move {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let server_handle = tokio::spawn(async move {
         run(options, async {
-            let _ = tokio::signal::ctrl_c().await;
+            let _ = rx.await;
         })
         .await
         .unwrap();
+    });
+
+    // the workers spawned by init must push the deployed collection into
+    // the scanner, which persists it to scanner.json; deleting the
+    // worker-wiring block in app::run::init makes this poll time out
+    let snapshot_path = layout.scanner_snapshot();
+    tokio::time::timeout(HANG_GUARD, async {
+        loop {
+            if snapshot_path.exists() {
+                if let Ok(v) = files::read_json::<serde_json::Value>(&snapshot_path).await {
+                    let deployed = v["deployed"]
+                        .as_array()
+                        .is_some_and(|d| d.iter().any(|c| c == "coll"));
+                    if deployed && v["collections"].get("coll").is_some() {
+                        return;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     })
     .await
-    .unwrap();
+    .expect("scan workers never pushed the deployed collection into scanner.json");
 
-    // the scanner actor seeds scanner.json at startup via new_with_default
-    assert!(layout.scanner_snapshot().exists());
+    tx.send(()).unwrap();
+    tokio::time::timeout(HANG_GUARD, server_handle)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[serial]
