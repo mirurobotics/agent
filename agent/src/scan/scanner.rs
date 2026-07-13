@@ -1315,9 +1315,6 @@ mod tests {
         // from emitting its stable file.
         #[tokio::test]
         async fn scan_isolates_bad_glob_collection_from_emitting_sibling() {
-            use crate::scan::collection::CollectionScanner;
-            use crate::scan::state::{CollectionState, Config};
-
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),

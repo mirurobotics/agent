@@ -1,6 +1,6 @@
 // standard crates
 use std::fmt::Display;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // internal crates
 use crate::filesys::{
@@ -93,7 +93,6 @@ impl Dir {
     }
 
     pub fn file(&self, file_name: &str) -> File {
-        use std::path::Path;
         let file_name_path = Path::new(file_name);
         let file_name_stripped = file_name_path
             .strip_prefix(std::path::MAIN_SEPARATOR.to_string())
