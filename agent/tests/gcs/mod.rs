@@ -1,4 +1,5 @@
 // standard crates
+use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
 // internal crates
@@ -16,6 +17,7 @@ use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use google_cloud_gax::error::rpc::{Code as GaxCode, Status};
@@ -128,8 +130,6 @@ async fn download_handler(
     uri: axum::extract::OriginalUri,
     headers: HeaderMap,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
-
     let (status, body, truncate) = {
         let mut r = rec.inner.lock().unwrap();
         r.download_hits += 1;
@@ -307,8 +307,6 @@ pub mod put {
             // A source that stats fine but cannot be opened for reading passes
             // the up-front size read and fails at the open, surfacing as
             // `LocalIoErr` before any request is dispatched.
-            use std::os::unix::fs::PermissionsExt;
-
             let rec = HttpRecorder::default();
             let store = http_store(rec.clone()).await;
             let src = temp_file_with(b"secret").await;
