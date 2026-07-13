@@ -933,6 +933,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shutdown_impl_maps_scan_worker_join_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.register_handle(
+            |mgr| &mut mgr.scan_worker_handle,
+            "scan_handle",
+            spawn_panicking_handle(),
+        )
+        .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("scan worker panic should surface");
+
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.scan_worker_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_maps_scan_bridge_worker_join_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.register_handle(
+            |mgr| &mut mgr.scan_bridge_worker_handle,
+            "scan_bridge_handle",
+            spawn_panicking_handle(),
+        )
+        .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("scan bridge worker panic should surface");
+
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.scan_bridge_worker_handle.is_none());
+    }
+
+    #[tokio::test]
     async fn shutdown_impl_ok_when_all_steps_succeed() {
         let mut mgr = new_shutdown_manager();
         mgr.register_handle(
