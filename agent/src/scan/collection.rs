@@ -499,9 +499,9 @@ mod tests {
     }
 
     /// Temp dir + `aaaa` file + state/obs/candidate at ts(1000).
-    /// Holds `dir` so the temp tree stays alive for the test.
+    /// Holds `_dir` so the temp tree stays alive for the test.
     struct Case {
-        dir: TempDir,
+        _dir: TempDir,
         file: File,
         state: CollectionState,
         obs: Observation,
@@ -515,7 +515,7 @@ mod tests {
         let obs = observation(&state, file.clone(), ts(1000)).await;
         let cand = candidate(file.clone(), obs.clone());
         Case {
-            dir,
+            _dir: dir,
             file,
             state,
             obs,
