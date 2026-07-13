@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, dirs, files, WriteOptions};
+use miru_agent::filesys::{self, dirs, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::Options;
 
@@ -225,6 +225,172 @@ async fn shutdown_signal_received() {
     tx.send(()).unwrap();
 
     // Wait for server to shutdown with timeout
+    tokio::time::timeout(HANG_GUARD, server_handle)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[serial]
+#[tokio::test]
+async fn scanner_runtime_spawns_and_shuts_down_cleanly() {
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout: Layout::new(dir.to_dir()),
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: false,
+            max_runtime: Duration::from_millis(100),
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+        },
+        enable_scan_worker: true,
+        enable_scan_bridge_worker: true,
+        ..Default::default()
+    };
+
+    // run self-terminates via max_runtime (~100ms). run(...) returning
+    // Ok(()) proves the scanner actor, scan driver, and scan bridge all
+    // spawned and were torn down without error -- a command sent onto a
+    // closed actor channel would surface as a shutdown error.
+    tokio::time::timeout(HANG_GUARD, async move {
+        run(options, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[serial]
+#[tokio::test]
+async fn scanner_snapshot_file_is_created() {
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let layout = Layout::new(dir.to_dir());
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout: Layout::new(dir.to_dir()),
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: false,
+            max_runtime: Duration::from_millis(100),
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+        },
+        enable_scan_worker: true,
+        enable_scan_bridge_worker: true,
+        ..Default::default()
+    };
+
+    tokio::time::timeout(HANG_GUARD, async move {
+        run(options, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+
+    // the scanner actor seeds scanner.json at startup via new_with_default
+    assert!(layout.scanner_snapshot().exists());
+}
+
+#[serial]
+#[tokio::test]
+async fn scanner_disabled_does_not_create_snapshot() {
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let layout = Layout::new(dir.to_dir());
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout: Layout::new(dir.to_dir()),
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: false,
+            max_runtime: Duration::from_millis(100),
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+        },
+        enable_scan_worker: false,
+        enable_scan_bridge_worker: false,
+        ..Default::default()
+    };
+
+    tokio::time::timeout(HANG_GUARD, async move {
+        run(options, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+
+    // both flags off => the scanner block is skipped => no snapshot file
+    assert!(!layout.scanner_snapshot().exists());
+}
+
+#[serial]
+#[tokio::test]
+async fn explicit_shutdown_tears_down_scanner() {
+    let dir = dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let options = AppOptions {
+        lifecycle: LifecycleOptions {
+            is_persistent: true,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        storage: StorageOptions {
+            layout: Layout::new(dir.to_dir()),
+            ..Default::default()
+        },
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+        },
+        enable_scan_worker: true,
+        enable_scan_bridge_worker: true,
+        ..Default::default()
+    };
+
+    // Create a channel for manual shutdown
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    let server_handle = tokio::spawn(async move {
+        run(options, async {
+            let _ = rx.await;
+        })
+        .await
+        .unwrap();
+    });
+
+    // Best-effort delay to let startup complete; the oneshot buffers the
+    // signal so the test stays correct even if startup is slower.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    tx.send(()).unwrap();
+
     tokio::time::timeout(HANG_GUARD, server_handle)
         .await
         .unwrap()
