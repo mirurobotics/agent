@@ -39,7 +39,7 @@ macro_rules! dispatch {
 pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub broadcast_capacity: usize,
-    pub snapshot_file: Option<ScanSnapshotFile>,
+    pub(crate) snapshot_file: Option<ScanSnapshotFile>,
 }
 
 impl Default for ScannerArgs {

@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CollectionState {
-    pub cfg: Config,
-    pub preexisting: HashMap<File, Observation>,
-    pub candidates: HashMap<File, Candidate>,
-    pub ledger: HashMap<File, Vec<StableFile>>,
+    pub(crate) cfg: Config,
+    pub(crate) preexisting: HashMap<File, Observation>,
+    pub(crate) candidates: HashMap<File, Candidate>,
+    pub(crate) ledger: HashMap<File, Vec<StableFile>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -153,8 +153,8 @@ impl StableFile {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScannerSnapshot {
-    pub collections: HashMap<UploadCollectionID, CollectionState>,
-    pub deployed: HashSet<UploadCollectionID>,
+    pub(crate) collections: HashMap<UploadCollectionID, CollectionState>,
+    pub(crate) deployed: HashSet<UploadCollectionID>,
 }
 
 impl Patch<ScannerSnapshot> for ScannerSnapshot {
