@@ -11,6 +11,8 @@ use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::MockErr as HTTPMockErr;
 use miru_agent::http::HTTPErr;
+use miru_agent::scan::errors::InternalError as ScanInternalError;
+use miru_agent::scan::ScanErr;
 use miru_agent::server::ServerErr;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
@@ -62,6 +64,13 @@ fn storage_err() -> DiskErr {
 
 fn events_err() -> EventsErr {
     EventsErr::MalformedCursorErr(MalformedCursorErr {
+        trace: miru_agent::trace!(),
+    })
+}
+
+fn scan_err() -> ScanErr {
+    ScanErr::InternalError(ScanInternalError {
+        message: "scan failure".to_string(),
         trace: miru_agent::trace!(),
     })
 }
@@ -121,6 +130,12 @@ mod from_conversions {
     fn events_err_maps_to_server_events_err() {
         let err: ServerErr = events_err().into();
         assert!(matches!(err, ServerErr::EventsErr(_)));
+    }
+
+    #[test]
+    fn scan_err_maps_to_server_scan_err() {
+        let err: ServerErr = scan_err().into();
+        assert!(matches!(err, ServerErr::ScanErr(_)));
     }
 
     #[test]
