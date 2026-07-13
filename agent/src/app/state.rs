@@ -11,7 +11,7 @@ use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
-use crate::scan::{self, ScanSnapshotFile, ScannerArgs, ScannerExt};
+use crate::scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
 
