@@ -575,13 +575,6 @@ impl ShutdownManager {
             info!("Socket server handle not found, skipping socket server shutdown...");
         }
 
-        // The scan workers must be joined before the app state step: both the
-        // scan driver and scan bridge workers send commands (scan(),
-        // update_rules()) INTO the scanner actor, which is now owned by
-        // AppState and shut down first inside app_state.shutdown(). Joining
-        // both workers here first means no in-flight command can hit a closed
-        // actor channel.
-
         // 5. scan driver worker
         if let Some(scan_worker_handle) = self.scan_worker_handle.take() {
             if let Err(e) = scan_worker_handle.await {
@@ -777,6 +770,62 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn register_handle_rejects_scan_worker_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_worker_handle,
+                "scan_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_worker_handle,
+                "scan_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate scan handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "scan_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
+    #[tokio::test]
+    async fn register_handle_rejects_scan_bridge_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_bridge_worker_handle,
+                "scan_bridge_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.scan_bridge_worker_handle,
+                "scan_bridge_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate scan bridge handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "scan_bridge_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
     // ============================= shutdown_impl ============================= //
 
     #[tokio::test]
@@ -906,76 +955,6 @@ mod tests {
         .unwrap();
         mgr.with_socket_server_handle(tokio::spawn(async { Ok(()) }))
             .unwrap();
-
-        mgr.shutdown_impl().await.unwrap();
-
-        assert!(mgr.token_refresh_worker_handle.is_none());
-        assert!(mgr.poller_worker_handle.is_none());
-        assert!(mgr.mqtt_worker_handle.is_none());
-        assert!(mgr.socket_server_handle.is_none());
-    }
-
-    // ============================= scanner slots ============================= //
-
-    #[tokio::test]
-    async fn register_handle_rejects_scan_worker_duplicates() {
-        let mut shutdown_manager = new_shutdown_manager();
-
-        shutdown_manager
-            .register_handle(
-                |mgr| &mut mgr.scan_worker_handle,
-                "scan_handle",
-                spawn_immediate_handle(),
-            )
-            .unwrap();
-
-        let err = shutdown_manager
-            .register_handle(
-                |mgr| &mut mgr.scan_worker_handle,
-                "scan_handle",
-                spawn_immediate_handle(),
-            )
-            .expect_err("duplicate scan handle should error");
-
-        match err {
-            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
-                assert_eq!(err.arg_name, "scan_handle");
-            }
-            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
-        }
-    }
-
-    #[tokio::test]
-    async fn register_handle_rejects_scan_bridge_duplicates() {
-        let mut shutdown_manager = new_shutdown_manager();
-
-        shutdown_manager
-            .register_handle(
-                |mgr| &mut mgr.scan_bridge_worker_handle,
-                "scan_bridge_handle",
-                spawn_immediate_handle(),
-            )
-            .unwrap();
-
-        let err = shutdown_manager
-            .register_handle(
-                |mgr| &mut mgr.scan_bridge_worker_handle,
-                "scan_bridge_handle",
-                spawn_immediate_handle(),
-            )
-            .expect_err("duplicate scan bridge handle should error");
-
-        match err {
-            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
-                assert_eq!(err.arg_name, "scan_bridge_handle");
-            }
-            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
-        }
-    }
-
-    #[tokio::test]
-    async fn shutdown_impl_ok_when_scan_steps_succeed() {
-        let mut mgr = new_shutdown_manager();
         mgr.register_handle(
             |mgr| &mut mgr.scan_worker_handle,
             "scan_handle",
@@ -991,9 +970,10 @@ mod tests {
 
         mgr.shutdown_impl().await.unwrap();
 
-        // both worker slots drained proves the driver + bridge teardown ran to
-        // completion; the scanner actor itself is owned by AppState and its
-        // teardown is covered by the AppState tests
+        assert!(mgr.token_refresh_worker_handle.is_none());
+        assert!(mgr.poller_worker_handle.is_none());
+        assert!(mgr.mqtt_worker_handle.is_none());
+        assert!(mgr.socket_server_handle.is_none());
         assert!(mgr.scan_worker_handle.is_none());
         assert!(mgr.scan_bridge_worker_handle.is_none());
     }

@@ -127,11 +127,8 @@ impl AppState {
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
-        // shutdown the scanner actor first: it is a leaf whose feeders (the scan
-        // driver and scan bridge workers, which send scan()/update_rules()
-        // commands INTO the actor) are already joined by the ShutdownManager
-        // before AppState::shutdown runs, so no in-flight commands can fail with
-        // SendActorMessageErr
+        // shutdown the scanner before the syncer (it uses syncer to determine the
+        // correct set of rules to use for scannning)
         if let Some(scanner) = &self.scanner {
             scanner.shutdown().await?;
         }
