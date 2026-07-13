@@ -12,7 +12,7 @@ use crate::app::{
 };
 use crate::authn::{self, TokenManagerExt};
 use crate::http;
-use crate::scan::{self, ScanSnapshotFile, ScannerArgs, ScannerExt};
+use crate::scan;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
@@ -154,10 +154,7 @@ async fn init(
         .await?;
     }
 
-    if options.enable_scanner {
-        let (scanner, scanner_handle) = init_scanner(options).await?;
-        let scanner = Arc::new(scanner);
-        shutdown_manager.with_scanner(scanner.clone(), scanner_handle)?;
+    if let Some(scanner) = &app_state.scanner {
         init_scan_worker(
             options.scanner.clone(),
             scanner.clone(),
@@ -186,6 +183,7 @@ async fn init_app_state(
         options.storage.capacities,
         Arc::new(http::Client::new(&options.backend_host.as_url())?),
         options.dpl_retry_policy,
+        options.enable_scanner,
     )
     .await?;
     let app_state = Arc::new(app_state);
@@ -299,20 +297,6 @@ async fn init_mqtt_worker(
     Ok(())
 }
 
-async fn init_scanner(options: &AppOptions) -> Result<(scan::Scanner, JoinHandle<()>), ServerErr> {
-    let snapshot_file = ScanSnapshotFile::new_with_default(
-        options.storage.layout.scanner_snapshot(),
-        Default::default(),
-    )
-    .await?;
-    let args = ScannerArgs {
-        snapshot_file: Some(snapshot_file),
-        ..ScannerArgs::default()
-    };
-    let (scanner, handle) = scan::Scanner::spawn(64, args)?;
-    Ok((scanner, handle))
-}
-
 async fn init_scan_worker(
     options: crate::workers::scan::Options,
     scanner: Arc<scan::Scanner>,
@@ -416,7 +400,6 @@ struct ShutdownManager {
     poller_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
-    scanner: Option<(Arc<scan::Scanner>, JoinHandle<()>)>,
     scan_worker_handle: Option<JoinHandle<()>>,
     scan_bridge_worker_handle: Option<JoinHandle<()>>,
 }
@@ -431,7 +414,6 @@ impl ShutdownManager {
             poller_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
-            scanner: None,
             scan_worker_handle: None,
             scan_bridge_worker_handle: None,
         }
@@ -454,23 +436,6 @@ impl ShutdownManager {
             state,
             state_handle,
         });
-        Ok(())
-    }
-
-    pub fn with_scanner(
-        &mut self,
-        scanner: Arc<scan::Scanner>,
-        handle: JoinHandle<()>,
-    ) -> Result<(), ServerErr> {
-        if self.scanner.is_some() {
-            return Err(ServerErr::ShutdownMngrDuplicateArgErr(
-                ShutdownMngrDuplicateArgErr {
-                    arg_name: "scanner".to_string(),
-                    trace: trace!(),
-                },
-            ));
-        }
-        self.scanner = Some((scanner, handle));
         Ok(())
     }
 
@@ -610,12 +575,12 @@ impl ShutdownManager {
             info!("Socket server handle not found, skipping socket server shutdown...");
         }
 
-        // The scan components must be torn down in driver -> bridge -> actor
-        // order. Both the scan driver and scan bridge workers send commands
-        // (scan(), update_rules()) INTO the scanner actor. If we closed the
-        // actor first, those in-flight commands would fail with
-        // SendActorMessageErr. So we join both workers first, then shut down
-        // the actor itself.
+        // The scan workers must be joined before the app state step: both the
+        // scan driver and scan bridge workers send commands (scan(),
+        // update_rules()) INTO the scanner actor, which is now owned by
+        // AppState and shut down first inside app_state.shutdown(). Joining
+        // both workers here first means no in-flight command can hit a closed
+        // actor channel.
 
         // 5. scan driver worker
         if let Some(scan_worker_handle) = self.scan_worker_handle.take() {
@@ -647,26 +612,7 @@ impl ShutdownManager {
             info!("Scan bridge worker handle not found, skipping scan bridge worker shutdown...");
         }
 
-        // 7. scanner actor
-        if let Some((scanner, handle)) = self.scanner.take() {
-            if let Err(e) = scanner.shutdown().await {
-                error!("Failed to shutdown scanner actor: {}", e);
-                first_err.get_or_insert(e.into());
-            }
-            if let Err(e) = handle.await {
-                error!("Failed to join scanner actor: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-        } else {
-            info!("Scanner not found, skipping scanner actor shutdown...");
-        }
-
-        // 8. app state
+        // 7. app state
         if let Some(app_state) = self.app_state.take() {
             if let Err(e) = app_state.state.shutdown().await {
                 error!("Failed to shutdown app state: {}", e);
@@ -740,6 +686,7 @@ mod tests {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await
         .unwrap();
@@ -970,11 +917,6 @@ mod tests {
 
     // ============================= scanner slots ============================= //
 
-    fn spawn_scanner() -> (Arc<scan::Scanner>, JoinHandle<()>) {
-        let (scanner, handle) = scan::Scanner::spawn(64, ScannerArgs::default()).unwrap();
-        (Arc::new(scanner), handle)
-    }
-
     #[tokio::test]
     async fn register_handle_rejects_scan_worker_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
@@ -1032,26 +974,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn with_scanner_rejects_duplicates() {
-        let mut shutdown_manager = new_shutdown_manager();
-
-        let (scanner, handle) = spawn_scanner();
-        shutdown_manager.with_scanner(scanner, handle).unwrap();
-
-        let (scanner, handle) = spawn_scanner();
-        let err = shutdown_manager
-            .with_scanner(scanner, handle)
-            .expect_err("duplicate scanner should error");
-
-        match err {
-            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
-                assert_eq!(err.arg_name, "scanner");
-            }
-            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
-        }
-    }
-
-    #[tokio::test]
     async fn shutdown_impl_ok_when_scan_steps_succeed() {
         let mut mgr = new_shutdown_manager();
         mgr.register_handle(
@@ -1066,15 +988,13 @@ mod tests {
             spawn_immediate_handle(),
         )
         .unwrap();
-        let (scanner, handle) = spawn_scanner();
-        mgr.with_scanner(scanner, handle).unwrap();
 
         mgr.shutdown_impl().await.unwrap();
 
-        // every scan slot drained proves the driver -> bridge -> actor
-        // teardown ran to completion
+        // both worker slots drained proves the driver + bridge teardown ran to
+        // completion; the scanner actor itself is owned by AppState and its
+        // teardown is covered by the AppState tests
         assert!(mgr.scan_worker_handle.is_none());
         assert!(mgr.scan_bridge_worker_handle.is_none());
-        assert!(mgr.scanner.is_none());
     }
 }

@@ -28,6 +28,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await;
         match result {
@@ -58,6 +59,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await;
         match result {
@@ -93,6 +95,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await;
         assert!(matches!(
@@ -134,6 +137,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await
         .unwrap();
@@ -184,6 +188,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await
         .unwrap();
@@ -232,6 +237,7 @@ pub mod init {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await
         .unwrap();
@@ -275,6 +281,7 @@ pub mod shutdown {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await
         .unwrap();
@@ -318,6 +325,7 @@ pub mod shutdown {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
+            false,
         )
         .await
         .unwrap();

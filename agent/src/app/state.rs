@@ -11,6 +11,7 @@ use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
+use crate::scan::{self, ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
 
@@ -19,6 +20,7 @@ pub struct AppState {
     pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
+    pub scanner: Option<Arc<scan::Scanner>>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -30,6 +32,7 @@ impl AppState {
         capacities: disk::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
+        enable_scanner: bool,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
@@ -85,8 +88,26 @@ impl AppState {
         // initialize the activity tracker
         let activity_tracker = Arc::new(activity::Tracker::new());
 
+        // initialize the scanner (optional)
+        let (scanner, scanner_handle) = if enable_scanner {
+            let snapshot_file =
+                ScanSnapshotFile::new_with_default(layout.scanner_snapshot(), Default::default())
+                    .await?;
+            let args = ScannerArgs {
+                snapshot_file: Some(snapshot_file),
+                ..ScannerArgs::default()
+            };
+            let (scanner, handle) = scan::Scanner::spawn(64, args)?;
+            (Some(Arc::new(scanner)), Some(handle))
+        } else {
+            (None, None)
+        };
+
         let shutdown_handle = async move {
-            let handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            if let Some(handle) = scanner_handle {
+                handles.push(handle);
+            }
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -96,6 +117,7 @@ impl AppState {
                 storage,
                 http_client,
                 syncer,
+                scanner,
                 token_mngr,
                 activity_tracker,
                 event_hub,
@@ -105,7 +127,16 @@ impl AppState {
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
-        // shutdown the syncer first (it uses storage during sync)
+        // shutdown the scanner actor first: it is a leaf whose feeders (the scan
+        // driver and scan bridge workers, which send scan()/update_rules()
+        // commands INTO the actor) are already joined by the ShutdownManager
+        // before AppState::shutdown runs, so no in-flight commands can fail with
+        // SendActorMessageErr
+        if let Some(scanner) = &self.scanner {
+            scanner.shutdown().await?;
+        }
+
+        // shutdown the syncer before storage (it uses storage during sync)
         self.syncer.shutdown().await?;
 
         // shutdown the event hub
