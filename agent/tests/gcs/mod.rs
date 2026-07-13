@@ -64,6 +64,11 @@ struct HttpRecord {
     upload_hits: usize,
     download_hits: usize,
     saw_bearer: bool,
+    /// Path-and-query of the last upload / download request.
+    upload_uri: String,
+    download_uri: String,
+    /// Raw body of the last upload request (multipart framing included).
+    upload_body: Vec<u8>,
     /// Bytes to serve for the download body.
     download_body: Vec<u8>,
     /// If set, downloads respond with this status instead of 200 + body.
@@ -86,8 +91,9 @@ fn bearer_present(headers: &HeaderMap) -> bool {
 /// Returns a minimal `Object` JSON that the client decodes to finalize.
 async fn upload_handler(
     State(rec): State<HttpRecorder>,
+    uri: axum::extract::OriginalUri,
     headers: HeaderMap,
-    _body: Bytes,
+    body: Bytes,
 ) -> (
     StatusCode,
     [(axum::http::HeaderName, &'static str); 1],
@@ -96,6 +102,8 @@ async fn upload_handler(
     let mut r = rec.inner.lock().unwrap();
     r.upload_hits += 1;
     r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+    r.upload_uri = uri.0.to_string();
+    r.upload_body = body.to_vec();
     let json_ct = [(axum::http::header::CONTENT_TYPE, "application/json")];
     if let Some(status) = r.upload_status {
         return (
@@ -117,6 +125,7 @@ async fn upload_handler(
 /// `x-goog-generation` response header (the object's generation).
 async fn download_handler(
     State(rec): State<HttpRecorder>,
+    uri: axum::extract::OriginalUri,
     headers: HeaderMap,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
@@ -125,6 +134,7 @@ async fn download_handler(
         let mut r = rec.inner.lock().unwrap();
         r.download_hits += 1;
         r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+        r.download_uri = uri.0.to_string();
         (r.download_status, r.download_body.clone(), r.download_truncate)
     };
     let gen_header = (
@@ -217,6 +227,16 @@ pub mod put {
         let r = rec.inner.lock().unwrap();
         assert_eq!(r.upload_hits, 1);
         assert!(r.saw_bearer, "upload must carry Authorization: Bearer");
+        assert_eq!(
+            r.upload_uri,
+            "/upload/storage/v1/b/test-bucket/o?uploadType=multipart&name=artifacts%2Fhello.txt"
+        );
+        assert!(
+            r.upload_body
+                .windows(b"hello world".len())
+                .any(|w| w == b"hello world"),
+            "uploaded multipart body must contain the file bytes"
+        );
     }
 
     #[tokio::test]
@@ -249,7 +269,12 @@ pub mod put {
                 .await
                 .unwrap_err();
 
-            assert!(matches!(err, GcsErr::RequestFailedErr(_)));
+            // The mapper must carry the HTTP status through, not just pick
+            // the variant.
+            match err {
+                GcsErr::RequestFailedErr(e) => assert_eq!(e.status, Some(403)),
+                other => panic!("expected RequestFailedErr, got {other:?}"),
+            }
         }
     }
 
@@ -318,6 +343,10 @@ pub mod get {
             let r = rec.inner.lock().unwrap();
             assert_eq!(r.download_hits, 1);
             assert!(r.saw_bearer, "download must carry Authorization: Bearer");
+            assert_eq!(
+                r.download_uri,
+                "/storage/v1/b/test-bucket/o/blobs%2Fdata.bin?alt=media"
+            );
         }
 
         #[tokio::test]
@@ -554,6 +583,9 @@ pub mod delete {
             let mut mock = MockStorageControl::new();
             mock.expect_delete_object()
                 .times(1)
+                .withf(|req, _| {
+                    req.bucket == "projects/_/buckets/test-bucket" && req.object == "blobs/data.bin"
+                })
                 .returning(|_, _| Ok(GaxResponse::from(())));
             let store = control_store(mock).await;
 
@@ -602,6 +634,9 @@ pub mod exists {
             let mut mock = MockStorageControl::new();
             mock.expect_get_object()
                 .times(1)
+                .withf(|req, _| {
+                    req.bucket == "projects/_/buckets/test-bucket" && req.object == "blobs/data.bin"
+                })
                 .returning(|_, _| Ok(GaxResponse::from(gcs::model::Object::default())));
             let store = control_store(mock).await;
 
