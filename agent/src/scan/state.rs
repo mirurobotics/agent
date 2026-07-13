@@ -163,7 +163,7 @@ impl Patch<ScannerSnapshot> for ScannerSnapshot {
     }
 }
 
-pub(crate) type ScanSnapshotFile = SingleThreadStateFile<ScannerSnapshot, ScannerSnapshot>;
+pub type ScanSnapshotFile = SingleThreadStateFile<ScannerSnapshot, ScannerSnapshot>;
 
 #[cfg(test)]
 mod tests {
