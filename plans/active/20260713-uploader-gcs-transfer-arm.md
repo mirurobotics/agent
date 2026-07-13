@@ -22,11 +22,12 @@ The upload executor (`agent/src/upload/executor.rs`) asks the backend to vend sh
 
 - [x] Milestone 1 — implement `transfer_gcs`, `gcs_credentials`, and the test-only endpoint seam in `agent/src/upload/transfer.rs`; `cargo build --features test` succeeds. (2026-07-13: both `--features test` and no-feature builds pass; `executor_err` helper also reused by `transfer_s3` per the plan's cost-nothing clause.)
 - [x] Milestone 2 — tests in `agent/tests/upload/transfer.rs`; `./scripts/test.sh` and `./scripts/covgate.sh` pass. (2026-07-13: 1483 tests, 0 failures; upload coverage 92.33% ≥ 91.00, all modules pass.)
-- [ ] Milestone 3 — `./scripts/lint.sh` clean; `./scripts/preflight.sh` prints `Preflight clean`.
+- [x] Milestone 3 — `./scripts/lint.sh` clean; `./scripts/preflight.sh` prints `Preflight clean`. (2026-07-13: lint clean — only the 3 pre-existing allowed audit warnings; test.sh and covgate.sh re-verified after the mock-body fix below. Preflight is delegated to a dedicated preflight agent per the session's orchestration and was not run here.)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- `./scripts/update-deps.sh` (Milestone 3, step 8) bumped the aws-sdk crates to versions requiring rustc 1.94.1, but the local toolchain is 1.94.0, so the refreshed `Cargo.lock` failed to build. Since this change adds no dependencies, `Cargo.lock` was restored to HEAD and `./scripts/lint.sh` run against the committed lockfile (clean). The lockfile refresh needs a toolchain bump first and is out of scope here.
+- The first cut of the happy-path mock handler omitted axum's `Bytes` body extractor, so the mock replied before the SDK client finished writing the multipart body — a race that surfaced as a flaky client-side `ConnectionErr` ("error sending request") in roughly half the runs of the small `upload::transfer` subset, while full-suite runs happened to pass. The gcs suite's handler (`agent/tests/gcs/mod.rs`) already drains the body via its `body: Bytes` extractor, which is why the identical pattern there is stable. Fixed by adding a `_body: Bytes` parameter; 10/10 subset runs pass after the fix.
 
 ## Decision Log
 
@@ -39,7 +40,7 @@ The upload executor (`agent/src/upload/executor.rs`) asks the backend to vend sh
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Implemented as planned, in three commits. `transfer_gcs` mirrors `transfer_s3` (credential-arm pluck → store build → `put`), with the extra fallible-async `Store::new` error site isolated in `gcs_store` alongside the test-only endpoint override; the shared `UploadErr::ExecutorErr` wrap was extracted into `executor_err` and reused by `transfer_s3` (the plan's cost-nothing clause). Tests land the four planned cases plus the retained s3/unknown-scheme ones; upload module coverage rose to 92.33% against the 91.00 gate. Two deviations from the script, both recorded in Surprises & Discoveries: `update-deps.sh` was rolled back (toolchain 1.94.0 vs aws crates requiring 1.94.1), and the mock upload handler needed a `Bytes` body extractor to avoid a response-before-body-drained race. `preflight.sh` was intentionally left to the downstream preflight agent.
 
 ## Context and Orientation
 

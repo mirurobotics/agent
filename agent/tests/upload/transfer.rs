@@ -2,8 +2,10 @@
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::mocks::http_client::run_server;
-use crate::mocks::upload_client::{credentials_json, s3_credentials_json};
+use crate::mocks::{
+    http_client::run_server,
+    upload_client::{credentials_json, s3_credentials_json},
+};
 use backend_api::models::{
     GcsUploadCredentials, S3UploadCredentials, UploadCredentials, UploadDestination,
 };
@@ -12,6 +14,7 @@ use miru_agent::upload::transfer::{gcs_credentials, s3_config};
 use miru_agent::upload::{ObjectTransfer, SdkTransfer, UploadErr};
 
 // external crates
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::routing::post;
@@ -69,10 +72,13 @@ struct GcsRecord {
 }
 
 /// Handles the single-shot upload `POST /upload/storage/v1/b/{bucket}/o`.
-/// Returns a minimal `Object` JSON that the client decodes to finalize.
+/// Returns a minimal `Object` JSON that the client decodes to finalize. The
+/// `Bytes` extractor drains the request body before responding — replying
+/// while the client is still writing races into a client-side send error.
 async fn upload_handler(
     State(rec): State<GcsRecorder>,
     headers: HeaderMap,
+    _body: Bytes,
 ) -> (StatusCode, [(HeaderName, &'static str); 1], String) {
     let mut r = rec.inner.lock().unwrap();
     r.upload_hits += 1;
@@ -163,7 +169,10 @@ async fn gcs_scheme_without_credentials_errs() {
         .unwrap_err();
 
     assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
-    assert!(err.to_string().contains("gcs_credentials"), "message: {err}");
+    assert!(
+        err.to_string().contains("gcs_credentials"),
+        "message: {err}"
+    );
 }
 
 #[test]
