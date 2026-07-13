@@ -12,7 +12,7 @@ use crate::app::{
 };
 use crate::authn::{self, TokenManagerExt};
 use crate::http;
-use crate::scan::{self, ScannerArgs, ScannerExt};
+use crate::scan::{self, ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
@@ -154,28 +154,24 @@ async fn init(
         .await?;
     }
 
-    if options.enable_scan_worker || options.enable_scan_bridge_worker {
+    if options.enable_scanner {
         let (scanner, scanner_handle) = init_scanner(options).await?;
         let scanner = Arc::new(scanner);
         shutdown_manager.with_scanner(scanner.clone(), scanner_handle)?;
-        if options.enable_scan_worker {
-            init_scan_worker(
-                options.scan_worker.clone(),
-                scanner.clone(),
-                shutdown_manager,
-                shutdown_tx.subscribe(),
-            )
-            .await?;
-        }
-        if options.enable_scan_bridge_worker {
-            init_scan_bridge_worker(
-                scanner.clone(),
-                app_state.clone(),
-                shutdown_manager,
-                shutdown_tx.subscribe(),
-            )
-            .await?;
-        }
+        init_scan_worker(
+            options.scanner.clone(),
+            scanner.clone(),
+            shutdown_manager,
+            shutdown_tx.subscribe(),
+        )
+        .await?;
+        init_scan_bridge_worker(
+            scanner.clone(),
+            app_state.clone(),
+            shutdown_manager,
+            shutdown_tx.subscribe(),
+        )
+        .await?;
     }
 
     Ok(app_state)
@@ -304,9 +300,9 @@ async fn init_mqtt_worker(
 }
 
 async fn init_scanner(options: &AppOptions) -> Result<(scan::Scanner, JoinHandle<()>), ServerErr> {
-    let snapshot_file = crate::scan::state::ScanSnapshotFile::new_with_default(
+    let snapshot_file = ScanSnapshotFile::new_with_default(
         options.storage.layout.scanner_snapshot(),
-        crate::scan::state::ScannerSnapshot::default(),
+        Default::default(),
     )
     .await?;
     let (scanner, handle) = scan::Scanner::spawn(

@@ -251,8 +251,7 @@ async fn scanner_runtime_spawns_and_shuts_down_cleanly() {
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
-        enable_scan_worker: true,
-        enable_scan_bridge_worker: true,
+        enable_scanner: true,
         ..Default::default()
     };
 
@@ -292,8 +291,7 @@ async fn scanner_snapshot_file_is_created() {
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
-        enable_scan_worker: true,
-        enable_scan_bridge_worker: true,
+        enable_scanner: true,
         ..Default::default()
     };
 
@@ -332,8 +330,7 @@ async fn scanner_disabled_does_not_create_snapshot() {
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
-        enable_scan_worker: false,
-        enable_scan_bridge_worker: false,
+        enable_scanner: false,
         ..Default::default()
     };
 
@@ -369,8 +366,7 @@ async fn explicit_shutdown_tears_down_scanner() {
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
-        enable_scan_worker: true,
-        enable_scan_bridge_worker: true,
+        enable_scanner: true,
         ..Default::default()
     };
 
