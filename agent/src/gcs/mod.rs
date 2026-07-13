@@ -263,7 +263,13 @@ impl Store {
             .await
         {
             Ok(()) => Ok(()),
-            Err(e) if is_not_found(&e) => Ok(()),
+            Err(e) if is_not_found(&e) => {
+                // GCS also returns NOT_FOUND for a nonexistent *bucket*, which
+                // this arm would silently swallow forever on a misconfigured
+                // bucket — log the service message so that is observable.
+                tracing::warn!("delete of '{obj}' returned NOT_FOUND, treating as already deleted: {e}");
+                Ok(())
+            }
             Err(e) => Err(map_gcs_err("delete_object", obj, e)),
         }
     }
