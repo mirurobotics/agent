@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt as _;
 pub mod errors;
 
 pub use errors::GcsErr;
-use errors::{is_not_found, map_gcs_err, ConnectionErr, InvalidResponseErr};
+use errors::{is_not_found, map_gcs_err, BuildErr, ConnectionErr};
 
 /// Per-attempt timeout for the gRPC control-plane ops (delete/exists) — tiny
 /// metadata RPCs. Without it the underlying client has no request timeout, no
@@ -136,8 +136,7 @@ impl Store {
     ) -> Result<Self, GcsErr> {
         let mut header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
             .map_err(|e| {
-                GcsErr::InvalidResponseErr(InvalidResponseErr {
-                    operation: "new".to_string(),
+                GcsErr::BuildErr(BuildErr {
                     msg: format!("access token is not a valid HTTP header value: {e}"),
                     trace: trace!(),
                 })
@@ -302,9 +301,8 @@ impl Store {
 
     /// Maps a client-builder error into a `GcsErr`.
     fn build_err(which: &str, err: google_cloud_gax::client_builder::Error) -> GcsErr {
-        GcsErr::InvalidResponseErr(InvalidResponseErr {
-            operation: "new".to_string(),
-            msg: format!("failed to build GCS {which}: {err}"),
+        GcsErr::BuildErr(BuildErr {
+            msg: format!("{which}: {err}"),
             trace: trace!(),
         })
     }

@@ -62,15 +62,17 @@ impl std::fmt::Display for RequestFailedErr {
 
 impl crate::errors::Error for RequestFailedErr {}
 
+/// Client construction failed locally — no request was dispatched. Covers a
+/// token that cannot form a valid `Authorization` header and SDK
+/// client-builder failures.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid response from GCS {operation} request: {msg}")]
-pub struct InvalidResponseErr {
-    pub operation: String,
+#[error("failed to build GCS client: {msg}")]
+pub struct BuildErr {
     pub msg: String,
     pub trace: Box<Trace>,
 }
 
-impl crate::errors::Error for InvalidResponseErr {}
+impl crate::errors::Error for BuildErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("local I/O error during {operation} for object '{object}': {msg}")]
@@ -92,7 +94,7 @@ pub enum GcsErr {
     #[error(transparent)]
     RequestFailedErr(RequestFailedErr),
     #[error(transparent)]
-    InvalidResponseErr(InvalidResponseErr),
+    BuildErr(BuildErr),
     #[error(transparent)]
     LocalIoErr(LocalIoErr),
     #[error(transparent)]
@@ -109,7 +111,7 @@ crate::impl_error!(GcsErr {
     ObjectNotFoundErr,
     ConnectionErr,
     RequestFailedErr,
-    InvalidResponseErr,
+    BuildErr,
     LocalIoErr,
     FileSysErr,
 });

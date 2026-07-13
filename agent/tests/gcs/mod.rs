@@ -8,7 +8,7 @@ use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;
 use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::gcs::errors::{
-    ConnectionErr, InvalidResponseErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
+    BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
 };
 use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
 
@@ -176,9 +176,9 @@ pub mod construction {
         };
         let result = Store::new(creds).await;
         match result {
-            Err(GcsErr::InvalidResponseErr(_)) => {}
-            Ok(_) => panic!("expected InvalidResponseErr, got Ok"),
-            Err(other) => panic!("expected InvalidResponseErr, got {other:?}"),
+            Err(GcsErr::BuildErr(_)) => {}
+            Ok(_) => panic!("expected BuildErr, got Ok"),
+            Err(other) => panic!("expected BuildErr, got {other:?}"),
         }
     }
 }
@@ -650,15 +650,14 @@ pub mod error_types {
     }
 
     #[test]
-    fn invalid_response_err_defaults_to_internal_server_error() {
-        let err = GcsErr::InvalidResponseErr(InvalidResponseErr {
-            operation: "get_object".to_string(),
-            msg: "bad body".to_string(),
+    fn build_err_defaults_to_internal_server_error() {
+        let err = GcsErr::BuildErr(BuildErr {
+            msg: "bad token".to_string(),
             trace: miru_agent::trace!(),
         });
         assert!(matches!(err.code(), Code::InternalServerError));
         assert_eq!(err.http_status().as_u16(), 500);
-        assert!(err.to_string().contains("invalid response"));
+        assert!(err.to_string().contains("failed to build GCS client"));
     }
 
     #[test]
