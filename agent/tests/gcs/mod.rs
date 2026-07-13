@@ -251,6 +251,31 @@ pub mod put {
             assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
         }
     }
+
+    pub mod source_unreadable {
+        use super::*;
+
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn upload_unreadable_source_maps_to_local_io_err() {
+            // A source that stats fine but cannot be opened for reading passes
+            // the up-front size read and fails at the open, surfacing as
+            // `LocalIoErr` before any request is dispatched.
+            use std::os::unix::fs::PermissionsExt;
+
+            let rec = HttpRecorder::default();
+            let store = http_store(rec.clone()).await;
+            let src = temp_file_with(b"secret").await;
+            files::set_permissions(src.file(), std::fs::Permissions::from_mode(0o000))
+                .await
+                .unwrap();
+
+            let err = store.put(src.to_file(), &obj("k")).await.unwrap_err();
+
+            assert!(matches!(err, GcsErr::LocalIoErr(_)));
+            assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
+        }
+    }
 }
 
 pub mod get {
