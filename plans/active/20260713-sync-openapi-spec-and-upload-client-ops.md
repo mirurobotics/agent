@@ -23,14 +23,14 @@ Observable outcome: `http::uploads::create/vend_credentials/confirm` free functi
 
 ## Progress
 
-- [ ] M1: Re-vendor backend spec from openapi a1bcdf3 + regenerate models
-- [ ] M2: Fix hand-written code for `stability_window_secs` i64 and removed `content` field
+- [x] M1: Re-vendor backend spec from openapi a1bcdf3 + regenerate models (commit 86501a6)
+- [x] M2: Fix hand-written code for `stability_window_secs` i64 and removed `content` field (commit 76f82a3)
 - [ ] M3: Implement upload HTTP client operations + mock + tests
 - [ ] M4: Validate locally and via preflight/CI (clean before PR leaves draft)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- M1/M2 landed as planned: the regen delta matched the Context section exactly (2 files deleted, 4 added, expected modified set; `libs/device-api` untouched), all verification greps passed, and the i64 fallout was confined to the predicted files. Full test suite green after M2 (1449 tests passed).
 
 ## Decision Log
 
