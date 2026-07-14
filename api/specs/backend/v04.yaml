@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: 97809d89ad2ad29405859e5709b0a29cd72ecc01
-    url: https://github.com/mirurobotics/openapi/commit/97809d89ad2ad29405859e5709b0a29cd72ecc01
-    message: 'refactor(agent): move upload-rules expansion from Deployment to Release (#151)'
+    sha: a1bcdf376f6aa360a024730ed941dc5a6547b63c
+    url: https://github.com/mirurobotics/openapi/commit/a1bcdf376f6aa360a024730ed941dc5a6547b63c
+    message: 'feat(buckets): expose read-only gcs session_name for wif binding (#197)'
 servers:
   - url: https://staging.api.mirurobotics.com/agent/v1
     description: Staging
@@ -159,8 +159,11 @@ paths:
       operationId: createUpload
       description: |
         Request an upload for a captured file. The backend verifies the calling
-        device from its session token, creates a ledger entry, and returns a
-        short-lived V4-presigned URL the device PUTs the file to. The device's
+        device from its session token, creates a ledger entry, authorizes the exact
+        `object_key` and provenance, performs digest dedup, and vends short-lived
+        downscoped cloud credentials scoped to that one object key. The device
+        uploads the file directly via the native cloud SDK (S3 multipart / GCS
+        resumable), then calls `POST /uploads/{upload_id}/confirm`. The device's
         identity is derived from the token and is never read from the request body.
       requestBody:
         required: true
@@ -170,11 +173,29 @@ paths:
               $ref: '#/components/schemas/CreateUploadRequest'
       responses:
         '200':
-          description: Successfully created the upload and minted a presigned URL.
+          description: Successfully created the upload ledger entry and vended downscoped credentials.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PresignedUpload'
+                $ref: '#/components/schemas/UploadWithCredentials'
+  /uploads/{upload_id}/credentials:
+    parameters:
+      - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+        - Uploads
+      summary: Vend Credentials
+      operationId: vendUploadCredentials
+      description: Vend the downscoped credentials for the upload.
+      parameters:
+        - $ref: '#/components/parameters/upload_id'
+      responses:
+        '200':
+          description: Successfully vended downscoped credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadCredentials'
   /uploads/{upload_id}/confirm:
     parameters:
       - $ref: '#/components/parameters/MiruVersion'
@@ -842,6 +863,7 @@ components:
           description: An absolute glob pattern (must start with `/`) that selects the files to upload.
         stability_window_secs:
           type: integer
+          format: int64
           example: 60
           description: How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
       example:
@@ -942,17 +964,6 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: Timestamp of when the upload rule was last updated.
-        content:
-          type: string
-          description: Expand the upload rule content using `expand=content` in the query string.
-          example: |
-            source:
-              glob: /var/log/robot/*.log
-              stability_window_secs: 60
-            destination:
-              bucket: my-uploads-bucket
-              path: logs/{device_id}/{filename}
-              delete_policy: never
       example:
         object: upload_rule
         id: upl_rule_123
@@ -984,7 +995,7 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/BaseUploadRule'
-              description: The upload rules included in this release. Expand using 'expand=release.upload_rules' in the query string.
+              description: The upload rules included in this release. Expand using 'expand=upload_rules' in the query string.
               example:
                 - object: upload_rule
                   id: upl_rule_123
@@ -1175,12 +1186,6 @@ components:
       x-enum-varnames:
         - DEPLOYMENT_EXPAND_RELEASE
         - DEPLOYMENT_EXPAND_CONFIG_INSTANCES
-    ReleaseExpansion:
-      type: string
-      enum:
-        - upload_rules
-      x-enum-varnames:
-        - RELEASE_EXPAND_UPLOAD_RULES
     UpdateDeploymentRequest:
       title: Update Deployment Request
       type: object
@@ -1201,26 +1206,46 @@ components:
           type: string
           format: date-time
           description: Independent historical watermark recording the last time the agent transitioned this deployment to Archived. The current state is determined by activity_status, not by which timestamp is present. Set by the agent.
+    ReleaseExpansion:
+      type: string
+      enum:
+        - upload_rules
+      x-enum-varnames:
+        - RELEASE_EXPAND_UPLOAD_RULES
     UploadSource:
       title: Upload Source
       type: object
       description: Source-side details of the file on the device that produced an upload.
       required:
         - file_path
-        - file_modified_at
+        - mtime
+        - first_observed_at
+        - last_observed_at
       properties:
         file_path:
           type: string
           example: /var/log/robot/robot.log
           description: Absolute path of the file on the device. Its basename renders the `{filename}` token in the destination path template.
-        file_modified_at:
+        mtime:
           type: string
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
+        first_observed_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the device agent first observed the file on the device.
+        last_observed_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:05Z'
+          description: Timestamp of when the device agent most recently observed the file before the upload was minted.
       example:
         file_path: /var/log/robot/robot.log
-        file_modified_at: '2021-01-01T00:00:00Z'
+        mtime: '2021-01-01T00:00:00Z'
+        first_observed_at: '2021-01-01T00:00:00Z'
+        last_observed_at: '2021-01-01T00:00:05Z'
     CreateUploadRequest:
       title: Create Upload Request
       type: object
@@ -1262,100 +1287,6 @@ components:
           type: string
           example: dpl_123
           description: ID of the deployment the device is currently on.
-    UploadRequiredHeaders:
-      title: Upload Required Headers
-      type: object
-      description: |
-        Provenance metadata the device MUST send as headers on the presigned PUT.
-        These values are echoed into the bucket object's metadata and are populated
-        server-side from the authenticated device's identity; the device never
-        supplies them as request input.
-      required:
-        - device_id
-        - release_id
-        - deployment_id
-        - config_version
-        - digest
-        - file_modified_at
-      properties:
-        device_id:
-          type: string
-          example: dvc_123
-          description: The verified ID of the device that produced the upload.
-        release_id:
-          type: string
-          example: rls_123
-          description: The ID of the release the device was on when the file was captured.
-        deployment_id:
-          type: string
-          example: dpl_123
-          description: The ID of the deployment the device was on when the file was captured.
-        config_version:
-          type: string
-          example: v1.0.0
-          description: The config version active on the device when the file was captured.
-        digest:
-          type: string
-          example: sha256:1234567890
-          description: The digest of the file being uploaded.
-        file_modified_at:
-          type: string
-          example: '2021-01-01T00:00:00Z'
-          description: The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
-      example:
-        device_id: dvc_123
-        release_id: rls_123
-        deployment_id: dpl_123
-        config_version: v1.0.0
-        digest: sha256:1234567890
-        file_modified_at: '2021-01-01T00:00:00Z'
-    PresignedUpload:
-      title: Presigned Upload
-      type: object
-      required:
-        - upload_id
-        - upload_url
-        - object_key
-        - expires_at
-        - required_headers
-        - already_uploaded
-      properties:
-        upload_id:
-          type: string
-          example: upl_123
-          description: ID of the upload ledger entry created for this request.
-        upload_url:
-          type: string
-          example: https://storage.googleapis.com/my-uploads-bucket/logs/dvc_123/robot.log?X-Goog-Signature=...
-          description: The short-lived V4-presigned PUT URL the device uploads the file to.
-        object_key:
-          type: string
-          example: logs/dvc_123/robot.log
-          description: The object path in the destination bucket. Carries the device's verified ID.
-        expires_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:15:00Z'
-          description: Timestamp after which the presigned URL is no longer valid.
-        required_headers:
-          $ref: '#/components/schemas/UploadRequiredHeaders'
-        already_uploaded:
-          type: boolean
-          example: false
-          description: True if a durable upload with the same digest already exists, in which case the device may skip the PUT.
-      example:
-        upload_id: upl_123
-        upload_url: https://storage.googleapis.com/my-uploads-bucket/logs/dvc_123/robot.log?X-Goog-Signature=...
-        object_key: logs/dvc_123/robot.log
-        expires_at: '2021-01-01T00:15:00Z'
-        required_headers:
-          device_id: dvc_123
-          release_id: rls_123
-          deployment_id: dpl_123
-          config_version: v1.0.0
-          digest: sha256:1234567890
-          file_modified_at: '2021-01-01T00:00:00Z'
-        already_uploaded: false
     UploadDestination:
       title: Upload Destination
       type: object
@@ -1396,7 +1327,7 @@ components:
         - id
         - device_id
         - upload_rule_id
-        - upload_rule_name
+        - upload_collection_name
         - source
         - destination
         - digest
@@ -1429,10 +1360,10 @@ components:
           type: string
           example: upl_rule_123
           description: ID of the upload rule that produced the upload.
-        upload_rule_name:
+        upload_collection_name:
           type: string
           example: Robot Logs
-          description: Human-readable name of the upload rule that produced the upload.
+          description: The name of the upload collection the producing upload rule belongs to.
         source:
           allOf:
             - $ref: '#/components/schemas/UploadSource'
@@ -1488,15 +1419,38 @@ components:
       title: Upload
       allOf:
         - $ref: '#/components/schemas/BaseUpload'
+        - type: object
+          properties:
+            metadata:
+              type: object
+              additionalProperties:
+                type: string
+              description: |
+                Provenance the device stamps as cloud object metadata on the
+                uploaded object (S3 `x-amz-meta-*` / GCS `x-goog-meta-*`). All
+                values are strings. Keep the map within the cloud provider's
+                object-metadata size limits (S3 ~2 KB, GCS ~8 KB of combined
+                user-defined metadata).
+
+                Uploads created through the broker flow always carry this map;
+                read/confirm-style responses may omit it, so `metadata` is not
+                required.
+
+                The currently-expected keys are, as a NON-normative example only:
+                `device_id`, `release_id`, `release_version`, `deployment_id`,
+                `digest`, `mtime`. This list is illustrative — the map
+                is generic and the set of keys may evolve without a schema change.
       example:
         object: upload
         id: upl_123
         device_id: dvc_123
         upload_rule_id: upl_rule_123
-        upload_rule_name: Robot Logs
+        upload_collection_name: Robot Logs
         source:
           file_path: /var/log/robot/robot.log
-          file_modified_at: '2021-01-01T00:00:00Z'
+          mtime: '2021-01-01T00:00:00Z'
+          first_observed_at: '2021-01-01T00:00:00Z'
+          last_observed_at: '2021-01-01T00:00:05Z'
         destination:
           bucket_id: bkt_123
           object_key: logs/dvc_123/robot.log
@@ -1510,6 +1464,229 @@ components:
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
         workspace_id: wksp_123
+        metadata:
+          device_id: dvc_123
+          release_id: rls_123
+          release_version: v1.0.0
+          deployment_id: dpl_123
+          digest: sha256:1234567890
+          mtime: '2021-01-01T00:00:00Z'
+    S3UploadCredentials:
+      title: S3 Upload Credentials
+      type: object
+      description: |
+        Short-lived credentials for the broker upload flow to any S3-compatible
+        object store (AWS S3, Cloudflare R2, MinIO, ...). The backend vends
+        session credentials scoped to `s3:PutObject` (plus the multipart actions)
+        on the exact object key. The device always drives a native S3 multipart
+        upload with the standard AWS S3 SDK, configured from `endpoint` + `region`
+        plus the access key / secret / session token, regardless of which
+        S3-compatible backend is behind the endpoint.
+      required:
+        - scheme
+        - access_key_id
+        - secret_access_key
+        - session_token
+        - region
+        - endpoint
+        - expires_at
+      properties:
+        scheme:
+          type: string
+          enum:
+            - s3
+          example: s3
+          x-stainless-const: true
+          description: The storage access scheme, which is always `s3` for these credentials.
+        access_key_id:
+          type: string
+          example: ASIAIOSFODNN7EXAMPLE
+          description: The STS session access key ID.
+        secret_access_key:
+          type: string
+          example: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+          description: The STS session secret access key.
+        session_token:
+          type: string
+          example: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
+          description: The STS session token that must accompany the access key pair.
+        region:
+          type: string
+          example: us-east-1
+          description: The region used for SigV4 signing. For Cloudflare R2 this is `auto`.
+        endpoint:
+          type: string
+          format: uri
+          example: https://s3.us-east-1.amazonaws.com
+          description: |
+            The S3 API endpoint URL the device points its S3 SDK at. AWS uses a
+            regional endpoint, e.g. `https://s3.us-east-1.amazonaws.com`; Cloudflare
+            R2 uses `https://<account_id>.r2.cloudflarestorage.com` with
+            `region: auto`.
+        expires_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T01:00:00Z'
+          description: Timestamp after which the session credentials are no longer valid.
+      example:
+        scheme: s3
+        access_key_id: ASIAIOSFODNN7EXAMPLE
+        secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+        session_token: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
+        region: us-east-1
+        endpoint: https://s3.us-east-1.amazonaws.com
+        expires_at: '2021-01-01T01:00:00Z'
+    GcsUploadCredentials:
+      title: GCS Upload Credentials
+      type: object
+      description: |
+        Short-lived Google Cloud Storage credentials for the broker upload flow. The
+        backend impersonates the bucket's service account and downscopes the token
+        with a Credential Access Boundary (CAB) to `storage.objects.create` on the
+        exact object name, so the device can drive a native resumable upload directly.
+      required:
+        - scheme
+        - access_token
+        - expires_at
+      properties:
+        scheme:
+          type: string
+          enum:
+            - gcs
+          example: gcs
+          x-stainless-const: true
+          description: The storage access scheme, which is always `gcs` for these credentials.
+        access_token:
+          type: string
+          example: ya29.c.b0Aaekm1J...redacted...opaque-oauth2-token
+          description: 'A downscoped GCS OAuth2 bearer token the device sends as `Authorization: Bearer <token>` on the resumable upload.'
+        expires_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T01:00:00Z'
+          description: Timestamp after which the access token is no longer valid.
+      example:
+        scheme: gcs
+        access_token: ya29.c.b0Aaekm1J...redacted...opaque-oauth2-token
+        expires_at: '2021-01-01T01:00:00Z'
+    UploadCredentials:
+      title: Upload Credentials
+      type: object
+      description: |
+        Response to a broker upload request. The backend verified the calling
+        device, created the upload ledger entry, authorized the exact `object_key`
+        and provenance, performed digest dedup, and vended short-lived downscoped
+        cloud credentials bound to that one object key. The device uploads directly
+        via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`.
+      required:
+        - scheme
+        - s3_credentials
+        - gcs_credentials
+        - expires_at
+      properties:
+        scheme:
+          type: string
+          enum:
+            - s3
+            - gcs
+          example: gcs
+          description: The storage access scheme. Mirrors the `credentials.scheme` discriminator so the device can select its SDK before parsing `credentials`.
+        s3_credentials:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/S3UploadCredentials'
+          description: The vended S3 downscoped credentials.
+          nullable: true
+        gcs_credentials:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/GcsUploadCredentials'
+          description: The vended GCS downscoped credentials.
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T01:00:00Z'
+          description: Timestamp after which the vended credentials expire. On mid-upload expiry the device re-requests exact-key credentials and resumes.
+      example:
+        scheme: gcs
+        gcs_credentials:
+          scheme: gcs
+          access_token: ya29.c.b0Aaekm1J...redacted...opaque-oauth2-token
+          expires_at: '2021-01-01T01:00:00Z'
+        s3_credentials:
+          scheme: s3
+          access_key_id: ASIAIOSFODNN7EXAMPLE
+          secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+          session_token: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
+          region: us-east-1
+          endpoint: https://s3.us-east-1.amazonaws.com
+          expires_at: '2021-01-01T01:00:00Z'
+        expires_at: '2021-01-01T01:00:00Z'
+    UploadWithCredentials:
+      title: Upload With Credentials
+      type: object
+      description: |
+        Response to a broker upload request. The backend verified the calling
+        device, created the upload ledger entry, authorized the exact `object_key`
+        and provenance, performed digest dedup, and vended short-lived downscoped
+        cloud credentials bound to that one object key. The device uploads directly
+        via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`.
+      required:
+        - upload
+        - credentials
+      properties:
+        upload:
+          $ref: '#/components/schemas/Upload'
+        credentials:
+          $ref: '#/components/schemas/UploadCredentials'
+      example:
+        upload:
+          object: upload
+          id: upl_123
+          device_id: dvc_123
+          upload_rule_id: upl_rule_123
+          upload_collection_name: Robot Logs
+          source:
+            file_path: /var/log/robot/robot.log
+            mtime: '2021-01-01T00:00:00Z'
+            first_observed_at: '2021-01-01T00:00:00Z'
+            last_observed_at: '2021-01-01T00:00:05Z'
+          destination:
+            bucket_id: bkt_123
+            object_key: logs/dvc_123/robot.log
+          digest: sha256:1234567890
+          size: 1048576
+          status: uploaded
+          incomplete: false
+          release_id: rls_123
+          deployment_id: dpl_123
+          uploaded_at: '2021-01-01T00:00:10Z'
+          created_at: '2021-01-01T00:00:00Z'
+          updated_at: '2021-01-01T00:00:00Z'
+          workspace_id: wksp_123
+          metadata:
+            device_id: dvc_123
+            release_id: rls_123
+            release_version: v1.0.0
+            deployment_id: dpl_123
+            digest: sha256:1234567890
+            mtime: '2021-01-01T00:00:00Z'
+        credentials:
+          scheme: gcs
+          gcs_credentials:
+            scheme: gcs
+            access_token: ya29.c.b0Aaekm1J...redacted...opaque-oauth2-token
+            expires_at: '2021-01-01T01:00:00Z'
+          s3_credentials:
+            scheme: s3
+            access_key_id: ASIAIOSFODNN7EXAMPLE
+            secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+            session_token: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
+            region: us-east-1
+            endpoint: https://s3.us-east-1.amazonaws.com
+            expires_at: '2021-01-01T01:00:00Z'
+          expires_at: '2021-01-01T01:00:00Z'
     DeviceStatus:
       type: string
       description: |
@@ -1847,6 +2024,14 @@ components:
           $ref: '#/components/schemas/DeploymentExpansion'
         example:
           - release
+    release_id:
+      name: release_id
+      in: path
+      required: true
+      description: The unique identifier of the release.
+      schema:
+        type: string
+        example: rls_123
     release_expansions:
       name: expand
       in: query
@@ -1858,14 +2043,6 @@ components:
           $ref: '#/components/schemas/ReleaseExpansion'
         example:
           - upload_rules
-    release_id:
-      name: release_id
-      in: path
-      required: true
-      description: The unique identifier of the release.
-      schema:
-        type: string
-        example: rls_123
     upload_id:
       name: upload_id
       in: path

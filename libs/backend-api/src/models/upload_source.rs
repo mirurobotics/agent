@@ -16,16 +16,24 @@ pub struct UploadSource {
     #[serde(rename = "file_path")]
     pub file_path: String,
     /// The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
-    #[serde(rename = "file_modified_at")]
-    pub file_modified_at: String,
+    #[serde(rename = "mtime")]
+    pub mtime: String,
+    /// Timestamp of when the device agent first observed the file on the device.
+    #[serde(rename = "first_observed_at")]
+    pub first_observed_at: String,
+    /// Timestamp of when the device agent most recently observed the file before the upload was minted.
+    #[serde(rename = "last_observed_at")]
+    pub last_observed_at: String,
 }
 
 impl UploadSource {
     /// Source-side details of the file on the device that produced an upload.
-    pub fn new(file_path: String, file_modified_at: String) -> UploadSource {
+    pub fn new(file_path: String, mtime: String, first_observed_at: String, last_observed_at: String) -> UploadSource {
         UploadSource {
             file_path,
-            file_modified_at,
+            mtime,
+            first_observed_at,
+            last_observed_at,
         }
     }
 }

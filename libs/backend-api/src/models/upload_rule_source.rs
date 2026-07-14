@@ -16,11 +16,11 @@ pub struct UploadRuleSource {
     pub glob: String,
     /// How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
     #[serde(rename = "stability_window_secs")]
-    pub stability_window_secs: i32,
+    pub stability_window_secs: i64,
 }
 
 impl UploadRuleSource {
-    pub fn new(glob: String, stability_window_secs: i32) -> UploadRuleSource {
+    pub fn new(glob: String, stability_window_secs: i64) -> UploadRuleSource {
         UploadRuleSource {
             glob,
             stability_window_secs,

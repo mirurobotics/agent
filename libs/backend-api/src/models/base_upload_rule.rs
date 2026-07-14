@@ -36,9 +36,6 @@ pub struct BaseUploadRule {
     /// Timestamp of when the upload rule was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
-    /// Expand the upload rule content using `expand=content` in the query string.
-    #[serde(rename = "content", skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
 }
 
 impl BaseUploadRule {
@@ -53,7 +50,6 @@ impl BaseUploadRule {
             destination: Box::new(destination),
             created_at,
             updated_at,
-            content: None,
         }
     }
 }

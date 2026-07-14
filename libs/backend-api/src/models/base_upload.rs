@@ -23,9 +23,9 @@ pub struct BaseUpload {
     /// ID of the upload rule that produced the upload.
     #[serde(rename = "upload_rule_id")]
     pub upload_rule_id: String,
-    /// Human-readable name of the upload rule that produced the upload.
-    #[serde(rename = "upload_rule_name")]
-    pub upload_rule_name: String,
+    /// The name of the upload collection the producing upload rule belongs to.
+    #[serde(rename = "upload_collection_name")]
+    pub upload_collection_name: String,
     /// Source-side details of the file on the device that produced this upload.
     #[serde(rename = "source")]
     pub source: Box<models::UploadSource>,
@@ -64,13 +64,13 @@ pub struct BaseUpload {
 }
 
 impl BaseUpload {
-    pub fn new(object: Object, id: String, device_id: String, upload_rule_id: String, upload_rule_name: String, source: models::UploadSource, destination: models::UploadDestination, digest: String, size: i64, status: models::UploadStatus, incomplete: bool, release_id: String, deployment_id: String, uploaded_at: Option<String>, created_at: String, updated_at: String, workspace_id: String) -> BaseUpload {
+    pub fn new(object: Object, id: String, device_id: String, upload_rule_id: String, upload_collection_name: String, source: models::UploadSource, destination: models::UploadDestination, digest: String, size: i64, status: models::UploadStatus, incomplete: bool, release_id: String, deployment_id: String, uploaded_at: Option<String>, created_at: String, updated_at: String, workspace_id: String) -> BaseUpload {
         BaseUpload {
             object,
             id,
             device_id,
             upload_rule_id,
-            upload_rule_name,
+            upload_collection_name,
             source: Box::new(source),
             destination: Box::new(destination),
             digest,

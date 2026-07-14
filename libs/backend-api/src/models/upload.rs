@@ -23,9 +23,9 @@ pub struct Upload {
     /// ID of the upload rule that produced the upload.
     #[serde(rename = "upload_rule_id")]
     pub upload_rule_id: String,
-    /// Human-readable name of the upload rule that produced the upload.
-    #[serde(rename = "upload_rule_name")]
-    pub upload_rule_name: String,
+    /// The name of the upload collection the producing upload rule belongs to.
+    #[serde(rename = "upload_collection_name")]
+    pub upload_collection_name: String,
     /// Source-side details of the file on the device that produced this upload.
     #[serde(rename = "source")]
     pub source: Box<models::UploadSource>,
@@ -61,16 +61,19 @@ pub struct Upload {
     /// ID of the workspace that owns the upload.
     #[serde(rename = "workspace_id")]
     pub workspace_id: String,
+    /// Provenance the device stamps as cloud object metadata on the uploaded object (S3 `x-amz-meta-*` / GCS `x-goog-meta-*`). All values are strings. Keep the map within the cloud provider's object-metadata size limits (S3 ~2 KB, GCS ~8 KB of combined user-defined metadata).  Uploads created through the broker flow always carry this map; read/confirm-style responses may omit it, so `metadata` is not required.  The currently-expected keys are, as a NON-normative example only: `device_id`, `release_id`, `release_version`, `deployment_id`, `digest`, `mtime`. This list is illustrative — the map is generic and the set of keys may evolve without a schema change. 
+    #[serde(rename = "metadata", skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Upload {
-    pub fn new(object: Object, id: String, device_id: String, upload_rule_id: String, upload_rule_name: String, source: models::UploadSource, destination: models::UploadDestination, digest: String, size: i64, status: models::UploadStatus, incomplete: bool, release_id: String, deployment_id: String, uploaded_at: Option<String>, created_at: String, updated_at: String, workspace_id: String) -> Upload {
+    pub fn new(object: Object, id: String, device_id: String, upload_rule_id: String, upload_collection_name: String, source: models::UploadSource, destination: models::UploadDestination, digest: String, size: i64, status: models::UploadStatus, incomplete: bool, release_id: String, deployment_id: String, uploaded_at: Option<String>, created_at: String, updated_at: String, workspace_id: String) -> Upload {
         Upload {
             object,
             id,
             device_id,
             upload_rule_id,
-            upload_rule_name,
+            upload_collection_name,
             source: Box::new(source),
             destination: Box::new(destination),
             digest,
@@ -83,6 +86,7 @@ impl Upload {
             created_at,
             updated_at,
             workspace_id,
+            metadata: None,
         }
     }
 }
