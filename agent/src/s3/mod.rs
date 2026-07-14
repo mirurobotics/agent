@@ -23,11 +23,6 @@ pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 pub struct Config {
     pub creds: Credentials,
     pub region: String,
-    /// Optional S3 API endpoint override. `None` uses AWS's default regional
-    /// endpoint; `Some(url)` targets an explicit endpoint — a regional AWS URL,
-    /// or an S3-compatible store such as Cloudflare R2 or MinIO — with
-    /// path-style addressing.
-    pub endpoint: Option<String>,
 }
 
 pub struct Credentials {
@@ -74,18 +69,13 @@ impl Store {
             None,
             "miru-agent",
         );
-        let mut builder = aws_sdk_s3::config::Config::builder()
+        let s3cfg = aws_sdk_s3::config::Config::builder()
             .behavior_version(BehaviorVersion::latest())
             .region(Region::new(cfg.region))
-            .credentials_provider(s3creds);
-        if let Some(endpoint) = cfg.endpoint {
-            // An explicit endpoint (a regional AWS URL, or an S3-compatible
-            // store like Cloudflare R2 / MinIO) is addressed path-style so the
-            // bucket sits in the path rather than a virtual host.
-            builder = builder.endpoint_url(endpoint).force_path_style(true);
-        }
+            .credentials_provider(s3creds)
+            .build();
         Self {
-            client: Client::from_conf(builder.build()),
+            client: Client::from_conf(s3cfg),
         }
     }
 

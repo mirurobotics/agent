@@ -25,6 +25,5 @@ pub mod services;
 pub mod sync;
 pub mod telemetry;
 pub mod test_utils;
-pub mod upload;
 pub mod version;
 pub mod workers;
