@@ -23,9 +23,9 @@ use tokio::task::JoinHandle;
 /// `disk/upload_rules.rs` inline tests.
 struct Stores {
     _dir: dirs::TempDir,
-    deployments: disk::Deployments,
-    releases: disk::Releases,
-    upload_rules: disk::UploadRules,
+    deployments: Arc<disk::Deployments>,
+    releases: Arc<disk::Releases>,
+    upload_rules: Arc<disk::UploadRules>,
 }
 
 impl Stores {
@@ -43,9 +43,9 @@ impl Stores {
             .unwrap();
         Self {
             _dir: dir,
-            deployments,
-            releases,
-            upload_rules,
+            deployments: Arc::new(deployments),
+            releases: Arc::new(releases),
+            upload_rules: Arc::new(upload_rules),
         }
     }
 
@@ -199,16 +199,13 @@ fn spawn_bridge(
     let shutdown_signal = Box::pin(async move {
         let _ = shutdown_rx.await;
     });
+    let storage = scan_bridge::Storage {
+        deployments: stores.deployments.clone(),
+        releases: stores.releases.clone(),
+        upload_rules: stores.upload_rules.clone(),
+    };
     let handle = tokio::spawn(async move {
-        scan_bridge::run(
-            scanner.as_ref(),
-            syncer.as_ref(),
-            &stores.deployments,
-            &stores.releases,
-            &stores.upload_rules,
-            shutdown_signal,
-        )
-        .await;
+        scan_bridge::run(scanner.as_ref(), syncer.as_ref(), &storage, shutdown_signal).await;
     });
     (handle, shutdown_tx)
 }
@@ -275,6 +272,70 @@ pub mod run {
         wait_until(|| scanner.update_rules_calls().len() == 1).await;
 
         // fire shutdown; run() must return and the task must complete.
+        shutdown_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("run did not return after shutdown fired")
+            .expect("run task panicked");
+    }
+
+    // A subscribe error makes the worker idle (never touching the scanner)
+    // rather than return; the shutdown future is still the only exit.
+    #[tokio::test]
+    async fn subscribe_error_idles_until_shutdown() {
+        let stores = Arc::new(Stores::new().await);
+        let scanner = Arc::new(MockScanner::default());
+        let syncer = Arc::new(MockSyncer::default());
+        syncer.set_subscribe_fail(true);
+        let (mut handle, shutdown_tx) = spawn_bridge(scanner.clone(), syncer, stores);
+
+        // the worker parks on the failed subscription without returning or
+        // touching the scanner.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut handle)
+                .await
+                .is_err(),
+            "worker returned instead of idling after subscribe error"
+        );
+        assert_eq!(scanner.update_rules_calls().len(), 0);
+        assert_eq!(scanner.clear_rules_calls(), 0);
+
+        // shutdown still exits the worker.
+        shutdown_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("run did not return after shutdown fired")
+            .expect("run task panicked");
+    }
+
+    // When the sync event stream ends (all senders dropped) the worker idles
+    // rather than silently retiring; the shutdown future is still the only exit.
+    #[tokio::test]
+    async fn stream_end_idles_until_shutdown() {
+        let stores = Arc::new(Stores::new().await);
+        stores.seed_queued("dpl", "rel").await;
+
+        let scanner = Arc::new(MockScanner::default());
+        let syncer = Arc::new(MockSyncer::default());
+        // keep `stores` alive: dropping it would delete the temp dir out from
+        // under the worker's startup disk read.
+        let (mut handle, shutdown_tx) =
+            spawn_bridge(scanner.clone(), syncer.clone(), stores.clone());
+
+        // let the startup resolve run so the worker is in its event loop.
+        wait_until(|| scanner.clear_rules_calls() == 1).await;
+
+        // drop the last sender: the event stream ends and the worker parks
+        // instead of returning.
+        syncer.drop_transmitter();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut handle)
+                .await
+                .is_err(),
+            "worker returned instead of idling after the stream ended"
+        );
+
+        // shutdown still exits the worker.
         shutdown_tx.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(5), handle)
             .await

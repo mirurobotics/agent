@@ -39,9 +39,6 @@ macro_rules! dispatch {
 pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub broadcast_capacity: usize,
-    // Crate-private: `ScanSnapshotFile` wraps the `pub(crate)` `ScannerSnapshot`,
-    // so exposing this field publicly would leak a more-private type. External
-    // constructors reach it via `..ScannerArgs::default()`.
     pub(crate) snapshot_file: Option<ScanSnapshotFile>,
 }
 

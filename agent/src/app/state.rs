@@ -11,6 +11,7 @@ use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
+use crate::scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
 
@@ -19,6 +20,7 @@ pub struct AppState {
     pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
+    pub scanner: Option<Arc<scan::Scanner>>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -30,6 +32,7 @@ impl AppState {
         capacities: disk::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
+        enable_scanner: bool,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
@@ -85,8 +88,14 @@ impl AppState {
         // initialize the activity tracker
         let activity_tracker = Arc::new(activity::Tracker::new());
 
+        // initialize the scanner (optional)
+        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_scanner).await;
+
         let shutdown_handle = async move {
-            let handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            if let Some(handle) = scanner_handle {
+                handles.push(handle);
+            }
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -96,6 +105,7 @@ impl AppState {
                 storage,
                 http_client,
                 syncer,
+                scanner,
                 token_mngr,
                 activity_tracker,
                 event_hub,
@@ -104,21 +114,85 @@ impl AppState {
         ))
     }
 
-    pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
-        // shutdown the syncer first (it uses storage during sync)
-        self.syncer.shutdown().await?;
-
-        // shutdown the event hub
-        if let Err(e) = self.event_hub.shutdown().await {
-            tracing::error!("failed to shutdown event hub: {e}");
+    /// Spawn the scanner actor with an on-disk snapshot. Fail-open by design:
+    /// a snapshot-file error degrades to scanning without persistence, and a
+    /// spawn error degrades to no scanner at all — the agent must boot even
+    /// when the scanner cannot.
+    async fn init_scanner(
+        layout: &disk::Layout,
+        enable_scanner: bool,
+    ) -> (
+        Option<Arc<scan::Scanner>>,
+        Option<tokio::task::JoinHandle<()>>,
+    ) {
+        if !enable_scanner {
+            return (None, None);
         }
 
-        // shutdown storage (sets device offline + shuts down all stores)
-        self.storage.shutdown().await?;
+        let snapshot_file = match ScanSnapshotFile::new_with_default(
+            layout.scanner_snapshot(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                        "failed to initialize scanner snapshot file; scanning will run without persistence: {e}"
+                    );
+                None
+            }
+        };
 
-        // shutdown the token manager
-        self.token_mngr.shutdown().await?;
+        let args = ScannerArgs {
+            snapshot_file,
+            ..ScannerArgs::default()
+        };
+        match scan::Scanner::spawn(64, args) {
+            Ok((scanner, handle)) => (Some(Arc::new(scanner)), Some(handle)),
+            Err(e) => {
+                tracing::error!("failed to spawn scanner; continuing without scanning: {e}");
+                (None, None)
+            }
+        }
+    }
 
-        Ok(())
+    pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
+        let mut first_err: Option<server::ServerErr> = None;
+
+        // shutdown the scanner before the syncer (it uses syncer to determine the
+        // correct set of rules to use for scanning)
+        if let Some(scanner) = &self.scanner {
+            if let Err(e) = scanner.shutdown().await {
+                tracing::error!("failed to shutdown scanner: {e}");
+                first_err.get_or_insert(e.into());
+            }
+        }
+
+        // shutdown the syncer before storage (it uses storage during sync)
+        if let Err(e) = self.syncer.shutdown().await {
+            tracing::error!("failed to shutdown syncer: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        if let Err(e) = self.event_hub.shutdown().await {
+            tracing::error!("failed to shutdown event hub: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        if let Err(e) = self.storage.shutdown().await {
+            tracing::error!("failed to shutdown storage: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        if let Err(e) = self.token_mngr.shutdown().await {
+            tracing::error!("failed to shutdown token manager: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }

@@ -152,7 +152,7 @@ impl StableFile {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ScannerSnapshot {
+pub struct ScannerSnapshot {
     pub(crate) collections: HashMap<UploadCollectionID, CollectionState>,
     pub(crate) deployed: HashSet<UploadCollectionID>,
 }
@@ -163,7 +163,7 @@ impl Patch<ScannerSnapshot> for ScannerSnapshot {
     }
 }
 
-pub(crate) type ScanSnapshotFile = SingleThreadStateFile<ScannerSnapshot, ScannerSnapshot>;
+pub type ScanSnapshotFile = SingleThreadStateFile<ScannerSnapshot, ScannerSnapshot>;
 
 #[cfg(test)]
 mod tests {
