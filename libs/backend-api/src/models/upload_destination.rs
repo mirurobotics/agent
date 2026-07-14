@@ -15,9 +15,6 @@ pub struct UploadDestination {
     /// ID of the registered bucket the file was uploaded to.
     #[serde(rename = "bucket_id")]
     pub bucket_id: String,
-    /// Physical name of the bucket in the object store. This is the bucket parameter the device passes to the native cloud SDK (it is not the Miru `bucket_id`).
-    #[serde(rename = "bucket_name")]
-    pub bucket_name: String,
     /// The object path the file was written to in the destination bucket. Carries the device's verified ID.
     #[serde(rename = "object_key")]
     pub object_key: String,
@@ -25,10 +22,9 @@ pub struct UploadDestination {
 
 impl UploadDestination {
     /// Destination-side details of where an upload was written.
-    pub fn new(bucket_id: String, bucket_name: String, object_key: String) -> UploadDestination {
+    pub fn new(bucket_id: String, object_key: String) -> UploadDestination {
         UploadDestination {
             bucket_id,
-            bucket_name,
             object_key,
         }
     }

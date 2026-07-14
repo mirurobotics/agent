@@ -9,7 +9,6 @@ pub mod releases;
 pub mod request;
 pub mod response;
 pub mod retry;
-pub mod uploads;
 
 pub use self::errors::HTTPErr;
 pub use self::query::QueryParams;

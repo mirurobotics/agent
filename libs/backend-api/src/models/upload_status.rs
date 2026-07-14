@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// UploadStatus : The lifecycle status of an upload in the ledger. - `pending`: credentials have been minted but the device has not yet confirmed a durable write. - `uploaded`: the device confirmed a durable write to the bucket. 
-/// The lifecycle status of an upload in the ledger. - `pending`: credentials have been minted but the device has not yet confirmed a durable write. - `uploaded`: the device confirmed a durable write to the bucket. 
+/// UploadStatus : The lifecycle status of an upload in the ledger. - `pending`: a presigned URL has been minted but the device has not yet confirmed a durable write. - `uploaded`: the device confirmed a durable write to the bucket. 
+/// The lifecycle status of an upload in the ledger. - `pending`: a presigned URL has been minted but the device has not yet confirmed a durable write. - `uploaded`: the device confirmed a durable write to the bucket. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum UploadStatus {
     #[serde(rename = "pending")]

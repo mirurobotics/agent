@@ -6,5 +6,3 @@ pub mod scanner;
 pub mod stub_token_manager;
 pub mod syncer;
 pub mod token_manager;
-pub mod upload_client;
-pub mod upload_executor;
