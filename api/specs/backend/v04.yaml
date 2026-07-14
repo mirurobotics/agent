@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: 8a902ed159a0215eb439a57caa0541404caf968d
-    url: https://github.com/mirurobotics/openapi/commit/8a902ed159a0215eb439a57caa0541404caf968d
-    message: 'feat(uploads): add bucket_name to upload destination (#199)'
+    sha: ac0d515e4d52638be803b37c9e3e23f9d8a73b5e
+    url: https://github.com/mirurobotics/openapi/commit/ac0d515e4d52638be803b37c9e3e23f9d8a73b5e
+    message: 'refactor(upload)!: drop endpoint from S3UploadCredentials (#200)'
 servers:
   - url: https://staging.api.mirurobotics.com/agent/v1
     description: Staging
@@ -1482,20 +1482,18 @@ components:
       title: S3 Upload Credentials
       type: object
       description: |
-        Short-lived credentials for the broker upload flow to any S3-compatible
-        object store (AWS S3, Cloudflare R2, MinIO, ...). The backend vends
-        session credentials scoped to `s3:PutObject` (plus the multipart actions)
-        on the exact object key. The device always drives a native S3 multipart
-        upload with the standard AWS S3 SDK, configured from `endpoint` + `region`
-        plus the access key / secret / session token, regardless of which
-        S3-compatible backend is behind the endpoint.
+        Short-lived AWS S3 session credentials for the broker upload flow. The
+        backend vends session credentials scoped to `s3:PutObject` (plus the
+        multipart actions) on the exact object key. The device drives a native
+        S3 multipart upload with the standard AWS S3 SDK, configured from
+        `region` plus the access key / secret / session token; the SDK derives
+        the endpoint from the region.
       required:
         - scheme
         - access_key_id
         - secret_access_key
         - session_token
         - region
-        - endpoint
         - expires_at
       properties:
         scheme:
@@ -1520,16 +1518,7 @@ components:
         region:
           type: string
           example: us-east-1
-          description: The region used for SigV4 signing. For Cloudflare R2 this is `auto`.
-        endpoint:
-          type: string
-          format: uri
-          example: https://s3.us-east-1.amazonaws.com
-          description: |
-            The S3 API endpoint URL the device points its S3 SDK at. AWS uses a
-            regional endpoint, e.g. `https://s3.us-east-1.amazonaws.com`; Cloudflare
-            R2 uses `https://<account_id>.r2.cloudflarestorage.com` with
-            `region: auto`.
+          description: The AWS region of the bucket, used for the S3 endpoint and SigV4 signing.
         expires_at:
           type: string
           format: date-time
@@ -1541,7 +1530,6 @@ components:
         secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
         session_token: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
         region: us-east-1
-        endpoint: https://s3.us-east-1.amazonaws.com
         expires_at: '2021-01-01T01:00:00Z'
     GcsUploadCredentials:
       title: GCS Upload Credentials
@@ -1627,7 +1615,6 @@ components:
           secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
           session_token: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
           region: us-east-1
-          endpoint: https://s3.us-east-1.amazonaws.com
           expires_at: '2021-01-01T01:00:00Z'
         expires_at: '2021-01-01T01:00:00Z'
     UploadWithCredentials:
@@ -1692,7 +1679,6 @@ components:
             secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
             session_token: FwoGZXIvYXdzEBaDOEXAMPLE...redacted...opaque-session-token
             region: us-east-1
-            endpoint: https://s3.us-east-1.amazonaws.com
             expires_at: '2021-01-01T01:00:00Z'
           expires_at: '2021-01-01T01:00:00Z'
     DeviceStatus:
