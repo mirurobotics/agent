@@ -10,7 +10,6 @@ use miru_agent::trace;
 use miru_agent::workers::scan;
 
 // external crates
-use chrono::Utc;
 use tokio::sync::oneshot;
 
 pub mod run {
@@ -108,100 +107,6 @@ pub mod run {
             sleep_ctrl.release().await;
             sleep_ctrl.await_sleep().await;
             assert_eq!(scanner.num_scan_calls(), i + 7);
-        }
-        assert!(!handle.is_finished());
-    }
-
-    #[tokio::test]
-    async fn prunes_after_each_scan_tick() {
-        let options = scan::Options::default();
-        let retention = chrono::Duration::seconds(options.ledger_retention_secs);
-        let scanner = Arc::new(MockScanner::default());
-        let sleep_ctrl = Arc::new(SleepController::new());
-
-        let t0 = Utc::now();
-        let options_for_spawn = options.clone();
-        let scanner_for_spawn = scanner.clone();
-        let sleep_ctrl_for_spawn = sleep_ctrl.clone();
-        let shutdown_signal = Box::pin(async move {
-            std::future::pending::<()>().await;
-        });
-        let _handle = tokio::spawn(async move {
-            scan::run(
-                &options_for_spawn,
-                scanner_for_spawn.as_ref(),
-                sleep_ctrl_for_spawn.sleep_fn(),
-                shutdown_signal,
-            )
-            .await;
-        });
-
-        // the initial scan is followed by exactly one prune
-        sleep_ctrl.await_sleep().await;
-        assert_eq!(scanner.num_scan_calls(), 1);
-        assert_eq!(scanner.prune_calls().len(), 1);
-
-        // each subsequent tick drives one scan and one prune
-        for i in 0..3 {
-            sleep_ctrl.release().await;
-            sleep_ctrl.await_sleep().await;
-            assert_eq!(scanner.num_scan_calls(), i + 2);
-            assert_eq!(scanner.prune_calls().len(), i + 2);
-        }
-
-        // every prune cutoff is now - retention (bounded by the test window)
-        for before in scanner.prune_calls() {
-            assert!(before >= t0 - retention);
-            assert!(before <= Utc::now() - retention);
-        }
-    }
-
-    #[tokio::test]
-    async fn survives_prune_error_and_continues() {
-        let options = scan::Options::default();
-        let scanner = Arc::new(MockScanner::default());
-        let sleep_ctrl = Arc::new(SleepController::new());
-
-        let options_for_spawn = options.clone();
-        let scanner_for_spawn = scanner.clone();
-        let sleep_ctrl_for_spawn = sleep_ctrl.clone();
-        let shutdown_signal = Box::pin(async move {
-            std::future::pending::<()>().await;
-        });
-        let handle = tokio::spawn(async move {
-            scan::run(
-                &options_for_spawn,
-                scanner_for_spawn.as_ref(),
-                sleep_ctrl_for_spawn.sleep_fn(),
-                shutdown_signal,
-            )
-            .await;
-        });
-
-        sleep_ctrl.await_sleep().await;
-        assert_eq!(scanner.num_scan_calls(), 1);
-        assert_eq!(scanner.prune_calls().len(), 1);
-
-        // prune() failures are logged and ignored; scans and prunes keep coming
-        scanner.set_prune(|| Err(scan_err()));
-        for i in 0..5 {
-            sleep_ctrl.release().await;
-            sleep_ctrl.await_sleep().await;
-            assert_eq!(scanner.num_scan_calls(), i + 2);
-            assert_eq!(scanner.prune_calls().len(), i + 2);
-        }
-        assert!(
-            !handle.is_finished(),
-            "worker must keep running through prune() errors"
-        );
-
-        // and keeps driving once prune() succeeds again
-        scanner.set_prune(|| Ok(()));
-        for i in 0..5 {
-            sleep_ctrl.release().await;
-            sleep_ctrl.await_sleep().await;
-            assert_eq!(scanner.num_scan_calls(), i + 7);
-            assert_eq!(scanner.prune_calls().len(), i + 7);
         }
         assert!(!handle.is_finished());
     }

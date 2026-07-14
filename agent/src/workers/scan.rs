@@ -11,25 +11,17 @@ use std::time::Duration;
 use crate::scan::ScannerExt;
 
 // external crates
-use chrono::Utc;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
 pub struct Options {
     pub scan_interval_secs: i64,
-    // Ledger entries whose latest stable file was first observed more than
-    // this many seconds ago are pruned each tick. The ledger is the dedup
-    // mechanism (see scan/collection.rs::discover_candidates): too-short
-    // retention re-emits stable files that still exist on disk, so retention
-    // only needs to exceed the on-disk lifetime of matched files.
-    pub ledger_retention_secs: i64,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
             scan_interval_secs: 60,
-            ledger_retention_secs: 30 * 24 * 60 * 60, // 30 days
         }
     }
 }
@@ -66,7 +58,6 @@ async fn run_impl<F, Fut, ScannerT: ScannerExt>(
     if let Err(e) = scanner.scan().await {
         error!("scan driver: initial scan failed: {e:?}");
     }
-    prune(options, scanner).await;
 
     let interval = Duration::from_secs(options.scan_interval_secs.max(0) as u64);
     loop {
@@ -75,13 +66,5 @@ async fn run_impl<F, Fut, ScannerT: ScannerExt>(
         if let Err(e) = scanner.scan().await {
             error!("scan driver: scan failed, continuing: {e:?}");
         }
-        prune(options, scanner).await;
-    }
-}
-
-async fn prune<ScannerT: ScannerExt>(options: &Options, scanner: &ScannerT) {
-    let cutoff = Utc::now() - chrono::Duration::seconds(options.ledger_retention_secs.max(0));
-    if let Err(e) = scanner.prune(cutoff).await {
-        error!("scan driver: prune failed, continuing: {e:?}");
     }
 }
