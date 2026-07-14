@@ -48,7 +48,7 @@ fn credentials(scheme: &str, s3: Value, gcs: Value) -> UploadCredentials {
 #[tokio::test]
 async fn unknown_scheme_is_unsupported() {
     let creds = credentials("something-new", s3_credentials_json(), Value::Null);
-    let err = SdkTransfer
+    let err = SdkTransfer::default()
         .transfer(&creds, &destination(), &File::new("/data/a.log"))
         .await
         .unwrap_err();
@@ -60,7 +60,7 @@ async fn unknown_scheme_is_unsupported() {
 #[tokio::test]
 async fn s3_scheme_without_credentials_errs() {
     let creds = credentials("s3", Value::Null, Value::Null);
-    let err = SdkTransfer
+    let err = SdkTransfer::default()
         .transfer(&creds, &destination(), &File::new("/data/a.log"))
         .await
         .unwrap_err();
@@ -72,7 +72,7 @@ async fn s3_scheme_without_credentials_errs() {
 #[tokio::test]
 async fn gcs_scheme_without_credentials_errs() {
     let creds = credentials("gcs", Value::Null, Value::Null);
-    let err = SdkTransfer
+    let err = SdkTransfer::default()
         .transfer(&creds, &destination(), &File::new("/data/a.log"))
         .await
         .unwrap_err();
@@ -89,7 +89,7 @@ async fn gcs_invalid_token_surfaces_executor_err() {
     // A newline is not a valid HTTP header byte, so the GCS client build fails
     // offline — exercising the gcs arm's error mapping without a network.
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("bad\ntoken"));
-    let err = SdkTransfer
+    let err = SdkTransfer::default()
         .transfer(&creds, &destination(), &File::new("/data/a.log"))
         .await
         .unwrap_err();
