@@ -19,11 +19,11 @@ After this change, `Job` has `first_observed_at: DateTime<Utc>` and `last_observ
 
 ## Progress
 
-- [ ] Milestone 1: add fields, update the test helper, validate with preflight, commit.
+- [x] Milestone 1: add fields, update the test helper, validate, commit. (2026-07-14: fields added to `agent/src/upload/job.rs`, `make_job` extended in `agent/tests/upload/queue.rs`; `cargo test --locked --features test upload` passed 43/43 and `cargo fmt -p miru-agent -- --check` clean. Full preflight runs in a separate follow-up pass.)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- None. The construction-site grep from Context and Orientation was re-run before editing and still returned exactly two hits (the struct definition and `make_job`); the compiler confirmed no other construction sites.
 
 ## Decision Log
 
@@ -34,7 +34,7 @@ After this change, `Job` has `first_observed_at: DateTime<Utc>` and `last_observ
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+`Job` now carries `first_observed_at` and `last_observed_at` (`DateTime<Utc>`) with provenance doc comments, placed after `mtime`. The only construction site (`make_job` in `agent/tests/upload/queue.rs`) was extended with `Utc::now()` values; existing whole-struct queue assertions cover the new fields with no new tests, per the Decision Log. No serde derives, constructors, or producer/executor plumbing were added — mapping `StableFile` observations into `Job` and stamping `UploadSource` remain future PRs.
 
 ## Context and Orientation
 

@@ -11,6 +11,8 @@ fn make_job(name: &str) -> Job {
         size: 42,
         digest: format!("sha256:{name}"),
         mtime: Utc::now(),
+        first_observed_at: Utc::now(),
+        last_observed_at: Utc::now(),
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         release_id: "rls_1".to_string(),
