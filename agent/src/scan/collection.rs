@@ -223,7 +223,7 @@ fn has_stability_window_elapsed(
     candidate: &Candidate,
     now: DateTime<Utc>,
 ) -> bool {
-    let window = state.cfg.rule.source.stability_window_secs as i64;
+    let window = state.cfg.rule.source.stability_window_secs;
     // The candidate's stored observation is the "observation at discovery".
     let stable_since = candidate.first_obs.timestamp;
     now.signed_duration_since(stable_since).num_seconds() >= window
