@@ -99,7 +99,9 @@ where
             upload_rule_id: job.upload_rule_id.clone(),
             source: Box::new(UploadSource {
                 file_path: job.file.path().to_string_lossy().into_owned(),
-                file_modified_at: job.mtime.to_rfc3339(),
+                mtime: job.mtime.to_rfc3339(),
+                first_observed_at: job.first_observed_at.to_rfc3339(),
+                last_observed_at: job.last_observed_at.to_rfc3339(),
             }),
             digest: job.digest.clone(),
             size: job.size as i64,
@@ -139,7 +141,7 @@ where
             http::uploads::confirm(
                 &self.client,
                 http::uploads::ConfirmParams {
-                    upload_id: &created.upload.id,
+                    id: &created.upload.id,
                     token: &token,
                 },
             )

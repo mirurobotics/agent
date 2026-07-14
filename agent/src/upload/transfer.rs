@@ -42,8 +42,8 @@ impl ObjectTransfer for SdkTransfer {
         file: &File,
     ) -> Result<(), UploadErr> {
         match credentials.scheme {
-            Scheme::UPLOAD_SCHEME_S3 => transfer_s3(credentials, destination, file).await,
-            Scheme::UPLOAD_SCHEME_GCS => Err(unsupported("GCS uploads are not yet implemented")),
+            Scheme::S3 => transfer_s3(credentials, destination, file).await,
+            Scheme::Gcs => Err(unsupported("GCS uploads are not yet implemented")),
             Scheme::SchemeUnknown => Err(unsupported("unrecognized upload credential scheme")),
         }
     }
