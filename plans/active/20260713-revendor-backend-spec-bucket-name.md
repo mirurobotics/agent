@@ -23,12 +23,12 @@ Observable outcome: `grep -n bucket_name libs/backend-api/src/models/upload_dest
 
 ## Progress
 
-- [ ] M1: Re-vendor backend spec from openapi 8a902ed + regenerate models + absorb fallout (commit)
-- [ ] M2: Validate locally and via preflight/CI (clean before PR leaves draft)
+- [x] M1: Re-vendor backend spec from openapi 8a902ed + regenerate models + absorb fallout (commit)
+- [x] M2: Validate locally and via preflight/CI (clean before PR leaves draft)
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- The M1 verification grep `grep -c 'bucket_name' api/specs/backend/v04.yaml` returns 11, not the expected 10: the new `x-git-commit.message` header line ("feat(uploads): add bucket_name to upload destination (#199)") itself contains `bucket_name`. The spec body has exactly the expected 10 occurrences.
 
 ## Decision Log
 
@@ -41,7 +41,7 @@ Observable outcome: `grep -n bucket_name libs/backend-api/src/models/upload_dest
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Executed exactly as planned with zero fallout. The wholesale copy of `openapi.gen.yaml` (8a902ed) plus the three header customizations produced the expected 8-line semantic spec diff, and `./api/regen.sh` changed exactly one generated file: `libs/backend-api/src/models/upload_destination.rs` now carries required `pub bucket_name: String` (and `UploadDestination::new(bucket_id, bucket_name, object_key)`). No hand-written call sites existed, so no source or test edits were needed: `cargo check --workspace` clean, `./scripts/test.sh` 1462 passed / 0 failed (same count as before), `./scripts/update-deps.sh` left `Cargo.lock` unchanged, `./scripts/lint.sh` and `./scripts/preflight.sh` clean. One milestone commit (M1); M2 produced no fixup commit.
 
 ## Context and Orientation
 
