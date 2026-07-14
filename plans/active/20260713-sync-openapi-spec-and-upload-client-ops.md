@@ -25,12 +25,13 @@ Observable outcome: `http::uploads::create/vend_credentials/confirm` free functi
 
 - [x] M1: Re-vendor backend spec from openapi a1bcdf3 + regenerate models (commit 86501a6)
 - [x] M2: Fix hand-written code for `stability_window_secs` i64 and removed `content` field (commit 76f82a3)
-- [ ] M3: Implement upload HTTP client operations + mock + tests
+- [x] M3: Implement upload HTTP client operations + mock + tests (commit e48b5b3)
 - [ ] M4: Validate locally and via preflight/CI (clean before PR leaves draft)
 
 ## Surprises & Discoveries
 
 - M1/M2 landed as planned: the regen delta matched the Context section exactly (2 files deleted, 4 added, expected modified set; `libs/device-api` untouched), all verification greps passed, and the i64 fallout was confined to the predicted files. Full test suite green after M2 (1449 tests passed).
+- M3: `cargo fmt --all` produced formatting fallout in `libs/` generated models; that fallout was reverted as out of scope (CI's fmt check is `cargo fmt -p miru-agent -- --check`, which does not cover generated libs). All 6 new `http::uploads` tests pass; full suite green (1780 tests, 0 failures).
 
 ## Decision Log
 
