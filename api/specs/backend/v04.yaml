@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.0-pre
   x-git-commit:
-    sha: a1bcdf376f6aa360a024730ed941dc5a6547b63c
-    url: https://github.com/mirurobotics/openapi/commit/a1bcdf376f6aa360a024730ed941dc5a6547b63c
-    message: 'feat(buckets): expose read-only gcs session_name for wif binding (#197)'
+    sha: 8a902ed159a0215eb439a57caa0541404caf968d
+    url: https://github.com/mirurobotics/openapi/commit/8a902ed159a0215eb439a57caa0541404caf968d
+    message: 'feat(uploads): add bucket_name to upload destination (#199)'
 servers:
   - url: https://staging.api.mirurobotics.com/agent/v1
     description: Staging
@@ -1293,18 +1293,24 @@ components:
       description: Destination-side details of where an upload was written.
       required:
         - bucket_id
+        - bucket_name
         - object_key
       properties:
         bucket_id:
           type: string
           example: bkt_123
           description: ID of the registered bucket the file was uploaded to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Physical name of the bucket in the object store. This is the bucket parameter the device passes to the native cloud SDK (not the Miru `bucket_id`).
         object_key:
           type: string
           example: logs/dvc_123/robot.log
           description: The object path the file was written to in the destination bucket. Carries the device's verified ID.
       example:
         bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
         object_key: logs/dvc_123/robot.log
     UploadStatus:
       title: Upload Status
@@ -1453,6 +1459,7 @@ components:
           last_observed_at: '2021-01-01T00:00:05Z'
         destination:
           bucket_id: bkt_123
+          bucket_name: my-uploads-bucket
           object_key: logs/dvc_123/robot.log
         digest: sha256:1234567890
         size: 1048576
@@ -1654,6 +1661,7 @@ components:
             last_observed_at: '2021-01-01T00:00:05Z'
           destination:
             bucket_id: bkt_123
+            bucket_name: my-uploads-bucket
             object_key: logs/dvc_123/robot.log
           digest: sha256:1234567890
           size: 1048576
