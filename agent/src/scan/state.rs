@@ -186,7 +186,7 @@ mod tests {
         }
     }
 
-    fn rule(collection_id: &str, glob: &str, window: i32) -> UploadRule {
+    fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
         UploadRule {
             upload_collection_id: collection_id.to_string(),
             source: UploadRuleSource {
@@ -197,7 +197,7 @@ mod tests {
         }
     }
 
-    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i32) -> Config {
+    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i64) -> Config {
         Config {
             deployment: deployment(dpl_id),
             rule: rule(collection_id, glob, window),

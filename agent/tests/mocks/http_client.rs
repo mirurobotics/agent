@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::{
     Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError, ErrorResponse,
-    GitCommit as BackendGitCommit, Release as BackendRelease, TokenResponse,
+    GitCommit as BackendGitCommit, Release as BackendRelease, TokenResponse, Upload,
+    UploadCredentials, UploadWithCredentials,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};
 
@@ -32,6 +33,9 @@ pub enum Call {
     GetConfigInstanceContent,
     GetRelease,
     GetGitCommit,
+    CreateUpload,
+    VendUploadCredentials,
+    ConfirmUpload,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -56,6 +60,10 @@ type SingleGitCommitFn = Mutex<Box<dyn Fn() -> Result<BackendGitCommit, HTTPErr>
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 type GetDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
+type CreateUploadFn = Mutex<Box<dyn Fn() -> Result<UploadWithCredentials, HTTPErr> + Send + Sync>>;
+type VendUploadCredentialsFn =
+    Mutex<Box<dyn Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync>>;
+type ConfirmUploadFn = Mutex<Box<dyn Fn() -> Result<Upload, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
@@ -69,6 +77,9 @@ pub struct MockClient {
     pub get_release_fn: SingleReleaseFn,
     pub get_git_commit_fn: SingleGitCommitFn,
     pub get_cfg_inst_content_fn: GetCfgInstContentFn,
+    pub create_upload_fn: CreateUploadFn,
+    pub vend_upload_credentials_fn: VendUploadCredentialsFn,
+    pub confirm_upload_fn: ConfirmUploadFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -86,6 +97,9 @@ impl Default for MockClient {
             get_release_fn: Mutex::new(Box::new(|| Ok(BackendRelease::default()))),
             get_git_commit_fn: Mutex::new(Box::new(|| Ok(BackendGitCommit::default()))),
             get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
+            create_upload_fn: Mutex::new(Box::new(|| Ok(UploadWithCredentials::default()))),
+            vend_upload_credentials_fn: Mutex::new(Box::new(|| Ok(UploadCredentials::default()))),
+            confirm_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -162,6 +176,27 @@ impl MockClient {
         *self.get_cfg_inst_content_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_create_upload<F>(&self, f: F)
+    where
+        F: Fn() -> Result<UploadWithCredentials, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.create_upload_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_vend_upload_credentials<F>(&self, f: F)
+    where
+        F: Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.vend_upload_credentials_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_confirm_upload<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Upload, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.confirm_upload_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn call_count(&self, target: Call) -> usize {
         self.requests
             .lock()
@@ -214,6 +249,19 @@ impl MockClient {
             }
             (m, p) if *m == Method::GET && p.starts_with("/releases/") => Call::GetRelease,
             (m, p) if *m == Method::GET && p.starts_with("/git_commits/") => Call::GetGitCommit,
+            (m, p)
+                if *m == Method::POST
+                    && p.starts_with("/uploads/")
+                    && p.ends_with("/credentials") =>
+            {
+                Call::VendUploadCredentials
+            }
+            (m, p)
+                if *m == Method::POST && p.starts_with("/uploads/") && p.ends_with("/confirm") =>
+            {
+                Call::ConfirmUpload
+            }
+            (m, p) if *m == Method::POST && p == "/uploads" => Call::CreateUpload,
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
     }
@@ -233,6 +281,11 @@ impl MockClient {
             Call::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
             Call::GetRelease => json(&(self.get_release_fn.lock().unwrap())()?),
             Call::GetGitCommit => json(&(self.get_git_commit_fn.lock().unwrap())()?),
+            Call::CreateUpload => json(&(self.create_upload_fn.lock().unwrap())()?),
+            Call::VendUploadCredentials => {
+                json(&(self.vend_upload_credentials_fn.lock().unwrap())()?)
+            }
+            Call::ConfirmUpload => json(&(self.confirm_upload_fn.lock().unwrap())()?),
             Call::GetConfigInstanceContent => {
                 // Extract ID from /config_instances/{id}/content
                 let id = path

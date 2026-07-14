@@ -519,7 +519,7 @@ mod tests {
         rule_id: &str,
         upload_collection_id: &str,
         glob: &str,
-        stability_window_secs: i32,
+        stability_window_secs: i64,
     ) -> UploadRule {
         UploadRule {
             id: rule_id.to_string(),
@@ -557,7 +557,7 @@ mod tests {
     /// `upload_collection_id` is [`DEFAULT_COLL_ID`] (deployment "d",
     /// rule "r", window `window`). Returns (dir, clock, scanner).
     /// Hold `dir` to keep the temp tree alive.
-    async fn single_coll(window: i32) -> (dirs::TempDir, Clock, Scanner) {
+    async fn single_coll(window: i64) -> (dirs::TempDir, Clock, Scanner) {
         let dir = dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
@@ -683,7 +683,7 @@ mod tests {
         state_path: File,
     }
 
-    async fn persisted_coll(window: i32) -> PersistedScannerFixture {
+    async fn persisted_coll(window: i64) -> PersistedScannerFixture {
         let dir = dirs::temp("testing").unwrap();
         let state_path = dir.file("scanner.json");
         let clock = Clock::new(1000);

@@ -50,7 +50,7 @@ mod tests {
     // =============================== TEST HELPERS ================================= //
 
     /// Build an UploadRule from Default with only the source fields set.
-    fn rule_with(id: &str, glob: &str, stability_window_secs: i32) -> UploadRule {
+    fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> UploadRule {
         UploadRule {
             id: id.to_string(),
             source: UploadRuleSource {

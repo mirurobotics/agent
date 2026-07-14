@@ -223,7 +223,7 @@ fn has_stability_window_elapsed(
     candidate: &Candidate,
     now: DateTime<Utc>,
 ) -> bool {
-    let window = state.cfg.rule.source.stability_window_secs as i64;
+    let window = state.cfg.rule.source.stability_window_secs;
     // The candidate's stored observation is the "observation at discovery".
     let stable_since = candidate.first_obs.timestamp;
     now.signed_duration_since(stable_since).num_seconds() >= window
@@ -330,7 +330,7 @@ mod tests {
     }
 
     /// An UploadRule pinned to a collection id, glob, and stability window.
-    fn rule(collection_id: &str, glob: &str, window: i32) -> UploadRule {
+    fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
         UploadRule {
             upload_collection_id: collection_id.to_string(),
             source: UploadRuleSource {
@@ -342,7 +342,7 @@ mod tests {
     }
 
     /// A Config wiring the deployment id and a rule together.
-    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i32) -> Config {
+    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i64) -> Config {
         Config {
             deployment: deployment(dpl_id),
             rule: rule(collection_id, glob, window),
@@ -508,7 +508,7 @@ mod tests {
         cand: Candidate,
     }
 
-    async fn case(name: &str, window: i32) -> Case {
+    async fn case(name: &str, window: i64) -> Case {
         let dir = dirs::temp("testing").unwrap();
         let file = write(&dir, name, b"aaaa").await;
         let state = CollectionState::new(config("d", "coll", &glob_for(&dir), window));
@@ -541,7 +541,7 @@ mod tests {
         state
     }
 
-    async fn scanner_new(dir: &Dir, window: i32, at: DateTime<Utc>) -> CollectionScanner {
+    async fn scanner_new(dir: &Dir, window: i64, at: DateTime<Utc>) -> CollectionScanner {
         CollectionScanner::new(config("d", "coll", &glob_for(dir), window), at)
             .await
             .unwrap()
