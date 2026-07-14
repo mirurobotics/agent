@@ -12,9 +12,24 @@ pub struct QueueFullErr {
 impl crate::errors::Error for QueueFullErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("upload executor error: {source}")]
+pub struct ExecutorErr {
+    #[source]
+    pub source: Box<dyn std::error::Error + Send + Sync>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ExecutorErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum UploadErr {
     #[error(transparent)]
     QueueFullErr(QueueFullErr),
+    #[error(transparent)]
+    ExecutorErr(ExecutorErr),
 }
 
-crate::impl_error!(UploadErr { QueueFullErr });
+crate::impl_error!(UploadErr {
+    QueueFullErr,
+    ExecutorErr
+});
