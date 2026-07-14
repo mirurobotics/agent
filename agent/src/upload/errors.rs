@@ -14,12 +14,7 @@ impl crate::errors::Error for QueueFullErr {}
 #[derive(Debug, thiserror::Error)]
 pub enum UploadErr {
     #[error(transparent)]
-    FileSysErr(#[from] crate::filesys::FileSysErr),
-    #[error(transparent)]
     QueueFullErr(QueueFullErr),
 }
 
-crate::impl_error!(UploadErr {
-    FileSysErr,
-    QueueFullErr
-});
+crate::impl_error!(UploadErr { QueueFullErr });
