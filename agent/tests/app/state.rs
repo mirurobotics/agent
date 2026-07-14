@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 // internal crates
 use miru_agent::app::state::AppState;
-use miru_agent::authn::Token;
+use miru_agent::authn::{Token, TokenManagerExt};
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
 use miru_agent::filesys::{dirs, files, Dir, FileSysErr, PathExt, WriteOptions};
@@ -318,12 +318,9 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        // stop the scanner actor directly so AppState::shutdown's scanner
-        // step errors (send on a closed actor channel)
+        // stop the scanner actor directly so AppState::shutdown errors
         state.scanner.as_ref().unwrap().shutdown().await.unwrap();
 
-        // the scanner failure surfaces as the returned error, but the rest
-        // of the chain still ran
         let err = state.shutdown().await.expect_err("scanner error surfaces");
         assert!(matches!(err, ServerErr::ScanErr(_)));
         state_handle.await;
@@ -348,15 +345,84 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        // stop the syncer actor directly so AppState::shutdown's syncer step
-        // errors (send on a closed actor channel)
+        // stop the syncer actor directly so AppState::shutdown errors
         state.syncer.shutdown().await.unwrap();
 
-        // the syncer failure surfaces as the returned error, but storage and
-        // the token manager still shut down: the device is persisted offline
-        // and the bundled state handle resolves instead of hanging
         let err = state.shutdown().await.expect_err("syncer error surfaces");
         assert!(matches!(err, ServerErr::SyncErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn event_hub_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // set the device online so the offline assertion below proves the
+        // storage shutdown actually ran
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the event hub actor directly so AppState::shutdown errors
+        state.event_hub.shutdown().await.unwrap();
+
+        let err = state
+            .shutdown()
+            .await
+            .expect_err("event hub error surfaces");
+        assert!(matches!(err, ServerErr::EventsErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn storage_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // shut storage down directly so AppState::shutdown errors
+        state.storage.shutdown().await.unwrap();
+
+        let err = state.shutdown().await.expect_err("storage error surfaces");
+        assert!(matches!(err, ServerErr::DiskErr(_)));
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn token_mngr_shutdown_error_is_surfaced() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // set the device online so the offline assertion below proves the
+        // storage shutdown actually ran
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the token manager actor directly so AppState::shutdown errors
+        state.token_mngr.shutdown().await.unwrap();
+
+        let err = state
+            .shutdown()
+            .await
+            .expect_err("token manager error surfaces");
+        assert!(matches!(err, ServerErr::AuthnErr(_)));
         state_handle.await;
 
         let device = files::read_json::<Device>(&env.layout.device())
