@@ -1,5 +1,6 @@
 // internal crates
-use miru_agent::errors::{Code, Error};
+use crate::errors::harnesses::{assert_error, Expected};
+use miru_agent::errors::Code;
 use miru_agent::events::errors::*;
 
 // external crates
@@ -19,15 +20,9 @@ mod cursor_expired {
     }
 
     #[test]
-    fn code_is_cursor_expired() {
+    fn cursor_expired_error_trait_surface() {
         let err = cursor_expired_err();
-        assert!(matches!(err.code(), Code::CursorExpired));
-    }
-
-    #[test]
-    fn http_status_is_gone() {
-        let err = cursor_expired_err();
-        assert_eq!(err.http_status(), StatusCode::GONE);
+        assert_error(&err, Expected::new(Code::CursorExpired, StatusCode::GONE));
     }
 
     #[test]
@@ -54,15 +49,12 @@ mod malformed_cursor {
     }
 
     #[test]
-    fn code_is_malformed_cursor() {
+    fn malformed_cursor_error_trait_surface() {
         let err = malformed_cursor_err();
-        assert!(matches!(err.code(), Code::MalformedCursor));
-    }
-
-    #[test]
-    fn http_status_is_bad_request() {
-        let err = malformed_cursor_err();
-        assert_eq!(err.http_status(), StatusCode::BAD_REQUEST);
+        assert_error(
+            &err,
+            Expected::new(Code::MalformedCursor, StatusCode::BAD_REQUEST),
+        );
     }
 }
 
@@ -92,22 +84,25 @@ mod delegation {
     use super::*;
 
     #[test]
-    fn events_err_delegates_code_for_cursor_expired() {
+    fn events_err_delegates_trait_surface_for_cursor_expired() {
         let inner = CursorExpiredErr {
             earliest_available: 1,
             requested: 0,
             trace: miru_agent::trace!(),
         };
         let err = EventsErr::CursorExpiredErr(inner);
-        assert!(matches!(err.code(), Code::CursorExpired));
+        assert_error(&err, Expected::new(Code::CursorExpired, StatusCode::GONE));
     }
 
     #[test]
-    fn events_err_delegates_http_status_for_malformed_cursor() {
+    fn events_err_delegates_trait_surface_for_malformed_cursor() {
         let inner = MalformedCursorErr {
             trace: miru_agent::trace!(),
         };
         let err = EventsErr::MalformedCursorErr(inner);
-        assert_eq!(err.http_status(), StatusCode::BAD_REQUEST);
+        assert_error(
+            &err,
+            Expected::new(Code::MalformedCursor, StatusCode::BAD_REQUEST),
+        );
     }
 }

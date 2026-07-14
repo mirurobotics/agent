@@ -1,5 +1,6 @@
 // internal crates
-use miru_agent::errors::{Code, Error};
+use crate::errors::harnesses::{assert_error, Expected};
+use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;
 use miru_agent::filesys::{files, WriteOptions};
@@ -219,9 +220,10 @@ pub mod put {
                 .unwrap_err();
 
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
-            assert!(matches!(err.code(), Code::InternalServerError));
-            assert_eq!(err.http_status().as_u16(), 500);
-            assert!(!err.is_network_conn_err());
+            assert_error(
+                &err,
+                Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
+            );
             // Exercise the RequestFailedErr Display impl (status + operation).
             assert!(err.to_string().contains("put_object"));
         }
@@ -482,6 +484,10 @@ pub mod get {
             let err = store.get(&obj(key), dest.file()).await.unwrap_err();
 
             assert!(matches!(err, S3Err::ObjectNotFoundErr(_)));
+            assert_error(
+                &err,
+                Expected::new(Code::ResourceNotFound, HTTPCode::NOT_FOUND),
+            );
         }
     }
 
