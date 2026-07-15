@@ -33,3 +33,15 @@ crate::impl_error!(UploadErr {
     QueueFullErr,
     ExecutorErr
 });
+
+/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the single
+/// error surface the actor sees from executor and transfer failures.
+pub(crate) fn executor_err<E>(source: E) -> UploadErr
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    UploadErr::ExecutorErr(ExecutorErr {
+        source: source.into(),
+        trace: crate::trace!(),
+    })
+}

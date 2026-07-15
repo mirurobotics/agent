@@ -5,8 +5,7 @@ use std::future::Future;
 use crate::filesys::File;
 use crate::gcs;
 use crate::s3;
-use crate::trace;
-use crate::upload::errors::{ExecutorErr, UploadErr};
+use crate::upload::errors::{executor_err, UploadErr};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
@@ -81,7 +80,7 @@ impl SdkTransfer {
         let creds = credentials
             .s3_credentials
             .as_deref()
-            .ok_or_else(|| unsupported("s3 scheme is missing s3_credentials"))?;
+            .ok_or_else(|| executor_err("s3 scheme is missing s3_credentials"))?;
         let store = self.s3_store(s3_config(creds));
         let object = s3::Object {
             bucket: destination.bucket_name.clone(),
@@ -101,7 +100,7 @@ impl SdkTransfer {
         let creds = credentials
             .gcs_credentials
             .as_deref()
-            .ok_or_else(|| unsupported("gcs scheme is missing gcs_credentials"))?;
+            .ok_or_else(|| executor_err("gcs scheme is missing gcs_credentials"))?;
         let store = self
             .gcs_store(gcs::Credentials {
                 access_token: creds.access_token.clone(),
@@ -144,7 +143,7 @@ impl ObjectTransfer for SdkTransfer {
         match credentials.scheme {
             Scheme::S3 => self.transfer_s3(credentials, destination, file).await,
             Scheme::Gcs => self.transfer_gcs(credentials, destination, file).await,
-            Scheme::SchemeUnknown => Err(unsupported("unrecognized upload credential scheme")),
+            Scheme::SchemeUnknown => Err(executor_err("unrecognized upload credential scheme")),
         }
     }
 }
@@ -160,25 +159,4 @@ pub fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
         },
         region: creds.region.clone(),
     }
-}
-
-/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the single error
-/// surface the actor sees from transfer failures.
-fn executor_err<E>(source: E) -> UploadErr
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    UploadErr::ExecutorErr(ExecutorErr {
-        source: Box::new(source),
-        trace: trace!(),
-    })
-}
-
-/// Builds an [`ExecutorErr`] from a static reason, for credential/scheme cases
-/// the device cannot act on.
-fn unsupported(msg: &str) -> UploadErr {
-    UploadErr::ExecutorErr(ExecutorErr {
-        source: msg.to_string().into(),
-        trace: trace!(),
-    })
 }

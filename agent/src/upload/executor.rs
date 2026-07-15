@@ -1,33 +1,105 @@
-// internal crates
-use crate::upload::{errors::UploadErr, job::Job};
+// standard crates
+use std::sync::Arc;
 
-// external crates
-use tracing::info;
+// internal crates
+use crate::authn::{Token, TokenManagerExt};
+use crate::http::{self, ClientI};
+use crate::upload::{
+    errors::{executor_err, UploadErr},
+    job::Job,
+    transfer::ObjectTransfer,
+};
+use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
-/// The production executor (a follow-up PR) fetches short-lived downscoped
-/// cloud credentials from the backend (`POST /uploads`), transfers the file
-/// with the native storage SDK, then confirms the upload. This trait keeps the
-/// actor independent of those mechanics.
+/// The production executor fetches short-lived downscoped cloud credentials from the
+/// backend, transfers the file with the native storage SDK, then confirms the upload.
+/// This trait keeps the actor independent of those mechanics.
 ///
 /// # Cancel safety
 ///
-/// The actor drops an in-progress `upload` future on shutdown, so
-/// implementations must tolerate being cancelled at any await point. An
-/// interrupted transfer is re-driven after restart via scanner re-observation
-/// plus backend digest dedup.
+/// The actor drops an in-progress `upload` future on shutdown, so implementations must
+/// tolerate being cancelled at any await point. An interrupted transfer is re-driven
+/// after restart via scanner re-observation plus backend digest dedup.
 pub trait UploadExecutor: Send + Sync {
     fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
-/// Placeholder executor that logs the job and reports success. Stands in until
-/// the real credential-fetch + native-SDK executor lands.
-pub struct LogExecutor;
+pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
+    http_client: Arc<C>,
+    token_mngr: Arc<T>,
+    transfer: X,
+}
 
-impl UploadExecutor for LogExecutor {
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
+    pub fn new(http_client: Arc<C>, token_mngr: Arc<T>, transfer: X) -> Self {
+        Self {
+            http_client,
+            token_mngr,
+            transfer,
+        }
+    }
+
+    async fn token(&self) -> Result<Arc<Token>, UploadErr> {
+        self.token_mngr.get_token().await.map_err(executor_err)
+    }
+
+    async fn create_upload(&self, job: &Job) -> Result<UploadWithCredentials, UploadErr> {
+        let token = self.token().await?;
+        let payload = new_upl_request(job);
+        http::with_retry(|| async {
+            let params = http::uploads::CreateParams {
+                payload: &payload,
+                token: &token.token,
+            };
+            http::uploads::create(self.http_client.as_ref(), params).await
+        })
+        .await
+        .map_err(executor_err)
+    }
+
+    async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
+        let token = self.token().await?;
+        http::with_retry(|| async {
+            let params = http::uploads::ConfirmParams {
+                id,
+                token: &token.token,
+            };
+            http::uploads::confirm(self.http_client.as_ref(), params).await
+        })
+        .await
+        .map(|_| ())
+        .map_err(executor_err)
+    }
+}
+
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
     async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
-        info!("LogExecutor: pretending to upload {job:?}");
+        let resp = self.create_upload(job).await?;
+
+        self.transfer
+            .transfer(&resp.credentials, &resp.upload.destination, &job.file)
+            .await?;
+
+        self.confirm_upload(&resp.upload.id).await?;
         Ok(())
+    }
+}
+
+pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
+    CreateUploadRequest {
+        upload_rule_id: job.upload_rule_id.clone(),
+        source: Box::new(UploadSource {
+            file_path: job.file.to_string(),
+            mtime: job.mtime.to_rfc3339(),
+            first_observed_at: job.first_observed_at.to_rfc3339(),
+            last_observed_at: job.last_observed_at.to_rfc3339(),
+        }),
+        digest: job.digest.clone(),
+        size: i64::try_from(job.size).unwrap_or(i64::MAX),
+        incomplete: None,
+        release_id: job.release_id.clone(),
+        deployment_id: job.deployment_id.clone(),
     }
 }
