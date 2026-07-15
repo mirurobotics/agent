@@ -154,21 +154,29 @@ async fn retry_backoff_follows_expected_sequence() {
         recorded.lock().unwrap().push(duration);
         async {}
     };
-    let (uploader, handle) =
-        Uploader::spawn(16, mock.clone(), UploaderOptions::default(), sleep_fn).unwrap();
+    // pin the backoff so the assertion is independent of production defaults
+    let options = UploaderOptions {
+        backoff: miru_agent::cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 30,
+        },
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, sleep_fn).unwrap();
 
     within(uploader.enqueue(make_job("a.log"))).await.unwrap();
     for _ in 0..7 {
         within(started_rx.recv()).await.unwrap();
     }
 
-    // in-place sleeps only (exponent = total attempts - 1); none around the
-    // two requeues
+    // in-place sleeps only (exponent = this round's attempts - 1); none around
+    // the two requeues, and the backoff resets with each round
     let expected = vec![
         Duration::from_secs(1),
         Duration::from_secs(2),
-        Duration::from_secs(8),
-        Duration::from_secs(16),
+        Duration::from_secs(1),
+        Duration::from_secs(2),
     ];
     assert_eq!(*sleeps.lock().unwrap(), expected);
 

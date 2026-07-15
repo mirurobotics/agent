@@ -38,8 +38,8 @@ pub struct UploaderOptions {
     /// Global per-job attempt cap across rounds; when exhausted, the job is
     /// dropped with a warning.
     pub max_total_attempts: u32,
-    /// Backoff between in-place attempts; the exponent is the job's total
-    /// attempt count so far minus one.
+    /// Backoff between in-place attempts; the exponent is the current round's
+    /// attempt count minus one.
     pub backoff: cooldown::Backoff,
 }
 
@@ -50,9 +50,9 @@ impl Default for UploaderOptions {
             in_place_attempts: 3,
             max_total_attempts: 9,
             backoff: cooldown::Backoff {
-                base_secs: 1,
+                base_secs: 10,
                 growth_factor: 2,
-                max_secs: 30,
+                max_secs: 120,
             },
         }
     }
@@ -148,7 +148,7 @@ where
     /// On a round-ending failure the job is requeued at the tail (no sleep);
     /// at `options.max_total_attempts` total failures it is dropped.
     async fn run_round(&mut self, mut entry: QueueEntry) -> Flow {
-        for attempt_in_round in 1..=self.options.in_place_attempts {
+        for attempt_this_round in 1..=self.options.in_place_attempts {
             entry.attempts += 1;
 
             let err = match self.attempt_upload(&entry).await {
@@ -165,15 +165,15 @@ where
                 return Flow::Continue;
             }
 
-            // round over: requeue at the tail with attempts preserved; no
-            // sleep on the round-ending failure
-            if attempt_in_round == self.options.in_place_attempts {
+            // round over: requeue at the tail with attempts preserved; no sleep on the
+            // round-ending failure
+            if attempt_this_round == self.options.in_place_attempts {
                 self.requeue(entry).await;
                 return Flow::Continue;
             }
 
             // back off before the next in-place attempt
-            if let Flow::Shutdown = self.backoff_sleep(entry.attempts).await {
+            if let Flow::Shutdown = self.await_next_round(attempt_this_round).await {
                 return Flow::Shutdown;
             }
         }
@@ -187,7 +187,7 @@ where
         let executor = self.executor.clone();
         let job = entry.job.clone();
         match self
-            .drive_interleaved(async move { executor.upload(&job).await })
+            .run_until_shutdown(async move { executor.upload(&job).await })
             .await
         {
             None => AttemptOutcome::ShuttingDown,
@@ -201,21 +201,21 @@ where
     async fn requeue(&mut self, entry: QueueEntry) {
         let job = entry.job.clone();
         if let Err(requeue_err) = self.queue.requeue(entry).await {
-            warn!(
+            error!(
                 "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
                 job.upload_rule_id, job.file, job.digest
             );
         }
     }
 
-    /// Back off before the next in-place attempt, staying responsive to
-    /// commands. `attempts` is the job's total attempt count so far; the
-    /// backoff exponent is that minus one. Returns [`Flow::Shutdown`] if a
-    /// shutdown arrived during the sleep.
-    async fn backoff_sleep(&mut self, attempts: u32) -> Flow {
-        let secs = cooldown::calc(&self.options.backoff, attempts - 1);
+    /// Back off before the next in-place attempt, staying responsive to commands.
+    /// `attempt_this_round` is the number of attempts made in the current round; the
+    /// backoff exponent is that minus one. Returns [`Flow::Shutdown`] if a shutdown
+    /// arrived during the sleep.
+    async fn await_next_round(&mut self, attempt_this_round: u32) -> Flow {
+        let secs = cooldown::calc(&self.options.backoff, attempt_this_round - 1);
         let sleep_fut = (self.sleep_fn)(Duration::from_secs(secs.max(0) as u64));
-        match self.drive_interleaved(sleep_fut).await {
+        match self.run_until_shutdown(sleep_fut).await {
             None => Flow::Shutdown,
             Some(()) => Flow::Continue,
         }
@@ -235,10 +235,10 @@ where
         );
     }
 
-    /// Drive `fut` to completion while continuing to serve commands. Returns
+    /// Run `fut` to completion while continuing to serve commands. Returns
     /// `None` when a shutdown arrived (or all senders dropped), in which case
     /// `fut` is dropped — cancelling an in-flight upload or sleep.
-    async fn drive_interleaved<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
+    async fn run_until_shutdown<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
         tokio::pin!(fut);
         loop {
             tokio::select! {
