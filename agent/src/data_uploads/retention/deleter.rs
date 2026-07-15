@@ -391,7 +391,7 @@ mod tests {
     use crate::cooldown;
     use crate::data_uploads::retention::job::Job;
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
-    use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+    use crate::filesys::{dirs, files, state_file::Options, Dir, File, PathExt, WriteOptions};
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -473,9 +473,15 @@ mod tests {
 
     /// A persistence handle for the snapshot at `file`.
     async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
-        DeleteQueueSnapshotFile::new_with_default(file.clone(), DeleteQueueSnapshot::default())
-            .await
-            .unwrap()
+        DeleteQueueSnapshotFile::open(
+            file.clone(),
+            Options {
+                default: Some(DeleteQueueSnapshot::default()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
     }
 
     /// Two symlinks pointing at each other. `stat` and `open` on either fail
