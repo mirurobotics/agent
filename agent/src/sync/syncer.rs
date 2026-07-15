@@ -15,6 +15,7 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
+use secrecy::ExposeSecret;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
@@ -244,7 +245,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             http_client: self.http_client.as_ref(),
             storage: &sync_storage,
             opts: &self.deploy_opts,
-            token: &token.token,
+            token: token.token.expose_secret(),
             event_hub: &self.event_hub,
         })
         .await

@@ -7,6 +7,7 @@ use miru_agent::models::Device;
 
 // external crates
 use chrono::{Duration, Utc};
+use secrecy::SecretString;
 
 pub mod assert_activated {
     use super::*;
@@ -100,7 +101,7 @@ pub mod resolve_device_id {
         let auth = layout.auth();
         dirs::create_if_absent(&auth.root).await.unwrap();
         let token = Token {
-            token: new_jwt("dvc_from_jwt"),
+            token: SecretString::from(new_jwt("dvc_from_jwt")),
             expires_at: Utc::now() + Duration::minutes(5),
         };
         files::write_json(&auth.token(), &token, WriteOptions::OVERWRITE_ATOMIC)

@@ -12,6 +12,7 @@ use miru_agent::http::{self, HTTPErr};
 
 // external crates
 use chrono::{Duration, Utc};
+use secrecy::ExposeSecret;
 use tokio::task::JoinHandle;
 
 /// Setup a TokenManager with a dummy private key (for tests that don't reach RSA signing).
@@ -306,7 +307,7 @@ pub mod refresh_token {
 
         token_mngr.refresh_token().await.unwrap();
         let token = token_mngr.get_token().await.unwrap();
-        assert_eq!(token.token, "token");
+        assert_eq!(token.token.expose_secret(), "token");
         assert_eq!(token.expires_at, expires_at);
         token_mngr.shutdown().await.unwrap();
         worker_handle.await.unwrap();
@@ -331,7 +332,7 @@ pub mod refresh_token {
 
         token_mngr.refresh_token().await.unwrap();
         let token = token_mngr.get_token().await.unwrap();
-        assert_eq!(token.token, "token");
+        assert_eq!(token.token.expose_secret(), "token");
         assert_eq!(token.expires_at, expires_at);
         token_mngr.shutdown().await.unwrap();
         worker_handle.await.unwrap();
@@ -355,11 +356,11 @@ pub mod refresh_token {
 
         token_mngr.refresh_token().await.unwrap();
         let token = token_mngr.get_token().await.unwrap();
-        assert_eq!(token.token, "token-0");
+        assert_eq!(token.token.expose_secret(), "token-0");
 
         token_mngr.refresh_token().await.unwrap();
         let token = token_mngr.get_token().await.unwrap();
-        assert_eq!(token.token, "token-1");
+        assert_eq!(token.token.expose_secret(), "token-1");
         token_mngr.shutdown().await.unwrap();
         worker_handle.await.unwrap();
     }
@@ -394,7 +395,7 @@ pub mod arc_delegation {
         let arc_mngr = Arc::new(token_mngr);
         arc_mngr.refresh_token().await.unwrap();
         let token = arc_mngr.get_token().await.unwrap();
-        assert_eq!(token.token, "arc-token");
+        assert_eq!(token.token.expose_secret(), "arc-token");
         arc_mngr.shutdown().await.unwrap();
         worker_handle.await.unwrap();
     }

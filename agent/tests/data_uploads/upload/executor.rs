@@ -27,6 +27,7 @@ use miru_agent::http::request::Params;
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
 use aws_smithy_types::body::SdkBody;
 use chrono::{TimeZone, Utc};
+use secrecy::SecretString;
 use serde_json::json;
 
 // ================================ HELPERS ======================================== //
@@ -100,7 +101,7 @@ fn uploaded_response() -> UploadWithCredentials {
 
 fn token_manager() -> Arc<MockTokenManager> {
     Arc::new(MockTokenManager::new(Token {
-        token: "test-token".to_string(),
+        token: SecretString::from("test-token"),
         expires_at: Utc::now() + chrono::Duration::hours(1),
     }))
 }

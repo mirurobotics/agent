@@ -10,6 +10,7 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
+use secrecy::SecretString;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -50,7 +51,7 @@ pub async fn issue_token(
         })
     })?;
     Ok(Token {
-        token: resp.token,
+        token: SecretString::from(resp.token),
         expires_at,
     })
 }
