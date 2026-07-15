@@ -280,6 +280,37 @@ async fn enqueue_after_shutdown_returns_send_err() {
 }
 
 #[tokio::test]
+async fn len_after_shutdown_returns_send_err() {
+    let (mock, _started_rx) = MockUploadExecutor::new();
+    let (uploader, handle) = spawn_uploader(mock.clone());
+
+    within(uploader.shutdown()).await.unwrap();
+    within(handle).await.unwrap();
+
+    let result = within(uploader.len()).await;
+    assert!(
+        matches!(result, Err(UploadErr::SendActorMessageErr(_))),
+        "expected SendActorMessageErr, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_after_worker_exit_returns_send_err() {
+    let (mock, _started_rx) = MockUploadExecutor::new();
+    let (uploader, handle) = spawn_uploader(mock.clone());
+
+    within(uploader.shutdown()).await.unwrap();
+    within(handle).await.unwrap();
+
+    // the worker is gone; a second shutdown can't reach it
+    let result = within(uploader.shutdown()).await;
+    assert!(
+        matches!(result, Err(UploadErr::SendActorMessageErr(_))),
+        "expected SendActorMessageErr, got: {result:?}"
+    );
+}
+
+#[tokio::test]
 async fn worker_exits_when_all_handles_dropped() {
     let (mock, _started_rx) = MockUploadExecutor::new();
     let (uploader, handle) = spawn_uploader(mock.clone());
