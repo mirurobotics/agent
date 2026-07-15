@@ -1,7 +1,7 @@
 // internal crates
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
 use miru_agent::filesys::File;
-use miru_agent::upload::{Job, LogExecutor, UploadErr, UploadExecutor};
+use miru_agent::upload::{Job, UploadErr, UploadExecutor};
 
 // external crates
 use chrono::Utc;
@@ -19,12 +19,6 @@ fn make_job(name: &str) -> Job {
         deployment_id: "dpl_1".to_string(),
         release_id: "rls_1".to_string(),
     }
-}
-
-#[tokio::test]
-async fn log_executor_returns_ok() {
-    let job = make_job("a.log");
-    LogExecutor.upload(&job).await.unwrap();
 }
 
 #[tokio::test]

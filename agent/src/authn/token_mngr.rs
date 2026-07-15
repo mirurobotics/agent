@@ -25,11 +25,13 @@ macro_rules! dispatch {
 pub type TokenFile = SingleThreadStateFile<Token, token::Updates>;
 
 // =================================== TRAIT ======================================= //
-#[allow(async_fn_in_trait)]
+/// Futures are declared `+ Send` (like [`http::ClientI::execute`]) so generic
+/// consumers whose own futures must be `Send` (e.g. the upload executor) can
+/// await them.
 pub trait TokenManagerExt: Send + Sync {
-    async fn shutdown(&self) -> Result<(), AuthnErr>;
-    async fn get_token(&self) -> Result<Arc<Token>, AuthnErr>;
-    async fn refresh_token(&self) -> Result<(), AuthnErr>;
+    fn shutdown(&self) -> impl std::future::Future<Output = Result<(), AuthnErr>> + Send;
+    fn get_token(&self) -> impl std::future::Future<Output = Result<Arc<Token>, AuthnErr>> + Send;
+    fn refresh_token(&self) -> impl std::future::Future<Output = Result<(), AuthnErr>> + Send;
 }
 
 // ======================== SINGLE THREADED IMPLEMENTATION ========================= //
