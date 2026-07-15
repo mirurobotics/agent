@@ -26,13 +26,13 @@ pub trait UploadExecutor: Send + Sync {
     fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
-pub struct BrokerExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
+pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
     http_client: Arc<C>,
     token_mngr: Arc<T>,
     transfer: X,
 }
 
-impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> BrokerExecutor<C, T, X> {
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
     pub fn new(http_client: Arc<C>, token_mngr: Arc<T>, transfer: X) -> Self {
         Self {
             http_client,
@@ -74,7 +74,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> BrokerExecutor<C, T, X> 
     }
 }
 
-impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for BrokerExecutor<C, T, X> {
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
     async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         let resp = self.create_upload(job).await?;
 

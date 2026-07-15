@@ -11,7 +11,7 @@ use miru_agent::upload::{ObjectTransfer, UploadErr};
 /// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
 /// scripted result (an empty script defaults to `Ok`) and records the call's
 /// arguments. Clones share the script and the recorded calls, so a test keeps
-/// one clone for assertions after moving the other into a `BrokerExecutor`
+/// one clone for assertions after moving the other into a `LiveExecutor`
 /// (which owns its transfer).
 #[derive(Clone, Default)]
 pub struct MockObjectTransfer {

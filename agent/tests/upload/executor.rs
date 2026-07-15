@@ -18,7 +18,7 @@ use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr};
 use miru_agent::upload::executor::new_upl_request;
-use miru_agent::upload::{BrokerExecutor, Job, SdkTransfer, UploadErr, UploadExecutor};
+use miru_agent::upload::{LiveExecutor, Job, SdkTransfer, UploadErr, UploadExecutor};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -131,7 +131,7 @@ async fn mock_empty_script_defaults_to_ok() {
     assert_eq!(mock.recorded_calls(), vec![job]);
 }
 
-// ============================== BrokerExecutor =================================== //
+// ============================== LiveExecutor =================================== //
 
 #[tokio::test]
 async fn happy_path_creates_transfers_confirms() {
@@ -140,7 +140,7 @@ async fn happy_path_creates_transfers_confirms() {
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
     let transfer = MockObjectTransfer::new();
     let job = make_job("a.log");
-    let executor = BrokerExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     executor.upload(&job).await.unwrap();
 
@@ -172,7 +172,7 @@ async fn unknown_status_proceeds_like_pending() {
     // with transfer and confirm rather than stranding the file.
     client.set_create_upload(|| Ok(response_with_status(UploadStatus::UploadStatusUnknown)));
     let transfer = MockObjectTransfer::new();
-    let executor = BrokerExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     executor.upload(&make_job("a.log")).await.unwrap();
 
@@ -188,7 +188,7 @@ async fn token_failure_maps_to_executor_err() {
         trace: miru_agent::trace!(),
     })));
     let transfer = MockObjectTransfer::new();
-    let executor = BrokerExecutor::new(client.clone(), token_mngr, transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -205,7 +205,7 @@ async fn create_failure_maps_to_executor_err() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(non_network_http_err()));
     let transfer = MockObjectTransfer::new();
-    let executor = BrokerExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -222,7 +222,7 @@ async fn transfer_failure_propagates_and_skips_confirm() {
     client.set_create_upload(|| Ok(pending_response()));
     let transfer = MockObjectTransfer::new();
     transfer.push_err();
-    let executor = BrokerExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -239,7 +239,7 @@ async fn confirm_failure_maps_to_executor_err() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Err(non_network_http_err()));
     let transfer = MockObjectTransfer::new();
-    let executor = BrokerExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -256,7 +256,7 @@ const S3_PUT_URI: &str = "https://s3.us-east-1.amazonaws.com/my-bucket/logs/a.lo
 
 #[tokio::test]
 async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
-    // Same composition as production — BrokerExecutor over the real
+    // Same composition as production — LiveExecutor over the real
     // SdkTransfer — with the S3 exchange replayed offline.
     let replay = StaticReplayClient::new(vec![ReplayEvent::new(
         http::Request::builder()
@@ -282,7 +282,7 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
     .unwrap();
     let mut job = make_job("a.log");
     job.file = src.file().clone();
-    let executor = BrokerExecutor::new(
+    let executor = LiveExecutor::new(
         client.clone(),
         token_manager(),
         SdkTransfer::with_s3_http_client(replay.clone()),
