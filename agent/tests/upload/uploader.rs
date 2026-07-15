@@ -19,7 +19,7 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Await `fut` with a timeout so sequencing bugs surface as panics, not
 /// hanging tests.
-async fn within<T>(fut: impl Future<Output = T>) -> T {
+async fn timed<T>(fut: impl Future<Output = T>) -> T {
     timeout(TEST_TIMEOUT, fut).await.expect("test timed out")
 }
 
@@ -75,14 +75,14 @@ async fn processes_enqueued_job() {
     let (uploader, handle) = spawn_uploader(mock.clone());
     let job = make_job("a.log");
 
-    within(uploader.enqueue(job.clone())).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
 
     assert_eq!(mock.recorded_calls(), vec![job]);
-    assert_eq!(within(uploader.len()).await.unwrap(), 0);
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
 }
 
 #[tokio::test]
@@ -98,17 +98,17 @@ async fn failing_round_requeues_at_tail_behind_later_job() {
     let job_a = make_job("a.log");
     let job_b = make_job("b.log");
 
-    within(uploader.enqueue(job_a.clone())).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
     // B is queued while A is in flight, so it lands ahead of A's requeue slot
-    within(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
     release_tx.send(scripted_err()).unwrap();
     for _ in 0..4 {
-        within(started_rx.recv()).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
     }
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
     // three in-place attempts for A, then B, then A's second round succeeding
     let expected = vec![job_a.clone(), job_a.clone(), job_a.clone(), job_b, job_a];
     assert_eq!(mock.recorded_calls(), expected);
@@ -124,18 +124,18 @@ async fn global_attempt_cap_drops_job() {
     let job_a = make_job("a.log");
     let job_b = make_job("b.log");
 
-    within(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
     // three rounds of three attempts each
     for _ in 0..9 {
-        within(started_rx.recv()).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
     }
 
     // A was dropped at the cap with the actor still healthy: B processes next
-    within(uploader.enqueue(job_b.clone())).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
     let mut expected = vec![job_a; 9];
     expected.push(job_b);
     assert_eq!(mock.recorded_calls(), expected);
@@ -165,9 +165,9 @@ async fn retry_backoff_follows_expected_sequence() {
     };
     let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, sleep_fn).unwrap();
 
-    within(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
     for _ in 0..7 {
-        within(started_rx.recv()).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
     }
 
     // in-place sleeps only (exponent = this round's attempts - 1); none around
@@ -180,8 +180,8 @@ async fn retry_backoff_follows_expected_sequence() {
     ];
     assert_eq!(*sleeps.lock().unwrap(), expected);
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
 }
 
 #[tokio::test]
@@ -191,8 +191,8 @@ async fn shutdown_during_in_flight_upload_returns_promptly() {
     mock.push_step(MockStep::Hang(release_rx));
     let (uploader, handle) = spawn_uploader(mock.clone());
 
-    within(uploader.enqueue(make_job("a.log"))).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
 
     // the hang is never released: shutdown must drop the in-flight future
     // rather than await it
@@ -200,7 +200,7 @@ async fn shutdown_during_in_flight_upload_returns_promptly() {
         .await
         .expect("shutdown timed out awaiting the in-flight upload")
         .unwrap();
-    within(handle).await.unwrap();
+    timed(handle).await.unwrap();
     drop(release_tx);
 }
 
@@ -222,18 +222,18 @@ async fn requeue_into_full_queue_drops_job() {
         Uploader::spawn(16, mock.clone(), options, |_: Duration| async {}).unwrap();
     let job_a = make_job("a.log");
 
-    within(uploader.enqueue(job_a.clone())).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
     // fill the queue with a fresh (unprunable) job so A's requeue finds it
     // full
-    within(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
     release_tx.send(scripted_err()).unwrap();
     for _ in 0..3 {
-        within(started_rx.recv()).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
     }
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
     // A's failed round could not requeue: A dropped, then B succeeded
     assert_eq!(
         mock.recorded_calls(),
@@ -254,14 +254,14 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
     )
     .unwrap();
 
-    within(uploader.enqueue(make_job("a.log"))).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
 
     timeout(Duration::from_secs(1), uploader.shutdown())
         .await
         .expect("shutdown timed out awaiting the backoff sleep")
         .unwrap();
-    within(handle).await.unwrap();
+    timed(handle).await.unwrap();
 }
 
 #[tokio::test]
@@ -269,10 +269,10 @@ async fn enqueue_after_shutdown_returns_send_err() {
     let (mock, _started_rx) = MockUploadExecutor::new();
     let (uploader, handle) = spawn_uploader(mock.clone());
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
 
-    let result = within(uploader.enqueue(make_job("a.log"))).await;
+    let result = timed(uploader.enqueue(make_job("a.log"))).await;
     assert!(
         matches!(result, Err(UploadErr::SendActorMessageErr(_))),
         "expected SendActorMessageErr, got: {result:?}"
@@ -284,10 +284,10 @@ async fn len_after_shutdown_returns_send_err() {
     let (mock, _started_rx) = MockUploadExecutor::new();
     let (uploader, handle) = spawn_uploader(mock.clone());
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
 
-    let result = within(uploader.len()).await;
+    let result = timed(uploader.len()).await;
     assert!(
         matches!(result, Err(UploadErr::SendActorMessageErr(_))),
         "expected SendActorMessageErr, got: {result:?}"
@@ -299,11 +299,11 @@ async fn shutdown_after_worker_exit_returns_send_err() {
     let (mock, _started_rx) = MockUploadExecutor::new();
     let (uploader, handle) = spawn_uploader(mock.clone());
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
 
     // the worker is gone; a second shutdown can't reach it
-    let result = within(uploader.shutdown()).await;
+    let result = timed(uploader.shutdown()).await;
     assert!(
         matches!(result, Err(UploadErr::SendActorMessageErr(_))),
         "expected SendActorMessageErr, got: {result:?}"
@@ -316,7 +316,7 @@ async fn worker_exits_when_all_handles_dropped() {
     let (uploader, handle) = spawn_uploader(mock.clone());
 
     drop(uploader);
-    within(handle).await.unwrap();
+    timed(handle).await.unwrap();
 }
 
 #[tokio::test]
@@ -326,12 +326,12 @@ async fn worker_exits_when_handles_dropped_during_in_flight_upload() {
     mock.push_step(MockStep::Hang(release_rx));
     let (uploader, handle) = spawn_uploader(mock.clone());
 
-    within(uploader.enqueue(make_job("a.log"))).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
 
     // the in-flight upload is dropped, not awaited
     drop(uploader);
-    within(handle).await.unwrap();
+    timed(handle).await.unwrap();
     drop(release_tx);
 }
 
@@ -342,12 +342,12 @@ async fn arc_handle_delegates_to_uploader() {
     let uploader = Arc::new(uploader);
     let job = make_job("a.log");
 
-    within(uploader.enqueue(job.clone())).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
-    assert_eq!(within(uploader.len()).await.unwrap(), 0);
+    timed(uploader.enqueue(job.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
 
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
     assert_eq!(mock.recorded_calls(), vec![job]);
 }
 
@@ -358,15 +358,15 @@ async fn len_reports_queued_jobs() {
     mock.push_step(MockStep::Hang(release_rx));
     let (uploader, handle) = spawn_uploader(mock.clone());
 
-    within(uploader.enqueue(make_job("a.log"))).await.unwrap();
-    within(started_rx.recv()).await.unwrap();
-    within(uploader.enqueue(make_job("b.log"))).await.unwrap();
-    within(uploader.enqueue(make_job("c.log"))).await.unwrap();
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(make_job("b.log"))).await.unwrap();
+    timed(uploader.enqueue(make_job("c.log"))).await.unwrap();
 
     // in-flight A is excluded
-    assert_eq!(within(uploader.len()).await.unwrap(), 2);
+    assert_eq!(timed(uploader.len()).await.unwrap(), 2);
 
     release_tx.send(Ok(())).unwrap();
-    within(uploader.shutdown()).await.unwrap();
-    within(handle).await.unwrap();
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
 }
