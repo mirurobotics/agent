@@ -17,7 +17,7 @@ use crate::upload::{
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -229,7 +229,7 @@ where
     }
 
     fn log_dropped(entry: &QueueEntry, err: &UploadErr) {
-        warn!(
+        error!(
             "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
             entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
         );
