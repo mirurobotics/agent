@@ -12,6 +12,7 @@ use miru_agent::network::MqttHost;
 
 // external crates
 use rumqttc::QoS;
+use secrecy::SecretString;
 
 #[tokio::test]
 async fn test_mqtt_client() {
@@ -21,7 +22,7 @@ async fn test_mqtt_client() {
 
     let options = Options::new(Credentials {
         username: "test_user".to_string(),
-        password: "test_pass".to_string(),
+        password: SecretString::from("test_pass"),
     })
     .with_connect_address(
         ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 18831).unwrap(),
@@ -60,7 +61,7 @@ async fn invalid_broker_url() {
     // (which the `MqttHost` would reject anyway).
     let options = Options::new(Credentials {
         username: "test".to_string(),
-        password: "test".to_string(),
+        password: SecretString::from("test"),
     })
     .with_connect_address(
         ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
@@ -83,7 +84,7 @@ async fn invalid_username_or_password() {
 
     let options = Options::new(Credentials {
         username: "wrong_user".to_string(),
-        password: "wrong_pass".to_string(),
+        password: SecretString::from("wrong_pass"),
     })
     .with_connect_address(
         ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 18832).unwrap(),
@@ -100,7 +101,7 @@ async fn invalid_username_or_password() {
 fn mqtt_options() -> Options {
     Options::new(Credentials {
         username: "test".to_string(),
-        password: "test".to_string(),
+        password: SecretString::from("test"),
     })
     .with_connect_address(
         ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),

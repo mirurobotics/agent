@@ -5,6 +5,9 @@ use std::time::Duration;
 use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
 use miru_agent::network::MqttHost;
 
+// external crates
+use secrecy::{ExposeSecret, SecretString};
+
 mod protocol_display {
     use super::*;
 
@@ -154,7 +157,24 @@ mod credentials {
     fn default() {
         let creds = Credentials::default();
         assert_eq!(creds.username, "miru-agent");
-        assert_eq!(creds.password, "miru-agent-password");
+        assert_eq!(creds.password.expose_secret(), "miru-agent-password");
+    }
+
+    #[test]
+    fn debug_redacts_password() {
+        let creds = Credentials {
+            username: "user".to_string(),
+            password: SecretString::from("super-secret-token"),
+        };
+        let rendered = format!("{creds:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "password leaked in Debug: {rendered}"
+        );
+        assert!(
+            rendered.contains("REDACTED"),
+            "expected redaction marker in Debug: {rendered}"
+        );
     }
 }
 
@@ -181,7 +201,7 @@ mod opts {
     fn new_defaults() {
         let creds = Credentials {
             username: "user".to_string(),
-            password: "pass".to_string(),
+            password: SecretString::from("pass"),
         };
         let actual = Options::new(creds.clone());
         let expected = Options {
@@ -214,7 +234,7 @@ mod opts {
     fn set_password() {
         let mut opts = Options::default();
         opts.set_password("new-password".to_string());
-        assert_eq!(opts.credentials.password, "new-password");
+        assert_eq!(opts.credentials.password.expose_secret(), "new-password");
     }
 
     #[test]
@@ -231,11 +251,28 @@ mod opts {
     fn with_credentials() {
         let new_creds = Credentials {
             username: "other".to_string(),
-            password: "secret".to_string(),
+            password: SecretString::from("secret"),
         };
         let opts = Options::default().with_credentials(new_creds);
         assert_eq!(opts.credentials.username, "other");
-        assert_eq!(opts.credentials.password, "secret");
+        assert_eq!(opts.credentials.password.expose_secret(), "secret");
+    }
+
+    #[test]
+    fn debug_redacts_password() {
+        let opts = Options::new(Credentials {
+            username: "user".to_string(),
+            password: SecretString::from("super-secret-token"),
+        });
+        let rendered = format!("{opts:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "password leaked in Debug: {rendered}"
+        );
+        assert!(
+            rendered.contains("REDACTED"),
+            "expected redaction marker in Debug: {rendered}"
+        );
     }
 
     #[test]
