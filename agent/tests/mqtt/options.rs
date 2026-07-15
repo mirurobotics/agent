@@ -233,7 +233,7 @@ mod opts {
     #[test]
     fn set_password() {
         let mut opts = Options::default();
-        opts.set_password("new-password".to_string());
+        opts.set_password(SecretString::from("new-password"));
         assert_eq!(opts.credentials.password.expose_secret(), "new-password");
     }
 

@@ -192,8 +192,8 @@ impl Options {
         self
     }
 
-    pub fn set_password(&mut self, password: String) {
-        self.credentials.password = SecretString::from(password);
+    pub fn set_password(&mut self, password: SecretString) {
+        self.credentials.password = password;
     }
 }
 
