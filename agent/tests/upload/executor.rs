@@ -18,7 +18,7 @@ use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr};
 use miru_agent::upload::executor::new_upl_request;
-use miru_agent::upload::{LiveExecutor, Job, SdkTransfer, UploadErr, UploadExecutor};
+use miru_agent::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
