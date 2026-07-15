@@ -164,5 +164,5 @@ pub fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
 /// Builds an [`UploadErr::ExecutorErr`] from a static reason, for
 /// credential/scheme cases the device cannot act on.
 fn unsupported(msg: &str) -> UploadErr {
-    executor_err(msg.to_string())
+    executor_err(msg)
 }

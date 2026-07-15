@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::authn::TokenManagerExt;
+use crate::authn::{Token, TokenManagerExt};
 use crate::http::{self, ClientI};
 use crate::upload::errors::{executor_err, UploadErr};
 use crate::upload::job::Job;
@@ -64,12 +64,12 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> BrokerExecutor<C, T, X> 
         }
     }
 
-    /// Fetches a fresh bearer token. Called immediately before each HTTP call
-    /// — the transfer between create and confirm can be long, and a token
-    /// fetched before create may have expired by confirm time.
-    async fn token(&self) -> Result<String, UploadErr> {
-        let token = self.token_mngr.get_token().await.map_err(executor_err)?;
-        Ok(token.token.clone())
+    /// Re-reads the current bearer token. Called immediately before each HTTP
+    /// call — the transfer between create and confirm can be long, and a token
+    /// read before create may have been rotated (by the background refresh
+    /// worker) by confirm time.
+    async fn token(&self) -> Result<Arc<Token>, UploadErr> {
+        self.token_mngr.get_token().await.map_err(executor_err)
     }
 }
 
@@ -82,7 +82,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor
         let resp = http::with_retry(|| async {
             let params = http::uploads::CreateParams {
                 payload: &payload,
-                token: &token,
+                token: &token.token,
             };
             http::uploads::create(self.http_client.as_ref(), params).await
         })
@@ -103,7 +103,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor
         http::with_retry(|| async {
             let params = http::uploads::ConfirmParams {
                 id: &resp.upload.id,
-                token: &token,
+                token: &token.token,
             };
             http::uploads::confirm(self.http_client.as_ref(), params).await
         })
