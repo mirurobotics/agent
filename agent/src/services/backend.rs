@@ -8,6 +8,9 @@ use crate::services::errors::ServiceErr;
 use crate::sync;
 use backend_api::models as backend_client;
 
+// external crates
+use secrecy::ExposeSecret;
+
 /// Single seam used by the services layer to fetch resources from the backend
 /// on a local-cache miss. Consolidates the previous per-resource fetcher
 /// traits (`DeploymentFetcher`, `ReleaseFetcher`, `GitCommitFetcher`) into a
@@ -46,7 +49,13 @@ impl<'a, C: ClientI, T: TokenManagerExt> BackendFetcher for HttpBackend<'a, C, T
     async fn fetch_deployment(&self, id: &str) -> Result<backend_client::Deployment, ServiceErr> {
         let token = self.token().await?;
         http::with_retry(|| async {
-            http::deployments::get(self.client, id, &["config_instances"], &token.token).await
+            http::deployments::get(
+                self.client,
+                id,
+                &["config_instances"],
+                token.token.expose_secret(),
+            )
+            .await
         })
         .await
         .map_err(ServiceErr::from)
@@ -55,7 +64,13 @@ impl<'a, C: ClientI, T: TokenManagerExt> BackendFetcher for HttpBackend<'a, C, T
     async fn fetch_release(&self, id: &str) -> Result<backend_client::Release, ServiceErr> {
         let token = self.token().await?;
         http::with_retry(|| async {
-            http::releases::get(self.client, id, &["file_rules"], &token.token).await
+            http::releases::get(
+                self.client,
+                id,
+                &["file_rules"],
+                token.token.expose_secret(),
+            )
+            .await
         })
         .await
         .map_err(ServiceErr::from)
@@ -64,7 +79,7 @@ impl<'a, C: ClientI, T: TokenManagerExt> BackendFetcher for HttpBackend<'a, C, T
     async fn fetch_git_commit(&self, id: &str) -> Result<backend_client::GitCommit, ServiceErr> {
         let token = self.token().await?;
         http::with_retry(|| async {
-            http::git_commits::get(self.client, id, &[], &token.token).await
+            http::git_commits::get(self.client, id, &[], token.token.expose_secret()).await
         })
         .await
         .map_err(ServiceErr::from)

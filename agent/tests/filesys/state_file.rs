@@ -8,6 +8,7 @@ use miru_agent::filesys::{
 
 // external crates
 use chrono::{Duration, Utc};
+use secrecy::SecretString;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
 
@@ -55,7 +56,7 @@ pub mod open_read_only {
 
         // create the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         files::write_json(&file, &token, WriteOptions::default())
@@ -116,7 +117,7 @@ pub mod open_with_default {
 
         // create the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         files::write_json(&file, &token, WriteOptions::default())
@@ -197,7 +198,7 @@ pub mod write {
 
         // write to the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token.clone()).await.unwrap();
@@ -221,7 +222,7 @@ pub mod write {
 
         // write to the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token.clone()).await.unwrap();
@@ -244,7 +245,7 @@ pub mod patch {
 
         // patch the file
         let updates = Updates {
-            token: Some("test-token".to_string()),
+            token: Some(SecretString::from("test-token")),
             expires_at: Some(Utc::now() + Duration::days(1)),
         };
         let expected = Token {
@@ -261,7 +262,7 @@ pub mod patch {
         let file = dir.file("test-file");
 
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         let mut state_file = SingleThreadTokenFile::open(
@@ -302,7 +303,7 @@ pub mod patch {
 
         // patch the file
         let updates = Updates {
-            token: Some("test-token".to_string()),
+            token: Some(SecretString::from("test-token")),
             expires_at: Some(Utc::now() + Duration::days(1)),
         };
         let expected = Token {
@@ -343,7 +344,7 @@ pub mod mode {
 
         // update path: a refresh writes a new token and must preserve 0o600
         let token = Token {
-            token: "refreshed-token".to_string(),
+            token: SecretString::from("refreshed-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token).await.unwrap();
@@ -405,7 +406,7 @@ pub mod spawn_read_only {
 
         // create the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         files::write_json(&file, &token, WriteOptions::default())
@@ -455,7 +456,7 @@ pub mod spawn_with_default_option {
         let file = dir.file("test-file");
 
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         files::write_json(&file, &token, WriteOptions::default())
@@ -478,7 +479,7 @@ pub mod shutdown {
         let file = dir.file("test-file");
 
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         files::write_json(&file, &token, WriteOptions::default())
@@ -548,7 +549,7 @@ pub mod after_shutdown {
         handle.await.unwrap();
 
         let updates = Updates {
-            token: Some("new-token".to_string()),
+            token: Some(SecretString::from("new-token")),
             expires_at: None,
         };
         assert!(matches!(
@@ -623,7 +624,7 @@ pub mod concurrent_write {
 
         // write to the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token.clone()).await.unwrap();
@@ -646,7 +647,7 @@ pub mod concurrent_write {
 
         // write to the file
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token.clone()).await.unwrap();
@@ -670,7 +671,7 @@ pub mod concurrent_patch {
         // patch the file
 
         let updates = Updates {
-            token: Some("test-token".to_string()),
+            token: Some(SecretString::from("test-token")),
             expires_at: Some(Utc::now() + Duration::days(1)),
         };
         let expected = Token {
@@ -687,7 +688,7 @@ pub mod concurrent_patch {
         let file = dir.file("test-file");
 
         let token = Token {
-            token: "test-token".to_string(),
+            token: SecretString::from("test-token"),
             expires_at: Utc::now() + Duration::days(1),
         };
         files::write_json(&file, &token, WriteOptions::default())
@@ -726,7 +727,7 @@ pub mod concurrent_patch {
 
         // patch the file
         let updates = Updates {
-            token: Some("test-token".to_string()),
+            token: Some(SecretString::from("test-token")),
             expires_at: Some(Utc::now() + Duration::days(1)),
         };
         let expected = Token {
