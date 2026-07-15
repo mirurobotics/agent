@@ -8,9 +8,9 @@ use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStreamError;
 
 #[derive(Debug, thiserror::Error)]
-#[error("object not found: {key}")]
+#[error("object not found: {object}")]
 pub struct ObjectNotFoundErr {
-    pub key: String,
+    pub object: Object,
     pub trace: Box<Trace>,
 }
 
@@ -25,9 +25,9 @@ impl crate::errors::Error for ObjectNotFoundErr {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("no such multipart upload '{upload_id}' for object '{key}'")]
+#[error("no such multipart upload '{upload_id}' for object '{object}'")]
 pub struct NoSuchUploadErr {
-    pub key: String,
+    pub object: Object,
     pub upload_id: String,
     pub trace: Box<Trace>,
 }
@@ -43,9 +43,9 @@ impl crate::errors::Error for NoSuchUploadErr {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("connection error for object '{key}': {msg}")]
+#[error("connection error for object '{object}': {msg}")]
 pub struct ConnectionErr {
-    pub key: String,
+    pub object: Object,
     pub msg: String,
     pub trace: Box<Trace>,
 }
@@ -59,7 +59,7 @@ impl crate::errors::Error for ConnectionErr {
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailedErr {
     pub operation: String,
-    pub object: Option<String>,
+    pub object: Object,
     pub status: Option<u16>,
     pub msg: String,
     pub trace: Box<Trace>,
@@ -67,7 +67,6 @@ pub struct RequestFailedErr {
 
 impl std::fmt::Display for RequestFailedErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let object = self.object.as_deref().unwrap_or("<none>");
         let status = self
             .status
             .map(|s| s.to_string())
@@ -75,7 +74,7 @@ impl std::fmt::Display for RequestFailedErr {
         write!(
             f,
             "S3 {} request for object '{}' failed with status {}: {}",
-            self.operation, object, status, self.msg
+            self.operation, self.object, status, self.msg
         )
     }
 }
@@ -83,9 +82,10 @@ impl std::fmt::Display for RequestFailedErr {
 impl crate::errors::Error for RequestFailedErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("invalid response from S3 {operation} request: {msg}")]
+#[error("invalid response from S3 {operation} request for object '{object}': {msg}")]
 pub struct InvalidResponseErr {
     pub operation: String,
+    pub object: Object,
     pub msg: String,
     pub trace: Box<Trace>,
 }
@@ -96,7 +96,7 @@ impl crate::errors::Error for InvalidResponseErr {}
 #[error("local I/O error during {operation} for object '{object}': {msg}")]
 pub struct LocalIoErr {
     pub operation: String,
-    pub object: String,
+    pub object: Object,
     pub msg: String,
     pub trace: Box<Trace>,
 }
@@ -154,18 +154,18 @@ pub fn is_not_found<E>(err: &SdkError<E>) -> bool {
 /// cannot express. This helper only covers the variants that need no
 /// operation-specific knowledge: dispatch/timeout (network), response and
 /// construction failures, and the service-error fallback.
-pub fn map_sdk_err<E>(operation: &str, key: Option<String>, err: SdkError<E>) -> S3Err
+pub fn map_sdk_err<E>(operation: &str, object: &Object, err: SdkError<E>) -> S3Err
 where
     E: std::error::Error + 'static,
 {
     match err {
         SdkError::TimeoutError(e) => S3Err::ConnectionErr(ConnectionErr {
-            key: key.unwrap_or_default(),
+            object: object.clone(),
             msg: format!("request timed out: {e:?}"),
             trace: crate::trace!(),
         }),
         SdkError::DispatchFailure(e) => S3Err::ConnectionErr(ConnectionErr {
-            key: key.unwrap_or_default(),
+            object: object.clone(),
             msg: format!("failed to dispatch request: {e:?}"),
             trace: crate::trace!(),
         }),
@@ -173,7 +173,7 @@ where
             let status = e.raw().status().as_u16();
             S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
-                object: key,
+                object: object.clone(),
                 status: Some(status),
                 msg: "response could not be parsed".to_string(),
                 trace: crate::trace!(),
@@ -181,7 +181,7 @@ where
         }
         SdkError::ConstructionFailure(e) => S3Err::RequestFailedErr(RequestFailedErr {
             operation: operation.to_string(),
-            object: key,
+            object: object.clone(),
             status: None,
             msg: format!("failed to construct request: {e:?}"),
             trace: crate::trace!(),
@@ -191,7 +191,7 @@ where
             let source = e.into_err();
             S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
-                object: key,
+                object: object.clone(),
                 status: Some(status),
                 msg: source.to_string(),
                 trace: crate::trace!(),
@@ -201,7 +201,7 @@ where
         // generic request failure rather than panicking.
         other => S3Err::RequestFailedErr(RequestFailedErr {
             operation: operation.to_string(),
-            object: key,
+            object: object.clone(),
             status: None,
             msg: format!("request failed: {other}"),
             trace: crate::trace!(),
@@ -215,7 +215,7 @@ where
 pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io::Error) -> S3Err {
     S3Err::LocalIoErr(LocalIoErr {
         operation: operation.to_string(),
-        object: obj.to_string(),
+        object: obj.clone(),
         msg: format!("filesystem I/O error at path '{file}': {err}"),
         trace: crate::trace!(),
     })
@@ -231,7 +231,7 @@ pub fn map_bytestream_err(
 ) -> S3Err {
     S3Err::LocalIoErr(LocalIoErr {
         operation: operation.to_string(),
-        object: obj.to_string(),
+        object: obj.clone(),
         msg: format!("failed to open '{file}' for streaming: {err}"),
         trace: crate::trace!(),
     })
@@ -239,18 +239,19 @@ pub fn map_bytestream_err(
 
 /// Maps an error reading the object body off the wire (connection reset, TLS
 /// drop, truncated body) into a retryable [`S3Err::ConnectionErr`].
-pub fn map_body_read_err(operation: &str, key: &str, err: &ByteStreamError) -> S3Err {
+pub fn map_body_read_err(operation: &str, object: &Object, err: &ByteStreamError) -> S3Err {
     S3Err::ConnectionErr(ConnectionErr {
-        key: key.to_string(),
+        object: object.clone(),
         msg: format!("failed to read object body during {operation}: {err}"),
         trace: crate::trace!(),
     })
 }
 
 /// Maps a missing/unparseable required field in an S3 response to InvalidResponseErr.
-pub fn missing_response_field(operation: &str, field: &str) -> S3Err {
+pub fn missing_response_field(operation: &str, object: &Object, field: &str) -> S3Err {
     S3Err::InvalidResponseErr(InvalidResponseErr {
         operation: operation.to_string(),
+        object: object.clone(),
         msg: format!("response did not include {field}"),
         trace: crate::trace!(),
     })
@@ -263,6 +264,13 @@ mod tests {
     use aws_sdk_s3::config::http::HttpResponse;
     use aws_sdk_s3::error::ConnectorError;
     use aws_smithy_types::body::SdkBody;
+
+    fn object() -> Object {
+        Object {
+            bucket: "bucket".to_string(),
+            key: "key".to_string(),
+        }
+    }
 
     // A stand-in service error `E` for the mapper's generic parameter. The
     // timeout/construction/dispatch branches never inspect it.
@@ -286,7 +294,7 @@ mod tests {
     fn timeout_maps_to_connection_err() {
         let err: SdkError<DummyErr> =
             SdkError::timeout_error(Box::<dyn std::error::Error + Send + Sync>::from("slow"));
-        let mapped = map_sdk_err("get_object", Some("k".to_string()), err);
+        let mapped = map_sdk_err("get_object", &object(), err);
         assert!(matches!(mapped, S3Err::ConnectionErr(_)));
         assert!(mapped.is_network_conn_err());
     }
@@ -297,7 +305,7 @@ mod tests {
             SdkError::dispatch_failure(ConnectorError::io(Box::<
                 dyn std::error::Error + Send + Sync,
             >::from("socket hangup")));
-        let mapped = map_sdk_err("get_object", Some("k".to_string()), err);
+        let mapped = map_sdk_err("get_object", &object(), err);
         assert!(matches!(mapped, S3Err::ConnectionErr(_)));
         assert!(mapped.is_network_conn_err());
     }
@@ -308,7 +316,7 @@ mod tests {
             Box::<dyn std::error::Error + Send + Sync>::from("unparseable"),
             raw_response(500),
         );
-        let mapped = map_sdk_err("get_object", Some("k".to_string()), err);
+        let mapped = map_sdk_err("get_object", &object(), err);
         match mapped {
             S3Err::RequestFailedErr(e) => assert_eq!(e.status, Some(500)),
             other => panic!("expected RequestFailedErr, got {other:?}"),
@@ -318,7 +326,7 @@ mod tests {
     #[test]
     fn service_error_maps_to_request_failed_with_status() {
         let err: SdkError<DummyErr> = SdkError::service_error(DummyErr, raw_response(403));
-        let mapped = map_sdk_err("head_object", Some("k".to_string()), err);
+        let mapped = map_sdk_err("head_object", &object(), err);
         match mapped {
             S3Err::RequestFailedErr(e) => assert_eq!(e.status, Some(403)),
             other => panic!("expected RequestFailedErr, got {other:?}"),
@@ -329,7 +337,7 @@ mod tests {
     fn construction_failure_maps_to_request_failed_without_status() {
         let err: SdkError<DummyErr> =
             SdkError::construction_failure(Box::<dyn std::error::Error + Send + Sync>::from("bad"));
-        let mapped = map_sdk_err("put_object", None, err);
+        let mapped = map_sdk_err("put_object", &object(), err);
         match mapped {
             S3Err::RequestFailedErr(e) => assert!(e.status.is_none()),
             other => panic!("expected RequestFailedErr, got {other:?}"),
@@ -359,7 +367,7 @@ mod tests {
 
     #[test]
     fn missing_response_field_maps_to_invalid_response() {
-        let mapped = missing_response_field("create_multipart_upload", "an upload id");
+        let mapped = missing_response_field("create_multipart_upload", &object(), "an upload id");
         assert!(matches!(mapped, S3Err::InvalidResponseErr(_)));
         assert_eq!(mapped.http_status().as_u16(), 500);
         // The Display echoes the field into the message.
@@ -370,19 +378,12 @@ mod tests {
         use super::*;
         use crate::filesys::file::File;
 
-        fn obj() -> Object {
-            Object {
-                bucket: "bucket".to_string(),
-                key: "key".to_string(),
-            }
-        }
-
         #[test]
         fn map_body_io_err_maps_to_local_io_err() {
             // A failure writing bytes to the local destination is a terminal
             // local I/O error, never a network condition.
             let err = std::io::Error::other("no space left on device");
-            let mapped = map_body_io_err("get_object", &obj(), &File::new("/data/out.bin"), err);
+            let mapped = map_body_io_err("get_object", &object(), &File::new("/data/out.bin"), err);
             assert!(matches!(mapped, S3Err::LocalIoErr(_)));
             assert!(!mapped.is_network_conn_err());
             assert_eq!(mapped.http_status().as_u16(), 500);
@@ -397,7 +398,8 @@ mod tests {
             // A failure opening the local source file for streaming is also a
             // terminal local I/O error.
             let err = ByteStreamError::from(std::io::Error::other("permission denied"));
-            let mapped = map_bytestream_err("put_object", &obj(), &File::new("/data/in.bin"), &err);
+            let mapped =
+                map_bytestream_err("put_object", &object(), &File::new("/data/in.bin"), &err);
             assert!(matches!(mapped, S3Err::LocalIoErr(_)));
             assert!(!mapped.is_network_conn_err());
             let msg = mapped.to_string();
@@ -411,7 +413,7 @@ mod tests {
             // transport error. `ByteStreamError` has no public constructor, but
             // its public `From<std::io::Error>` impl builds a representative one.
             let err = ByteStreamError::from(std::io::Error::other("connection reset"));
-            let mapped = map_body_read_err("get_object", "blobs/data.bin", &err);
+            let mapped = map_body_read_err("get_object", &object(), &err);
             assert!(matches!(mapped, S3Err::ConnectionErr(_)));
             assert!(mapped.is_network_conn_err());
             assert!(mapped.to_string().contains("connection error"));
@@ -430,7 +432,7 @@ mod tests {
         #[test]
         fn object_not_found_maps_to_resource_not_found() {
             let err = S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
-                key: "k".to_string(),
+                object: object(),
                 trace: crate::trace!(),
             });
             assert!(matches!(err.code(), Code::ResourceNotFound));
@@ -442,7 +444,7 @@ mod tests {
         #[test]
         fn no_such_upload_maps_to_resource_not_found() {
             let err = S3Err::NoSuchUploadErr(NoSuchUploadErr {
-                key: "k".to_string(),
+                object: object(),
                 upload_id: "u".to_string(),
                 trace: crate::trace!(),
             });
@@ -455,7 +457,7 @@ mod tests {
         #[test]
         fn connection_err_is_network_conn_err() {
             let err = S3Err::ConnectionErr(ConnectionErr {
-                key: "k".to_string(),
+                object: object(),
                 msg: "boom".to_string(),
                 trace: crate::trace!(),
             });
@@ -468,7 +470,7 @@ mod tests {
         fn request_failed_err_defaults_to_internal_server_error() {
             let err = S3Err::RequestFailedErr(RequestFailedErr {
                 operation: "get_object".to_string(),
-                object: None,
+                object: object(),
                 status: None,
                 msg: "nope".to_string(),
                 trace: crate::trace!(),
@@ -476,9 +478,8 @@ mod tests {
             assert!(matches!(err.code(), Code::InternalServerError));
             assert_eq!(err.http_status().as_u16(), 500);
             assert!(!err.is_network_conn_err());
-            // Display with no object / no status hits the fallback formatting.
+            // Display with no status hits the "unknown" fallback formatting.
             let msg = err.to_string();
-            assert!(msg.contains("<none>"));
             assert!(msg.contains("unknown"));
         }
 
@@ -486,6 +487,7 @@ mod tests {
         fn invalid_response_err_defaults_to_internal_server_error() {
             let err = S3Err::InvalidResponseErr(InvalidResponseErr {
                 operation: "get_object".to_string(),
+                object: object(),
                 msg: "bad body".to_string(),
                 trace: crate::trace!(),
             });
@@ -498,7 +500,7 @@ mod tests {
         fn local_io_err_defaults_to_internal_server_error() {
             let err = S3Err::LocalIoErr(LocalIoErr {
                 operation: "get_object".to_string(),
-                object: "s3://bucket/key".to_string(),
+                object: object(),
                 msg: "no such file or directory".to_string(),
                 trace: crate::trace!(),
             });
@@ -512,11 +514,11 @@ mod tests {
 
         #[test]
         fn request_failed_err_display_includes_object_and_status() {
-            // The non-`<none>`/`unknown` branch: both object and status are
-            // `Some`, so Display echoes the s3:// URI and the numeric status.
+            // The status is `Some`, so Display echoes the s3:// URI and the
+            // numeric status.
             let err = S3Err::RequestFailedErr(RequestFailedErr {
                 operation: "put_object".to_string(),
-                object: Some("s3://bucket/key".to_string()),
+                object: object(),
                 status: Some(403),
                 msg: "denied".to_string(),
                 trace: crate::trace!(),

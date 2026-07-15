@@ -131,7 +131,7 @@ impl Store {
             .body(body)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("put_object", Some(dst.key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
         Ok(())
     }
 
@@ -151,15 +151,11 @@ impl Store {
             Err(err) => {
                 if errors::is_not_found(&err) {
                     return Err(S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
-                        key: src.key.to_string(),
+                        object: src.clone(),
                         trace: trace!(),
                     }));
                 }
-                return Err(errors::map_sdk_err(
-                    "get_object",
-                    Some(src.key.to_string()),
-                    err,
-                ));
+                return Err(errors::map_sdk_err("get_object", src, err));
             }
         };
 
@@ -176,7 +172,7 @@ impl Store {
         // buffer so large downloads don't pay one dispatch per body chunk.
         let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
         while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", &src.key, &e))?;
+            let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", src, &e))?;
             writer
                 .write_all(&chunk)
                 .await
@@ -202,7 +198,7 @@ impl Store {
             .key(&obj.key)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("delete_object", Some(obj.key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err("delete_object", obj, e))?;
         Ok(())
     }
 
@@ -222,11 +218,7 @@ impl Store {
                 if errors::is_not_found(&err) {
                     Ok(false)
                 } else {
-                    Err(errors::map_sdk_err(
-                        "head_object",
-                        Some(obj.key.to_string()),
-                        err,
-                    ))
+                    Err(errors::map_sdk_err("head_object", obj, err))
                 }
             }
         }
