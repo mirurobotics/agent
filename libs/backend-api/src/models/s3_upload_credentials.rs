@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// S3UploadCredentials : Short-lived credentials for the broker upload flow to any S3-compatible object store (AWS S3, Cloudflare R2, MinIO, ...). The backend vends session credentials scoped to `s3:PutObject` (plus the multipart actions) on the exact object key. The device always drives a native S3 multipart upload with the standard AWS S3 SDK, configured from `endpoint` + `region` plus the access key / secret / session token, regardless of which S3-compatible backend is behind the endpoint. 
+/// S3UploadCredentials : Short-lived AWS S3 session credentials for the broker upload flow. The backend vends session credentials scoped to `s3:PutObject` (plus the multipart actions) on the exact object key. The device drives a native S3 multipart upload with the standard AWS S3 SDK, configured from `region` plus the access key / secret / session token; the SDK derives the endpoint from the region. 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct S3UploadCredentials {
     /// The storage access scheme, which is always `s3` for these credentials.
@@ -24,27 +24,23 @@ pub struct S3UploadCredentials {
     /// The STS session token that must accompany the access key pair.
     #[serde(rename = "session_token")]
     pub session_token: String,
-    /// The region used for SigV4 signing. For Cloudflare R2 this is `auto`.
+    /// The AWS region of the bucket, used for the S3 endpoint and SigV4 signing.
     #[serde(rename = "region")]
     pub region: String,
-    /// The S3 API endpoint URL the device points its S3 SDK at. AWS uses a regional endpoint, e.g. `https://s3.us-east-1.amazonaws.com`; Cloudflare R2 uses `https://<account_id>.r2.cloudflarestorage.com` with `region: auto`. 
-    #[serde(rename = "endpoint")]
-    pub endpoint: String,
     /// Timestamp after which the session credentials are no longer valid.
     #[serde(rename = "expires_at")]
     pub expires_at: String,
 }
 
 impl S3UploadCredentials {
-    /// Short-lived credentials for the broker upload flow to any S3-compatible object store (AWS S3, Cloudflare R2, MinIO, ...). The backend vends session credentials scoped to `s3:PutObject` (plus the multipart actions) on the exact object key. The device always drives a native S3 multipart upload with the standard AWS S3 SDK, configured from `endpoint` + `region` plus the access key / secret / session token, regardless of which S3-compatible backend is behind the endpoint. 
-    pub fn new(scheme: Scheme, access_key_id: String, secret_access_key: String, session_token: String, region: String, endpoint: String, expires_at: String) -> S3UploadCredentials {
+    /// Short-lived AWS S3 session credentials for the broker upload flow. The backend vends session credentials scoped to `s3:PutObject` (plus the multipart actions) on the exact object key. The device drives a native S3 multipart upload with the standard AWS S3 SDK, configured from `region` plus the access key / secret / session token; the SDK derives the endpoint from the region. 
+    pub fn new(scheme: Scheme, access_key_id: String, secret_access_key: String, session_token: String, region: String, expires_at: String) -> S3UploadCredentials {
         S3UploadCredentials {
             scheme,
             access_key_id,
             secret_access_key,
             session_token,
             region,
-            endpoint,
             expires_at,
         }
     }
