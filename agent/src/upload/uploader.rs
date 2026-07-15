@@ -92,6 +92,16 @@ enum Flow {
     Shutdown,
 }
 
+/// Outcome of driving a single executor attempt to completion (or shutdown).
+enum AttemptOutcome {
+    /// The upload succeeded; the round is done.
+    Succeeded,
+    /// The upload failed; carries the error for logging and retry decisions.
+    Failed(UploadErr),
+    /// A shutdown arrived mid-attempt; the run loop must stop.
+    ShuttingDown,
+}
+
 pub(crate) struct Worker<ExecutorT, F, Fut>
 where
     ExecutorT: UploadExecutor,
@@ -141,58 +151,88 @@ where
         for attempt_in_round in 1..=self.options.in_place_attempts {
             entry.attempts += 1;
 
-            // the future is built from clones so it borrows nothing from
-            // self, leaving self free to serve commands while it runs
-            let executor = self.executor.clone();
-            let job = entry.job.clone();
-            let result = match self
-                .drive_interleaved(async move { executor.upload(&job).await })
-                .await
-            {
-                None => return Flow::Shutdown,
-                Some(result) => result,
-            };
-
-            let err = match result {
-                Ok(()) => {
-                    info!(
-                        "uploaded file {} (rule {}, digest {}) on attempt {}",
-                        entry.job.file, entry.job.upload_rule_id, entry.job.digest, entry.attempts
-                    );
+            let err = match self.attempt_upload(&entry).await {
+                AttemptOutcome::ShuttingDown => return Flow::Shutdown,
+                AttemptOutcome::Succeeded => {
+                    Self::log_success(&entry);
                     return Flow::Continue;
                 }
-                Err(err) => err,
+                AttemptOutcome::Failed(err) => err,
             };
 
             if entry.attempts >= self.options.max_total_attempts {
-                warn!(
-                    "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
-                    entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
-                );
+                Self::log_dropped(&entry, &err);
                 return Flow::Continue;
             }
 
             // round over: requeue at the tail with attempts preserved; no
             // sleep on the round-ending failure
             if attempt_in_round == self.options.in_place_attempts {
-                let job = entry.job.clone();
-                if let Err(requeue_err) = self.queue.requeue(entry).await {
-                    warn!(
-                        "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
-                        job.upload_rule_id, job.file, job.digest
-                    );
-                }
+                self.requeue(entry).await;
                 return Flow::Continue;
             }
 
             // back off before the next in-place attempt
-            let secs = cooldown::calc(&self.options.backoff, entry.attempts - 1);
-            let sleep_fut = (self.sleep_fn)(Duration::from_secs(secs.max(0) as u64));
-            if self.drive_interleaved(sleep_fut).await.is_none() {
+            if let Flow::Shutdown = self.backoff_sleep(entry.attempts).await {
                 return Flow::Shutdown;
             }
         }
         Flow::Continue
+    }
+
+    /// Drive one executor attempt on `entry` to completion while staying
+    /// responsive to commands. The future is built from clones so it borrows
+    /// nothing from `self`, leaving `self` free to serve commands while it runs.
+    async fn attempt_upload(&mut self, entry: &QueueEntry) -> AttemptOutcome {
+        let executor = self.executor.clone();
+        let job = entry.job.clone();
+        match self
+            .drive_interleaved(async move { executor.upload(&job).await })
+            .await
+        {
+            None => AttemptOutcome::ShuttingDown,
+            Some(Ok(())) => AttemptOutcome::Succeeded,
+            Some(Err(err)) => AttemptOutcome::Failed(err),
+        }
+    }
+
+    /// Requeue `entry` at the tail with its attempt count preserved, dropping
+    /// it with a warning if the queue rejects it.
+    async fn requeue(&mut self, entry: QueueEntry) {
+        let job = entry.job.clone();
+        if let Err(requeue_err) = self.queue.requeue(entry).await {
+            warn!(
+                "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
+                job.upload_rule_id, job.file, job.digest
+            );
+        }
+    }
+
+    /// Back off before the next in-place attempt, staying responsive to
+    /// commands. `attempts` is the job's total attempt count so far; the
+    /// backoff exponent is that minus one. Returns [`Flow::Shutdown`] if a
+    /// shutdown arrived during the sleep.
+    async fn backoff_sleep(&mut self, attempts: u32) -> Flow {
+        let secs = cooldown::calc(&self.options.backoff, attempts - 1);
+        let sleep_fut = (self.sleep_fn)(Duration::from_secs(secs.max(0) as u64));
+        match self.drive_interleaved(sleep_fut).await {
+            None => Flow::Shutdown,
+            Some(()) => Flow::Continue,
+        }
+    }
+
+    fn log_success(entry: &QueueEntry) {
+        info!(
+            "uploaded file {} (rule {}, digest {}) on attempt {}",
+            entry.job.file, entry.job.upload_rule_id, entry.job.digest, entry.attempts
+        );
+    }
+
+    fn log_dropped(entry: &QueueEntry, err: &UploadErr) {
+        warn!(
+            "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
+            entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
+        );
     }
 
     /// Drive `fut` to completion while continuing to serve commands. Returns
