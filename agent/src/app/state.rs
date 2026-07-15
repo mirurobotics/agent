@@ -14,7 +14,7 @@ use crate::data_uploads::{
 use crate::deploy::{apply, fsm};
 use crate::disk;
 use crate::events;
-use crate::filesys::{File, PathExt};
+use crate::filesys::{state_file, File, PathExt};
 use crate::http;
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
@@ -144,9 +144,12 @@ impl AppState {
         layout: &disk::Layout,
         sinks: Vec<Arc<dyn scan::StableFileSink>>,
     ) -> Result<(Arc<scan::Scanner>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match ScanSnapshotFile::new_with_default(
+        let snapshot_file = match ScanSnapshotFile::open(
             layout.scanner_snapshot(),
-            Default::default(),
+            state_file::Options {
+                default: Some(Default::default()),
+                ..Default::default()
+            },
         )
         .await
         {
@@ -175,9 +178,12 @@ impl AppState {
     async fn init_deleter(
         layout: &disk::Layout,
     ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
+        let snapshot_file = match retention::DeleteQueueSnapshotFile::open(
             layout.delete_queue(),
-            Default::default(),
+            state_file::Options {
+                default: Some(Default::default()),
+                ..Default::default()
+            },
         )
         .await
         {
@@ -210,9 +216,12 @@ impl AppState {
         token_mngr: Arc<authn::TokenManager>,
         deleter: Arc<retention::Deleter>,
     ) -> Result<(Arc<upload::Uploader>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match upload::QueueSnapshotFile::new_with_default(
+        let snapshot_file = match upload::QueueSnapshotFile::open(
             layout.upload_queue(),
-            Default::default(),
+            state_file::Options {
+                default: Some(Default::default()),
+                ..Default::default()
+            },
         )
         .await
         {
@@ -306,7 +315,15 @@ async fn setup_auth_files(
     let public_key_file = auth_dir.public_key();
     public_key_file.assert_exists()?;
 
-    let token_file = TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
+    // 0o600: the token is a live bearer credential (and the MQTT password).
+    let token_file = TokenFile::open(
+        auth_dir.token(),
+        state_file::Options {
+            default: Some(authn::Token::default()),
+            mode: Some(0o600),
+        },
+    )
+    .await?;
 
     Ok((token_file, private_key_file, public_key_file))
 }

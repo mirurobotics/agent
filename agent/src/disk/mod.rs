@@ -28,7 +28,7 @@ pub use crate::network::{BackendHost, MqttHost};
 use self::device::Device as DeviceStorage;
 use self::errors::DiskErr as StorErr;
 use self::layout::Layout as StorLayout;
-use crate::filesys::Overwrite;
+use crate::filesys::{state_file::Options, Overwrite};
 use crate::models;
 
 use tokio::task::JoinHandle;
@@ -233,14 +233,17 @@ async fn init_device_storage(
     layout: &StorLayout,
     device_id: String,
 ) -> Result<(Arc<DeviceStorage>, JoinHandle<()>), StorErr> {
-    let (device_storage, device_storage_handle) = DeviceStorage::spawn_with_default(
+    let (device_storage, device_storage_handle) = DeviceStorage::spawn(
         64,
         layout.device(),
-        models::Device {
-            id: device_id.clone(),
-            activated: true,
-            status: models::DeviceStatus::Offline,
-            ..models::Device::default()
+        Options {
+            default: Some(models::Device {
+                id: device_id.clone(),
+                activated: true,
+                status: models::DeviceStatus::Offline,
+                ..models::Device::default()
+            }),
+            ..Default::default()
         },
     )
     .await?;

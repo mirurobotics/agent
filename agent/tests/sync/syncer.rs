@@ -15,7 +15,7 @@ use miru_agent::disk::{
 };
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, dirs, files, Overwrite};
+use miru_agent::filesys::{self, dirs, files, state_file::Options, Overwrite};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
@@ -33,9 +33,15 @@ pub async fn create_token_manager(
     dir: &filesys::Dir,
     http_client: Arc<MockClient>,
 ) -> (TokenManager, JoinHandle<()>) {
-    let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
-        .await
-        .unwrap();
+    let token_file = TokenFile::open(
+        dir.file("token.json"),
+        Options {
+            default: Some(Token::default()),
+            mode: None,
+        },
+    )
+    .await
+    .unwrap();
     let private_key_file = dir.file("private_key.pem");
     files::seed(&private_key_file, "private_key").await;
     let public_key_file = dir.file("public_key.pem");
@@ -62,10 +68,16 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployment_cache.json"), 1000)
         .await
         .unwrap();
-    let (device_stor, _) =
-        disk::Device::spawn_with_default(64, dir.file("device.json"), Device::default())
-            .await
-            .unwrap();
+    let (device_stor, _) = disk::Device::spawn(
+        64,
+        dir.file("device.json"),
+        Options {
+            default: Some(Device::default()),
+            mode: None,
+        },
+    )
+    .await
+    .unwrap();
     let (release_stor, _) = Releases::spawn(16, dir.file("releases_cache.json"), 1000)
         .await
         .unwrap();

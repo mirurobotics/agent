@@ -18,6 +18,7 @@
 use miru_agent::data_uploads::queue::{
     Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
+use miru_agent::filesys::state_file::Options;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 
 // external crates
@@ -35,9 +36,15 @@ pub fn now() -> DateTime<Utc> {
 /// A fresh snapshot handle over `path`. Reopening the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
 async fn open<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
-    QueueSnapshotFile::<J>::new_with_default(path.clone(), QueueSnapshot::<J>::default())
-        .await
-        .unwrap()
+    QueueSnapshotFile::<J>::open(
+        path.clone(),
+        Options {
+            default: Some(QueueSnapshot::<J>::default()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
 }
 
 /// `enqueue` without requiring the error to be `Debug`.

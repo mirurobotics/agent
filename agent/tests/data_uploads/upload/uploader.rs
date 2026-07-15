@@ -15,6 +15,7 @@ use miru_agent::data_uploads::upload::{
     UploaderOptions,
 };
 use miru_agent::errors::Error;
+use miru_agent::filesys::state_file::Options;
 use miru_agent::filesys::{dirs, File};
 use miru_agent::models::FileRuleRetention;
 
@@ -1003,9 +1004,15 @@ mod durability {
     /// A queue persisted to `path`, so a test can inspect what is on disk
     /// while an attempt is still running.
     async fn open(path: &File) -> QueueSnapshotFile {
-        QueueSnapshotFile::new_with_default(path.clone(), QueueSnapshot::default())
-            .await
-            .unwrap()
+        QueueSnapshotFile::open(
+            path.clone(),
+            Options {
+                default: Some(QueueSnapshot::default()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
     }
 
     fn spawn_persisted(

@@ -2,7 +2,7 @@
 use crate::mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager};
 use miru_agent::authn::Token;
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::dirs;
+use miru_agent::filesys::{dirs, state_file};
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::mqtt::client::Client;
 use miru_agent::mqtt::device::{Ping, SyncDevice};
@@ -59,10 +59,16 @@ pub mod handle_connection_events {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let event = Event::Incoming(Incoming::ConnAck(ConnAck {
             code: ConnectReturnCode::RefusedProtocolVersion,
@@ -82,13 +88,16 @@ pub mod handle_connection_events {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) = disk::Device::spawn_with_default(
+        let (device_file, _) = disk::Device::spawn(
             64,
             layout.device(),
-            Device {
-                status: DeviceStatus::Offline,
-                last_connected_at: Utc::now(),
-                ..Device::default()
+            state_file::Options {
+                default: Some(Device {
+                    status: DeviceStatus::Offline,
+                    last_connected_at: Utc::now(),
+                    ..Device::default()
+                }),
+                mode: None,
             },
         )
         .await
@@ -116,10 +125,16 @@ pub mod handle_connection_events {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let event = Event::Incoming(Incoming::ConnAck(ConnAck {
             code: ConnectReturnCode::Success,
@@ -144,10 +159,16 @@ pub mod handle_connection_events {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let event = Event::Incoming(Incoming::ConnAck(ConnAck {
             code: ConnectReturnCode::BadUserNamePassword,
@@ -174,10 +195,16 @@ pub mod handle_connection_events {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let event = Event::Incoming(Incoming::ConnAck(ConnAck {
             code: ConnectReturnCode::Success,
@@ -203,13 +230,16 @@ pub mod handle_connection_events {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) = disk::Device::spawn_with_default(
+        let (device_file, _) = disk::Device::spawn(
             64,
             layout.device(),
-            Device {
-                status: DeviceStatus::Online,
-                last_disconnected_at: Utc::now(),
-                ..Device::default()
+            state_file::Options {
+                default: Some(Device {
+                    status: DeviceStatus::Online,
+                    last_disconnected_at: Utc::now(),
+                    ..Device::default()
+                }),
+                mode: None,
             },
         )
         .await
@@ -239,10 +269,16 @@ pub mod handle_sync_events {
         let layout = Layout::new(dir.to_dir());
 
         let device = Device::default();
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let event = Event::Incoming(Incoming::Publish(Publish::new(
             topics::device_sync(&device.id),
@@ -264,10 +300,16 @@ pub mod handle_sync_events {
         let layout = Layout::new(dir.to_dir());
 
         let device = Device::default();
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let payload = SyncDevice { is_synced: true };
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
@@ -291,10 +333,16 @@ pub mod handle_sync_events {
         let layout = Layout::new(dir.to_dir());
 
         let device = Device::default();
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let payload = SyncDevice { is_synced: false };
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
@@ -318,10 +366,16 @@ pub mod handle_sync_events {
         let layout = Layout::new(dir.to_dir());
 
         let device = Device::default();
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let payload = SyncDevice { is_synced: false };
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
@@ -354,10 +408,16 @@ pub mod handle_ping_events {
         let layout = Layout::new(dir.to_dir());
 
         let device = Device::default();
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let event = Event::Incoming(Incoming::Publish(Publish::new(
             topics::device_ping(&device.id),
@@ -382,10 +442,16 @@ pub mod handle_ping_events {
         let layout = Layout::new(dir.to_dir());
 
         let device = Device::default();
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let payload = Ping {
             message_id: "123e4567-e89b-12d3-a456-426614174000".to_string(),
@@ -424,10 +490,16 @@ pub mod handle_mqtt_error {
             status: DeviceStatus::Offline,
             ..Device::default()
         };
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let token = Token {
             token: "token".to_string(),
@@ -483,10 +555,16 @@ pub mod handle_mqtt_error {
             status: DeviceStatus::Online,
             ..Device::default()
         };
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let token = Token {
             token: "token".to_string(),
@@ -545,10 +623,16 @@ pub mod handle_mqtt_error {
             status: DeviceStatus::Online,
             ..Device::default()
         };
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            state_file::Options {
+                default: Some(device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let token = Token {
             token: "token".to_string(),

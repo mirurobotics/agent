@@ -26,9 +26,15 @@ pub async fn reset(
     let settings_file = layout.settings();
     files::write_json(&settings_file, &settings, WriteOptions::OVERWRITE_ATOMIC).await?;
 
-    // blank token.json
+    // blank token.json — 0o600 since the token is a live bearer credential
+    // (and the MQTT password); the update path in the token manager matches.
     let token = authn::Token::default();
-    files::write_json(&auth_dir.token(), &token, WriteOptions::OVERWRITE_ATOMIC).await?;
+    files::write_json(
+        &auth_dir.token(),
+        &token,
+        WriteOptions::OVERWRITE_ATOMIC_0600,
+    )
+    .await?;
 
     // wipe resources directory (also wipes config_instances/, deployments,
     // releases, git_commits — everything cached locally)

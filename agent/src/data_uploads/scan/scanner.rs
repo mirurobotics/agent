@@ -454,7 +454,7 @@ mod tests {
     use super::{ScannerExt, StableFileSink};
     use crate::data_uploads::scan::rule::RuleScanner;
     use crate::data_uploads::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
-    use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+    use crate::filesys::{dirs, files, state_file::Options, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
 
     // external crates
@@ -724,9 +724,15 @@ mod tests {
     }
 
     async fn state_file(file: &File) -> ScanSnapshotFile {
-        ScanSnapshotFile::new_with_default(file.clone(), ScannerSnapshot::default())
-            .await
-            .unwrap()
+        ScanSnapshotFile::open(
+            file.clone(),
+            Options {
+                default: Some(ScannerSnapshot::default()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
     }
 
     async fn spawn_persisted(clock: &Clock, file: &File) -> Scanner {

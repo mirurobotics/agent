@@ -12,6 +12,7 @@
 use crate::data_uploads::queue::queue_suite;
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
+use miru_agent::filesys::state_file::Options;
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
@@ -63,9 +64,15 @@ fn make_job(name: &str) -> Job {
 /// A fresh snapshot file over `path`. Reopening the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
 async fn open(path: &File) -> QueueSnapshotFile {
-    QueueSnapshotFile::new_with_default(path.clone(), QueueSnapshot::default())
-        .await
-        .unwrap()
+    QueueSnapshotFile::open(
+        path.clone(),
+        Options {
+            default: Some(QueueSnapshot::default()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
 }
 
 mod wire {
@@ -73,7 +80,7 @@ mod wire {
 
     /// Pins the persisted wire format on the read side: an entry is
     /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
-    /// rather than flattened. `SingleThreadStateFile::new_with_default`
+    /// rather than flattened. `SingleThreadStateFile::open`
     /// silently overwrites a snapshot it cannot parse, so a shape change would
     /// wipe a live user's queue instead of erroring — this test is the guard.
     ///
@@ -188,7 +195,7 @@ mod wire {
             .await
             .unwrap();
 
-        // if deserialization failed, new_with_default would silently write an
+        // if deserialization failed, open would silently write an
         // empty default snapshot and the pop below would find nothing
         let queue = Queue::from_snapshot(8, open(&path).await);
         let entry = queue.next_ready(Utc::now()).unwrap();
