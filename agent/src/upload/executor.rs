@@ -1,5 +1,6 @@
 // internal crates
 use crate::upload::{errors::UploadErr, job::Job};
+use backend_api::models::{CreateUploadRequest, UploadSource};
 
 // external crates
 use tracing::info;
@@ -29,5 +30,28 @@ impl UploadExecutor for LogExecutor {
     async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         info!("LogExecutor: pretending to upload {job:?}");
         Ok(())
+    }
+}
+
+/// Maps a [`Job`] into the backend's `POST /uploads` payload. Kept separate so
+/// the wire mapping is unit-testable without mocks. Timestamps are RFC 3339
+/// (the repo-wide `DateTime<Utc>` wire convention); a size beyond `i64` (never
+/// expected in practice) saturates instead of silently wrapping. The scanner
+/// has no incomplete-file signal yet, so `incomplete` stays unset and the
+/// backend defaults it to false.
+pub fn create_request(job: &Job) -> CreateUploadRequest {
+    CreateUploadRequest {
+        upload_rule_id: job.upload_rule_id.clone(),
+        source: Box::new(UploadSource {
+            file_path: job.file.to_string(),
+            mtime: job.mtime.to_rfc3339(),
+            first_observed_at: job.first_observed_at.to_rfc3339(),
+            last_observed_at: job.last_observed_at.to_rfc3339(),
+        }),
+        digest: job.digest.clone(),
+        size: i64::try_from(job.size).unwrap_or(i64::MAX),
+        incomplete: None,
+        release_id: job.release_id.clone(),
+        deployment_id: job.deployment_id.clone(),
     }
 }

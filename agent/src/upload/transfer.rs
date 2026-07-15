@@ -5,8 +5,7 @@ use std::future::Future;
 use crate::filesys::File;
 use crate::gcs;
 use crate::s3;
-use crate::trace;
-use crate::upload::errors::{ExecutorErr, UploadErr};
+use crate::upload::errors::{executor_err, UploadErr};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
@@ -162,23 +161,8 @@ pub fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
     }
 }
 
-/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the single error
-/// surface the actor sees from transfer failures.
-fn executor_err<E>(source: E) -> UploadErr
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    UploadErr::ExecutorErr(ExecutorErr {
-        source: Box::new(source),
-        trace: trace!(),
-    })
-}
-
-/// Builds an [`ExecutorErr`] from a static reason, for credential/scheme cases
-/// the device cannot act on.
+/// Builds an [`UploadErr::ExecutorErr`] from a static reason, for
+/// credential/scheme cases the device cannot act on.
 fn unsupported(msg: &str) -> UploadErr {
-    UploadErr::ExecutorErr(ExecutorErr {
-        source: msg.to_string().into(),
-        trace: trace!(),
-    })
+    executor_err(msg.to_string())
 }
