@@ -17,7 +17,7 @@ use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr};
-use miru_agent::upload::executor::create_request;
+use miru_agent::upload::executor::new_upl_request;
 use miru_agent::upload::{BrokerExecutor, Job, SdkTransfer, UploadErr, UploadExecutor};
 
 // external crates
@@ -159,23 +159,10 @@ async fn happy_path_creates_transfers_confirms() {
     );
     let sent: CreateUploadRequest =
         serde_json::from_str(requests[0].body.as_deref().unwrap()).unwrap();
-    assert_eq!(sent, create_request(&job));
+    assert_eq!(sent, new_upl_request(&job));
     assert_eq!(requests[0].token.as_deref(), Some("test-token"));
     assert_eq!(requests[1].path, "/uploads/upl_1/confirm");
     assert_eq!(requests[1].token.as_deref(), Some("test-token"));
-}
-
-#[tokio::test]
-async fn dedup_uploaded_status_skips_transfer_and_confirm() {
-    let client = Arc::new(MockClient::default());
-    client.set_create_upload(|| Ok(uploaded_response()));
-    let transfer = MockObjectTransfer::new();
-    let executor = BrokerExecutor::new(client.clone(), token_manager(), transfer.clone());
-
-    executor.upload(&make_job("a.log")).await.unwrap();
-
-    assert_eq!(transfer.recorded_calls(), vec![]);
-    assert_eq!(client.call_count(Call::ConfirmUpload), 0);
 }
 
 #[tokio::test]
@@ -342,5 +329,5 @@ fn create_request_maps_job_fields() {
         release_id: "rls_1".to_string(),
         deployment_id: "dpl_1".to_string(),
     };
-    assert_eq!(create_request(&job), expected);
+    assert_eq!(new_upl_request(&job), expected);
 }

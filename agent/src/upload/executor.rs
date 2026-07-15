@@ -9,7 +9,7 @@ use crate::upload::{
     job::Job,
     transfer::ObjectTransfer,
 };
-use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus};
+use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
@@ -26,27 +26,6 @@ pub trait UploadExecutor: Send + Sync {
     fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
-/// Production [`UploadExecutor`] driving the backend's broker upload flow: mint the
-/// upload at the backend (`POST /uploads`), transfer the file's bytes to cloud storage
-/// through the injected [`ObjectTransfer`], then confirm (`POST
-/// /uploads/{id}/confirm`).
-///
-/// If the backend's digest dedup reports the file already `uploaded` in the create
-/// response, the executor short-circuits without transferring or confirming. Any other
-/// status (including the forward-compat catch-all
-/// [`UploadStatus::UploadStatusUnknown`]) proceeds with transfer and confirm: a new
-/// backend status must not strand device files, and confirm is idempotent server-side.
-///
-/// Mid-upload credential expiry handling (re-requesting exact-key credentials via `POST
-/// /uploads/{id}/credentials` and resuming the partial transfer) is an explicit
-/// follow-up; until then an expired credential fails the transfer and the flow is
-/// re-driven from scratch.
-///
-/// # Cancel safety
-///
-/// Every await point may be the last — the actor drops in-flight futures on shutdown.
-/// No in-memory state is required for correctness: create is digest-deduped and confirm
-/// is idempotent server-side, so a re-observed file safely re-drives the whole flow.
 pub struct BrokerExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
     http_client: Arc<C>,
     token_mngr: Arc<T>,
@@ -62,20 +41,14 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> BrokerExecutor<C, T, X> 
         }
     }
 
-    /// Re-reads the current bearer token. Called immediately before each HTTP
-    /// call — the transfer between create and confirm can be long, and a token
-    /// read before create may have been rotated (by the background refresh
-    /// worker) by confirm time.
     async fn token(&self) -> Result<Arc<Token>, UploadErr> {
         self.token_mngr.get_token().await.map_err(executor_err)
     }
-}
 
-impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for BrokerExecutor<C, T, X> {
-    async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
+    async fn create_upload(&self, job: &Job) -> Result<UploadWithCredentials, UploadErr> {
         let token = self.token().await?;
-        let payload = create_request(job);
-        let resp = http::with_retry(|| async {
+        let payload = new_upl_request(job);
+        http::with_retry(|| async {
             let params = http::uploads::CreateParams {
                 payload: &payload,
                 token: &token.token,
@@ -83,39 +56,38 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for Broke
             http::uploads::create(self.http_client.as_ref(), params).await
         })
         .await
-        .map_err(executor_err)?;
+        .map_err(executor_err)
+    }
 
-        // Digest dedup: the backend already holds this file durably, so there
-        // is nothing left to transfer or confirm.
-        if resp.upload.status == UploadStatus::UPLOAD_STATUS_UPLOADED {
-            return Ok(());
-        }
-
-        self.transfer
-            .transfer(&resp.credentials, &resp.upload.destination, &job.file)
-            .await?;
-
+    async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
         let token = self.token().await?;
         http::with_retry(|| async {
             let params = http::uploads::ConfirmParams {
-                id: &resp.upload.id,
+                id,
                 token: &token.token,
             };
             http::uploads::confirm(self.http_client.as_ref(), params).await
         })
         .await
-        .map_err(executor_err)?;
+        .map(|_| ())
+        .map_err(executor_err)
+    }
+}
+
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for BrokerExecutor<C, T, X> {
+    async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
+        let resp = self.create_upload(job).await?;
+
+        self.transfer
+            .transfer(&resp.credentials, &resp.upload.destination, &job.file)
+            .await?;
+
+        self.confirm_upload(&resp.upload.id).await?;
         Ok(())
     }
 }
 
-/// Maps a [`Job`] into the backend's `POST /uploads` payload. Kept separate so
-/// the wire mapping is unit-testable without mocks. Timestamps are RFC 3339
-/// (the repo-wide `DateTime<Utc>` wire convention); a size beyond `i64` (never
-/// expected in practice) saturates instead of silently wrapping. The scanner
-/// has no incomplete-file signal yet, so `incomplete` stays unset and the
-/// backend defaults it to false.
-pub fn create_request(job: &Job) -> CreateUploadRequest {
+pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
     CreateUploadRequest {
         upload_rule_id: job.upload_rule_id.clone(),
         source: Box::new(UploadSource {
