@@ -1,5 +1,6 @@
 // internal crates
 use crate::filesys::File;
+use crate::models::DeletePolicy;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -22,4 +23,8 @@ pub struct Job {
     pub last_observed_at: DateTime<Utc>,
     pub upload_rule_id: String,
     pub deployment_id: String,
+    /// What to do with the local source file after a successful upload.
+    /// Copied from `StableFile.delete_policy` by the scan-upload bridge and
+    /// read by the executor after the upload is confirmed durable.
+    pub delete_policy: DeletePolicy,
 }

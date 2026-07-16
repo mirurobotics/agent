@@ -464,7 +464,7 @@ mod tests {
     use super::{ScanEvent, ScannerExt, DEFAULT_BROADCAST_CAPACITY};
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-    use crate::models::{Deployment, DplActivity, UploadRule, UploadRuleSource};
+    use crate::models::{DeletePolicy, Deployment, DplActivity, UploadRule, UploadRuleSource};
     use crate::scan::collection::CollectionScanner;
     use crate::scan::state::{CollectionState, Config, ScanSnapshotFile, ScannerSnapshot};
 
@@ -911,6 +911,7 @@ mod tests {
                 last_observed_at: DateTime::from_timestamp(1001, 0).unwrap(),
                 deployment_id: "dpl-1".to_string(),
                 upload_rule_id: DEFAULT_COLL_ID.to_string(),
+                delete_policy: DeletePolicy::Never,
             };
 
             let mut rx = subscribe(&scanner).await;

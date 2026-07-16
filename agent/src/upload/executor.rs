@@ -3,13 +3,18 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
+use crate::filesys::files;
 use crate::http::{self, ClientI};
+use crate::models::DeletePolicy;
 use crate::upload::{
     errors::{executor_err, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
 };
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
+
+// external crates
+use tracing::warn;
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
@@ -83,6 +88,20 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             .await?;
 
         self.confirm_upload(&resp.upload.id).await?;
+
+        // The upload is now durable (confirmed with the backend). Honor the
+        // rule's delete policy. This is best-effort: a delete failure must NOT
+        // fail the job — that would re-drive an already-durable upload. A
+        // missing file is already Ok(()) inside files::delete, covering the
+        // re-observed-after-a-prior-interrupted-attempt case (idempotent).
+        if job.delete_policy == DeletePolicy::AfterUpload {
+            if let Err(e) = files::delete(&job.file).await {
+                warn!(
+                    "upload for {} confirmed but deleting the local source file failed: {e:?}",
+                    job.file
+                );
+            }
+        }
         Ok(())
     }
 }
