@@ -1,4 +1,5 @@
 // standard crates
+use std::collections::HashMap;
 use std::sync::Arc;
 
 // internal crates
@@ -80,6 +81,7 @@ fn response_with_status(status: UploadStatus) -> UploadWithCredentials {
             ..Default::default()
         }),
         credentials: Box::new(s3_credentials()),
+        metadata: HashMap::new(),
     }
 }
 

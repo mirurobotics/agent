@@ -61,9 +61,6 @@ pub struct Upload {
     /// ID of the workspace that owns the upload.
     #[serde(rename = "workspace_id")]
     pub workspace_id: String,
-    /// Provenance the device stamps as cloud object metadata on the uploaded object (S3 `x-amz-meta-*` / GCS `x-goog-meta-*`). All values are strings. Keep the map within the cloud provider's object-metadata size limits (S3 ~2 KB, GCS ~8 KB of combined user-defined metadata).  Uploads created through the broker flow always carry this map; read/confirm-style responses may omit it, so `metadata` is not required.  The currently-expected keys are, as a NON-normative example only: `device_id`, `release_id`, `release_version`, `deployment_id`, `digest`, `mtime`. This list is illustrative — the map is generic and the set of keys may evolve without a schema change. 
-    #[serde(rename = "metadata", skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Upload {
@@ -86,7 +83,6 @@ impl Upload {
             created_at,
             updated_at,
             workspace_id,
-            metadata: None,
         }
     }
 }
