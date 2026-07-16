@@ -10,6 +10,7 @@ use crate::http;
 use crate::scan;
 use crate::services;
 use crate::sync;
+use crate::upload;
 
 #[derive(Debug, thiserror::Error)]
 pub struct MissingDeviceIDErr {
@@ -113,6 +114,8 @@ pub enum ServerErr {
     ScanErr(Box<scan::ScanErr>),
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
+    #[error(transparent)]
+    UploadErr(Box<upload::UploadErr>),
 
     // external crate errors
     #[error(transparent)]
@@ -185,6 +188,12 @@ impl From<sync::SyncErr> for ServerErr {
     }
 }
 
+impl From<upload::UploadErr> for ServerErr {
+    fn from(e: upload::UploadErr) -> Self {
+        Self::UploadErr(Box::new(e))
+    }
+}
+
 crate::impl_error!(ServerErr {
     MissingDeviceIDErr,
     TimestampConversionErr,
@@ -199,8 +208,37 @@ crate::impl_error!(ServerErr {
     DiskErr,
     ScanErr,
     SyncErr,
+    UploadErr,
     BindUnixSocketErr,
     RunAxumServerErr,
     SendShutdownSignalErr,
     JoinHandleErr,
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::Error as _;
+    use crate::trace;
+    use crate::upload::{errors::QueueFullErr, UploadErr};
+
+    // An upload::UploadErr converts into the ServerErr::UploadErr variant and
+    // routes through the impl_error!-generated trait methods for that arm.
+    #[test]
+    fn upload_err_converts_and_reports() {
+        let upload_err = UploadErr::QueueFullErr(QueueFullErr {
+            capacity: 1,
+            file: "/data/a.log".to_string(),
+            trace: trace!(),
+        });
+
+        let err: ServerErr = upload_err.into();
+        assert!(matches!(err, ServerErr::UploadErr(_)));
+
+        // exercise the generated arms for the new variant
+        let _ = err.code();
+        let _ = err.http_status();
+        let _ = err.params();
+        assert!(!format!("{err}").is_empty());
+    }
+}
