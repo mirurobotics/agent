@@ -49,6 +49,17 @@ impl MockScanner {
         }
     }
 
+    /// Emit a scan event to all current subscribers. Returns the number of
+    /// subscribers that received it (0 if none are listening yet).
+    pub fn emit(&self, event: ScanEvent) -> usize {
+        self.subscribe_tx.send(event).unwrap_or(0)
+    }
+
+    /// The number of live subscribers to the scan-event stream.
+    pub fn subscriber_count(&self) -> usize {
+        self.subscribe_tx.receiver_count()
+    }
+
     /// The recorded `update_rules` calls, in order.
     pub fn update_rules_calls(&self) -> Vec<(Deployment, Vec<UploadRule>)> {
         self.update_rules_calls.lock().unwrap().clone()
