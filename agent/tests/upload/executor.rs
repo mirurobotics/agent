@@ -326,7 +326,6 @@ fn create_request_maps_job_fields() {
         digest: "sha256:abc".to_string(),
         size: 42,
         incomplete: None,
-        release_id: "rls_1".to_string(),
         deployment_id: "dpl_1".to_string(),
     };
     assert_eq!(new_upl_request(&job), expected);
