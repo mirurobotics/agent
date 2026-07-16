@@ -39,7 +39,6 @@ pub mod run {
                 &options_for_spawn,
                 scanner_for_spawn.as_ref(),
                 sleep_ctrl_for_spawn.sleep_fn(),
-                chrono::Utc::now,
                 shutdown_signal,
             )
             .await;
@@ -82,7 +81,6 @@ pub mod run {
                 &options_for_spawn,
                 scanner_for_spawn.as_ref(),
                 sleep_ctrl_for_spawn.sleep_fn(),
-                chrono::Utc::now,
                 shutdown_signal,
             )
             .await;
@@ -131,7 +129,6 @@ pub mod run {
                 &options_for_spawn,
                 scanner_for_spawn.as_ref(),
                 sleep_ctrl_for_spawn.sleep_fn(),
-                chrono::Utc::now,
                 shutdown_signal,
             )
             .await;

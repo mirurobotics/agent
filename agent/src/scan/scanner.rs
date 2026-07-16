@@ -241,10 +241,9 @@ impl SingleThreadScanner {
         Ok(())
     }
 
-    async fn prune(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        debug!("scan: pruning ledger entries first observed before {before}");
+    async fn prune(&mut self) -> Result<(), ScanErr> {
         for scanner in self.scanners.values_mut() {
-            scanner.prune_ledger(before)?;
+            scanner.prune_ledger()?;
         }
         self.persist_snapshot().await;
         Ok(())
@@ -263,7 +262,7 @@ pub trait ScannerExt {
     async fn scan(&self) -> Result<(), ScanErr>;
     async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr>;
     async fn shutdown(&self) -> Result<(), ScanErr>;
-    async fn prune(&self, before: DateTime<Utc>) -> Result<(), ScanErr>;
+    async fn prune(&self) -> Result<(), ScanErr>;
 }
 
 pub enum Command {
@@ -293,7 +292,6 @@ pub enum Command {
         respond_to: oneshot::Sender<Result<usize, ScanErr>>,
     },
     Prune {
-        before: DateTime<Utc>,
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
 }
@@ -363,9 +361,9 @@ impl Worker {
                         "Actor failed to send get ledger count response"
                     );
                 }
-                Command::Prune { before, respond_to } => {
+                Command::Prune { respond_to } => {
                     dispatch!(
-                        self.scanner.prune(before).await,
+                        self.scanner.prune().await,
                         respond_to,
                         "Actor failed to send prune response"
                     );
@@ -468,12 +466,9 @@ impl ScannerExt for Scanner {
         Ok(())
     }
 
-    async fn prune(&self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        self.send_command(|tx| Command::Prune {
-            before,
-            respond_to: tx,
-        })
-        .await?
+    async fn prune(&self) -> Result<(), ScanErr> {
+        self.send_command(|tx| Command::Prune { respond_to: tx })
+            .await?
     }
 }
 
@@ -1389,44 +1384,37 @@ mod tests {
     mod prune {
         use super::*;
 
-        // prune(before) with `before` AFTER the recorded first_observed_at drops the
-        // ledger entry; with `before` earlier retains it.
+        // prune retains a ledger entry while its file still exists and drops it
+        // once the file is gone.
         #[tokio::test]
-        async fn prune_drops_and_retains() {
+        async fn prune_retains_present_drops_gone() {
             let (dir, clock, scanner) = single_coll(0).await;
-            write(&dir, "p.mcap", b"aaa").await;
+            let file = write(&dir, "p.mcap", b"aaa").await;
 
-            // discover at t=1000, evaluate stable at t=1001. first_observed_at == 1000.
+            // discover at t=1000, evaluate stable at t=1001 => one ledger entry.
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
 
-            // retain: before (t=999) <= first_observed_at (1000) => keep.
-            scanner
-                .prune(chrono::DateTime::from_timestamp(999, 0).unwrap())
-                .await
-                .unwrap();
+            // file still present => entry retained.
+            scanner.prune().await.unwrap();
             assert_eq!(ledger_count(&scanner).await, 1);
 
-            // drop: before (t=1001) > first_observed_at (1000) => remove.
-            scanner
-                .prune(chrono::DateTime::from_timestamp(1001, 0).unwrap())
-                .await
-                .unwrap();
+            // file removed => entry dropped.
+            files::delete(&file).await.unwrap();
+            scanner.prune().await.unwrap();
             assert_eq!(ledger_count(&scanner).await, 0);
         }
 
         #[tokio::test]
         async fn prune_persists_snapshot() {
             let fxtr = persisted_coll(0).await;
-            write(&fxtr.dir, "a.mcap", b"aaaa").await;
+            let file = write(&fxtr.dir, "a.mcap", b"aaaa").await;
             scan_once(&fxtr.scanner).await;
             tick(&fxtr.scanner, &fxtr.clock, 1).await;
 
-            fxtr.scanner
-                .prune(DateTime::from_timestamp(2000, 0).unwrap())
-                .await
-                .unwrap();
+            files::delete(&file).await.unwrap();
+            fxtr.scanner.prune().await.unwrap();
 
             let snapshot = read_snapshot(&fxtr.state_path).await;
             let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();

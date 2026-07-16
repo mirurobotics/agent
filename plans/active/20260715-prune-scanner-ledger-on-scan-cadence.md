@@ -22,12 +22,11 @@ After this change, a running agent keeps its scanner ledger bounded automaticall
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) Add `ledger_retention_secs` to `workers::scan::Options` + `Default`.
-- [ ] Inject a `now_fn` closure into `workers::scan::run` / `run_impl` mirroring the existing `sleep_fn` injection.
-- [ ] Compute `before = now_fn() - ledger_retention_secs` and call `scanner.prune(before)` after each scan (initial pass + every loop tick), logging errors and continuing.
-- [ ] Pass `chrono::Utc::now` as the production `now_fn` at the single call site in `agent/src/app/run.rs::init_scan_worker`.
-- [ ] Confirm the new option flows through `AppOptions::default()` via `Default::default()` (no explicit wiring needed).
-- [ ] Add a `#[cfg(test)] mod tests` to `agent/src/workers/scan.rs`: a recording fake `ScannerExt`, a controllable clock, and a driven `sleep_fn`; assert prune is invoked on cadence with the correct `before` cutoff.
+- [x] (2026-07-15) Time-based impl landed: `ledger_retention_secs` option, injected `now_fn`, `prune(before = now - retention)` after each scan. **Reverted 2026-07-16 in favor of existence-based pruning (see Decision Log pivot).**
+- [x] (2026-07-16) `CollectionState::prune_ledger()` drops entries whose keyed file no longer exists (`retain(|file, _| file.exists())`); `before` param removed throughout (`CollectionScanner`, `SingleThreadScanner`, `ScannerExt`, `Command::Prune`).
+- [x] (2026-07-16) `workers::scan::run`/`run_impl` reverted to the pre-change signatures (no `now_fn`); `prune_ledger(scanner)` calls `scanner.prune()` after the initial scan and every loop tick, logging errors and continuing. `ledger_retention_secs` removed from `Options`.
+- [x] (2026-07-16) `agent/src/app/run.rs::init_scan_worker` reverted to pass only `tokio::time::sleep` + the boxed shutdown future (no `chrono::Utc::now`).
+- [x] (2026-07-16) Tests updated for existence semantics in `scan/state.rs`, `scan/collection.rs`, `scan/scanner.rs`, `workers/scan.rs` (in-file), and integration tests/mocks; the recording fake's `prune` takes no arg and the clock/cutoff scaffolding is removed.
 - [ ] Run preflight to CLEAN (CI green on pushed branch head) before the PR leaves draft / the task is reported complete.
 
 Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
@@ -43,7 +42,12 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Decision Log
 
-- Decision: Retention default is **86_400 seconds (24 hours)**, stored as `ledger_retention_secs: i64` on `workers::scan::Options`.
+- Decision: **Pivot from time-based to existence-based pruning.** `prune` no longer takes a `before` cutoff and no longer consults `first_observed_at`; instead `CollectionState::prune_ledger` drops exactly the entries whose keyed file no longer exists on disk (`self.ledger.retain(|file, _| file.exists())`). The `ledger_retention_secs` option and the injected `now_fn` are removed; the worker calls `scanner.prune()` (no args) after the initial scan and each cadence tick.
+  Rationale: The ledger exists solely to dedup uploads — `discover_candidates` skips a file that matches its latest ledger entry. An entry is therefore useful only while its file still exists and could be re-observed. Time-based (or count-based) pruning can drop an entry whose file **still exists**, causing that file to be rediscovered and re-uploaded — a correctness bug (duplicate upload). Existence-based pruning drops only entries whose file is already gone, so it can **never** cause a duplicate upload while still bounding the ledger (deleted files are cleaned up on the next tick). This removes the retention-window tuning knob and the worker's time source entirely. `File::exists()` is a sync `PathExt` method already used in `eval_candidate`.
+  Supersedes: the three decisions below about the 24h retention default, the `now_fn` injection, and the `now - retention` cutoff computation (retained for history; the cutoff/retention mechanics no longer apply). The "prune runs after scan, including the initial pass" and "prune failure is logged and the loop continues" decisions still hold.
+  Date/Author: 2026-07-16 / implementer.
+
+- Decision: Retention default is **86_400 seconds (24 hours)**, stored as `ledger_retention_secs: i64` on `workers::scan::Options`. *(Superseded 2026-07-16 — see pivot entry above; no retention window exists anymore.)*
   Rationale: The ledger's job is dedup — an entry must survive at least as long as the file it records could still be re-observed and mistakenly re-reported. A fixed 24h window comfortably outlives transient conditions (device reboots, network drops, agent restarts, redeploys) while still bounding growth to at most one day of stable files. A fixed wall-clock window is chosen over "a multiple of `scan_interval_secs`" because retention is about *how long dedup memory must live*, which is a property of the workload, not of how often we happen to poll; coupling it to the 60s scan cadence would make a faster scan interval silently shrink dedup memory. `i64` matches the existing `scan_interval_secs: i64` type and the `chrono::Duration::seconds(i64)` API.
   Date/Author: 2026-07-15 / plan author.
 

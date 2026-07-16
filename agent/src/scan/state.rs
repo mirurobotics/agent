@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 
 // internal crates
-use crate::filesys::{state_file::SingleThreadStateFile, File};
+use crate::filesys::{state_file::SingleThreadStateFile, File, PathExt};
 use crate::models::{DeletePolicy, Deployment, Patch, UploadCollectionID, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
@@ -83,12 +83,8 @@ impl CollectionState {
         Ok(())
     }
 
-    pub(crate) fn prune_ledger(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        self.ledger.retain(|_, stable_files| {
-            stable_files
-                .last()
-                .is_none_or(|stable_file| stable_file.first_observed_at >= before)
-        });
+    pub(crate) fn prune_ledger(&mut self) -> Result<(), ScanErr> {
+        self.ledger.retain(|file, _| file.exists());
         Ok(())
     }
 }
@@ -394,70 +390,66 @@ mod tests {
     mod prune_ledger {
         use super::*;
 
-        #[test]
-        fn retains_when_last_entry_after_cutoff() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state.ledger.insert(
-                file.clone(),
-                vec![
-                    stable_file(file.clone(), ts(900)),
-                    stable_file(file.clone(), ts(1100)),
-                ],
-            );
+        // internal crates
+        use crate::filesys::{dirs, files, Dir, WriteOptions};
 
-            state.prune_ledger(ts(1000)).unwrap();
-            assert_eq!(state.ledger_count(), 1);
-            assert_eq!(state.ledger.get(&file).unwrap().len(), 2);
+        /// Write `bytes` to `dir/name` and return the corresponding `File`.
+        async fn write(dir: &Dir, name: &str, bytes: &[u8]) -> File {
+            let file = dir.file(name);
+            files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+            file
         }
 
-        #[test]
-        fn drops_when_last_entry_before_cutoff() {
-            let file = File::new("/none/p.mcap");
+        // An entry whose file still exists is retained; one whose file is gone
+        // (never created) is dropped.
+        #[tokio::test]
+        async fn retains_existing_drops_missing() {
+            let dir = dirs::temp("testing").unwrap();
+            let present = write(&dir, "present.mcap", b"aaaa").await;
+            let missing = dir.file("missing.mcap");
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state.ledger.insert(
-                file.clone(),
-                vec![
-                    stable_file(file.clone(), ts(1100)),
-                    stable_file(file.clone(), ts(900)),
-                ],
+                present.clone(),
+                vec![stable_file(present.clone(), ts(1000))],
             );
+            state.ledger.insert(
+                missing.clone(),
+                vec![stable_file(missing.clone(), ts(1000))],
+            );
+            assert_eq!(state.ledger_count(), 2);
 
-            state.prune_ledger(ts(1000)).unwrap();
+            state.prune_ledger().unwrap();
+            assert_eq!(state.ledger_count(), 1);
+            assert!(state.ledger.contains_key(&present));
+            assert!(!state.ledger.contains_key(&missing));
+        }
+
+        // A previously-present file's entry is pruned once the file is deleted.
+        #[tokio::test]
+        async fn drops_after_file_deleted() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "gone.mcap", b"aaaa").await;
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            state
+                .ledger
+                .insert(file.clone(), vec![stable_file(file.clone(), ts(1000))]);
+
+            state.prune_ledger().unwrap();
+            assert_eq!(state.ledger_count(), 1);
+
+            files::delete(&file).await.unwrap();
+            state.prune_ledger().unwrap();
             assert_eq!(state.ledger_count(), 0);
         }
 
-        #[test]
-        fn prune_last_strictly_before_drops() {
-            let file = File::new("/none/p.mcap");
+        // Pruning an empty ledger is a no-op.
+        #[tokio::test]
+        async fn empty_ledger_is_noop() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state
-                .ledger
-                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
-            state.prune_ledger(ts(1001)).unwrap();
+            state.prune_ledger().unwrap();
             assert_eq!(state.ledger_count(), 0);
-        }
-
-        #[test]
-        fn prune_last_strictly_after_retains() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state
-                .ledger
-                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
-            state.prune_ledger(ts(999)).unwrap();
-            assert_eq!(state.ledger_count(), 1);
-        }
-
-        #[test]
-        fn prune_last_exact_equality_retains() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state
-                .ledger
-                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
-            state.prune_ledger(ts(1000)).unwrap();
-            assert_eq!(state.ledger_count(), 1);
         }
     }
 

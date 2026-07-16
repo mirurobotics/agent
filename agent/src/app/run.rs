@@ -319,7 +319,6 @@ async fn init_scan_worker(
             &options,
             scanner.as_ref(),
             tokio::time::sleep,
-            chrono::Utc::now,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
             }),

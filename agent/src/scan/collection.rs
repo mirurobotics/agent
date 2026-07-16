@@ -125,8 +125,8 @@ impl CollectionScanner {
         Ok(stable_files)
     }
 
-    pub(crate) fn prune_ledger(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        self.state.prune_ledger(before)
+    pub(crate) fn prune_ledger(&mut self) -> Result<(), ScanErr> {
+        self.state.prune_ledger()
     }
 }
 
@@ -1416,24 +1416,39 @@ mod tests {
     mod prune_ledger {
         use super::*;
 
-        fn scanner_with_ledger_entry(at: DateTime<Utc>) -> CollectionScanner {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            seed_ledger(&mut state, &file, stable_file(file.clone(), at));
-            CollectionScanner::from_state(state)
-        }
+        // Pass-through to CollectionState::prune_ledger: an entry whose file
+        // still exists is retained; one whose file is gone is dropped.
+        #[tokio::test]
+        async fn retains_existing_drops_missing() {
+            let dir = dirs::temp("testing").unwrap();
+            let present = write(&dir, "present.mcap", b"aaaa").await;
+            let missing = dir.file("missing.mcap");
+            let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
+            seed_ledger(&mut state, &present, stable_file(present.clone(), ts(1000)));
+            seed_ledger(&mut state, &missing, stable_file(missing.clone(), ts(1000)));
+            let mut scanner = CollectionScanner::from_state(state);
+            assert_eq!(scanner.ledger_count(), 2);
 
-        #[test]
-        fn retains_at_cutoff() {
-            let mut scanner = scanner_with_ledger_entry(ts(1000));
-            scanner.prune_ledger(ts(1000)).unwrap();
+            scanner.prune_ledger().unwrap();
             assert_eq!(scanner.ledger_count(), 1);
+            assert!(scanner.state.ledger.contains_key(&present));
+            assert!(!scanner.state.ledger.contains_key(&missing));
         }
 
-        #[test]
-        fn drops_after_cutoff() {
-            let mut scanner = scanner_with_ledger_entry(ts(1000));
-            scanner.prune_ledger(ts(1001)).unwrap();
+        // Deleting a previously-present file drops its entry on the next prune.
+        #[tokio::test]
+        async fn drops_after_file_deleted() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "gone.mcap", b"aaaa").await;
+            let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
+            seed_ledger(&mut state, &file, stable_file(file.clone(), ts(1000)));
+            let mut scanner = CollectionScanner::from_state(state);
+
+            scanner.prune_ledger().unwrap();
+            assert_eq!(scanner.ledger_count(), 1);
+
+            files::delete(&file).await.unwrap();
+            scanner.prune_ledger().unwrap();
             assert_eq!(scanner.ledger_count(), 0);
         }
     }
