@@ -646,8 +646,7 @@ impl ShutdownManager {
             info!("Sync-scan bridge worker handle not found, skipping sync-scan bridge worker shutdown...");
         }
 
-        // 7. scan-upload bridge worker (joined before app state so it stops enqueuing
-        // before the uploader actor is told to shut down)
+        // 7. scan-upload bridge worker 
         if let Some(scan_upload_bridge_worker_handle) = self.scan_upload_bridge_worker_handle.take()
         {
             if let Err(e) = scan_upload_bridge_worker_handle.await {
