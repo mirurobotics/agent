@@ -305,7 +305,7 @@ impl Uploader {
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let queue = match snapshot_file {
-            Some(file) => Queue::with_snapshot(options.queue_capacity, file),
+            Some(file) => Queue::from_snapshot(options.queue_capacity, file),
             None => Queue::new(options.queue_capacity),
         };
         let worker = Worker {
