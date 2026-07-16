@@ -6,6 +6,7 @@ use crate::trace;
 use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::io::AsyncWriteExt;
 
 pub mod errors;
@@ -26,18 +27,18 @@ pub struct Config {
 }
 
 pub struct Credentials {
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub session_token: String,
+    pub access_key_id: SecretString,
+    pub secret_access_key: SecretString,
+    pub session_token: SecretString,
 }
 
 #[cfg(feature = "test")]
 impl Default for Credentials {
     fn default() -> Self {
         Self {
-            access_key_id: "access-key".to_string(),
-            secret_access_key: "secret-key".to_string(),
-            session_token: "session-token".to_string(),
+            access_key_id: SecretString::from("access-key"),
+            secret_access_key: SecretString::from("secret-key"),
+            session_token: SecretString::from("session-token"),
         }
     }
 }
@@ -63,9 +64,9 @@ impl Store {
     /// I/O happens here; the first request is made lazily on the first call.
     pub fn new(cfg: Config) -> Self {
         let s3creds = AwsCredentials::new(
-            cfg.creds.access_key_id,
-            cfg.creds.secret_access_key,
-            Some(cfg.creds.session_token),
+            cfg.creds.access_key_id.expose_secret().to_owned(),
+            cfg.creds.secret_access_key.expose_secret().to_owned(),
+            Some(cfg.creds.session_token.expose_secret().to_owned()),
             None,
             "miru-agent",
         );
