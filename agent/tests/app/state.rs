@@ -16,6 +16,7 @@ use miru_agent::models::{self, Device, DeviceStatus};
 use miru_agent::scan::ScannerExt;
 use miru_agent::server::ServerErr;
 use miru_agent::sync::SyncerExt;
+use miru_agent::upload::UploaderExt;
 
 // external crates
 use chrono::Utc;
@@ -258,6 +259,32 @@ pub mod init {
         state.shutdown().await.unwrap();
         state_handle.await;
     }
+
+    #[tokio::test]
+    async fn uploader_spawned_when_enabled() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // the uploader shares the scanner enable flag: it is fed by the
+        // scan-upload bridge, which only runs when scanning is on
+        assert!(state.uploader.is_some());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn uploader_absent_when_disabled() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        assert!(state.uploader.is_none());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
 }
 
 pub mod shutdown {
@@ -323,6 +350,34 @@ pub mod shutdown {
 
         let err = state.shutdown().await.expect_err("scanner error surfaces");
         assert!(matches!(err, ServerErr::ScanErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn uploader_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // set the device online so the offline assertion below proves teardown
+        // continued through storage after the uploader error
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the uploader actor directly so AppState::shutdown errors on it
+        // (the uploader is torn down first, so its error is the one surfaced)
+        state.uploader.as_ref().unwrap().shutdown().await.unwrap();
+
+        let err = state.shutdown().await.expect_err("uploader error surfaces");
+        assert!(matches!(err, ServerErr::UploadErr(_)));
         state_handle.await;
 
         let device = files::read_json::<Device>(&env.layout.device())

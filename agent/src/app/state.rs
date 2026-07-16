@@ -14,6 +14,7 @@ use crate::http;
 use crate::scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
+use crate::upload::{self, UploaderExt};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -21,6 +22,7 @@ pub struct AppState {
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
     pub scanner: Option<Arc<scan::Scanner>>,
+    pub uploader: Option<Arc<upload::Uploader>>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -32,7 +34,7 @@ impl AppState {
         capacities: disk::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
-        enable_scanner: bool,
+        enable_uploader: bool,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
@@ -89,11 +91,18 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         // initialize the scanner (optional)
-        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_scanner).await;
+        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_uploader).await;
+
+        // initialize the uploader (optional)
+        let (uploader, uploader_handle) =
+            Self::init_uploader(enable_uploader, http_client.clone(), token_mngr.clone());
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
             if let Some(handle) = scanner_handle {
+                handles.push(handle);
+            }
+            if let Some(handle) = uploader_handle {
                 handles.push(handle);
             }
 
@@ -106,6 +115,7 @@ impl AppState {
                 http_client,
                 syncer,
                 scanner,
+                uploader,
                 token_mngr,
                 activity_tracker,
                 event_hub,
@@ -157,8 +167,48 @@ impl AppState {
         }
     }
 
+    /// Spawn the uploader actor driving the live executor (credential mint → native SDK
+    /// transfer → confirm). Fail-open by design: a spawn error degrades to no uploader
+    /// — the agent must boot even when the uploader cannot.
+    fn init_uploader(
+        enable_scanner: bool,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
+    ) -> (
+        Option<Arc<upload::Uploader>>,
+        Option<tokio::task::JoinHandle<()>>,
+    ) {
+        if !enable_scanner {
+            return (None, None);
+        }
+
+        let executor = Arc::new(upload::LiveExecutor::new(
+            http_client,
+            token_mngr,
+            upload::SdkTransfer::default(),
+        ));
+        match upload::Uploader::spawn(64, executor, upload::UploaderOptions::default(), |wait| {
+            tokio::time::sleep(wait)
+        }) {
+            Ok((uploader, handle)) => (Some(Arc::new(uploader)), Some(handle)),
+            Err(e) => {
+                tracing::error!("failed to spawn uploader; continuing without uploads: {e}");
+                (None, None)
+            }
+        }
+    }
+
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
+
+        // shutdown the uploader first: it depends on nothing else in the app, and its
+        // feeder (the scan-upload bridge worker) has already been joined by this point.
+        if let Some(uploader) = &self.uploader {
+            if let Err(e) = uploader.shutdown().await {
+                tracing::error!("failed to shutdown uploader: {e}");
+                first_err.get_or_insert(e.into());
+            }
+        }
 
         // shutdown the scanner before the syncer (it uses syncer to determine the
         // correct set of rules to use for scanning)
