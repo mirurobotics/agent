@@ -34,7 +34,7 @@ impl AppState {
         capacities: disk::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
-        enable_scanner: bool,
+        enable_uploader: bool,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
@@ -91,12 +91,11 @@ impl AppState {
         let activity_tracker = Arc::new(activity::Tracker::new());
 
         // initialize the scanner (optional)
-        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_scanner).await;
+        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_uploader).await;
 
-        // initialize the uploader (optional; shares the scanner's enable flag since
-        // uploads are driven by scanner observations)
+        // initialize the uploader (optional)
         let (uploader, uploader_handle) =
-            Self::init_uploader(enable_scanner, http_client.clone(), token_mngr.clone());
+            Self::init_uploader(enable_uploader, http_client.clone(), token_mngr.clone());
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
@@ -168,11 +167,9 @@ impl AppState {
         }
     }
 
-    /// Spawn the uploader actor driving the live executor (credential mint →
-    /// native SDK transfer → confirm). Gated on the scanner flag since the
-    /// scan-upload bridge only enqueues jobs when the scanner is observing files.
-    /// Fail-open by design: a spawn error degrades to no uploader — the agent
-    /// must boot even when the uploader cannot.
+    /// Spawn the uploader actor driving the live executor (credential mint → native SDK
+    /// transfer → confirm). Fail-open by design: a spawn error degrades to no uploader
+    /// — the agent must boot even when the uploader cannot.
     fn init_uploader(
         enable_scanner: bool,
         http_client: Arc<http::Client>,
