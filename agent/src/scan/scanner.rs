@@ -905,6 +905,7 @@ mod tests {
                 file: file.clone(),
                 size: 4,
                 digest,
+                crc32c: Some(crc32c::crc32c(b"aaaa")),
                 mtime: DateTime::<Utc>::from(mtime),
                 mtime_aliases: vec![],
                 first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),

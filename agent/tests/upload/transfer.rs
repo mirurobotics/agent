@@ -170,7 +170,7 @@ fn gcs_router(rec: GcsRecorder) -> Router {
 async fn unknown_scheme_is_unsupported() {
     let creds = credentials("something-new", s3_credentials_json(), Value::Null);
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(&creds, &destination(), &File::new("/data/a.log"), None)
         .await
         .unwrap_err();
 
@@ -182,7 +182,7 @@ async fn unknown_scheme_is_unsupported() {
 async fn s3_scheme_without_credentials_errs() {
     let creds = credentials("s3", Value::Null, Value::Null);
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(&creds, &destination(), &File::new("/data/a.log"), None)
         .await
         .unwrap_err();
 
@@ -200,7 +200,7 @@ async fn s3_transfer_puts_object_to_bucket_name_and_key() {
     let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
     SdkTransfer::with_s3_http_client(replay.clone())
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), None)
         .await
         .unwrap();
 
@@ -226,7 +226,7 @@ async fn s3_put_failure_maps_to_executor_err() {
     let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
     let err = SdkTransfer::with_s3_http_client(replay.clone())
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), None)
         .await
         .unwrap_err();
 
@@ -242,7 +242,7 @@ async fn s3_default_store_fails_offline_on_missing_file() {
     let missing = File::new("/nonexistent/definitely/not/here.log");
 
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &missing)
+        .transfer(&creds, &destination(), &missing, None)
         .await
         .unwrap_err();
 
@@ -253,7 +253,7 @@ async fn s3_default_store_fails_offline_on_missing_file() {
 async fn gcs_scheme_without_credentials_errs() {
     let creds = credentials("gcs", Value::Null, Value::Null);
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(&creds, &destination(), &File::new("/data/a.log"), None)
         .await
         .unwrap_err();
 
@@ -270,7 +270,7 @@ async fn gcs_invalid_token_surfaces_executor_err() {
     // offline — exercising the gcs arm's error mapping without a network.
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("bad\ntoken"));
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(&creds, &destination(), &File::new("/data/a.log"), None)
         .await
         .unwrap_err();
 
@@ -285,7 +285,7 @@ async fn gcs_transfer_puts_object_to_bucket_name_and_key() {
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
     SdkTransfer::with_gcs_endpoint(server.base_url)
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), None)
         .await
         .unwrap();
 
@@ -310,6 +310,28 @@ async fn gcs_transfer_puts_object_to_bucket_name_and_key() {
 }
 
 #[tokio::test]
+async fn gcs_transfer_forwards_expected_crc32c() {
+    // The scanner's CRC32C reaches the GCS request as the object's checksum.
+    // A deliberately wrong value (0xDEADBEEF, big-endian base64 "3q2+7w==")
+    // proves it is the forwarded value, not one the SDK recomputes from bytes.
+    let rec = GcsRecorder::default();
+    let server = run_server(gcs_router(rec.clone())).await;
+    let src = temp_file_with(b"hello world").await;
+    let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
+
+    SdkTransfer::with_gcs_endpoint(server.base_url)
+        .transfer(&creds, &destination(), src.file(), Some(0xDEAD_BEEF))
+        .await
+        .unwrap();
+
+    let r = rec.inner.lock().unwrap();
+    assert!(
+        r.body.windows(b"3q2+7w==".len()).any(|w| w == b"3q2+7w=="),
+        "upload metadata must carry the forwarded crc32c"
+    );
+}
+
+#[tokio::test]
 async fn gcs_put_failure_maps_to_executor_err() {
     let rec = GcsRecorder::default();
     rec.inner.lock().unwrap().status = Some(StatusCode::FORBIDDEN);
@@ -318,7 +340,7 @@ async fn gcs_put_failure_maps_to_executor_err() {
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
     let err = SdkTransfer::with_gcs_endpoint(server.base_url)
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), None)
         .await
         .unwrap_err();
 
@@ -335,7 +357,7 @@ async fn gcs_default_store_fails_offline_on_missing_file() {
     let missing = File::new("/nonexistent/definitely/not/here.log");
 
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &missing)
+        .transfer(&creds, &destination(), &missing, None)
         .await
         .unwrap_err();
 

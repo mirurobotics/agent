@@ -9,6 +9,11 @@ pub struct Job {
     pub file: File,
     pub size: u64,
     pub digest: String,
+    /// CRC32C of the file content, computed in the same scan pass as `digest`
+    /// (mirrors `StableFile.crc32c`). Passed to the object store on upload so
+    /// the transfer is rejected if the stored bytes differ from what the scanner
+    /// measured. `None` skips the check (e.g. legacy ledger entries).
+    pub crc32c: Option<u32>,
     pub mtime: DateTime<Utc>,
     /// When the agent first observed the file on the device. Mirrors the
     /// scanner's observation timestamps (`StableFile.first_observed_at` in

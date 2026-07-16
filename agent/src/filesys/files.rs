@@ -15,6 +15,7 @@ use crate::trace;
 
 // external crates
 use atomicwrites::{AllowOverwrite, AtomicFile, DisallowOverwrite};
+use crc32c::crc32c_append;
 use secrecy::{ExposeSecretMut, SecretBox};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -89,18 +90,31 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     Ok(buf)
 }
 
-/// Computes the SHA-256 content digest of `file`, returned as `sha256:<lowercase-hex>`.
+/// The content hashes of a file, computed in a single streaming pass.
+pub struct ContentHashes {
+    /// SHA-256 content digest as `sha256:<lowercase-hex>` — the content identity
+    /// used for ledger/dedup comparison.
+    pub digest: String,
+    /// CRC32C (Castagnoli) of the same bytes. Handed to the object store as the
+    /// expected checksum so an upload is rejected if the stored bytes differ
+    /// from what the scanner measured (GCS enforces this server-side).
+    pub crc32c: u32,
+}
+
+/// Computes the SHA-256 digest and CRC32C of `file` in a single streaming pass,
+/// so both checksums describe exactly the same bytes.
 ///
 /// Streams the file through a fixed 8 KiB buffer, so memory use is constant
 /// regardless of file size (the whole file is never materialized). Hashing is
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
-pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+pub async fn content_hashes(file: &File) -> Result<ContentHashes, FileSysErr> {
     let mut f = TokioFile::open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
     let mut hasher = Sha256::new();
+    let mut crc: u32 = 0;
     let mut buf = [0u8; 8 * 1024];
     loop {
         let n = f.read(&mut buf).await.map_err(|e| {
@@ -114,10 +128,22 @@ pub async fn hash(file: &File) -> Result<String, FileSysErr> {
             break;
         }
         hasher.update(&buf[..n]);
+        crc = crc32c_append(crc, &buf[..n]);
     }
 
     let digest = hasher.finalize();
-    Ok(format!("sha256:{digest:x}"))
+    Ok(ContentHashes {
+        digest: format!("sha256:{digest:x}"),
+        crc32c: crc,
+    })
+}
+
+/// Computes the SHA-256 content digest of `file`, returned as `sha256:<lowercase-hex>`.
+///
+/// A thin wrapper over [`content_hashes`] for callers that only need the digest;
+/// see it for the streaming/memory characteristics.
+pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+    Ok(content_hashes(file).await?.digest)
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {

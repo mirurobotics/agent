@@ -79,7 +79,12 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
         let resp = self.create_upload(job).await?;
 
         self.transfer
-            .transfer(&resp.credentials, &resp.upload.destination, &job.file)
+            .transfer(
+                &resp.credentials,
+                &resp.upload.destination,
+                &job.file,
+                job.crc32c,
+            )
             .await?;
 
         self.confirm_upload(&resp.upload.id).await?;

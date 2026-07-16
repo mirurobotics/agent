@@ -195,14 +195,31 @@ impl Store {
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
     /// can stall this call; callers that need a bound must enforce their own
     /// size-scaled deadline (e.g. `tokio::time::timeout`) around it.
-    pub async fn put(&self, src: File, dst: &Object) -> Result<(), GcsErr> {
+    ///
+    /// When `expected_crc32c` is `Some`, that value (the scanner's CRC32C of the
+    /// content) is sent as the object's checksum instead of one the SDK computes
+    /// from the streamed bytes. GCS recomputes the CRC32C server-side and rejects
+    /// the upload if it disagrees, so the object is stored only if its bytes match
+    /// what the scanner measured. `None` leaves the SDK's default behavior (it
+    /// computes and sends a CRC32C over the uploaded bytes), which still catches
+    /// on-the-wire corruption but not drift from the scanned content.
+    pub async fn put(
+        &self,
+        src: File,
+        dst: &Object,
+        expected_crc32c: Option<u32>,
+    ) -> Result<(), GcsErr> {
         files::size(&src).await?;
         let resource_name = dst.resource_name();
         let file = tokio::fs::File::open(src.path())
             .await
             .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?;
-        self.data
-            .write_object(&resource_name, &dst.key, file)
+        let write = self.data.write_object(&resource_name, &dst.key, file);
+        let write = match expected_crc32c {
+            Some(crc) => write.with_known_crc32c(crc),
+            None => write,
+        };
+        write
             .send_unbuffered()
             .await
             .map_err(|e| map_gcs_err("put_object", dst, e))?;

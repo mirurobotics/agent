@@ -124,6 +124,12 @@ pub struct StableFile {
     pub file: File,
     pub size: u64,
     pub digest: String,
+    /// CRC32C of the file content, computed in the same pass as `digest`. Handed
+    /// to the object store on upload so the transfer is rejected if the stored
+    /// bytes differ from what the scanner measured. `None` for entries persisted
+    /// before this field existed (`#[serde(default)]`), which skip the check.
+    #[serde(default)]
+    pub crc32c: Option<u32>,
     pub mtime: DateTime<Utc>,
     pub mtime_aliases: Vec<DateTime<Utc>>,
     pub first_observed_at: DateTime<Utc>,
@@ -213,6 +219,7 @@ mod tests {
             file,
             size: 4,
             digest: HASH_AAAA.to_string(),
+            crc32c: None,
             mtime: ts(0),
             mtime_aliases: vec![],
             first_observed_at,

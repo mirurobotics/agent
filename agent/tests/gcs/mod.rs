@@ -224,7 +224,7 @@ pub mod put {
         let src = temp_file_with(b"hello world").await;
 
         store
-            .put(src.to_file(), &obj("artifacts/hello.txt"))
+            .put(src.to_file(), &obj("artifacts/hello.txt"), None)
             .await
             .unwrap();
 
@@ -244,6 +244,36 @@ pub mod put {
     }
 
     #[tokio::test]
+    async fn upload_sends_provided_crc32c_as_object_checksum() {
+        // A deliberately wrong CRC32C (not the checksum of the payload) must ride
+        // in the object metadata verbatim, proving the caller-provided value is
+        // sent for the server to enforce rather than one the SDK recomputes from
+        // the bytes (which would be the payload's real, different, checksum).
+        // GCS encodes crc32c as big-endian base64: 0xDEADBEEF -> "3q2+7w==".
+        let rec = HttpRecorder::default();
+        let store = http_store(rec.clone()).await;
+        let src = temp_file_with(b"hello world").await;
+
+        store
+            .put(
+                src.to_file(),
+                &obj("artifacts/hello.txt"),
+                Some(0xDEAD_BEEF),
+            )
+            .await
+            .unwrap();
+
+        let r = rec.inner.lock().unwrap();
+        assert_eq!(r.upload_hits, 1);
+        assert!(
+            r.upload_body
+                .windows(b"3q2+7w==".len())
+                .any(|w| w == b"3q2+7w=="),
+            "upload metadata must carry the caller-provided crc32c (0xDEADBEEF)"
+        );
+    }
+
+    #[tokio::test]
     async fn upload_empty_file_succeeds() {
         // A 0-byte source still issues exactly one upload.
         let rec = HttpRecorder::default();
@@ -251,7 +281,7 @@ pub mod put {
         let src = temp_file_with(b"").await;
 
         store
-            .put(src.to_file(), &obj("artifacts/empty.txt"))
+            .put(src.to_file(), &obj("artifacts/empty.txt"), None)
             .await
             .unwrap();
 
@@ -269,7 +299,7 @@ pub mod put {
             let src = temp_file_with(b"payload").await;
 
             let err = store
-                .put(src.to_file(), &obj("denied.txt"))
+                .put(src.to_file(), &obj("denied.txt"), None)
                 .await
                 .unwrap_err();
 
@@ -291,7 +321,7 @@ pub mod put {
             let store = http_store(rec.clone()).await;
             let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-            let err = store.put(missing, &obj("k")).await.unwrap_err();
+            let err = store.put(missing, &obj("k"), None).await.unwrap_err();
 
             assert!(matches!(err, GcsErr::FileSysErr(_)));
             assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
@@ -314,7 +344,7 @@ pub mod put {
                 .await
                 .unwrap();
 
-            let err = store.put(src.to_file(), &obj("k")).await.unwrap_err();
+            let err = store.put(src.to_file(), &obj("k"), None).await.unwrap_err();
 
             assert!(matches!(err, GcsErr::LocalIoErr(_)));
             assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);

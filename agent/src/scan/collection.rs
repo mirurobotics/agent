@@ -252,9 +252,11 @@ async fn differs_from_previous(
     observation: &Observation,
 ) -> Result<Outcome, ScanErr> {
     // A new digest (or no prior ledger entry at all) is a new stable version.
-    let digest = files::hash(&candidate.file).await?;
+    // The CRC32C is computed in the same pass so it describes the exact bytes the
+    // digest identifies; it rides to the object store to gate the upload.
+    let hashes = files::content_hashes(&candidate.file).await?;
     if let Some(previous) = find_previous_stable_file(state, candidate) {
-        if digest == previous.digest {
+        if hashes.digest == previous.digest {
             // Content unchanged since the latest ledger entry.
             return Ok(Outcome::AlreadyInLedger {
                 mtime: observation.mtime,
@@ -264,7 +266,8 @@ async fn differs_from_previous(
     Ok(Outcome::Stable(build_stable_file(
         candidate,
         observation.timestamp,
-        digest,
+        hashes.digest,
+        hashes.crc32c,
     )))
 }
 
@@ -272,12 +275,14 @@ fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
     digest: Digest,
+    crc32c: u32,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
         file: candidate.file.clone(),
         size: first_obs.size,
         digest,
+        crc32c: Some(crc32c),
         mtime: first_obs.mtime.into(),
         mtime_aliases: vec![],
         first_observed_at: first_obs.timestamp,
@@ -403,12 +408,19 @@ mod tests {
         }
     }
 
+    /// The CRC32C the scanner emits for `content`, so an expected `StableFile`
+    /// matches one the real evaluate path produces from the same bytes.
+    fn crc(content: &[u8]) -> Option<u32> {
+        Some(crc32c::crc32c(content))
+    }
+
     /// A StableFile with a given `first_observed_at` (other fields fixed).
     fn stable_file(file: File, first_observed_at: DateTime<Utc>) -> StableFile {
         StableFile {
             file,
             size: 4,
             digest: HASH_AAAA.to_string(),
+            crc32c: None,
             mtime: ts(0),
             mtime_aliases: vec![],
             first_observed_at,
@@ -427,6 +439,7 @@ mod tests {
     fn stable_from_obs(
         obs: &Observation,
         digest: &str,
+        crc32c: Option<u32>,
         first_observed_at: DateTime<Utc>,
         last_observed_at: DateTime<Utc>,
     ) -> StableFile {
@@ -434,6 +447,7 @@ mod tests {
             file: obs.file.clone(),
             size: obs.size,
             digest: digest.to_string(),
+            crc32c,
             mtime: DateTime::<Utc>::from(obs.mtime),
             mtime_aliases: vec![],
             first_observed_at,
@@ -979,7 +993,7 @@ mod tests {
             let file = write(&dir, "e.mcap", b"aaaa").await;
             let state = CollectionState::new(config("dpl-1", "coll", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&obs, HASH_AAAA, crc(b"aaaa"), ts(1000), ts(1010));
             let cand = candidate(file, obs);
 
             let action = eval_candidate(&state, &cand, ts(1010)).await.unwrap();
@@ -1024,7 +1038,7 @@ mod tests {
 
             write_file(&c.file, b"bbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1000), ts(1010));
+            let expected = stable_from_obs(&changed, HASH_BBBB, crc(b"bbbb"), ts(1000), ts(1010));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1061,7 +1075,7 @@ mod tests {
         #[tokio::test]
         async fn reevaluate_dedups_unchanged_file() {
             let mut c = case("dedup.mcap", 10).await;
-            let expected = stable_from_obs(&c.obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&c.obs, HASH_AAAA, crc(b"aaaa"), ts(1000), ts(1010));
             track(&mut c.state, &c.file, c.obs.clone());
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1151,6 +1165,7 @@ mod tests {
             let expected = stable_from_obs(
                 &changed,
                 &files::hash(&c.file).await.unwrap(),
+                crc(b"bbbbbbbb"),
                 ts(1001),
                 ts(1011),
             );
@@ -1176,7 +1191,7 @@ mod tests {
             write_file(&c.file, b"bbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
             assert_eq!(changed.size, c.obs.size);
-            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1001), ts(1011));
+            let expected = stable_from_obs(&changed, HASH_BBBB, crc(b"bbbb"), ts(1001), ts(1011));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = CollectionScanner::from_state(c.state);
@@ -1200,7 +1215,7 @@ mod tests {
             let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 10));
             let gone_obs = observation(&state, gone.clone(), ts(1000)).await;
             let live_obs = observation(&state, live.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&live_obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&live_obs, HASH_AAAA, crc(b"aaaa"), ts(1000), ts(1010));
             track(&mut state, &gone, gone_obs);
             track(&mut state, &live, live_obs);
             let mut scanner = CollectionScanner::from_state(state);
@@ -1241,7 +1256,7 @@ mod tests {
             let good = write(&dir, "good.mcap", b"aaaa").await;
             let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
             let good_obs = observation(&state, good.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&good_obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&good_obs, HASH_AAAA, crc(b"aaaa"), ts(1000), ts(1010));
 
             // the poisoned candidate is a directory living at a *.mcap path.
             let poison = dir.file("poison.mcap");

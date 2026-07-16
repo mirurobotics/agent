@@ -2611,6 +2611,7 @@ dependencies = [
  "backend-api",
  "base64 0.22.1",
  "chrono",
+ "crc32c",
  "device-api",
  "futures",
  "glob",

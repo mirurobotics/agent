@@ -10,6 +10,7 @@ fn make_job(name: &str) -> Job {
         file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
+        crc32c: None,
         mtime: Utc::now(),
         first_observed_at: Utc::now(),
         last_observed_at: Utc::now(),

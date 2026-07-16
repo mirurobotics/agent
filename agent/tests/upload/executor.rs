@@ -34,6 +34,7 @@ fn make_job(name: &str) -> Job {
         file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
+        crc32c: Some(0x1234_5678),
         mtime: now,
         first_observed_at: now,
         last_observed_at: now,
@@ -145,10 +146,15 @@ async fn happy_path_creates_transfers_confirms() {
     executor.upload(&job).await.unwrap();
 
     // Exactly one transfer, carrying the create response's credentials and
-    // destination plus the job's file.
+    // destination plus the job's file and its scanner CRC32C.
     assert_eq!(
         transfer.recorded_calls(),
-        vec![(s3_credentials(), destination(), job.file.clone())]
+        vec![(
+            s3_credentials(),
+            destination(),
+            job.file.clone(),
+            job.crc32c
+        )]
     );
     // The captured HTTP exchange: create (with the job's payload and the token
     // manager's bearer string) then confirm for the created upload's id.
@@ -307,6 +313,7 @@ fn create_request_maps_job_fields() {
         file: File::new("/data/a.log"),
         size: 42,
         digest: "sha256:abc".to_string(),
+        crc32c: Some(0x1234_5678),
         mtime: Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap(),
         first_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 1, 0).unwrap(),
         last_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 2, 0).unwrap(),

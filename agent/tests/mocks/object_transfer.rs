@@ -16,7 +16,7 @@ use miru_agent::upload::{ObjectTransfer, UploadErr};
 #[derive(Clone, Default)]
 pub struct MockObjectTransfer {
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
-    calls: Arc<Mutex<Vec<(UploadCredentials, UploadDestination, File)>>>,
+    calls: Arc<Mutex<Vec<(UploadCredentials, UploadDestination, File, Option<u32>)>>>,
 }
 
 impl MockObjectTransfer {
@@ -38,7 +38,7 @@ impl MockObjectTransfer {
             })));
     }
 
-    pub fn recorded_calls(&self) -> Vec<(UploadCredentials, UploadDestination, File)> {
+    pub fn recorded_calls(&self) -> Vec<(UploadCredentials, UploadDestination, File, Option<u32>)> {
         self.calls.lock().unwrap().clone()
     }
 }
@@ -49,11 +49,14 @@ impl ObjectTransfer for MockObjectTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        expected_crc32c: Option<u32>,
     ) -> Result<(), UploadErr> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((credentials.clone(), destination.clone(), file.clone()));
+        self.calls.lock().unwrap().push((
+            credentials.clone(),
+            destination.clone(),
+            file.clone(),
+            expected_crc32c,
+        ));
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))
     }

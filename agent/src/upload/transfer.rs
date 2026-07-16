@@ -20,11 +20,15 @@ use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestinat
 /// Called from the upload actor, whose in-flight future may be dropped on
 /// shutdown, so implementations must tolerate cancellation at any await point.
 pub trait ObjectTransfer: Send + Sync {
+    /// `expected_crc32c` is the scanner's CRC32C of the content, forwarded to the
+    /// object store as the integrity check it enforces on upload (currently the
+    /// GCS scheme; `None` skips the check). See [`crate::gcs::Store::put`].
     fn transfer(
         &self,
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        expected_crc32c: Option<u32>,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
 }
 
@@ -91,11 +95,13 @@ impl SdkTransfer {
 
     /// Uploads `file` to GCS using the vended downscoped OAuth2 bearer token,
     /// which is scoped to `storage.objects.create` on this exact object.
+    /// `expected_crc32c` is forwarded as the checksum GCS enforces on the upload.
     async fn transfer_gcs(
         &self,
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        expected_crc32c: Option<u32>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .gcs_credentials
@@ -111,7 +117,10 @@ impl SdkTransfer {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
         };
-        store.put(file.clone(), &object).await.map_err(executor_err)
+        store
+            .put(file.clone(), &object, expected_crc32c)
+            .await
+            .map_err(executor_err)
     }
 
     /// Builds the S3 store, honoring the test-only HTTP client override.
@@ -139,10 +148,16 @@ impl ObjectTransfer for SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        expected_crc32c: Option<u32>,
     ) -> Result<(), UploadErr> {
         match credentials.scheme {
+            // S3 checksum enforcement is a separate change; `expected_crc32c` is
+            // GCS's integrity input (S3 uses SHA-256, not CRC32C).
             Scheme::S3 => self.transfer_s3(credentials, destination, file).await,
-            Scheme::Gcs => self.transfer_gcs(credentials, destination, file).await,
+            Scheme::Gcs => {
+                self.transfer_gcs(credentials, destination, file, expected_crc32c)
+                    .await
+            }
             Scheme::SchemeUnknown => Err(executor_err("unrecognized upload credential scheme")),
         }
     }
