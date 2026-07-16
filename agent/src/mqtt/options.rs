@@ -7,6 +7,7 @@ use crate::mqtt::errors::InvalidConnectAddressErr;
 use crate::network::{is_loopback_host, MqttHost};
 
 // external crates
+use secrecy::{ExposeSecret, SecretString};
 use tracing::warn;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -101,17 +102,31 @@ impl fmt::Display for ConnectAddress {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+/// MQTT connection credentials.
+///
+/// The `password` carries the live auth bearer token, so it is stored as a
+/// [`SecretString`] to keep it out of `Debug`/log output. Reach the raw value
+/// only via `password.expose_secret()` at the point it is handed to the broker.
+#[derive(Debug, Clone)]
 pub struct Credentials {
     pub username: String,
-    pub password: String,
+    pub password: SecretString,
 }
+
+impl PartialEq for Credentials {
+    fn eq(&self, other: &Self) -> bool {
+        self.username == other.username
+            && self.password.expose_secret() == other.password.expose_secret()
+    }
+}
+
+impl Eq for Credentials {}
 
 impl Default for Credentials {
     fn default() -> Self {
         Self {
             username: "miru-agent".to_string(),
-            password: "miru-agent-password".to_string(),
+            password: SecretString::from("miru-agent-password"),
         }
     }
 }
@@ -177,7 +192,7 @@ impl Options {
         self
     }
 
-    pub fn set_password(&mut self, password: String) {
+    pub fn set_password(&mut self, password: SecretString) {
         self.credentials.password = password;
     }
 }
