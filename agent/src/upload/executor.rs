@@ -99,7 +99,6 @@ pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
         digest: job.digest.clone(),
         size: i64::try_from(job.size).unwrap_or(i64::MAX),
         incomplete: None,
-        release_id: job.release_id.clone(),
         deployment_id: job.deployment_id.clone(),
     }
 }

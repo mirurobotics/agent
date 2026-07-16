@@ -1254,7 +1254,6 @@ components:
         - source
         - digest
         - size
-        - release_id
         - deployment_id
       properties:
         upload_rule_id:
@@ -1279,10 +1278,6 @@ components:
           default: false
           example: false
           description: Whether the file was incomplete when collected (e.g. it was never closed cleanly / has no finalization marker). Sets the upload's `incomplete` flag. Defaults to false.
-        release_id:
-          type: string
-          example: rls_123
-          description: ID of the release the device is currently on.
         deployment_id:
           type: string
           example: dpl_123
