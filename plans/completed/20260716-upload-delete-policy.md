@@ -24,12 +24,12 @@ You can see it work by running the test suite: a new executor test writes a real
 
 ## Progress
 
-- [ ] (2026-07-16) Milestone 1: carry `delete_policy` on `StableFile` (built from the rule) with a backward-compatible serde default; test + covgate + commit.
-- [ ] (2026-07-16) Milestone 2: carry `delete_policy` on `Job`, copy it in the scan-upload bridge; test + covgate + commit.
-- [ ] (2026-07-16) Milestone 3: delete the source file in `LiveExecutor::upload` after `confirm_upload` when the policy is `after_upload`, best-effort; test + covgate + commit.
-- [ ] (2026-07-16) Milestone 4: preflight to CI-green on the pushed branch head.
+- [x] (2026-07-16) Milestone 1: carry `delete_policy` on `StableFile` (built from the rule) with a backward-compatible serde default; test + covgate.
+- [x] (2026-07-16) Milestone 2: carry `delete_policy` on `Job`, copy it in the scan-upload bridge; test + covgate.
+- [x] (2026-07-16) Milestone 3: delete the source file in `LiveExecutor::upload` after `confirm_upload` when the policy is `after_upload`, best-effort; test + covgate.
+- [x] (2026-07-16) Milestone 4: preflight to CI-green on the pushed branch head — PR #168, all three CI jobs (`lint`, `test`, `tools`) green on head `36c5510`.
 
-Split partially completed work into "done" and "remaining" as needed and add timestamps as steps complete.
+The feature landed as a single cohesive commit (`36c5510`) rather than three: the source edits were produced together and interleave such that any partial split leaves an intermediate commit that fails to compile under `--features test` (the workers test constructs both a `StableFile` needing the scan-side field and a `Job` needing the upload-side field). The agent repo squash-merges PRs, so a single compiling, fully-tested commit is the cleaner history.
 
 ## Surprises & Discoveries
 
@@ -51,7 +51,17 @@ Split partially completed work into "done" and "remaining" as needed and add tim
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-07-16. The delete policy is honored end to end, exactly as designed:
+
+- `StableFile` carries `delete_policy` (`#[serde(default)]` for old-ledger compatibility), stamped in `build_stable_file` from `state.rule().destination.delete_policy`.
+- `Job` carries `delete_policy`; the scan-upload bridge copies it from the `StableFile`.
+- `LiveExecutor::upload` deletes the local source file after `confirm_upload` when the policy is `after_upload`, best-effort (a delete failure or already-missing file is logged and swallowed so a durable upload is never re-driven).
+
+All three planned test areas landed and pass in CI: `build_stable_file` stamping (both policies), backward-compatible `StableFile` deserialization (serialize-then-strip so it is robust to the `File` wire shape), the bridge copy, and the four executor cases (delete on `after_upload`, keep on `never`, swallow a post-confirm delete error while still returning `Ok`, and treat an already-missing source as success).
+
+Validation: local `test.sh` (1504 pass), `covgate.sh` (upload 97.58, scan 98.98, models 100, workers 85.56 — all ≥ gate), and `lint.sh` clean; CI on PR #168 green across `lint` / `test` / `tools` on head `36c5510`.
+
+Refinements adopted from the plan review (all Low/Med): the serde back-compat test uses serialize-then-strip rather than a hardcoded JSON blob; the delete-error executor test asserts on the observable outcome (`Ok` + confirm ran once) rather than a platform-specific error kind; and the missing-source case is kept as a distinct test (a path that never existed) from the present-then-deleted case.
 
 ## Context and Orientation
 
