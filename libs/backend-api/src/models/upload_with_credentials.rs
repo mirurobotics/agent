@@ -16,14 +16,18 @@ pub struct UploadWithCredentials {
     pub upload: Box<models::Upload>,
     #[serde(rename = "credentials")]
     pub credentials: Box<models::UploadCredentials>,
+    /// Provenance the device stamps as cloud object metadata on the uploaded object (S3 `x-amz-meta-*` / GCS `x-goog-meta-*`). All values are strings. Keep the map within the cloud provider's object-metadata size limits (S3 ~2 KB, GCS ~8 KB of combined user-defined metadata).  Only the create response carries this map; `Upload` objects returned elsewhere (read/confirm/list) do not include it.  The currently-expected keys are, as a NON-normative example only: `device_id`, `release_id`, `release_version`, `deployment_id`, `digest`, `mtime`. This list is illustrative — the map is generic and the set of keys may evolve without a schema change. 
+    #[serde(rename = "metadata")]
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 impl UploadWithCredentials {
     /// Response to a broker upload request. The backend verified the calling device, created the upload ledger entry, authorized the exact `object_key` and provenance, performed digest dedup, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
-    pub fn new(upload: models::Upload, credentials: models::UploadCredentials) -> UploadWithCredentials {
+    pub fn new(upload: models::Upload, credentials: models::UploadCredentials, metadata: std::collections::HashMap<String, String>) -> UploadWithCredentials {
         UploadWithCredentials {
             upload: Box::new(upload),
             credentials: Box::new(credentials),
+            metadata,
         }
     }
 }
