@@ -48,7 +48,7 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
             Ok(ScanEvent::StableFile(stable)) => {
                 enqueue_stable_file(uploader, stable).await;
             }
-            // broadcast buffer overflowed. 
+            // broadcast buffer overflowed.
             Err(RecvError::Lagged(dropped)) => {
                 warn!(
                     "scan-upload bridge: lagged behind scanner events, dropped {dropped}; files will be re-observed on the next scan"
