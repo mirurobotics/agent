@@ -9,6 +9,9 @@ use crate::upload::errors::{executor_err, UploadErr};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
+// external crates
+use secrecy::SecretString;
+
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
 /// destination, transfer the file's bytes to the object store. Kept separate
@@ -103,7 +106,7 @@ impl SdkTransfer {
             .ok_or_else(|| executor_err("gcs scheme is missing gcs_credentials"))?;
         let store = self
             .gcs_store(gcs::Credentials {
-                access_token: creds.access_token.clone(),
+                access_token: SecretString::from(creds.access_token.clone()),
             })
             .await
             .map_err(executor_err)?;
@@ -153,9 +156,9 @@ impl ObjectTransfer for SdkTransfer {
 pub fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
     s3::Config {
         creds: s3::Credentials {
-            access_key_id: creds.access_key_id.clone(),
-            secret_access_key: creds.secret_access_key.clone(),
-            session_token: creds.session_token.clone(),
+            access_key_id: SecretString::from(creds.access_key_id.clone()),
+            secret_access_key: SecretString::from(creds.secret_access_key.clone()),
+            session_token: SecretString::from(creds.session_token.clone()),
         },
         region: creds.region.clone(),
     }

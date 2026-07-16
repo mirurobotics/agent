@@ -10,6 +10,7 @@ use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
 use google_cloud_storage::retry_policy::RetryableErrors;
 use http::{Extensions, HeaderMap, HeaderValue};
+use secrecy::{ExposeSecret, SecretString};
 use tokio::io::AsyncWriteExt as _;
 
 pub mod errors;
@@ -29,14 +30,14 @@ const CONTROL_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 const READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct Credentials {
-    pub access_token: String,
+    pub access_token: SecretString,
 }
 
 #[cfg(feature = "test")]
 impl Default for Credentials {
     fn default() -> Self {
         Self {
-            access_token: "test-token".to_string(),
+            access_token: SecretString::from("test-token"),
         }
     }
 }
@@ -134,13 +135,14 @@ impl Store {
         endpoint: Option<String>,
         control_override: Option<StorageControl>,
     ) -> Result<Self, GcsErr> {
-        let mut header_value = HeaderValue::from_str(&format!("Bearer {}", creds.access_token))
-            .map_err(|e| {
-                GcsErr::BuildErr(BuildErr {
-                    msg: format!("access token is not a valid HTTP header value: {e}"),
-                    trace: trace!(),
-                })
-            })?;
+        let mut header_value =
+            HeaderValue::from_str(&format!("Bearer {}", creds.access_token.expose_secret()))
+                .map_err(|e| {
+                    GcsErr::BuildErr(BuildErr {
+                        msg: format!("access token is not a valid HTTP header value: {e}"),
+                        trace: trace!(),
+                    })
+                })?;
         header_value.set_sensitive(true);
         let credentials = GcsCredentials::from(StaticTokenCredentials {
             header_value,

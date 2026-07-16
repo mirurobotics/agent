@@ -9,6 +9,7 @@ use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
 use aws_smithy_types::body::SdkBody;
+use secrecy::{ExposeSecret, SecretString};
 
 const REGION: &str = "us-east-1";
 const BUCKET: &str = "test-bucket";
@@ -137,14 +138,28 @@ pub mod construction {
     async fn new_builds_without_network() {
         let cfg = Config {
             creds: Credentials {
-                access_key_id: "AKIA_TEST".to_string(),
-                secret_access_key: "secret".to_string(),
-                session_token: "session".to_string(),
+                access_key_id: SecretString::from("AKIA_TEST"),
+                secret_access_key: SecretString::from("secret"),
+                session_token: SecretString::from("session"),
             },
             region: "us-west-2".to_string(),
         };
         // Constructing must not panic or touch the network.
         let _store = Store::new(cfg);
+    }
+
+    /// The secret fields round-trip: the exposed values equal what was set. Guards
+    /// the `SecretString` wiring feeding the AWS SDK credentials.
+    #[test]
+    fn credentials_expose_secret_round_trip() {
+        let creds = Credentials {
+            access_key_id: SecretString::from("AKIA_TEST"),
+            secret_access_key: SecretString::from("secret"),
+            session_token: SecretString::from("session"),
+        };
+        assert_eq!(creds.access_key_id.expose_secret(), "AKIA_TEST");
+        assert_eq!(creds.secret_access_key.expose_secret(), "secret");
+        assert_eq!(creds.session_token.expose_secret(), "session");
     }
 }
 

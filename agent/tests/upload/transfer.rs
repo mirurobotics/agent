@@ -16,6 +16,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Router;
+use secrecy::ExposeSecret;
 use serde_json::{json, Value};
 
 fn destination() -> UploadDestination {
@@ -349,9 +350,9 @@ fn s3_config_maps_credentials() {
     assert_eq!(
         (
             cfg.region.as_str(),
-            cfg.creds.access_key_id.as_str(),
-            cfg.creds.secret_access_key.as_str(),
-            cfg.creds.session_token.as_str(),
+            cfg.creds.access_key_id.expose_secret(),
+            cfg.creds.secret_access_key.expose_secret(),
+            cfg.creds.session_token.expose_secret(),
         ),
         ("us-east-1", "AKIA_TEST", "secret", "session")
     );

@@ -24,6 +24,7 @@ use google_cloud_gax::error::rpc::{Code as GaxCode, Status};
 use google_cloud_gax::error::Error as GaxError;
 use google_cloud_gax::response::Response as GaxResponse;
 use google_cloud_storage as gcs;
+use secrecy::{ExposeSecret, SecretString};
 
 const BUCKET: &str = "test-bucket";
 
@@ -193,7 +194,7 @@ pub mod construction {
     #[tokio::test]
     async fn new_builds_with_valid_token() {
         let creds = Credentials {
-            access_token: "valid-token".to_string(),
+            access_token: SecretString::from("valid-token"),
         };
         let store = Store::new(creds).await;
         assert!(store.is_ok());
@@ -203,7 +204,7 @@ pub mod construction {
     async fn new_rejects_bad_token() {
         // A newline is not a valid HTTP header value byte.
         let creds = Credentials {
-            access_token: "bad\ntoken".to_string(),
+            access_token: SecretString::from("bad\ntoken"),
         };
         let result = Store::new(creds).await;
         match result {
@@ -211,6 +212,16 @@ pub mod construction {
             Ok(_) => panic!("expected BuildErr, got Ok"),
             Err(other) => panic!("expected BuildErr, got {other:?}"),
         }
+    }
+
+    /// The secret token round-trips: the exposed value equals what was set. Guards
+    /// the `SecretString` wiring feeding the `Bearer` authorization header.
+    #[test]
+    fn credentials_expose_secret_round_trip() {
+        let creds = Credentials {
+            access_token: SecretString::from("valid-token"),
+        };
+        assert_eq!(creds.access_token.expose_secret(), "valid-token");
     }
 }
 
