@@ -22,5 +22,4 @@ pub struct Job {
     pub last_observed_at: DateTime<Utc>,
     pub upload_rule_id: String,
     pub deployment_id: String,
-    pub release_id: String,
 }

@@ -25,8 +25,9 @@ pub struct MockScanner {
     clear_rules_fn: Arc<Mutex<ResultFn>>,
     scan_fn: Arc<Mutex<ResultFn>>,
 
-    // subscriptions
-    subscribe_tx: broadcast::Sender<ScanEvent>,
+    // subscriptions; wrapped so `close()` can drop the sender (closing the
+    // stream) while the mock stays shared behind an Arc.
+    subscribe_tx: Mutex<Option<broadcast::Sender<ScanEvent>>>,
 }
 
 impl Default for MockScanner {
@@ -45,8 +46,35 @@ impl MockScanner {
             update_rules_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
             clear_rules_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
             scan_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
-            subscribe_tx,
+            subscribe_tx: Mutex::new(Some(subscribe_tx)),
         }
+    }
+
+    /// Emit a scan event to all current subscribers. Returns the number of
+    /// subscribers that received it (0 if none are listening, or the stream
+    /// has been closed).
+    pub fn emit(&self, event: ScanEvent) -> usize {
+        self.subscribe_tx
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or(0, |tx| tx.send(event).unwrap_or(0))
+    }
+
+    /// The number of live subscribers to the scan-event stream.
+    pub fn subscriber_count(&self) -> usize {
+        self.subscribe_tx
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or(0, |tx| tx.receiver_count())
+    }
+
+    /// Drop the event sender, closing the stream so subscribers observe
+    /// `RecvError::Closed`. Models the scanner actor going away while a
+    /// consumer is still running.
+    pub fn close(&self) {
+        self.subscribe_tx.lock().unwrap().take();
     }
 
     /// The recorded `update_rules` calls, in order.
@@ -116,7 +144,13 @@ impl ScannerExt for MockScanner {
     }
 
     async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr> {
-        Ok(self.subscribe_tx.subscribe())
+        Ok(self
+            .subscribe_tx
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("MockScanner::subscribe called after close")
+            .subscribe())
     }
 
     async fn shutdown(&self) -> Result<(), ScanErr> {

@@ -39,7 +39,6 @@ fn make_job(name: &str) -> Job {
         last_observed_at: now,
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        release_id: "rls_1".to_string(),
     }
 }
 
@@ -312,7 +311,6 @@ fn create_request_maps_job_fields() {
         last_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 2, 0).unwrap(),
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        release_id: "rls_1".to_string(),
     };
 
     let expected = CreateUploadRequest {
