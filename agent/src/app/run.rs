@@ -174,7 +174,6 @@ async fn init(
             init_scan_upload_bridge_worker(
                 scanner.clone(),
                 uploader.clone(),
-                app_state.clone(),
                 shutdown_manager,
                 shutdown_tx.subscribe(),
             )
@@ -369,17 +368,14 @@ async fn init_sync_scan_bridge_worker(
 async fn init_scan_upload_bridge_worker(
     scanner: Arc<scan::Scanner>,
     uploader: Arc<upload::Uploader>,
-    app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), ServerErr> {
     info!("Initializing scan-upload bridge worker...");
-    let deployments = app_state.storage.deployments.clone();
     let bridge_handle = tokio::spawn(async move {
         scan_upload_bridge::run(
             scanner.as_ref(),
             uploader.as_ref(),
-            deployments.as_ref(),
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
             }),
@@ -646,7 +642,7 @@ impl ShutdownManager {
             info!("Sync-scan bridge worker handle not found, skipping sync-scan bridge worker shutdown...");
         }
 
-        // 7. scan-upload bridge worker 
+        // 7. scan-upload bridge worker
         if let Some(scan_upload_bridge_worker_handle) = self.scan_upload_bridge_worker_handle.take()
         {
             if let Err(e) = scan_upload_bridge_worker_handle.await {
