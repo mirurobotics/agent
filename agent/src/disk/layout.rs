@@ -46,6 +46,10 @@ impl Layout {
         self.root().file("scanner.json")
     }
 
+    pub fn upload_queue(&self) -> filesys::File {
+        self.root().file("upload_queue.json")
+    }
+
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }

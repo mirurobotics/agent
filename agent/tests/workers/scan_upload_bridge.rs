@@ -71,6 +71,7 @@ impl Harness {
             16,
             executor.clone(),
             UploaderOptions::default(),
+            None,
             |_: Duration| async {},
         )
         .unwrap();

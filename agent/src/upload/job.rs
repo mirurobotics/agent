@@ -4,8 +4,9 @@ use crate::models::DeletePolicy;
 
 // external crates
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     pub file: File,
     pub size: u64,

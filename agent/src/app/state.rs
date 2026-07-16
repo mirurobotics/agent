@@ -94,8 +94,13 @@ impl AppState {
         let (scanner, scanner_handle) = Self::init_scanner(layout, enable_uploader).await;
 
         // initialize the uploader (optional)
-        let (uploader, uploader_handle) =
-            Self::init_uploader(enable_uploader, http_client.clone(), token_mngr.clone());
+        let (uploader, uploader_handle) = Self::init_uploader(
+            layout,
+            enable_uploader,
+            http_client.clone(),
+            token_mngr.clone(),
+        )
+        .await;
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
@@ -168,9 +173,11 @@ impl AppState {
     }
 
     /// Spawn the uploader actor driving the live executor (credential mint → native SDK
-    /// transfer → confirm). Fail-open by design: a spawn error degrades to no uploader
+    /// transfer → confirm). Fail-open by design: a snapshot-file error degrades to
+    /// uploading without queue persistence, and a spawn error degrades to no uploader
     /// — the agent must boot even when the uploader cannot.
-    fn init_uploader(
+    async fn init_uploader(
+        layout: &disk::Layout,
         enable_scanner: bool,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
@@ -182,14 +189,33 @@ impl AppState {
             return (None, None);
         }
 
+        let snapshot_file = match upload::QueueSnapshotFile::new_with_default(
+            layout.upload_queue(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                    "failed to initialize upload queue snapshot file; uploads will run without persistence: {e}"
+                );
+                None
+            }
+        };
+
         let executor = Arc::new(upload::LiveExecutor::new(
             http_client,
             token_mngr,
             upload::SdkTransfer::default(),
         ));
-        match upload::Uploader::spawn(64, executor, upload::UploaderOptions::default(), |wait| {
-            tokio::time::sleep(wait)
-        }) {
+        match upload::Uploader::spawn(
+            64,
+            executor,
+            upload::UploaderOptions::default(),
+            snapshot_file,
+            |wait| tokio::time::sleep(wait),
+        ) {
             Ok((uploader, handle)) => (Some(Arc::new(uploader)), Some(handle)),
             Err(e) => {
                 tracing::error!("failed to spawn uploader; continuing without uploads: {e}");

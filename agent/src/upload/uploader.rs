@@ -10,7 +10,7 @@ use crate::upload::{
     errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
     executor::UploadExecutor,
     job::Job,
-    queue::{Queue, QueueEntry},
+    queue::{Queue, QueueEntry, QueueSnapshotFile},
 };
 
 // external crates
@@ -123,7 +123,7 @@ where
 {
     pub(crate) async fn run(mut self) {
         loop {
-            match self.queue.pop_front() {
+            match self.queue.pop_front().await {
                 // idle: nothing to interleave, just wait for the next command
                 None => match self.receiver.recv().await {
                     // all senders dropped
@@ -295,6 +295,7 @@ impl Uploader {
         buffer_size: usize,
         executor: Arc<ExecutorT>,
         options: UploaderOptions,
+        snapshot_file: Option<QueueSnapshotFile>,
         sleep_fn: F,
     ) -> Result<(Self, JoinHandle<()>), UploadErr>
     where
@@ -303,9 +304,13 @@ impl Uploader {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
+        let queue = match snapshot_file {
+            Some(file) => Queue::from_snapshot(options.queue_capacity, file),
+            None => Queue::new(options.queue_capacity),
+        };
         let worker = Worker {
             receiver,
-            queue: Queue::new(options.queue_capacity),
+            queue,
             executor,
             options,
             sleep_fn,

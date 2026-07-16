@@ -67,7 +67,14 @@ async fn make_real_job(dir: &filesys::Dir, name: &str, contents: &str) -> Job {
 
 /// Spawn an uploader with default options and a no-op sleep.
 fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
-    Uploader::spawn(16, mock, UploaderOptions::default(), |_: Duration| async {}).unwrap()
+    Uploader::spawn(
+        16,
+        mock,
+        UploaderOptions::default(),
+        None,
+        |_: Duration| async {},
+    )
+    .unwrap()
 }
 
 #[tokio::test]
@@ -164,7 +171,7 @@ async fn retry_backoff_follows_expected_sequence() {
         },
         ..UploaderOptions::default()
     };
-    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, sleep_fn).unwrap();
+    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();
 
     timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
     for _ in 0..7 {
@@ -220,7 +227,7 @@ async fn requeue_into_full_queue_drops_job() {
         ..Default::default()
     };
     let (uploader, handle) =
-        Uploader::spawn(16, mock.clone(), options, |_: Duration| async {}).unwrap();
+        Uploader::spawn(16, mock.clone(), options, None, |_: Duration| async {}).unwrap();
     let job_a = make_job("a.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
@@ -251,6 +258,7 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
         16,
         mock.clone(),
         UploaderOptions::default(),
+        None,
         |_: Duration| std::future::pending::<()>(),
     )
     .unwrap();
