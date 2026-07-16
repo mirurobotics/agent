@@ -893,7 +893,7 @@ mod tests {
         async fn stamps_after_upload_policy_from_rule() {
             let mut c = case("s.mcap", 0).await;
             c.state.cfg.rule.destination.delete_policy = DeletePolicy::AfterUpload;
-            let outcome = super::differs_from_previous(&c.state, &c.cand, &c.obs)
+            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
                 .await
                 .unwrap();
             assert_eq!(
@@ -906,7 +906,7 @@ mod tests {
         #[tokio::test]
         async fn stamps_never_policy_from_default_rule() {
             let c = case("s.mcap", 0).await;
-            let outcome = super::differs_from_previous(&c.state, &c.cand, &c.obs)
+            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
                 .await
                 .unwrap();
             assert_eq!(stable_file_of(outcome).delete_policy, DeletePolicy::Never);

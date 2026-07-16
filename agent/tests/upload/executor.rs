@@ -302,9 +302,6 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
 
 // ============================== delete policy =================================== //
 
-/// A written temp file plus a `LiveExecutor` whose create/confirm succeed and
-/// whose transfer defaults to `Ok`, for the delete-policy tests. Returns the
-/// temp-file guard (kept alive by the caller) and the executor.
 async fn delete_policy_setup(
     client: Arc<MockClient>,
 ) -> (

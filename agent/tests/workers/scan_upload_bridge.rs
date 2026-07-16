@@ -48,9 +48,6 @@ fn stable_file(name: &str, deployment_id: &str, rule_id: &str) -> StableFile {
         last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
         deployment_id: deployment_id.to_string(),
         upload_rule_id: rule_id.to_string(),
-        // A non-default policy so the bridge's field copy is meaningfully
-        // exercised: the enqueued Job must carry AfterUpload, not the Never
-        // default.
         delete_policy: DeletePolicy::AfterUpload,
     }
 }

@@ -130,11 +130,7 @@ pub struct StableFile {
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub upload_rule_id: String,
-    /// What to do with the local source file after a successful upload.
-    /// Stamped from the rule's destination (`UploadRule.destination.delete_policy`)
-    /// at stabilization time. `#[serde(default)]` keeps ledgers written by
-    /// older agents (which lack this field) deserializable — they default to
-    /// `DeletePolicy::Never`, the safe no-op.
+    // default to 'never'
     #[serde(default)]
     pub delete_policy: DeletePolicy,
 }
@@ -745,9 +741,6 @@ mod tests {
             assert!(!entry.equal_metadata(&observation));
         }
 
-        // A ledger written by an older agent has no `delete_policy` field.
-        // Serialize a real StableFile, strip the key, and confirm it still
-        // deserializes — defaulting to the safe `Never` (via `#[serde(default)]`).
         #[test]
         fn without_delete_policy_defaults_to_never() {
             let sf = stable_file(File::new("/none/s.mcap"), ts(900));

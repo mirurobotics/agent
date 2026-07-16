@@ -77,6 +77,17 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         .map(|_| ())
         .map_err(executor_err)
     }
+
+    async fn delete_source_file(&self, job: &Job) {
+        if job.delete_policy == DeletePolicy::AfterUpload {
+            if let Err(e) = files::delete(&job.file).await {
+                warn!(
+                    "upload for {} confirmed but deleting the local source file failed: {e:?}",
+                    job.file
+                );
+            }
+        }
+    }
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
@@ -89,19 +100,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
 
         self.confirm_upload(&resp.upload.id).await?;
 
-        // The upload is now durable (confirmed with the backend). Honor the
-        // rule's delete policy. This is best-effort: a delete failure must NOT
-        // fail the job — that would re-drive an already-durable upload. A
-        // missing file is already Ok(()) inside files::delete, covering the
-        // re-observed-after-a-prior-interrupted-attempt case (idempotent).
-        if job.delete_policy == DeletePolicy::AfterUpload {
-            if let Err(e) = files::delete(&job.file).await {
-                warn!(
-                    "upload for {} confirmed but deleting the local source file failed: {e:?}",
-                    job.file
-                );
-            }
-        }
+        self.delete_source_file(job).await;
         Ok(())
     }
 }
