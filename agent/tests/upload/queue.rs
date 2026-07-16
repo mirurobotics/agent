@@ -1,5 +1,6 @@
 // internal crates
 use miru_agent::filesys::File;
+use miru_agent::models::DeletePolicy;
 use miru_agent::upload::{Job, Queue, QueueEntry, UploadErr};
 
 // external crates
@@ -15,6 +16,7 @@ fn make_job(name: &str) -> Job {
         last_observed_at: Utc::now(),
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
+        delete_policy: DeletePolicy::Never,
     }
 }
 

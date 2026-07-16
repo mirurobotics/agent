@@ -6,6 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{scanner::MockScanner, upload_executor::MockUploadExecutor};
 use miru_agent::filesys::File;
+use miru_agent::models::DeletePolicy;
 use miru_agent::scan::scanner::StableFile;
 use miru_agent::scan::ScanEvent;
 use miru_agent::upload::{Job, Uploader, UploaderExt, UploaderOptions};
@@ -47,6 +48,7 @@ fn stable_file(name: &str, deployment_id: &str, rule_id: &str) -> StableFile {
         last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
         deployment_id: deployment_id.to_string(),
         upload_rule_id: rule_id.to_string(),
+        delete_policy: DeletePolicy::AfterUpload,
     }
 }
 
@@ -148,6 +150,7 @@ async fn stable_file_becomes_upload_job() {
         last_observed_at: stable.last_observed_at,
         upload_rule_id: stable.upload_rule_id,
         deployment_id: stable.deployment_id,
+        delete_policy: stable.delete_policy,
     };
     assert_eq!(expected, jobs[0]);
 

@@ -77,6 +77,7 @@ async fn enqueue_stable_file<UploaderT: UploaderExt>(uploader: &UploaderT, stabl
         last_observed_at: stable.last_observed_at,
         upload_rule_id: stable.upload_rule_id,
         deployment_id: stable.deployment_id,
+        delete_policy: stable.delete_policy,
     };
 
     if let Err(e) = uploader.enqueue(job).await {

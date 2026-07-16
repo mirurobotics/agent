@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
-use crate::models::{Deployment, Patch, UploadCollectionID, UploadRule};
+use crate::models::{DeletePolicy, Deployment, Patch, UploadCollectionID, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
 
@@ -130,6 +130,9 @@ pub struct StableFile {
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub upload_rule_id: String,
+    // default to 'never'
+    #[serde(default)]
+    pub delete_policy: DeletePolicy,
 }
 
 impl StableFile {
@@ -219,6 +222,7 @@ mod tests {
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
             upload_rule_id: "coll".to_string(),
+            delete_policy: DeletePolicy::Never,
         }
     }
 
@@ -735,6 +739,20 @@ mod tests {
             observation.mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
             assert!(!entry.has_mtime(&observation));
             assert!(!entry.equal_metadata(&observation));
+        }
+
+        #[test]
+        fn without_delete_policy_defaults_to_never() {
+            let sf = stable_file(File::new("/none/s.mcap"), ts(900));
+            let mut value = serde_json::to_value(&sf).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("delete_policy")
+                .expect("fixture should serialize a delete_policy field");
+
+            let parsed: StableFile = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.delete_policy, DeletePolicy::Never);
         }
     }
 }

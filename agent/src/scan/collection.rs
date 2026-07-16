@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{errors::*, files, File, PathExt};
-use crate::models::UploadRule;
+use crate::models::{DeletePolicy, UploadRule};
 use crate::scan::{
     errors::*,
     state::{Candidate, CollectionState, Config, Observation, StableFile},
@@ -265,6 +265,7 @@ async fn differs_from_previous(
         candidate,
         observation.timestamp,
         digest,
+        state.rule().destination.delete_policy,
     )))
 }
 
@@ -272,6 +273,7 @@ fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
     digest: Digest,
+    delete_policy: DeletePolicy,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
@@ -284,6 +286,7 @@ fn build_stable_file(
         last_observed_at,
         deployment_id: first_obs.deployment_id.clone(),
         upload_rule_id: first_obs.upload_rule_id.clone(),
+        delete_policy,
     }
 }
 
@@ -305,7 +308,7 @@ mod tests {
 
     // internal crates
     use crate::filesys::{dirs, dirs::TempDir, Dir, PathExt, WriteOptions};
-    use crate::models::{Deployment, UploadRule, UploadRuleSource};
+    use crate::models::{DeletePolicy, Deployment, UploadRule, UploadRuleSource};
     use crate::scan::state::{Candidate, CollectionState, Config, Observation, StableFile};
 
     // external crates
@@ -415,6 +418,7 @@ mod tests {
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
             upload_rule_id: "coll".to_string(),
+            delete_policy: DeletePolicy::Never,
         }
     }
 
@@ -440,6 +444,7 @@ mod tests {
             last_observed_at,
             deployment_id: obs.deployment_id.clone(),
             upload_rule_id: obs.upload_rule_id.clone(),
+            delete_policy: DeletePolicy::Never,
         }
     }
 
@@ -872,6 +877,39 @@ mod tests {
                     .await
                     .unwrap(),
             );
+        }
+
+        /// Extract the `StableFile` from a `Stable` outcome, panicking otherwise.
+        fn stable_file_of(outcome: Outcome) -> StableFile {
+            match outcome {
+                Outcome::Stable(sf) => sf,
+                _ => panic!("expected Outcome::Stable"),
+            }
+        }
+
+        // The emitted StableFile stamps the rule's delete policy: an `after_upload`
+        // rule yields `AfterUpload` on the StableFile.
+        #[tokio::test]
+        async fn stamps_after_upload_policy_from_rule() {
+            let mut c = case("s.mcap", 0).await;
+            c.state.cfg.rule.destination.delete_policy = DeletePolicy::AfterUpload;
+            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
+                .await
+                .unwrap();
+            assert_eq!(
+                stable_file_of(outcome).delete_policy,
+                DeletePolicy::AfterUpload
+            );
+        }
+
+        // The default rule (`never`) yields `Never` on the StableFile.
+        #[tokio::test]
+        async fn stamps_never_policy_from_default_rule() {
+            let c = case("s.mcap", 0).await;
+            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
+                .await
+                .unwrap();
+            assert_eq!(stable_file_of(outcome).delete_policy, DeletePolicy::Never);
         }
     }
 

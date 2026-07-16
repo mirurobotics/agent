@@ -3,13 +3,18 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
+use crate::filesys::files;
 use crate::http::{self, ClientI};
+use crate::models::DeletePolicy;
 use crate::upload::{
     errors::{executor_err, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
 };
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
+
+// external crates
+use tracing::warn;
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
@@ -72,6 +77,17 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         .map(|_| ())
         .map_err(executor_err)
     }
+
+    async fn delete_source_file(&self, job: &Job) {
+        if job.delete_policy == DeletePolicy::AfterUpload {
+            if let Err(e) = files::delete(&job.file).await {
+                warn!(
+                    "upload for {} confirmed but deleting the local source file failed: {e:?}",
+                    job.file
+                );
+            }
+        }
+    }
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
@@ -83,6 +99,8 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             .await?;
 
         self.confirm_upload(&resp.upload.id).await?;
+
+        self.delete_source_file(job).await;
         Ok(())
     }
 }
