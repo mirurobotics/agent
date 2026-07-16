@@ -48,17 +48,14 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
             Ok(ScanEvent::StableFile(stable)) => {
                 enqueue_stable_file(uploader, stable).await;
             }
-            // the broadcast buffer overflowed. The dropped files are re-emitted on the
-            // scanner's next pass (backend digest dedup absorbs any overlap), so log
-            // and keep consuming rather than treating this as fatal.
+            // broadcast buffer overflowed. 
             Err(RecvError::Lagged(dropped)) => {
                 warn!(
                     "scan-upload bridge: lagged behind scanner events, dropped {dropped}; files will be re-observed on the next scan"
                 );
             }
-            // the scanner is gone (all senders dropped). Do NOT return — that would
-            // silently retire the worker while the app believes it is live. Log and
-            // idle so the only exit is run()'s shutdown arm.
+            // scanner is gone (all senders dropped). Log and idle so the only exit
+            // is run()'s shutdown arm.
             Err(RecvError::Closed) => {
                 error!(
                     "scan-upload bridge: scanner event stream ended; worker idling until shutdown"

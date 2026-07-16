@@ -140,16 +140,17 @@ async fn stable_file_becomes_upload_job() {
 
     let jobs = harness.await_uploads(1).await;
     assert_eq!(jobs.len(), 1);
-    let job = &jobs[0];
-    // every field is carried straight through from the stable file
-    assert_eq!(job.file, stable.file);
-    assert_eq!(job.size, stable.size);
-    assert_eq!(job.digest, stable.digest);
-    assert_eq!(job.mtime, stable.mtime);
-    assert_eq!(job.first_observed_at, stable.first_observed_at);
-    assert_eq!(job.last_observed_at, stable.last_observed_at);
-    assert_eq!(job.upload_rule_id, "rule_1");
-    assert_eq!(job.deployment_id, "dpl_1");
+    let expected = Job {
+        file: stable.file,
+        size: stable.size,
+        digest: stable.digest,
+        mtime: stable.mtime,
+        first_observed_at: stable.first_observed_at,
+        last_observed_at: stable.last_observed_at,
+        upload_rule_id: stable.upload_rule_id,
+        deployment_id: stable.deployment_id,
+    };
+    assert_eq!(expected, jobs[0]);
 
     harness.shutdown().await;
 }
