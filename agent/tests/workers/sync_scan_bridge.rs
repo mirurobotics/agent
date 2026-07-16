@@ -10,7 +10,7 @@ use miru_agent::filesys::{dirs, Overwrite};
 use miru_agent::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
 use miru_agent::scan::ScanErr;
 use miru_agent::sync::syncer::SyncEvent;
-use miru_agent::workers::scan_bridge;
+use miru_agent::workers::sync_scan_bridge;
 
 // external crates
 use tokio::sync::oneshot;
@@ -187,7 +187,7 @@ fn fire_sync_success(syncer: &MockSyncer) {
         .unwrap();
 }
 
-/// Spawn the scan bridge worker against the given mocks/stores with a
+/// Spawn the sync-scan bridge worker against the given mocks/stores with a
 /// oneshot-driven shutdown. Returns the run task handle and the shutdown
 /// trigger; sending on the trigger fires the shutdown future.
 fn spawn_bridge(
@@ -199,18 +199,18 @@ fn spawn_bridge(
     let shutdown_signal = Box::pin(async move {
         let _ = shutdown_rx.await;
     });
-    let storage = scan_bridge::Storage {
+    let storage = sync_scan_bridge::Storage {
         deployments: stores.deployments.clone(),
         releases: stores.releases.clone(),
         upload_rules: stores.upload_rules.clone(),
     };
     let handle = tokio::spawn(async move {
-        scan_bridge::run(scanner.as_ref(), syncer.as_ref(), &storage, shutdown_signal).await;
+        sync_scan_bridge::run(scanner.as_ref(), syncer.as_ref(), &storage, shutdown_signal).await;
     });
     (handle, shutdown_tx)
 }
 
-/// A running scan bridge worker plus the mocks/stores it drives. Built with
+/// A running sync-scan bridge worker plus the mocks/stores it drives. Built with
 /// [`Bridge::start`] over an already-seeded `Arc<Stores>` — the worker does a
 /// single startup disk read before its event loop, so seeding must precede
 /// start. Dropping the fixture resolves the retained shutdown sender (which

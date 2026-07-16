@@ -26,7 +26,7 @@ pub async fn run<ScannerT: ScannerExt, SyncerT: SyncerExt>(
 ) {
     tokio::select! {
         _ = shutdown_signal.as_mut() => {
-            info!("Scan bridge worker shutdown complete");
+            info!("Sync-scan bridge worker shutdown complete");
         }
         // doesn't return but we do need to run it in the background
         _ = run_impl(scanner, syncer, storage) => {}
@@ -38,12 +38,12 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     syncer: &SyncerT,
     storage: &Storage,
 ) {
-    info!("Running scan bridge worker");
+    info!("Running sync-scan bridge worker");
 
     let mut subscriber = match syncer.subscribe().await {
         Ok(subscriber) => subscriber,
         Err(e) => {
-            error!("scan bridge: error subscribing to syncer events: {e:?}; idling until shutdown");
+            error!("sync-scan bridge: error subscribing to syncer events: {e:?}; idling until shutdown");
             return idle_forever().await;
         }
     };
@@ -65,7 +65,7 @@ async fn run_impl<ScannerT: ScannerExt, SyncerT: SyncerExt>(
     // sync stream ended (all Senders dropped). Do NOT return — that would silently
     // retire the worker while the app believes it is live. Log and idle so the only
     // exit is run()'s shutdown arm.
-    error!("scan bridge: syncer event stream ended; worker idling until shutdown");
+    error!("sync-scan bridge: syncer event stream ended; worker idling until shutdown");
     idle_forever().await
 }
 
@@ -87,16 +87,16 @@ async fn resolve_and_push<ScannerT: ScannerExt>(scanner: &ScannerT, storage: &St
     match result {
         Ok(Some((deployment, rules))) => {
             if let Err(e) = scanner.update_rules(deployment, rules).await {
-                error!("scan bridge: failed to update scanner rules: {e:?}");
+                error!("sync-scan bridge: failed to update scanner rules: {e:?}");
             }
         }
         Ok(None) => {
             if let Err(e) = scanner.clear_rules().await {
-                error!("scan bridge: failed to clear scanner rules: {e:?}");
+                error!("sync-scan bridge: failed to clear scanner rules: {e:?}");
             }
         }
         Err(e) => {
-            error!("scan bridge: failed to resolve active upload rules: {e:?}");
+            error!("sync-scan bridge: failed to resolve active upload rules: {e:?}");
         }
     }
 }

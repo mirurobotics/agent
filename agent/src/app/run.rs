@@ -16,7 +16,7 @@ use crate::scan;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{
-    mqtt, poller, scan_bridge,
+    mqtt, poller, sync_scan_bridge,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
 };
 
@@ -162,7 +162,7 @@ async fn init(
             shutdown_tx.subscribe(),
         )
         .await?;
-        init_scan_bridge_worker(
+        init_sync_scan_bridge_worker(
             scanner.clone(),
             app_state.clone(),
             shutdown_manager,
@@ -323,21 +323,21 @@ async fn init_scan_worker(
     Ok(())
 }
 
-async fn init_scan_bridge_worker(
+async fn init_sync_scan_bridge_worker(
     scanner: Arc<scan::Scanner>,
     app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), ServerErr> {
-    info!("Initializing scan bridge worker...");
+    info!("Initializing sync-scan bridge worker...");
     let syncer = app_state.syncer.clone();
-    let storage = scan_bridge::Storage {
+    let storage = sync_scan_bridge::Storage {
         deployments: app_state.storage.deployments.clone(),
         releases: app_state.storage.releases.clone(),
         upload_rules: app_state.storage.upload_rules.clone(),
     };
     let bridge_handle = tokio::spawn(async move {
-        scan_bridge::run(
+        sync_scan_bridge::run(
             scanner.as_ref(),
             syncer.as_ref(),
             &storage,
@@ -348,8 +348,8 @@ async fn init_scan_bridge_worker(
         .await;
     });
     shutdown_manager.register_handle(
-        |mgr| &mut mgr.scan_bridge_worker_handle,
-        "scan_bridge_handle",
+        |mgr| &mut mgr.sync_scan_bridge_worker_handle,
+        "sync_scan_bridge_handle",
         bridge_handle,
     )?;
     Ok(())
@@ -401,7 +401,7 @@ struct ShutdownManager {
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
     scan_worker_handle: Option<JoinHandle<()>>,
-    scan_bridge_worker_handle: Option<JoinHandle<()>>,
+    sync_scan_bridge_worker_handle: Option<JoinHandle<()>>,
 }
 
 impl ShutdownManager {
@@ -415,7 +415,7 @@ impl ShutdownManager {
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
             scan_worker_handle: None,
-            scan_bridge_worker_handle: None,
+            sync_scan_bridge_worker_handle: None,
         }
     }
 
@@ -590,10 +590,10 @@ impl ShutdownManager {
             info!("Scan driver worker handle not found, skipping scan driver worker shutdown...");
         }
 
-        // 6. scan bridge worker
-        if let Some(scan_bridge_worker_handle) = self.scan_bridge_worker_handle.take() {
-            if let Err(e) = scan_bridge_worker_handle.await {
-                error!("Failed to shutdown scan bridge worker: {}", e);
+        // 6. sync-scan bridge worker
+        if let Some(sync_scan_bridge_worker_handle) = self.sync_scan_bridge_worker_handle.take() {
+            if let Err(e) = sync_scan_bridge_worker_handle.await {
+                error!("Failed to shutdown sync-scan bridge worker: {}", e);
                 first_err.get_or_insert_with(|| {
                     ServerErr::JoinHandleErr(JoinHandleErr {
                         source: Box::new(e),
@@ -602,7 +602,7 @@ impl ShutdownManager {
                 });
             }
         } else {
-            info!("Scan bridge worker handle not found, skipping scan bridge worker shutdown...");
+            info!("Sync-scan bridge worker handle not found, skipping sync-scan bridge worker shutdown...");
         }
 
         // 7. app state
@@ -799,28 +799,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_handle_rejects_scan_bridge_duplicates() {
+    async fn register_handle_rejects_sync_scan_bridge_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.scan_bridge_worker_handle,
-                "scan_bridge_handle",
+                |mgr| &mut mgr.sync_scan_bridge_worker_handle,
+                "sync_scan_bridge_handle",
                 spawn_immediate_handle(),
             )
             .unwrap();
 
         let err = shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.scan_bridge_worker_handle,
-                "scan_bridge_handle",
+                |mgr| &mut mgr.sync_scan_bridge_worker_handle,
+                "sync_scan_bridge_handle",
                 spawn_immediate_handle(),
             )
-            .expect_err("duplicate scan bridge handle should error");
+            .expect_err("duplicate sync-scan bridge handle should error");
 
         match err {
             ServerErr::ShutdownMngrDuplicateArgErr(err) => {
-                assert_eq!(err.arg_name, "scan_bridge_handle");
+                assert_eq!(err.arg_name, "sync_scan_bridge_handle");
             }
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }
@@ -952,11 +952,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_impl_maps_scan_bridge_worker_join_error() {
+    async fn shutdown_impl_maps_sync_scan_bridge_worker_join_error() {
         let mut mgr = new_shutdown_manager();
         mgr.register_handle(
-            |mgr| &mut mgr.scan_bridge_worker_handle,
-            "scan_bridge_handle",
+            |mgr| &mut mgr.sync_scan_bridge_worker_handle,
+            "sync_scan_bridge_handle",
             spawn_panicking_handle(),
         )
         .unwrap();
@@ -964,10 +964,10 @@ mod tests {
         let err = mgr
             .shutdown_impl()
             .await
-            .expect_err("scan bridge worker panic should surface");
+            .expect_err("sync-scan bridge worker panic should surface");
 
         assert!(matches!(err, ServerErr::JoinHandleErr(_)));
-        assert!(mgr.scan_bridge_worker_handle.is_none());
+        assert!(mgr.sync_scan_bridge_worker_handle.is_none());
     }
 
     #[tokio::test]
@@ -1000,8 +1000,8 @@ mod tests {
         )
         .unwrap();
         mgr.register_handle(
-            |mgr| &mut mgr.scan_bridge_worker_handle,
-            "scan_bridge_handle",
+            |mgr| &mut mgr.sync_scan_bridge_worker_handle,
+            "sync_scan_bridge_handle",
             spawn_immediate_handle(),
         )
         .unwrap();
@@ -1013,6 +1013,6 @@ mod tests {
         assert!(mgr.mqtt_worker_handle.is_none());
         assert!(mgr.socket_server_handle.is_none());
         assert!(mgr.scan_worker_handle.is_none());
-        assert!(mgr.scan_bridge_worker_handle.is_none());
+        assert!(mgr.sync_scan_bridge_worker_handle.is_none());
     }
 }
