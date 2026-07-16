@@ -155,6 +155,29 @@ async fn stable_file_becomes_upload_job() {
 }
 
 #[tokio::test]
+async fn idles_when_scanner_stream_closes() {
+    let mut harness = Harness::start().await;
+
+    // the scanner going away closes the event stream. The bridge must NOT exit
+    // on `Closed` — that would silently retire the worker while the app still
+    // holds its handle and believes the pipeline is live.
+    harness.scanner.close();
+
+    // a wrongly-implemented bridge (returning on `Closed`) would complete its
+    // task almost immediately; a correct one idles until the shutdown signal.
+    // `Err(Elapsed)` means the handle is still pending — the desired outcome.
+    assert!(
+        timeout(Duration::from_millis(100), &mut harness.bridge)
+            .await
+            .is_err(),
+        "bridge exited on stream close instead of idling until shutdown"
+    );
+
+    // the shutdown signal remains the only intended exit, and it works.
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn each_stable_file_becomes_a_job_in_order() {
     let mut harness = Harness::start().await;
 
