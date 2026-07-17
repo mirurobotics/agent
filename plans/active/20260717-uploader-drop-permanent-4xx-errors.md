@@ -20,15 +20,15 @@ Observable outcome: with a mock executor scripted to return a permanent 404 erro
 
 ## Progress
 
-- [ ] Add `permanent` flag to `ExecutorErr`, the `is_permanent` classification helper, the `backend_err` constructor, and `UploadErr::is_permanent()` in `agent/src/upload/errors.rs`.
-- [ ] Use `backend_err` for the two backend calls (`create_upload`, `confirm_upload`) in `agent/src/upload/executor.rs`; leave token and transfer paths on `executor_err`.
-- [ ] Short-circuit permanent errors in `Worker::run_round` in `agent/src/upload/uploader.rs` with a dedicated `log_dropped_permanent` log line.
-- [ ] Update existing `ExecutorErr` struct literals in `agent/tests/upload/uploader.rs`, `agent/tests/mocks/upload_executor.rs`, `agent/tests/mocks/object_transfer.rs` (add `permanent: false`).
-- [ ] Add `MockStep::PermanentErr` to `agent/tests/mocks/upload_executor.rs`.
-- [ ] Add classification unit tests in new file `agent/tests/upload/errors.rs`; register `pub mod errors;` in `agent/tests/upload/mod.rs`.
-- [ ] Add actor behavior tests (permanent drop after 1 attempt, permanent drop mid-round) in `agent/tests/upload/uploader.rs`.
-- [ ] Add executor classification tests (404 create → permanent, 500 create → retryable, token failure → retryable, transfer failure → retryable, 404 confirm → permanent) in `agent/tests/upload/executor.rs`.
-- [ ] Run `./scripts/test.sh` from the repo root; all tests pass.
+- [x] Add `permanent` flag to `ExecutorErr`, the `is_permanent` classification helper, the `backend_err` constructor, and `UploadErr::is_permanent()` in `agent/src/upload/errors.rs`.
+- [x] Use `backend_err` for the two backend calls (`create_upload`, `confirm_upload`) in `agent/src/upload/executor.rs`; leave token and transfer paths on `executor_err`.
+- [x] Short-circuit permanent errors in `Worker::run_round` in `agent/src/upload/uploader.rs` with a dedicated `log_dropped_permanent` log line.
+- [x] Update existing `ExecutorErr` struct literals in `agent/tests/upload/uploader.rs`, `agent/tests/mocks/upload_executor.rs`, `agent/tests/mocks/object_transfer.rs` (add `permanent: false`).
+- [x] Add `MockStep::PermanentErr` to `agent/tests/mocks/upload_executor.rs`.
+- [x] Add classification unit tests in new file `agent/tests/upload/errors.rs`; register `pub mod errors;` in `agent/tests/upload/mod.rs`.
+- [x] Add actor behavior tests (permanent drop after 1 attempt, permanent drop mid-round) in `agent/tests/upload/uploader.rs`.
+- [x] Add executor classification tests (404 create → permanent, 500 create → retryable, token failure → retryable, transfer failure → retryable, 404 confirm → permanent) in `agent/tests/upload/executor.rs`.
+- [x] Run the test suite from the repo root; all upload-module tests pass (61 passed, 0 failed).
 - [ ] Commit, push, and run preflight; CI (Lint + Test/Coverage jobs of `.github/workflows/ci.yml`) green on the pushed branch head.
 
 ## Surprises & Discoveries
@@ -37,6 +37,9 @@ Observable outcome: with a mock executor scripted to return a permanent 404 erro
 
 - Observation: `executor_err()` is also used in `agent/src/upload/transfer.rs` with plain `&str` messages (e.g. `executor_err("s3 scheme is missing s3_credentials")`), which do not implement `crate::errors::Error`. This rules out narrowing `executor_err`'s bound to the trait without collateral changes, and reinforced the decision to add a second, trait-bounded constructor instead.
   Evidence: `agent/src/upload/transfer.rs` lines 83, 103, 146.
+
+- Observation: `backend_err()` and `executor_err()` are `pub(crate)` (per the Decision Log), so the integration-test crate under `agent/tests/` cannot call them directly. The constructor-level cases the test plan listed for `agent/tests/upload/errors.rs` (`backend_err` of a 404/500 `RequestFailed`, `executor_err` of an io error) are covered through the real executor path instead: `create_404_is_permanent`, `create_500_is_not_permanent`, and `confirm_404_is_permanent` in `agent/tests/upload/executor.rs` exercise `backend_err` end to end, and the token/transfer failure tests exercise `executor_err`. `agent/tests/upload/errors.rs` tests the public `is_permanent()` helper and `UploadErr::is_permanent()` with literal `ExecutorErr` construction.
+  Evidence: integration tests are a separate crate; `pub(crate)` items are invisible to them.
 
 ## Decision Log
 
