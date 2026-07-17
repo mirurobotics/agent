@@ -21,16 +21,20 @@ You can see it work by running the test suite: the S3 tests assert the recorded 
 
 ## Progress
 
-- [ ] Milestone 1: `s3::Store` and `gcs::Store` put paths accept a metadata map and stamp it; store-level tests.
-- [ ] Milestone 2: thread the create-upload response's `metadata` through `ObjectTransfer` and `LiveExecutor`; transfer/executor tests.
+- [x] Milestone 1: `s3::Store` and `gcs::Store` put paths accept a metadata map and stamp it; store-level tests. (commit 0306560)
+- [x] Milestone 2: thread the create-upload response's `metadata` through `ObjectTransfer` and `LiveExecutor`; transfer/executor tests. (commit ab4dd45)
 - [ ] Milestone 3: preflight to CI-green on the pushed branch head.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
-
-- Observation: …
-  Evidence: …
+- Observation: the smithy replay client's `Headers::get` returns `Option<&str>` directly, so the new header assertions needed no `.to_str()` conversion.
+  Evidence: `put_stamps_metadata_headers` in `agent/tests/s3/mod.rs` asserts `requests[0].headers().get("x-amz-meta-device_id") == Some("dvc_1")` and passes.
+- Observation: clippy's `type_complexity` (denied via `-D warnings`) rejects the mock's inline 4-tuple inside `Arc<Mutex<Vec<...>>>`; a type alias was required.
+  Evidence: `agent/tests/mocks/object_transfer.rs` — `pub type TransferCall = (UploadCredentials, UploadDestination, File, HashMap<String, String>)`.
+- Observation: GCS needs no empty-map guard — the vendored `google-cloud-storage` `Object` model defaults `metadata` to an empty map, so `.set_metadata(empty)` produces resource state identical to not calling it.
+  Evidence: refine review of `google-cloud-storage-1.15.0/src/storage/write_object.rs` and the generated `Object` model; the pre-existing exact-body GCS tests pass unchanged.
+- Observation: the known-flaky local `workers` covgate passed in every local run this time (85.56 vs 84.67 minimum).
+  Evidence: `./scripts/covgate.sh` output during Milestones 1-2 and the refine pass.
 
 ## Decision Log
 
@@ -44,6 +48,8 @@ You can see it work by running the test suite: the S3 tests assert the recorded 
   Rationale: S3 fixes object metadata at initiation — `UploadPart` and `CompleteMultipartUpload` inherit it, and a resumed upload keeps the metadata from its original initiation. Date/Author: 2026-07-17 / ben@miruml.com.
 - Decision: No spec revendor / model regeneration.
   Rationale: `libs/backend-api/src/models/upload_with_credentials.rs` already has `pub metadata: std::collections::HashMap<String, String>` (a required field, synced by the 20260713 spec-sync plan). Date/Author: 2026-07-17 / ben@miruml.com.
+- Decision: Record `MockObjectTransfer` calls behind a `pub type TransferCall` alias instead of the plan's literal inline 4-tuple.
+  Rationale: clippy `type_complexity` (denied by `-D warnings` in lint.sh) rejects the inline 4-tuple inside `Arc<Mutex<Vec<...>>>`; the alias is behavior-identical. Date/Author: 2026-07-17 / ben@miruml.com.
 
 ## Outcomes & Retrospective
 
