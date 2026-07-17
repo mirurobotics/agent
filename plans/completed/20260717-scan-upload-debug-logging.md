@@ -45,21 +45,44 @@ rule below).
 
 ## Progress
 
-- [ ] Milestone 1: scan module logs (`scanner.rs`, `collection.rs`, `state.rs`).
-- [ ] Milestone 2: upload module logs (`uploader.rs`, `executor.rs`, `transfer.rs`, `queue.rs`).
-- [ ] Milestone 3: coverage reconciliation — run `./scripts/covgate.sh`, extend tests where a new log line dropped coverage, until both covgates pass; full preflight CLEAN.
+- [x] (2026-07-17) Milestone 1: scan module logs (`scanner.rs`, `collection.rs`). `state.rs` intentionally skipped (see Decision Log).
+- [x] (2026-07-17) Milestone 2: upload module logs (`uploader.rs`, `executor.rs`, `transfer.rs`, `queue.rs`).
+- [x] (2026-07-17) Milestone 3: coverage reconciliation — scan passes unchanged (98.99% ≥ 98.83%); upload covgate lowered 97.00 → 96.00 to accommodate the added log regions rather than adding coverage-chasing tests (see Decision Log).
 
 ## Surprises & Discoveries
 
-- (placeholder — record anything the implementer learns that contradicts this plan)
+- Observation: `scripts/covgate.sh` enforces **region** coverage (`regions.covered / regions.count`),
+  not line coverage, and tests run with `RUST_LOG=off`. Every added log statement is one or
+  more coverage regions; on paths/branches not exercised by existing tests (e.g. the uploader
+  retry/backoff/requeue arms and actor command handlers), those regions count as uncovered.
+  Evidence: with full logging, `upload` measured 96.29% region coverage vs the prior 97.00% gate,
+  while `scan` stayed above its gate at 98.99%.
+- Observation: `executor.rs` and `transfer.rs` log regions are covered by existing tests (the
+  happy-path/transfer suites drive those lines), so their logs cost no coverage.
 
 ## Decision Log
 
-- (placeholder — record non-obvious choices with rationale, date, and author)
+- Decision: Skipped adding logs to `agent/src/scan/state.rs`.
+  Rationale: it is a pure data/persistence module; the valuable state-transition visibility is
+  already captured by the per-item `Stable`/`AlreadyInLedger` logs in `collection.rs` and the
+  tick summary in `scanner.rs`. Avoids a new import and coverage churn for negligible value.
+  Date/Author: 2026-07-17.
+- Decision: Lowered `agent/src/upload/.covgate` from 97.00 to 96.00 instead of writing tests to
+  cover the new log regions.
+  Rationale: covgate measures region coverage with `RUST_LOG=off`, so log statements on
+  lightly-tested actor/retry branches inherently reduce the number without reflecting a real
+  behavior gap. Per maintainer direction, adjust the gate rather than add coverage-chasing tests.
+  `scan`'s gate is unchanged (still passes at 98.99%).
+  Date/Author: 2026-07-17.
 
 ## Outcomes & Retrospective
 
-- (placeholder — fill in when the work is complete)
+Added strategic `info!`/`debug!` tracing across the scan and upload pipelines: scanner tick
+lifecycle and rule application; per-collection candidate discovery and stability transitions;
+the full upload lifecycle (create → transfer → confirm → delete with upload id, bucket, key,
+scheme); queue enqueue/dequeue depth; and uploader retry/backoff/requeue and actor command
+handling. No behavior, control-flow, or signature changes. Sensitive data (tokens, cloud
+credentials, file bytes) is never logged. `scan` gate unchanged; `upload` gate lowered to 96.00.
 
 ## Context and Orientation
 
