@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::models::{Deployment, UploadCollectionID, UploadRule};
 pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
-    collection::CollectionScanner,
+    collection::{Options, CollectionScanner},
     errors::*,
     state::{CollectionState, ScanSnapshotFile, ScannerSnapshot},
 };
@@ -67,7 +67,14 @@ impl SingleThreadScanner {
         let scanners = persisted
             .collections
             .iter()
-            .map(|(cid, state)| (cid.clone(), CollectionScanner::from_state(state.clone())))
+            .map(|(cid, state)| {
+                (
+                    cid.clone(),
+                    CollectionScanner::from_state(
+                        state.clone(), Options::default(),
+                    ),
+                )
+            })
             .collect();
         Ok(Self {
             scanners,
@@ -172,7 +179,8 @@ impl SingleThreadScanner {
                 None => {
                     self.scanners.insert(
                         rule.upload_collection_id.clone(),
-                        CollectionScanner::new(config, now).await?,
+                        CollectionScanner::new(config, now, Options::default())
+                            .await?,
                     );
                 }
             }
@@ -808,6 +816,9 @@ mod tests {
     mod persist_snapshot {
         use super::*;
 
+        // internal crates
+        use crate::scan::collection::Options;
+
         #[tokio::test]
         async fn writes_current_snapshot() {
             let dir = dirs::temp("testing").unwrap();
@@ -833,7 +844,7 @@ mod tests {
             .unwrap();
             scanner.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(collection_state),
+                CollectionScanner::from_state( collection_state, Options::default(),),
             );
             scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
 
@@ -857,7 +868,7 @@ mod tests {
             .unwrap();
             scanner.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(collection_state),
+                CollectionScanner::from_state(collection_state, Options::default()),
             );
             scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
 
@@ -1199,6 +1210,9 @@ mod tests {
     mod scan {
         use super::*;
 
+        // internal crates
+        use crate::scan::collection::Options;
+
         #[tokio::test]
         async fn empty_set_scan_is_noop() {
             let clock = Clock::new(1000);
@@ -1321,7 +1335,9 @@ mod tests {
             };
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
-            let mut good = CollectionScanner::from_state(CollectionState::new(good_cfg));
+            let mut good = CollectionScanner::from_state(
+                CollectionState::new(good_cfg), Options::default(),
+            );
             write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
@@ -1332,7 +1348,9 @@ mod tests {
             };
             // from_state skips the constructor glob, so the bad pattern only bites at
             // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
-            let bad = CollectionScanner::from_state(CollectionState::new(bad_cfg));
+            let bad = CollectionScanner::from_state(
+                CollectionState::new(bad_cfg), Options::default(),
+            );
 
             single.scanners.insert("good".to_string(), good);
             single.scanners.insert("bad".to_string(), bad);
@@ -1361,10 +1379,13 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::state::{Candidate, Observation, LEDGER_PRUNE_THRESHOLD};
+        use crate::scan::collection::Options;
+        use crate::scan::state::{Candidate, Observation};
 
         // external crates
         use std::time::SystemTime;
+
+        const LEDGER_PRUNE_THRESHOLD: usize = 1000;
 
         /// A single-entry ledger history for `file` (fixed synthetic metadata).
         fn ledger_entry(file: &File) -> Vec<StableFile> {
@@ -1427,7 +1448,10 @@ mod tests {
             let (state, stale) = padded_state(&dir, &live, 0);
             single.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(state),
+                CollectionScanner::from_state(
+                    state,
+                    Options { prune_threshold: LEDGER_PRUNE_THRESHOLD, },
+                ),
             );
             single.deployed.insert(DEFAULT_COLL_ID.to_string());
 
@@ -1510,7 +1534,10 @@ mod tests {
             );
             single.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(state),
+                CollectionScanner::from_state(
+                    state,
+                    Options { prune_threshold: LEDGER_PRUNE_THRESHOLD, },
+                )
             );
             // deliberately NOT inserted into `deployed`.
 

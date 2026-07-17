@@ -11,12 +11,6 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Minimum number of ledger files (keys) before pruning activates. Below
-/// this the full ledger is kept as reviewable audit history; at or above
-/// it, discovery prunes entries whose file no longer matches the rule's
-/// glob (see `prune_ledger`).
-pub(crate) const LEDGER_PRUNE_THRESHOLD: usize = 1000;
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CollectionState {
     pub(crate) cfg: Config,
@@ -90,12 +84,8 @@ impl CollectionState {
     }
 
     /// Drop ledger entries whose file is absent from this pass's glob set.
-    /// Gated: a ledger below LEDGER_PRUNE_THRESHOLD keys is left untouched so
-    /// small histories stay auditable. Caveat: a glob narrowed then later
-    /// re-broadened can re-report an unchanged file whose entry was pruned
-    /// while outside the glob (rare; costs one duplicate upload).
-    pub(crate) fn prune_ledger(&mut self, globbed: &[File]) {
-        if self.ledger.len() < LEDGER_PRUNE_THRESHOLD {
+    pub(crate) fn prune_ledger(&mut self, globbed: &[File], threshold: usize) {
+        if self.ledger.len() < threshold {
             return;
         }
         let globbed: HashSet<&File> = globbed.iter().collect();
@@ -404,9 +394,6 @@ mod tests {
     mod prune_ledger {
         use super::*;
 
-        // internal crates
-        use crate::scan::state::LEDGER_PRUNE_THRESHOLD;
-
         /// Seed `n` single-entry ledger histories keyed to `/none/{i}.mcap`,
         /// returning the seeded keys in order. No I/O: pruning never inspects
         /// the filesystem, only the glob set it is handed.
@@ -427,10 +414,10 @@ mod tests {
         #[test]
         fn below_threshold_prunes_nothing() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            seed_n(&mut state, LEDGER_PRUNE_THRESHOLD - 1);
+            seed_n(&mut state, 2);
 
-            state.prune_ledger(&[]);
-            assert_eq!(state.ledger_count(), LEDGER_PRUNE_THRESHOLD - 1);
+            state.prune_ledger(&[], 3);
+            assert_eq!(state.ledger_count(), 2);
         }
 
         // Exactly at the threshold the gate opens (pins the >= boundary):
@@ -438,7 +425,7 @@ mod tests {
         #[test]
         fn at_threshold_drops_unglobbed_keeps_globbed() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            let seeded = seed_n(&mut state, LEDGER_PRUNE_THRESHOLD);
+            let seeded = seed_n(&mut state, 4);
             let kept = &seeded[..3];
             // give one retained key a two-entry history to prove the whole
             // Vec survives, not just the latest entry.
@@ -448,7 +435,7 @@ mod tests {
                 .unwrap()
                 .push(stable_file(kept[0].clone(), ts(2000)));
 
-            state.prune_ledger(kept);
+            state.prune_ledger(kept, 4);
             assert_eq!(state.ledger_count(), 3);
             for file in kept {
                 assert!(state.ledger.contains_key(file));
@@ -461,7 +448,7 @@ mod tests {
         #[test]
         fn empty_ledger_noop() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state.prune_ledger(&[]);
+            state.prune_ledger(&[], 1);
             assert_eq!(state.ledger_count(), 0);
         }
     }

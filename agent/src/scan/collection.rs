@@ -15,21 +15,41 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 
+pub struct Options {
+    pub prune_threshold: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            prune_threshold: 1000,
+        }
+    }
+}
+
 /// Owned (non-actor) sub-scanner for a single upload collection.
 pub(crate) struct CollectionScanner {
     state: CollectionState,
+    prune_threshold: usize,
 }
 
 impl CollectionScanner {
-    pub(crate) async fn new(config: Config, now: DateTime<Utc>) -> Result<Self, ScanErr> {
+    pub(crate) async fn new(
+        config: Config,
+        now: DateTime<Utc>,
+        options: Options,
+    ) -> Result<Self, ScanErr> {
         let mut state = CollectionState::new(config);
         let globbed = files::glob(&state.cfg.rule.source.glob)?;
         state.preexisting = discover_preexisting(&state, &globbed, now).await;
-        Ok(Self::from_state(state))
+        Ok(Self::from_state(state, options))
     }
 
-    pub(crate) fn from_state(state: CollectionState) -> Self {
-        Self { state }
+    pub(crate) fn from_state(state: CollectionState, options: Options) -> Self {
+        Self {
+            state,
+            prune_threshold: options.prune_threshold,
+        }
     }
 
     pub(crate) fn state(&self) -> &CollectionState {
@@ -74,7 +94,7 @@ impl CollectionScanner {
         self.state
             .candidates
             .extend(candidates.into_iter().map(|c| (c.file.clone(), c)));
-        self.state.prune_ledger(&globbed);
+        self.state.prune_ledger(&globbed, self.prune_threshold);
         Ok(())
     }
 
@@ -561,9 +581,13 @@ mod tests {
     }
 
     async fn scanner_new(dir: &Dir, window: i64, at: DateTime<Utc>) -> CollectionScanner {
-        CollectionScanner::new(config("d", "coll", &glob_for(dir), window), at)
-            .await
-            .unwrap()
+        CollectionScanner::new(
+            config("d", "coll", &glob_for(dir), window),
+            at,
+            Options::default(),
+        )
+        .await
+        .unwrap()
     }
 
     // ============================ M1: CONSTRUCTION ============================== //
@@ -576,7 +600,9 @@ mod tests {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "a.mcap", b"aaaa").await;
             let cfg = config("d", "coll", &glob_for(&dir), 10);
-            let mut scanner = CollectionScanner::new(cfg.clone(), ts(1000)).await.unwrap();
+            let mut scanner = CollectionScanner::new(cfg.clone(), ts(1000), Options::default())
+                .await
+                .unwrap();
 
             let expected_state = state_with_preexisting(cfg, file, ts(1000)).await;
             assert_eq!(scanner.state, expected_state);
@@ -683,7 +709,9 @@ mod tests {
         async fn new_file_adds_to_candidates() {
             let dir = dirs::temp("testing").unwrap();
             let cfg = config("d", "coll", &glob_for(&dir), 0);
-            let mut scanner = CollectionScanner::new(cfg.clone(), ts(1000)).await.unwrap();
+            let mut scanner = CollectionScanner::new(cfg.clone(), ts(1000), Options::default())
+                .await
+                .unwrap();
             assert_eq!(scanner.state, CollectionState::new(cfg.clone()));
 
             let file = write(&dir, "new.mcap", b"aaaa").await;
@@ -725,7 +753,7 @@ mod tests {
             let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
             seed_ledger(&mut state, &file, ledger_entry_matching(&obs, ts(900)));
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(state, Options::default());
 
             scanner.discover_candidates(ts(1001)).await.unwrap();
             assert!(scanner.state.candidates.is_empty());
@@ -1056,7 +1084,7 @@ mod tests {
             seed_ledger(&mut c.state, &c.file, prior);
             track(&mut c.state, &c.file, c.obs.clone());
             let file = c.file.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert!(scanner
                 .evaluate_candidates(ts(1010))
@@ -1079,7 +1107,7 @@ mod tests {
             let expected = stable_from_obs(&changed, HASH_BBBB, ts(1000), ts(1010));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert_eq!(
                 scanner.evaluate_candidates(ts(1010)).await.unwrap(),
@@ -1096,7 +1124,7 @@ mod tests {
             track(&mut c.state, &c.file, c.obs.clone());
             files::delete(&c.file).await.unwrap();
             let file = c.file.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert!(scanner
                 .evaluate_candidates(ts(1010))
@@ -1116,7 +1144,7 @@ mod tests {
             let expected = stable_from_obs(&c.obs, HASH_AAAA, ts(1000), ts(1010));
             track(&mut c.state, &c.file, c.obs.clone());
             let file = c.file.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert_eq!(
                 scanner.evaluate_candidates(ts(1010)).await.unwrap(),
@@ -1180,7 +1208,7 @@ mod tests {
             track(&mut c.state, &c.file, c.obs.clone());
             let file = c.file.clone();
             let base = c.obs.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert!(scanner
                 .evaluate_candidates(ts(1010))
@@ -1208,7 +1236,7 @@ mod tests {
             );
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert_eq!(
                 scanner.evaluate_candidates(ts(1011)).await.unwrap(),
@@ -1231,7 +1259,7 @@ mod tests {
             let expected = stable_from_obs(&changed, HASH_BBBB, ts(1001), ts(1011));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
-            let mut scanner = CollectionScanner::from_state(c.state);
+            let mut scanner = CollectionScanner::from_state(c.state, Options::default());
 
             assert_eq!(
                 scanner.evaluate_candidates(ts(1011)).await.unwrap(),
@@ -1255,7 +1283,7 @@ mod tests {
             let expected = stable_from_obs(&live_obs, HASH_AAAA, ts(1000), ts(1010));
             track(&mut state, &gone, gone_obs);
             track(&mut state, &live, live_obs);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(state, Options::default());
 
             // delete one candidate's file before the tick
             files::delete(&gone).await.unwrap();
@@ -1304,7 +1332,7 @@ mod tests {
 
             track(&mut state, &good, good_obs);
             track(&mut state, &poison, poison_obs);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(state, Options::default());
 
             let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
 
@@ -1341,7 +1369,7 @@ mod tests {
             cfg2.rule.id = "rule2".to_string();
             let mut s2 = CollectionState::new(cfg2);
             track(&mut s2, &file, first_obs);
-            let mut scanner = CollectionScanner::from_state(s2);
+            let mut scanner = CollectionScanner::from_state(s2, Options::default());
 
             let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
             assert_eq!(emitted.len(), 1);
@@ -1408,7 +1436,7 @@ mod tests {
             let o2 = observation(&state, f2.clone(), ts(1000)).await;
             track(&mut state, &f1, o1);
             track(&mut state, &f2, o2);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(state, Options::default());
 
             scanner.evaluate_candidates(ts(1010)).await.unwrap();
             assert_eq!(scanner.ledger_count(), 2);
@@ -1416,13 +1444,11 @@ mod tests {
     }
 
     // Ledger pruning runs inside the periodic discovery pass, keyed off the
-    // pass's glob set and gated by LEDGER_PRUNE_THRESHOLD (threshold mechanics
-    // are pinned in the state tests; these pin the discovery seam).
+    // pass's glob set and the threshold supplied by the scanner.
     mod prune_ledger {
         use super::*;
 
-        // internal crates
-        use crate::scan::state::LEDGER_PRUNE_THRESHOLD;
+        const LEDGER_PRUNE_THRESHOLD: usize = 4;
 
         /// Seed `n` single-entry ledger histories keyed to never-created
         /// `gone{i}.mcap` paths inside `dir` (stale: inside the glob's
@@ -1451,7 +1477,12 @@ mod tests {
             seed_ledger(&mut state, &live_a, ledger_entry_matching(&obs_a, ts(900)));
             seed_ledger(&mut state, &live_b, ledger_entry_matching(&obs_b, ts(900)));
             let stale = seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(
+                state,
+                Options {
+                    prune_threshold: LEDGER_PRUNE_THRESHOLD,
+                },
+            );
 
             scanner.discover_candidates(ts(1001)).await.unwrap();
 
@@ -1472,7 +1503,12 @@ mod tests {
             let obs = observation(&state, live.clone(), ts(1000)).await;
             seed_ledger(&mut state, &live, ledger_entry_matching(&obs, ts(900)));
             seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD - 2);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(
+                state,
+                Options {
+                    prune_threshold: LEDGER_PRUNE_THRESHOLD,
+                },
+            );
 
             scanner.discover_candidates(ts(1001)).await.unwrap();
 
@@ -1494,7 +1530,12 @@ mod tests {
                 stable_file(unmatched.clone(), ts(1000)),
             );
             seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(
+                state,
+                Options {
+                    prune_threshold: LEDGER_PRUNE_THRESHOLD,
+                },
+            );
 
             scanner.discover_candidates(ts(1001)).await.unwrap();
 
@@ -1510,7 +1551,7 @@ mod tests {
             let dir = dirs::temp("testing").unwrap();
             let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
             seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
-            let mut scanner = CollectionScanner::from_state(state);
+            let mut scanner = CollectionScanner::from_state(state, Options::default());
 
             scanner
                 .update_config(config_v2(&glob_for(&dir)), ts(1001))
