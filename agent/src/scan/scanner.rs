@@ -1379,6 +1379,7 @@ mod tests {
                 last_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
                 deployment_id: "d".to_string(),
                 upload_rule_id: DEFAULT_COLL_ID.to_string(),
+                delete_policy: DeletePolicy::Never,
             }]
         }
 
