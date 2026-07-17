@@ -9,6 +9,9 @@ use crate::upload::errors::{executor_err, UploadErr};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
+// external crates
+use tracing::debug;
+
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
 /// destination, transfer the file's bytes to the object store. Kept separate
@@ -140,6 +143,10 @@ impl ObjectTransfer for SdkTransfer {
         destination: &UploadDestination,
         file: &File,
     ) -> Result<(), UploadErr> {
+        debug!(
+            "upload: transferring file {} via scheme {:?} to bucket {} key {}",
+            file, credentials.scheme, destination.bucket_name, destination.object_key
+        );
         match credentials.scheme {
             Scheme::S3 => self.transfer_s3(credentials, destination, file).await,
             Scheme::Gcs => self.transfer_gcs(credentials, destination, file).await,

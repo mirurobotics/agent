@@ -17,7 +17,7 @@ use crate::upload::{
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -125,16 +125,20 @@ where
         loop {
             match self.queue.pop_front().await {
                 // idle: nothing to interleave, just wait for the next command
-                None => match self.receiver.recv().await {
-                    // all senders dropped
-                    None => break,
-                    Some(cmd) => {
-                        if let Flow::Shutdown = self.handle_command(cmd).await {
-                            break;
+                None => {
+                    debug!("upload: queue empty; awaiting next command");
+                    match self.receiver.recv().await {
+                        // all senders dropped
+                        None => break,
+                        Some(cmd) => {
+                            if let Flow::Shutdown = self.handle_command(cmd).await {
+                                break;
+                            }
                         }
                     }
-                },
+                }
                 Some(entry) => {
+                    debug!("upload: dequeued job; starting upload round");
                     if let Flow::Shutdown = self.run_round(entry).await {
                         break;
                     }
@@ -151,13 +155,24 @@ where
         for attempt_this_round in 1..=self.options.in_place_attempts {
             entry.attempts += 1;
 
+            let file = &entry.job.file;
+            let rule = &entry.job.upload_rule_id;
+            let size = entry.job.size;
+            let attempt = entry.attempts;
+            debug!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
+
             let err = match self.attempt_upload(&entry).await {
                 AttemptOutcome::ShuttingDown => return Flow::Shutdown,
                 AttemptOutcome::Succeeded => {
                     Self::log_success(&entry);
                     return Flow::Continue;
                 }
-                AttemptOutcome::Failed(err) => err,
+                AttemptOutcome::Failed(err) => {
+                    let file = &entry.job.file;
+                    let attempt = entry.attempts;
+                    debug!("upload: attempt {attempt} for file {file} failed: {err:?}");
+                    err
+                }
             };
 
             if entry.attempts >= self.options.max_total_attempts {
@@ -200,6 +215,9 @@ where
     /// it with a warning if the queue rejects it.
     async fn requeue(&mut self, entry: QueueEntry) {
         let job = entry.job.clone();
+        let file = &job.file;
+        let attempts = entry.attempts;
+        debug!("upload: requeuing {file} at tail after {attempts} attempt(s)");
         if let Err(requeue_err) = self.queue.requeue(entry).await {
             error!(
                 "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
@@ -214,7 +232,9 @@ where
     /// arrived during the sleep.
     async fn await_next_round(&mut self, attempt_this_round: u32) -> Flow {
         let secs = cooldown::calc(&self.options.backoff, attempt_this_round - 1);
-        let sleep_fut = (self.sleep_fn)(Duration::from_secs(secs.max(0) as u64));
+        let backoff_secs = secs.max(0);
+        debug!("upload: backing off {backoff_secs}s before next in-place attempt");
+        let sleep_fut = (self.sleep_fn)(Duration::from_secs(backoff_secs as u64));
         match self.run_until_shutdown(sleep_fut).await {
             None => Flow::Shutdown,
             Some(()) => Flow::Continue,
@@ -259,12 +279,14 @@ where
     async fn handle_command(&mut self, cmd: Command) -> Flow {
         match cmd {
             Command::Shutdown { respond_to } => {
+                debug!("upload: worker handling shutdown command");
                 if respond_to.send(Ok(())).is_err() {
                     error!("Actor failed to send shutdown response");
                 }
                 Flow::Shutdown
             }
             Command::Enqueue { job, respond_to } => {
+                debug!("upload: worker handling enqueue command");
                 dispatch!(
                     self.queue.enqueue(job).await,
                     respond_to,
@@ -273,6 +295,7 @@ where
                 Flow::Continue
             }
             Command::Len { respond_to } => {
+                debug!("upload: worker handling len query");
                 dispatch!(
                     Ok(self.queue.len()),
                     respond_to,
