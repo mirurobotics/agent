@@ -8,7 +8,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 |-----------|--------|-------------|
 | `agent/` (this repo, `mirurobotics/agent`) | read-write | One-line production fix in `agent/src/scan/collection.rs` plus corrections and additions to the inline test modules in `agent/src/scan/{collection,state,scanner}.rs`. |
 
-This plan lives in `plans/` of the agent repo because all code changes are contained in this repository. Base branch: `main`. Working branch: `claude/task-mode-pr-agent-nxwei3`.
+This plan lives in `plans/completed/` of the agent repo because all code changes are contained in this repository. Base branch: `main`. Working branch: `claude/task-mode-pr-agent-nxwei3`.
 
 ## Purpose / Big Picture
 
