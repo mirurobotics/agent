@@ -31,11 +31,24 @@ impl crate::errors::Error for ExecutorErr {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("upload attempt for file {file} ({size} bytes) exceeded its {deadline:?} deadline")]
+pub struct AttemptTimeoutErr {
+    pub file: String,
+    pub size: u64,
+    pub deadline: std::time::Duration,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for AttemptTimeoutErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum UploadErr {
     #[error(transparent)]
     QueueFullErr(QueueFullErr),
     #[error(transparent)]
     ExecutorErr(ExecutorErr),
+    #[error(transparent)]
+    AttemptTimeoutErr(AttemptTimeoutErr),
     #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
@@ -45,6 +58,7 @@ pub enum UploadErr {
 crate::impl_error!(UploadErr {
     QueueFullErr,
     ExecutorErr,
+    AttemptTimeoutErr,
     SendActorMessageErr,
     ReceiveActorMessageErr
 });
@@ -82,6 +96,21 @@ where
     UploadErr::ExecutorErr(ExecutorErr {
         source: Box::new(source),
         terminal_status,
+        trace: crate::trace!(),
+    })
+}
+
+/// Builds the retryable [`UploadErr::AttemptTimeoutErr`] the actor
+/// returns when an upload attempt exceeds its size-scaled deadline.
+pub(crate) fn attempt_timeout_err(
+    file: String,
+    size: u64,
+    deadline: std::time::Duration,
+) -> UploadErr {
+    UploadErr::AttemptTimeoutErr(AttemptTimeoutErr {
+        file,
+        size,
+        deadline,
         trace: crate::trace!(),
     })
 }

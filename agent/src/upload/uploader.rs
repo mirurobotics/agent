@@ -42,6 +42,15 @@ pub struct UploaderOptions {
     /// Backoff between in-place attempts; the exponent is the current round's
     /// attempt count minus one.
     pub backoff: cooldown::Backoff,
+    /// Fixed floor of the per-attempt upload deadline. Covers control-plane
+    /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
+    /// setup so tiny files are never starved.
+    pub attempt_timeout_floor: Duration,
+    /// Minimum-throughput assumption scaling the per-attempt deadline with
+    /// file size. Deliberately far below any plausible sustained uplink: a
+    /// false timeout discards transfer progress, so this errs generous while
+    /// still guaranteeing every attempt terminates.
+    pub attempt_timeout_min_bytes_per_sec: u64,
 }
 
 impl Default for UploaderOptions {
@@ -55,7 +64,19 @@ impl Default for UploaderOptions {
                 growth_factor: 2,
                 max_secs: 120,
             },
+            attempt_timeout_floor: Duration::from_secs(120),
+            attempt_timeout_min_bytes_per_sec: 64 * 1024,
         }
+    }
+}
+
+impl UploaderOptions {
+    /// Deadline for one upload attempt of `size` bytes: floor plus a
+    /// per-byte allowance at the minimum-throughput assumption.
+    pub fn attempt_deadline(&self, size: u64) -> Duration {
+        let bps = self.attempt_timeout_min_bytes_per_sec.max(1);
+        self.attempt_timeout_floor
+            .saturating_add(Duration::from_secs(size.div_ceil(bps)))
     }
 }
 
