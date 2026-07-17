@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashMap;
+
 // internal crates
 use crate::errors::harnesses::{assert_error, Expected};
 use miru_agent::errors::{Code, Error, HTTPCode};
@@ -167,7 +170,10 @@ pub mod put {
                 resp(200, &[]),
             );
 
-            store.put_singlepart(src.file(), &obj(key)).await.unwrap();
+            store
+                .put_singlepart(src.file(), &obj(key), &HashMap::new())
+                .await
+                .unwrap();
 
             let requests = replay.actual_requests().collect::<Vec<_>>();
             assert_eq!(requests.len(), 1);
@@ -189,7 +195,10 @@ pub mod put {
                 resp(200, &[]),
             );
 
-            store.put_singlepart(src.file(), &obj(key)).await.unwrap();
+            store
+                .put_singlepart(src.file(), &obj(key), &HashMap::new())
+                .await
+                .unwrap();
 
             // The streamed body can't be byte-compared, so assert the method +
             // path by hand (see `put_streams_file_body_bytes`).
@@ -200,6 +209,30 @@ pub mod put {
                 requests[0].uri().to_string(),
                 uri("artifacts/empty.txt?x-id=PutObject")
             );
+        }
+
+        #[tokio::test]
+        async fn put_stamps_metadata_headers() {
+            let key = "artifacts/hello.txt";
+            let src = temp_file_with(b"hello world").await;
+            let metadata = HashMap::from([
+                ("device_id".to_string(), "dvc_1".to_string()),
+                ("digest".to_string(), "sha256:abc".to_string()),
+            ]);
+            let (store, replay) = store_expecting(
+                req("PUT", "artifacts/hello.txt?x-id=PutObject"),
+                resp(200, &[]),
+            );
+
+            store
+                .put_singlepart(src.file(), &obj(key), &metadata)
+                .await
+                .unwrap();
+
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let header = |name: &str| requests[0].headers().get(name);
+            assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
+            assert_eq!(header("x-amz-meta-digest"), Some("sha256:abc"));
         }
     }
 
@@ -215,7 +248,7 @@ pub mod put {
             );
 
             let err = store
-                .put(src.to_file(), &obj("denied.txt"))
+                .put(src.to_file(), &obj("denied.txt"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -240,7 +273,10 @@ pub mod put {
             let (store, _replay) = store_with(vec![]);
             let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-            let err = store.put(missing, &obj("k")).await.unwrap_err();
+            let err = store
+                .put(missing, &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
 
             assert!(matches!(err, S3Err::FileSysErr(_)));
         }
@@ -263,7 +299,10 @@ pub mod put {
             let (store, replay) =
                 store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
 
-            store.put(src.to_file(), &obj("small.bin")).await.unwrap();
+            store
+                .put(src.to_file(), &obj("small.bin"), &HashMap::new())
+                .await
+                .unwrap();
 
             assert_eq!(
                 actual_shapes(&replay),
@@ -288,7 +327,10 @@ pub mod put {
                 ReplayEvent::new(complete_req(), complete_resp()),
             ]);
 
-            store.put(src.to_file(), &obj("big.bin")).await.unwrap();
+            store
+                .put(src.to_file(), &obj("big.bin"), &HashMap::new())
+                .await
+                .unwrap();
 
             assert_eq!(
                 actual_shapes(&replay),

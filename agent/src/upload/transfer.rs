@@ -1,4 +1,5 @@
 // standard crates
+use std::collections::HashMap;
 use std::future::Future;
 
 // internal crates
@@ -89,7 +90,10 @@ impl SdkTransfer {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
         };
-        store.put(file.clone(), &object).await.map_err(executor_err)
+        store
+            .put(file.clone(), &object, &HashMap::new())
+            .await
+            .map_err(executor_err)
     }
 
     /// Uploads `file` to GCS using the vended downscoped OAuth2 bearer token,
@@ -114,7 +118,10 @@ impl SdkTransfer {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
         };
-        store.put(file.clone(), &object).await.map_err(executor_err)
+        store
+            .put(file.clone(), &object, &HashMap::new())
+            .await
+            .map_err(executor_err)
     }
 
     /// Builds the S3 store, honoring the test-only HTTP client override.
