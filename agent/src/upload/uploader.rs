@@ -145,8 +145,9 @@ where
 
     /// Drive up to `options.in_place_attempts` executor attempts on `entry`
     /// with backoff sleeps in between, while staying responsive to commands.
-    /// On a round-ending failure the job is requeued at the tail (no sleep);
-    /// at `options.max_total_attempts` total failures it is dropped.
+    /// A permanent (non-retryable) failure drops the job immediately. On a
+    /// round-ending failure the job is requeued at the tail (no sleep); at
+    /// `options.max_total_attempts` total failures it is dropped.
     async fn run_round(&mut self, mut entry: QueueEntry) -> Flow {
         for attempt_this_round in 1..=self.options.in_place_attempts {
             entry.attempts += 1;
@@ -159,6 +160,11 @@ where
                 }
                 AttemptOutcome::Failed(err) => err,
             };
+
+            if err.is_permanent() {
+                Self::log_dropped_permanent(&entry, &err);
+                return Flow::Continue;
+            }
 
             if entry.attempts >= self.options.max_total_attempts {
                 Self::log_dropped(&entry, &err);
@@ -231,6 +237,13 @@ where
     fn log_dropped(entry: &QueueEntry, err: &UploadErr) {
         error!(
             "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
+            entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
+        );
+    }
+
+    fn log_dropped_permanent(entry: &QueueEntry, err: &UploadErr) {
+        error!(
+            "dropping upload job after {} attempt(s) (rule {}, file {}, digest {}): permanent client error, not retrying: {err:?}",
             entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
         );
     }

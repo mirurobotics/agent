@@ -41,6 +41,7 @@ fn make_job(name: &str) -> Job {
 fn scripted_err() -> Result<(), UploadErr> {
     Err(UploadErr::ExecutorErr(ExecutorErr {
         source: Box::new(std::io::Error::other("scripted failure")),
+        permanent: false,
         trace: miru_agent::trace!(),
     }))
 }

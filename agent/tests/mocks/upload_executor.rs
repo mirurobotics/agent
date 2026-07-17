@@ -13,6 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 pub enum MockStep {
     Ok,
     Err,
+    /// A permanent (non-retryable) executor error.
+    PermanentErr,
     /// Await the receiver and return the sent result (or `Ok(())` if the
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
@@ -61,6 +63,12 @@ impl UploadExecutor for MockUploadExecutor {
             None | Some(MockStep::Ok) => Ok(()),
             Some(MockStep::Err) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted failure")),
+                permanent: false,
+                trace: miru_agent::trace!(),
+            })),
+            Some(MockStep::PermanentErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
+                source: Box::new(std::io::Error::other("scripted permanent failure")),
+                permanent: true,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),
