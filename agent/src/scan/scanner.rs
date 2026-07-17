@@ -141,6 +141,7 @@ impl SingleThreadScanner {
     async fn clear_rules(&mut self) -> Result<(), ScanErr> {
         self.deployed.clear();
         self.persist_snapshot().await;
+        info!("scan: cleared all deployed collection rules");
         Ok(())
     }
 
@@ -180,6 +181,10 @@ impl SingleThreadScanner {
         self.deployed = deployed;
         self.persist_snapshot().await;
 
+        let count = rules.len();
+        let deployment_id = &deployment.id;
+        info!("scan: applied {count} rule(s) for deployment {deployment_id}");
+
         Ok(())
     }
 
@@ -189,10 +194,20 @@ impl SingleThreadScanner {
 
         let now = (self.now_fn)();
 
+        let active = self.scanners.len();
+        let deployed = self.deployed.len();
+        debug!("scan: tick over {active} collection(s), {deployed} deployed");
+
         // evaludate candidates for all scanners
         for (cid, scanner) in self.scanners.iter_mut() {
             match scanner.evaluate_candidates(now).await {
-                Ok(stable) => stable_files.extend(stable),
+                Ok(stable) => {
+                    if !stable.is_empty() {
+                        let count = stable.len();
+                        debug!("scan: collection {cid} produced {count} stable file(s)");
+                    }
+                    stable_files.extend(stable);
+                }
                 Err(err) => warn!("scan: evaluate failed for collection {cid}: {err}"),
             }
 
@@ -208,17 +223,26 @@ impl SingleThreadScanner {
         }
 
         // prune inactive collection scanners
+        let pruned = inactive_colls.len();
         for cid in inactive_colls {
+            info!("scan: pruned inactive collection {cid}");
             self.scanners.remove(&cid);
         }
 
         self.persist_snapshot().await;
+        let emitted = stable_files.len();
         self.emit_stable_files(stable_files);
+
+        debug!(
+            "scan: tick complete; {emitted} stable file(s) emitted, \
+             {pruned} inactive collection(s) pruned"
+        );
 
         Ok(())
     }
 
     async fn prune(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
+        debug!("scan: pruning ledger entries first observed before {before}");
         for scanner in self.scanners.values_mut() {
             scanner.prune_ledger(before)?;
         }
