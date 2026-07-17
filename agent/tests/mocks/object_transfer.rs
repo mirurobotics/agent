@@ -1,5 +1,5 @@
 // standard crates
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 // internal crates
@@ -7,6 +7,14 @@ use backend_api::models::{UploadCredentials, UploadDestination};
 use miru_agent::filesys::File;
 use miru_agent::upload::errors::ExecutorErr;
 use miru_agent::upload::{ObjectTransfer, UploadErr};
+
+/// One recorded `transfer` call's arguments.
+pub type TransferCall = (
+    UploadCredentials,
+    UploadDestination,
+    File,
+    HashMap<String, String>,
+);
 
 /// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
 /// scripted result (an empty script defaults to `Ok`) and records the call's
@@ -16,7 +24,7 @@ use miru_agent::upload::{ObjectTransfer, UploadErr};
 #[derive(Clone, Default)]
 pub struct MockObjectTransfer {
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
-    calls: Arc<Mutex<Vec<(UploadCredentials, UploadDestination, File)>>>,
+    calls: Arc<Mutex<Vec<TransferCall>>>,
 }
 
 impl MockObjectTransfer {
@@ -38,7 +46,7 @@ impl MockObjectTransfer {
             })));
     }
 
-    pub fn recorded_calls(&self) -> Vec<(UploadCredentials, UploadDestination, File)> {
+    pub fn recorded_calls(&self) -> Vec<TransferCall> {
         self.calls.lock().unwrap().clone()
     }
 }
@@ -49,11 +57,14 @@ impl ObjectTransfer for MockObjectTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((credentials.clone(), destination.clone(), file.clone()));
+        self.calls.lock().unwrap().push((
+            credentials.clone(),
+            destination.clone(),
+            file.clone(),
+            metadata.clone(),
+        ));
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))
     }

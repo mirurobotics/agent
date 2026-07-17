@@ -1,4 +1,5 @@
 // standard crates
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // internal crates
@@ -24,6 +25,10 @@ fn destination() -> UploadDestination {
         bucket_name: "my-bucket".to_string(),
         object_key: "logs/a.log".to_string(),
     }
+}
+
+fn metadata() -> HashMap<String, String> {
+    HashMap::from([("device_id".to_string(), "dvc_1".to_string())])
 }
 
 fn s3_credentials_json() -> Value {
@@ -170,7 +175,12 @@ fn gcs_router(rec: GcsRecorder) -> Router {
 async fn unknown_scheme_is_unsupported() {
     let creds = credentials("something-new", s3_credentials_json(), Value::Null);
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(
+            &creds,
+            &destination(),
+            &File::new("/data/a.log"),
+            &HashMap::new(),
+        )
         .await
         .unwrap_err();
 
@@ -182,7 +192,12 @@ async fn unknown_scheme_is_unsupported() {
 async fn s3_scheme_without_credentials_errs() {
     let creds = credentials("s3", Value::Null, Value::Null);
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(
+            &creds,
+            &destination(),
+            &File::new("/data/a.log"),
+            &HashMap::new(),
+        )
         .await
         .unwrap_err();
 
@@ -200,7 +215,7 @@ async fn s3_transfer_puts_object_to_bucket_name_and_key() {
     let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
     SdkTransfer::with_s3_http_client(replay.clone())
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), &metadata())
         .await
         .unwrap();
 
@@ -214,6 +229,11 @@ async fn s3_transfer_puts_object_to_bucket_name_and_key() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method(), "PUT");
     assert_eq!(requests[0].uri().to_string(), S3_PUT_URI);
+    // The vended metadata map is stamped as user-defined object metadata.
+    assert_eq!(
+        requests[0].headers().get("x-amz-meta-device_id"),
+        Some("dvc_1")
+    );
 }
 
 #[tokio::test]
@@ -226,7 +246,7 @@ async fn s3_put_failure_maps_to_executor_err() {
     let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
     let err = SdkTransfer::with_s3_http_client(replay.clone())
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), &HashMap::new())
         .await
         .unwrap_err();
 
@@ -242,7 +262,7 @@ async fn s3_default_store_fails_offline_on_missing_file() {
     let missing = File::new("/nonexistent/definitely/not/here.log");
 
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &missing)
+        .transfer(&creds, &destination(), &missing, &HashMap::new())
         .await
         .unwrap_err();
 
@@ -253,7 +273,12 @@ async fn s3_default_store_fails_offline_on_missing_file() {
 async fn gcs_scheme_without_credentials_errs() {
     let creds = credentials("gcs", Value::Null, Value::Null);
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(
+            &creds,
+            &destination(),
+            &File::new("/data/a.log"),
+            &HashMap::new(),
+        )
         .await
         .unwrap_err();
 
@@ -270,7 +295,12 @@ async fn gcs_invalid_token_surfaces_executor_err() {
     // offline — exercising the gcs arm's error mapping without a network.
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("bad\ntoken"));
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &File::new("/data/a.log"))
+        .transfer(
+            &creds,
+            &destination(),
+            &File::new("/data/a.log"),
+            &HashMap::new(),
+        )
         .await
         .unwrap_err();
 
@@ -285,7 +315,7 @@ async fn gcs_transfer_puts_object_to_bucket_name_and_key() {
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
     SdkTransfer::with_gcs_endpoint(server.base_url)
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), &metadata())
         .await
         .unwrap();
 
@@ -307,6 +337,12 @@ async fn gcs_transfer_puts_object_to_bucket_name_and_key() {
             .any(|w| w == b"hello world"),
         "uploaded multipart body must contain the file bytes"
     );
+    // The vended metadata map lands in the object-resource JSON part.
+    let contains = |needle: &[u8]| r.body.windows(needle.len()).any(|w| w == needle);
+    assert!(
+        contains(b"device_id") && contains(b"dvc_1"),
+        "uploaded multipart body must contain the metadata map"
+    );
 }
 
 #[tokio::test]
@@ -318,7 +354,7 @@ async fn gcs_put_failure_maps_to_executor_err() {
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
     let err = SdkTransfer::with_gcs_endpoint(server.base_url)
-        .transfer(&creds, &destination(), src.file())
+        .transfer(&creds, &destination(), src.file(), &HashMap::new())
         .await
         .unwrap_err();
 
@@ -335,7 +371,7 @@ async fn gcs_default_store_fails_offline_on_missing_file() {
     let missing = File::new("/nonexistent/definitely/not/here.log");
 
     let err = SdkTransfer::default()
-        .transfer(&creds, &destination(), &missing)
+        .transfer(&creds, &destination(), &missing, &HashMap::new())
         .await
         .unwrap_err();
 

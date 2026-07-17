@@ -29,6 +29,7 @@ pub trait ObjectTransfer: Send + Sync {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        metadata: &HashMap<String, String>,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
 }
 
@@ -80,6 +81,7 @@ impl SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .s3_credentials
@@ -91,7 +93,7 @@ impl SdkTransfer {
             key: destination.object_key.clone(),
         };
         store
-            .put(file.clone(), &object, &HashMap::new())
+            .put(file.clone(), &object, metadata)
             .await
             .map_err(executor_err)
     }
@@ -103,6 +105,7 @@ impl SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .gcs_credentials
@@ -119,7 +122,7 @@ impl SdkTransfer {
             key: destination.object_key.clone(),
         };
         store
-            .put(file.clone(), &object, &HashMap::new())
+            .put(file.clone(), &object, metadata)
             .await
             .map_err(executor_err)
     }
@@ -149,14 +152,21 @@ impl ObjectTransfer for SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         info!(
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, destination.bucket_name, destination.object_key
         );
         match credentials.scheme {
-            Scheme::S3 => self.transfer_s3(credentials, destination, file).await,
-            Scheme::Gcs => self.transfer_gcs(credentials, destination, file).await,
+            Scheme::S3 => {
+                self.transfer_s3(credentials, destination, file, metadata)
+                    .await
+            }
+            Scheme::Gcs => {
+                self.transfer_gcs(credentials, destination, file, metadata)
+                    .await
+            }
             Scheme::SchemeUnknown => Err(executor_err("unrecognized upload credential scheme")),
         }
     }
