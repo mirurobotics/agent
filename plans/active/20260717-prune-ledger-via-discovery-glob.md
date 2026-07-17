@@ -29,15 +29,15 @@ Observable outcome: run the scan/collection/state test suites and see threshold-
 
 ## Progress
 
-- [ ] Edit 1: `agent/src/scan/state.rs` — threshold constant + repurposed `prune_ledger(&mut self, globbed)`.
-- [ ] Edit 2: `agent/src/scan/collection.rs` — glob once per pass at the callers, thread the file list through `observe_untracked`, prune inside `discover_candidates`.
-- [ ] Edit 3: `agent/src/scan/scanner.rs` — remove `SingleThreadScanner::prune`, `Command::Prune`, worker match arm, `ScannerExt::prune`, `Scanner::prune`.
-- [ ] Edit 4: `agent/src/workers/scan.rs` — remove `prune_ledger` helper, both call sites, and the in-file test module (revert to pre-feature scan-only shape).
-- [ ] Edit 5: `agent/tests/mocks/scanner.rs` — remove `MockScanner::prune`.
-- [ ] Tests: rewrite `state.rs::prune_ledger`, `collection.rs::prune_ledger` (discovery-integrated), replace `scanner.rs::prune` with scan-driven prune tests.
-- [ ] Build + full test suite green locally-equivalent via CI; covgates re-checked (run `./scripts/update-covgates.sh` if per-module thresholds shift).
+- [x] Edit 1: `agent/src/scan/state.rs` — threshold constant + repurposed `prune_ledger(&mut self, globbed)`.
+- [x] Edit 2: `agent/src/scan/collection.rs` — glob once per pass at the callers, thread the file list through `observe_untracked`, prune inside `discover_candidates`.
+- [x] Edit 3: `agent/src/scan/scanner.rs` — remove `SingleThreadScanner::prune`, `Command::Prune`, worker match arm, `ScannerExt::prune`, `Scanner::prune`.
+- [x] Edit 4: `agent/src/workers/scan.rs` — remove `prune_ledger` helper, both call sites, and the in-file test module (revert to pre-feature scan-only shape).
+- [x] Edit 5: `agent/tests/mocks/scanner.rs` — remove `MockScanner::prune`.
+- [x] Tests: rewrite `state.rs::prune_ledger` (3 tests), `collection.rs::prune_ledger` (4 tests, discovery-integrated), replace `scanner.rs::prune` with 3 scan-driven prune tests (incl. the optional `undeployed_collection_is_not_pruned`).
+- [x] Build + full test suite green locally (minus known root-sandbox environment failures; see Surprises); covgates re-checked — `scan` 99.10 ≥ 98.83, `workers` 85.80 ≥ 84.67, no regeneration needed.
 - [ ] Preflight reports CLEAN (CI green on the pushed head of `claude/practical-newton-1dsjq9`).
-- [ ] Move `plans/active/20260715-prune-scanner-ledger-on-scan-cadence.md` to `plans/completed/` with a closing note.
+- [x] Move `plans/active/20260715-prune-scanner-ledger-on-scan-cadence.md` to `plans/completed/` with a closing note.
 
 ## Surprises & Discoveries
 
@@ -46,6 +46,8 @@ Observable outcome: run the scan/collection/state test suites and see threshold-
 - Observation (authoring): No test-only threshold override is needed. The pruned entries never need real files on disk — seeding ≥1000 in-memory `HashMap` entries keyed to paths inside (or outside) the temp dir is microseconds of work — so tests exercise the real production constant.
   Evidence: `stable_file()` fixtures in `state.rs`/`collection.rs` tests construct `StableFile` values with no I/O; only the *retained* (glob-matched) files need to exist on disk, and only in the collection-level tests.
 - Observation (authoring): The only production caller of `ScannerExt::prune` is the scan worker; the only other implementor is `MockScanner`. `grep -rn "\.prune(" agent/src agent/tests` shows scan-side hits only in `workers/scan.rs`, `scan/scanner.rs`, and `tests/mocks/scanner.rs` (the `cache` module has its own unrelated `prune`). Removal is contained.
+- Observation (implementation, 2026-07-17): The root sandbox has more environment-artifact test failures than the 3 previously catalogued. Running `cargo test --no-fail-fast` as root also fails 15 integration tests in the `mod` binary (permission-denied fixtures that root bypasses, a `/root`-home-dir assertion, unwritable-dest gcs/s3 cases, `sync::deployments::apply_error_isolation`). Verified pre-existing by stashing this change and re-running a sample — all fail on the unchanged tree too. None touch scan/worker code. CI (non-root) is the authority.
+- Observation (implementation, 2026-07-17): Removing `file.exists()` from `CollectionState::prune_ledger` left `PathExt` unused in `state.rs` — dropped from the import. Coverage after the change: `scan` 99.10% (gate 98.83), `workers` 85.80% (gate 84.67) — deleting the worker-prune code *raised* the workers ratio, so no covgate regeneration was needed.
 
 ## Decision Log
 
@@ -87,7 +89,7 @@ Observable outcome: run the scan/collection/state test suites and see threshold-
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+2026-07-17 (implementation): All five edits landed exactly as planned. `prune_ledger` now lives on `CollectionState` as `fn prune_ledger(&mut self, globbed: &[File])` gated by `LEDGER_PRUNE_THRESHOLD` (1000 keys); `CollectionScanner::discover_candidates` globs once and feeds both candidate discovery and the prune; `observe_untracked`/`discover_preexisting`/`discover_candidates` (free fns) take the glob slice and became infallible; the entire external prune path (`ScannerExt::prune`, `Command::Prune` + match arm, `SingleThreadScanner::prune`, `Scanner::prune`, `CollectionScanner::prune_ledger` pass-through, worker helper + in-file test module, `MockScanner::prune`) is gone and the scan worker is back to scan-only. Tests: 3 state-level, 4 collection-level (incl. `discovery_prunes_existing_but_unmatched_file` and `update_config_does_not_prune`), 3 actor-level (incl. the optional `undeployed_collection_is_not_pruned`, which proved cleanly testable by keeping a window-waiting candidate alive). Validation: build clean; full suite green minus pre-existing root-sandbox artifacts; import linter + fmt + clippy (`--all-targets --all-features -D warnings`) clean; scan 99.10 / workers 85.80 vs gates 98.83 / 84.67 — no covgate changes. Remaining: CI preflight on the pushed head (orchestrator-owned).
 
 ## Context and Orientation
 

@@ -391,3 +391,15 @@ Preflight MUST report **CLEAN** — CI green on the pushed branch head — befor
 ---
 
 Change note (2026-07-15): Initial authoring. Investigated and verified against the working tree: `prune`/`prune_ledger` semantics, the worker's `sleep_fn` injection pattern, the scanner actor's `now_fn` precedent, the single `init_scan_worker` call site, and the `Default`-based flow of `scanner` options through `AppOptions`. Recorded the absence of any existing worker test module (fakes must be written fresh).
+
+---
+
+Closing note (2026-07-17): **Superseded.** The worker-driven prune this plan
+landed (`ScannerExt::prune` -> `Command::Prune` -> `SingleThreadScanner::prune`,
+driven by `workers/scan.rs` each tick; later pivoted from age-based to
+existence-based semantics) was replaced by
+`plans/active/20260717-prune-ledger-via-discovery-glob.md`: pruning now runs
+inside the collection scanner's discovery pass against the pass's glob set,
+gated by `LEDGER_PRUNE_THRESHOLD` (1000 ledger files) so small ledgers keep
+their full audit history. The external prune plumbing added here was removed
+and the scan worker reverted to its scan-only shape.
