@@ -14,7 +14,6 @@ use backend_api::models::{
     CreateUploadRequest, Upload, UploadCredentials, UploadDestination, UploadSource, UploadStatus,
     UploadWithCredentials,
 };
-use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
@@ -196,10 +195,11 @@ async fn unknown_status_proceeds_like_pending() {
 #[tokio::test]
 async fn token_failure_maps_to_executor_err() {
     let client = Arc::new(MockClient::default());
-    let token_mngr = Arc::new(StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
-        is_network_conn_err: false,
-        trace: miru_agent::trace!(),
-    })));
+    // a token-endpoint 404: definitive 4xx provenance that must not be
+    // mistaken for a permanent failure of the upload job itself
+    let token_mngr = Arc::new(StubTokenManager::err(AuthnErr::HTTPErr(request_failed(
+        reqwest::StatusCode::NOT_FOUND,
+    ))));
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
 
