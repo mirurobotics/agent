@@ -84,12 +84,12 @@ impl CollectionState {
     }
 
     /// Drop ledger entries whose file is absent from this pass's glob set.
-    pub(crate) fn prune_ledger(&mut self, globbed: &[File], threshold: usize) {
+    pub(crate) fn prune_ledger(&mut self, retain: &[File], threshold: usize) {
         if self.ledger.len() < threshold {
             return;
         }
-        let globbed: HashSet<&File> = globbed.iter().collect();
-        self.ledger.retain(|file, _| globbed.contains(file));
+        let to_retain: HashSet<&File> = retain.iter().collect();
+        self.ledger.retain(|file, _| to_retain.contains(file));
     }
 }
 

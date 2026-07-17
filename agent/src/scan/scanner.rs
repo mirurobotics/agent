@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::models::{Deployment, UploadCollectionID, UploadRule};
 pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
-    collection::{Options, CollectionScanner},
+    collection::{CollectionScanner, Options},
     errors::*,
     state::{CollectionState, ScanSnapshotFile, ScannerSnapshot},
 };
@@ -70,9 +70,7 @@ impl SingleThreadScanner {
             .map(|(cid, state)| {
                 (
                     cid.clone(),
-                    CollectionScanner::from_state(
-                        state.clone(), Options::default(),
-                    ),
+                    CollectionScanner::from_state(state.clone(), Options::default()),
                 )
             })
             .collect();
@@ -179,8 +177,7 @@ impl SingleThreadScanner {
                 None => {
                     self.scanners.insert(
                         rule.upload_collection_id.clone(),
-                        CollectionScanner::new(config, now, Options::default())
-                            .await?,
+                        CollectionScanner::new(config, now, Options::default()).await?,
                     );
                 }
             }
@@ -844,7 +841,7 @@ mod tests {
             .unwrap();
             scanner.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state( collection_state, Options::default(),),
+                CollectionScanner::from_state(collection_state, Options::default()),
             );
             scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
 
@@ -1335,9 +1332,8 @@ mod tests {
             };
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
-            let mut good = CollectionScanner::from_state(
-                CollectionState::new(good_cfg), Options::default(),
-            );
+            let mut good =
+                CollectionScanner::from_state(CollectionState::new(good_cfg), Options::default());
             write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
@@ -1348,9 +1344,8 @@ mod tests {
             };
             // from_state skips the constructor glob, so the bad pattern only bites at
             // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
-            let bad = CollectionScanner::from_state(
-                CollectionState::new(bad_cfg), Options::default(),
-            );
+            let bad =
+                CollectionScanner::from_state(CollectionState::new(bad_cfg), Options::default());
 
             single.scanners.insert("good".to_string(), good);
             single.scanners.insert("bad".to_string(), bad);
@@ -1450,7 +1445,9 @@ mod tests {
                 DEFAULT_COLL_ID.to_string(),
                 CollectionScanner::from_state(
                     state,
-                    Options { prune_threshold: LEDGER_PRUNE_THRESHOLD, },
+                    Options {
+                        prune_threshold: LEDGER_PRUNE_THRESHOLD,
+                    },
                 ),
             );
             single.deployed.insert(DEFAULT_COLL_ID.to_string());
@@ -1536,8 +1533,10 @@ mod tests {
                 DEFAULT_COLL_ID.to_string(),
                 CollectionScanner::from_state(
                     state,
-                    Options { prune_threshold: LEDGER_PRUNE_THRESHOLD, },
-                )
+                    Options {
+                        prune_threshold: LEDGER_PRUNE_THRESHOLD,
+                    },
+                ),
             );
             // deliberately NOT inserted into `deployed`.
 
