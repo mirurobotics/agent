@@ -122,7 +122,7 @@ pub mod put {
         ]);
 
         store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap();
 
@@ -130,6 +130,32 @@ pub mod put {
         assert_eq!(
             actual_shapes(&replay),
             vec![create_shape(), upload_part_shape(1), complete_shape()]
+        );
+    }
+
+    #[tokio::test]
+    async fn create_stamps_metadata_headers() {
+        let key = "big.bin";
+        let src = temp_file_with(b"multipart-body").await;
+        let metadata = HashMap::from([("device_id".to_string(), "dvc_1".to_string())]);
+
+        let (store, replay) = store_with(vec![
+            ReplayEvent::new(create_req(), create_resp()),
+            ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
+            ReplayEvent::new(complete_req(), complete_resp()),
+        ]);
+
+        store
+            .put_multipart(&source_of(&src).await, &obj(key), &metadata)
+            .await
+            .unwrap();
+
+        // Metadata is fixed at initiation: only the CreateMultipartUpload
+        // request carries the header.
+        let requests = replay.actual_requests().collect::<Vec<_>>();
+        assert_eq!(
+            requests[0].headers().get("x-amz-meta-device_id"),
+            Some("dvc_1")
         );
     }
 
@@ -151,7 +177,7 @@ pub mod put {
         let (store, _replay) = store_with(vec![ReplayEvent::new(create_req(), no_id_resp)]);
 
         let err = store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::InvalidResponseErr(_)));
@@ -177,7 +203,7 @@ pub mod put {
         ]);
 
         let err = store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::InvalidResponseErr(_)));
@@ -200,7 +226,7 @@ pub mod put {
             store_with(vec![ReplayEvent::new(create_req(), access_denied_resp())]);
 
         let err = store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -219,7 +245,7 @@ pub mod put {
         ]);
 
         let err = store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -245,7 +271,7 @@ pub mod put {
         ]);
 
         let err = store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap_err();
         assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -276,7 +302,7 @@ pub mod put {
         ]);
 
         let err = store
-            .put_multipart(&source_of(&src).await, &obj(key))
+            .put_multipart(&source_of(&src).await, &obj(key), &HashMap::new())
             .await
             .unwrap_err();
         // The surfaced error is the original part failure, not the abort failure.
@@ -309,7 +335,7 @@ pub mod put {
             ]);
 
             let err = store
-                .put_multipart(&missing, &obj("big.bin"))
+                .put_multipart(&missing, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -333,7 +359,7 @@ pub mod put {
             ]);
 
             let err = store
-                .put_multipart(&source, &obj("big.bin"))
+                .put_multipart(&source, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -369,7 +395,7 @@ pub mod put {
             ]);
 
             let err = store
-                .put_multipart(&source, &obj("big.bin"))
+                .put_multipart(&source, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap_err();
 

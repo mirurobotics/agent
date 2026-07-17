@@ -28,8 +28,13 @@ impl Store {
     /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
     /// parts, then the error propagates.
-    pub async fn put_multipart(&self, src: &Source, dst: &Object) -> Result<(), S3Err> {
-        let upload_id = self.create_multipart_upload(dst).await?;
+    pub async fn put_multipart(
+        &self,
+        src: &Source,
+        dst: &Object,
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> Result<(), S3Err> {
+        let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
         match self.exec_multipart_upload(src, dst, &upload_id).await {
             Ok(()) => Ok(()),
@@ -185,12 +190,17 @@ impl Store {
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
-    async fn create_multipart_upload(&self, dst: &Object) -> Result<UploadID, S3Err> {
+    async fn create_multipart_upload(
+        &self,
+        dst: &Object,
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> Result<UploadID, S3Err> {
         let created = self
             .client
             .create_multipart_upload()
             .bucket(&dst.bucket)
             .key(&dst.key)
+            .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("create_multipart_upload", dst, e))?;

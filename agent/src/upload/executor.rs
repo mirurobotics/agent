@@ -107,7 +107,12 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             job.file, resp.upload.destination.bucket_name, resp.upload.destination.object_key
         );
         self.transfer
-            .transfer(&resp.credentials, &resp.upload.destination, &job.file)
+            .transfer(
+                &resp.credentials,
+                &resp.upload.destination,
+                &job.file,
+                &resp.metadata,
+            )
             .await?;
 
         info!(

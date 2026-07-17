@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashMap;
+
 // internal crates
 use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
@@ -195,7 +198,12 @@ impl Store {
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
     /// can stall this call; callers that need a bound must enforce their own
     /// size-scaled deadline (e.g. `tokio::time::timeout`) around it.
-    pub async fn put(&self, src: File, dst: &Object) -> Result<(), GcsErr> {
+    pub async fn put(
+        &self,
+        src: File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+    ) -> Result<(), GcsErr> {
         files::size(&src).await?;
         let resource_name = dst.resource_name();
         let file = tokio::fs::File::open(src.path())
@@ -203,6 +211,7 @@ impl Store {
             .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?;
         self.data
             .write_object(&resource_name, &dst.key, file)
+            .set_metadata(metadata.clone())
             .send_unbuffered()
             .await
             .map_err(|e| map_gcs_err("put_object", dst, e))?;

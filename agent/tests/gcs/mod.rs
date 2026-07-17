@@ -1,4 +1,5 @@
 // standard crates
+use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
@@ -224,7 +225,7 @@ pub mod put {
         let src = temp_file_with(b"hello world").await;
 
         store
-            .put(src.to_file(), &obj("artifacts/hello.txt"))
+            .put(src.to_file(), &obj("artifacts/hello.txt"), &HashMap::new())
             .await
             .unwrap();
 
@@ -251,11 +252,31 @@ pub mod put {
         let src = temp_file_with(b"").await;
 
         store
-            .put(src.to_file(), &obj("artifacts/empty.txt"))
+            .put(src.to_file(), &obj("artifacts/empty.txt"), &HashMap::new())
             .await
             .unwrap();
 
         assert_eq!(rec.inner.lock().unwrap().upload_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn upload_includes_metadata_in_object_resource() {
+        let rec = HttpRecorder::default();
+        let store = http_store(rec.clone()).await;
+        let src = temp_file_with(b"payload").await;
+        let metadata = HashMap::from([("device_id".to_string(), "dvc_1".to_string())]);
+
+        store
+            .put(src.to_file(), &obj("artifacts/meta.txt"), &metadata)
+            .await
+            .unwrap();
+
+        // The map lands in the object-resource JSON part of the multipart body;
+        // substring asserts avoid coupling to serializer key order/spacing.
+        let r = rec.inner.lock().unwrap();
+        let contains = |needle: &[u8]| r.upload_body.windows(needle.len()).any(|w| w == needle);
+        assert!(contains(b"device_id"), "upload body carries the key");
+        assert!(contains(b"dvc_1"), "upload body carries the value");
     }
 
     pub mod access_denied {
@@ -269,7 +290,7 @@ pub mod put {
             let src = temp_file_with(b"payload").await;
 
             let err = store
-                .put(src.to_file(), &obj("denied.txt"))
+                .put(src.to_file(), &obj("denied.txt"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -291,7 +312,10 @@ pub mod put {
             let store = http_store(rec.clone()).await;
             let missing = File::new("/nonexistent/definitely/not/here.bin");
 
-            let err = store.put(missing, &obj("k")).await.unwrap_err();
+            let err = store
+                .put(missing, &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
 
             assert!(matches!(err, GcsErr::FileSysErr(_)));
             assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
@@ -314,7 +338,10 @@ pub mod put {
                 .await
                 .unwrap();
 
-            let err = store.put(src.to_file(), &obj("k")).await.unwrap_err();
+            let err = store
+                .put(src.to_file(), &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
 
             assert!(matches!(err, GcsErr::LocalIoErr(_)));
             assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);

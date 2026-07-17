@@ -70,6 +70,10 @@ fn s3_credentials() -> UploadCredentials {
     .unwrap()
 }
 
+fn response_metadata() -> HashMap<String, String> {
+    HashMap::from([("device_id".to_string(), "dvc_1".to_string())])
+}
+
 /// A `POST /uploads` response for upload `upl_1` (destination
 /// `my-bucket`/`logs/a.log`, s3 credentials) in the given `status`.
 fn response_with_status(status: UploadStatus) -> UploadWithCredentials {
@@ -81,7 +85,7 @@ fn response_with_status(status: UploadStatus) -> UploadWithCredentials {
             ..Default::default()
         }),
         credentials: Box::new(s3_credentials()),
-        metadata: HashMap::new(),
+        metadata: response_metadata(),
     }
 }
 
@@ -147,11 +151,16 @@ async fn happy_path_creates_transfers_confirms() {
 
     executor.upload(&job).await.unwrap();
 
-    // Exactly one transfer, carrying the create response's credentials and
-    // destination plus the job's file.
+    // Exactly one transfer, carrying the create response's credentials,
+    // destination, and metadata plus the job's file.
     assert_eq!(
         transfer.recorded_calls(),
-        vec![(s3_credentials(), destination(), job.file.clone())]
+        vec![(
+            s3_credentials(),
+            destination(),
+            job.file.clone(),
+            response_metadata()
+        )]
     );
     // The captured HTTP exchange: create (with the job's payload and the token
     // manager's bearer string) then confirm for the created upload's id.
@@ -294,11 +303,16 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
     executor.upload(&job).await.unwrap();
 
     // The replay client saw exactly one PUT at the expected URI — the create
-    // response's credentials and destination drove the production transfer.
+    // response's credentials and destination drove the production transfer —
+    // stamped with the create response's metadata map.
     let requests = replay.actual_requests().collect::<Vec<_>>();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method(), "PUT");
     assert_eq!(requests[0].uri().to_string(), S3_PUT_URI);
+    assert_eq!(
+        requests[0].headers().get("x-amz-meta-device_id"),
+        Some("dvc_1")
+    );
     assert_eq!(client.call_count(Call::ConfirmUpload), 1);
 }
 

@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashMap;
+
 // internal crates
 use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
@@ -109,18 +112,28 @@ impl Store {
     /// stream through one `PutObject` ([`Self::put_singlepart`]); larger files
     /// stream part-by-part through a stateless multipart upload
     /// ([`Self::put_multipart`]).
-    pub async fn put(&self, src: File, dst: &Object) -> Result<(), S3Err> {
+    pub async fn put(
+        &self,
+        src: File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+    ) -> Result<(), S3Err> {
         let size = files::size(&src).await?;
         if size > PART_SIZE {
-            self.put_multipart(&multipart::Source { file: src, size }, dst)
+            self.put_multipart(&multipart::Source { file: src, size }, dst, metadata)
                 .await
         } else {
-            self.put_singlepart(&src, dst).await
+            self.put_singlepart(&src, dst, metadata).await
         }
     }
 
     /// Streams a file to S3 as a single-part upload.
-    pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), S3Err> {
+    pub async fn put_singlepart(
+        &self,
+        src: &File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+    ) -> Result<(), S3Err> {
         let body = ByteStream::from_path(src.path())
             .await
             .map_err(|e| errors::map_bytestream_err("put_object", dst, src, &e))?;
@@ -129,6 +142,7 @@ impl Store {
             .bucket(&dst.bucket)
             .key(&dst.key)
             .body(body)
+            .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
