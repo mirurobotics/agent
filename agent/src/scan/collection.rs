@@ -184,7 +184,7 @@ async fn observe_file(
         size: meta.len(),
         mtime,
         deployment_id: state.cfg.deployment.id.clone(),
-        upload_rule_id: state.cfg.rule.upload_collection_id.clone(),
+        upload_rule_id: state.cfg.rule.id.clone(),
     })
 }
 
