@@ -5,6 +5,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::cooldown;
+use crate::errors::HTTPCode;
 use crate::trace;
 use crate::upload::{
     errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
@@ -175,6 +176,11 @@ where
                 }
             };
 
+            if let Some(status) = err.terminal_status() {
+                Self::log_terminal_drop(&entry, status, &err);
+                return Flow::Continue;
+            }
+
             if entry.attempts >= self.options.max_total_attempts {
                 Self::log_dropped(&entry, &err);
                 return Flow::Continue;
@@ -252,6 +258,15 @@ where
         error!(
             "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
             entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
+        );
+    }
+
+    fn log_terminal_drop(entry: &QueueEntry, status: HTTPCode, err: &UploadErr) {
+        error!(
+            "dropping upload job: backend rejected it with terminal HTTP status {status} \
+             (rule {}, file {}, digest {}, attempt {}); the backend will not learn this \
+             upload died: {err:?}",
+            entry.job.upload_rule_id, entry.job.file, entry.job.digest, entry.attempts
         );
     }
 

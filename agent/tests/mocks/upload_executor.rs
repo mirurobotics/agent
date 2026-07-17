@@ -61,6 +61,7 @@ impl UploadExecutor for MockUploadExecutor {
             None | Some(MockStep::Ok) => Ok(()),
             Some(MockStep::Err) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted failure")),
+                terminal_status: None,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),
