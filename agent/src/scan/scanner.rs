@@ -891,7 +891,7 @@ mod tests {
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            let rule = rule_in_collection("rule-1", DEFAULT_COLL_ID, &glob, 0);
+            let rule = rule_in_collection("upl_rule_123", "upl_col_123", &glob, 0);
             scanner
                 .update_rules(deployment("dpl-1"), vec![rule])
                 .await
@@ -910,7 +910,7 @@ mod tests {
                 first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
                 last_observed_at: DateTime::from_timestamp(1001, 0).unwrap(),
                 deployment_id: "dpl-1".to_string(),
-                upload_rule_id: DEFAULT_COLL_ID.to_string(),
+                upload_rule_id: "upl_rule_123".to_string(),
                 delete_policy: DeletePolicy::Never,
             };
 
@@ -1167,8 +1167,8 @@ mod tests {
             while let Ok(ScanEvent::StableFile(stable)) = rx.try_recv() {
                 emitted.insert((stable.upload_rule_id.clone(), stable_name(&stable)));
             }
-            let event1 = ("current".to_string(), "current.mcap".to_string());
-            let event2 = ("legacy".to_string(), "legacy.mcap".to_string());
+            let event1 = ("current-rule".to_string(), "current.mcap".to_string());
+            let event2 = ("legacy-rule".to_string(), "legacy.mcap".to_string());
             assert_eq!(emitted, BTreeSet::from([event1, event2]));
             // The legacy collection is no longer active once its candidate pool drains.
             assert_eq!(
@@ -1294,18 +1294,18 @@ mod tests {
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 2);
 
-            // exactly two StableFiles, one per distinct collection (upload_rule_id is
-            // stamped from the collection id in observe_file).
+            // exactly two StableFiles, one per distinct collection, distinguished
+            // by their rules' ids.
             let mut emitted = Vec::new();
             while let Ok(ScanEvent::StableFile(sf)) = rx.try_recv() {
                 emitted.push(sf);
             }
             assert_eq!(emitted.len(), 2, "expected exactly two StableFiles");
-            let colls: BTreeSet<String> =
+            let emitted_rule_ids: BTreeSet<String> =
                 emitted.iter().map(|sf| sf.upload_rule_id.clone()).collect();
             assert_eq!(
-                colls,
-                BTreeSet::from(["coll-1".to_string(), "coll-2".to_string()])
+                emitted_rule_ids,
+                BTreeSet::from(["c1".to_string(), "c2".to_string()])
             );
         }
 
@@ -1358,7 +1358,7 @@ mod tests {
             // the good collection's StableFile was emitted despite the sibling error.
             let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
             assert_eq!(stable_name(&sf), "good.mcap".to_string());
-            assert_eq!(sf.upload_rule_id, "good".to_string());
+            assert_eq!(sf.upload_rule_id, "r-good".to_string());
             assert!(
                 rx.try_recv().is_err(),
                 "only the good collection should emit"

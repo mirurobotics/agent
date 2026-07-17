@@ -332,9 +332,10 @@ mod tests {
         }
     }
 
-    /// An UploadRule pinned to a collection id, glob, and stability window.
+    /// An UploadRule pinned to a rule id, collection id, glob, and stability window.
     fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
         UploadRule {
+            id: "upl_rule_1".to_string(),
             upload_collection_id: collection_id.to_string(),
             source: UploadRuleSource {
                 glob: glob.to_string(),
@@ -402,7 +403,7 @@ mod tests {
             size: 4,
             mtime: SystemTime::UNIX_EPOCH,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
+            upload_rule_id: "upl_rule_1".to_string(),
         }
     }
 
@@ -417,7 +418,7 @@ mod tests {
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
+            upload_rule_id: "upl_rule_1".to_string(),
             delete_policy: DeletePolicy::Never,
         }
     }
@@ -715,6 +716,47 @@ mod tests {
 
             scanner.discover_candidates(ts(1001)).await.unwrap();
             assert!(scanner.state.candidates.is_empty());
+        }
+    }
+
+    // =============================== OBSERVE ================================== //
+
+    mod observe {
+        use super::*;
+
+        /// A CollectionState whose rule id and collection id share a suffix, so
+        /// only the prefix distinguishes them and a field swap can never pass.
+        fn swap_proof_state(glob: &str) -> CollectionState {
+            let mut cfg = config("d", "upl_col_123", glob, 0);
+            cfg.rule.id = "upl_rule_123".to_string();
+            CollectionState::new(cfg)
+        }
+
+        // observe_file stamps the rule's OWN id (upl_rule_*), never the
+        // collection id (upl_col_*).
+        #[tokio::test]
+        async fn observe_file_stamps_rule_id_not_collection_id() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "id.mcap", b"aaaa").await;
+            let state = swap_proof_state(&glob_for(&dir));
+
+            let obs = observe_file(&state, file, ts(1000)).await.unwrap();
+            assert_eq!(obs.upload_rule_id, "upl_rule_123");
+        }
+
+        // The rule id survives the full discover -> evaluate path onto the
+        // emitted StableFile.
+        #[tokio::test]
+        async fn emitted_stable_file_carries_rule_id_not_collection_id() {
+            let dir = dirs::temp("testing").unwrap();
+            let file = write(&dir, "id.mcap", b"aaaa").await;
+            let mut scanner = CollectionScanner::from_state(swap_proof_state(&glob_for(&dir)));
+
+            scanner.discover_candidates(ts(1000)).await.unwrap();
+            let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
+            assert_eq!(emitted.len(), 1);
+            assert_eq!(emitted[0].file, file);
+            assert_eq!(emitted[0].upload_rule_id, "upl_rule_123");
         }
     }
 
@@ -1306,8 +1348,8 @@ mod tests {
             assert!(!scanner.state.ledger.contains_key(&poison));
         }
 
-        // The emitted StableFile takes its deployment_id / upload_rule_id and
-        // first_observed_at from the FIRST (discovery) observation, not the
+        // The emitted StableFile takes its deployment_id and its rule id
+        // (upload_rule_id) from the FIRST (discovery) observation, not the
         // evaluation-time (LAST) observation, even when the config changed in
         // between. last_observed_at, by contrast, comes from the LAST observation
         // — so the two timestamps diverge here.
@@ -1316,12 +1358,16 @@ mod tests {
             let dir = dirs::temp("testing").unwrap();
             let file = write(&dir, "id.mcap", b"aaaa").await;
 
-            // first observation
-            let s1 = CollectionState::new(config("d1", "coll1", &glob_for(&dir), 0));
+            // first observation under rule upl_rule_first.
+            let mut cfg1 = config("d1", "upl_col_first", &glob_for(&dir), 0);
+            cfg1.rule.id = "upl_rule_first".to_string();
+            let s1 = CollectionState::new(cfg1);
             let first_obs = observation(&s1, file.clone(), ts(1000)).await;
 
-            // swap config to deployment d2, collection coll2.
-            let mut s2 = CollectionState::new(config("d2", "coll2", &glob_for(&dir), 0));
+            // swap config to deployment d2, rule upl_rule_second.
+            let mut cfg2 = config("d2", "upl_col_second", &glob_for(&dir), 0);
+            cfg2.rule.id = "upl_rule_second".to_string();
+            let mut s2 = CollectionState::new(cfg2);
             track(&mut s2, &file, first_obs);
             let mut scanner = CollectionScanner::from_state(s2);
 
@@ -1329,9 +1375,9 @@ mod tests {
             assert_eq!(emitted.len(), 1);
             let sf = &emitted[0];
 
-            // identity from the FIRST observation, not d2, coll2.
+            // identity from the FIRST observation, not d2, upl_rule_second.
             assert_eq!(sf.deployment_id, "d1");
-            assert_eq!(sf.upload_rule_id, "coll1");
+            assert_eq!(sf.upload_rule_id, "upl_rule_first");
             // first_observed_at is the discovery ts; last_observed_at is the eval ts
             assert_eq!(sf.first_observed_at, ts(1000));
             assert_eq!(sf.last_observed_at, ts(1010));

@@ -191,6 +191,7 @@ mod tests {
 
     fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
         UploadRule {
+            id: "upl_rule_1".to_string(),
             upload_collection_id: collection_id.to_string(),
             source: UploadRuleSource {
                 glob: glob.to_string(),
@@ -221,7 +222,7 @@ mod tests {
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
+            upload_rule_id: "upl_rule_1".to_string(),
             delete_policy: DeletePolicy::Never,
         }
     }
@@ -234,7 +235,7 @@ mod tests {
             size: 4,
             mtime: SystemTime::UNIX_EPOCH,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
+            upload_rule_id: "upl_rule_1".to_string(),
         }
     }
 
@@ -322,7 +323,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                upload_rule_id: "upl_rule_1".to_string(),
             }
         }
 
@@ -474,7 +475,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                upload_rule_id: "upl_rule_1".to_string(),
             }
         }
 
@@ -535,7 +536,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                upload_rule_id: "upl_rule_1".to_string(),
             }
         }
 
@@ -693,7 +694,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                upload_rule_id: "upl_rule_1".to_string(),
             }
         }
 
