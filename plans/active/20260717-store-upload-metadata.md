@@ -23,7 +23,7 @@ You can see it work by running the test suite: the S3 tests assert the recorded 
 
 - [x] Milestone 1: `s3::Store` and `gcs::Store` put paths accept a metadata map and stamp it; store-level tests. (commit 0306560)
 - [x] Milestone 2: thread the create-upload response's `metadata` through `ObjectTransfer` and `LiveExecutor`; transfer/executor tests. (commit ab4dd45)
-- [ ] Milestone 3: preflight to CI-green on the pushed branch head.
+- [x] Milestone 3: preflight to CI-green on the pushed branch head (PR #177; lint/test/tools all green on 5e81af0).
 
 ## Surprises & Discoveries
 
@@ -53,7 +53,12 @@ You can see it work by running the test suite: the S3 tests assert the recorded 
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Delivered as planned in two feature commits plus docs, on draft PR #177 with CI green (lint/test/tools):
+
+- `0306560` feat(storage): `s3::Store`/`gcs::Store` put paths take `metadata: &HashMap<String, String>` and stamp it (S3 `x-amz-meta-*` on PutObject/CreateMultipartUpload behind an empty-map guard; GCS `.set_metadata` on write_object). Three new store tests assert the recorded wire traffic.
+- `ab4dd45` feat(upload): `ObjectTransfer::transfer` gained a trailing metadata parameter; `SdkTransfer` forwards it; `LiveExecutor::upload` passes `resp.metadata`. `MockObjectTransfer` records 4-tuples (behind a `TransferCall` alias for clippy `type_complexity`); the executor happy-path whole-tuple assert and the end-to-end replayed-S3 test prove the map flows from the create response onto the wire.
+
+Validation: `test.sh` 1843 passed / 0 failed; `covgate.sh` all 34 gates green (upload 96.64 ≥ 96.00, s3 94.58 ≥ 94.00, gcs 91 ≥ 88.00); `lint.sh` and tools self-lint/covgate clean; a dedicated refine review reported no findings. The only deviation from the plan's letter was the `TransferCall` type alias (see Decision Log). Retrospective: the compiler-driven call-site strategy and the replay/recorder test rigs made this a low-friction change; the plan's empty-map guard kept every pre-existing exact-request test passing untouched.
 
 ## Context and Orientation
 
