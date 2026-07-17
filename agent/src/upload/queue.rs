@@ -12,7 +12,7 @@ use crate::upload::{
 
 // external crates
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueEntry {
@@ -78,7 +78,7 @@ impl Queue {
         self.verify_capacity(&job).await?;
         self.jobs.push_back(QueueEntry { job, attempts: 0 });
         self.persist().await;
-        debug!("upload: job enqueued; queue length {}", self.jobs.len());
+        info!("upload: job enqueued; queue length {}", self.jobs.len());
         Ok(())
     }
 
@@ -88,7 +88,7 @@ impl Queue {
         self.verify_capacity(&entry.job).await?;
         self.jobs.push_back(entry);
         self.persist().await;
-        debug!("upload: job requeued; queue length {}", self.jobs.len());
+        info!("upload: job requeued; queue length {}", self.jobs.len());
         Ok(())
     }
 
@@ -96,7 +96,7 @@ impl Queue {
         let entry = self.jobs.pop_front();
         if entry.is_some() {
             self.persist().await;
-            debug!("upload: job dequeued; queue length {}", self.jobs.len());
+            info!("upload: job dequeued; queue length {}", self.jobs.len());
         }
         entry
     }

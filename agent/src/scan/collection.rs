@@ -13,7 +13,7 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 /// Owned (non-actor) sub-scanner for a single upload collection.
 pub(crate) struct CollectionScanner {
@@ -66,7 +66,7 @@ impl CollectionScanner {
         let candidates = discover_candidates(&self.state, now).await?;
         if !candidates.is_empty() {
             let count = candidates.len();
-            debug!("scan: discovered {count} new candidate file(s)");
+            info!("scan: discovered {count} new candidate file(s)");
         }
         self.state
             .candidates
@@ -101,7 +101,7 @@ impl CollectionScanner {
                 }
                 Outcome::AlreadyInLedger { mtime } => {
                     let file = &candidate.file;
-                    debug!("scan: {file} unchanged since last stable version; in ledger");
+                    info!("scan: {file} unchanged since last stable version; in ledger");
                     self.state.candidates.remove(&candidate.file);
                     if let Some(entry) = self.state.latest_ledger_entry_mut(&candidate.file) {
                         entry.push_mtime_alias(mtime.into());
@@ -111,7 +111,7 @@ impl CollectionScanner {
                     let file = &candidate.file;
                     let digest = &stable_file.digest;
                     let size = stable_file.size;
-                    debug!("scan: {file} became stable (digest {digest}, size {size})");
+                    info!("scan: {file} became stable (digest {digest}, size {size})");
                     self.state.candidates.remove(&candidate.file);
                     stable_files.push(stable_file.clone());
                     self.state

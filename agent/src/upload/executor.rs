@@ -14,7 +14,7 @@ use crate::upload::{
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
@@ -80,7 +80,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 
     async fn delete_source_file(&self, job: &Job) {
         if job.delete_policy == DeletePolicy::AfterUpload {
-            debug!(
+            info!(
                 "upload: deleting local source file {} per delete policy",
                 job.file
             );
@@ -97,12 +97,12 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
     async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         let resp = self.create_upload(job).await?;
-        debug!(
+        info!(
             "upload: created upload {} for file {} (scheme {:?})",
             resp.upload.id, job.file, resp.credentials.scheme
         );
 
-        debug!(
+        info!(
             "upload: transferring file {} to bucket {} key {}",
             job.file, resp.upload.destination.bucket_name, resp.upload.destination.object_key
         );
@@ -110,7 +110,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             .transfer(&resp.credentials, &resp.upload.destination, &job.file)
             .await?;
 
-        debug!(
+        info!(
             "upload: confirming upload {} for file {}",
             resp.upload.id, job.file
         );

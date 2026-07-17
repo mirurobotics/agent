@@ -225,6 +225,7 @@ impl SingleThreadScanner {
         // prune inactive collection scanners
         let pruned = inactive_colls.len();
         for cid in inactive_colls {
+            info!("scan: pruned inactive collection {cid}");
             self.scanners.remove(&cid);
         }
 

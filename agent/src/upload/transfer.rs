@@ -10,7 +10,7 @@ use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
 // external crates
-use tracing::debug;
+use tracing::info;
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
@@ -143,7 +143,7 @@ impl ObjectTransfer for SdkTransfer {
         destination: &UploadDestination,
         file: &File,
     ) -> Result<(), UploadErr> {
-        debug!(
+        info!(
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, destination.bucket_name, destination.object_key
         );
