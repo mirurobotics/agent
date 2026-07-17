@@ -17,7 +17,8 @@ use backend_api::models::{
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
-use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr};
+use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
+use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::DeletePolicy;
 use miru_agent::upload::executor::new_upl_request;
 use miru_agent::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
@@ -103,6 +104,15 @@ fn token_manager() -> Arc<MockTokenManager> {
 fn non_network_http_err() -> HTTPErr {
     HTTPErr::MockErr(HttpMockErr {
         is_network_conn_err: false,
+    })
+}
+
+fn request_failed(status: reqwest::StatusCode) -> HTTPErr {
+    HTTPErr::RequestFailed(RequestFailed {
+        request: HttpParams::get("http://test/uploads").meta().unwrap(),
+        status,
+        error: None,
+        trace: miru_agent::trace!(),
     })
 }
 
@@ -199,6 +209,8 @@ async fn token_failure_maps_to_executor_err() {
         matches!(result, Err(UploadErr::ExecutorErr(_))),
         "expected ExecutorErr, got: {result:?}"
     );
+    // token-manager failures are never permanent, even when they wrap a 4xx
+    assert!(!result.unwrap_err().is_permanent());
     assert!(client.requests().is_empty());
     assert_eq!(transfer.recorded_calls(), vec![]);
 }
@@ -233,7 +245,46 @@ async fn transfer_failure_propagates_and_skips_confirm() {
         matches!(result, Err(UploadErr::ExecutorErr(_))),
         "expected ExecutorErr, got: {result:?}"
     );
+    // object-transfer failures are never permanent
+    assert!(!result.unwrap_err().is_permanent());
     assert_eq!(client.call_count(Call::ConfirmUpload), 0);
+}
+
+#[tokio::test]
+async fn create_404_is_permanent() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Err(request_failed(reqwest::StatusCode::NOT_FOUND)));
+    let executor = LiveExecutor::new(client, token_manager(), MockObjectTransfer::new());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    assert!(err.is_permanent(), "expected permanent, got: {err:?}");
+}
+
+#[tokio::test]
+async fn create_500_is_not_permanent() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Err(request_failed(reqwest::StatusCode::INTERNAL_SERVER_ERROR)));
+    let executor = LiveExecutor::new(client, token_manager(), MockObjectTransfer::new());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    assert!(!err.is_permanent(), "expected retryable, got: {err:?}");
+}
+
+#[tokio::test]
+async fn confirm_404_is_permanent() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    client.set_confirm_upload(|| Err(request_failed(reqwest::StatusCode::NOT_FOUND)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client, token_manager(), transfer.clone());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    // the transfer succeeded; the confirm's definitive 404 is what's permanent
+    assert_eq!(transfer.recorded_calls().len(), 1);
+    assert!(err.is_permanent(), "expected permanent, got: {err:?}");
 }
 
 #[tokio::test]

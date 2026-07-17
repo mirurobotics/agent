@@ -151,6 +151,68 @@ async fn global_attempt_cap_drops_job() {
 }
 
 #[tokio::test]
+async fn permanent_error_drops_job_after_one_attempt() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::PermanentErr);
+    mock.push_step(MockStep::Ok);
+    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = sleeps.clone();
+    let sleep_fn = move |duration: Duration| {
+        recorded.lock().unwrap().push(duration);
+        async {}
+    };
+    let (uploader, handle) =
+        Uploader::spawn(16, mock.clone(), UploaderOptions::default(), None, sleep_fn).unwrap();
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+
+    // A dropped after a single attempt: no in-place retries, no requeue, no
+    // backoff sleeps, and the actor stayed healthy to process B
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+    assert!(sleeps.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn permanent_error_mid_round_drops_immediately() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::Err);
+    mock.push_step(MockStep::PermanentErr);
+    mock.push_step(MockStep::Ok);
+    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = sleeps.clone();
+    let sleep_fn = move |duration: Duration| {
+        recorded.lock().unwrap().push(duration);
+        async {}
+    };
+    let (uploader, handle) =
+        Uploader::spawn(16, mock.clone(), UploaderOptions::default(), None, sleep_fn).unwrap();
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    for _ in 0..2 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // one transient failure (with its backoff sleep), then the permanent
+    // failure ends A's round early and B runs next
+    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_a, job_b]);
+    assert_eq!(sleeps.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn retry_backoff_follows_expected_sequence() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     for _ in 0..6 {
