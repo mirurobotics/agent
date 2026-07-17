@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 
 // internal crates
-use crate::filesys::{state_file::SingleThreadStateFile, File, PathExt};
+use crate::filesys::{state_file::SingleThreadStateFile, File};
 use crate::models::{DeletePolicy, Deployment, Patch, UploadCollectionID, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
@@ -10,6 +10,12 @@ use crate::trace;
 // external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+/// Minimum number of ledger files (keys) before pruning activates. Below
+/// this the full ledger is kept as reviewable audit history; at or above
+/// it, discovery prunes entries whose file no longer matches the rule's
+/// glob (see `prune_ledger`).
+pub(crate) const LEDGER_PRUNE_THRESHOLD: usize = 1000;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CollectionState {
@@ -83,9 +89,17 @@ impl CollectionState {
         Ok(())
     }
 
-    pub(crate) fn prune_ledger(&mut self) -> Result<(), ScanErr> {
-        self.ledger.retain(|file, _| file.exists());
-        Ok(())
+    /// Drop ledger entries whose file is absent from this pass's glob set.
+    /// Gated: a ledger below LEDGER_PRUNE_THRESHOLD keys is left untouched so
+    /// small histories stay auditable. Caveat: a glob narrowed then later
+    /// re-broadened can re-report an unchanged file whose entry was pruned
+    /// while outside the glob (rare; costs one duplicate upload).
+    pub(crate) fn prune_ledger(&mut self, globbed: &[File]) {
+        if self.ledger.len() < LEDGER_PRUNE_THRESHOLD {
+            return;
+        }
+        let globbed: HashSet<&File> = globbed.iter().collect();
+        self.ledger.retain(|file, _| globbed.contains(file));
     }
 }
 
@@ -391,64 +405,63 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::filesys::{dirs, files, Dir, WriteOptions};
+        use crate::scan::state::LEDGER_PRUNE_THRESHOLD;
 
-        /// Write `bytes` to `dir/name` and return the corresponding `File`.
-        async fn write(dir: &Dir, name: &str, bytes: &[u8]) -> File {
-            let file = dir.file(name);
-            files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC)
-                .await
-                .unwrap();
-            file
+        /// Seed `n` single-entry ledger histories keyed to `/none/{i}.mcap`,
+        /// returning the seeded keys in order. No I/O: pruning never inspects
+        /// the filesystem, only the glob set it is handed.
+        fn seed_n(state: &mut CollectionState, n: usize) -> Vec<File> {
+            let mut files = Vec::with_capacity(n);
+            for i in 0..n {
+                let file = File::new(format!("/none/{i}.mcap"));
+                state
+                    .ledger
+                    .insert(file.clone(), vec![stable_file(file.clone(), ts(1000))]);
+                files.push(file);
+            }
+            files
         }
 
-        // An entry whose file still exists is retained; one whose file is gone
-        // (never created) is dropped.
-        #[tokio::test]
-        async fn retains_existing_drops_missing() {
-            let dir = dirs::temp("testing").unwrap();
-            let present = write(&dir, "present.mcap", b"aaaa").await;
-            let missing = dir.file("missing.mcap");
+        // Below the threshold nothing is pruned, even against an empty glob
+        // set (the maximally aggressive input): the audit-history guarantee.
+        #[test]
+        fn below_threshold_prunes_nothing() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state.ledger.insert(
-                present.clone(),
-                vec![stable_file(present.clone(), ts(1000))],
-            );
-            state.ledger.insert(
-                missing.clone(),
-                vec![stable_file(missing.clone(), ts(1000))],
-            );
-            assert_eq!(state.ledger_count(), 2);
+            seed_n(&mut state, LEDGER_PRUNE_THRESHOLD - 1);
 
-            state.prune_ledger().unwrap();
-            assert_eq!(state.ledger_count(), 1);
-            assert!(state.ledger.contains_key(&present));
-            assert!(!state.ledger.contains_key(&missing));
+            state.prune_ledger(&[]);
+            assert_eq!(state.ledger_count(), LEDGER_PRUNE_THRESHOLD - 1);
         }
 
-        // A previously-present file's entry is pruned once the file is deleted.
-        #[tokio::test]
-        async fn drops_after_file_deleted() {
-            let dir = dirs::temp("testing").unwrap();
-            let file = write(&dir, "gone.mcap", b"aaaa").await;
+        // Exactly at the threshold the gate opens (pins the >= boundary):
+        // glob-set members keep their full Vec history, everything else drops.
+        #[test]
+        fn at_threshold_drops_unglobbed_keeps_globbed() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let seeded = seed_n(&mut state, LEDGER_PRUNE_THRESHOLD);
+            let kept = &seeded[..3];
+            // give one retained key a two-entry history to prove the whole
+            // Vec survives, not just the latest entry.
             state
                 .ledger
-                .insert(file.clone(), vec![stable_file(file.clone(), ts(1000))]);
+                .get_mut(&kept[0])
+                .unwrap()
+                .push(stable_file(kept[0].clone(), ts(2000)));
 
-            state.prune_ledger().unwrap();
-            assert_eq!(state.ledger_count(), 1);
-
-            files::delete(&file).await.unwrap();
-            state.prune_ledger().unwrap();
-            assert_eq!(state.ledger_count(), 0);
+            state.prune_ledger(kept);
+            assert_eq!(state.ledger_count(), 3);
+            for file in kept {
+                assert!(state.ledger.contains_key(file));
+            }
+            assert_eq!(state.ledger.get(&kept[0]).unwrap().len(), 2);
+            assert!(!state.ledger.contains_key(&seeded[3]));
         }
 
-        // Pruning an empty ledger is a no-op.
-        #[tokio::test]
-        async fn empty_ledger_is_noop() {
+        // Pruning an empty ledger is a no-op (the gate returns early).
+        #[test]
+        fn empty_ledger_noop() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state.prune_ledger().unwrap();
+            state.prune_ledger(&[]);
             assert_eq!(state.ledger_count(), 0);
         }
     }

@@ -240,14 +240,6 @@ impl SingleThreadScanner {
 
         Ok(())
     }
-
-    async fn prune(&mut self) -> Result<(), ScanErr> {
-        for scanner in self.scanners.values_mut() {
-            scanner.prune_ledger()?;
-        }
-        self.persist_snapshot().await;
-        Ok(())
-    }
 }
 
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
@@ -262,7 +254,6 @@ pub trait ScannerExt {
     async fn scan(&self) -> Result<(), ScanErr>;
     async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr>;
     async fn shutdown(&self) -> Result<(), ScanErr>;
-    async fn prune(&self) -> Result<(), ScanErr>;
 }
 
 pub enum Command {
@@ -290,9 +281,6 @@ pub enum Command {
     #[cfg(feature = "test")]
     GetLedgerCount {
         respond_to: oneshot::Sender<Result<usize, ScanErr>>,
-    },
-    Prune {
-        respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
 }
 
@@ -359,13 +347,6 @@ impl Worker {
                         self.scanner.get_ledger_count().await,
                         respond_to,
                         "Actor failed to send get ledger count response"
-                    );
-                }
-                Command::Prune { respond_to } => {
-                    dispatch!(
-                        self.scanner.prune().await,
-                        respond_to,
-                        "Actor failed to send prune response"
                     );
                 }
             }
@@ -464,11 +445,6 @@ impl ScannerExt for Scanner {
             .await??;
         info!("Scanner shutdown complete");
         Ok(())
-    }
-
-    async fn prune(&self) -> Result<(), ScanErr> {
-        self.send_command(|tx| Command::Prune { respond_to: tx })
-            .await?
     }
 }
 
@@ -1384,41 +1360,164 @@ mod tests {
     mod prune {
         use super::*;
 
-        // prune retains a ledger entry while its file still exists and drops it
-        // once the file is gone.
-        #[tokio::test]
-        async fn prune_retains_present_drops_gone() {
-            let (dir, clock, scanner) = single_coll(0).await;
-            let file = write(&dir, "p.mcap", b"aaa").await;
+        // internal crates
+        use crate::scan::state::{Candidate, Observation, LEDGER_PRUNE_THRESHOLD};
 
-            // discover at t=1000, evaluate stable at t=1001 => one ledger entry.
-            scan_once(&scanner).await;
-            tick(&scanner, &clock, 1).await;
-            assert_eq!(ledger_count(&scanner).await, 1);
+        // external crates
+        use std::time::SystemTime;
 
-            // file still present => entry retained.
-            scanner.prune().await.unwrap();
-            assert_eq!(ledger_count(&scanner).await, 1);
-
-            // file removed => entry dropped.
-            files::delete(&file).await.unwrap();
-            scanner.prune().await.unwrap();
-            assert_eq!(ledger_count(&scanner).await, 0);
+        /// A single-entry ledger history for `file` (fixed synthetic metadata).
+        fn ledger_entry(file: &File) -> Vec<StableFile> {
+            vec![StableFile {
+                file: file.clone(),
+                size: 4,
+                digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                mtime: DateTime::from_timestamp(0, 0).unwrap(),
+                mtime_aliases: vec![],
+                first_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
+                last_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
+                deployment_id: "d".to_string(),
+                upload_rule_id: DEFAULT_COLL_ID.to_string(),
+            }]
         }
 
+        /// Seed `n` ledger histories keyed to never-created `gone{i}.mcap`
+        /// paths inside `dir` (absent from every glob result).
+        fn seed_stale(state: &mut CollectionState, dir: &Dir, n: usize) -> Vec<File> {
+            let mut files = Vec::with_capacity(n);
+            for i in 0..n {
+                let file = dir.file(&format!("gone{i}.mcap"));
+                state.ledger.insert(file.clone(), ledger_entry(&file));
+                files.push(file);
+            }
+            files
+        }
+
+        /// A CollectionState for `DEFAULT_COLL_ID` globbing `dir` with a
+        /// threshold-opening ledger: one entry for the (real) `live` file plus
+        /// LEDGER_PRUNE_THRESHOLD stale entries. Returns the stale keys too.
+        fn padded_state(dir: &Dir, live: &File, window: i64) -> (CollectionState, Vec<File>) {
+            let cfg = Config {
+                deployment: deployment("d"),
+                rule: rule_in_collection("r", DEFAULT_COLL_ID, &mcap_glob(dir), window),
+            };
+            let mut state = CollectionState::new(cfg);
+            state.ledger.insert(live.clone(), ledger_entry(live));
+            let stale = seed_stale(&mut state, dir, LEDGER_PRUNE_THRESHOLD);
+            (state, stale)
+        }
+
+        // A scan tick prunes a deployed collection's over-threshold ledger via
+        // its discovery pass: glob-absent entries drop, the globbed file's
+        // entry survives.
         #[tokio::test]
-        async fn prune_persists_snapshot() {
-            let fxtr = persisted_coll(0).await;
-            let file = write(&fxtr.dir, "a.mcap", b"aaaa").await;
-            scan_once(&fxtr.scanner).await;
-            tick(&fxtr.scanner, &fxtr.clock, 1).await;
+        async fn scan_prunes_ledger_via_discovery() {
+            let clock = Clock::new(1000);
+            let mut single = SingleThreadScanner::new(ScannerArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                snapshot_file: None,
+            })
+            .unwrap();
 
-            files::delete(&file).await.unwrap();
-            fxtr.scanner.prune().await.unwrap();
+            let dir = dirs::temp("testing").unwrap();
+            let live = write(&dir, "live.mcap", b"aaaa").await;
+            let (state, stale) = padded_state(&dir, &live, 0);
+            single.scanners.insert(
+                DEFAULT_COLL_ID.to_string(),
+                CollectionScanner::from_state(state),
+            );
+            single.deployed.insert(DEFAULT_COLL_ID.to_string());
 
-            let snapshot = read_snapshot(&fxtr.state_path).await;
+            single.scan().await.unwrap();
+
+            let ledger = &single.scanners.get(DEFAULT_COLL_ID).unwrap().state().ledger;
+            assert_eq!(ledger.len(), 1);
+            assert!(ledger.contains_key(&live));
+            assert!(!ledger.contains_key(&stale[0]));
+        }
+
+        // The prune result rides the scan pass's existing persist: after one
+        // tick the on-disk snapshot no longer holds the stale keys (there is
+        // no dedicated prune-persist path anymore).
+        #[tokio::test]
+        async fn scan_prune_is_persisted() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let live = write(&dir, "live.mcap", b"aaaa").await;
+            let (coll_state, stale) = padded_state(&dir, &live, 0);
+            let padded = ScannerSnapshot {
+                collections: HashMap::from([(DEFAULT_COLL_ID.to_string(), coll_state)]),
+                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+            };
+            let mut snapshot_file = state_file(&state_path).await;
+            snapshot_file.patch(padded).await.unwrap();
+
+            let clock = Clock::new(1000);
+            let (scanner, _h) = Scanner::spawn(
+                64,
+                ScannerArgs {
+                    now_fn: Arc::new(clock.now_fn()),
+                    broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                    snapshot_file: Some(snapshot_file),
+                },
+            )
+            .unwrap();
+            scan_once(&scanner).await;
+
+            let snapshot = read_snapshot(&state_path).await;
             let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
-            assert!(state.ledger.is_empty());
+            assert_eq!(state.ledger.len(), 1);
+            assert!(state.ledger.contains_key(&live));
+            assert!(!state.ledger.contains_key(&stale[0]));
+        }
+
+        // An undeployed collection is never glob-pruned: scan() runs discovery
+        // (and thus the prune) only for deployed collections. This asymmetry
+        // is deliberate — an undeployed collection just drains its candidates
+        // and is then removed wholesale, a stronger prune than the glob-set one.
+        #[tokio::test]
+        async fn undeployed_collection_is_not_pruned() {
+            let clock = Clock::new(1000);
+            let mut single = SingleThreadScanner::new(ScannerArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                snapshot_file: None,
+            })
+            .unwrap();
+
+            let dir = dirs::temp("testing").unwrap();
+            let live = write(&dir, "live.mcap", b"aaaa").await;
+            // a large stability window keeps the candidate (and therefore the
+            // undeployed collection) alive across the tick.
+            let (mut state, stale) = padded_state(&dir, &live, 10_000);
+            let waiting = dir.file("waiting.mcap");
+            state.candidates.insert(
+                waiting.clone(),
+                Candidate {
+                    file: waiting.clone(),
+                    first_obs: Observation {
+                        file: waiting,
+                        timestamp: DateTime::from_timestamp(1000, 0).unwrap(),
+                        size: 4,
+                        mtime: SystemTime::UNIX_EPOCH,
+                        deployment_id: "d".to_string(),
+                        upload_rule_id: DEFAULT_COLL_ID.to_string(),
+                    },
+                },
+            );
+            single.scanners.insert(
+                DEFAULT_COLL_ID.to_string(),
+                CollectionScanner::from_state(state),
+            );
+            // deliberately NOT inserted into `deployed`.
+
+            single.scan().await.unwrap();
+
+            let ledger = &single.scanners.get(DEFAULT_COLL_ID).unwrap().state().ledger;
+            assert_eq!(ledger.len(), LEDGER_PRUNE_THRESHOLD + 1);
+            assert!(ledger.contains_key(&stale[0]));
         }
     }
 

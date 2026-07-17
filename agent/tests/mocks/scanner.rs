@@ -155,8 +155,4 @@ impl ScannerExt for MockScanner {
     async fn shutdown(&self) -> Result<(), ScanErr> {
         Ok(())
     }
-
-    async fn prune(&self) -> Result<(), ScanErr> {
-        Ok(())
-    }
 }

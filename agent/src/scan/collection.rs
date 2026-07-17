@@ -23,7 +23,8 @@ pub(crate) struct CollectionScanner {
 impl CollectionScanner {
     pub(crate) async fn new(config: Config, now: DateTime<Utc>) -> Result<Self, ScanErr> {
         let mut state = CollectionState::new(config);
-        state.preexisting = discover_preexisting(&state, now).await?;
+        let globbed = files::glob(&state.cfg.rule.source.glob)?;
+        state.preexisting = discover_preexisting(&state, &globbed, now).await;
         Ok(Self::from_state(state))
     }
 
@@ -55,15 +56,17 @@ impl CollectionScanner {
     ) -> Result<(), ScanErr> {
         self.state.set_config(config)?;
 
-        // rediscover preexisting files
-        let preexisting = discover_preexisting(&self.state, now).await?;
-        self.state.preexisting = preexisting;
+        // rediscover preexisting files (no prune here: pruning runs only in the
+        // periodic discovery pass)
+        let globbed = files::glob(&self.state.cfg.rule.source.glob)?;
+        self.state.preexisting = discover_preexisting(&self.state, &globbed, now).await;
 
         Ok(())
     }
 
     pub(crate) async fn discover_candidates(&mut self, now: DateTime<Utc>) -> Result<(), ScanErr> {
-        let candidates = discover_candidates(&self.state, now).await?;
+        let globbed = files::glob(&self.state.cfg.rule.source.glob)?;
+        let candidates = discover_candidates(&self.state, &globbed, now).await;
         if !candidates.is_empty() {
             let count = candidates.len();
             info!("scan: discovered {count} new candidate file(s)");
@@ -71,6 +74,7 @@ impl CollectionScanner {
         self.state
             .candidates
             .extend(candidates.into_iter().map(|c| (c.file.clone(), c)));
+        self.state.prune_ledger(&globbed);
         Ok(())
     }
 
@@ -124,23 +128,19 @@ impl CollectionScanner {
         }
         Ok(stable_files)
     }
-
-    pub(crate) fn prune_ledger(&mut self) -> Result<(), ScanErr> {
-        self.state.prune_ledger()
-    }
 }
 
-/// Glob the rule's source, skip already-tracked candidates, observe each
-/// remaining file, and return the `(file, observation)` pairs. A file that
-/// cannot be observed is warned about and skipped (skip-and-continue); a glob
-/// pattern error propagates.
+/// Skip already-tracked candidates among the pass's globbed files, observe
+/// each remaining file, and return the `(file, observation)` pairs. A file
+/// that cannot be observed is warned about and skipped (skip-and-continue).
 async fn observe_untracked(
     state: &CollectionState,
+    globbed: &[File],
     now: DateTime<Utc>,
-) -> Result<Vec<(File, Observation)>, ScanErr> {
+) -> Vec<(File, Observation)> {
     let mut observed = Vec::new();
-    for file in files::glob(&state.cfg.rule.source.glob)? {
-        if state.is_candidate(&file) {
+    for file in globbed {
+        if state.is_candidate(file) {
             continue;
         }
         let observation = match observe_file(state, file.clone(), now).await {
@@ -150,29 +150,33 @@ async fn observe_untracked(
                 continue;
             }
         };
-        observed.push((file, observation));
+        observed.push((file.clone(), observation));
     }
-    Ok(observed)
+    observed
 }
 
 async fn discover_preexisting(
     state: &CollectionState,
+    globbed: &[File],
     now: DateTime<Utc>,
-) -> Result<HashMap<File, Observation>, ScanErr> {
-    Ok(observe_untracked(state, now).await?.into_iter().collect())
+) -> HashMap<File, Observation> {
+    observe_untracked(state, globbed, now)
+        .await
+        .into_iter()
+        .collect()
 }
 
 async fn discover_candidates(
     state: &CollectionState,
+    globbed: &[File],
     now: DateTime<Utc>,
-) -> Result<Vec<Candidate>, ScanErr> {
-    let candidates = observe_untracked(state, now)
-        .await?
+) -> Vec<Candidate> {
+    observe_untracked(state, globbed, now)
+        .await
         .into_iter()
         .filter(|(_, obs)| !state.is_preexisting(obs) && !state.is_latest_ledger_entry(obs))
         .map(|(file, first_obs)| Candidate { file, first_obs })
-        .collect();
-    Ok(candidates)
+        .collect()
 }
 
 async fn observe_file(
@@ -1411,45 +1415,109 @@ mod tests {
         }
     }
 
-    // CollectionScanner::prune_ledger is a pass-through to CollectionState::prune_ledger
-    // (behavior covered in state tests). These only assert the hook is wired.
+    // Ledger pruning runs inside the periodic discovery pass, keyed off the
+    // pass's glob set and gated by LEDGER_PRUNE_THRESHOLD (threshold mechanics
+    // are pinned in the state tests; these pin the discovery seam).
     mod prune_ledger {
         use super::*;
 
-        // Pass-through to CollectionState::prune_ledger: an entry whose file
-        // still exists is retained; one whose file is gone is dropped.
-        #[tokio::test]
-        async fn retains_existing_drops_missing() {
-            let dir = dirs::temp("testing").unwrap();
-            let present = write(&dir, "present.mcap", b"aaaa").await;
-            let missing = dir.file("missing.mcap");
-            let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
-            seed_ledger(&mut state, &present, stable_file(present.clone(), ts(1000)));
-            seed_ledger(&mut state, &missing, stable_file(missing.clone(), ts(1000)));
-            let mut scanner = CollectionScanner::from_state(state);
-            assert_eq!(scanner.ledger_count(), 2);
+        // internal crates
+        use crate::scan::state::LEDGER_PRUNE_THRESHOLD;
 
-            scanner.prune_ledger().unwrap();
-            assert_eq!(scanner.ledger_count(), 1);
-            assert!(scanner.state.ledger.contains_key(&present));
-            assert!(!scanner.state.ledger.contains_key(&missing));
+        /// Seed `n` single-entry ledger histories keyed to never-created
+        /// `gone{i}.mcap` paths inside `dir` (stale: inside the glob's
+        /// directory, but absent from every glob result).
+        fn seed_stale(state: &mut CollectionState, dir: &Dir, n: usize) -> Vec<File> {
+            let mut files = Vec::with_capacity(n);
+            for i in 0..n {
+                let file = dir.file(&format!("gone{i}.mcap"));
+                seed_ledger(state, &file, stable_file(file.clone(), ts(1000)));
+                files.push(file);
+            }
+            files
         }
 
-        // Deleting a previously-present file drops its entry on the next prune.
+        // At/above the threshold, a discovery pass drops entries absent from
+        // the glob set, keeps entries for still-globbed files, and does not
+        // re-promote the (already reported, unchanged) live files.
         #[tokio::test]
-        async fn drops_after_file_deleted() {
+        async fn discovery_prunes_stale_entries_at_threshold() {
             let dir = dirs::temp("testing").unwrap();
-            let file = write(&dir, "gone.mcap", b"aaaa").await;
+            let live_a = write(&dir, "a.mcap", b"aaaa").await;
+            let live_b = write(&dir, "b.mcap", b"aaaa").await;
             let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
-            seed_ledger(&mut state, &file, stable_file(file.clone(), ts(1000)));
+            let obs_a = observation(&state, live_a.clone(), ts(1000)).await;
+            let obs_b = observation(&state, live_b.clone(), ts(1000)).await;
+            seed_ledger(&mut state, &live_a, ledger_entry_matching(&obs_a, ts(900)));
+            seed_ledger(&mut state, &live_b, ledger_entry_matching(&obs_b, ts(900)));
+            let stale = seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
             let mut scanner = CollectionScanner::from_state(state);
 
-            scanner.prune_ledger().unwrap();
-            assert_eq!(scanner.ledger_count(), 1);
+            scanner.discover_candidates(ts(1001)).await.unwrap();
 
-            files::delete(&file).await.unwrap();
-            scanner.prune_ledger().unwrap();
+            assert_eq!(scanner.ledger_count(), 2);
+            assert!(scanner.state.ledger.contains_key(&live_a));
+            assert!(scanner.state.ledger.contains_key(&live_b));
+            assert!(!scanner.state.ledger.contains_key(&stale[0]));
+            assert!(scanner.state.candidates.is_empty());
+        }
+
+        // Below the threshold a discovery pass prunes nothing: stale entries
+        // stay as reviewable audit history.
+        #[tokio::test]
+        async fn discovery_below_threshold_keeps_stale_entries() {
+            let dir = dirs::temp("testing").unwrap();
+            let live = write(&dir, "a.mcap", b"aaaa").await;
+            let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
+            let obs = observation(&state, live.clone(), ts(1000)).await;
+            seed_ledger(&mut state, &live, ledger_entry_matching(&obs, ts(900)));
+            seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD - 2);
+            let mut scanner = CollectionScanner::from_state(state);
+
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+
+            assert_eq!(scanner.ledger_count(), LEDGER_PRUNE_THRESHOLD - 1);
+        }
+
+        // The behavioral delta vs. existence-based pruning: a file that still
+        // EXISTS but no longer matches the glob is pruned — while outside the
+        // glob it can never be re-discovered, so its entry serves no dedup
+        // purpose.
+        #[tokio::test]
+        async fn discovery_prunes_existing_but_unmatched_file() {
+            let dir = dirs::temp("testing").unwrap();
+            let unmatched = write(&dir, "keep.txt", b"aaaa").await;
+            let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
+            seed_ledger(
+                &mut state,
+                &unmatched,
+                stable_file(unmatched.clone(), ts(1000)),
+            );
+            seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
+            let mut scanner = CollectionScanner::from_state(state);
+
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+
+            assert!(unmatched.exists());
+            assert!(!scanner.state.ledger.contains_key(&unmatched));
             assert_eq!(scanner.ledger_count(), 0);
+        }
+
+        // update_config globs (to re-snapshot preexisting) but must NOT prune:
+        // pruning runs only in the periodic discovery pass.
+        #[tokio::test]
+        async fn update_config_does_not_prune() {
+            let dir = dirs::temp("testing").unwrap();
+            let mut state = CollectionState::new(config("d", "coll", &glob_for(&dir), 0));
+            seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
+            let mut scanner = CollectionScanner::from_state(state);
+
+            scanner
+                .update_config(config_v2(&glob_for(&dir)), ts(1001))
+                .await
+                .unwrap();
+
+            assert_eq!(scanner.ledger_count(), LEDGER_PRUNE_THRESHOLD);
         }
     }
 }
