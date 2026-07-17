@@ -184,7 +184,7 @@ async fn observe_file(
         size: meta.len(),
         mtime,
         deployment_id: state.cfg.deployment.id.clone(),
-        upload_rule_id: state.cfg.rule.upload_collection_id.clone(),
+        upload_rule_id: state.cfg.rule.id.clone(),
     })
 }
 
@@ -1317,11 +1317,15 @@ mod tests {
             let file = write(&dir, "id.mcap", b"aaaa").await;
 
             // first observation
-            let s1 = CollectionState::new(config("d1", "coll1", &glob_for(&dir), 0));
+            let mut cfg1 = config("d1", "coll1", &glob_for(&dir), 0);
+            cfg1.rule.id = "rule1".to_string();
+            let s1 = CollectionState::new(cfg1);
             let first_obs = observation(&s1, file.clone(), ts(1000)).await;
 
             // swap config to deployment d2, collection coll2.
-            let mut s2 = CollectionState::new(config("d2", "coll2", &glob_for(&dir), 0));
+            let mut cfg2 = config("d2", "coll2", &glob_for(&dir), 0);
+            cfg2.rule.id = "rule2".to_string();
+            let mut s2 = CollectionState::new(cfg2);
             track(&mut s2, &file, first_obs);
             let mut scanner = CollectionScanner::from_state(s2);
 
@@ -1329,9 +1333,9 @@ mod tests {
             assert_eq!(emitted.len(), 1);
             let sf = &emitted[0];
 
-            // identity from the FIRST observation, not d2, coll2.
+            // identity from the FIRST observation, not d2, rule2.
             assert_eq!(sf.deployment_id, "d1");
-            assert_eq!(sf.upload_rule_id, "coll1");
+            assert_eq!(sf.upload_rule_id, "rule1");
             // first_observed_at is the discovery ts; last_observed_at is the eval ts
             assert_eq!(sf.first_observed_at, ts(1000));
             assert_eq!(sf.last_observed_at, ts(1010));
