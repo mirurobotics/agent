@@ -50,6 +50,13 @@ pub mod storage_layout {
     }
 
     #[test]
+    fn scanner_snapshot() {
+        let layout = Layout::default();
+        let file = layout.scanner_snapshot();
+        assert_eq!(file.to_string(), "/var/lib/miru/scanner.json");
+    }
+
+    #[test]
     fn resources() {
         let layout = Layout::default();
         let dir = layout.resources();

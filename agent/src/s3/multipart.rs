@@ -28,8 +28,13 @@ impl Store {
     /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
     /// parts, then the error propagates.
-    pub async fn put_multipart(&self, src: &Source, dst: &Object) -> Result<(), S3Err> {
-        let upload_id = self.create_multipart_upload(dst).await?;
+    pub async fn put_multipart(
+        &self,
+        src: &Source,
+        dst: &Object,
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> Result<(), S3Err> {
+        let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
         match self.exec_multipart_upload(src, dst, &upload_id).await {
             Ok(()) => Ok(()),
@@ -100,7 +105,7 @@ impl Store {
                 .await?
             else {
                 return Err(S3Err::NoSuchUploadErr(NoSuchUploadErr {
-                    key: obj.key.to_string(),
+                    object: obj.clone(),
                     upload_id: upload_id.to_string(),
                     trace: crate::trace!(),
                 }));
@@ -148,11 +153,7 @@ impl Store {
         match req.send().await {
             Ok(page) => Ok(Some(page)),
             Err(err) if errors::is_not_found(&err) => Ok(None),
-            Err(err) => Err(errors::map_sdk_err(
-                "list_parts",
-                Some(obj.key.to_string()),
-                err,
-            )),
+            Err(err) => Err(errors::map_sdk_err("list_parts", obj, err)),
         }
     }
 
@@ -189,21 +190,24 @@ impl Store {
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
-    async fn create_multipart_upload(&self, dst: &Object) -> Result<UploadID, S3Err> {
+    async fn create_multipart_upload(
+        &self,
+        dst: &Object,
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> Result<UploadID, S3Err> {
         let created = self
             .client
             .create_multipart_upload()
             .bucket(&dst.bucket)
             .key(&dst.key)
+            .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .send()
             .await
-            .map_err(|e| {
-                errors::map_sdk_err("create_multipart_upload", Some(dst.key.to_string()), e)
-            })?;
+            .map_err(|e| errors::map_sdk_err("create_multipart_upload", dst, e))?;
         let upload_id = created
             .upload_id()
             .ok_or_else(|| {
-                errors::missing_response_field("create_multipart_upload", "an upload id")
+                errors::missing_response_field("create_multipart_upload", dst, "an upload id")
             })?
             .to_string();
         Ok(upload_id)
@@ -275,11 +279,11 @@ impl Store {
             .body(body)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("upload_part", Some(dst.key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err("upload_part", dst, e))?;
 
         let etag = output
             .e_tag()
-            .ok_or_else(|| errors::missing_response_field("upload_part", "an etag"))?;
+            .ok_or_else(|| errors::missing_response_field("upload_part", dst, "an etag"))?;
         Ok(CompletedPart::builder()
             .part_number(part_number)
             .e_tag(etag)
@@ -305,9 +309,7 @@ impl Store {
             .multipart_upload(completed)
             .send()
             .await
-            .map_err(|e| {
-                errors::map_sdk_err("complete_multipart_upload", Some(obj.key.to_string()), e)
-            })?;
+            .map_err(|e| errors::map_sdk_err("complete_multipart_upload", obj, e))?;
         Ok(())
     }
 
@@ -321,9 +323,7 @@ impl Store {
             .upload_id(upload_id)
             .send()
             .await
-            .map_err(|e| {
-                errors::map_sdk_err("abort_multipart_upload", Some(obj.key.to_string()), e)
-            })?;
+            .map_err(|e| errors::map_sdk_err("abort_multipart_upload", obj, e))?;
         Ok(())
     }
 }

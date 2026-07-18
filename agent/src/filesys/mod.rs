@@ -1,10 +1,10 @@
-pub mod cached_file;
 pub mod dir;
 pub mod dirs;
 pub mod errors;
 pub mod file;
 pub mod files;
 pub mod path;
+pub mod state_file;
 
 // internal crates
 pub use self::dir::Dir;

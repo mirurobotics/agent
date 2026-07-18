@@ -7,8 +7,10 @@ use crate::errors::Trace;
 use crate::events;
 use crate::filesys;
 use crate::http;
+use crate::scan;
 use crate::services;
 use crate::sync;
+use crate::upload;
 
 #[derive(Debug, thiserror::Error)]
 pub struct MissingDeviceIDErr {
@@ -109,7 +111,11 @@ pub enum ServerErr {
     #[error(transparent)]
     DiskErr(DiskErr),
     #[error(transparent)]
+    ScanErr(Box<scan::ScanErr>),
+    #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
+    #[error(transparent)]
+    UploadErr(Box<upload::UploadErr>),
 
     // external crate errors
     #[error(transparent)]
@@ -170,9 +176,21 @@ impl From<DiskErr> for ServerErr {
     }
 }
 
+impl From<scan::ScanErr> for ServerErr {
+    fn from(e: scan::ScanErr) -> Self {
+        Self::ScanErr(Box::new(e))
+    }
+}
+
 impl From<sync::SyncErr> for ServerErr {
     fn from(e: sync::SyncErr) -> Self {
         Self::SyncErr(Box::new(e))
+    }
+}
+
+impl From<upload::UploadErr> for ServerErr {
+    fn from(e: upload::UploadErr) -> Self {
+        Self::UploadErr(Box::new(e))
     }
 }
 
@@ -188,7 +206,9 @@ crate::impl_error!(ServerErr {
     HTTPErr,
     ServiceErr,
     DiskErr,
+    ScanErr,
     SyncErr,
+    UploadErr,
     BindUnixSocketErr,
     RunAxumServerErr,
     SendShutdownSignalErr,

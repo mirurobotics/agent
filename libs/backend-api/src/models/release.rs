@@ -32,7 +32,7 @@ pub struct Release {
     /// The git commit associated with this release.
     #[serde(rename = "git_commit", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub git_commit: Option<Option<Box<models::GitCommit>>>,
-    /// The upload rules included in this release. Expand using 'expand=release.upload_rules' in the query string.
+    /// The upload rules included in this release. Expand using 'expand=upload_rules' in the query string.
     #[serde(rename = "upload_rules", skip_serializing_if = "Option::is_none")]
     pub upload_rules: Option<Vec<models::BaseUploadRule>>,
 }

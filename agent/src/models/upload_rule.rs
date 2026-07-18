@@ -39,7 +39,7 @@ impl_status_enum!(
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UploadRuleSource {
     pub glob: String,
-    pub stability_window_secs: i32,
+    pub stability_window_secs: i64,
 }
 
 impl From<backend_client::UploadRuleSource> for UploadRuleSource {

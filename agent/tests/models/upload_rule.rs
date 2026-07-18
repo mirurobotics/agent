@@ -110,7 +110,6 @@ fn backend_rule(created_at: &str, updated_at: &str) -> backend_client::BaseUploa
         }),
         created_at: created_at.to_string(),
         updated_at: updated_at.to_string(),
-        content: None,
     }
 }
 

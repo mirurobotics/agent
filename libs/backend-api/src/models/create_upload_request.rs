@@ -26,23 +26,19 @@ pub struct CreateUploadRequest {
     /// Whether the file was incomplete when collected (e.g. it was never closed cleanly / has no finalization marker). Sets the upload's `incomplete` flag. Defaults to false.
     #[serde(rename = "incomplete", skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
-    /// ID of the release the device is currently on.
-    #[serde(rename = "release_id")]
-    pub release_id: String,
     /// ID of the deployment the device is currently on.
     #[serde(rename = "deployment_id")]
     pub deployment_id: String,
 }
 
 impl CreateUploadRequest {
-    pub fn new(upload_rule_id: String, source: models::UploadSource, digest: String, size: i64, release_id: String, deployment_id: String) -> CreateUploadRequest {
+    pub fn new(upload_rule_id: String, source: models::UploadSource, digest: String, size: i64, deployment_id: String) -> CreateUploadRequest {
         CreateUploadRequest {
             upload_rule_id,
             source: Box::new(source),
             digest,
             size,
             incomplete: None,
-            release_id,
             deployment_id,
         }
     }

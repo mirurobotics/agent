@@ -12,6 +12,7 @@ use crate::trace;
 // external crates
 use chrono::{DateTime, Utc};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, TlsConfiguration, Transport};
+use secrecy::ExposeSecret;
 
 pub struct Publish<'a> {
     pub topic: &'a str,
@@ -49,7 +50,10 @@ impl Client {
         );
 
         mqtt_options.set_keep_alive(options.keep_alive);
-        mqtt_options.set_credentials(&options.credentials.username, &options.credentials.password);
+        mqtt_options.set_credentials(
+            &options.credentials.username,
+            options.credentials.password.expose_secret(),
+        );
 
         match options.connect_address.protocol() {
             Protocol::TCP => {

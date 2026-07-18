@@ -201,6 +201,7 @@ async fn shutdown_signal_received() {
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
         },
+        enable_scanner: true,
         ..Default::default()
     };
 

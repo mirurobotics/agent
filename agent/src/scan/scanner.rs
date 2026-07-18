@@ -5,7 +5,11 @@ use std::sync::Arc;
 // internal crates
 use crate::models::{Deployment, UploadCollectionID, UploadRule};
 pub use crate::scan::state::{Config, StableFile};
-use crate::scan::{collection::CollectionScanner, errors::*};
+use crate::scan::{
+    collection::CollectionScanner,
+    errors::*,
+    state::{CollectionState, ScanSnapshotFile, ScannerSnapshot},
+};
 use crate::trace;
 
 // external crates
@@ -35,6 +39,7 @@ macro_rules! dispatch {
 pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub broadcast_capacity: usize,
+    pub(crate) snapshot_file: Option<ScanSnapshotFile>,
 }
 
 impl Default for ScannerArgs {
@@ -42,6 +47,7 @@ impl Default for ScannerArgs {
         Self {
             now_fn: Arc::new(Utc::now),
             broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+            snapshot_file: None,
         }
     }
 }
@@ -51,16 +57,52 @@ pub struct SingleThreadScanner {
     deployed: HashSet<UploadCollectionID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     subscriber_tx: broadcast::Sender<ScanEvent>,
+    snapshot_file: Option<ScanSnapshotFile>,
 }
 
 impl SingleThreadScanner {
-    pub fn new(args: ScannerArgs) -> Self {
+    pub fn new(args: ScannerArgs) -> Result<Self, ScanErr> {
         let (subscriber_tx, _) = broadcast::channel(args.broadcast_capacity);
-        Self {
-            scanners: HashMap::new(),
-            deployed: HashSet::new(),
+        let persisted = Self::load_snapshot(&args.snapshot_file);
+        let scanners = persisted
+            .collections
+            .iter()
+            .map(|(cid, state)| (cid.clone(), CollectionScanner::from_state(state.clone())))
+            .collect();
+        Ok(Self {
+            scanners,
+            deployed: persisted.deployed,
             now_fn: args.now_fn,
             subscriber_tx,
+            snapshot_file: args.snapshot_file,
+        })
+    }
+
+    fn load_snapshot(state_file: &Option<ScanSnapshotFile>) -> ScannerSnapshot {
+        let Some(state_file) = state_file.as_ref() else {
+            return ScannerSnapshot {
+                collections: HashMap::new(),
+                deployed: HashSet::new(),
+            };
+        };
+        state_file.read().as_ref().clone()
+    }
+
+    async fn persist_snapshot(&mut self) {
+        let Some(state_file) = self.snapshot_file.as_mut() else {
+            return;
+        };
+        let collections: HashMap<UploadCollectionID, CollectionState> = self
+            .scanners
+            .iter()
+            .map(|(cid, scanner)| (cid.clone(), scanner.state().clone()))
+            .collect();
+        let snapshot = ScannerSnapshot {
+            collections,
+            deployed: self.deployed.clone(),
+        };
+        if let Err(err) = state_file.patch(snapshot).await {
+            warn!("scan: failed to persist scanner state: {err}");
         }
     }
 
@@ -98,6 +140,8 @@ impl SingleThreadScanner {
 
     async fn clear_rules(&mut self) -> Result<(), ScanErr> {
         self.deployed.clear();
+        self.persist_snapshot().await;
+        info!("scan: cleared all deployed collection rules");
         Ok(())
     }
 
@@ -135,6 +179,11 @@ impl SingleThreadScanner {
         }
 
         self.deployed = deployed;
+        self.persist_snapshot().await;
+
+        let count = rules.len();
+        let deployment_id = &deployment.id;
+        info!("scan: applied {count} rule(s) for deployment {deployment_id}");
 
         Ok(())
     }
@@ -145,10 +194,20 @@ impl SingleThreadScanner {
 
         let now = (self.now_fn)();
 
+        let active = self.scanners.len();
+        let deployed = self.deployed.len();
+        debug!("scan: tick over {active} collection(s), {deployed} deployed");
+
         // evaludate candidates for all scanners
         for (cid, scanner) in self.scanners.iter_mut() {
             match scanner.evaluate_candidates(now).await {
-                Ok(stable) => stable_files.extend(stable),
+                Ok(stable) => {
+                    if !stable.is_empty() {
+                        let count = stable.len();
+                        debug!("scan: collection {cid} produced {count} stable file(s)");
+                    }
+                    stable_files.extend(stable);
+                }
                 Err(err) => warn!("scan: evaluate failed for collection {cid}: {err}"),
             }
 
@@ -164,19 +223,30 @@ impl SingleThreadScanner {
         }
 
         // prune inactive collection scanners
+        let pruned = inactive_colls.len();
         for cid in inactive_colls {
+            info!("scan: pruned inactive collection {cid}");
             self.scanners.remove(&cid);
         }
 
+        self.persist_snapshot().await;
+        let emitted = stable_files.len();
         self.emit_stable_files(stable_files);
+
+        debug!(
+            "scan: tick complete; {emitted} stable file(s) emitted, \
+             {pruned} inactive collection(s) pruned"
+        );
 
         Ok(())
     }
 
     async fn prune(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
+        debug!("scan: pruning ledger entries first observed before {before}");
         for scanner in self.scanners.values_mut() {
             scanner.prune_ledger(before)?;
         }
+        self.persist_snapshot().await;
         Ok(())
     }
 }
@@ -319,7 +389,7 @@ impl Scanner {
     pub fn spawn(buffer_size: usize, args: ScannerArgs) -> Result<(Self, JoinHandle<()>), ScanErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            scanner: SingleThreadScanner::new(args),
+            scanner: SingleThreadScanner::new(args)?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
@@ -410,7 +480,7 @@ impl ScannerExt for Scanner {
 #[cfg(test)]
 mod tests {
     // standard crates
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeSet, HashMap, HashSet};
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
 
@@ -418,7 +488,9 @@ mod tests {
     use super::{ScanEvent, ScannerExt, DEFAULT_BROADCAST_CAPACITY};
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-    use crate::models::{Deployment, DplActivity, UploadRule, UploadRuleSource};
+    use crate::models::{DeletePolicy, Deployment, DplActivity, UploadRule, UploadRuleSource};
+    use crate::scan::collection::CollectionScanner;
+    use crate::scan::state::{CollectionState, Config, ScanSnapshotFile, ScannerSnapshot};
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -471,7 +543,7 @@ mod tests {
         rule_id: &str,
         upload_collection_id: &str,
         glob: &str,
-        stability_window_secs: i32,
+        stability_window_secs: i64,
     ) -> UploadRule {
         UploadRule {
             id: rule_id.to_string(),
@@ -498,6 +570,7 @@ mod tests {
             ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: capacity,
+                snapshot_file: None,
             },
         )
         .unwrap();
@@ -505,10 +578,10 @@ mod tests {
     }
 
     /// temp dir + `*.mcap` glob + spawned scanner + one deployed rule whose
-    /// `upload_collection_id` is [`DEFAULT_UPLOAD_COLLECTION_ID`] (deployment "d",
+    /// `upload_collection_id` is [`DEFAULT_COLL_ID`] (deployment "d",
     /// rule "r", window `window`). Returns (dir, clock, scanner).
     /// Hold `dir` to keep the temp tree alive.
-    async fn single_coll(window: i32) -> (dirs::TempDir, Clock, Scanner) {
+    async fn single_coll(window: i64) -> (dirs::TempDir, Clock, Scanner) {
         let dir = dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
@@ -600,13 +673,63 @@ mod tests {
         );
     }
 
+    async fn state_file(file: &File) -> ScanSnapshotFile {
+        ScanSnapshotFile::new_with_default(file.clone(), ScannerSnapshot::default())
+            .await
+            .unwrap()
+    }
+
+    async fn spawn_persisted(clock: &Clock, file: &File) -> Scanner {
+        let (scanner, _h) = Scanner::spawn(
+            64,
+            ScannerArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                snapshot_file: Some(state_file(file).await),
+            },
+        )
+        .unwrap();
+        scanner
+    }
+
+    async fn read_snapshot(file: &File) -> ScannerSnapshot {
+        files::read_json(file).await.unwrap()
+    }
+
+    fn mcap_glob(dir: &Dir) -> String {
+        format!("{}/*.mcap", dir.path().display())
+    }
+
+    struct PersistedScannerFixture {
+        dir: dirs::TempDir,
+        clock: Clock,
+        scanner: Scanner,
+        state_path: File,
+    }
+
+    async fn persisted_coll(window: i64) -> PersistedScannerFixture {
+        let dir = dirs::temp("testing").unwrap();
+        let state_path = dir.file("scanner.json");
+        let clock = Clock::new(1000);
+        let scanner = spawn_persisted(&clock, &state_path).await;
+        let glob = mcap_glob(&dir);
+        let rule = rule_in_collection("r", DEFAULT_COLL_ID, &glob, window);
+        deploy(&scanner, vec![rule]).await;
+        PersistedScannerFixture {
+            dir,
+            clock,
+            scanner,
+            state_path,
+        }
+    }
+
     mod construction {
         use super::*;
 
         #[tokio::test]
         async fn worker_new_and_scanner_new_round_trip() {
             let (tx, rx) = mpsc::channel(64);
-            let single = SingleThreadScanner::new(ScannerArgs::default());
+            let single = SingleThreadScanner::new(ScannerArgs::default()).unwrap();
             let worker = Worker::new(single, rx);
             let handle = tokio::spawn(worker.run());
 
@@ -620,6 +743,164 @@ mod tests {
             handle.await.unwrap();
             let err = scanner.get_ledger_count().await.unwrap_err();
             assert!(matches!(err, crate::scan::ScanErr::SendActorMessageErr(_)));
+        }
+
+        #[tokio::test]
+        async fn missing_state_file_starts_fresh() {
+            let fxtr = persisted_coll(0).await;
+            write(&fxtr.dir, "a.mcap", b"aaaa").await;
+            scan_once(&fxtr.scanner).await;
+            tick(&fxtr.scanner, &fxtr.clock, 1).await;
+            assert_eq!(ledger_count(&fxtr.scanner).await, 1);
+
+            assert!(fxtr.state_path.exists());
+            let snapshot = read_snapshot(&fxtr.state_path).await;
+            assert!(snapshot.collections.contains_key(DEFAULT_COLL_ID));
+        }
+
+        #[tokio::test]
+        async fn corrupt_state_file_starts_fresh() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            files::seed(&state_path, "not json").await;
+
+            let clock = Clock::new(1000);
+            let scanner = spawn_persisted(&clock, &state_path).await;
+            let rule = rule_in_collection("r", DEFAULT_COLL_ID, &mcap_glob(&dir), 0);
+            deploy(&scanner, vec![rule]).await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(ledger_count(&scanner).await, 1);
+
+            let snapshot = read_snapshot(&state_path).await;
+            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            assert_eq!(state.ledger.len(), 1);
+        }
+
+        #[tokio::test]
+        async fn existing_state_file_restores_scanner() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let collection_state = CollectionState::new(Config {
+                deployment: deployment("d"),
+                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+            });
+            let expected = ScannerSnapshot {
+                collections: HashMap::from([(DEFAULT_COLL_ID.to_string(), collection_state)]),
+                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+            };
+            let mut snapshot_file = state_file(&state_path).await;
+            snapshot_file.patch(expected.clone()).await.unwrap();
+
+            let scanner = SingleThreadScanner::new(ScannerArgs {
+                snapshot_file: Some(snapshot_file),
+                ..ScannerArgs::default()
+            })
+            .unwrap();
+
+            assert_eq!(scanner.deployed, expected.deployed);
+            assert_eq!(
+                scanner.scanners.get(DEFAULT_COLL_ID).unwrap().state(),
+                expected.collections.get(DEFAULT_COLL_ID).unwrap()
+            );
+        }
+    }
+
+    mod load_snapshot {
+        use super::*;
+
+        #[tokio::test]
+        async fn loads_existing_snapshot() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let config = Config {
+                deployment: deployment("d"),
+                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+            };
+            let expected = ScannerSnapshot {
+                collections: HashMap::from([(
+                    DEFAULT_COLL_ID.to_string(),
+                    CollectionState::new(config),
+                )]),
+                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+            };
+            let mut snapshot_file = state_file(&state_path).await;
+            snapshot_file.patch(expected.clone()).await.unwrap();
+
+            let loaded = SingleThreadScanner::load_snapshot(&Some(snapshot_file));
+
+            assert_eq!(loaded, expected);
+        }
+    }
+
+    mod persist_snapshot {
+        use super::*;
+
+        #[tokio::test]
+        async fn writes_current_snapshot() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let clock = Clock::new(1000);
+            let config = Config {
+                deployment: deployment("d"),
+                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+            };
+            let collection_state = CollectionState::new(config);
+            let expected = ScannerSnapshot {
+                collections: HashMap::from([(
+                    DEFAULT_COLL_ID.to_string(),
+                    collection_state.clone(),
+                )]),
+                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+            };
+            let mut scanner = SingleThreadScanner::new(ScannerArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                snapshot_file: Some(state_file(&state_path).await),
+            })
+            .unwrap();
+            scanner.scanners.insert(
+                DEFAULT_COLL_ID.to_string(),
+                CollectionScanner::from_state(collection_state),
+            );
+            scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
+
+            scanner.persist_snapshot().await;
+
+            assert_eq!(read_snapshot(&state_path).await, expected);
+        }
+
+        #[tokio::test]
+        async fn write_failure_is_swallowed() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let collection_state = CollectionState::new(Config {
+                deployment: deployment("d"),
+                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+            });
+            let mut scanner = SingleThreadScanner::new(ScannerArgs {
+                snapshot_file: Some(state_file(&state_path).await),
+                ..ScannerArgs::default()
+            })
+            .unwrap();
+            scanner.scanners.insert(
+                DEFAULT_COLL_ID.to_string(),
+                CollectionScanner::from_state(collection_state),
+            );
+            scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
+
+            files::delete(&state_path).await.unwrap();
+            dirs::create(&Dir::new(state_path.path().clone()))
+                .await
+                .unwrap();
+
+            scanner.persist_snapshot().await;
+
+            let cached = scanner.snapshot_file.as_ref().unwrap().read();
+            assert_eq!(cached.as_ref(), &ScannerSnapshot::default());
+            assert!(scanner.scanners.contains_key(DEFAULT_COLL_ID));
+            assert!(scanner.deployed.contains(DEFAULT_COLL_ID));
         }
     }
 
@@ -653,7 +934,8 @@ mod tests {
                 first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
                 last_observed_at: DateTime::from_timestamp(1001, 0).unwrap(),
                 deployment_id: "dpl-1".to_string(),
-                upload_rule_id: DEFAULT_COLL_ID.to_string(),
+                upload_rule_id: "rule-1".to_string(),
+                delete_policy: DeletePolicy::Never,
             };
 
             let mut rx = subscribe(&scanner).await;
@@ -687,6 +969,19 @@ mod tests {
             scanner.clear_rules().await.unwrap();
             scan_once(&scanner).await;
             assert_eq!(ledger_count(&scanner).await, 0);
+        }
+
+        #[tokio::test]
+        async fn clear_rules_persists_snapshot() {
+            let fxtr = persisted_coll(0).await;
+            let before = read_snapshot(&fxtr.state_path).await;
+            assert!(before.deployed.contains(DEFAULT_COLL_ID));
+
+            fxtr.scanner.clear_rules().await.unwrap();
+
+            let after = read_snapshot(&fxtr.state_path).await;
+            assert!(after.deployed.is_empty());
+            assert!(after.collections.contains_key(DEFAULT_COLL_ID));
         }
 
         // clear_rules empties `deployed` but leaves scanners in place; a subsequent
@@ -785,6 +1080,22 @@ mod tests {
             );
         }
 
+        #[tokio::test]
+        async fn update_rules_persists_snapshot() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let clock = Clock::new(1000);
+            let scanner = spawn_persisted(&clock, &state_path).await;
+            assert_eq!(read_snapshot(&state_path).await, ScannerSnapshot::default());
+
+            let rule = rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0);
+            deploy(&scanner, vec![rule]).await;
+
+            let snapshot = read_snapshot(&state_path).await;
+            assert!(snapshot.deployed.contains(DEFAULT_COLL_ID));
+            assert!(snapshot.collections.contains_key(DEFAULT_COLL_ID));
+        }
+
         // Pushing the SAME upload_collection_id with a new rule updates config in place
         // and carries over ledger state, so an already-reported file is not
         // re-reported.
@@ -880,8 +1191,8 @@ mod tests {
             while let Ok(ScanEvent::StableFile(stable)) = rx.try_recv() {
                 emitted.insert((stable.upload_rule_id.clone(), stable_name(&stable)));
             }
-            let event1 = ("current".to_string(), "current.mcap".to_string());
-            let event2 = ("legacy".to_string(), "legacy.mcap".to_string());
+            let event1 = ("current-rule".to_string(), "current.mcap".to_string());
+            let event2 = ("legacy-rule".to_string(), "legacy.mcap".to_string());
             assert_eq!(emitted, BTreeSet::from([event1, event2]));
             // The legacy collection is no longer active once its candidate pool drains.
             assert_eq!(
@@ -925,6 +1236,18 @@ mod tests {
                 scan_once(&scanner).await;
             }
             assert_eq!(ledger_count(&scanner).await, 0);
+        }
+
+        #[tokio::test]
+        async fn scan_persists_snapshot() {
+            let fxtr = persisted_coll(10).await;
+            let file = write(&fxtr.dir, "candidate.mcap", b"aaaa").await;
+
+            scan_once(&fxtr.scanner).await;
+
+            let snapshot = read_snapshot(&fxtr.state_path).await;
+            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            assert!(state.candidates.contains_key(&file));
         }
 
         #[tokio::test]
@@ -995,8 +1318,7 @@ mod tests {
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 2);
 
-            // exactly two StableFiles, one per distinct collection (upload_rule_id is
-            // stamped from the collection id in observe_file).
+            // exactly two StableFiles, one per distinct rule.
             let mut emitted = Vec::new();
             while let Ok(ScanEvent::StableFile(sf)) = rx.try_recv() {
                 emitted.push(sf);
@@ -1004,24 +1326,20 @@ mod tests {
             assert_eq!(emitted.len(), 2, "expected exactly two StableFiles");
             let colls: BTreeSet<String> =
                 emitted.iter().map(|sf| sf.upload_rule_id.clone()).collect();
-            assert_eq!(
-                colls,
-                BTreeSet::from(["coll-1".to_string(), "coll-2".to_string()])
-            );
+            assert_eq!(colls, BTreeSet::from(["c1".to_string(), "c2".to_string()]));
         }
 
         // A discovery error in one collection does not prevent a sibling collection
         // from emitting its stable file.
         #[tokio::test]
         async fn scan_isolates_bad_glob_collection_from_emitting_sibling() {
-            use crate::scan::collection::CollectionScanner;
-            use crate::scan::state::{Config, State};
-
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
-            });
+                snapshot_file: None,
+            })
+            .unwrap();
 
             // --- good collection: a real file, discovered as a candidate at t=1000. ---
             let good_dir = dirs::temp("testing").unwrap();
@@ -1032,7 +1350,7 @@ mod tests {
             };
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
-            let mut good = CollectionScanner::from_state(State::new(good_cfg));
+            let mut good = CollectionScanner::from_state(CollectionState::new(good_cfg));
             write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
@@ -1043,7 +1361,7 @@ mod tests {
             };
             // from_state skips the constructor glob, so the bad pattern only bites at
             // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
-            let bad = CollectionScanner::from_state(State::new(bad_cfg));
+            let bad = CollectionScanner::from_state(CollectionState::new(bad_cfg));
 
             single.scanners.insert("good".to_string(), good);
             single.scanners.insert("bad".to_string(), bad);
@@ -1060,7 +1378,7 @@ mod tests {
             // the good collection's StableFile was emitted despite the sibling error.
             let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
             assert_eq!(stable_name(&sf), "good.mcap".to_string());
-            assert_eq!(sf.upload_rule_id, "good".to_string());
+            assert_eq!(sf.upload_rule_id, "r-good".to_string());
             assert!(
                 rx.try_recv().is_err(),
                 "only the good collection should emit"
@@ -1096,6 +1414,23 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(ledger_count(&scanner).await, 0);
+        }
+
+        #[tokio::test]
+        async fn prune_persists_snapshot() {
+            let fxtr = persisted_coll(0).await;
+            write(&fxtr.dir, "a.mcap", b"aaaa").await;
+            scan_once(&fxtr.scanner).await;
+            tick(&fxtr.scanner, &fxtr.clock, 1).await;
+
+            fxtr.scanner
+                .prune(DateTime::from_timestamp(2000, 0).unwrap())
+                .await
+                .unwrap();
+
+            let snapshot = read_snapshot(&fxtr.state_path).await;
+            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            assert!(state.ledger.is_empty());
         }
     }
 

@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashMap;
+
 // internal crates
 use crate::filesys::{file::File, files, path::PathExt};
 use crate::trace;
@@ -109,18 +112,28 @@ impl Store {
     /// stream through one `PutObject` ([`Self::put_singlepart`]); larger files
     /// stream part-by-part through a stateless multipart upload
     /// ([`Self::put_multipart`]).
-    pub async fn put(&self, src: File, dst: &Object) -> Result<(), S3Err> {
+    pub async fn put(
+        &self,
+        src: File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+    ) -> Result<(), S3Err> {
         let size = files::size(&src).await?;
         if size > PART_SIZE {
-            self.put_multipart(&multipart::Source { file: src, size }, dst)
+            self.put_multipart(&multipart::Source { file: src, size }, dst, metadata)
                 .await
         } else {
-            self.put_singlepart(&src, dst).await
+            self.put_singlepart(&src, dst, metadata).await
         }
     }
 
     /// Streams a file to S3 as a single-part upload.
-    pub async fn put_singlepart(&self, src: &File, dst: &Object) -> Result<(), S3Err> {
+    pub async fn put_singlepart(
+        &self,
+        src: &File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+    ) -> Result<(), S3Err> {
         let body = ByteStream::from_path(src.path())
             .await
             .map_err(|e| errors::map_bytestream_err("put_object", dst, src, &e))?;
@@ -129,9 +142,10 @@ impl Store {
             .bucket(&dst.bucket)
             .key(&dst.key)
             .body(body)
+            .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("put_object", Some(dst.key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
         Ok(())
     }
 
@@ -151,15 +165,11 @@ impl Store {
             Err(err) => {
                 if errors::is_not_found(&err) {
                     return Err(S3Err::ObjectNotFoundErr(ObjectNotFoundErr {
-                        key: src.key.to_string(),
+                        object: src.clone(),
                         trace: trace!(),
                     }));
                 }
-                return Err(errors::map_sdk_err(
-                    "get_object",
-                    Some(src.key.to_string()),
-                    err,
-                ));
+                return Err(errors::map_sdk_err("get_object", src, err));
             }
         };
 
@@ -169,16 +179,25 @@ impl Store {
         // failure a partially-written `dest` may remain; cleaning that up is the
         // caller's responsibility.
         let mut body = output.body;
-        let mut file = tokio::fs::File::create(dest.path())
+        let file = tokio::fs::File::create(dest.path())
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
+        // Every write on an unbuffered tokio File dispatches a blocking task —
+        // buffer so large downloads don't pay one dispatch per body chunk.
+        let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
         while let Some(chunk) = body.next().await {
-            let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", &src.key, &e))?;
-            file.write_all(&chunk)
+            let chunk = chunk.map_err(|e| errors::map_body_read_err("get_object", src, &e))?;
+            writer
+                .write_all(&chunk)
                 .await
                 .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         }
-        file.flush()
+        writer
+            .flush()
+            .await
+            .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
+        let file = writer.into_inner();
+        file.sync_data()
             .await
             .map_err(|e| errors::map_body_io_err("get_object", src, dest, e))?;
         Ok(())
@@ -193,7 +212,7 @@ impl Store {
             .key(&obj.key)
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("delete_object", Some(obj.key.to_string()), e))?;
+            .map_err(|e| errors::map_sdk_err("delete_object", obj, e))?;
         Ok(())
     }
 
@@ -213,11 +232,7 @@ impl Store {
                 if errors::is_not_found(&err) {
                     Ok(false)
                 } else {
-                    Err(errors::map_sdk_err(
-                        "head_object",
-                        Some(obj.key.to_string()),
-                        err,
-                    ))
+                    Err(errors::map_sdk_err("head_object", obj, err))
                 }
             }
         }

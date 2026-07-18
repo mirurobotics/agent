@@ -1,3 +1,6 @@
+// standard crates
+use std::fmt::Write;
+
 // internal crates
 use crate::crypt::errors::*;
 use crate::filesys::{self, files, Atomic, Overwrite, PathExt, WriteOptions};
@@ -110,7 +113,6 @@ pub fn fingerprint(key: &Rsa<Public>) -> Result<String, CryptErr> {
     let digest = sha256(&der);
     let mut out = String::with_capacity(digest.len() * 2);
     for b in digest {
-        use std::fmt::Write;
         let _ = write!(out, "{b:02x}");
     }
     Ok(out)

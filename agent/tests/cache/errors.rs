@@ -1,7 +1,8 @@
 // internal crates
+use crate::errors::harnesses::{assert_error, Expected};
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
-use miru_agent::errors::Error;
+use miru_agent::errors::Code;
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 
@@ -27,20 +28,14 @@ mod cache_element_not_found {
     use axum::http::StatusCode;
 
     #[test]
-    fn returns_resource_not_found_code() {
+    fn cache_element_not_found_error_trait_surface() {
         let err = CacheElementNotFound {
             msg: "test".to_string(),
             trace: miru_agent::trace!(),
         };
-        assert_eq!(err.code().as_str(), "resource_not_found");
-    }
-
-    #[test]
-    fn returns_404_status() {
-        let err = CacheElementNotFound {
-            msg: "test".to_string(),
-            trace: miru_agent::trace!(),
-        };
-        assert_eq!(err.http_status(), StatusCode::NOT_FOUND);
+        assert_error(
+            &err,
+            Expected::new(Code::ResourceNotFound, StatusCode::NOT_FOUND),
+        );
     }
 }

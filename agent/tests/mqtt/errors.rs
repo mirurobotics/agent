@@ -306,6 +306,7 @@ mod poll_error_classification {
     use miru_agent::mqtt::client::poll;
     use miru_agent::mqtt::options::{ConnectAddress, Credentials, Options, Protocol};
     use miru_agent::network::MqttHost;
+    use secrecy::SecretString;
 
     // poll() classifies ConnectionError variants into MQTTError types.
     // We can't inject errors into an EventLoop directly, but we can
@@ -317,7 +318,7 @@ mod poll_error_classification {
         // unlikely to have anything listening on port 1
         let opts = Options::new(Credentials {
             username: "test".to_string(),
-            password: "test".to_string(),
+            password: SecretString::from("test"),
         })
         .with_connect_address(
             ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
@@ -333,13 +334,14 @@ mod poll_error_classification {
 mod mqtt_client_new {
     use miru_agent::mqtt::options::{Credentials, Options};
     use miru_agent::mqtt::Client;
+    use secrecy::SecretString;
 
     #[tokio::test]
     async fn created_at_is_recent() {
         let before = chrono::Utc::now();
         let opts = Options::new(Credentials {
             username: "test".to_string(),
-            password: "test".to_string(),
+            password: SecretString::from("test"),
         });
         let (client, _eventloop) = Client::new(&opts);
         let after = chrono::Utc::now();

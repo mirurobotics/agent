@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::errors::{Code, Error, HTTPCode};
+use crate::errors::harnesses::{assert_error, Expected};
+use miru_agent::errors::{Code, HTTPCode};
 use miru_agent::filesys::{dirs, PathExt};
 use miru_agent::logs::{self, LogLevel, LogsErr, Options};
 
@@ -163,10 +164,10 @@ fn test_logs_err_uses_default_error_trait() {
     // LogsErr only implements Error to opt into the project's error machinery;
     // it relies on the trait defaults.
     let err = LogsErr::ReloadFailed("anything".to_string());
-    assert_eq!(err.code().as_str(), Code::InternalServerError.as_str());
-    assert_eq!(err.http_status(), HTTPCode::INTERNAL_SERVER_ERROR);
-    assert!(err.params().is_none());
-    assert!(!err.is_network_conn_err());
+    assert_error(
+        &err,
+        Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
+    );
 }
 
 // ========================= build_layers ========================= //

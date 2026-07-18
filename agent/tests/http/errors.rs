@@ -1,6 +1,7 @@
 // internal crates
+use crate::errors::harnesses::{assert_error, Expected};
 use backend_api::models::{Error as ApiError, ErrorResponse};
-use miru_agent::errors::Error;
+use miru_agent::errors::Code;
 use miru_agent::http::errors::{
     reqwest_err_to_http_client_err, MockErr, RequestFailed, ReqwestErr, ReqwestErrKind, TimeoutErr,
 };
@@ -52,65 +53,41 @@ pub mod request_failed {
         assert!(display.contains("unknown miru server error"));
     }
 
+    // Covers the `error: Some(..)` branch of code()/params() and the http_status
+    // passthrough: BackendError code, the response params serialized to `{}`, and
+    // the set status.
     #[test]
-    fn code_delegates_to_error_response() {
+    fn trait_surface_with_error() {
         let err = RequestFailed {
             request: meta(),
             status: reqwest::StatusCode::NOT_FOUND,
             error: Some(make_error_response("not_found", "msg")),
             trace: trace(),
         };
-        match err.code() {
-            miru_agent::errors::Code::BackendError(code) => assert_eq!(code, "not_found"),
-            other => panic!("expected BackendError, got: {other:?}"),
-        }
+        assert_error(
+            &err,
+            Expected::new(
+                Code::BackendError("not_found".to_string()),
+                reqwest::StatusCode::NOT_FOUND,
+            )
+            .with_params(serde_json::json!({})),
+        );
     }
 
+    // Covers the `error: None` branch of code()/params() and the http_status
+    // passthrough with a distinct status: InternalServerError code, no params.
     #[test]
-    fn code_without_error_is_internal_server_error() {
-        let err = RequestFailed {
-            request: meta(),
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            error: None,
-            trace: trace(),
-        };
-        match err.code() {
-            miru_agent::errors::Code::InternalServerError => {}
-            other => panic!("expected InternalServerError, got: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn http_status() {
+    fn trait_surface_without_error() {
         let err = RequestFailed {
             request: meta(),
             status: reqwest::StatusCode::BAD_REQUEST,
             error: None,
             trace: trace(),
         };
-        assert_eq!(err.http_status(), reqwest::StatusCode::BAD_REQUEST);
-    }
-
-    #[test]
-    fn params_returns_some_when_error_present() {
-        let err = RequestFailed {
-            request: meta(),
-            status: reqwest::StatusCode::NOT_FOUND,
-            error: Some(make_error_response("not_found", "msg")),
-            trace: trace(),
-        };
-        assert!(err.params().is_some());
-    }
-
-    #[test]
-    fn params_returns_none_when_no_error() {
-        let err = RequestFailed {
-            request: meta(),
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            error: None,
-            trace: trace(),
-        };
-        assert!(err.params().is_none());
+        assert_error(
+            &err,
+            Expected::new(Code::InternalServerError, reqwest::StatusCode::BAD_REQUEST),
+        );
     }
 }
 
@@ -136,7 +113,14 @@ pub mod timeout_err {
             request: meta(),
             trace: trace(),
         };
-        assert!(err.is_network_conn_err());
+        assert_error(
+            &err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+            .with_network_conn_err(true),
+        );
     }
 }
 
@@ -165,9 +149,16 @@ pub mod reqwest_err_kind {
             source: err,
             trace: trace(),
         };
-        assert!(reqwest_err.is_network_conn_err());
         let display = format!("{reqwest_err}");
         assert!(display.contains("network connection error"));
+        assert_error(
+            &reqwest_err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+            .with_network_conn_err(true),
+        );
     }
 
     #[test]
@@ -188,7 +179,13 @@ pub mod reqwest_err_kind {
             source: err,
             trace: trace(),
         };
-        assert!(!reqwest_err.is_network_conn_err());
+        assert_error(
+            &reqwest_err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        );
     }
 
     #[tokio::test]
@@ -236,7 +233,14 @@ pub mod mock_err {
         let err = MockErr {
             is_network_conn_err: true,
         };
-        assert!(err.is_network_conn_err());
+        assert_error(
+            &err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+            .with_network_conn_err(true),
+        );
     }
 
     #[test]
@@ -244,7 +248,13 @@ pub mod mock_err {
         let err = MockErr {
             is_network_conn_err: false,
         };
-        assert!(!err.is_network_conn_err());
+        assert_error(
+            &err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        );
     }
 
     #[test]

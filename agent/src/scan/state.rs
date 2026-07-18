@@ -1,30 +1,31 @@
 // standard crates
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // internal crates
-use crate::filesys::File;
-use crate::models::{Deployment, UploadRule};
+use crate::filesys::{state_file::SingleThreadStateFile, File};
+use crate::models::{DeletePolicy, Deployment, Patch, UploadCollectionID, UploadRule};
 use crate::scan::errors::*;
 use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq)]
-pub struct State {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CollectionState {
     pub(crate) cfg: Config,
     pub(crate) preexisting: HashMap<File, Observation>,
     pub(crate) candidates: HashMap<File, Candidate>,
     pub(crate) ledger: HashMap<File, Vec<StableFile>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     pub deployment: Deployment,
     pub rule: UploadRule,
 }
 
-impl State {
+impl CollectionState {
     pub(crate) fn new(cfg: Config) -> Self {
         Self {
             cfg,
@@ -92,7 +93,7 @@ impl State {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observation {
     pub file: File,
     pub timestamp: DateTime<Utc>,
@@ -110,15 +111,15 @@ impl Observation {
 
 // A file that is a candidate for upload. Holds the single observation taken at
 // discovery; re-discovery of a tracked candidate is skipped (see
-// `State::is_candidate`), so a candidate never accumulates a second observation.
-#[derive(Clone, Debug, PartialEq)]
+// `CollectionState::is_candidate`), so a candidate never accumulates a second observation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub file: File,
     pub first_obs: Observation,
 }
 
 // A file that has been determined stable enough for upload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StableFile {
     pub file: File,
     pub size: u64,
@@ -129,6 +130,9 @@ pub struct StableFile {
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub upload_rule_id: String,
+    // default to 'never'
+    #[serde(default)]
+    pub delete_policy: DeletePolicy,
 }
 
 impl StableFile {
@@ -149,6 +153,20 @@ impl StableFile {
         self.mtime_aliases.push(mtime);
     }
 }
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScannerSnapshot {
+    pub(crate) collections: HashMap<UploadCollectionID, CollectionState>,
+    pub(crate) deployed: HashSet<UploadCollectionID>,
+}
+
+impl Patch<ScannerSnapshot> for ScannerSnapshot {
+    fn patch(&mut self, patch: ScannerSnapshot) {
+        *self = patch;
+    }
+}
+
+pub type ScanSnapshotFile = SingleThreadStateFile<ScannerSnapshot, ScannerSnapshot>;
 
 #[cfg(test)]
 mod tests {
@@ -171,7 +189,7 @@ mod tests {
         }
     }
 
-    fn rule(collection_id: &str, glob: &str, window: i32) -> UploadRule {
+    fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
         UploadRule {
             upload_collection_id: collection_id.to_string(),
             source: UploadRuleSource {
@@ -182,7 +200,7 @@ mod tests {
         }
     }
 
-    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i32) -> Config {
+    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i64) -> Config {
         Config {
             deployment: deployment(dpl_id),
             rule: rule(collection_id, glob, window),
@@ -204,6 +222,7 @@ mod tests {
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
             upload_rule_id: "coll".to_string(),
+            delete_policy: DeletePolicy::Never,
         }
     }
 
@@ -224,7 +243,7 @@ mod tests {
 
         #[test]
         fn new_starts_empty() {
-            let state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
 
             assert_eq!(state.rule().upload_collection_id, "coll");
             assert!(state.preexisting.is_empty());
@@ -238,7 +257,7 @@ mod tests {
         fn rule() {
             let mut cfg = config("d", "coll", "/logs/*.mcap", 60);
             cfg.rule.id = "rule-42".to_string();
-            let state = State::new(cfg);
+            let state = CollectionState::new(cfg);
 
             assert_eq!(state.rule().id, "rule-42");
             assert_eq!(state.rule().source.glob, "/logs/*.mcap");
@@ -246,7 +265,7 @@ mod tests {
 
         #[test]
         fn ledger_count() {
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             assert_eq!(state.ledger_count(), 0);
 
             let file = File::new("/none/a.mcap");
@@ -258,7 +277,7 @@ mod tests {
 
         #[test]
         fn has_candidates() {
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             assert!(!state.has_candidates());
 
             let file = File::new("/none/c.mcap");
@@ -275,7 +294,7 @@ mod tests {
         #[test]
         fn is_candidate() {
             let file = File::new("/none/c.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
 
             assert!(!state.is_candidate(&file));
 
@@ -309,7 +328,7 @@ mod tests {
 
         #[test]
         fn does_not_exist() {
-            let state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             let obs = observation(File::new("/none/p.mcap"));
             assert!(!state.is_preexisting(&obs));
         }
@@ -317,7 +336,7 @@ mod tests {
         #[test]
         fn metadata_not_equal() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .preexisting
                 .insert(file.clone(), observation(file.clone()));
@@ -334,7 +353,7 @@ mod tests {
         #[test]
         fn is_preexisting() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             let obs = observation(file.clone());
             state.preexisting.insert(file, obs.clone());
             assert!(state.is_preexisting(&obs));
@@ -348,7 +367,7 @@ mod tests {
         fn collect_ids_differ() {
             let coll_id_a = "coll_a".to_string();
             let coll_id_b = "coll_b".to_string();
-            let mut state = State::new(config("d", &coll_id_a, "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", &coll_id_a, "/none/*.mcap", 0));
             let err = state
                 .set_config(config("d", &coll_id_b, "/none/*.mcap", 0))
                 .unwrap_err();
@@ -358,7 +377,7 @@ mod tests {
 
         #[test]
         fn success() {
-            let mut state = State::new(config("d", "coll", "/old/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/old/*.mcap", 0));
             let mut replacement = rule("coll", "/new/*.mcap", 5);
             replacement.id = "r2".to_string();
             state
@@ -378,7 +397,7 @@ mod tests {
         #[test]
         fn retains_when_last_entry_after_cutoff() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state.ledger.insert(
                 file.clone(),
                 vec![
@@ -395,7 +414,7 @@ mod tests {
         #[test]
         fn drops_when_last_entry_before_cutoff() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state.ledger.insert(
                 file.clone(),
                 vec![
@@ -411,7 +430,7 @@ mod tests {
         #[test]
         fn prune_last_strictly_before_drops() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file, ts(1000))]);
@@ -422,7 +441,7 @@ mod tests {
         #[test]
         fn prune_last_strictly_after_retains() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file, ts(1000))]);
@@ -433,7 +452,7 @@ mod tests {
         #[test]
         fn prune_last_exact_equality_retains() {
             let file = File::new("/none/p.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file, ts(1000))]);
@@ -523,7 +542,7 @@ mod tests {
         #[test]
         fn matches() {
             let file = File::new("/none/l.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             state.ledger.insert(file.clone(), vec![entry]);
@@ -533,7 +552,7 @@ mod tests {
         #[test]
         fn metadata_differs() {
             let file = File::new("/none/l.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             state.ledger.insert(file.clone(), vec![entry]);
@@ -550,7 +569,7 @@ mod tests {
         #[test]
         fn absent() {
             let file = File::new("/none/l.mcap");
-            let state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             assert!(!state.is_latest_ledger_entry(&obs(file)));
         }
     }
@@ -561,7 +580,7 @@ mod tests {
         #[test]
         fn appends_alias() {
             let file = File::new("/none/l.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file.clone(), ts(900))]);
@@ -577,7 +596,7 @@ mod tests {
         #[test]
         fn none_when_absent() {
             let file = File::new("/none/l.mcap");
-            let mut state = State::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
             assert!(state.latest_ledger_entry_mut(&file).is_none());
         }
     }
@@ -603,6 +622,62 @@ mod tests {
             entry.push_mtime_alias(ts(5678));
             entry.push_mtime_alias(ts(1234));
             assert_eq!(entry.mtime_aliases, vec![ts(1234), ts(5678)]);
+        }
+    }
+
+    mod persistence {
+        use super::*;
+
+        /// A CollectionState with one preexisting file, one candidate, and one ledger
+        /// entry, so every map in the snapshot is exercised.
+        fn populated_state() -> CollectionState {
+            let file = File::new("/none/p.mcap");
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 10));
+            state
+                .preexisting
+                .insert(file.clone(), observation(file.clone()));
+            state.candidates.insert(
+                file.clone(),
+                Candidate {
+                    file: file.clone(),
+                    first_obs: observation(file.clone()),
+                },
+            );
+            state
+                .ledger
+                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
+            state
+        }
+
+        #[test]
+        fn snapshot_round_trips_serde_json() {
+            let original = ScannerSnapshot {
+                collections: HashMap::from([("coll".to_string(), populated_state())]),
+                deployed: HashSet::from(["coll".to_string()]),
+            };
+            let json = serde_json::to_string(&original).unwrap();
+            let back: ScannerSnapshot = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, original);
+        }
+
+        #[test]
+        fn patch_replaces_whole_value() {
+            let mut old = ScannerSnapshot {
+                collections: HashMap::from([("coll".to_string(), populated_state())]),
+                deployed: HashSet::from(["coll".to_string()]),
+            };
+            let new = ScannerSnapshot {
+                collections: HashMap::from([(
+                    "coll2".to_string(),
+                    CollectionState::new(config("d2", "coll2", "/none/*.mcap", 0)),
+                )]),
+                deployed: HashSet::from(["coll2".to_string()]),
+            };
+            old.patch(new.clone());
+            assert_eq!(old, new);
+
+            old.patch(ScannerSnapshot::default());
+            assert_eq!(old, ScannerSnapshot::default());
         }
     }
 
@@ -664,6 +739,20 @@ mod tests {
             observation.mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
             assert!(!entry.has_mtime(&observation));
             assert!(!entry.equal_metadata(&observation));
+        }
+
+        #[test]
+        fn without_delete_policy_defaults_to_never() {
+            let sf = stable_file(File::new("/none/s.mcap"), ts(900));
+            let mut value = serde_json::to_value(&sf).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("delete_policy")
+                .expect("fixture should serialize a delete_policy field");
+
+            let parsed: StableFile = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.delete_policy, DeletePolicy::Never);
         }
     }
 }

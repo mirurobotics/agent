@@ -10,8 +10,12 @@ use crate::filesys::{
 };
 use crate::trace;
 
+// external crates
+use serde::{Deserialize, Serialize};
+
 /// File struct for interacting with files
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct File {
     path: PathBuf,
 }

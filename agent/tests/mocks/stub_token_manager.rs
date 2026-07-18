@@ -9,9 +9,11 @@ use chrono::Utc;
 
 /// One-shot test stub: each call to `get_token` consumes the canned
 /// response. `http::with_retry` does not re-fetch the token between
-/// attempts, so a single canned response is sufficient for every test
-/// that currently exercises `HttpBackend`. Calling `get_token` more
-/// than once panics with "no canned response".
+/// attempts, so a single canned response is sufficient for tests that
+/// fetch at most once (`HttpBackend` calls, and `LiveExecutor` paths
+/// that fail before the pre-confirm re-fetch). Calling `get_token` more
+/// than once panics with "no canned response" — use `MockTokenManager`
+/// when the flow fetches twice.
 pub struct StubTokenManager {
     response: Mutex<Option<Result<Arc<Token>, AuthnErr>>>,
 }

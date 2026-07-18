@@ -1,10 +1,10 @@
 // standard crates
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::sync::{
-    errors::SyncErr,
+    errors::{MockErr, SyncErr},
     syncer::{State, SyncEvent, SyncerExt},
 };
 
@@ -23,7 +23,8 @@ pub struct MockSyncer {
 
     // subscriptions
     pub subscribe_rx: watch::Receiver<SyncEvent>,
-    pub subscribe_tx: watch::Sender<SyncEvent>,
+    pub subscribe_tx: Mutex<Option<watch::Sender<SyncEvent>>>,
+    pub fail_subscribe: AtomicBool,
 }
 
 impl Default for MockSyncer {
@@ -49,7 +50,8 @@ impl MockSyncer {
 
             // subscriptions
             subscribe_rx: rx,
-            subscribe_tx: tx,
+            subscribe_tx: Mutex::new(Some(tx)),
+            fail_subscribe: AtomicBool::new(false),
         }
     }
 
@@ -58,7 +60,23 @@ impl MockSyncer {
     }
 
     pub fn get_transmitter(&self) -> watch::Sender<SyncEvent> {
-        self.subscribe_tx.clone()
+        self.subscribe_tx
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("transmitter was dropped")
+            .clone()
+    }
+
+    /// Drop the mock's event sender so the subscription stream ends (as long
+    /// as no clones from `get_transmitter` are still alive).
+    pub fn drop_transmitter(&self) {
+        *self.subscribe_tx.lock().unwrap() = None;
+    }
+
+    /// Make subsequent `subscribe` calls fail with a mock error.
+    pub fn set_subscribe_fail(&self, fail: bool) {
+        self.fail_subscribe.store(fail, Ordering::Relaxed);
     }
 
     pub fn set_sync<F>(&self, sync_fn: F)
@@ -112,6 +130,11 @@ impl SyncerExt for MockSyncer {
     }
 
     async fn subscribe(&self) -> Result<watch::Receiver<SyncEvent>, SyncErr> {
+        if self.fail_subscribe.load(Ordering::Relaxed) {
+            return Err(SyncErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }));
+        }
         Ok(self.subscribe_rx.clone())
     }
 }
