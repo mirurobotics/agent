@@ -5,6 +5,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
+use miru_agent::errors::Error;
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
 use miru_agent::upload::errors::ExecutorErr;
 use miru_agent::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
@@ -40,7 +41,7 @@ fn make_job(name: &str) -> Job {
 fn scripted_err() -> Result<(), UploadErr> {
     Err(UploadErr::ExecutorErr(ExecutorErr {
         source: Box::new(std::io::Error::other("scripted failure")),
-        terminal_status: None,
+        is_terminal: false,
         trace: miru_agent::trace!(),
     }))
 }
@@ -464,7 +465,7 @@ async fn enqueue_after_shutdown_returns_send_err() {
         matches!(result, Err(UploadErr::SendActorMessageErr(_))),
         "expected SendActorMessageErr, got: {result:?}"
     );
-    assert_eq!(result.unwrap_err().terminal_status(), None);
+    assert!(!result.unwrap_err().is_terminal());
 }
 
 #[tokio::test]

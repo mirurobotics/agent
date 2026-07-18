@@ -42,7 +42,7 @@ impl MockObjectTransfer {
             .unwrap()
             .push_back(Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted transfer failure")),
-                terminal_status: None,
+                is_terminal: false,
                 trace: miru_agent::trace!(),
             })));
     }
