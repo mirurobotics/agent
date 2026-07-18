@@ -26,13 +26,13 @@ Examples: 0 B → 120 s; 1 MiB → 136 s; 100 MiB → ~27 min; 1 GiB → ~4.7 h.
 
 ## Progress
 
-- [ ] Milestone 1: deadline formula + retryable timeout error variant, with unit tests.
-- [ ] Milestone 2: wire `tokio::time::timeout` into the actor's attempt, with behavioral tests.
-- [ ] Milestone 3: doc-comment updates, covgate, preflight CLEAN.
+- [x] Milestone 1: deadline formula + retryable timeout error variant, with unit tests. (`feat(upload): add attempt deadline formula and timeout error variant`; formula unit test `attempt_deadline_formula` landed with the test commit below.)
+- [x] Milestone 2: wire `tokio::time::timeout` into the actor's attempt, with behavioral tests. (`feat(upload): bound upload attempts with a size-scaled deadline`; acceptance test `hung_attempt_times_out_and_is_retried` landed with the test commit below.)
+- [x] Milestone 3: doc-comment updates, covgate, preflight CLEAN. (`docs(upload): document the size-scaled attempt deadline contract`; `test(upload): cover attempt deadline formula and hung-attempt retry`; local `./scripts/preflight.sh` clean — CI on the pushed branch head is verified on the draft PR.)
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The first full `./scripts/preflight.sh` run failed in its tests/covgate component while a direct `./scripts/covgate.sh` rerun and a second full preflight both passed on identical code — a transient flake from the four parallel jobs (clippy `--fix` build plus two coverage builds) contending, not a real failure. Rerun the failing script alone before treating a parallel-preflight failure as a regression.
 
 ## Decision Log
 
@@ -47,10 +47,18 @@ Examples: 0 B → 120 s; 1 MiB → 136 s; 100 MiB → ~27 min; 1 GiB → ~4.7 h.
 - Decision: defaults floor = 120 s, min throughput = 64 KiB/s.
   Rationale: floor must cover worst-case bounded control-plane work for a tiny file — token fetch plus create and confirm at up to 3 HTTP attempts × 10 s each plus ~1 s retry delays ≈ 70 s — with headroom for TLS/connection setup; 64 KiB/s is well below any plausible sustained device uplink (fleet devices may be on LTE), so slow-but-alive transfers don't get killed, while dead connections always terminate.
   Date/Author: 2026-07-17, planning session.
+- Decision: tests landed as one follow-up commit (`test(upload): cover attempt deadline formula and hung-attempt retry`) instead of being folded into the milestone-1/2 commits.
+  Rationale: the implementation pipeline runs source, a fresh-context refine pass, then tests; the branch content is identical to the plan's, only the commit slicing differs.
+  Date/Author: 2026-07-17, implementation session.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Implemented exactly as planned, with zero source deviations (the refine pass over the diff reported no findings):
+
+- Every upload attempt is now bounded by `tokio::time::timeout` at the actor seam with `UploaderOptions::attempt_deadline` (floor 120 s + 1 s per 64 KiB); expiry surfaces as the retryable `UploadErr::AttemptTimeoutErr` and flows through the unchanged backoff/requeue/attempt-cap machinery.
+- Acceptance proof: `hung_attempt_times_out_and_is_retried` (paused tokio clock) shows a never-completing attempt ending at its 2 s virtual deadline and the same job retried through the normal backoff path; the pre-existing shutdown-race tests pass unchanged.
+- Validation: full suite 1515 passed / 0 failed; covgate upload module 96.81% against the 96.00 gate (no gate lowered); `./scripts/preflight.sh` clean locally. CI (`lint`, `test`, `tools`) is verified on the pushed head of `feat/upload-attempt-deadline` via the draft PR.
+- Retrospective: the plan's file-level prescriptions (exact fields, formula, error struct, test scripts) made implementation mechanical; the only friction was a transient parallel-preflight flake (see Surprises).
 
 ## Context and Orientation
 
