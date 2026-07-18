@@ -27,10 +27,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@ab5c1da94f53f5cd75c1038092aa276dddfccbba # v1.9.0
+        uses: useblacksmith/setup-docker-builder@5fe3b77775f1dd55595beb998036fe1f2cf47118 # v1.10.0
 
       - name: Log in to Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -38,7 +38,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
