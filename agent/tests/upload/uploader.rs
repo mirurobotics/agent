@@ -78,6 +78,38 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
     .unwrap()
 }
 
+#[test]
+fn attempt_deadline_formula() {
+    // pin the inputs so the assertions are independent of production defaults
+    let options = UploaderOptions {
+        attempt_timeout_floor: Duration::from_secs(10),
+        attempt_timeout_min_bytes_per_sec: 100,
+        ..UploaderOptions::default()
+    };
+    // size 0 pays the floor only
+    assert_eq!(options.attempt_deadline(0), Duration::from_secs(10));
+    // a partial second of transfer time rounds up
+    assert_eq!(options.attempt_deadline(1), Duration::from_secs(11));
+    // an exact multiple adds size / bytes-per-second seconds
+    assert_eq!(options.attempt_deadline(500), Duration::from_secs(15));
+
+    // production defaults: 120s floor plus one second per 64 KiB
+    let defaults = UploaderOptions::default();
+    assert_eq!(defaults.attempt_deadline(0), Duration::from_secs(120));
+    assert_eq!(
+        defaults.attempt_deadline(64 * 1024),
+        Duration::from_secs(121)
+    );
+
+    // a zero throughput assumption clamps to 1 byte/sec instead of panicking
+    let zero_bps = UploaderOptions {
+        attempt_timeout_floor: Duration::from_secs(10),
+        attempt_timeout_min_bytes_per_sec: 0,
+        ..UploaderOptions::default()
+    };
+    assert_eq!(zero_bps.attempt_deadline(1_000), Duration::from_secs(1_010));
+}
+
 #[tokio::test]
 async fn processes_enqueued_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
@@ -214,6 +246,47 @@ async fn retry_backoff_follows_expected_sequence() {
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn hung_attempt_times_out_and_is_retried() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    let (release_tx, release_rx) = oneshot::channel();
+    // the hang is never released: only the attempt deadline can end it
+    mock.push_step(MockStep::Hang(release_rx));
+    mock.push_step(MockStep::Ok);
+    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = sleeps.clone();
+    // instant sleeps, so the attempt deadline is the only pending timer and
+    // the paused clock auto-advances straight to it
+    let sleep_fn = move |duration: Duration| {
+        recorded.lock().unwrap().push(duration);
+        async {}
+    };
+    // pin the deadline inputs: make_job's 42 bytes yield a 2s deadline,
+    // safely under timed()'s 5s guard
+    let options = UploaderOptions {
+        attempt_timeout_floor: Duration::from_secs(1),
+        attempt_timeout_min_bytes_per_sec: 64 * 1024,
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();
+    let job = make_job("a.log");
+
+    timed(uploader.enqueue(job.clone())).await.unwrap();
+    // first attempt starts and hangs on the never-released oneshot
+    timed(started_rx.recv()).await.unwrap();
+    // the deadline fires in virtual time and the retry attempt starts
+    timed(started_rx.recv()).await.unwrap();
+
+    // the same job was attempted twice: the timeout was treated as a
+    // retryable failure, taking the normal in-place backoff path
+    assert_eq!(mock.recorded_calls(), vec![job.clone(), job]);
+    assert!(!sleeps.lock().unwrap().is_empty());
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    drop(release_tx);
 }
 
 #[tokio::test]
