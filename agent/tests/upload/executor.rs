@@ -16,8 +16,10 @@ use backend_api::models::{
 };
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
+use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
-use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr};
+use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
+use miru_agent::http::request::Params;
 use miru_agent::models::DeletePolicy;
 use miru_agent::upload::executor::new_upl_request;
 use miru_agent::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
@@ -107,6 +109,15 @@ fn token_manager() -> Arc<MockTokenManager> {
 fn non_network_http_err() -> HTTPErr {
     HTTPErr::MockErr(HttpMockErr {
         is_network_conn_err: false,
+    })
+}
+
+fn request_failed_err(status: u16) -> HTTPErr {
+    HTTPErr::RequestFailed(RequestFailed {
+        request: Params::get("http://test/uploads").meta().unwrap(),
+        status: reqwest::StatusCode::from_u16(status).unwrap(),
+        error: None,
+        trace: miru_agent::trace!(),
     })
 }
 
@@ -260,6 +271,50 @@ async fn confirm_failure_maps_to_executor_err() {
         "expected ExecutorErr, got: {result:?}"
     );
     assert_eq!(transfer.recorded_calls().len(), 1);
+}
+
+// ===== terminal classification =====
+
+#[tokio::test]
+async fn create_4xx_failure_is_terminal_with_status() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Err(request_failed_err(404)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    assert_eq!(err.terminal_status(), Some(HTTPCode::NOT_FOUND));
+    assert!(err.is_terminal());
+}
+
+#[tokio::test]
+async fn create_transient_statuses_are_not_terminal() {
+    for status in [401u16, 408, 429, 500] {
+        let client = Arc::new(MockClient::default());
+        client.set_create_upload(move || Err(request_failed_err(status)));
+        let transfer = MockObjectTransfer::new();
+        let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+        let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+        assert_eq!(err.terminal_status(), None, "status {status}");
+        assert!(!err.is_terminal(), "status {status}");
+    }
+}
+
+#[tokio::test]
+async fn confirm_4xx_failure_is_terminal() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    client.set_confirm_upload(|| Err(request_failed_err(422)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    assert_eq!(err.terminal_status(), Some(HTTPCode::UNPROCESSABLE_ENTITY));
+    assert!(err.is_terminal());
 }
 
 /// The path-style PutObject URI the S3 SDK emits for [`destination`]'s bucket

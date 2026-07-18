@@ -7,7 +7,7 @@ use crate::filesys::files;
 use crate::http::{self, ClientI};
 use crate::models::DeletePolicy;
 use crate::upload::{
-    errors::{executor_err, UploadErr},
+    errors::{classified_executor_err, executor_err, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
 };
@@ -61,7 +61,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             http::uploads::create(self.http_client.as_ref(), params).await
         })
         .await
-        .map_err(executor_err)
+        .map_err(classified_executor_err)
     }
 
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
@@ -75,7 +75,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         })
         .await
         .map(|_| ())
-        .map_err(executor_err)
+        .map_err(classified_executor_err)
     }
 
     async fn delete_source_file(&self, job: &Job) {

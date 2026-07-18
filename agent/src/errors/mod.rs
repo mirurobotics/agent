@@ -39,6 +39,11 @@ pub trait Error: std::error::Error {
     fn is_network_conn_err(&self) -> bool {
         false
     }
+    /// True when retrying can never succeed (e.g. the backend rejected the
+    /// request with a non-transient 4xx). Default: false.
+    fn is_terminal(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -76,6 +81,11 @@ macro_rules! impl_error {
             fn is_network_conn_err(&self) -> bool {
                 match self {
                     $(Self::$variant(e) => e.is_network_conn_err(),)+
+                }
+            }
+            fn is_terminal(&self) -> bool {
+                match self {
+                    $(Self::$variant(e) => e.is_terminal(),)+
                 }
             }
             fn params(&self) -> Option<serde_json::Value> {

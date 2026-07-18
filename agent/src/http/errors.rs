@@ -37,6 +37,10 @@ impl crate::errors::Error for RequestFailed {
         self.status
     }
 
+    fn is_terminal(&self) -> bool {
+        self.status.is_client_error() && !matches!(self.status.as_u16(), 401 | 408 | 429)
+    }
+
     fn params(&self) -> Option<serde_json::Value> {
         self.error.as_ref().map(|error| {
             serde_json::to_value(&error.error.params)

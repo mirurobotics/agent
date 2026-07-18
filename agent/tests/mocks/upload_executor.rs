@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
+use miru_agent::errors::HTTPCode;
 use miru_agent::upload::errors::ExecutorErr;
 use miru_agent::upload::{Job, UploadErr, UploadExecutor};
 
@@ -13,6 +14,8 @@ use tokio::sync::{mpsc, oneshot};
 pub enum MockStep {
     Ok,
     Err,
+    /// Fail with an error classified terminal (HTTP 400)
+    TerminalErr,
     /// Await the receiver and return the sent result (or `Ok(())` if the
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
@@ -61,6 +64,12 @@ impl UploadExecutor for MockUploadExecutor {
             None | Some(MockStep::Ok) => Ok(()),
             Some(MockStep::Err) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted failure")),
+                terminal_status: None,
+                trace: miru_agent::trace!(),
+            })),
+            Some(MockStep::TerminalErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
+                source: Box::new(std::io::Error::other("scripted terminal failure")),
+                terminal_status: Some(HTTPCode::BAD_REQUEST),
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),
