@@ -83,9 +83,10 @@ fn attempt_deadline_formula() {
     // pin the inputs so the assertions are independent of production defaults
     let options = UploaderOptions {
         attempt_timeout_floor: Duration::from_secs(10),
-        attempt_timeout_min_bytes_per_sec: 100,
+        attempt_timeout_bytes_per_sec: 100,
         ..UploaderOptions::default()
     };
+
     // size 0 pays the floor only
     assert_eq!(options.attempt_deadline(0), Duration::from_secs(10));
     // a partial second of transfer time rounds up
@@ -104,7 +105,7 @@ fn attempt_deadline_formula() {
     // a zero throughput assumption clamps to 1 byte/sec instead of panicking
     let zero_bps = UploaderOptions {
         attempt_timeout_floor: Duration::from_secs(10),
-        attempt_timeout_min_bytes_per_sec: 0,
+        attempt_timeout_bytes_per_sec: 0,
         ..UploaderOptions::default()
     };
     assert_eq!(zero_bps.attempt_deadline(1_000), Duration::from_secs(1_010));
@@ -252,22 +253,25 @@ async fn retry_backoff_follows_expected_sequence() {
 async fn hung_attempt_times_out_and_is_retried() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
+
     // the hang is never released: only the attempt deadline can end it
     mock.push_step(MockStep::Hang(release_rx));
     mock.push_step(MockStep::Ok);
     let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let recorded = sleeps.clone();
+
     // instant sleeps, so the attempt deadline is the only pending timer and
     // the paused clock auto-advances straight to it
     let sleep_fn = move |duration: Duration| {
         recorded.lock().unwrap().push(duration);
         async {}
     };
+
     // pin the deadline inputs: make_job's 42 bytes yield a 2s deadline,
     // safely under timed()'s 5s guard
     let options = UploaderOptions {
         attempt_timeout_floor: Duration::from_secs(1),
-        attempt_timeout_min_bytes_per_sec: 64 * 1024,
+        attempt_timeout_bytes_per_sec: 64 * 1024,
         ..UploaderOptions::default()
     };
     let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();

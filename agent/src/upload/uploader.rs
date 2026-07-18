@@ -8,7 +8,7 @@ use crate::cooldown;
 use crate::errors::HTTPCode;
 use crate::trace;
 use crate::upload::{
-    errors::{attempt_timeout_err, ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
+    errors::*,
     executor::UploadExecutor,
     job::Job,
     queue::{Queue, QueueEntry, QueueSnapshotFile},
@@ -50,7 +50,7 @@ pub struct UploaderOptions {
     /// file size. Deliberately far below any plausible sustained uplink: a
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
-    pub attempt_timeout_min_bytes_per_sec: u64,
+    pub attempt_timeout_bytes_per_sec: u64,
 }
 
 impl Default for UploaderOptions {
@@ -65,7 +65,7 @@ impl Default for UploaderOptions {
                 max_secs: 120,
             },
             attempt_timeout_floor: Duration::from_secs(120),
-            attempt_timeout_min_bytes_per_sec: 64 * 1024,
+            attempt_timeout_bytes_per_sec: 64 * 1024,
         }
     }
 }
@@ -74,7 +74,7 @@ impl UploaderOptions {
     /// Deadline for one upload attempt of `size` bytes: floor plus a
     /// per-byte allowance at the minimum-throughput assumption.
     pub fn attempt_deadline(&self, size: u64) -> Duration {
-        let bps = self.attempt_timeout_min_bytes_per_sec.max(1);
+        let bps = self.attempt_timeout_bytes_per_sec.max(1);
         self.attempt_timeout_floor
             .saturating_add(Duration::from_secs(size.div_ceil(bps)))
     }
@@ -225,13 +225,6 @@ where
     /// Drive one executor attempt on `entry` to completion while staying
     /// responsive to commands. The future is built from clones so it borrows
     /// nothing from `self`, leaving `self` free to serve commands while it runs.
-    ///
-    /// Every attempt is bounded by the size-scaled deadline from
-    /// [`UploaderOptions::attempt_deadline`]; expiry drops the in-flight
-    /// future and surfaces as a retryable
-    /// [`AttemptTimeoutErr`](crate::upload::errors::AttemptTimeoutErr),
-    /// handled like any other failed attempt (backoff, requeue, global
-    /// attempt cap).
     async fn attempt_upload(&mut self, entry: &QueueEntry) -> AttemptOutcome {
         let executor = self.executor.clone();
         let job = entry.job.clone();
@@ -239,11 +232,12 @@ where
         let attempt = async move {
             match tokio::time::timeout(deadline, executor.upload(&job)).await {
                 Ok(result) => result,
-                Err(_) => Err(attempt_timeout_err(
-                    job.file.to_string(),
-                    job.size,
+                Err(_) => Err(UploadErr::AttemptTimeoutErr(AttemptTimeoutErr {
+                    file: job.file.to_string(),
+                    size: job.size,
                     deadline,
-                )),
+                    trace: trace!(),
+                })),
             }
         };
         match self.run_until_shutdown(attempt).await {

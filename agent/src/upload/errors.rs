@@ -99,18 +99,3 @@ where
         trace: crate::trace!(),
     })
 }
-
-/// Builds the retryable [`UploadErr::AttemptTimeoutErr`] the actor
-/// returns when an upload attempt exceeds its size-scaled deadline.
-pub(crate) fn attempt_timeout_err(
-    file: String,
-    size: u64,
-    deadline: std::time::Duration,
-) -> UploadErr {
-    UploadErr::AttemptTimeoutErr(AttemptTimeoutErr {
-        file,
-        size,
-        deadline,
-        trace: crate::trace!(),
-    })
-}
