@@ -8,7 +8,7 @@ use crate::cooldown;
 use crate::errors::HTTPCode;
 use crate::trace;
 use crate::upload::{
-    errors::{ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
+    errors::{attempt_timeout_err, ReceiveActorMessageErr, SendActorMessageErr, UploadErr},
     executor::UploadExecutor,
     job::Job,
     queue::{Queue, QueueEntry, QueueSnapshotFile},
@@ -225,13 +225,28 @@ where
     /// Drive one executor attempt on `entry` to completion while staying
     /// responsive to commands. The future is built from clones so it borrows
     /// nothing from `self`, leaving `self` free to serve commands while it runs.
+    ///
+    /// Every attempt is bounded by the size-scaled deadline from
+    /// [`UploaderOptions::attempt_deadline`]; expiry drops the in-flight
+    /// future and surfaces as a retryable
+    /// [`AttemptTimeoutErr`](crate::upload::errors::AttemptTimeoutErr),
+    /// handled like any other failed attempt (backoff, requeue, global
+    /// attempt cap).
     async fn attempt_upload(&mut self, entry: &QueueEntry) -> AttemptOutcome {
         let executor = self.executor.clone();
         let job = entry.job.clone();
-        match self
-            .run_until_shutdown(async move { executor.upload(&job).await })
-            .await
-        {
+        let deadline = self.options.attempt_deadline(job.size);
+        let attempt = async move {
+            match tokio::time::timeout(deadline, executor.upload(&job)).await {
+                Ok(result) => result,
+                Err(_) => Err(attempt_timeout_err(
+                    job.file.to_string(),
+                    job.size,
+                    deadline,
+                )),
+            }
+        };
+        match self.run_until_shutdown(attempt).await {
             None => AttemptOutcome::ShuttingDown,
             Some(Ok(())) => AttemptOutcome::Succeeded,
             Some(Err(err)) => AttemptOutcome::Failed(err),
