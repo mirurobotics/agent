@@ -151,6 +151,29 @@ async fn global_attempt_cap_drops_job() {
 }
 
 #[tokio::test]
+async fn terminal_failure_drops_job_without_requeue() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::TerminalErr);
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle) = spawn_uploader(mock.clone());
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+
+    // A was dropped on its first attempt: nothing queued for a requeue round
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // exactly one attempt for A (no in-place retries), then B: the worker survived
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+}
+
+#[tokio::test]
 async fn retry_backoff_follows_expected_sequence() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     for _ in 0..6 {
@@ -287,6 +310,7 @@ async fn enqueue_after_shutdown_returns_send_err() {
         matches!(result, Err(UploadErr::SendActorMessageErr(_))),
         "expected SendActorMessageErr, got: {result:?}"
     );
+    assert_eq!(result.unwrap_err().terminal_status(), None);
 }
 
 #[tokio::test]

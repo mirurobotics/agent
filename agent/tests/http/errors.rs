@@ -1,7 +1,7 @@
 // internal crates
 use crate::errors::harnesses::{assert_error, Expected};
 use backend_api::models::{Error as ApiError, ErrorResponse};
-use miru_agent::errors::Code;
+use miru_agent::errors::{Code, Error};
 use miru_agent::http::errors::{
     reqwest_err_to_http_client_err, MockErr, RequestFailed, ReqwestErr, ReqwestErrKind, TimeoutErr,
 };
@@ -88,6 +88,32 @@ pub mod request_failed {
             &err,
             Expected::new(Code::InternalServerError, reqwest::StatusCode::BAD_REQUEST),
         );
+    }
+
+    #[test]
+    fn is_terminal_classification_by_status() {
+        let cases = [
+            (400u16, true),
+            (403, true),
+            (404, true),
+            (409, true),
+            (422, true),
+            (401, false),
+            (408, false),
+            (429, false),
+            (500, false),
+            (502, false),
+            (503, false),
+        ];
+        for (status, expected) in cases {
+            let err = RequestFailed {
+                request: meta(),
+                status: reqwest::StatusCode::from_u16(status).unwrap(),
+                error: None,
+                trace: trace(),
+            };
+            assert_eq!(err.is_terminal(), expected, "status {status}");
+        }
     }
 }
 
@@ -264,6 +290,14 @@ pub mod mock_err {
         };
         let display = format!("{err}");
         assert!(display.contains("true"));
+    }
+
+    #[test]
+    fn non_status_error_is_not_terminal_through_dispatch() {
+        let err = HTTPErr::MockErr(MockErr {
+            is_network_conn_err: false,
+        });
+        assert!(!err.is_terminal());
     }
 }
 
