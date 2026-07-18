@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{errors::*, files, File, PathExt};
-use crate::models::{DeletePolicy, UploadRule};
+use crate::models::DeletePolicy;
 use crate::scan::{
     errors::*,
     state::{Candidate, CollectionState, Config, Observation, StableFile},
@@ -56,10 +56,12 @@ impl CollectionScanner {
         &self.state
     }
 
-    pub(crate) fn rule(&self) -> &UploadRule {
+    #[cfg(feature = "test")]
+    pub(crate) fn rule(&self) -> &crate::models::UploadRule {
         self.state.rule()
     }
 
+    #[cfg(feature = "test")]
     pub(crate) fn ledger_count(&self) -> usize {
         self.state.ledger_count()
     }

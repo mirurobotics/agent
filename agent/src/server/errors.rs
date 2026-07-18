@@ -13,21 +13,6 @@ use crate::sync;
 use crate::upload;
 
 #[derive(Debug, thiserror::Error)]
-pub struct MissingDeviceIDErr {
-    pub device_file_err: filesys::FileSysErr,
-    pub jwt_err: crypt::CryptErr,
-    pub trace: Box<Trace>,
-}
-
-impl std::fmt::Display for MissingDeviceIDErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unable to determine device id from the device file or the token on file: device file error: {}, jwt error: {}", self.device_file_err, self.jwt_err)
-    }
-}
-
-impl crate::errors::Error for MissingDeviceIDErr {}
-
-#[derive(Debug, thiserror::Error)]
 #[error("shutdown manager was provided the same argument ({arg_name}) twice")]
 pub struct ShutdownMngrDuplicateArgErr {
     pub arg_name: String,
@@ -66,15 +51,6 @@ pub struct JoinHandleErr {
 impl crate::errors::Error for JoinHandleErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to send shutdown signal to {service}")]
-pub struct SendShutdownSignalErr {
-    pub service: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for SendShutdownSignalErr {}
-
-#[derive(Debug, thiserror::Error)]
 #[error("timestamp conversion error: {msg}")]
 pub struct TimestampConversionErr {
     pub msg: String,
@@ -86,8 +62,6 @@ impl crate::errors::Error for TimestampConversionErr {}
 #[derive(Debug, thiserror::Error)]
 pub enum ServerErr {
     // server errors
-    #[error(transparent)]
-    MissingDeviceIDErr(Box<MissingDeviceIDErr>),
     #[error(transparent)]
     TimestampConversionErr(TimestampConversionErr),
     #[error(transparent)]
@@ -122,8 +96,6 @@ pub enum ServerErr {
     BindUnixSocketErr(BindUnixSocketErr),
     #[error(transparent)]
     RunAxumServerErr(RunAxumServerErr),
-    #[error(transparent)]
-    SendShutdownSignalErr(SendShutdownSignalErr),
     #[error(transparent)]
     JoinHandleErr(JoinHandleErr),
 }
@@ -195,7 +167,6 @@ impl From<upload::UploadErr> for ServerErr {
 }
 
 crate::impl_error!(ServerErr {
-    MissingDeviceIDErr,
     TimestampConversionErr,
     ShutdownMngrDuplicateArgErr,
     EventsErr,
@@ -211,6 +182,5 @@ crate::impl_error!(ServerErr {
     UploadErr,
     BindUnixSocketErr,
     RunAxumServerErr,
-    SendShutdownSignalErr,
     JoinHandleErr,
 });
