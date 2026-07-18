@@ -7,7 +7,6 @@ use miru_agent::models::{Deployment, UploadRule};
 use miru_agent::scan::{ScanErr, ScanEvent, ScannerExt};
 
 // external crates
-use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 
 type ResultFn = Box<dyn Fn() -> Result<(), ScanErr> + Send + Sync>;
@@ -154,10 +153,6 @@ impl ScannerExt for MockScanner {
     }
 
     async fn shutdown(&self) -> Result<(), ScanErr> {
-        Ok(())
-    }
-
-    async fn prune(&self, _before: DateTime<Utc>) -> Result<(), ScanErr> {
         Ok(())
     }
 }

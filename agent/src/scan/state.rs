@@ -83,13 +83,13 @@ impl CollectionState {
         Ok(())
     }
 
-    pub(crate) fn prune_ledger(&mut self, before: DateTime<Utc>) -> Result<(), ScanErr> {
-        self.ledger.retain(|_, stable_files| {
-            stable_files
-                .last()
-                .is_none_or(|stable_file| stable_file.first_observed_at >= before)
-        });
-        Ok(())
+    /// Drop ledger entries whose file is absent from this pass's glob set.
+    pub(crate) fn prune_ledger(&mut self, retain: &[File], threshold: usize) {
+        if self.ledger.len() < threshold {
+            return;
+        }
+        let to_retain: HashSet<&File> = retain.iter().collect();
+        self.ledger.retain(|file, _| to_retain.contains(file));
     }
 }
 
@@ -394,70 +394,62 @@ mod tests {
     mod prune_ledger {
         use super::*;
 
-        #[test]
-        fn retains_when_last_entry_after_cutoff() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state.ledger.insert(
-                file.clone(),
-                vec![
-                    stable_file(file.clone(), ts(900)),
-                    stable_file(file.clone(), ts(1100)),
-                ],
-            );
-
-            state.prune_ledger(ts(1000)).unwrap();
-            assert_eq!(state.ledger_count(), 1);
-            assert_eq!(state.ledger.get(&file).unwrap().len(), 2);
+        /// Seed `n` single-entry ledger histories keyed to `/none/{i}.mcap`,
+        /// returning the seeded keys in order. No I/O: pruning never inspects
+        /// the filesystem, only the glob set it is handed.
+        fn seed_n(state: &mut CollectionState, n: usize) -> Vec<File> {
+            let mut files = Vec::with_capacity(n);
+            for i in 0..n {
+                let file = File::new(format!("/none/{i}.mcap"));
+                state
+                    .ledger
+                    .insert(file.clone(), vec![stable_file(file.clone(), ts(1000))]);
+                files.push(file);
+            }
+            files
         }
 
+        // Below the threshold nothing is pruned, even against an empty glob
+        // set (the maximally aggressive input): the audit-history guarantee.
         #[test]
-        fn drops_when_last_entry_before_cutoff() {
-            let file = File::new("/none/p.mcap");
+        fn below_threshold_prunes_nothing() {
             let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state.ledger.insert(
-                file.clone(),
-                vec![
-                    stable_file(file.clone(), ts(1100)),
-                    stable_file(file.clone(), ts(900)),
-                ],
-            );
+            seed_n(&mut state, 2);
 
-            state.prune_ledger(ts(1000)).unwrap();
+            state.prune_ledger(&[], 3);
+            assert_eq!(state.ledger_count(), 2);
+        }
+
+        // Exactly at the threshold the gate opens (pins the >= boundary):
+        // glob-set members keep their full Vec history, everything else drops.
+        #[test]
+        fn at_threshold_drops_unglobbed_keeps_globbed() {
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let seeded = seed_n(&mut state, 4);
+            let kept = &seeded[..3];
+            // give one retained key a two-entry history to prove the whole
+            // Vec survives, not just the latest entry.
+            state
+                .ledger
+                .get_mut(&kept[0])
+                .unwrap()
+                .push(stable_file(kept[0].clone(), ts(2000)));
+
+            state.prune_ledger(kept, 4);
+            assert_eq!(state.ledger_count(), 3);
+            for file in kept {
+                assert!(state.ledger.contains_key(file));
+            }
+            assert_eq!(state.ledger.get(&kept[0]).unwrap().len(), 2);
+            assert!(!state.ledger.contains_key(&seeded[3]));
+        }
+
+        // Pruning an empty ledger is a no-op (the gate returns early).
+        #[test]
+        fn empty_ledger_noop() {
+            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            state.prune_ledger(&[], 1);
             assert_eq!(state.ledger_count(), 0);
-        }
-
-        #[test]
-        fn prune_last_strictly_before_drops() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state
-                .ledger
-                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
-            state.prune_ledger(ts(1001)).unwrap();
-            assert_eq!(state.ledger_count(), 0);
-        }
-
-        #[test]
-        fn prune_last_strictly_after_retains() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state
-                .ledger
-                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
-            state.prune_ledger(ts(999)).unwrap();
-            assert_eq!(state.ledger_count(), 1);
-        }
-
-        #[test]
-        fn prune_last_exact_equality_retains() {
-            let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
-            state
-                .ledger
-                .insert(file.clone(), vec![stable_file(file, ts(1000))]);
-            state.prune_ledger(ts(1000)).unwrap();
-            assert_eq!(state.ledger_count(), 1);
         }
     }
 
