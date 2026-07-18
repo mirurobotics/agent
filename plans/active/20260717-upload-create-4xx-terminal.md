@@ -21,13 +21,14 @@ Observable outcome: run the test suite and see the new uploader test prove a ter
 
 ## Progress
 
-- [ ] Milestone 1: `is_terminal()` on the `Error` trait + `impl_error!` + `RequestFailed` override; classification tests.
-- [ ] Milestone 2: propagate through `ExecutorErr`; uploader drops terminal jobs with the loud log; executor + uploader tests.
+- [x] Milestone 1: `is_terminal()` on the `Error` trait + `impl_error!` + `RequestFailed` override; classification tests. (commits c21adb7, f9ecf29)
+- [x] Milestone 2: propagate through `ExecutorErr`; uploader drops terminal jobs with the loud log; executor + uploader tests. (commits b004d5a, f9ecf29)
 - [ ] Milestone 3: preflight to CI-green on the pushed branch head.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- Coverage for `impl_error!`-generated `is_terminal()` bodies attributes to the macro definition site (`agent/src/errors/mod.rs`), not to each invoking module. Measured at the milestone-2 HEAD, only the errors/http/upload gates dipped; the plan's contingency for unrelated-module covgate dips was never needed. A single dispatch test through `HTTPErr::MockErr` restored `errors` to 100.
+- The `_ => None` wildcard arm of `UploadErr::terminal_status()` was unreachable by the planned tests; a one-line `terminal_status() == None` assertion in the existing `enqueue_after_shutdown_returns_send_err` test covers it (actor-channel errors are never terminal) and keeps the tight 96.00 upload gate green (96.81 measured).
 
 ## Decision Log
 
