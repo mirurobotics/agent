@@ -24,15 +24,6 @@ pub struct JoinHandleErr {
 impl crate::errors::Error for JoinHandleErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to prune caches: {sources:?}")]
-pub struct PruneCacheErrs {
-    pub sources: Vec<cache::CacheErr>,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for PruneCacheErrs {}
-
-#[derive(Debug, thiserror::Error)]
 pub struct ResolveDeviceIDErr {
     pub device_file_err: Box<filesys::FileSysErr>,
     pub jwt_err: Box<crypt::CryptErr>,
@@ -55,8 +46,6 @@ impl crate::errors::Error for ResolveDeviceIDErr {}
 pub enum DiskErr {
     #[error(transparent)]
     DeviceNotActivatedErr(DeviceNotActivatedErr),
-    #[error(transparent)]
-    PruneCacheErrs(PruneCacheErrs),
     #[error(transparent)]
     CacheErr(cache::CacheErr),
     #[error(transparent)]
@@ -89,7 +78,6 @@ impl From<filesys::FileSysErr> for DiskErr {
 
 crate::impl_error!(DiskErr {
     DeviceNotActivatedErr,
-    PruneCacheErrs,
     CacheErr,
     CryptErr,
     FileSysErr,
