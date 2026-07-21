@@ -19,7 +19,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -184,29 +184,46 @@ where
     /// commands. On a retryable failure the entry is stamped with its
     /// next-attempt deadline and requeued at the tail — no sleeping here; at
     /// `options.attempts` total failures (or a terminal failure) it is
-    /// dropped.
+    /// dropped. Network connection errors are exempt from attempt accounting:
+    /// they do not bump `entry.attempts` (so they can never exhaust the
+    /// attempt budget) and cool down for the flat base period rather than the
+    /// growing backoff.
     async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
-        entry.attempts += 1;
-
         let file = &entry.job.file;
         let rule = &entry.job.file_rule_id;
         let size = entry.job.size;
-        let attempt = entry.attempts;
+        let attempt = entry.attempts + 1;
         info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
 
         let err = match self.attempt_upload(&entry).await {
             AttemptOutcome::ShuttingDown => return Flow::Shutdown,
             AttemptOutcome::Succeeded => {
+                entry.attempts += 1;
                 Self::log_success(&entry);
                 return Flow::Continue;
             }
-            AttemptOutcome::Failed(err) => {
-                let file = &entry.job.file;
-                let attempt = entry.attempts;
-                warn!("upload: attempt {attempt} for file {file} failed: {err:?}");
-                err
-            }
+            AttemptOutcome::Failed(err) => err,
         };
+
+        // network connection errors are expected and do not count toward the
+        // attempt budget: the entry keeps its attempt count and cools down for
+        // the flat base period instead of the growing backoff
+        if err.is_network_conn_err() {
+            let wait = self.options.backoff.base_secs.max(0);
+            entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait));
+            let file = &entry.job.file;
+            debug!(
+                "upload: network connection error for file {file}; not counting attempt, \
+                 retrying in {wait}s: {err:?}"
+            );
+            self.requeue(entry).await;
+            return Flow::Continue;
+        }
+
+        entry.attempts += 1;
+        let file = &entry.job.file;
+        let attempt = entry.attempts;
+        warn!("upload: attempt {attempt} for file {file} failed: {err:?}");
 
         if err.is_terminal() {
             Self::log_terminal_drop(&entry, &err);
