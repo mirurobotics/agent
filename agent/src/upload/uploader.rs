@@ -15,7 +15,7 @@ use crate::upload::{
 };
 
 // external crates
-use chrono::Utc;
+use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -34,14 +34,10 @@ macro_rules! dispatch {
 pub struct UploaderOptions {
     /// Maximum number of queued jobs (in-flight job excluded).
     pub queue_capacity: usize,
-    /// Consecutive executor attempts on the same job (with backoff sleeps
-    /// between them) before it is requeued at the tail.
-    pub in_place_attempts: u32,
-    /// Global per-job attempt cap across rounds; when exhausted, the job is
-    /// dropped with a warning.
-    pub max_total_attempts: u32,
-    /// Backoff between in-place attempts; the exponent is the current round's
-    /// attempt count minus one.
+    /// Total executor attempts per job before it is dropped.
+    pub attempts: u32,
+    /// Backoff between attempts; the exponent is the job's lifetime attempt
+    /// count minus one, so waits grow across requeues and cap at `max_secs`.
     pub backoff: cooldown::Backoff,
     /// Fixed floor of the per-attempt upload deadline. Covers control-plane
     /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
@@ -58,12 +54,11 @@ impl Default for UploaderOptions {
     fn default() -> Self {
         Self {
             queue_capacity: 1024,
-            in_place_attempts: 3,
-            max_total_attempts: 9,
+            attempts: 30,
             backoff: cooldown::Backoff {
                 base_secs: 10,
                 growth_factor: 2,
-                max_secs: 120,
+                max_secs: 3600,
             },
             attempt_timeout_floor: Duration::from_secs(120),
             attempt_timeout_bytes_per_sec: 64 * 1024,
@@ -117,7 +112,7 @@ enum Flow {
 
 /// Outcome of driving a single executor attempt to completion (or shutdown).
 enum AttemptOutcome {
-    /// The upload succeeded; the round is done.
+    /// The upload succeeded; the attempt is done.
     Succeeded,
     /// The upload failed; carries the error for logging and retry decisions.
     Failed(UploadErr),
@@ -125,30 +120,39 @@ enum AttemptOutcome {
     ShuttingDown,
 }
 
-pub(crate) struct Worker<ExecutorT, F, Fut>
+pub(crate) struct Worker<ExecutorT, F, Fut, N>
 where
     ExecutorT: UploadExecutor,
     F: Fn(Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
+    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     receiver: Receiver<Command>,
     queue: Queue,
     executor: Arc<ExecutorT>,
     options: UploaderOptions,
     sleep_fn: F,
+    now_fn: N,
 }
 
-impl<ExecutorT, F, Fut> Worker<ExecutorT, F, Fut>
+impl<ExecutorT, F, Fut, N> Worker<ExecutorT, F, Fut, N>
 where
     ExecutorT: UploadExecutor,
     F: Fn(Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
+    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     pub(crate) async fn run(mut self) {
         loop {
-            match self.queue.pop_ready(Utc::now()).await {
+            let now = (self.now_fn)();
+            match self.queue.pop_ready(now).await {
+                Some(entry) => {
+                    if let Flow::Shutdown = self.run_attempt(entry).await {
+                        break;
+                    }
+                }
                 // idle: nothing to interleave, just wait for the next command
-                None => {
+                None if self.queue.is_empty() => {
                     info!("upload: queue empty; awaiting next command");
                     match self.receiver.recv().await {
                         // all senders dropped
@@ -160,9 +164,15 @@ where
                         }
                     }
                 }
-                Some(entry) => {
-                    info!("upload: dequeued job; starting upload round");
-                    if let Flow::Shutdown = self.run_round(entry).await {
+                // every queued entry is waiting out its backoff: sleep until
+                // the earliest deadline (or a command) and re-evaluate
+                None => {
+                    let wait = match self.queue.earliest_next_attempt() {
+                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
+                        // unreachable: the queue is non-empty here
+                        None => Duration::ZERO,
+                    };
+                    if let Flow::Shutdown = self.idle_wait(wait).await {
                         break;
                     }
                 }
@@ -170,57 +180,69 @@ where
         }
     }
 
-    /// Drive up to `options.in_place_attempts` executor attempts on `entry`
-    /// with backoff sleeps in between, while staying responsive to commands.
-    /// On a round-ending failure the job is requeued at the tail (no sleep);
-    /// at `options.max_total_attempts` total failures it is dropped.
-    async fn run_round(&mut self, mut entry: QueueEntry) -> Flow {
-        for attempt_this_round in 1..=self.options.in_place_attempts {
-            entry.attempts += 1;
+    /// Drive one executor attempt on `entry`, while staying responsive to
+    /// commands. On a retryable failure the entry is stamped with its
+    /// next-attempt deadline and requeued at the tail — no sleeping here; at
+    /// `options.attempts` total failures (or a terminal failure) it is
+    /// dropped.
+    async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
+        entry.attempts += 1;
 
-            let file = &entry.job.file;
-            let rule = &entry.job.file_rule_id;
-            let size = entry.job.size;
-            let attempt = entry.attempts;
-            info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
+        let file = &entry.job.file;
+        let rule = &entry.job.file_rule_id;
+        let size = entry.job.size;
+        let attempt = entry.attempts;
+        info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
 
-            let err = match self.attempt_upload(&entry).await {
-                AttemptOutcome::ShuttingDown => return Flow::Shutdown,
-                AttemptOutcome::Succeeded => {
-                    Self::log_success(&entry);
-                    return Flow::Continue;
-                }
-                AttemptOutcome::Failed(err) => {
-                    let file = &entry.job.file;
-                    let attempt = entry.attempts;
-                    warn!("upload: attempt {attempt} for file {file} failed: {err:?}");
-                    err
-                }
-            };
-
-            if let Some(status) = err.terminal_status() {
-                Self::log_terminal_drop(&entry, status, &err);
+        let err = match self.attempt_upload(&entry).await {
+            AttemptOutcome::ShuttingDown => return Flow::Shutdown,
+            AttemptOutcome::Succeeded => {
+                Self::log_success(&entry);
                 return Flow::Continue;
             }
-
-            if entry.attempts >= self.options.max_total_attempts {
-                Self::log_dropped(&entry, &err);
-                return Flow::Continue;
+            AttemptOutcome::Failed(err) => {
+                let file = &entry.job.file;
+                let attempt = entry.attempts;
+                warn!("upload: attempt {attempt} for file {file} failed: {err:?}");
+                err
             }
+        };
 
-            // round over: requeue at the tail with attempts preserved; no sleep on the
-            // round-ending failure
-            if attempt_this_round == self.options.in_place_attempts {
-                self.requeue(entry).await;
-                return Flow::Continue;
-            }
-
-            // back off before the next in-place attempt
-            if let Flow::Shutdown = self.await_next_round(attempt_this_round).await {
-                return Flow::Shutdown;
-            }
+        if let Some(status) = err.terminal_status() {
+            Self::log_terminal_drop(&entry, status, &err);
+            return Flow::Continue;
         }
+
+        if entry.attempts >= self.options.attempts {
+            Self::log_dropped(&entry, &err);
+            return Flow::Continue;
+        }
+
+        let wait = cooldown::calc(&self.options.backoff, entry.attempts - 1).max(0);
+        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait));
+        let file = &entry.job.file;
+        info!("upload: retrying {file} in {wait}s");
+        self.requeue(entry).await;
         Flow::Continue
+    }
+
+    /// Wait out the shortest backoff among queued entries, staying responsive
+    /// to commands. Deliberately NOT [`Self::run_until_shutdown`]: that helper
+    /// keeps driving its future after handling a command, but an enqueue here
+    /// must return to the run loop immediately so a newly eligible entry is
+    /// re-evaluated rather than waiting out the sleep. Any non-shutdown
+    /// command — like the sleep completing — returns [`Flow::Continue`].
+    async fn idle_wait(&mut self, wait: Duration) -> Flow {
+        let sleep_fut = (self.sleep_fn)(wait);
+        tokio::select! {
+            biased;
+            cmd = self.receiver.recv() => match cmd {
+                // all senders dropped
+                None => Flow::Shutdown,
+                Some(cmd) => self.handle_command(cmd).await,
+            },
+            () = sleep_fut => Flow::Continue,
+        }
     }
 
     /// Drive one executor attempt on `entry` to completion while staying
@@ -260,21 +282,6 @@ where
                 "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
                 job.file_rule_id, job.file, job.digest
             );
-        }
-    }
-
-    /// Back off before the next in-place attempt, staying responsive to commands.
-    /// `attempt_this_round` is the number of attempts made in the current round; the
-    /// backoff exponent is that minus one. Returns [`Flow::Shutdown`] if a shutdown
-    /// arrived during the sleep.
-    async fn await_next_round(&mut self, attempt_this_round: u32) -> Flow {
-        let secs = cooldown::calc(&self.options.backoff, attempt_this_round - 1);
-        let backoff_secs = secs.max(0);
-        info!("upload: backing off {backoff_secs}s before next in-place attempt");
-        let sleep_fut = (self.sleep_fn)(Duration::from_secs(backoff_secs as u64));
-        match self.run_until_shutdown(sleep_fut).await {
-            None => Flow::Shutdown,
-            Some(()) => Flow::Continue,
         }
     }
 
@@ -357,17 +364,19 @@ pub struct Uploader {
 }
 
 impl Uploader {
-    pub fn spawn<ExecutorT, F, Fut>(
+    pub fn spawn<ExecutorT, F, Fut, N>(
         buffer_size: usize,
         executor: Arc<ExecutorT>,
         options: UploaderOptions,
         snapshot_file: Option<QueueSnapshotFile>,
         sleep_fn: F,
+        now_fn: N,
     ) -> Result<(Self, JoinHandle<()>), UploadErr>
     where
         ExecutorT: UploadExecutor + 'static,
         F: Fn(Duration) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
+        N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let queue = match snapshot_file {
@@ -380,6 +389,7 @@ impl Uploader {
             executor,
             options,
             sleep_fn,
+            now_fn,
         };
         let worker_handle = tokio::spawn(worker.run());
         Ok((Self { sender }, worker_handle))

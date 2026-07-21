@@ -73,6 +73,7 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
         UploaderOptions::default(),
         None,
         |_: Duration| async {},
+        Utc::now,
     )
     .unwrap()
 }
@@ -227,7 +228,8 @@ async fn retry_backoff_follows_expected_sequence() {
         },
         ..UploaderOptions::default()
     };
-    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();
+    let (uploader, handle) =
+        Uploader::spawn(16, mock.clone(), options, None, sleep_fn, Utc::now).unwrap();
 
     timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
     for _ in 0..7 {
@@ -326,8 +328,15 @@ async fn requeue_into_full_queue_drops_job() {
         queue_capacity: 1,
         ..Default::default()
     };
-    let (uploader, handle) =
-        Uploader::spawn(16, mock.clone(), options, None, |_: Duration| async {}).unwrap();
+    let (uploader, handle) = Uploader::spawn(
+        16,
+        mock.clone(),
+        options,
+        None,
+        |_: Duration| async {},
+        Utc::now,
+    )
+    .unwrap();
     let job_a = make_job("a.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
@@ -360,6 +369,7 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
         UploaderOptions::default(),
         None,
         |_: Duration| std::future::pending::<()>(),
+        Utc::now,
     )
     .unwrap();
 
