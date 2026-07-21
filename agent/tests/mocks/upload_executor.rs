@@ -15,6 +15,8 @@ pub enum MockStep {
     Err,
     /// Fail with an error classified terminal (HTTP 400)
     TerminalErr,
+    /// Fail with an error classified as a network connection error
+    NetworkErr,
     /// Await the receiver and return the sent result (or `Ok(())` if the
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
@@ -71,6 +73,12 @@ impl UploadExecutor for MockUploadExecutor {
                 source: Box::new(std::io::Error::other("scripted terminal failure")),
                 is_terminal: true,
                 is_network_conn_err: false,
+                trace: miru_agent::trace!(),
+            })),
+            Some(MockStep::NetworkErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
+                source: Box::new(std::io::Error::other("scripted network failure")),
+                is_terminal: false,
+                is_network_conn_err: true,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),

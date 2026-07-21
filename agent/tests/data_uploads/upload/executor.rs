@@ -224,6 +224,24 @@ async fn token_failure_maps_to_executor_err() {
 }
 
 #[tokio::test]
+async fn token_network_failure_is_network_classified() {
+    let client = Arc::new(MockClient::default());
+    let token_mngr = Arc::new(StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
+        is_network_conn_err: true,
+        trace: miru_agent::trace!(),
+    })));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    // the authn network classification survives the executor's type erasure
+    assert!(err.is_network_conn_err());
+    assert!(!err.is_terminal());
+    assert!(client.requests().is_empty());
+}
+
+#[tokio::test]
 async fn create_failure_maps_to_executor_err() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(non_network_http_err()));

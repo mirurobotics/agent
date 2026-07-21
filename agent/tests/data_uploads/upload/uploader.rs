@@ -47,6 +47,15 @@ fn scripted_err() -> Result<(), UploadErr> {
     }))
 }
 
+fn scripted_network_err() -> Result<(), UploadErr> {
+    Err(UploadErr::ExecutorErr(ExecutorErr {
+        source: Box::new(std::io::Error::other("scripted network failure")),
+        is_terminal: false,
+        is_network_conn_err: true,
+        trace: miru_agent::trace!(),
+    }))
+}
+
 /// Build a job backed by a real temp file, so queue staleness checks see it
 /// as fresh.
 async fn make_real_job(dir: &filesys::Dir, name: &str, contents: &str) -> Job {
@@ -332,6 +341,132 @@ async fn hung_attempt_times_out_and_is_retried() {
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
     drop(release_tx);
+}
+
+#[tokio::test]
+async fn network_failures_never_drop_job() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    for _ in 0..6 {
+        mock.push_step(MockStep::NetworkErr);
+    }
+    mock.push_step(MockStep::Ok);
+    // a budget the network failures would blow through if they counted
+    let options = UploaderOptions {
+        attempts: 3,
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
+    let job = make_job("a.log");
+
+    timed(uploader.enqueue(job.clone())).await.unwrap();
+    for _ in 0..7 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    assert_eq!(mock.recorded_calls(), vec![job; 7]);
+}
+
+#[tokio::test]
+async fn network_failure_uses_flat_cooldown() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::NetworkErr);
+    mock.push_step(MockStep::NetworkErr);
+    mock.push_step(MockStep::Ok);
+    // pin the backoff so the assertion is independent of production defaults
+    let options = UploaderOptions {
+        backoff: miru_agent::cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 30,
+        },
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), options);
+
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    for _ in 0..3 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // the flat base period after each network failure; the growing backoff
+    // would be [1s, 2s]
+    assert_eq!(
+        *sleeps.lock().unwrap(),
+        vec![Duration::from_secs(1), Duration::from_secs(1)]
+    );
+}
+
+#[tokio::test]
+async fn network_failure_requeues_at_tail() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    let (release_tx, release_rx) = oneshot::channel();
+    mock.push_step(MockStep::Hang(release_rx));
+    mock.push_step(MockStep::Ok);
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle, _sleeps) =
+        spawn_with_test_clock(mock.clone(), UploaderOptions::default());
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    // B is queued while A is in flight, so it lands ahead of A's requeue slot
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    release_tx.send(scripted_network_err()).unwrap();
+    for _ in 0..2 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // A's network failure stamps its flat cooldown and requeues at the tail:
+    // B, eligible now, runs before A's retry
+    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b, job_a]);
+}
+
+#[tokio::test]
+async fn network_failures_do_not_consume_attempt_budget() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    // the whole 3-attempt budget in non-network failures, interleaved with two
+    // network failures that must not count toward it: A is dropped on the
+    // third non-network failure (call 5), not before
+    for step in [
+        MockStep::Err,
+        MockStep::NetworkErr,
+        MockStep::Err,
+        MockStep::NetworkErr,
+        MockStep::Err,
+    ] {
+        mock.push_step(step);
+    }
+    mock.push_step(MockStep::Ok);
+    let options = UploaderOptions {
+        attempts: 3,
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    for _ in 0..5 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    // A was dropped at the cap with the actor still healthy: B processes next
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    let mut expected = vec![job_a; 5];
+    expected.push(job_b);
+    assert_eq!(mock.recorded_calls(), expected);
 }
 
 #[tokio::test]
