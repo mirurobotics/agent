@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::future::Future;
 
 // internal crates
-use crate::data_uploads::upload::errors::{executor_err, UploadErr};
+use crate::data_uploads::upload::errors::{classified_executor_err, executor_err, UploadErr};
 use crate::filesys::File;
 use crate::gcs;
 use crate::s3;
@@ -95,7 +95,7 @@ impl SdkTransfer {
         store
             .put(file.clone(), &object, metadata)
             .await
-            .map_err(executor_err)
+            .map_err(classified_executor_err)
     }
 
     /// Uploads `file` to GCS using the vended downscoped OAuth2 bearer token,
@@ -116,7 +116,7 @@ impl SdkTransfer {
                 access_token: creds.access_token.clone(),
             })
             .await
-            .map_err(executor_err)?;
+            .map_err(classified_executor_err)?;
         let object = gcs::Object {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
@@ -124,7 +124,7 @@ impl SdkTransfer {
         store
             .put(file.clone(), &object, metadata)
             .await
-            .map_err(executor_err)
+            .map_err(classified_executor_err)
     }
 
     /// Builds the S3 store, honoring the test-only HTTP client override.

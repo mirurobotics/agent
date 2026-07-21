@@ -20,12 +20,18 @@ pub struct ExecutorErr {
     #[source]
     pub source: Box<dyn std::error::Error + Send + Sync>,
     pub is_terminal: bool,
+    /// True when the wrapped failure was classified a network connection error
+    /// at wrap time.
+    pub is_network_conn_err: bool,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ExecutorErr {
     fn is_terminal(&self) -> bool {
         self.is_terminal
+    }
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
     }
 }
 
@@ -68,25 +74,28 @@ pub(crate) fn executor_err<E>(source: E) -> UploadErr
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    wrap_executor_err(source, false)
+    wrap_executor_err(source, false, false)
 }
 
-/// Wraps a Miru error while preserving its terminal classification.
+/// Wraps a Miru error while preserving its terminal and network-connection
+/// classifications.
 pub(crate) fn classified_executor_err<E>(source: E) -> UploadErr
 where
     E: crate::errors::Error + Send + Sync + 'static,
 {
     let is_terminal = source.is_terminal();
-    wrap_executor_err(source, is_terminal)
+    let is_network_conn_err = source.is_network_conn_err();
+    wrap_executor_err(source, is_terminal, is_network_conn_err)
 }
 
-fn wrap_executor_err<E>(source: E, is_terminal: bool) -> UploadErr
+fn wrap_executor_err<E>(source: E, is_terminal: bool, is_network_conn_err: bool) -> UploadErr
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     UploadErr::ExecutorErr(ExecutorErr {
         source: source.into(),
         is_terminal,
+        is_network_conn_err,
         trace: crate::trace!(),
     })
 }

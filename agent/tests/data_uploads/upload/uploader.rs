@@ -42,6 +42,7 @@ fn scripted_err() -> Result<(), UploadErr> {
     Err(UploadErr::ExecutorErr(ExecutorErr {
         source: Box::new(std::io::Error::other("scripted failure")),
         is_terminal: false,
+        is_network_conn_err: false,
         trace: miru_agent::trace!(),
     }))
 }
