@@ -6,52 +6,124 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.4.1-alpha.1
+  x-release-version: v0.4.1-beta.1
   x-git-commit:
-    sha: 23848f9a79a880b989d7d7949b83329b0e44d85e
-    url: https://github.com/mirurobotics/openapi/commit/23848f9a79a880b989d7d7949b83329b0e44d85e
-    message: "fix(stlc): re-anchor platform seal onto the real SDK on staging main\
-      \ (#203)\n\n## Problem\n\nThe `stlc-generate` push build fails on the **platform**\
-      \ target with:\n\n```\n✗ python: origin/main has diverged from the last sealed\
-      \ integrated commit on this branch.\n  origin/main: c416f66d97fc\n  integrated:\
-      \  b77b8473e502\n```\n\n(run:\nhttps://github.com/mirurobotics/openapi/actions/runs/29300994249/job/86984614129\n\
-      — `platform` fails; `cli` and `device` pass.)\n\n## Root cause\n\nThe platform\
-      \ milestone-A seal (added in #140) pinned `integrated` to\n`b77b8473` *\"initial\
-      \ stlc build\"* — a **broken, near-empty build** whose\nonly diff vs the pre-stlc\
-      \ base was `.stats.yml` +\n`src/miru_platform/lib/.keep` (no actual SDK). The\
-      \ real, full platform\nSDK was later pushed to `python-platform-sdk-staging`\
-      \ `main` as\n`c416f66d` (#147), but the tracking seal was never updated.\n\n\
-      The two are **siblings** (same parent `c38cf33`, neither descends from\nthe\
-      \ other) with **different trees**, so stlc's sibling-divergence guard\nthrows\
-      \ on every push build. The `device` target has the same commit\ntopology but\
-      \ passes, because its sealed `integrated` tree is *identical*\nto its `main`\
-      \ tree, so stlc's reconcile check treats the remote as\ncontributing nothing.\n\
-      \n## Fix\n\nThere is **no custom code** for this target (no `*-custom-code`\
-      \ patch\nfiles, only the tracking JSON). So re-anchor `base` == `integrated`\
-      \ ==\nthe current staging `main` tip `c416f66d`. This matches the healthy\n\
-      device shape (integrated tree == main tree), the guard passes, and the\nnext\
-      \ push build regenerates from the current spec and pushes cleanly.\nNothing\
-      \ on `main` is discarded.\n\n## After merge\n\nThe change is under `sdkgen/*/stainless/custom-code/`,\
-      \ so the push\nloop-breaker `guard` treats it as a seal-only change and runs\
-      \ **no**\nrebuild. To actually rebuild + push the up-to-date platform SDK, run\
-      \ the\n**Generate SDKs with stlc** workflow via `workflow_dispatch` (project:\n\
-      `platform`).\n\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n\
-      \n<!-- codesmith:footer -->\n---\n<a\nhref=\"https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/203\"\
-      ><picture><source\nmedia=\"(prefers-color-scheme: dark)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg\"\
-      ><source\nmedia=\"(prefers-color-scheme: light)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg\"\
-      ><img\nalt=\"View with Codesmith\"\nsrc=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg\"\
-      ></picture></a>\n<a\nhref=\"https://backend.blacksmith.sh/track/enable-autofix?expires=1786757258&installation_id=142588636&pr_number=203&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F203&signature=d0e6c26c6871340b8b8ad24dfed56c8443e990bea1bed7bbd3a9471637100e8a\"\
-      ><picture><source\nmedia=\"(prefers-color-scheme: dark)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg\"\
-      ><source\nmedia=\"(prefers-color-scheme: light)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg\"\
-      ><img\nalt=\"Autofix with Codesmith\"\nsrc=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg\"\
-      ></picture></a>\n<sup>Need help on this PR? Tag <code>@codesmith</code> with\
-      \ what you\nneed. Autofix is disabled.</sup>\n\n<!-- codesmith:autofix:disabled\
-      \ -->\n<!-- /codesmith:footer -->\n\nCo-authored-by: Claude Opus 4.8 <noreply@anthropic.com>"
+    sha: 57cd37b47531ed21703db13f88bd6e57bb101487
+    url: https://github.com/mirurobotics/openapi/commit/57cd37b47531ed21703db13f88bd6e57bb101487
+    message: 'feat(buckets): migrate GCS to B1 and add GET /buckets/setup (#204)
+
+
+      ## What
+
+
+      Two changes to the canonical bucket specs:
+
+
+      ### 1. GCS bucket config → Option B1
+
+      The specs described the old "Design-M" GCS model (customer supplies
+
+      `wip_provider` + `service_account_email`; Miru pins `session_name`).
+
+      Migrated to B1, where the customer supplies **no** GCS auth fields —
+
+      Miru provisions a per-workspace uploader service account, federates into
+
+      its own WIF pool, impersonates that SA, and surfaces its email
+
+      read-only; the customer''s only action is to grant that SA
+
+      `roles/storage.objectCreator` on their bucket.
+
+
+      - `CreateGcsBucketConfig` → empty object (no client fields)
+
+      - `GcsBucketConfig` (response) → drops `wip_provider`/`session_name`;
+
+      keeps read-only `service_account_email`
+
+      - `UpdateGcsBucketConfig` → empty (GCS has no updatable auth fields)
+
+      - `patchBucket` description no longer lists GCS auth fields (only AWS
+
+      `role_arn` is mutable)
+
+      - **AWS/S3 unchanged** — it already uses the correct external-id model.
+
+
+      ### 2. New `GET /buckets/setup`
+
+      Returns the workspace-level integration values a user needs **before**
+
+      creating a bucket:
+
+      - `aws.external_id` — require this in your IAM role''s `sts:ExternalId`
+
+      trust condition
+
+      - `gcs.service_account_email` — grant it `roles/storage.objectCreator`
+
+      on your bucket
+
+
+      New `BucketSetup` schema (`object: bucket_setup`, both fields
+
+      read-only), wired into the `frontend` and `cli` bundles (the two
+
+      audiences that expose `/buckets`), plus the
+
+      `tools/stainless/{frontend,cli}.yml` route/model entries (MIRU018 route
+
+      parity).
+
+
+      ## Breaking change
+
+      GCS create/update no longer accept
+
+      `wip_provider`/`service_account_email`, and the GCS response drops
+
+      `wip_provider`/`session_name`.
+
+
+      ## Notes for consumers
+
+      - **Routing:** `/buckets/setup` is a static path that must be matched
+
+      **before** `/buckets/{bucket_id}` — the backend router needs
+
+      static-segment-first ordering (backend concern).
+
+      - **Backend implementation of `GET /buckets/setup` is a separate
+
+      follow-up task** — this PR only defines the contract.
+
+      - Reconciles with backend branch `feat/gcs-b1-migration` (which already
+
+      implements the B1 GCS shape).
+
+
+      ## Validation
+
+      `./scripts/preflight.sh` passes (lint + tool tests + surface lint all
+
+      green); `./scripts/regen.sh` produces no diff (bundles committed). No
+
+      `wip_provider`/`session_name` remains under `apis/`.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      ---------
+
+
+      Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>'
     author: ben-miru
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-07-16T02:43:53.052099+00:00'
+    built_at: '2026-07-18T04:16:34.601814+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -549,14 +621,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.4.1-alpha.1
+      - v0.4.1-beta.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 23848f9a79a880b989d7d7949b83329b0e44d85e
+      - 57cd37b47531ed21703db13f88bd6e57bb101487
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
