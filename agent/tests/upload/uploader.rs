@@ -300,15 +300,6 @@ async fn hung_attempt_times_out_and_is_retried() {
     // the hang is never released: only the attempt deadline can end it
     mock.push_step(MockStep::Hang(release_rx));
     mock.push_step(MockStep::Ok);
-    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-    let recorded = sleeps.clone();
-
-    // instant sleeps, so the attempt deadline is the only pending timer and
-    // the paused clock auto-advances straight to it
-    let sleep_fn = move |duration: Duration| {
-        recorded.lock().unwrap().push(duration);
-        async {}
-    };
 
     // pin the deadline inputs: make_job's 42 bytes yield a 2s deadline,
     // safely under timed()'s 5s guard
@@ -317,17 +308,22 @@ async fn hung_attempt_times_out_and_is_retried() {
         attempt_timeout_bytes_per_sec: 64 * 1024,
         ..UploaderOptions::default()
     };
-    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();
+    // the test clock's instant sleeps leave the attempt deadline as the only
+    // pending timer, so the paused tokio clock auto-advances straight to it;
+    // the chrono test clock then advances past the backoff stamp so the
+    // requeued job becomes eligible deterministically
+    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), options);
     let job = make_job("a.log");
 
     timed(uploader.enqueue(job.clone())).await.unwrap();
     // first attempt starts and hangs on the never-released oneshot
     timed(started_rx.recv()).await.unwrap();
-    // the deadline fires in virtual time and the retry attempt starts
+    // the deadline fires in virtual time; the job is stamped with a backoff
+    // deadline, requeued, and retried once the test clock reaches the stamp
     timed(started_rx.recv()).await.unwrap();
 
     // the same job was attempted twice: the timeout was treated as a
-    // retryable failure, taking the normal in-place backoff path
+    // retryable failure, taking the normal backoff/requeue path
     assert_eq!(mock.recorded_calls(), vec![job.clone(), job]);
     assert!(!sleeps.lock().unwrap().is_empty());
 
