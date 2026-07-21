@@ -26,13 +26,15 @@ Observable outcome: run `./scripts/test.sh` and see the new uploader tests prove
 
 ## Progress
 
-- [ ] Milestone 1: queue eligibility — `next_attempt_at` on `QueueEntry`, `pop_ready`, `earliest_next_attempt`; queue tests; commit.
-- [ ] Milestone 2: uploader single-attempt with deferred retry — options rename/removal, worker rewrite, `now_fn` wiring, uploader + bridge tests; commit.
+- [x] Milestone 1: queue eligibility — `next_attempt_at` on `QueueEntry`, `pop_ready`, `earliest_next_attempt`; queue tests; commit. (7dace8b source + mechanical test adaptation; new eligibility tests landed with d384644.)
+- [x] Milestone 2: uploader single-attempt with deferred retry — options rename/removal, worker rewrite, `now_fn` wiring, uploader + bridge tests; commit. (3d3cd3d source, d384644 test rework; full suite 1530 passed, covgate upload 96.21 ≥ 96.00.)
 - [ ] Milestone 3: preflight to CLEAN (CI green on the pushed branch head).
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- Discovery: with the new model, a test using a no-op `sleep_fn` and the real clock busy-loops whenever every queued entry is inside its backoff window — `idle_wait`'s instantly-ready sleep starves tokio's current-thread test runtime so even `tokio::time::timeout` never fires (the old `global_attempt_cap_drops_job` hung this way after the worker rewrite, before its test-clock rework). The test harness now documents that `spawn_uploader` (no-op sleep) is only safe when no stamped entry is ever left waiting; other tests use the advancing test clock or a frozen clock + pending sleep.
+- Discovery: the planned test inventory left the upload module at 95.45% coverage, below its 96.00 gate. One extra test (`command_pending_at_shutdown_returns_receive_err`) covering the shutdown-ack error path and the dropped-response `ReceiveActorMessageErr` branch brought it to 96.21 — the gate was not lowered.
+- Discovery: `requeue_into_full_queue_drops_job` shrinks from `[A, A, A, B]` to `[A, B]` recorded calls under the new model — A's single failed attempt cannot requeue into the full queue and is dropped immediately, which is exactly the intended no-head-of-line-blocking behavior.
 
 ## Decision Log
 
@@ -50,6 +52,10 @@ Observable outcome: run `./scripts/test.sh` and see the new uploader tests prove
   Rationale: eligibility is time-based; tests need a controllable clock (a shared `DateTime<Utc>` that the test's `sleep_fn` advances) to be deterministic without real sleeping. Production passes `Utc::now`. Date/Author: 2026-07-20 / ben@miruml.com.
 - Decision: the idle wait (all queued jobs in backoff) re-evaluates the queue after *every* handled command, unlike `run_until_shutdown` which keeps driving its future.
   Rationale: an enqueue during the wait must run immediately; the wait deadline is recomputed from `earliest_next_attempt` each loop iteration, so dropping and rebuilding the sleep future loses nothing. Date/Author: 2026-07-20 / ben@miruml.com.
+- Decision: `idle_wait` is a single `tokio::select!` with `biased;` polling `receiver.recv()` before the sleep.
+  Rationale: commands are handled first when both are ready; the biased recv cannot starve eligible entries because every handled command returns to the loop top, which pops before recv'ing again. Date/Author: 2026-07-20 / implementation.
+- Decision: the idle wait converts the chrono delta via `(earliest - now).to_std().unwrap_or(Duration::ZERO)`.
+  Rationale: `to_std()` errors on negative deltas, so the fallback doubles as the >= 0 clamp; deadline stamping uses `chrono::TimeDelta::seconds` to avoid clashing with the imported `std::time::Duration`. Date/Author: 2026-07-20 / implementation.
 
 ## Outcomes & Retrospective
 
