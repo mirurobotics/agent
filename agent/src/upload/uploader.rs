@@ -310,7 +310,7 @@ where
 
     /// Run `fut` to completion while continuing to serve commands. Returns
     /// `None` when a shutdown arrived (or all senders dropped), in which case
-    /// `fut` is dropped — cancelling an in-flight upload or sleep.
+    /// `fut` is dropped — cancelling an in-flight upload.
     async fn run_until_shutdown<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
         tokio::pin!(fut);
         loop {
