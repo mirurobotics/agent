@@ -15,6 +15,7 @@ use crate::upload::{
 };
 
 // external crates
+use chrono::Utc;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -145,7 +146,7 @@ where
 {
     pub(crate) async fn run(mut self) {
         loop {
-            match self.queue.pop_front().await {
+            match self.queue.pop_ready(Utc::now()).await {
                 // idle: nothing to interleave, just wait for the next command
                 None => {
                     info!("upload: queue empty; awaiting next command");

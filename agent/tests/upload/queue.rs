@@ -32,7 +32,7 @@ async fn open(path: &File) -> QueueSnapshotFile {
 /// whole-`Job` equality across a reload does not hold).
 async fn digests(queue: &mut Queue) -> Vec<String> {
     let mut out = Vec::new();
-    while let Some(entry) = queue.pop_front().await {
+    while let Some(entry) = queue.pop_ready(Utc::now()).await {
         out.push(entry.job.digest);
     }
     out
@@ -179,13 +179,14 @@ mod requeue {
             .requeue(QueueEntry {
                 job: requeued_job.clone(),
                 attempts: 3,
+                next_attempt_at: None,
             })
             .await
             .unwrap();
 
-        let first = queue.pop_front().await.unwrap();
+        let first = queue.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(first.job, job_a);
-        let second = queue.pop_front().await.unwrap();
+        let second = queue.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(second.job, requeued_job);
         assert_eq!(second.attempts, 3);
     }
@@ -201,13 +202,14 @@ mod requeue {
                 .requeue(QueueEntry {
                     job: make_job("a.log"),
                     attempts: 5,
+                    next_attempt_at: None,
                 })
                 .await
                 .unwrap();
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_front().await.unwrap();
+        let entry = reloaded.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 5);
     }
@@ -222,6 +224,7 @@ mod requeue {
             .requeue(QueueEntry {
                 job: make_job("b.log"),
                 attempts: 2,
+                next_attempt_at: None,
             })
             .await;
 
@@ -233,7 +236,7 @@ mod requeue {
     }
 }
 
-mod pop_front {
+mod pop_ready {
     use super::*;
 
     #[tokio::test]
@@ -247,11 +250,11 @@ mod pop_front {
         }
 
         for expected in jobs {
-            let entry = queue.pop_front().await.unwrap();
+            let entry = queue.pop_ready(Utc::now()).await.unwrap();
             assert_eq!(entry.job, expected);
             assert_eq!(entry.attempts, 0);
         }
-        assert!(queue.pop_front().await.is_none());
+        assert!(queue.pop_ready(Utc::now()).await.is_none());
     }
 
     #[tokio::test]
@@ -263,7 +266,7 @@ mod pop_front {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
             queue.enqueue(make_job("a.log")).await.unwrap();
             queue.enqueue(make_job("b.log")).await.unwrap();
-            queue.pop_front().await.unwrap();
+            queue.pop_ready(Utc::now()).await.unwrap();
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
