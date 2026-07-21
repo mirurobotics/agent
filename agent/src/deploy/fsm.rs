@@ -293,11 +293,13 @@ mod tests {
                 }
             };
 
-            // both actions are waits, so validate the wait times
+            // both actions are waits, so validate the wait times. The actual wait
+            // is measured against a second Utc::now() call, so the tolerance must
+            // absorb scheduler delays between the two clock reads under load.
             validate_eq_wait_time(
                 expected_wait_time,
                 actual_wait_time,
-                TimeDelta::milliseconds(1),
+                TimeDelta::milliseconds(250),
             );
         }
 
