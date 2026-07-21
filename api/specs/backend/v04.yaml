@@ -6,124 +6,845 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.4.1-beta.1
+  x-release-version: v0.4.1
   x-git-commit:
-    sha: 57cd37b47531ed21703db13f88bd6e57bb101487
-    url: https://github.com/mirurobotics/openapi/commit/57cd37b47531ed21703db13f88bd6e57bb101487
-    message: 'feat(buckets): migrate GCS to B1 and add GET /buckets/setup (#204)
+    sha: e170551d48a37498e7bd3efaff9b5573f07dbb5b
+    url: https://github.com/mirurobotics/openapi/commit/e170551d48a37498e7bd3efaff9b5573f07dbb5b
+    message: 'chore(deps): bump the actions-minor group across 1 directory with 2
+      updates (#182)
 
 
-      ## What
+      Bumps the actions-minor group with 2 updates in the / directory:
+
+      [dorny/paths-filter](https://github.com/dorny/paths-filter) and
+
+      [marocchino/sticky-pull-request-comment](https://github.com/marocchino/sticky-pull-request-comment).
 
 
-      Two changes to the canonical bucket specs:
+      Updates `dorny/paths-filter` from 4.0.1 to 4.0.2
+
+      <details>
+
+      <summary>Release notes</summary>
+
+      <p><em>Sourced from <a
+
+      href="https://github.com/dorny/paths-filter/releases">dorny/paths-filter''s
+
+      releases</a>.</em></p>
+
+      <blockquote>
+
+      <h2>v4.0.2</h2>
+
+      <h2>What''s Changed</h2>
+
+      <ul>
+
+      <li>fix warning message by <a
+
+      href="https://github.com/cgundy"><code>@​cgundy</code></a> in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/282">dorny/paths-filter#282</a></li>
+
+      <li>chore: fix GitHub spelling in logs by <a
+
+      href="https://github.com/squat"><code>@​squat</code></a> in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/278">dorny/paths-filter#278</a></li>
+
+      <li>fix: use rev-parse instead of branch --show-current for older git
+
+      compat by <a
+
+      href="https://github.com/saschabratton"><code>@​saschabratton</code></a>
+
+      in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/303">dorny/paths-filter#303</a></li>
+
+      <li>fix: work around git dubious ownership errors in container jobs by
+
+      <a
+
+      href="https://github.com/saschabratton"><code>@​saschabratton</code></a>
+
+      in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/317">dorny/paths-filter#317</a></li>
+
+      <li>docs: update changelog for v4.0.2 by <a
+
+      href="https://github.com/saschabratton"><code>@​saschabratton</code></a>
+
+      in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/318">dorny/paths-filter#318</a></li>
+
+      </ul>
+
+      <h2>New Contributors</h2>
+
+      <ul>
+
+      <li><a href="https://github.com/cgundy"><code>@​cgundy</code></a> made
+
+      their first contribution in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/282">dorny/paths-filter#282</a></li>
+
+      <li><a href="https://github.com/squat"><code>@​squat</code></a> made
+
+      their first contribution in <a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/278">dorny/paths-filter#278</a></li>
+
+      </ul>
+
+      <p><strong>Full Changelog</strong>: <a
+
+      href="https://github.com/dorny/paths-filter/compare/v4.0.1...v4.0.2">https://github.com/dorny/paths-filter/compare/v4.0.1...v4.0.2</a></p>
+
+      </blockquote>
+
+      </details>
+
+      <details>
+
+      <summary>Changelog</summary>
+
+      <p><em>Sourced from <a
+
+      href="https://github.com/dorny/paths-filter/blob/master/CHANGELOG.md">dorny/paths-filter''s
+
+      changelog</a>.</em></p>
+
+      <blockquote>
+
+      <h1>Changelog</h1>
+
+      <h2>v4.0.2</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/317">Work
+
+      around git dubious ownership errors in container jobs</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/303">Use
+
+      rev-parse instead of branch --show-current for older git compat</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/282">Fix
+
+      warning message</a></li>
+
+      </ul>
+
+      <h2>v4.0.1</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/255">Support
+
+      merge queue</a></li>
+
+      </ul>
+
+      <h2>v4.0.0</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/294">Update
+
+      action runtime to node24</a></li>
+
+      </ul>
+
+      <h2>v3.0.3</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/279">Add
+
+      missing predicate-quantifier</a></li>
+
+      </ul>
+
+      <h2>v3.0.2</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/224">Add
+
+      config parameter for predicate quantifier</a></li>
+
+      </ul>
+
+      <h2>v3.0.1</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/133">Compare
+
+      base and ref when token is empty</a></li>
+
+      </ul>
+
+      <h2>v3.0.0</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/210">Update to
+
+      Node.js 20</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/215">Update
+
+      all dependencies</a></li>
+
+      </ul>
+
+      <h2>v2.11.1</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/167">Update
+
+      @​actions/core to v1.10.0 - Fixes warning about deprecated
+
+      set-output</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/168">Document
+
+      need for pull-requests: read permission</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/164">Updating
+
+      to actions/checkout@v3</a></li>
+
+      </ul>
+
+      <h2>v2.11.0</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/157">Set
+
+      list-files input parameter as not required</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/161">Update
+
+      Node.js</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/162">Fix
+
+      incorrect handling of Unicode characters in exec()</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/163">Use
+
+      Octokit pagination</a></li>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/160">Updates
+
+      real world links</a></li>
+
+      </ul>
+
+      <h2>v2.10.2</h2>
+
+      <ul>
+
+      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/91">Fix
+
+      getLocalRef() returns wrong ref</a></li>
+
+      </ul>
+
+      <h2>v2.10.1</h2>
+
+      <ul>
+
+      <li><a
+
+      href="https://redirect.github.com/dorny/paths-filter/pull/85">Improve
+
+      robustness of change detection</a></li>
+
+      </ul>
+
+      <h2>v2.10.0</h2>
+
+      <ul>
+
+      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/82">Add
+
+      ref input parameter</a></li>
+
+      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/83">Fix
+
+      change detection in PR when pullRequest.changed_files is
+
+      incorrect</a></li>
+
+      </ul>
+
+      <h2>v2.9.3</h2>
+
+      <ul>
+
+      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/78">Fix
+
+      change detection when base is a tag</a></li>
+
+      </ul>
+
+      <!-- raw HTML omitted -->
+
+      </blockquote>
+
+      <p>... (truncated)</p>
+
+      </details>
+
+      <details>
+
+      <summary>Commits</summary>
+
+      <ul>
+
+      <li><a
+
+      href="https://github.com/dorny/paths-filter/commit/7b450fff21473bca461d4b92ce414b9d0420d706"><code>7b450ff</code></a>
+
+      docs: update changelog for v4.0.2 (<a
+
+      href="https://redirect.github.com/dorny/paths-filter/issues/318">#318</a>)</li>
+
+      <li><a
+
+      href="https://github.com/dorny/paths-filter/commit/928037783a71f24983ea250c6e55290c1b2de54f"><code>9280377</code></a>
+
+      fix: work around git dubious ownership errors in container jobs (<a
+
+      href="https://redirect.github.com/dorny/paths-filter/issues/317">#317</a>)</li>
+
+      <li><a
+
+      href="https://github.com/dorny/paths-filter/commit/f3ceefdc7ef57bc2d8560787d4b6c33e44044cec"><code>f3ceefd</code></a>
+
+      fix: use rev-parse instead of branch --show-current for older git compat
+
+      (<a
+
+      href="https://redirect.github.com/dorny/paths-filter/issues/303">#303</a>)</li>
+
+      <li><a
+
+      href="https://github.com/dorny/paths-filter/commit/61f87a10cd2c304679af17bb73ef192addf33c1c"><code>61f87a1</code></a>
+
+      chore: fix GitHub spelling in logs (<a
+
+      href="https://redirect.github.com/dorny/paths-filter/issues/278">#278</a>)</li>
+
+      <li><a
+
+      href="https://github.com/dorny/paths-filter/commit/b82ff81ffbe6fb4b636bb5b47e37fd8d12b32632"><code>b82ff81</code></a>
+
+      fix warning message (<a
+
+      href="https://redirect.github.com/dorny/paths-filter/issues/282">#282</a>)</li>
+
+      <li>See full diff in <a
+
+      href="https://github.com/dorny/paths-filter/compare/fbd0ab8f3e69293af611ebaee6363fc25e6d187d...7b450fff21473bca461d4b92ce414b9d0420d706">compare
+
+      view</a></li>
+
+      </ul>
+
+      </details>
+
+      <br />
 
 
-      ### 1. GCS bucket config → Option B1
+      Updates `marocchino/sticky-pull-request-comment` from 3.0.4 to 3.0.5
 
-      The specs described the old "Design-M" GCS model (customer supplies
+      <details>
 
-      `wip_provider` + `service_account_email`; Miru pins `session_name`).
+      <summary>Release notes</summary>
 
-      Migrated to B1, where the customer supplies **no** GCS auth fields —
+      <p><em>Sourced from <a
 
-      Miru provisions a per-workspace uploader service account, federates into
+      href="https://github.com/marocchino/sticky-pull-request-comment/releases">marocchino/sticky-pull-request-comment''s
 
-      its own WIF pool, impersonates that SA, and surfaces its email
+      releases</a>.</em></p>
 
-      read-only; the customer''s only action is to grant that SA
+      <blockquote>
 
-      `roles/storage.objectCreator` on their bucket.
+      <h2>v3.0.5</h2>
+
+      <h2>What''s Changed</h2>
+
+      <ul>
+
+      <li>build(deps-dev): Bump rollup from 4.60.1 to 4.60.2 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1687">marocchino/sticky-pull-request-comment#1687</a></li>
+
+      <li>build(deps-dev): Bump typescript from 6.0.2 to 6.0.3 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1686">marocchino/sticky-pull-request-comment#1686</a></li>
+
+      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.11 to
+
+      2.4.12 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1685">marocchino/sticky-pull-request-comment#1685</a></li>
+
+      <li>build(deps-dev): Bump vitest from 4.1.4 to 4.1.5 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1688">marocchino/sticky-pull-request-comment#1688</a></li>
+
+      <li>build(deps): Bump <code>@​actions/glob</code> from 0.6.1 to 0.7.0 by
+
+      <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1689">marocchino/sticky-pull-request-comment#1689</a></li>
+
+      <li>build(deps): Bump <code>@​actions/core</code> from 3.0.0 to 3.0.1 by
+
+      <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1690">marocchino/sticky-pull-request-comment#1690</a></li>
+
+      <li>build(deps): Bump <code>@​actions/github</code> from 9.1.0 to 9.1.1
+
+      by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1691">marocchino/sticky-pull-request-comment#1691</a></li>
+
+      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.12 to
+
+      2.4.13 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1693">marocchino/sticky-pull-request-comment#1693</a></li>
+
+      <li>feat: embed file content in message template via
+
+      <code>{{{content}}}</code> placeholder by <a
+
+      href="https://github.com/marocchino"><code>@​marocchino</code></a> with
+
+      <a href="https://github.com/Copilot"><code>@​Copilot</code></a> in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1665">marocchino/sticky-pull-request-comment#1665</a></li>
+
+      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.13 to
+
+      2.4.14 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1694">marocchino/sticky-pull-request-comment#1694</a></li>
+
+      <li>build(deps-dev): Bump rollup from 4.60.2 to 4.60.3 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1695">marocchino/sticky-pull-request-comment#1695</a></li>
+
+      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.6.0 to
+
+      25.6.2 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1698">marocchino/sticky-pull-request-comment#1698</a></li>
+
+      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.6.2 to
+
+      25.7.0 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1700">marocchino/sticky-pull-request-comment#1700</a></li>
+
+      <li>build(deps-dev): Bump vitest from 4.1.5 to 4.1.6 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1701">marocchino/sticky-pull-request-comment#1701</a></li>
+
+      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.7.0 to
+
+      25.8.0 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1703">marocchino/sticky-pull-request-comment#1703</a></li>
+
+      <li>build(deps-dev): Bump rollup from 4.60.3 to 4.60.4 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1704">marocchino/sticky-pull-request-comment#1704</a></li>
+
+      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.8.0 to
+
+      25.9.1 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1707">marocchino/sticky-pull-request-comment#1707</a></li>
+
+      <li>build(deps-dev): Bump vitest from 4.1.6 to 4.1.7 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1708">marocchino/sticky-pull-request-comment#1708</a></li>
+
+      <li>build(deps): Bump brace-expansion from 5.0.5 to 5.0.6 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1705">marocchino/sticky-pull-request-comment#1705</a></li>
+
+      <li>build(deps): Bump undici from 6.24.0 to 6.27.0 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1725">marocchino/sticky-pull-request-comment#1725</a></li>
+
+      <li>build(deps-dev): Bump rollup from 4.60.4 to 4.62.2 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1722">marocchino/sticky-pull-request-comment#1722</a></li>
+
+      <li>build(deps): Bump actions/checkout from 6 to 7 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1721">marocchino/sticky-pull-request-comment#1721</a></li>
+
+      <li>build(deps-dev): Bump vite from 8.0.13 to 8.0.16 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1720">marocchino/sticky-pull-request-comment#1720</a></li>
+
+      <li>build(deps-dev): Bump vitest from 4.1.7 to 4.1.9 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1719">marocchino/sticky-pull-request-comment#1719</a></li>
+
+      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.9.1 to
+
+      26.1.0 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1731">marocchino/sticky-pull-request-comment#1731</a></li>
+
+      <li>build(deps-dev): Bump <code>@​rollup/plugin-commonjs</code> from
+
+      29.0.2 to 29.0.3 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1710">marocchino/sticky-pull-request-comment#1710</a></li>
+
+      <li>build(deps-dev): Bump js-yaml from 4.1.1 to 5.2.1 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1732">marocchino/sticky-pull-request-comment#1732</a></li>
+
+      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.14 to
+
+      2.5.2 by <a
+
+      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
+
+      in <a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1730">marocchino/sticky-pull-request-comment#1730</a></li>
+
+      </ul>
+
+      <p><strong>Full Changelog</strong>: <a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/compare/v3.0.4...v3.0.5">https://github.com/marocchino/sticky-pull-request-comment/compare/v3.0.4...v3.0.5</a></p>
+
+      </blockquote>
+
+      </details>
+
+      <details>
+
+      <summary>Commits</summary>
+
+      <ul>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/5770ad5eb8f42dd2c4f34da00c94c5381e49af88"><code>5770ad5</code></a>
+
+      📦️ Build</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/2c190609760f3bf7b8298e5e88612e77a6d49ecc"><code>2c19060</code></a>
+
+      build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.14 to 2.5.2
+
+      (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1730">#1730</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/3d24e5ae13e5cb81ea2bc10645b7d737cf11902f"><code>3d24e5a</code></a>
+
+      build(deps-dev): Bump js-yaml from 4.1.1 to 5.2.1 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1732">#1732</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/36048210fda2e47994091215455a64526baf9829"><code>3604821</code></a>
+
+      build(deps-dev): Bump <code>@​rollup/plugin-commonjs</code> from 29.0.2
+
+      to 29.0.3 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1710">#1710</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/a4d9c0f61c8b826000881e93dcf8d3c3de9e6d82"><code>a4d9c0f</code></a>
+
+      build(deps-dev): Bump <code>@​types/node</code> from 25.9.1 to 26.1.0
+
+      (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1731">#1731</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/ae65a58300ab21f85000f649966645a4f8b98c7e"><code>ae65a58</code></a>
+
+      build(deps-dev): Bump vitest from 4.1.7 to 4.1.9 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1719">#1719</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/86803217fddacb4de85c3e9724a5562badaa8c8e"><code>8680321</code></a>
+
+      build(deps-dev): Bump vite from 8.0.13 to 8.0.16 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1720">#1720</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/5d402391401fd084c1a074525b8c1f306989428f"><code>5d40239</code></a>
+
+      build(deps): Bump actions/checkout from 6 to 7 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1721">#1721</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/39ab01d7848066124dd3483f4186a8ec4b5f8f3d"><code>39ab01d</code></a>
+
+      build(deps-dev): Bump rollup from 4.60.4 to 4.62.2 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1722">#1722</a>)</li>
+
+      <li><a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/commit/b2660f1f0ba080a208cdb3834816c6012377e8b6"><code>b2660f1</code></a>
+
+      build(deps): Bump undici from 6.24.0 to 6.27.0 (<a
+
+      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1725">#1725</a>)</li>
+
+      <li>Additional commits viewable in <a
+
+      href="https://github.com/marocchino/sticky-pull-request-comment/compare/0ea0beb66eb9baf113663a64ec522f60e49231c0...5770ad5eb8f42dd2c4f34da00c94c5381e49af88">compare
+
+      view</a></li>
+
+      </ul>
+
+      </details>
+
+      <br />
 
 
-      - `CreateGcsBucketConfig` → empty object (no client fields)
+      <!-- codesmith:footer -->
 
-      - `GcsBucketConfig` (response) → drops `wip_provider`/`session_name`;
+      ---
 
-      keeps read-only `service_account_email`
+      <a
 
-      - `UpdateGcsBucketConfig` → empty (GCS has no updatable auth fields)
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/182"><picture><source
 
-      - `patchBucket` description no longer lists GCS auth fields (only AWS
+      media="(prefers-color-scheme: dark)"
 
-      `role_arn` is mutable)
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"><source
 
-      - **AWS/S3 unchanged** — it already uses the correct external-id model.
+      media="(prefers-color-scheme: light)"
 
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg"><img
 
-      ### 2. New `GET /buckets/setup`
+      alt="View with Codesmith"
 
-      Returns the workspace-level integration values a user needs **before**
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"></picture></a>
 
-      creating a bucket:
+      <a
 
-      - `aws.external_id` — require this in your IAM role''s `sts:ExternalId`
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1787173487&installation_model_id=425273&pr_number=182&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F182&signature=9d0dbc5838b77a36236b6692f2024d1b488eb5a6be849dd6f356aa4971e02b21"><picture><source
 
-      trust condition
+      media="(prefers-color-scheme: dark)"
 
-      - `gcs.service_account_email` — grant it `roles/storage.objectCreator`
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
 
-      on your bucket
+      media="(prefers-color-scheme: light)"
 
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
 
-      New `BucketSetup` schema (`object: bucket_setup`, both fields
+      alt="Autofix with Codesmith"
 
-      read-only), wired into the `frontend` and `cli` bundles (the two
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"></picture></a>
 
-      audiences that expose `/buckets`), plus the
+      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
 
-      `tools/stainless/{frontend,cli}.yml` route/model entries (MIRU018 route
-
-      parity).
-
-
-      ## Breaking change
-
-      GCS create/update no longer accept
-
-      `wip_provider`/`service_account_email`, and the GCS response drops
-
-      `wip_provider`/`session_name`.
+      need. Autofix is disabled.</sup>
 
 
-      ## Notes for consumers
+      <!-- codesmith:autofix:disabled -->
 
-      - **Routing:** `/buckets/setup` is a static path that must be matched
-
-      **before** `/buckets/{bucket_id}` — the backend router needs
-
-      static-segment-first ordering (backend concern).
-
-      - **Backend implementation of `GET /buckets/setup` is a separate
-
-      follow-up task** — this PR only defines the contract.
-
-      - Reconciles with backend branch `feat/gcs-b1-migration` (which already
-
-      implements the B1 GCS shape).
+      <!-- /codesmith:footer -->
 
 
-      ## Validation
+      Signed-off-by: dependabot[bot] <support@github.com>
 
-      `./scripts/preflight.sh` passes (lint + tool tests + surface lint all
+      Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
-      green); `./scripts/regen.sh` produces no diff (bundles committed). No
-
-      `wip_provider`/`session_name` remains under `apis/`.
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-
-      ---------
-
-
-      Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>'
-    author: ben-miru
+      Co-authored-by: ben-miru <ben@mirurobotics.com>'
+    author: dependabot[bot]
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-07-18T04:16:34.601814+00:00'
+    built_at: '2026-07-21T06:41:39.429166+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -621,14 +1342,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.4.1-beta.1
+      - v0.4.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 57cd37b47531ed21703db13f88bd6e57bb101487
+      - e170551d48a37498e7bd3efaff9b5573f07dbb5b
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
