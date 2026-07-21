@@ -18,13 +18,16 @@ After this change, the uploader treats network-classified failures the way the d
 
 ## Progress
 
-- [ ] Milestone 1: classification propagation across the executor boundary (`upload/errors.rs`, `upload/executor.rs`, `upload/transfer.rs`) + unit tests.
-- [ ] Milestone 2: uploader retry policy (no attempt bump, flat cooldown, tail requeue, debug logging) + actor tests.
-- [ ] Milestone 3: post-v0.9.0 audit confirmation, full local validation, push, CI-clean preflight.
+- [x] Milestone 1: classification propagation across the executor boundary (`upload/errors.rs`, `upload/executor.rs`, `upload/transfer.rs`) + unit tests.
+- [x] Milestone 2: uploader retry policy (no attempt bump, flat cooldown, tail requeue, debug logging) + actor tests.
+- [x] Milestone 3: post-v0.9.0 audit confirmation (PR #178 audited post-merge, see Decision Log), local validation of the upload test suite, push, CI-clean preflight.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- PR #178 (upload attempt-deadline) merged to `main` as 6749a4c while this plan was in flight — the exact contingency the Milestone 3 audit anticipated. The branch rebased onto it with zero conflicts: #178 touches `attempt_upload`, `UploaderOptions`, and the `errors` imports, while this plan touches `run_round` and the `ExecutorErr` type, so the hunks are disjoint. All 71 upload tests (including #178's paused-clock `hung_attempt_times_out_and_is_retried`) pass on the combined tree.
+- A third `ExecutorErr` struct literal exists in `agent/tests/mocks/object_transfer.rs` (`push_err`), beyond the two the plan listed; it gained the new field like the others.
+- The `network_failure_requeues_at_tail` test cannot use `MockStep::NetworkErr` directly — the failure must be released *after* job B is enqueued, so it uses `MockStep::Hang` released with a new `scripted_network_err()` helper. Expected call order `[A, B, A]` also proves the round ends after one attempt.
+- The original test plan left `await_network_cooldown`'s shutdown arm uncovered (a covgate liability); `shutdown_during_network_cooldown_returns_promptly` was added to cover it.
 
 ## Decision Log
 
@@ -34,10 +37,14 @@ After this change, the uploader treats network-classified failures the way the d
 - Decision: on a network-classified failure the job is requeued at the tail immediately (ending the round), then the actor sleeps the flat cooldown before popping the next job.
   Rationale: the executor path has two independent network destinations — create/confirm go to the Miru backend, the transfer goes to S3 or GCS. A partial outage (e.g. GCS unreachable, backend fine) would head-of-line block distinct-destination jobs if the failed job stayed in place. Tail-requeue rotates the queue so every job gets a shot per cooldown period; during a total outage rotation is harmless (the flat sleep bounds the global attempt rate to one per `base_secs` either way). Requeue happens *before* the sleep so a queue snapshot or shutdown during the sleep never loses the job.
   Date/Author: 2026-07-20 / plan author.
+- Decision: PR #178's `AttemptTimeoutErr` needs no classification change. It is a bare expiry (file/size/deadline only, no captured source), and its `crate::errors::Error` impl uses the trait defaults, so `is_network_conn_err() == false` — a deadline expiry burns the attempt budget as a real failure, exactly as the audit guidance requires. Under the reworked `run_round` it rides the non-network path (bump, warn, exponential in-place backoff, cap drop) unchanged.
+  Date/Author: 2026-07-20 / implementation.
+- Decision: a refine-pass attempt to demote the pre-existing requeue `info!` log to `debug!` on network rounds was reverted — `Queue::requeue` logs `info!` unconditionally right after, so the demotion was half-effective and completing it would churn `queue.rs` out of scope. Accepted residual: pre-outcome `info!` lines ("dequeued job", "attempting", queue-side logs) still fire each network cycle; the failure itself and the cooldown log are `debug!` as specified.
+  Date/Author: 2026-07-20 / implementation.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Implemented as planned across three commits (plus the rebase onto PR #178): `ExecutorErr` captures `is_network_conn_err` at wrap time and the four erasing call sites (executor `token()`, S3 put, GCS store build, GCS put) now go through `classified_executor_err`; `run_round` bumps `entry.attempts` only after the outcome is known and only for non-network failures, ends the round on a network failure with a debug-only log, tail requeue (before the sleep), and a flat `base_secs` cooldown via the new `await_network_cooldown` helper. Network failures can never hit `max_total_attempts`, so jobs survive outages indefinitely; the non-network policy is byte-for-byte unchanged (verified by the untouched pre-existing actor tests). Coverage: 7 new in-source unit tests in `upload/errors.rs`, 5 new actor tests (including the tail-requeue ordering and shutdown-during-cooldown cases), 1 new executor test, and negative-classification asserts on the three transfer failure tests. Delivered via draft PR against `main` with CI preflight green on the pushed head.
 
 ## Context and Orientation
 
