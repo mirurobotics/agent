@@ -188,8 +188,8 @@ impl Storage {
             Ok(device_data) => match device_data.status {
                 models::DeviceStatus::Online => {
                     info!("Shutting down device storage, setting device to offline");
-                    record(
-                        &mut first_err,
+                    first_err = record(
+                        first_err,
                         "device offline patch",
                         self.device
                             .patch(models::device::Updates::disconnected())
@@ -202,38 +202,34 @@ impl Storage {
             },
             Err(e) => {
                 error!("failed to read device data during shutdown: {e}");
-                first_err.get_or_insert(e.into());
+                first_err = first_err.or(Some(e.into()));
             }
         }
 
-        record(&mut first_err, "device store", self.device.shutdown().await);
-        record(
-            &mut first_err,
+        first_err = record(first_err, "device store", self.device.shutdown().await);
+        first_err = record(
+            first_err,
             "config instance metadata store",
             self.cfg_insts.meta.shutdown().await,
         );
-        record(
-            &mut first_err,
+        first_err = record(
+            first_err,
             "config instance content store",
             self.cfg_insts.content.shutdown().await,
         );
-        record(
-            &mut first_err,
+        first_err = record(
+            first_err,
             "deployments store",
             self.deployments.shutdown().await,
         );
-        record(
-            &mut first_err,
-            "releases store",
-            self.releases.shutdown().await,
-        );
-        record(
-            &mut first_err,
+        first_err = record(first_err, "releases store", self.releases.shutdown().await);
+        first_err = record(
+            first_err,
             "upload rules store",
             self.upload_rules.shutdown().await,
         );
-        record(
-            &mut first_err,
+        first_err = record(
+            first_err,
             "git commits store",
             self.git_commits.shutdown().await,
         );
@@ -245,11 +241,20 @@ impl Storage {
     }
 }
 
-fn record<E: Into<StorErr>>(first_err: &mut Option<StorErr>, target: &str, result: Result<(), E>) {
-    if let Err(e) = result {
-        let e = e.into();
-        error!("failed to shutdown {target}: {e}");
-        first_err.get_or_insert(e);
+// Logs a failed shutdown step and folds it into the running first error:
+// the earliest error wins, later ones are logged only.
+fn record<E: Into<StorErr>>(
+    first_err: Option<StorErr>,
+    target: &str,
+    result: Result<(), E>,
+) -> Option<StorErr> {
+    match result {
+        Ok(()) => first_err,
+        Err(e) => {
+            let e = e.into();
+            error!("failed to shutdown {target}: {e}");
+            first_err.or(Some(e))
+        }
     }
 }
 
