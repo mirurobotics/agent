@@ -20,6 +20,13 @@ use miru_agent::upload::UploaderExt;
 
 // external crates
 use chrono::Utc;
+use tokio::time::Duration;
+
+// Outer wall-clock net around join handles in each test. Purely hang
+// protection -- its value is NOT part of the verified behavior. It
+// must absorb coverage-instrumented, loaded-machine runs, so keep it
+// generous; on success it never elapses and costs nothing.
+const HANG_GUARD: Duration = Duration::from_secs(60);
 
 type ShutdownHandle = Pin<Box<dyn Future<Output = ()> + Send>>;
 
@@ -497,5 +504,43 @@ pub mod shutdown {
         // bundle would hang the test and trip the suite-level timeout
         state.shutdown().await.unwrap();
         state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn returns_first_error_with_multiple_failures() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // pre-close the syncer (fails first) and token manager (fails last)
+        state.syncer.shutdown().await.unwrap();
+        state.token_mngr.shutdown().await.unwrap();
+
+        // the FIRST error (the syncer's) is returned, not the token manager's
+        let err = state.shutdown().await.unwrap_err();
+        assert!(matches!(err, ServerErr::SyncErr(_)));
+
+        tokio::time::timeout(HANG_GUARD, state_handle)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn continues_past_storage_substore_failure() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // pre-close one storage substore so the storage step fails partway
+        // through Storage::shutdown
+        state.storage.git_commits.shutdown().await.unwrap();
+
+        // shutdown reports the storage failure...
+        let err = state.shutdown().await.unwrap_err();
+        assert!(matches!(err, ServerErr::DiskErr(_)));
+
+        // ...but the remaining stores and the token manager were still shut
+        // down, so the state handle completes (pre-fix: times out)
+        tokio::time::timeout(HANG_GUARD, state_handle)
+            .await
+            .unwrap();
     }
 }

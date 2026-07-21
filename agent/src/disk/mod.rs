@@ -31,7 +31,7 @@ use self::layout::Layout as StorLayout;
 use crate::filesys::Overwrite;
 use crate::models;
 
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Capacities {
@@ -180,29 +180,81 @@ impl Storage {
     }
 
     pub async fn shutdown(&self) -> Result<(), StorErr> {
+        // best-effort: attempt every step, return the first error at the end
+        let mut first_err: Option<StorErr> = None;
+
         // if the device is online, set it to offline before shutting down
-        let device_data = self.device.read().await?;
-        match device_data.status {
-            models::DeviceStatus::Online => {
-                info!("Shutting down device storage, setting device to offline");
-                self.device
-                    .patch(models::device::Updates::disconnected())
-                    .await?;
-            }
-            models::DeviceStatus::Offline => {
-                info!("Shutting down device storage, device is already offline");
+        match self.device.read().await {
+            Ok(device_data) => match device_data.status {
+                models::DeviceStatus::Online => {
+                    info!("Shutting down device storage, setting device to offline");
+                    first_err = record(
+                        first_err,
+                        "device offline patch",
+                        self.device
+                            .patch(models::device::Updates::disconnected())
+                            .await,
+                    );
+                }
+                models::DeviceStatus::Offline => {
+                    info!("Shutting down device storage, device is already offline");
+                }
+            },
+            Err(e) => {
+                error!("failed to read device data during shutdown: {e}");
+                first_err = first_err.or(Some(e.into()));
             }
         }
 
-        self.device.shutdown().await?;
-        self.cfg_insts.meta.shutdown().await?;
-        self.cfg_insts.content.shutdown().await?;
-        self.deployments.shutdown().await?;
-        self.releases.shutdown().await?;
-        self.upload_rules.shutdown().await?;
-        self.git_commits.shutdown().await?;
+        first_err = record(first_err, "device store", self.device.shutdown().await);
+        first_err = record(
+            first_err,
+            "config instance metadata store",
+            self.cfg_insts.meta.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "config instance content store",
+            self.cfg_insts.content.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "deployments store",
+            self.deployments.shutdown().await,
+        );
+        first_err = record(first_err, "releases store", self.releases.shutdown().await);
+        first_err = record(
+            first_err,
+            "upload rules store",
+            self.upload_rules.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "git commits store",
+            self.git_commits.shutdown().await,
+        );
 
-        Ok(())
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+// Logs a failed shutdown step and folds it into the running first error:
+// the earliest error wins, later ones are logged only.
+fn record<E: Into<StorErr>>(
+    first_err: Option<StorErr>,
+    target: &str,
+    result: Result<(), E>,
+) -> Option<StorErr> {
+    match result {
+        Ok(()) => first_err,
+        Err(e) => {
+            let e = e.into();
+            error!("failed to shutdown {target}: {e}");
+            first_err.or(Some(e))
+        }
     }
 }
 
