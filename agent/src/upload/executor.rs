@@ -24,9 +24,10 @@ use tracing::{info, warn};
 ///
 /// # Cancel safety
 ///
-/// The actor drops an in-progress `upload` future on shutdown, so implementations must
-/// tolerate being cancelled at any await point. An interrupted transfer is re-driven
-/// after restart via scanner re-observation plus backend digest dedup.
+/// The actor drops an in-progress `upload` future on shutdown or when the attempt
+/// deadline expires, so implementations must tolerate being cancelled at any await
+/// point. An interrupted transfer is re-driven after restart via scanner
+/// re-observation plus backend digest dedup.
 pub trait UploadExecutor: Send + Sync {
     fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }

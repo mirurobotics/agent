@@ -197,7 +197,10 @@ impl Store {
     /// The upload itself carries no timeout — a single attempt spans the whole
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
     /// can stall this call; callers that need a bound must enforce their own
-    /// size-scaled deadline (e.g. `tokio::time::timeout`) around it.
+    /// size-scaled deadline (e.g. `tokio::time::timeout`) around it. The
+    /// upload actor does exactly that: `Worker::attempt_upload` in
+    /// `agent/src/upload/uploader.rs` bounds every attempt with a
+    /// floor-plus-per-byte deadline (`UploaderOptions::attempt_deadline`).
     pub async fn put(
         &self,
         src: File,
