@@ -5,6 +5,7 @@ pub mod cache;
 pub mod cli;
 pub mod cooldown;
 pub mod crypt;
+pub mod delete;
 pub mod deploy;
 pub mod disk;
 pub mod errors;

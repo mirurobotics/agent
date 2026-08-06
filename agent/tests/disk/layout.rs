@@ -57,6 +57,13 @@ pub mod storage_layout {
     }
 
     #[test]
+    fn delete_queue() {
+        let layout = Layout::default();
+        let file = layout.delete_queue();
+        assert_eq!(file.to_string(), "/var/lib/miru/delete_queue.json");
+    }
+
+    #[test]
     fn resources() {
         let layout = Layout::default();
         let dir = layout.resources();
