@@ -1,5 +1,5 @@
 // internal crates
-use miru_agent::filesys::{dirs, File};
+use miru_agent::filesys::{dirs, files, File, WriteOptions};
 use miru_agent::models::DeletePolicy;
 use miru_agent::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr};
 
@@ -51,6 +51,37 @@ mod from_snapshot {
         let queue = Queue::from_snapshot(8, open(&path).await);
 
         assert!(queue.is_empty());
+    }
+
+    // upload_queue.json written before `delete_delay_secs` existed must load
+    // (defaulting the field to 0), not be silently replaced by an empty
+    // default snapshot (new_with_default overwrites on any read error).
+    #[tokio::test]
+    async fn pre_delete_delay_snapshot_loads_with_default_zero() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+
+        // persist one entry, then strip the field from the on-disk JSON to
+        // reproduce a snapshot written by an older agent
+        {
+            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            queue.enqueue(make_job("a.log")).await.unwrap();
+        }
+        let mut value: serde_json::Value = files::read_json(&path).await.unwrap();
+        value["entries"][0]["job"]
+            .as_object_mut()
+            .unwrap()
+            .remove("delete_delay_secs")
+            .expect("fixture should serialize a delete_delay_secs field");
+        files::write_json(&path, &value, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let mut reloaded = Queue::from_snapshot(8, open(&path).await);
+        assert_eq!(reloaded.len(), 1);
+        let entry = reloaded.pop_front().await.unwrap();
+        assert_eq!(entry.job.delete_delay_secs, 0);
+        assert_eq!(entry.job.digest, "sha256:a.log");
     }
 }
 

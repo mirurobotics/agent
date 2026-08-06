@@ -17,5 +17,9 @@ pub struct Job {
     pub upload_rule_id: String,
     pub deployment_id: String,
     pub delete_policy: DeletePolicy,
+    // seconds to keep the file after it becomes deletable (copied from the
+    // StableFile); defaults to 0 so `upload_queue.json` entries written by
+    // older agents (which lack the field) remain deserializable
+    #[serde(default)]
     pub delete_delay_secs: i64,
 }
