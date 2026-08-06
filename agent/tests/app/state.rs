@@ -7,6 +7,7 @@ use std::sync::Arc;
 // internal crates
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
+use miru_agent::delete::DeleterExt;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
 use miru_agent::filesys::{dirs, files, Dir, FileSysErr, PathExt, WriteOptions};
@@ -292,6 +293,57 @@ pub mod init {
         state.shutdown().await.unwrap();
         state_handle.await;
     }
+
+    #[tokio::test]
+    async fn deleter_spawned_when_enabled() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // the deleter shares the scanner/uploader enable flag: its producer
+        // is the uploader's executor. the actor is spawned and its queue
+        // snapshot file is seeded on disk
+        assert!(state.deleter.is_some());
+        assert!(env.layout.delete_queue().exists());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn deleter_degrades_when_snapshot_path_unwritable() {
+        let env = TestEnv::valid().await;
+        // a directory at the snapshot FILE path makes
+        // DeleteQueueSnapshotFile::new_with_default fail on both read and create
+        dirs::create(&Dir::new(env.layout.delete_queue().path().clone()))
+            .await
+            .unwrap();
+
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // fail-open: the agent boots and the deleter runs without persistence
+        assert!(state.deleter.is_some());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+
+        // nothing replaced the blocking directory with a snapshot file
+        assert!(env.layout.delete_queue().path().is_dir());
+    }
+
+    #[tokio::test]
+    async fn deleter_absent_when_disabled() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init(false).await.unwrap();
+
+        // no deleter actor is spawned and nothing touches the snapshot file
+        assert!(state.deleter.is_none());
+        assert!(!env.layout.delete_queue().exists());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
 }
 
 pub mod shutdown {
@@ -385,6 +437,35 @@ pub mod shutdown {
 
         let err = state.shutdown().await.expect_err("uploader error surfaces");
         assert!(matches!(err, ServerErr::UploadErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn deleter_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init(true).await.unwrap();
+
+        // set the device online so the offline assertion below proves teardown
+        // continued through storage after the deleter error
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the deleter actor directly so AppState::shutdown errors on it
+        // (the uploader shuts down cleanly first, so the deleter's error is
+        // the one surfaced)
+        state.deleter.as_ref().unwrap().shutdown().await.unwrap();
+
+        let err = state.shutdown().await.expect_err("deleter error surfaces");
+        assert!(matches!(err, ServerErr::DeleteErr(_)));
         state_handle.await;
 
         let device = files::read_json::<Device>(&env.layout.device())
