@@ -35,6 +35,7 @@ fn make_job(name: &str) -> Job {
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         delete_policy: DeletePolicy::Never,
+        delete_delay_secs: 0,
     }
 }
 
@@ -63,6 +64,7 @@ async fn make_real_job(dir: &filesys::Dir, name: &str, contents: &str) -> Job {
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         delete_policy: DeletePolicy::Never,
+        delete_delay_secs: 0,
     }
 }
 

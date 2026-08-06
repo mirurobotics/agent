@@ -21,6 +21,7 @@ fn rule(id: &str, digest: &str, policy: DeletePolicy) -> UploadRule {
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
             delete_policy: policy,
+            delete_delay_secs: 0,
         },
         created_at: DateTime::<Utc>::UNIX_EPOCH,
         updated_at: DateTime::<Utc>::UNIX_EPOCH,

@@ -302,6 +302,7 @@ async fn differs_from_previous(
         observation.timestamp,
         digest,
         state.rule().destination.delete_policy,
+        state.rule().destination.delete_delay_secs,
     )))
 }
 
@@ -310,6 +311,7 @@ fn build_stable_file(
     last_observed_at: DateTime<Utc>,
     digest: Digest,
     delete_policy: DeletePolicy,
+    delete_delay_secs: i64,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
@@ -323,6 +325,7 @@ fn build_stable_file(
         deployment_id: first_obs.deployment_id.clone(),
         upload_rule_id: first_obs.upload_rule_id.clone(),
         delete_policy,
+        delete_delay_secs,
     }
 }
 
@@ -455,6 +458,7 @@ mod tests {
             deployment_id: "d".to_string(),
             upload_rule_id: "coll".to_string(),
             delete_policy: DeletePolicy::Never,
+            delete_delay_secs: 0,
         }
     }
 
@@ -481,6 +485,7 @@ mod tests {
             deployment_id: obs.deployment_id.clone(),
             upload_rule_id: obs.upload_rule_id.clone(),
             delete_policy: DeletePolicy::Never,
+            delete_delay_secs: 0,
         }
     }
 
@@ -954,6 +959,28 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(stable_file_of(outcome).delete_policy, DeletePolicy::Never);
+        }
+
+        // The emitted StableFile stamps the rule destination's delete delay:
+        // a rule with `delete_delay_secs: 300` yields 300 on the StableFile.
+        #[tokio::test]
+        async fn stamps_delete_delay_secs_from_rule() {
+            let mut c = case("s.mcap", 0).await;
+            c.state.cfg.rule.destination.delete_delay_secs = 300;
+            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
+                .await
+                .unwrap();
+            assert_eq!(stable_file_of(outcome).delete_delay_secs, 300);
+        }
+
+        // The default rule stamps the default delay 0.
+        #[tokio::test]
+        async fn stamps_zero_delete_delay_from_default_rule() {
+            let c = case("s.mcap", 0).await;
+            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
+                .await
+                .unwrap();
+            assert_eq!(stable_file_of(outcome).delete_delay_secs, 0);
         }
     }
 

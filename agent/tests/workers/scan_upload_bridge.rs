@@ -49,6 +49,8 @@ fn stable_file(name: &str, deployment_id: &str, rule_id: &str) -> StableFile {
         deployment_id: deployment_id.to_string(),
         upload_rule_id: rule_id.to_string(),
         delete_policy: DeletePolicy::AfterUpload,
+        // non-default so the bridge's field copy is provably a copy, not a default
+        delete_delay_secs: 300,
     }
 }
 
@@ -152,6 +154,7 @@ async fn stable_file_becomes_upload_job() {
         upload_rule_id: stable.upload_rule_id,
         deployment_id: stable.deployment_id,
         delete_policy: stable.delete_policy,
+        delete_delay_secs: stable.delete_delay_secs,
     };
     assert_eq!(expected, jobs[0]);
 

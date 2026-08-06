@@ -17,4 +17,5 @@ pub struct Job {
     pub upload_rule_id: String,
     pub deployment_id: String,
     pub delete_policy: DeletePolicy,
+    pub delete_delay_secs: i64,
 }

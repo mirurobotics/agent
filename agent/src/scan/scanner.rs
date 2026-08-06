@@ -915,6 +915,7 @@ mod tests {
                 deployment_id: "dpl-1".to_string(),
                 upload_rule_id: "rule-1".to_string(),
                 delete_policy: DeletePolicy::Never,
+                delete_delay_secs: 0,
             };
 
             let mut rx = subscribe(&scanner).await;
@@ -1396,6 +1397,7 @@ mod tests {
                 deployment_id: "d".to_string(),
                 upload_rule_id: DEFAULT_COLL_ID.to_string(),
                 delete_policy: DeletePolicy::Never,
+                delete_delay_secs: 0,
             }]
         }
 

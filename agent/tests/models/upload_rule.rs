@@ -44,6 +44,7 @@ impl ModelFixture for UploadRule {
                     "bucket_name": "my-bucket",
                     "path": "{device_id}/logs",
                     "delete_policy": "never",
+                    "delete_delay_secs": 300,
                 }),
             },
         ]
@@ -134,6 +135,9 @@ fn from_backend() {
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
             delete_policy: DeletePolicy::AfterUpload,
+            // the wire schema cannot express a delay yet (openapi #212); the
+            // backend mapping hardcodes 0
+            delete_delay_secs: 0,
         },
         created_at: created,
         updated_at: updated,
@@ -160,4 +164,28 @@ fn from_backend_invalid_dates() {
 #[test]
 fn delete_policy_default() {
     assert_eq!(DeletePolicy::default(), DeletePolicy::Never);
+}
+
+// ─── delete-delay back-compat ──────────────────────────────────────────────
+
+// A cached destination written before `delete_delay_secs` existed (the field
+// is absent from the JSON) deserializes with the default 0.
+#[test]
+fn destination_without_delete_delay_secs_defaults_to_zero() {
+    let destination: UploadRuleDestination = serde_json::from_value(json!({
+        "bucket_id": "buck_123",
+        "bucket_name": "my-bucket",
+        "path": "{device_id}/logs",
+        "delete_policy": "never",
+    }))
+    .unwrap();
+
+    let expected = UploadRuleDestination {
+        bucket_id: "buck_123".to_string(),
+        bucket_name: "my-bucket".to_string(),
+        path: "{device_id}/logs".to_string(),
+        delete_policy: DeletePolicy::Never,
+        delete_delay_secs: 0,
+    };
+    assert_eq!(destination, expected);
 }

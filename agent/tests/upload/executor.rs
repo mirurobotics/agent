@@ -44,6 +44,7 @@ fn make_job(name: &str) -> Job {
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         delete_policy: DeletePolicy::Never,
+        delete_delay_secs: 0,
     }
 }
 
@@ -472,6 +473,7 @@ fn create_request_maps_job_fields() {
         upload_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         delete_policy: DeletePolicy::Never,
+        delete_delay_secs: 0,
     };
 
     let expected = CreateUploadRequest {

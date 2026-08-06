@@ -58,6 +58,13 @@ pub struct UploadRuleDestination {
     pub bucket_name: String,
     pub path: String,
     pub delete_policy: DeletePolicy,
+    /// Seconds to keep the file after it becomes deletable (i.e. after a
+    /// confirmed upload under `AfterUpload`). Internal-only until openapi
+    /// #212 lands: the backend cannot express it yet, so the wire mapping
+    /// sets 0 (delete on the next sweep). `#[serde(default)]` keeps cached
+    /// `upload_rules.json` written by older agents deserializable.
+    #[serde(default)]
+    pub delete_delay_secs: i64,
 }
 
 impl From<backend_client::UploadRuleDestination> for UploadRuleDestination {
@@ -67,6 +74,8 @@ impl From<backend_client::UploadRuleDestination> for UploadRuleDestination {
             bucket_name: destination.bucket_name,
             path: destination.path,
             delete_policy: (&destination.delete_policy).into(),
+            // internal-only until openapi #212 adds it to the wire schema
+            delete_delay_secs: 0,
         }
     }
 }

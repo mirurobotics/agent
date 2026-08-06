@@ -134,6 +134,11 @@ pub struct StableFile {
     // default to 'never'
     #[serde(default)]
     pub delete_policy: DeletePolicy,
+    // seconds to keep the file after it becomes deletable (stamped from the
+    // rule destination); defaults to 0 so old `scanner.json` snapshots
+    // (which lack the field) remain deserializable
+    #[serde(default)]
+    pub delete_delay_secs: i64,
 }
 
 impl StableFile {
@@ -224,6 +229,7 @@ mod tests {
             deployment_id: "d".to_string(),
             upload_rule_id: "coll".to_string(),
             delete_policy: DeletePolicy::Never,
+            delete_delay_secs: 0,
         }
     }
 
@@ -746,6 +752,22 @@ mod tests {
 
             let parsed: StableFile = serde_json::from_value(value).unwrap();
             assert_eq!(parsed.delete_policy, DeletePolicy::Never);
+        }
+
+        // Old `scanner.json` snapshots predate `delete_delay_secs`; the field
+        // defaults to 0 when absent from the serialized form.
+        #[test]
+        fn without_delete_delay_secs_defaults_to_zero() {
+            let sf = stable_file(File::new("/none/s.mcap"), ts(900));
+            let mut value = serde_json::to_value(&sf).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("delete_delay_secs")
+                .expect("fixture should serialize a delete_delay_secs field");
+
+            let parsed: StableFile = serde_json::from_value(value).unwrap();
+            assert_eq!(parsed.delete_delay_secs, 0);
         }
     }
 }
