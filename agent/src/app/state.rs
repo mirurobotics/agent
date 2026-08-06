@@ -208,6 +208,9 @@ impl AppState {
             http_client,
             token_mngr,
             upload::SdkTransfer::default(),
+            // the deleter is wired in with the delete worker (Milestone 5);
+            // until then confirmed uploads skip deletion with a warning.
+            None::<Arc<crate::delete::Deleter>>,
         ));
         match upload::Uploader::spawn(
             64,

@@ -187,20 +187,26 @@ impl SingleThreadDeleter {
 }
 
 // =================================== TRAIT ======================================= //
-#[allow(async_fn_in_trait)]
+// `-> impl Future + Send` (not `async fn`) so callers awaiting a generic
+// `D: DeleterExt` inside their own `Send` futures — the upload executor — can
+// prove those futures `Send` (the `TokenManagerExt`/`ObjectTransfer` pattern).
+//
 // an async, actor-round-tripping is_empty would be dead weight next to len()
 #[allow(clippy::len_without_is_empty)]
 pub trait DeleterExt: Send + Sync {
     /// Record a pending deletion, replacing any existing entry for the same
     /// file.
-    async fn enqueue(&self, pending: PendingDelete) -> Result<(), DeleteErr>;
+    fn enqueue(
+        &self,
+        pending: PendingDelete,
+    ) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
     /// Perform one sweep pass over the queue.
-    async fn sweep(&self) -> Result<(), DeleteErr>;
+    fn sweep(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
     /// The number of pending deletions in the queue.
-    async fn len(&self) -> Result<usize, DeleteErr>;
+    fn len(&self) -> impl std::future::Future<Output = Result<usize, DeleteErr>> + Send;
     /// Stop the actor. Pending entries stay in the persisted snapshot and are
     /// re-seeded on the next spawn.
-    async fn shutdown(&self) -> Result<(), DeleteErr>;
+    fn shutdown(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
 }
 
 // ================================== WORKER ======================================= //
