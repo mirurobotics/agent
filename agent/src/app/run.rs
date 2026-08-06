@@ -179,6 +179,17 @@ async fn init(
             )
             .await?;
         }
+        if options.enable_delete_worker {
+            if let Some(deleter) = &app_state.deleter {
+                init_delete_worker(
+                    options.delete_worker.clone(),
+                    deleter.clone(),
+                    shutdown_manager,
+                    shutdown_tx.subscribe(),
+                )
+                .await?;
+            }
+        }
     }
 
     Ok(app_state)
@@ -390,6 +401,32 @@ async fn init_scan_upload_bridge_worker(
     Ok(())
 }
 
+async fn init_delete_worker(
+    options: crate::workers::delete::Options,
+    deleter: Arc<crate::delete::Deleter>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing delete driver worker...");
+    let delete_handle = tokio::spawn(async move {
+        crate::workers::delete::run(
+            &options,
+            deleter.as_ref(),
+            tokio::time::sleep,
+            Box::pin(async move {
+                let _ = shutdown_rx.recv().await;
+            }),
+        )
+        .await;
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.delete_worker_handle,
+        "delete_worker_handle",
+        delete_handle,
+    )?;
+    Ok(())
+}
+
 async fn init_socket_server(
     options: &AppOptions,
     app_state: Arc<AppState>,
@@ -438,6 +475,7 @@ struct ShutdownManager {
     scan_worker_handle: Option<JoinHandle<()>>,
     sync_scan_bridge_worker_handle: Option<JoinHandle<()>>,
     scan_upload_bridge_worker_handle: Option<JoinHandle<()>>,
+    delete_worker_handle: Option<JoinHandle<()>>,
 }
 
 impl ShutdownManager {
@@ -453,6 +491,7 @@ impl ShutdownManager {
             scan_worker_handle: None,
             sync_scan_bridge_worker_handle: None,
             scan_upload_bridge_worker_handle: None,
+            delete_worker_handle: None,
         }
     }
 
@@ -660,7 +699,25 @@ impl ShutdownManager {
             );
         }
 
-        // 8. app state
+        // 8. delete driver worker (must join before app state shutdown so no
+        // sweeps race the deleter actor's shutdown)
+        if let Some(delete_worker_handle) = self.delete_worker_handle.take() {
+            if let Err(e) = delete_worker_handle.await {
+                error!("Failed to shutdown delete driver worker: {}", e);
+                first_err.get_or_insert_with(|| {
+                    ServerErr::JoinHandleErr(JoinHandleErr {
+                        source: Box::new(e),
+                        trace: trace!(),
+                    })
+                });
+            }
+        } else {
+            info!(
+                "Delete driver worker handle not found, skipping delete driver worker shutdown..."
+            );
+        }
+
+        // 9. app state
         if let Some(app_state) = self.app_state.take() {
             if let Err(e) = app_state.state.shutdown().await {
                 error!("Failed to shutdown app state: {}", e);
@@ -909,6 +966,34 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn register_handle_rejects_delete_worker_duplicates() {
+        let mut shutdown_manager = new_shutdown_manager();
+
+        shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.delete_worker_handle,
+                "delete_worker_handle",
+                spawn_immediate_handle(),
+            )
+            .unwrap();
+
+        let err = shutdown_manager
+            .register_handle(
+                |mgr| &mut mgr.delete_worker_handle,
+                "delete_worker_handle",
+                spawn_immediate_handle(),
+            )
+            .expect_err("duplicate delete worker handle should error");
+
+        match err {
+            ServerErr::ShutdownMngrDuplicateArgErr(err) => {
+                assert_eq!(err.arg_name, "delete_worker_handle");
+            }
+            _ => panic!("expected ShutdownMngrDuplicateArgErr"),
+        }
+    }
+
     // ============================= shutdown_impl ============================= //
 
     #[tokio::test]
@@ -1073,6 +1158,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shutdown_impl_maps_delete_worker_join_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.register_handle(
+            |mgr| &mut mgr.delete_worker_handle,
+            "delete_worker_handle",
+            spawn_panicking_handle(),
+        )
+        .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("delete worker panic should surface");
+
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.delete_worker_handle.is_none());
+    }
+
+    #[tokio::test]
     async fn shutdown_impl_ok_when_all_steps_succeed() {
         let mut mgr = new_shutdown_manager();
         mgr.register_handle(
@@ -1113,6 +1217,12 @@ mod tests {
             spawn_immediate_handle(),
         )
         .unwrap();
+        mgr.register_handle(
+            |mgr| &mut mgr.delete_worker_handle,
+            "delete_worker_handle",
+            spawn_immediate_handle(),
+        )
+        .unwrap();
 
         mgr.shutdown_impl().await.unwrap();
 
@@ -1123,5 +1233,6 @@ mod tests {
         assert!(mgr.scan_worker_handle.is_none());
         assert!(mgr.sync_scan_bridge_worker_handle.is_none());
         assert!(mgr.scan_upload_bridge_worker_handle.is_none());
+        assert!(mgr.delete_worker_handle.is_none());
     }
 }

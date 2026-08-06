@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
+use crate::delete::{self, DeleterExt};
 use crate::deploy::{apply, fsm};
 use crate::disk;
 use crate::events;
@@ -22,6 +23,7 @@ pub struct AppState {
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
     pub scanner: Option<Arc<scan::Scanner>>,
+    pub deleter: Option<Arc<delete::Deleter>>,
     pub uploader: Option<Arc<upload::Uploader>>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
@@ -93,18 +95,26 @@ impl AppState {
         // initialize the scanner (optional)
         let (scanner, scanner_handle) = Self::init_scanner(layout, enable_uploader).await;
 
+        // initialize the deleter (optional) before the uploader: the uploader's
+        // executor enqueues pending deletions onto it
+        let (deleter, deleter_handle) = Self::init_deleter(layout, enable_uploader).await;
+
         // initialize the uploader (optional)
         let (uploader, uploader_handle) = Self::init_uploader(
             layout,
             enable_uploader,
             http_client.clone(),
             token_mngr.clone(),
+            deleter.clone(),
         )
         .await;
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
             if let Some(handle) = scanner_handle {
+                handles.push(handle);
+            }
+            if let Some(handle) = deleter_handle {
                 handles.push(handle);
             }
             if let Some(handle) = uploader_handle {
@@ -120,6 +130,7 @@ impl AppState {
                 http_client,
                 syncer,
                 scanner,
+                deleter,
                 uploader,
                 token_mngr,
                 activity_tracker,
@@ -172,6 +183,50 @@ impl AppState {
         }
     }
 
+    /// Spawn the deleter actor with an on-disk snapshot. Fail-open by design:
+    /// a snapshot-file error degrades to deleting without queue persistence,
+    /// and a spawn error degrades to no deleter at all (confirmed uploads then
+    /// skip deletion with a warning) — the agent must boot even when the
+    /// deleter cannot.
+    async fn init_deleter(
+        layout: &disk::Layout,
+        enable_deleter: bool,
+    ) -> (
+        Option<Arc<delete::Deleter>>,
+        Option<tokio::task::JoinHandle<()>>,
+    ) {
+        if !enable_deleter {
+            return (None, None);
+        }
+
+        let snapshot_file = match delete::DeleteQueueSnapshotFile::new_with_default(
+            layout.delete_queue(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                    "failed to initialize delete queue snapshot file; deletions will run without persistence: {e}"
+                );
+                None
+            }
+        };
+
+        let args = delete::DeleterArgs {
+            snapshot_file,
+            ..delete::DeleterArgs::default()
+        };
+        match delete::Deleter::spawn(64, args) {
+            Ok((deleter, handle)) => (Some(Arc::new(deleter)), Some(handle)),
+            Err(e) => {
+                tracing::error!("failed to spawn deleter; continuing without deletion: {e}");
+                (None, None)
+            }
+        }
+    }
+
     /// Spawn the uploader actor driving the live executor (credential mint → native SDK
     /// transfer → confirm). Fail-open by design: a snapshot-file error degrades to
     /// uploading without queue persistence, and a spawn error degrades to no uploader
@@ -181,6 +236,7 @@ impl AppState {
         enable_scanner: bool,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
+        deleter: Option<Arc<delete::Deleter>>,
     ) -> (
         Option<Arc<upload::Uploader>>,
         Option<tokio::task::JoinHandle<()>>,
@@ -208,9 +264,7 @@ impl AppState {
             http_client,
             token_mngr,
             upload::SdkTransfer::default(),
-            // the deleter is wired in with the delete worker (Milestone 5);
-            // until then confirmed uploads skip deletion with a warning.
-            None::<Arc<crate::delete::Deleter>>,
+            deleter,
         ));
         match upload::Uploader::spawn(
             64,
@@ -235,6 +289,15 @@ impl AppState {
         if let Some(uploader) = &self.uploader {
             if let Err(e) = uploader.shutdown().await {
                 tracing::error!("failed to shutdown uploader: {e}");
+                first_err.get_or_insert(e.into());
+            }
+        }
+
+        // shutdown the deleter after the uploader (whose executor is its producer);
+        // the delete driver worker has already been joined by this point
+        if let Some(deleter) = &self.deleter {
+            if let Err(e) = deleter.shutdown().await {
+                tracing::error!("failed to shutdown deleter: {e}");
                 first_err.get_or_insert(e.into());
             }
         }
