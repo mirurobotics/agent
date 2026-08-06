@@ -17,7 +17,11 @@ pub struct PendingDelete {
     /// paths carried by these records (path-safety invariant).
     pub file: File,
     /// Size/mtime/digest as recorded at upload time (from the `Job`).
-    /// The sweep re-stats and deletes only on a size+mtime match.
+    /// The sweep re-stats and deletes on a size+mtime match; when only the
+    /// mtime differs it re-hashes and deletes only on a digest match (a
+    /// touched-but-unchanged file is absorbed by the scanner as an mtime
+    /// alias and never re-uploaded, so no replacement record would ever
+    /// arrive).
     pub size: u64,
     pub mtime: DateTime<Utc>,
     pub digest: String,

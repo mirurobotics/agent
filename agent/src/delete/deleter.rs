@@ -75,12 +75,14 @@ impl SingleThreadDeleter {
 
     /// Record `pending` as the queue's newest knowledge of its path: any
     /// existing entry for the same file is replaced (newest record wins), so
-    /// the queue holds at most one entry per path. At capacity the enqueue is
+    /// the queue holds at most one entry per path. At capacity a NEW path is
     /// rejected with [`DeleteErr::QueueFullErr`] — the file simply stays on
-    /// disk, the safe direction.
+    /// disk, the safe direction — while a same-path replacement always
+    /// succeeds (it never grows the queue), even on a snapshot-seeded
+    /// over-capacity backlog.
     async fn enqueue(&mut self, pending: PendingDelete) -> Result<(), DeleteErr> {
-        self.entries.retain(|entry| entry.file != pending.file);
-        if self.entries.len() >= self.capacity {
+        let replaces_existing = self.entries.iter().any(|entry| entry.file == pending.file);
+        if !replaces_existing && self.entries.len() >= self.capacity {
             warn!(
                 "delete: queue is full (capacity {}); rejecting pending deletion for file {}",
                 self.capacity, pending.file
@@ -91,6 +93,7 @@ impl SingleThreadDeleter {
                 trace: trace!(),
             }));
         }
+        self.entries.retain(|entry| entry.file != pending.file);
         self.entries.push(pending);
         self.persist_snapshot().await;
         info!(
@@ -119,10 +122,11 @@ impl SingleThreadDeleter {
     }
 
     /// Whether `entry` should stay in the queue after this pass. Deletes the
-    /// file only when it is due and its current size and mtime still match the
-    /// record; every other outcome either drops the entry WITHOUT deleting
-    /// (already gone, changed since upload) or keeps it for the next sweep
-    /// (not yet due, stat or delete failure).
+    /// file only when it is due and provably unchanged since upload — its
+    /// current size and mtime still match the record, or its size and digest
+    /// match when only the mtime moved; every other outcome either drops the
+    /// entry WITHOUT deleting (already gone, changed since upload) or keeps it
+    /// for the next sweep (not yet due, stat, hash, or delete failure).
     async fn sweep_entry(entry: &PendingDelete, now: DateTime<Utc>) -> bool {
         if now < entry.due_at() {
             return true;
@@ -147,12 +151,38 @@ impl SingleThreadDeleter {
         // scanner does when it records the mtime (never compare a SystemTime
         // to a DateTime<Utc> directly).
         let mtime = DateTime::<Utc>::from(metadata.modified().unwrap_or(SystemTime::now()));
-        if metadata.len() != entry.size || mtime != entry.mtime {
+        if metadata.len() != entry.size {
             info!(
                 "delete: {} changed since upload; dropping without deleting",
                 entry.file
             );
             return false;
+        }
+        if mtime != entry.mtime {
+            // Same size but a different mtime is how a touched-but-unchanged
+            // file presents — and the scanner absorbs exactly that case as an
+            // mtime alias (AlreadyInLedger) without re-uploading, so no fresh
+            // record would ever replace a dropped one. Re-hash to disambiguate:
+            // a digest match proves the uploaded bytes are still on disk
+            // (delete); a mismatch means real new content (drop without
+            // deleting — the scanner re-uploads it and re-enqueues).
+            match files::hash(&entry.file).await {
+                Ok(digest) if digest == entry.digest => {}
+                Ok(_) => {
+                    info!(
+                        "delete: {} changed since upload; dropping without deleting",
+                        entry.file
+                    );
+                    return false;
+                }
+                Err(err) => {
+                    warn!(
+                        "delete: failed to hash {}: {err:?}; retrying next sweep",
+                        entry.file
+                    );
+                    return true;
+                }
+            }
         }
 
         match files::delete(&entry.file).await {
@@ -418,6 +448,13 @@ mod tests {
         })
     }
 
+    /// A persistence handle for the snapshot at `file`.
+    async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
+        DeleteQueueSnapshotFile::new_with_default(file.clone(), DeleteQueueSnapshot::default())
+            .await
+            .unwrap()
+    }
+
     mod due_at {
         use super::*;
 
@@ -484,6 +521,53 @@ mod tests {
             deleter.enqueue(replacement.clone()).await.unwrap();
             assert_eq!(deleter.entries, vec![replacement]);
         }
+
+        // A snapshot-seeded backlog may exceed `queue_capacity` (capacity only
+        // gates new enqueues). A same-path record must still replace on such a
+        // queue rather than being rejected after its older record was dropped.
+        #[tokio::test]
+        async fn over_capacity_backlog_still_replaces_existing() {
+            let dir = dirs::temp("delete-over-capacity").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let tmp_a = temp_file(b"aaaa").await;
+            let tmp_b = temp_file(b"bbbb").await;
+            let clock = Clock::new(1000);
+            let first_a = pending(tmp_a.file(), 1000, 100).await;
+            let first_b = pending(tmp_b.file(), 1000, 100).await;
+
+            // write a two-entry snapshot, then rebuild with capacity 1: the
+            // seeded backlog exceeds capacity by design.
+            {
+                let mut seeder = SingleThreadDeleter::new(DeleterArgs {
+                    now_fn: Arc::new(clock.now_fn()),
+                    snapshot_file: Some(snapshot_file(&state_path).await),
+                    ..DeleterArgs::default()
+                });
+                seeder.enqueue(first_a.clone()).await.unwrap();
+                seeder.enqueue(first_b.clone()).await.unwrap();
+            }
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                queue_capacity: 1,
+                snapshot_file: Some(snapshot_file(&state_path).await),
+            });
+            assert_eq!(deleter.entries, vec![first_a.clone(), first_b.clone()]);
+
+            // a same-path record replaces its entry (newest record wins);
+            // nothing is silently lost from the over-capacity queue.
+            let replacement = pending(tmp_a.file(), 1200, 0).await;
+            deleter.enqueue(replacement.clone()).await.unwrap();
+            assert_eq!(deleter.entries, vec![first_b.clone(), replacement]);
+
+            // a genuinely new path is still rejected, leaving the queue intact.
+            let tmp_c = temp_file(b"cccc").await;
+            let err = deleter
+                .enqueue(pending(tmp_c.file(), 1000, 0).await)
+                .await
+                .unwrap_err();
+            assert!(matches!(err, DeleteErr::QueueFullErr(_)));
+            assert_eq!(deleter.entries.len(), 2);
+        }
     }
 
     mod sweep {
@@ -549,19 +633,70 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn mtime_changed_file_is_dropped_without_deleting() {
+        async fn mtime_changed_content_unchanged_is_deleted() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             let mut record = pending(tmp.file(), 1000, 0).await;
-            // same size, different recorded mtime: the re-stat mismatches.
+            // same size, different recorded mtime: the re-stat mismatches, but
+            // the untouched file's digest still matches, so the sweep deletes.
             record.mtime += chrono::Duration::seconds(1);
             deleter.enqueue(record).await.unwrap();
 
             deleter.sweep().await.unwrap();
 
             assert!(deleter.entries.is_empty());
+            assert!(!tmp.file().exists());
+        }
+
+        #[tokio::test]
+        async fn mtime_and_content_changed_is_dropped_without_deleting() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            let mut record = pending(tmp.file(), 1000, 0).await;
+            // deterministic mtime mismatch: the record carries a sentinel.
+            record.mtime = DateTime::from_timestamp(1, 0).unwrap();
+            deleter.enqueue(record).await.unwrap();
+
+            // same size, different content: the size check passes at 4 bytes
+            // and the digest branch drops the entry without deleting.
+            files::write_bytes(tmp.file(), b"bbbb", WriteOptions::OVERWRITE_NONATOMIC)
+                .await
+                .unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert!(deleter.entries.is_empty());
             assert!(tmp.file().exists());
+        }
+
+        // a hash failure (EISDIR: the recorded path is a directory, whose read
+        // fails) keeps the entry for the next sweep and never panics the pass.
+        #[tokio::test]
+        async fn hash_failure_retains_entry() {
+            let dir = dirs::temp("delete-hash-eisdir").unwrap();
+            let target = File::new(dir.path().clone());
+            let metadata = files::metadata(&target).await.unwrap();
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            let record = PendingDelete {
+                file: target.clone(),
+                size: metadata.len(),
+                // sentinel mtime: the re-stat mismatches, forcing the re-hash.
+                mtime: DateTime::from_timestamp(1, 0).unwrap(),
+                digest: "sha256:unused".to_string(),
+                eligible_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                delete_delay_secs: 0,
+                upload_rule_id: "rule_1".to_string(),
+                deployment_id: "dpl_1".to_string(),
+            };
+            deleter.enqueue(record.clone()).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert_eq!(deleter.entries, vec![record]);
+            assert!(target.exists());
         }
 
         #[tokio::test]
@@ -636,12 +771,6 @@ mod tests {
 
     mod persistence {
         use super::*;
-
-        async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
-            DeleteQueueSnapshotFile::new_with_default(file.clone(), DeleteQueueSnapshot::default())
-                .await
-                .unwrap()
-        }
 
         #[tokio::test]
         async fn queue_survives_rebuild_from_snapshot() {
