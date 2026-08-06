@@ -24,19 +24,27 @@ You can see it work by running the test suite: sweep tests drive a `Deleter` wit
 
 ## Progress
 
-- [ ] Milestone 1: thread `delete_delay_secs` (internal-only, default 0) through `UploadRuleDestination` → `StableFile` → `Job`; serde back-compat tests.
-- [ ] Milestone 2: new `agent/src/delete/` module — `PendingDelete`, persisted queue, sweep semantics, `Deleter` actor with `DeleterExt`; in-src sweep tests + actor tests + `.covgate`.
-- [ ] Milestone 3: executor integration — `LiveExecutor` enqueues a `PendingDelete` instead of deleting inline; executor tests updated.
-- [ ] Milestone 4: interval driver `agent/src/workers/delete.rs` mirroring `workers/scan.rs`; `MockDeleter` + driver tests.
-- [ ] Milestone 5: app wiring — `AppOptions`, `AppState` (spawn + shutdown ordering), `run.rs` init/shutdown/duplicate-guard tests.
-- [ ] Milestone 6: preflight to CI-green on the pushed branch head.
+- [x] Milestone 1: thread `delete_delay_secs` (internal-only, default 0) through `UploadRuleDestination` → `StableFile` → `Job`; serde back-compat tests. (commit cd3cb64)
+- [x] Milestone 2: new `agent/src/delete/` module — `PendingDelete`, persisted queue, sweep semantics, `Deleter` actor with `DeleterExt`; in-src sweep tests + actor tests + `.covgate` (98.39). (commit d4509b9)
+- [x] Milestone 3: executor integration — `LiveExecutor` enqueues a `PendingDelete` instead of deleting inline; executor tests updated. (commit f45f4d2)
+- [x] Milestone 4: interval driver `agent/src/workers/delete.rs` mirroring `workers/scan.rs`; `MockDeleter` + driver tests. (commit df0ec39)
+- [x] Milestone 5: app wiring — `AppOptions`, `AppState` (spawn + shutdown ordering), `run.rs` init/shutdown/duplicate-guard tests. (commit 87c0e85)
+- [x] Milestone 6: preflight to CI-green on the pushed branch head (draft PR; refine pass commits e21deb0, ab6f726, fc11123 included).
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
-
-- Observation: …
-  Evidence: …
+- Observation: `Job.delete_delay_secs` without `#[serde(default)]` would have wiped the persisted upload queue on upgrade — `SingleThreadStateFile::new_with_default` silently replaces an unreadable `upload_queue.json` with the default (empty) queue, and released agents (v0.9.1-alpha.3+) write `Job`s without the field; the scanner's ledger never re-emits those files. The plan followed the `delete_policy` precedent (no default); the refine pass caught the hazard.
+  Evidence: refine iteration 2; fix commit ab6f726 (`agent/src/upload/job.rs` + end-to-end back-compat test in `agent/tests/upload/queue.rs`); `git tag --contains` on the `Job` struct's introduction.
+- Observation: a touched-but-unchanged file (mtime changed, content identical) is absorbed by the scanner as an mtime alias (`AlreadyInLedger`) and never re-uploaded, so the planned drop-on-mtime-mismatch would strand such files forever, defeating the delete policy.
+  Evidence: refine iteration 2; `agent/src/scan/` ledger aliasing; sweep now re-hashes on size-match + mtime-mismatch (commit e21deb0) with tests in `agent/src/delete/deleter.rs`.
+- Observation: `async fn` in `DeleterExt` could not satisfy `UploadExecutor::upload`'s Send-future contract for a generic `D: DeleterExt` (AFIT futures carry no `Send` bound), so the trait declares `fn ... -> impl Future<Output = _> + Send` — the same pattern as the executor's other collaborators (`TokenManagerExt`, `ObjectTransfer`).
+  Evidence: compile failure during Milestone 3; rationale comment on the trait in `agent/src/delete/deleter.rs`.
+- Observation: the plan's delete-failure test vector (record path whose parent is a file) fails at the re-stat (`ENOTDIR`), never reaching `files::delete`, because the sweep stats before deleting. Split into two tests: delete failure via a directory target (`EISDIR` at delete) and stat failure via the parent-is-file path; both retain the entry.
+  Evidence: in-src tests `delete_failure_retains_entry` / `stat_failure_retains_entry` in `agent/src/delete/deleter.rs`.
+- Observation: `SingleThreadDeleter::enqueue` originally removed the same-path entry before the capacity check, so a snapshot-seeded over-capacity backlog could silently lose a pending deletion on replacement. Capacity check now precedes any mutation; same-path replacement (which never grows the queue) always succeeds.
+  Evidence: refine iteration 1; `over_capacity_backlog_still_replaces_existing` test (commit e21deb0).
+- Observation: the models serde harness (`assert_minimal_json_defaults`) compares re-serialized JSON byte-for-byte, so the "minimal JSON" fixture had to include `delete_delay_secs`; the omitted-field-defaults-to-0 behavior is covered by a dedicated back-compat test instead.
+  Evidence: `agent/tests/models/harnesses.rs`; `destination_without_delete_delay_secs_defaults_to_zero` in `agent/tests/models/upload_rule.rs`.
 
 ## Decision Log
 
@@ -50,10 +58,22 @@ You can see it work by running the test suite: sweep tests drive a `Deleter` wit
   Rationale: The repo has no canonicalize-under-root containment helper (`agent/src/filesys/path.rs` is lexical-only), so queue-only provenance is the guardrail against deleting anything the pipeline did not upload. The metadata re-check protects a file modified after upload: the scanner will re-observe it, re-stabilize, re-upload, and a fresh pending deletion is enqueued after that upload. When unsure, never delete. Date/Author: 2026-08-05 / ben@miruml.com.
 - Decision: The `Deleter` actor spawns whenever the uploader does (the executor needs its handle); `AppOptions.enable_delete_worker` gates only the interval driver. A deleter spawn failure degrades to uploads-without-deletion (executor holds `Option<Arc<D>>`), never to a boot failure.
   Rationale: Matches the fail-open pattern of `AppState::init_scanner`/`init_uploader` (`agent/src/app/state.rs:132-225`) — the agent must boot even when an optional subsystem cannot. Date/Author: 2026-08-05 / ben@miruml.com.
+- Decision (implementation): `Job.delete_delay_secs` carries `#[serde(default)]`, deviating from the `delete_policy` precedent the plan cited.
+  Rationale: Persisted `upload_queue.json` files written by released agents lack the field; without the default, `new_with_default` silently resets the queue on upgrade and the backlog is lost (the ledger never re-emits). The failure mode "kept too long" is acceptable; "lost the upload backlog" is not. Date/Author: 2026-08-06 / ben@miruml.com.
+- Decision (implementation): on size-match + mtime-mismatch the sweep re-hashes the file (`files::hash`, the scanner's `sha256:` format) and deletes on digest match; drops without deleting on digest mismatch; retains on hash error. Deviates from the plan's literal size+mtime-only wording.
+  Rationale: A touched-but-unchanged file is an mtime alias the scanner absorbs without re-uploading, so the literal rule would strand it forever. Re-hashing strengthens the plan's actual invariant — delete only what is provably unchanged since upload — and keeps "never delete when unsure" (hash error retains). Date/Author: 2026-08-06 / ben@miruml.com.
+- Decision (implementation): `DeleterExt` methods are declared `fn ... -> impl Future<Output = Result<_, DeleteErr>> + Send` instead of `async fn`.
+  Rationale: `UploadExecutor::upload` must return a `Send` future; AFIT futures of a generic `D: DeleterExt` carry no `Send` bound, so `LiveExecutor`'s impl could not be proven `Send`. Matches the repo's existing collaborator-trait pattern. Date/Author: 2026-08-06 / ben@miruml.com.
+- Decision (implementation): `ServerErr` gained a boxed `DeleteErr` variant (`agent/src/server/errors.rs`) for `AppState::shutdown`'s `e.into()` error mapping, following the existing boxed `ScanErr`/`UploadErr` pattern.
+  Rationale: The deleter shutdown arm uses the same `first_err.get_or_insert(e.into())` shape as the uploader/scanner; the `From` impl did not exist. Date/Author: 2026-08-06 / ben@miruml.com.
 
 ## Outcomes & Retrospective
 
-(Fill in on completion.)
+Shipped on `feat/delete-worker` as five milestone commits (cd3cb64, d4509b9, f45f4d2, df0ec39, 87c0e85) plus three refine-pass commits (e21deb0, ab6f726, fc11123): the internal-only `delete_delay_secs` plumbing, the `agent/src/delete/` module (record + persisted queue + metadata-checked sweep + actor), the executor's enqueue-instead-of-inline-delete, the interval driver, and full app wiring. All behavioral acceptance criteria in Validation and Acceptance are covered by passing tests (1538 tests green locally); covgate gates met with the new `delete` module at 98.39+ (`.covgate` 98.39), `upload` 97.02, `app` 93.58, `workers` 85.87 (no local flake manifested). Validated by CI on the pushed head of the draft PR.
+
+What went well: the plan's file-level orientation (exact templates to mirror — scanner actor, scan driver, fail-open init) made each milestone mechanical; per-milestone commits kept every step revertible; the refine pass earned its keep by catching a HIGH-severity upgrade hazard (upload-queue wipe) and the mtime-alias stranding case, both invisible to the milestone-scoped tests.
+
+What to carry forward: (1) when adding fields to PERSISTED structs, default-ness must be decided by what released binaries wrote, not by struct-local precedent; (2) "provably unchanged" checks should name the proof (digest), not proxies (mtime); (3) the pre-existing `SingleThreadStateFile::new_with_default` silent-reset hazard is flagged as a follow-up outside this plan's scope. Openapi #212 remains the follow-up that puts `delete_delay_secs` on the wire; this branch needs no rework for it — new retention policies become new producers of the same `PendingDelete` record.
 
 ## Context and Orientation
 
