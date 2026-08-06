@@ -1,3 +1,4 @@
+pub mod delete;
 pub mod mqtt;
 pub mod poller;
 pub mod scan;

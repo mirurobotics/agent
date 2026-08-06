@@ -1,10 +1,13 @@
 // standard crates
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::delete::errors::QueueFullErr;
 use miru_agent::delete::{DeleteErr, DeleterExt, PendingDelete};
+
+type ResultFn = Box<dyn Fn() -> Result<(), DeleteErr> + Send + Sync>;
 
 /// One scripted result for a `MockDeleter::enqueue` call.
 pub enum MockStep {
@@ -14,11 +17,14 @@ pub enum MockStep {
 
 /// A test double for [`DeleterExt`] that records every `enqueue`d
 /// [`PendingDelete`] and follows a scripted result queue (an empty script
-/// defaults to `Ok`), mirroring `MockUploadExecutor`. The other trait methods
-/// return sensible defaults.
+/// defaults to `Ok`), mirroring `MockUploadExecutor`. `sweep` calls are
+/// counted with a settable result (mirroring `MockScanner`'s `scan`). The
+/// other trait methods return sensible defaults.
 pub struct MockDeleter {
     script: Mutex<VecDeque<MockStep>>,
     pub calls: Mutex<Vec<PendingDelete>>,
+    num_sweep_calls: AtomicUsize,
+    sweep_fn: Arc<Mutex<ResultFn>>,
 }
 
 impl MockDeleter {
@@ -26,6 +32,8 @@ impl MockDeleter {
         Arc::new(Self {
             script: Mutex::new(VecDeque::new()),
             calls: Mutex::new(Vec::new()),
+            num_sweep_calls: AtomicUsize::new(0),
+            sweep_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
         })
     }
 
@@ -35,6 +43,20 @@ impl MockDeleter {
 
     pub fn recorded_calls(&self) -> Vec<PendingDelete> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// The number of `sweep` calls.
+    pub fn num_sweep_calls(&self) -> usize {
+        self.num_sweep_calls.load(Ordering::Relaxed)
+    }
+
+    /// Override the result returned by `sweep` (the call is still counted
+    /// before the result is produced).
+    pub fn set_sweep<F>(&self, f: F)
+    where
+        F: Fn() -> Result<(), DeleteErr> + Send + Sync + 'static,
+    {
+        *self.sweep_fn.lock().unwrap() = Box::new(f);
     }
 }
 
@@ -54,7 +76,8 @@ impl DeleterExt for MockDeleter {
     }
 
     async fn sweep(&self) -> Result<(), DeleteErr> {
-        Ok(())
+        self.num_sweep_calls.fetch_add(1, Ordering::Relaxed);
+        (*self.sweep_fn.lock().unwrap())()
     }
 
     async fn len(&self) -> Result<usize, DeleteErr> {
