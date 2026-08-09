@@ -26,7 +26,7 @@ No retention engine, no scanner re-keying, no migration code. Zero production us
 - [x] M1: FileRule model + adapter from BaseUploadRule
 - [x] M2: Thread FileRule through disk, release, sync, services, scanner, upload pipeline, workers
 - [x] M3: Update integration tests and fixtures
-- [ ] M4: Preflight clean, push, CI green, verification of start-fresh paths
+- [x] M4: Preflight clean, push, CI green, verification of start-fresh paths
 
 ## Surprises & Discoveries
 
@@ -49,7 +49,18 @@ No retention engine, no scanner re-keying, no migration code. Zero production us
 
 ## Outcomes & Retrospective
 
-To be filled in on completion.
+Draft PR: https://github.com/mirurobotics/agent/pull/194 ("refactor(models)!: restructure UploadRule into FileRule domain model").
+
+Landed as four signed commits on `refactor/upload-rule-to-file-rule`:
+
+- `a521d3a` refactor(models): replace UploadRule with FileRule and v0.4 wire adapter
+- `2c5dfb8` refactor(agent): thread FileRule through disk, sync, services, scan, upload, workers
+- `73ee840` test(agent): update test surface for FileRule rename
+- `bbda71c` docs(agent): refresh comments left stale by the FileRule rename
+
+`./scripts/preflight.sh` reports "Preflight clean" (exit 0): 1528 tests pass, every `.covgate` module meets its threshold, import/assert linters clean. All four acceptance greps hold — `"upload_rules"` exactly one hit (services/backend.rs:58), `"release.upload_rules"` exactly one hit (sync/deployments.rs:134), `upload_rules.json` zero hits in agent/src, and `CreateUploadRequest.upload_rule_id` still fed from `job.file_rule_id`. Nothing under api/specs/, libs/backend-api, or libs/device-api changed.
+
+What went to plan: the refactor was as mechanical as predicted, and the "simplest honest split" guidance for M1/M2 was the right call. What cost the most time: the test sweep (M3) touched 20 files, and the `ModelFixture` harness's optional-field contract was not obvious from the plan — worth reading `agent/tests/models/harnesses.rs` first next time a model's required/optional split changes.
 
 ## Context and Orientation
 
