@@ -8,7 +8,7 @@ pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "invalid upload rule replacement: collection id changed from '{existing_upload_collection_id}' to '{replacement_upload_collection_id}'"
+    "invalid file rule replacement: collection id changed from '{existing_upload_collection_id}' to '{replacement_upload_collection_id}'"
 )]
 pub struct InvalidRule {
     pub existing_upload_collection_id: UploadCollectionID,

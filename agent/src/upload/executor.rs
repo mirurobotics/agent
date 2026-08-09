@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::authn::{Token, TokenManagerExt};
 use crate::filesys::files;
 use crate::http::{self, ClientI};
-use crate::models::DeletePolicy;
+use crate::models::FileRuleRetention;
 use crate::upload::{
     errors::{classified_executor_err, executor_err, UploadErr},
     job::Job,
@@ -80,9 +80,14 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
     }
 
     async fn delete_source_file(&self, job: &Job) {
-        if job.delete_policy == DeletePolicy::AfterUpload {
+        if job.retention
+            == Some(FileRuleRetention {
+                require_upload: true,
+                ttl_secs: 0,
+            })
+        {
             info!(
-                "upload: deleting local source file {} per delete policy",
+                "upload: deleting local source file {} per retention policy",
                 job.file
             );
             if let Err(e) = files::delete(&job.file).await {
@@ -129,7 +134,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
 
 pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
     CreateUploadRequest {
-        upload_rule_id: job.upload_rule_id.clone(),
+        upload_rule_id: job.file_rule_id.clone(),
         source: Box::new(UploadSource {
             file_path: job.file.to_string(),
             mtime: job.mtime.to_rfc3339(),

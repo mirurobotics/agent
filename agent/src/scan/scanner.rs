@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // internal crates
-use crate::models::{Deployment, UploadCollectionID, UploadRule};
+use crate::models::{Deployment, FileRule, UploadCollectionID};
 pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
     collection::{CollectionScanner, Options},
@@ -124,7 +124,7 @@ impl SingleThreadScanner {
     }
 
     #[cfg(feature = "test")]
-    async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
+    async fn get_rules(&self) -> Result<Vec<FileRule>, ScanErr> {
         let rules = self
             .scanners
             .values()
@@ -153,30 +153,38 @@ impl SingleThreadScanner {
     async fn update_rules(
         &mut self,
         deployment: Deployment,
-        rules: Vec<UploadRule>,
+        rules: Vec<FileRule>,
     ) -> Result<(), ScanErr> {
         let mut deployed: HashSet<UploadCollectionID> = HashSet::new();
         for rule in rules.iter() {
-            if deployed.contains(&rule.upload_collection_id) {
+            let Some(upload) = &rule.upload else {
+                continue;
+            };
+            if deployed.contains(&upload.upload_collection_id) {
                 return Err(ScanErr::DuplicateCollectionID(DuplicateCollectionID {
-                    collection_id: rule.upload_collection_id.clone(),
+                    collection_id: upload.upload_collection_id.clone(),
                     trace: trace!(),
                 }));
             }
-            deployed.insert(rule.upload_collection_id.clone());
+            deployed.insert(upload.upload_collection_id.clone());
         }
 
         let now = (self.now_fn)();
         for rule in rules.iter() {
+            let Some(upload) = &rule.upload else {
+                let rule_id = &rule.id;
+                warn!("scan: skipping file rule {rule_id} with no upload block");
+                continue;
+            };
             let config = Config {
                 deployment: deployment.clone(),
                 rule: rule.clone(),
             };
-            match self.scanners.get_mut(&rule.upload_collection_id) {
+            match self.scanners.get_mut(&upload.upload_collection_id) {
                 Some(scanner) => scanner.update_config(config, now).await?,
                 None => {
                     self.scanners.insert(
-                        rule.upload_collection_id.clone(),
+                        upload.upload_collection_id.clone(),
                         CollectionScanner::new(config, now, Options::default()).await?,
                     );
                 }
@@ -254,7 +262,7 @@ pub trait ScannerExt {
     async fn update_rules(
         &self,
         deployment: Deployment,
-        rules: Vec<UploadRule>,
+        rules: Vec<FileRule>,
     ) -> Result<(), ScanErr>;
     async fn scan(&self) -> Result<(), ScanErr>;
     async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr>;
@@ -267,7 +275,7 @@ pub enum Command {
     },
     UpdateRules {
         deployment: Box<Deployment>,
-        rules: Vec<UploadRule>,
+        rules: Vec<FileRule>,
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
     Scan {
@@ -281,7 +289,7 @@ pub enum Command {
     },
     #[cfg(feature = "test")]
     GetRules {
-        respond_to: oneshot::Sender<Result<Vec<UploadRule>, ScanErr>>,
+        respond_to: oneshot::Sender<Result<Vec<FileRule>, ScanErr>>,
     },
     #[cfg(feature = "test")]
     GetLedgerCount {
@@ -404,7 +412,7 @@ impl Scanner {
     }
 
     #[cfg(feature = "test")]
-    pub async fn get_rules(&self) -> Result<Vec<UploadRule>, ScanErr> {
+    pub async fn get_rules(&self) -> Result<Vec<FileRule>, ScanErr> {
         self.send_command(|tx| Command::GetRules { respond_to: tx })
             .await?
     }
@@ -425,7 +433,7 @@ impl ScannerExt for Scanner {
     async fn update_rules(
         &self,
         deployment: Deployment,
-        rules: Vec<UploadRule>,
+        rules: Vec<FileRule>,
     ) -> Result<(), ScanErr> {
         self.send_command(|tx| Command::UpdateRules {
             deployment: Box::new(deployment),
@@ -464,7 +472,7 @@ mod tests {
     use super::{ScanEvent, ScannerExt, DEFAULT_BROADCAST_CAPACITY};
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-    use crate::models::{DeletePolicy, Deployment, DplActivity, UploadRule, UploadRuleSource};
+    use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
     use crate::scan::collection::CollectionScanner;
     use crate::scan::state::{CollectionState, Config, ScanSnapshotFile, ScannerSnapshot};
 
@@ -500,7 +508,7 @@ mod tests {
 
     // =============================== TEST HELPERS ================================= //
 
-    /// Default `UploadRule::upload_collection_id` for `single_coll` and tests that
+    /// Default upload collection id for `single_coll` and tests that
     /// redeploy the same scanner map entry.
     const DEFAULT_COLL_ID: &str = "coll";
 
@@ -514,17 +522,20 @@ mod tests {
         }
     }
 
-    /// Build an UploadRule with a pinned `upload_collection_id` (plus rule id/glob/window).
+    /// Build a FileRule with a pinned `upload_collection_id` (plus rule id/glob/window).
     fn rule_in_collection(
         rule_id: &str,
         upload_collection_id: &str,
         glob: &str,
         stability_window_secs: i64,
-    ) -> UploadRule {
-        UploadRule {
+    ) -> FileRule {
+        FileRule {
             id: rule_id.to_string(),
-            upload_collection_id: upload_collection_id.to_string(),
-            source: UploadRuleSource {
+            upload: Some(FileRuleUpload {
+                upload_collection_id: upload_collection_id.to_string(),
+                ..Default::default()
+            }),
+            source: FileRuleSource {
                 glob: glob.to_string(),
                 stability_window_secs,
             },
@@ -573,15 +584,16 @@ mod tests {
     }
 
     /// The set of rule ids currently held by the scanner.
-    fn rule_ids(rules: &[UploadRule]) -> BTreeSet<String> {
+    fn rule_ids(rules: &[FileRule]) -> BTreeSet<String> {
         rules.iter().map(|r| r.id.clone()).collect()
     }
 
     /// The set of `upload_collection_id` values currently held by the scanner.
-    fn collection_ids(rules: &[UploadRule]) -> BTreeSet<String> {
+    fn collection_ids(rules: &[FileRule]) -> BTreeSet<String> {
         rules
             .iter()
-            .map(|r| r.upload_collection_id.clone())
+            .filter_map(|r| r.upload.as_ref())
+            .map(|u| u.upload_collection_id.clone())
             .collect()
     }
 
@@ -606,7 +618,7 @@ mod tests {
 
     /// Deploy `rules` under the fixed deployment "d". The rule vec stays explicit
     /// at the call site; only the boilerplate deployment + `.await.unwrap()` hides.
-    async fn deploy(scanner: &Scanner, rules: Vec<UploadRule>) {
+    async fn deploy(scanner: &Scanner, rules: Vec<FileRule>) {
         scanner.update_rules(deployment("d"), rules).await.unwrap();
     }
 
@@ -913,8 +925,8 @@ mod tests {
                 first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
                 last_observed_at: DateTime::from_timestamp(1001, 0).unwrap(),
                 deployment_id: "dpl-1".to_string(),
-                upload_rule_id: "rule-1".to_string(),
-                delete_policy: DeletePolicy::Never,
+                file_rule_id: "rule-1".to_string(),
+                retention: None,
             };
 
             let mut rx = subscribe(&scanner).await;
@@ -1168,7 +1180,7 @@ mod tests {
 
             let mut emitted = BTreeSet::new();
             while let Ok(ScanEvent::StableFile(stable)) = rx.try_recv() {
-                emitted.insert((stable.upload_rule_id.clone(), stable_name(&stable)));
+                emitted.insert((stable.file_rule_id.clone(), stable_name(&stable)));
             }
             let event1 = ("current-rule".to_string(), "current.mcap".to_string());
             let event2 = ("legacy-rule".to_string(), "legacy.mcap".to_string());
@@ -1307,7 +1319,7 @@ mod tests {
             }
             assert_eq!(emitted.len(), 2, "expected exactly two StableFiles");
             let colls: BTreeSet<String> =
-                emitted.iter().map(|sf| sf.upload_rule_id.clone()).collect();
+                emitted.iter().map(|sf| sf.file_rule_id.clone()).collect();
             assert_eq!(colls, BTreeSet::from(["c1".to_string(), "c2".to_string()]));
         }
 
@@ -1362,7 +1374,7 @@ mod tests {
             // the good collection's StableFile was emitted despite the sibling error.
             let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
             assert_eq!(stable_name(&sf), "good.mcap".to_string());
-            assert_eq!(sf.upload_rule_id, "r-good".to_string());
+            assert_eq!(sf.file_rule_id, "r-good".to_string());
             assert!(
                 rx.try_recv().is_err(),
                 "only the good collection should emit"
@@ -1394,8 +1406,8 @@ mod tests {
                 first_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
                 last_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
                 deployment_id: "d".to_string(),
-                upload_rule_id: DEFAULT_COLL_ID.to_string(),
-                delete_policy: DeletePolicy::Never,
+                file_rule_id: DEFAULT_COLL_ID.to_string(),
+                retention: None,
             }]
         }
 
@@ -1525,7 +1537,7 @@ mod tests {
                         size: 4,
                         mtime: SystemTime::UNIX_EPOCH,
                         deployment_id: "d".to_string(),
-                        upload_rule_id: DEFAULT_COLL_ID.to_string(),
+                        file_rule_id: DEFAULT_COLL_ID.to_string(),
                     },
                 },
             );

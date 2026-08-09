@@ -23,14 +23,17 @@ No retention engine, no scanner re-keying, no migration code. Zero production us
 
 ## Progress
 
-- [ ] M1: FileRule model + adapter from BaseUploadRule
-- [ ] M2: Thread FileRule through disk, release, sync, services, scanner, upload pipeline, workers
+- [x] M1: FileRule model + adapter from BaseUploadRule
+- [x] M2: Thread FileRule through disk, release, sync, services, scanner, upload pipeline, workers
 - [ ] M3: Update integration tests and fixtures
 - [ ] M4: Preflight clean, push, CI green, verification of start-fresh paths
 
 ## Surprises & Discoveries
 
-Add entries as work proceeds.
+- The old hand-written `Deserialize for UploadRule` used `deserialize_error!` only for the timestamp fields; missing id/digest/source were plain serde errors from the inner struct. `FileRule` keeps that exact pattern (id/name/digest/source required by the inner struct, timestamps Option + `deserialize_error!`, upload/retention `#[serde(default)]`).
+- `FileRuleRetention` needs `Eq` (not just `PartialEq`): `StableFile` derives `Eq` and now carries `retention: Option<FileRuleRetention>`.
+- `cargo clippy --package miru-agent --features test -- -D warnings` fails on the CLEAN branch too: two `clippy::manual_map` warnings in generated `libs/backend-api/src/models/upload_credentials.rs` abort the build under `-D warnings`. Pre-existing, unrelated to this refactor (CI's `--fix --allow-dirty` auto-applies them). miru-agent's own code lints clean with zero warnings.
+- The M1/M2 commit split is by-path, not by-compilability: neither commit compiles alone (the model swap and the threading are mutually dependent), so M1 = all of agent/src/models/ (including release.rs, which lives there), M2 = everything else — as the plan's "simplest honest split" note anticipated.
 
 ## Decision Log
 

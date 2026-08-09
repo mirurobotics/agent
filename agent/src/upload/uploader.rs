@@ -178,7 +178,7 @@ where
             entry.attempts += 1;
 
             let file = &entry.job.file;
-            let rule = &entry.job.upload_rule_id;
+            let rule = &entry.job.file_rule_id;
             let size = entry.job.size;
             let attempt = entry.attempts;
             info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
@@ -257,7 +257,7 @@ where
         if let Err(requeue_err) = self.queue.requeue(entry).await {
             error!(
                 "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
-                job.upload_rule_id, job.file, job.digest
+                job.file_rule_id, job.file, job.digest
             );
         }
     }
@@ -280,14 +280,14 @@ where
     fn log_success(entry: &QueueEntry) {
         info!(
             "uploaded file {} (rule {}, digest {}) on attempt {}",
-            entry.job.file, entry.job.upload_rule_id, entry.job.digest, entry.attempts
+            entry.job.file, entry.job.file_rule_id, entry.job.digest, entry.attempts
         );
     }
 
     fn log_dropped(entry: &QueueEntry, err: &UploadErr) {
         error!(
             "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
-            entry.attempts, entry.job.upload_rule_id, entry.job.file, entry.job.digest
+            entry.attempts, entry.job.file_rule_id, entry.job.file, entry.job.digest
         );
     }
 
@@ -296,7 +296,7 @@ where
             "dropping upload job: backend rejected it with terminal HTTP status {status} \
              (rule {}, file {}, digest {}, attempt {}); the backend will not learn this \
              upload died: {err:?}",
-            entry.job.upload_rule_id, entry.job.file, entry.job.digest, entry.attempts
+            entry.job.file_rule_id, entry.job.file, entry.job.digest, entry.attempts
         );
     }
 

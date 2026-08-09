@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{errors::*, files, File, PathExt};
-use crate::models::DeletePolicy;
+use crate::models::FileRuleRetention;
 use crate::scan::{
     errors::*,
     state::{Candidate, CollectionState, Config, Observation, StableFile},
@@ -57,7 +57,7 @@ impl CollectionScanner {
     }
 
     #[cfg(feature = "test")]
-    pub(crate) fn rule(&self) -> &crate::models::UploadRule {
+    pub(crate) fn rule(&self) -> &crate::models::FileRule {
         self.state.rule()
     }
 
@@ -220,7 +220,7 @@ async fn observe_file(
         size: meta.len(),
         mtime,
         deployment_id: state.cfg.deployment.id.clone(),
-        upload_rule_id: state.cfg.rule.id.clone(),
+        file_rule_id: state.cfg.rule.id.clone(),
     })
 }
 
@@ -301,7 +301,7 @@ async fn differs_from_previous(
         candidate,
         observation.timestamp,
         digest,
-        state.rule().destination.delete_policy,
+        state.rule().retention.clone(),
     )))
 }
 
@@ -309,7 +309,7 @@ fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
     digest: Digest,
-    delete_policy: DeletePolicy,
+    retention: Option<FileRuleRetention>,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
@@ -321,8 +321,8 @@ fn build_stable_file(
         first_observed_at: first_obs.timestamp,
         last_observed_at,
         deployment_id: first_obs.deployment_id.clone(),
-        upload_rule_id: first_obs.upload_rule_id.clone(),
-        delete_policy,
+        file_rule_id: first_obs.file_rule_id.clone(),
+        retention,
     }
 }
 
@@ -344,7 +344,7 @@ mod tests {
 
     // internal crates
     use crate::filesys::{dirs, dirs::TempDir, Dir, PathExt, WriteOptions};
-    use crate::models::{DeletePolicy, Deployment, UploadRule, UploadRuleSource};
+    use crate::models::{Deployment, FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
     use crate::scan::state::{Candidate, CollectionState, Config, Observation, StableFile};
 
     // external crates
@@ -368,11 +368,14 @@ mod tests {
         }
     }
 
-    /// An UploadRule pinned to a collection id, glob, and stability window.
-    fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
-        UploadRule {
-            upload_collection_id: collection_id.to_string(),
-            source: UploadRuleSource {
+    /// A FileRule pinned to a collection id, glob, and stability window.
+    fn rule(collection_id: &str, glob: &str, window: i64) -> FileRule {
+        FileRule {
+            upload: Some(FileRuleUpload {
+                upload_collection_id: collection_id.to_string(),
+                ..Default::default()
+            }),
+            source: FileRuleSource {
                 glob: glob.to_string(),
                 stability_window_secs: window,
             },
@@ -438,7 +441,7 @@ mod tests {
             size: 4,
             mtime: SystemTime::UNIX_EPOCH,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
+            file_rule_id: "coll".to_string(),
         }
     }
 
@@ -453,8 +456,8 @@ mod tests {
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
-            delete_policy: DeletePolicy::Never,
+            file_rule_id: "coll".to_string(),
+            retention: None,
         }
     }
 
@@ -479,8 +482,8 @@ mod tests {
             first_observed_at,
             last_observed_at,
             deployment_id: obs.deployment_id.clone(),
-            upload_rule_id: obs.upload_rule_id.clone(),
-            delete_policy: DeletePolicy::Never,
+            file_rule_id: obs.file_rule_id.clone(),
+            retention: None,
         }
     }
 
@@ -931,29 +934,35 @@ mod tests {
             }
         }
 
-        // The emitted StableFile stamps the rule's delete policy: an `after_upload`
-        // rule yields `AfterUpload` on the StableFile.
+        // The emitted StableFile stamps the rule's retention: a rule with a
+        // retention block yields the same retention on the StableFile.
         #[tokio::test]
-        async fn stamps_after_upload_policy_from_rule() {
+        async fn stamps_retention_from_rule() {
             let mut c = case("s.mcap", 0).await;
-            c.state.cfg.rule.destination.delete_policy = DeletePolicy::AfterUpload;
+            c.state.cfg.rule.retention = Some(FileRuleRetention {
+                require_upload: true,
+                ttl_secs: 0,
+            });
             let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
                 .await
                 .unwrap();
             assert_eq!(
-                stable_file_of(outcome).delete_policy,
-                DeletePolicy::AfterUpload
+                stable_file_of(outcome).retention,
+                Some(FileRuleRetention {
+                    require_upload: true,
+                    ttl_secs: 0,
+                })
             );
         }
 
-        // The default rule (`never`) yields `Never` on the StableFile.
+        // The default rule (no retention) yields None on the StableFile.
         #[tokio::test]
-        async fn stamps_never_policy_from_default_rule() {
+        async fn stamps_no_retention_from_default_rule() {
             let c = case("s.mcap", 0).await;
             let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
                 .await
                 .unwrap();
-            assert_eq!(stable_file_of(outcome).delete_policy, DeletePolicy::Never);
+            assert_eq!(stable_file_of(outcome).retention, None);
         }
     }
 
@@ -1350,7 +1359,7 @@ mod tests {
             assert!(!scanner.state.ledger.contains_key(&poison));
         }
 
-        // The emitted StableFile takes its deployment_id / upload_rule_id and
+        // The emitted StableFile takes its deployment_id / file_rule_id and
         // first_observed_at from the FIRST (discovery) observation, not the
         // evaluation-time (LAST) observation, even when the config changed in
         // between. last_observed_at, by contrast, comes from the LAST observation
@@ -1379,7 +1388,7 @@ mod tests {
 
             // identity from the FIRST observation, not d2, rule2.
             assert_eq!(sf.deployment_id, "d1");
-            assert_eq!(sf.upload_rule_id, "rule1");
+            assert_eq!(sf.file_rule_id, "rule1");
             // first_observed_at is the discovery ts; last_observed_at is the eval ts
             assert_eq!(sf.first_observed_at, ts(1000));
             assert_eq!(sf.last_observed_at, ts(1010));
@@ -1402,7 +1411,10 @@ mod tests {
             let dir = dirs::temp("testing").unwrap();
             let glob = glob_for(&dir);
             let scanner = scanner_new(&dir, 7, ts(1000)).await;
-            assert_eq!(scanner.rule().upload_collection_id, "coll");
+            assert_eq!(
+                scanner.rule().upload.as_ref().unwrap().upload_collection_id,
+                "coll"
+            );
             assert_eq!(scanner.rule().source.glob, glob);
             assert_eq!(scanner.rule().source.stability_window_secs, 7);
         }

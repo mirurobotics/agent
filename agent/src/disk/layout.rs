@@ -70,8 +70,8 @@ impl Layout {
         self.resources().file("releases.json")
     }
 
-    pub fn upload_rules(&self) -> filesys::File {
-        self.resources().file("upload_rules.json")
+    pub fn file_rules(&self) -> filesys::File {
+        self.resources().file("file_rules.json")
     }
 
     pub fn git_commits(&self) -> filesys::File {

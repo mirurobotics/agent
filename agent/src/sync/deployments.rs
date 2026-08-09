@@ -29,7 +29,7 @@ pub struct Storage<'a> {
     pub cfg_insts: disk::CfgInstRef<'a>,
     pub releases: &'a disk::Releases,
     pub git_commits: &'a disk::GitCommits,
-    pub upload_rules: &'a disk::UploadRules,
+    pub file_rules: &'a disk::FileRules,
 }
 
 impl<'a> Storage<'a> {
@@ -273,10 +273,10 @@ async fn store_expanded_release(
             deployment_id: backend_dpl.id.clone(),
         })
     })?;
-    let upload_rule_ids: Vec<models::UploadRuleID> =
+    let file_rule_ids: Vec<models::FileRuleID> =
         backend_rules.iter().map(|r| r.id.clone()).collect();
 
-    let release = models::Release::from_backend(backend_release.clone(), upload_rule_ids);
+    let release = models::Release::from_backend(backend_release.clone(), file_rule_ids);
     let release_id = release.id.clone();
     storage
         .releases
@@ -284,10 +284,10 @@ async fn store_expanded_release(
         .await?;
 
     for backend_rule in backend_rules {
-        let rule: models::UploadRule = backend_rule.into();
+        let rule: models::FileRule = backend_rule.into();
         let id = rule.id.clone();
         storage
-            .upload_rules
+            .file_rules
             .write_if_absent(id, rule, |_, _| false)
             .await?;
     }
