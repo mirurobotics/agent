@@ -2,10 +2,10 @@ pub mod config_instance;
 pub mod deployment;
 pub mod device;
 pub mod errors;
+pub mod file_rule;
 pub mod git_commit;
 pub mod release;
 pub(crate) mod status;
-pub mod upload_rule;
 
 // internal crates
 pub use self::config_instance::CfgInstID;
@@ -19,16 +19,16 @@ pub use self::deployment::DplTarget;
 pub use self::device::Device;
 pub use self::device::DeviceStatus;
 pub use self::errors::ModelsErr;
+pub use self::file_rule::FileRule;
+pub use self::file_rule::FileRuleID;
+pub use self::file_rule::FileRuleRetention;
+pub use self::file_rule::FileRuleSource;
+pub use self::file_rule::FileRuleUpload;
+pub use self::file_rule::UploadCollectionID;
 pub use self::git_commit::GitCommit;
 pub use self::git_commit::GitCommitID;
 pub use self::release::Release;
 pub use self::release::ReleaseID;
-pub use self::upload_rule::DeletePolicy;
-pub use self::upload_rule::UploadCollectionID;
-pub use self::upload_rule::UploadRule;
-pub use self::upload_rule::UploadRuleDestination;
-pub use self::upload_rule::UploadRuleID;
-pub use self::upload_rule::UploadRuleSource;
 
 pub trait Patch<PatchT> {
     fn patch(&mut self, patch: PatchT);
