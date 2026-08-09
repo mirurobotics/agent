@@ -25,7 +25,7 @@ No retention engine, no scanner re-keying, no migration code. Zero production us
 
 - [ ] M1: FileRule model + adapter from BaseUploadRule
 - [ ] M2: Thread FileRule through disk, release, sync, services, scanner, upload pipeline, workers
-- [ ] M3: Update integration tests, fixtures, and .covgate files
+- [ ] M3: Update integration tests and fixtures
 - [ ] M4: Preflight clean, push, CI green, verification of start-fresh paths
 
 ## Surprises & Discoveries
@@ -38,7 +38,7 @@ Add entries as work proceeds.
 - **Retention semantics at the delete site**: file deleted after upload confirm iff `retention == Some(FileRuleRetention { require_upload: true, ttl_secs: 0 })` — an exact match, chosen over `matches!(retention, Some(r) if r.require_upload && r.ttl_secs == 0)` so any future nonzero-ttl value changes behavior only when a retention engine is deliberately added (out of scope here). This is bit-for-bit equivalent to the old `delete_policy == AfterUpload` check for all values the v0.4 adapter can produce.
 - **`name` field placeholder**: `FileRule.name` is populated from `upload_collection_name` until the wire carries a real rule name (spec v0.5).
 - **DeletePolicy removed**: the internal `models::DeletePolicy` enum, its `impl_status_enum!` block, and `UploadRuleDestination` are deleted. `StableFile.delete_policy` and `Job.delete_policy` become `retention: Option<FileRuleRetention>` with `#[serde(default)]` (None == old Never default). The generated `backend_client::UploadDeletePolicy` stays and is consumed only by the adapter.
-- **Persisted-state compat = start-fresh, no migration**: scanner.json and upload_queue.json reset to defaults on parse failure via `SingleThreadStateFile::new_with_default`. resources/upload_rules.json is a `cache::FileCache` which does NOT reset on parse failure — compat there comes from the filename change to `file_rules.json`: the new file doesn't exist, so a fresh empty cache is created; the stale upload_rules.json is orphaned and never read again. We deliberately do not delete the orphan (zero production users; not worth cleanup code).
+- **Persisted-state compat = start-fresh, no migration**: stale scanner.json/upload_queue.json reset via `SingleThreadStateFile::new_with_default`; the rules cache compat comes from the upload_rules.json → file_rules.json filename change (fresh empty cache; orphan left in place — zero production users). Mechanics detailed in Context ("Persisted-state compatibility").
 - **Scanner with `upload: None`**: scanner stays keyed by `upload_collection_id`. `Scanner::update_rules` skips (with a `warn!` log) any FileRule whose `upload` is None — unreachable with the v0.4 adapter, but the code path must be total. No panic, no error.
 - **Wire strings frozen**: `"upload_rules"` expansion string, `"release.upload_rules"` context string, `CreateUploadRequest { upload_rule_id }` field, and test wire fixture id `"uplr_1"` all stay.
 
@@ -53,7 +53,7 @@ All paths are relative to the repo root /home/ben/miru/workbench6/repos/agent un
 - Imports in three comment-headed groups: `// standard crates`, `// internal crates`, `// external crates` (custom import linter).
 - Errors via thiserror + `crate::errors::Error`; aggregate enums via `impl_error!`.
 - `#[cfg(feature = "test")]` for test-only code; tests mirror src layout; `#[serial]` for shared OS resources.
-- Per-test-module `.covgate` files enforced by scripts/covgate.sh — renamed test modules must have their `.covgate` moved too.
+- Per-source-directory `.covgate` files (a coverage threshold number, e.g. agent/src/models/.covgate) are enforced by scripts/covgate.sh (scripts/lib/covgate.sh discovers them under agent/src). This rename stays within already-gated directories (models/, disk/), so no `.covgate` changes are needed.
 - fmt/clippy are scoped `--package miru-agent`. Never run `cargo fmt --all` (it dirties generated libs).
 - CI lint flags 4+ `assert_eq!` on one variable's fields as a field-by-field assert; add `// lint:allow(field-by-field-assert)` where mechanical fixture updates trip it.
 
@@ -126,13 +126,13 @@ After: `FileRule.retention` → `StableFile.retention` → `Job.retention` → d
 
 ### Full reference map of consumers to change
 
-Models: agent/src/models/upload_rule.rs (→ file_rule.rs); agent/src/models/mod.rs; agent/src/models/release.rs (`upload_rule_ids: Vec<UploadRuleID>` field ~line 22, Default ~33, `from_backend(release, upload_rule_ids)` ~39-57, `#[serde(default)]` in Deserialize ~72-89, import line 3).
+Models: agent/src/models/upload_rule.rs (→ file_rule.rs); agent/src/models/mod.rs; agent/src/models/release.rs (`upload_rule_ids: Vec<UploadRuleID>` field ~line 22, Default ~33, `from_backend(release, upload_rule_ids)` ~39-57, `#[serde(default)]` in Deserialize ~72-89, import line 3); agent/src/models/status.rs (doc-comment example, line 16).
 
-Disk: agent/src/disk/upload_rules.rs (→ file_rules.rs; `pub type UploadRules = cache::FileCache<UploadRuleID, UploadRule>`, fns `upload_rules_for_deployment` / `upload_rules_for_deployed`, in-source `#[cfg(test)]` block); agent/src/disk/layout.rs lines 73-75 (`fn upload_rules()` → `resources().file("upload_rules.json")` — rename fn and literal to file_rules / "file_rules.json"); agent/src/disk/mod.rs (module decl line 15, re-export line 25, `Capacities.upload_rules` lines 41/53, `Storage.upload_rules` Arc line 85, spawn in `Storage::init` lines 143-145, shutdown lines 226-230).
+Disk: agent/src/disk/upload_rules.rs (→ file_rules.rs; `pub type UploadRules = cache::FileCache<UploadRuleID, UploadRule>`, fns `upload_rules_for_deployment` / `upload_rules_for_deployed`, in-source `#[cfg(test)]` block); agent/src/disk/layout.rs lines 73-75 (`fn upload_rules()` → `resources().file("upload_rules.json")` — rename fn and literal to file_rules / "file_rules.json"); agent/src/disk/mod.rs (module decl line 15, re-export line 25, `Capacities.upload_rules` lines 42/53, `Storage.upload_rules` Arc line 85, spawn in `Storage::init` lines 143-145, shutdown lines 226-230).
 
 Sync: agent/src/sync/deployments.rs (`Storage.upload_rules: &disk::UploadRules` line 32; `store_expanded_release` lines 263-307 reads `backend_release.upload_rules`, errors `SyncErr::UploadRulesNotExpanded` if absent, builds `upload_rule_ids`, writes rule bodies via `write_if_absent`; the wire string "release.upload_rules" at line 134 STAYS); agent/src/sync/syncer.rs line 241; agent/src/sync/errors.rs (`UploadRulesNotExpandedErr` struct + enum variant + From + `impl_error!`, lines 73-79/108/153-157/172).
 
-Services: agent/src/services/release/get.rs (reads `backend_rls.upload_rules` → `ServiceErr::UploadRulesNotExpanded`, builds `upload_rule_ids`); agent/src/services/backend.rs line 59 (expansion string "upload_rules" STAYS); agent/src/services/errors.rs (`UploadRulesNotExpandedErr` + variant).
+Services: agent/src/services/release/get.rs (reads `backend_rls.upload_rules` → `ServiceErr::UploadRulesNotExpanded`, builds `upload_rule_ids`); agent/src/services/backend.rs line 58 (expansion string "upload_rules" STAYS); agent/src/services/errors.rs (`UploadRulesNotExpandedErr` + variant).
 
 Workers/app: agent/src/workers/sync_scan_bridge.rs (`Storage.upload_rules` Arc line 18; `resolve_and_push` calls `disk::upload_rules_for_deployed` + `scanner.update_rules`); agent/src/workers/scan_upload_bridge.rs (`enqueue_stable_file` maps `stable.upload_rule_id` line 78 and `stable.delete_policy` line 80 into Job); agent/src/app/run.rs line 347 (`upload_rules: app_state.storage.upload_rules.clone()`).
 
@@ -155,7 +155,7 @@ Test surface (agent/tests/, mirrors src): models/upload_rule.rs (→ file_rule.r
    - `name: wire.upload_collection_name.clone()`
    - `upload: Some(FileRuleUpload { upload_collection_id, upload_collection_name, bucket_id, bucket_name, path })` from top-level + destination fields
    - `retention:` match on `wire.destination.delete_policy` — `AfterUpload` → `Some(FileRuleRetention { require_upload: true, ttl_secs: 0 })`; `Never` and `Unknown(_)` → `None`
-2. Delete agent/src/models/upload_rule.rs. In agent/src/models/mod.rs replace the module decl (line 8) and re-exports (lines 26-31): export `FileRule, FileRuleID, FileRuleUpload, FileRuleRetention, FileRuleSource, UploadCollectionID`. `DeletePolicy`, `UploadRule`, `UploadRuleDestination`, `UploadRuleSource`, `UploadRuleID` disappear.
+2. Delete agent/src/models/upload_rule.rs. In agent/src/models/mod.rs replace the module decl (line 8) and re-exports (lines 26-31): export `FileRule, FileRuleID, FileRuleUpload, FileRuleRetention, FileRuleSource, UploadCollectionID`. `DeletePolicy`, `UploadRule`, `UploadRuleDestination`, `UploadRuleSource`, `UploadRuleID` disappear. Also update the doc comment at agent/src/models/status.rs:16, whose backend-only example cites the deleted `DeletePolicy` — no backend-only user remains, so reword to `backend_type` only (no current users after this refactor). Keep it a one-line comment edit.
 
 The crate will not compile at the end of step 1+2 alone — M1's commit includes the minimal mechanical renames needed to compile (this is fine; the deep threading with behavior-shape changes is M2). Practically: do M1 and M2 edits together but commit them as two commits by staging model files first, or simply fold M1+M2 into sequential edits and commit M1 once `cargo check --package miru-agent` passes with the new model in place. Prefer the simplest honest split: M1 commit = models/ changes plus whatever call-site renames `cargo check` forces; M2 commit = the remaining structural threading (retention plumbing, filename change, scanner skip path).
 
@@ -203,9 +203,9 @@ Workers/app:
 
 Sanity: `cargo check --package miru-agent` and `cargo check --package miru-agent --features test` (the in-source `#[cfg(test)]`/`#[cfg(feature = "test")]` fixture blocks must also compile).
 
-### M3 — Tests, fixtures, covgates
+### M3 — Tests and fixtures
 
-18. `git mv agent/tests/models/upload_rule.rs agent/tests/models/file_rule.rs` and `git mv` its `.covgate`; same for agent/tests/disk/upload_rules.rs → file_rules.rs + `.covgate`. Update module decls in agent/tests/models/mod.rs and agent/tests/disk/mod.rs.
+18. `git mv agent/tests/models/upload_rule.rs agent/tests/models/file_rule.rs`; same for agent/tests/disk/upload_rules.rs → file_rules.rs. Update module decls in agent/tests/models/mod.rs and agent/tests/disk/mod.rs.
 19. models/file_rule.rs tests: Required/OptionalField tables reflect the new required set (id, digest, source) and optional upload/retention; `defaults()` asserts upload/retention None; `backend_rule()` wire fixture unchanged in shape (still builds BaseUploadRule with AFTER_UPLOAD); `from_backend` asserts the retention mapping both ways (after_upload → Some{true,0}; never → None); `from_backend_invalid_dates` unchanged in spirit; `delete_policy_default` becomes a retention-default test.
 20. Sweep remaining test files per the reference map: models/release.rs (file_rule_ids), disk/file_rules.rs, disk/layout.rs (path assertion → "/var/lib/miru/resources/file_rules.json"), disk/caches.rs, sync/helpers.rs (wire fixture builders keep producing BaseUploadRule; internal expectations use FileRule; `assert_upload_rule_stored` → `assert_file_rule_stored`), sync/deployments.rs (`dir.file("file_rules.json")`), sync/syncer.rs, sync/errors.rs, upload/executor.rs (delete section: Job fixtures carry `retention`; `after_upload_deletes_source_after_confirm` now sets `retention: Some(FileRuleRetention { require_upload: true, ttl_secs: 0 })`; add/keep the negative case retention None → file kept), upload/uploader.rs, upload/queue.rs, workers/*, services/*, mocks/scanner.rs, server/handlers.rs, server/response.rs. agent/tests/http/uploads.rs: wire `upload_rule_id: "uplr_1"` stays byte-identical.
 21. Watch for the field-by-field-assert lint on updated fixtures; add `// lint:allow(field-by-field-assert)` only where genuinely needed.
@@ -247,9 +247,7 @@ M2 — threading (Plan of Work steps 3-17, whatever wasn't forced in M1: retenti
 M3 — tests + covgates:
 
     git mv agent/tests/models/upload_rule.rs agent/tests/models/file_rule.rs
-    git mv agent/tests/models/upload_rule.covgate agent/tests/models/file_rule.covgate   # adjust to actual covgate filename pattern found in-tree
     git mv agent/tests/disk/upload_rules.rs agent/tests/disk/file_rules.rs
-    git mv agent/tests/disk/upload_rules.covgate agent/tests/disk/file_rules.covgate     # ditto
     # ... test edits per Plan of Work ...
     ./scripts/test.sh
     ./scripts/covgate.sh
@@ -257,8 +255,6 @@ M3 — tests + covgates:
     git commit -m "test(agent): update test surface for FileRule rename"
 
 Expected: test.sh exits 0 with all tests passing; covgate.sh reports no missing gates.
-
-Note: confirm the actual `.covgate` naming convention by listing existing files (`find agent/tests -name '*.covgate' | head`) before the mv — adjust paths accordingly.
 
 M4 — preflight, push, CI:
 
@@ -272,8 +268,8 @@ Expected: preflight prints "Preflight clean"; CI run for the pushed head conclud
 
 Verification of start-fresh paths (one-shot test, part of M4 — see Validation for what to assert):
 
-    ./scripts/test.sh models::file_rule
-    ./scripts/test.sh disk::file_rules
+    cargo test --package miru-agent --features test models::file_rule
+    cargo test --package miru-agent --features test disk::file_rules
 
 ## Validation and Acceptance
 
@@ -283,7 +279,8 @@ Behavioral acceptance criteria:
 2. **Adapter mapping**: `From<BaseUploadRule> for FileRule` produces `upload: Some(..)` with all five fields, `name == upload_collection_name`, and the retention mapping in criterion 1. Covered by agent/tests/models/file_rule.rs `from_backend` tests.
 3. **Wire surface unchanged**: `CreateUploadRequest` still serializes `upload_rule_id`; expansion string "upload_rules" and context string "release.upload_rules" byte-identical; agent/tests/http/uploads.rs passes unmodified in its wire assertions (`upload_rule_id: "uplr_1"`). Verify with:
 
-        grep -rn '"upload_rules"' agent/src/          # expect hits at services/backend.rs and the sync context string only
+        grep -rn '"upload_rules"' agent/src/          # expect exactly one hit: services/backend.rs:58
+        grep -rn '"release.upload_rules"' agent/src/   # expect exactly one hit: sync/deployments.rs:134
         grep -n 'upload_rule_id' agent/src/upload/executor.rs   # expect the CreateUploadRequest field literal
 
 4. **Start-fresh paths**: (a) scanner/uploader state — a scanner.json or upload_queue.json that fails to parse is overwritten with defaults (existing SingleThreadStateFile tests under agent/tests/ keep passing; app/state.rs wiring untouched); (b) cache — the layout test asserts the new path "/var/lib/miru/resources/file_rules.json", and disk/file_rules.rs round-trip tests show a fresh empty cache is created when the file is absent. No code anywhere reads "upload_rules.json" (grep for the literal in agent/src must return nothing).
