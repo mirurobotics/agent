@@ -6,7 +6,6 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
-use miru_agent::models::DeletePolicy;
 use miru_agent::upload::errors::ExecutorErr;
 use miru_agent::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
 
@@ -32,9 +31,9 @@ fn make_job(name: &str) -> Job {
         mtime: Utc::now(),
         first_observed_at: Utc::now(),
         last_observed_at: Utc::now(),
-        upload_rule_id: "rule_1".to_string(),
+        file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        delete_policy: DeletePolicy::Never,
+        retention: None,
     }
 }
 
@@ -60,9 +59,9 @@ async fn make_real_job(dir: &filesys::Dir, name: &str, contents: &str) -> Job {
         mtime: DateTime::<Utc>::from(files::last_modified(&file).await.unwrap()),
         first_observed_at: Utc::now(),
         last_observed_at: Utc::now(),
-        upload_rule_id: "rule_1".to_string(),
+        file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        delete_policy: DeletePolicy::Never,
+        retention: None,
     }
 }
 

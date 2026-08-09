@@ -10,8 +10,8 @@ use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::disk::{
-    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, GitCommits, Releases, Storage,
-    UploadRules,
+    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, FileRules, GitCommits, Releases,
+    Storage,
 };
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
@@ -72,7 +72,7 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits_cache.json"), 1000)
         .await
         .unwrap();
-    let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules_cache.json"), 1000)
+    let (file_rule_stor, _) = FileRules::spawn(16, dir.file("file_rules_cache.json"), 1000)
         .await
         .unwrap();
 
@@ -84,7 +84,7 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         },
         deployments: Arc::new(deployment_stor),
         releases: Arc::new(release_stor),
-        upload_rules: Arc::new(upload_rule_stor),
+        file_rules: Arc::new(file_rule_stor),
         git_commits: Arc::new(git_commit_stor),
     }
 }

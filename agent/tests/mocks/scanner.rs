@@ -3,14 +3,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::models::{Deployment, UploadRule};
+use miru_agent::models::{Deployment, FileRule};
 use miru_agent::scan::{ScanErr, ScanEvent, ScannerExt};
 
 // external crates
 use tokio::sync::broadcast;
 
 type ResultFn = Box<dyn Fn() -> Result<(), ScanErr> + Send + Sync>;
-type UpdateRulesCalls = Arc<Mutex<Vec<(Deployment, Vec<UploadRule>)>>>;
+type UpdateRulesCalls = Arc<Mutex<Vec<(Deployment, Vec<FileRule>)>>>;
 
 /// A test double for [`ScannerExt`] that records `update_rules` / `clear_rules` /
 /// `scan` calls and lets a test inject an error result for those methods (mirrors
@@ -77,7 +77,7 @@ impl MockScanner {
     }
 
     /// The recorded `update_rules` calls, in order.
-    pub fn update_rules_calls(&self) -> Vec<(Deployment, Vec<UploadRule>)> {
+    pub fn update_rules_calls(&self) -> Vec<(Deployment, Vec<FileRule>)> {
         self.update_rules_calls.lock().unwrap().clone()
     }
 
@@ -128,7 +128,7 @@ impl ScannerExt for MockScanner {
     async fn update_rules(
         &self,
         deployment: Deployment,
-        rules: Vec<UploadRule>,
+        rules: Vec<FileRule>,
     ) -> Result<(), ScanErr> {
         self.update_rules_calls
             .lock()

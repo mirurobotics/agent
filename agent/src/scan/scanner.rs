@@ -1071,6 +1071,23 @@ mod tests {
             );
         }
 
+        // A file rule with no upload block has no collection to scan, so it is
+        // skipped rather than panicking or erroring. Unreachable with the v0.4
+        // wire adapter (which always produces an upload block), but the code
+        // path must be total.
+        #[tokio::test]
+        async fn update_rules_skips_rule_without_upload() {
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+
+            let mut rule = rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0);
+            rule.upload = None;
+            deploy(&scanner, vec![rule]).await;
+
+            assert_eq!(active_collections(&scanner).await, BTreeSet::new());
+            assert!(scanner.get_rules().await.unwrap().is_empty());
+        }
+
         #[tokio::test]
         async fn update_rules_persists_snapshot() {
             let dir = dirs::temp("testing").unwrap();
