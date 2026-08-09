@@ -49,7 +49,7 @@ impl Stores {
         }
     }
 
-    /// Seed a Deployed deployment -> release -> upload rule bodies so the
+    /// Seed a Deployed deployment -> release -> file rule bodies so the
     /// deployment-scoped traversal resolves to the given rules.
     async fn seed_deployed(&self, dpl_id: &str, release_id: &str, rules: &[FileRule]) {
         self.deployments
@@ -102,7 +102,7 @@ impl Stores {
             .unwrap();
     }
 
-    /// Add an upload rule body (glob only) under `id`, leaving any existing
+    /// Add a file rule body (glob only) under `id`, leaving any existing
     /// release wiring untouched.
     async fn put_rule(&self, id: &str, glob: &str) {
         self.file_rules
@@ -130,7 +130,7 @@ impl Stores {
     }
 }
 
-/// Build an FileRule with only its id + source fields set.
+/// Build a FileRule with only its id + source fields set.
 fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> FileRule {
     FileRule {
         id: id.to_string(),

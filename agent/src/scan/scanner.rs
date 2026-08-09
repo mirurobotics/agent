@@ -508,8 +508,8 @@ mod tests {
 
     // =============================== TEST HELPERS ================================= //
 
-    /// Default upload collection id for `single_coll` and tests that
-    /// redeploy the same scanner map entry.
+    /// Default `FileRuleUpload::upload_collection_id` for `single_coll` and
+    /// tests that redeploy the same scanner map entry.
     const DEFAULT_COLL_ID: &str = "coll";
 
     /// A Deployed deployment with the given id (release_id mirrors the id).
