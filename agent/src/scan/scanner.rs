@@ -180,13 +180,16 @@ impl SingleThreadScanner {
         // retention engine has eligibility to act on.
         let now = (self.now_fn)();
         for rule in rules.iter() {
-            let config = Config {
-                deployment: deployment.clone(),
-                rule: rule.clone(),
-            };
             match self.scanners.get_mut(&rule.id) {
-                Some(scanner) => scanner.update_config(config, now).await?,
+                // A rule's content is immutable per id (content-digested; edits
+                // mint a new id), so a re-push can only change the deployment
+                // context. No re-glob, no preexisting re-snapshot.
+                Some(scanner) => scanner.set_deployment(deployment.clone()),
                 None => {
+                    let config = Config {
+                        deployment: deployment.clone(),
+                        rule: rule.clone(),
+                    };
                     self.scanners.insert(
                         rule.id.clone(),
                         RuleScanner::new(config, now, Options::default()).await?,
@@ -1233,33 +1236,35 @@ mod tests {
             assert!(snapshot.rules.contains_key(DEFAULT_RULE_ID));
         }
 
-        // Pushing the SAME rule id with a new rule generation updates config in
-        // place and carries over ledger state, so an already-reported file is not
-        // re-reported.
+        // Re-pushing the SAME rule id keeps the existing scanner and its ledger
+        // (no re-report of an already-reported file) while refreshing the
+        // deployment stamped onto subsequent stable files. A rule's content is
+        // immutable per id, so the deployment is all a re-push can change.
         #[tokio::test]
-        async fn update_rules_updates_in_place_carrying_state() {
+        async fn update_rules_refreshes_deployment_carrying_state() {
             let dir = dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
+            deploy(&scanner, vec![upload_rule(DEFAULT_RULE_ID, &glob, 0)]).await;
 
-            let mut v1 = upload_rule(DEFAULT_RULE_ID, &glob, 0);
-            v1.digest = "d1".to_string();
-            deploy(&scanner, vec![v1]).await;
-
-            // file appears after creation and goes stable.
+            // file appears after creation and goes stable under deployment "d".
             write(&dir, "carry.mcap", b"ccc").await;
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
 
-            // v2: same rule id, new digest.
-            let mut v2 = upload_rule(DEFAULT_RULE_ID, &glob, 0);
-            v2.digest = "d2".to_string();
-            deploy(&scanner, vec![v2]).await;
+            // the same rule arrives again under a new deployment.
+            scanner
+                .update_rules(
+                    deployment("d2"),
+                    vec![upload_rule(DEFAULT_RULE_ID, &glob, 0)],
+                )
+                .await
+                .unwrap();
 
-            // the swap carried the dedup state: no re-report.
+            // the ledger carried: no re-report of the already-reported file.
             let mut rx = subscribe(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
@@ -1267,10 +1272,15 @@ mod tests {
                 rx.try_recv().is_err(),
                 "carried dedup state must not re-emit the already-reported file"
             );
+            assert_eq!(scanner.get_rules().await.unwrap().len(), 1);
 
-            let rules = scanner.get_rules().await.unwrap();
-            assert_eq!(rules.len(), 1);
-            assert_eq!(rules[0].digest, "d2".to_string());
+            // a file arriving after the re-push is stamped with the new deployment.
+            write(&dir, "after.mcap", b"aaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            let ScanEvent::StableFile { file, .. } = rx.recv().await.unwrap();
+            assert_eq!(stable_name(&file), "after.mcap");
+            assert_eq!(file.deployment_id, "d2");
         }
 
         // The deployed set is replaced on each update_rules: after [A,B] then [C], only C
@@ -1336,27 +1346,26 @@ mod tests {
             );
         }
 
-        // update_rules re-snapshots preexisting: redeploying the same rule id
-        // after a new file appears suppresses that file (it is re-discovered as
-        // preexisting).
+        // A re-push of the same rule must NOT swallow files that appeared since
+        // the last scan tick. update_rules runs on every sync success; if it
+        // re-snapshotted preexisting (as it once did), a file appearing in the
+        // window between a scan tick and a sync would be classified preexisting
+        // and silently never uploaded.
         #[tokio::test]
-        async fn update_rules_resnapshots_preexisting() {
+        async fn update_rules_repush_does_not_swallow_new_files() {
             let (dir, clock, scanner) = single_rule(0).await;
             let glob = format!("{}/*.mcap", dir.path().display());
 
-            // a file appears after the scanner was created.
+            // a file appears after the scanner was created, before any scan tick...
             write(&dir, "late.mcap", b"aaa").await;
 
-            // same rule id, new glob generation: update_config re-runs
-            // discover_preexisting, so the now-present file is snapshotted as
-            // preexisting.
-            let rule = upload_rule(DEFAULT_RULE_ID, &glob, 0);
-            deploy(&scanner, vec![rule]).await;
+            // ...and a sync re-pushes the same rule before the next tick.
+            deploy(&scanner, vec![upload_rule(DEFAULT_RULE_ID, &glob, 0)]).await;
 
+            // the file is still discovered and reported.
             scan_once(&scanner).await;
             tick(&scanner, &clock, 100).await;
-            scan_once(&scanner).await;
-            assert_eq!(ledger_count(&scanner).await, 0);
+            assert_eq!(ledger_count(&scanner).await, 1);
         }
     }
 

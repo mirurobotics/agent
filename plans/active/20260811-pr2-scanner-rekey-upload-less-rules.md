@@ -84,6 +84,23 @@ ahead of the PR 4 wire flip.
 
 ## Decision Log
 
+- **Same-rule re-push refreshes only the deployment (Ben's call, 2026-08-11).** A rule's
+  content is immutable per id (content-digested; edits mint a new id), so the only real
+  delta on the every-sync re-push path is the deployment stamped onto observations —
+  which is load-bearing (`CreateUploadRequest.deployment_id`). `update_config` — which
+  also re-globbed and re-snapshotted `preexisting` on every push — is replaced by
+  `RuleScanner::set_deployment`; `RuleState::set_config` and the `InvalidRule` error are
+  deleted. This fixes a latent lost-file window that predates this PR: a file appearing
+  between a scan tick and a sync was swallowed into `preexisting` and never uploaded
+  (pinned by `update_rules_repush_does_not_swallow_new_files`). Known semantic change:
+  files appearing while a rule is undeployed are now uploaded when the same rule id is
+  later redeployed, instead of being suppressed as preexisting — preexisting-backlog
+  suppression now happens exactly once, at a rule's first deploy.
+- **`RuleScanner::rule()` is no longer test-gated.** The scan tick needs it in
+  production to attach the upload block to emitted events; the `#[cfg(feature = "test")]`
+  gate made the no-features build fail (unnoticed because tests, clippy, and CI all run
+  with the test feature enabled).
+
 - **Bridge gating carries `Option<FileRuleUpload>`, not a bool.** `ScanEvent::StableFile`
   becomes a struct variant `{ file: StableFile, upload: Option<FileRuleUpload> }`. Rejected
   a bool flag as lossy, and rejected putting the field on `StableFile` itself: `StableFile`

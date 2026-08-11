@@ -7,18 +7,6 @@ pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 
 #[derive(Debug, thiserror::Error)]
-#[error(
-    "invalid file rule replacement: rule id changed from '{existing_file_rule_id}' to '{replacement_file_rule_id}'"
-)]
-pub struct InvalidRule {
-    pub existing_file_rule_id: FileRuleID,
-    pub replacement_file_rule_id: FileRuleID,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for InvalidRule {}
-
-#[derive(Debug, thiserror::Error)]
 #[error("duplicate file rule id in rule set: '{file_rule_id}'")]
 pub struct DuplicateFileRuleID {
     pub file_rule_id: FileRuleID,
@@ -42,8 +30,6 @@ pub enum ScanErr {
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
     ReceiveActorMessageErr(ReceiveActorMessageErr),
-    #[error(transparent)]
-    InvalidRule(InvalidRule),
     #[error(transparent)]
     DuplicateFileRuleID(DuplicateFileRuleID),
     #[error(transparent)]
@@ -81,7 +67,6 @@ impl From<crate::cache::CacheErr> for ScanErr {
 crate::impl_error!(ScanErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
-    InvalidRule,
     DuplicateFileRuleID,
     InternalError,
     FileSysErr,

@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{errors::*, files, File, PathExt};
-use crate::models::FileRuleRetention;
+use crate::models::{Deployment, FileRuleRetention};
 use crate::scan::{
     errors::*,
     state::{Candidate, Config, Observation, RuleState, StableFile},
@@ -56,7 +56,6 @@ impl RuleScanner {
         &self.state
     }
 
-    #[cfg(feature = "test")]
     pub(crate) fn rule(&self) -> &crate::models::FileRule {
         self.state.rule()
     }
@@ -70,20 +69,17 @@ impl RuleScanner {
         self.state.has_candidates()
     }
 
-    /// Replace only the active rule, carrying over observation/dedupe/cadence state.
-    pub(crate) async fn update_config(
-        &mut self,
-        config: Config,
-        now: DateTime<Utc>,
-    ) -> Result<(), ScanErr> {
-        self.state.set_config(config)?;
-
-        // rediscover preexisting files (no prune here: pruning runs only in the
-        // periodic discovery pass)
-        let globbed = files::glob(&self.state.cfg.rule.source.glob)?;
-        self.state.preexisting = discover_preexisting(&self.state, &globbed, now).await;
-
-        Ok(())
+    /// Refresh the deployment context on a re-push of the same rule.
+    ///
+    /// This is all a re-push can change: a rule's content is immutable per id
+    /// (content-digested; edits mint a new id), so only the deployment stamped
+    /// onto subsequent observations moves. Deliberately no preexisting
+    /// re-snapshot: that semantic ("don't upload the backlog that predates
+    /// deployment") belongs to a rule's first deploy in `new`. Re-running it
+    /// here would swallow any file that appeared since the last scan tick into
+    /// `preexisting` — silently never uploaded — on every sync re-push.
+    pub(crate) fn set_deployment(&mut self, deployment: Deployment) {
+        self.state.cfg.deployment = deployment;
     }
 
     pub(crate) async fn discover_candidates(&mut self, now: DateTime<Utc>) -> Result<(), ScanErr> {
@@ -560,14 +556,6 @@ mod tests {
         }
     }
 
-    /// Config for the same rule id with a new glob (for update_config tests).
-    fn config_v2(glob: &str) -> Config {
-        Config {
-            deployment: deployment("d"),
-            rule: rule("r1", glob, 0),
-        }
-    }
-
     /// Empty state for `cfg` with `file` snapshotted into preexisting at `at`.
     async fn state_with_preexisting(cfg: Config, file: File, at: DateTime<Utc>) -> RuleState {
         let mut state = RuleState::new(cfg);
@@ -609,66 +597,58 @@ mod tests {
         }
     }
 
-    // ============================ M2: update_config ============================== //
+    // =========================== M2: set_deployment ============================= //
 
-    mod update_config {
+    mod set_deployment {
         use super::*;
 
-        // update_config propagates the InvalidRule error on a rule id change.
+        // set_deployment swaps only the deployment; every other piece of state —
+        // preexisting, candidates, ledger — is untouched. No glob runs, so a
+        // file that appeared since the last scan is NOT swallowed into
+        // preexisting: it is discovered as a candidate afterwards.
         #[tokio::test]
-        async fn update_config_different_rule_ids_err() {
-            let dir = dirs::temp("testing").unwrap();
-            let glob = glob_for(&dir);
-            let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
-            let err = scanner
-                .update_config(config("d", "other", &glob, 0), ts(1001))
-                .await
-                .unwrap_err();
-            assert!(matches!(err, ScanErr::InvalidRule(_)));
-        }
-
-        // update_config re-snapshots newly present files as preexisting and swaps the rule.
-        #[tokio::test]
-        async fn update_config_resnapshots_preexisting() {
+        async fn late_file_survives_deployment_refresh() {
             let dir = dirs::temp("testing").unwrap();
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
             let late_file = write(&dir, "late.mcap", b"aaaa").await;
-            let cfg = config_v2(&glob_for(&dir));
-            scanner.update_config(cfg.clone(), ts(1001)).await.unwrap();
+            scanner.set_deployment(deployment("d2"));
 
-            let expected_state = state_with_preexisting(cfg, late_file, ts(1001)).await;
-            assert_eq!(scanner.state, expected_state);
+            assert_eq!(scanner.state.cfg.deployment.id, "d2");
+            assert!(scanner.state.preexisting.is_empty());
 
-            scanner.discover_candidates(ts(1002)).await.unwrap();
-            assert!(scanner.state.candidates.is_empty());
-            assert_eq!(scanner.state, expected_state);
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+            assert!(scanner.state.candidates.contains_key(&late_file));
         }
 
-        // update_config leaves tracked candidates in place; they are not moved into preexisting.
+        // Observations made after a deployment refresh stamp the new deployment id.
         #[tokio::test]
-        async fn update_config_preserves_candidates() {
+        async fn subsequent_observations_carry_new_deployment() {
+            let dir = dirs::temp("testing").unwrap();
+            let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
+            scanner.set_deployment(deployment("d2"));
+
+            write(&dir, "a.mcap", b"aaaa").await;
+            scanner.discover_candidates(ts(1001)).await.unwrap();
+            let stable = scanner.evaluate_candidates(ts(1002)).await.unwrap();
+
+            assert_eq!(stable.len(), 1);
+            assert_eq!(stable[0].deployment_id, "d2");
+        }
+
+        // A tracked candidate stays tracked across a deployment refresh.
+        #[tokio::test]
+        async fn preserves_candidates() {
             let dir = dirs::temp("testing").unwrap();
             let candidate_file = write(&dir, "pre.mcap", b"aaaa").await;
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
             write_file(&candidate_file, b"bbbbbbbb").await;
             scanner.discover_candidates(ts(1001)).await.unwrap();
-            let expected_candidate = scanner
-                .state
-                .candidates
-                .get(&candidate_file)
-                .cloned()
-                .expect("changed preexisting file promoted to candidate");
+            assert!(scanner.state.candidates.contains_key(&candidate_file));
 
-            let cfg = config_v2(&glob_for(&dir));
-            scanner.update_config(cfg.clone(), ts(1002)).await.unwrap();
-
-            let mut expected_state = RuleState::new(cfg);
-            expected_state
-                .candidates
-                .insert(candidate_file, expected_candidate);
-            assert_eq!(scanner.state, expected_state);
+            scanner.set_deployment(deployment("d2"));
+            assert!(scanner.state.candidates.contains_key(&candidate_file));
         }
     }
 
@@ -1540,23 +1520,6 @@ mod tests {
             assert!(unmatched.exists());
             assert!(!scanner.state.ledger.contains_key(&unmatched));
             assert_eq!(scanner.ledger_count(), 0);
-        }
-
-        // update_config globs (to re-snapshot preexisting) but must NOT prune:
-        // pruning runs only in the periodic discovery pass.
-        #[tokio::test]
-        async fn update_config_does_not_prune() {
-            let dir = dirs::temp("testing").unwrap();
-            let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
-            seed_stale(&mut state, &dir, LEDGER_PRUNE_THRESHOLD);
-            let mut scanner = RuleScanner::from_state(state, Options::default());
-
-            scanner
-                .update_config(config_v2(&glob_for(&dir)), ts(1001))
-                .await
-                .unwrap();
-
-            assert_eq!(scanner.ledger_count(), LEDGER_PRUNE_THRESHOLD);
         }
     }
 }

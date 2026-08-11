@@ -4,8 +4,6 @@ use std::collections::{HashMap, HashSet};
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
 use crate::models::{Deployment, FileRule, FileRuleID, FileRuleRetention, Patch};
-use crate::scan::errors::*;
-use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -69,24 +67,6 @@ impl RuleState {
         self.ledger
             .get_mut(file)
             .and_then(|entries| entries.last_mut())
-    }
-
-    /// Replace this scanner's config in place. The rule id must not change: the
-    /// ledger, candidate set, and preexisting set all belong to one rule, and
-    /// re-pointing them at a different rule would silently inherit its history.
-    /// Keying scanners by rule id makes this unreachable through the scanner —
-    /// the check stays as defense in depth.
-    pub(crate) fn set_config(&mut self, cfg: Config) -> Result<(), ScanErr> {
-        if self.cfg.rule.id != cfg.rule.id {
-            return Err(ScanErr::InvalidRule(InvalidRule {
-                existing_file_rule_id: self.cfg.rule.id.clone(),
-                replacement_file_rule_id: cfg.rule.id,
-                trace: trace!(),
-            }));
-        }
-
-        self.cfg = cfg;
-        Ok(())
     }
 
     /// Drop ledger entries whose file is absent from this pass's glob set.
@@ -367,48 +347,6 @@ mod tests {
             let obs = observation(file.clone());
             state.preexisting.insert(file, obs.clone());
             assert!(state.is_preexisting(&obs));
-        }
-    }
-
-    mod set_config {
-        use super::*;
-
-        #[test]
-        fn rule_ids_differ() {
-            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
-            let err = state
-                .set_config(config("d", "r2", "/none/*.mcap", 0))
-                .unwrap_err();
-            assert!(matches!(err, ScanErr::InvalidRule(_)));
-            // rejected in full: the original config is untouched.
-            assert_eq!(state.rule().id, "r1".to_string());
-        }
-
-        #[test]
-        fn success() {
-            let mut state = RuleState::new(config("d", "r1", "/old/*.mcap", 0));
-            state
-                .set_config(config("d", "r1", "/new/*.mcap", 5))
-                .unwrap();
-            assert_eq!(state.rule().id, "r1".to_string());
-            assert_eq!(state.rule().source.glob, "/new/*.mcap".to_string());
-            assert_eq!(state.rule().source.stability_window_secs, 5);
-        }
-
-        /// A rule that drops its upload block (upload → retention-only) keeps the
-        /// same id, so it replaces in place and inherits the existing ledger.
-        #[test]
-        fn upload_block_may_be_dropped() {
-            let mut state = RuleState::new(config("d", "r1", "/logs/*.mcap", 0));
-            let mut replacement = rule("r1", "/logs/*.mcap", 0);
-            replacement.upload = None;
-            state
-                .set_config(Config {
-                    deployment: deployment("d"),
-                    rule: replacement,
-                })
-                .unwrap();
-            assert!(state.rule().upload.is_none());
         }
     }
 
