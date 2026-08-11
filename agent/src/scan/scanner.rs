@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // internal crates
-use crate::models::{Deployment, FileRule, UploadCollectionID};
+use crate::models::{Deployment, FileRule, FileRuleID, FileRuleUpload};
 pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
     errors::*,
@@ -21,7 +21,13 @@ use tracing::{debug, error, info, warn};
 // =============================== SCANNER EVENTS ================================== //
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanEvent {
-    StableFile(StableFile),
+    /// A file the scanner considers stable, plus the upload block of the rule
+    /// that matched it. `upload: None` means the rule is retention-only —
+    /// subscribers must not mint an upload job for it.
+    StableFile {
+        file: StableFile,
+        upload: Option<FileRuleUpload>,
+    },
 }
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 256;
@@ -53,8 +59,8 @@ impl Default for ScannerArgs {
 }
 
 pub struct SingleThreadScanner {
-    scanners: HashMap<UploadCollectionID, RuleScanner>,
-    deployed: HashSet<UploadCollectionID>,
+    scanners: HashMap<FileRuleID, RuleScanner>,
+    deployed: HashSet<FileRuleID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     subscriber_tx: broadcast::Sender<ScanEvent>,
     snapshot_file: Option<ScanSnapshotFile>,
@@ -65,11 +71,11 @@ impl SingleThreadScanner {
         let (subscriber_tx, _) = broadcast::channel(args.broadcast_capacity);
         let persisted = Self::load_snapshot(&args.snapshot_file);
         let scanners = persisted
-            .collections
+            .rules
             .iter()
-            .map(|(cid, state)| {
+            .map(|(rule_id, state)| {
                 (
-                    cid.clone(),
+                    rule_id.clone(),
                     RuleScanner::from_state(state.clone(), Options::default()),
                 )
             })
@@ -86,7 +92,7 @@ impl SingleThreadScanner {
     fn load_snapshot(state_file: &Option<ScanSnapshotFile>) -> ScannerSnapshot {
         let Some(state_file) = state_file.as_ref() else {
             return ScannerSnapshot {
-                collections: HashMap::new(),
+                rules: HashMap::new(),
                 deployed: HashSet::new(),
             };
         };
@@ -97,13 +103,13 @@ impl SingleThreadScanner {
         let Some(state_file) = self.snapshot_file.as_mut() else {
             return;
         };
-        let collections: HashMap<UploadCollectionID, RuleState> = self
+        let rules: HashMap<FileRuleID, RuleState> = self
             .scanners
             .iter()
-            .map(|(cid, scanner)| (cid.clone(), scanner.state().clone()))
+            .map(|(rule_id, scanner)| (rule_id.clone(), scanner.state().clone()))
             .collect();
         let snapshot = ScannerSnapshot {
-            collections,
+            rules,
             deployed: self.deployed.clone(),
         };
         if let Err(err) = state_file.patch(snapshot).await {
@@ -115,9 +121,12 @@ impl SingleThreadScanner {
         self.subscriber_tx.subscribe()
     }
 
-    fn emit_stable_files(&self, stable_files: Vec<StableFile>) {
-        for stable_file in stable_files {
-            if let Err(e) = self.subscriber_tx.send(ScanEvent::StableFile(stable_file)) {
+    fn emit_stable_files(&self, stable_files: Vec<(StableFile, Option<FileRuleUpload>)>) {
+        for (file, upload) in stable_files {
+            if let Err(e) = self
+                .subscriber_tx
+                .send(ScanEvent::StableFile { file, upload })
+            {
                 debug!("no stable-file subscribers active: {e:?}");
             }
         }
@@ -146,7 +155,7 @@ impl SingleThreadScanner {
     async fn clear_rules(&mut self) -> Result<(), ScanErr> {
         self.deployed.clear();
         self.persist_snapshot().await;
-        info!("scan: cleared all deployed collection rules");
+        info!("scan: cleared all deployed file rules");
         Ok(())
     }
 
@@ -155,36 +164,31 @@ impl SingleThreadScanner {
         deployment: Deployment,
         rules: Vec<FileRule>,
     ) -> Result<(), ScanErr> {
-        let mut deployed: HashSet<UploadCollectionID> = HashSet::new();
+        let mut deployed: HashSet<FileRuleID> = HashSet::new();
         for rule in rules.iter() {
-            let Some(upload) = &rule.upload else {
-                continue;
-            };
-            if deployed.contains(&upload.upload_collection_id) {
-                return Err(ScanErr::DuplicateCollectionID(DuplicateCollectionID {
-                    collection_id: upload.upload_collection_id.clone(),
+            if deployed.contains(&rule.id) {
+                return Err(ScanErr::DuplicateFileRuleID(DuplicateFileRuleID {
+                    file_rule_id: rule.id.clone(),
                     trace: trace!(),
                 }));
             }
-            deployed.insert(upload.upload_collection_id.clone());
+            deployed.insert(rule.id.clone());
         }
 
+        // Every rule gets a scanner, whether or not it uploads: a retention-only
+        // rule still needs its glob walked and its files ledgered so the
+        // retention engine has eligibility to act on.
         let now = (self.now_fn)();
         for rule in rules.iter() {
-            let Some(upload) = &rule.upload else {
-                let rule_id = &rule.id;
-                warn!("scan: skipping file rule {rule_id} with no upload block");
-                continue;
-            };
             let config = Config {
                 deployment: deployment.clone(),
                 rule: rule.clone(),
             };
-            match self.scanners.get_mut(&upload.upload_collection_id) {
+            match self.scanners.get_mut(&rule.id) {
                 Some(scanner) => scanner.update_config(config, now).await?,
                 None => {
                     self.scanners.insert(
-                        upload.upload_collection_id.clone(),
+                        rule.id.clone(),
                         RuleScanner::new(config, now, Options::default()).await?,
                     );
                 }
@@ -203,43 +207,47 @@ impl SingleThreadScanner {
 
     async fn scan(&mut self) -> Result<(), ScanErr> {
         let mut stable_files = Vec::new();
-        let mut inactive_colls = Vec::new();
+        let mut inactive_rules = Vec::new();
 
         let now = (self.now_fn)();
 
         let active = self.scanners.len();
         let deployed = self.deployed.len();
-        debug!("scan: tick over {active} collection(s), {deployed} deployed");
+        debug!("scan: tick over {active} rule(s), {deployed} deployed");
 
         // evaludate candidates for all scanners
-        for (cid, scanner) in self.scanners.iter_mut() {
+        for (rule_id, scanner) in self.scanners.iter_mut() {
             match scanner.evaluate_candidates(now).await {
                 Ok(stable) => {
                     if !stable.is_empty() {
                         let count = stable.len();
-                        debug!("scan: collection {cid} produced {count} stable file(s)");
+                        debug!("scan: rule {rule_id} produced {count} stable file(s)");
                     }
-                    stable_files.extend(stable);
+                    // Tag each file with its rule's upload block here, while the
+                    // rule is in scope. Subscribers use it to decide whether the
+                    // file becomes an upload job.
+                    let upload = scanner.rule().upload.clone();
+                    stable_files.extend(stable.into_iter().map(|file| (file, upload.clone())));
                 }
-                Err(err) => warn!("scan: evaluate failed for collection {cid}: {err}"),
+                Err(err) => warn!("scan: evaluate failed for rule {rule_id}: {err}"),
             }
 
             // discover candidates for deployed scanners
-            if self.deployed.contains(cid) {
+            if self.deployed.contains(rule_id) {
                 if let Err(err) = scanner.discover_candidates(now).await {
-                    warn!("scan: discover failed for collection {cid}: {err}");
+                    warn!("scan: discover failed for rule {rule_id}: {err}");
                 }
             // if the scanner has no candidates, it is inactive
             } else if !scanner.has_candidates() {
-                inactive_colls.push(cid.clone());
+                inactive_rules.push(rule_id.clone());
             }
         }
 
-        // prune inactive collection scanners
-        let pruned = inactive_colls.len();
-        for cid in inactive_colls {
-            info!("scan: pruned inactive collection {cid}");
-            self.scanners.remove(&cid);
+        // prune inactive rule scanners
+        let pruned = inactive_rules.len();
+        for rule_id in inactive_rules {
+            info!("scan: pruned inactive rule {rule_id}");
+            self.scanners.remove(&rule_id);
         }
 
         self.persist_snapshot().await;
@@ -248,7 +256,7 @@ impl SingleThreadScanner {
 
         debug!(
             "scan: tick complete; {emitted} stable file(s) emitted, \
-             {pruned} inactive collection(s) pruned"
+             {pruned} inactive rule(s) pruned"
         );
 
         Ok(())
@@ -508,9 +516,9 @@ mod tests {
 
     // =============================== TEST HELPERS ================================= //
 
-    /// Default `FileRuleUpload::upload_collection_id` for `single_coll` and
+    /// Default rule id — the key scanners are held by — for `single_rule` and
     /// tests that redeploy the same scanner map entry.
-    const DEFAULT_COLL_ID: &str = "coll";
+    const DEFAULT_RULE_ID: &str = "r";
 
     /// A Deployed deployment with the given id (release_id mirrors the id).
     fn deployment(id: &str) -> Deployment {
@@ -519,6 +527,26 @@ mod tests {
             activity_status: DplActivity::Deployed,
             release_id: id.to_string(),
             ..Default::default()
+        }
+    }
+
+    /// An upload-bearing FileRule pinned to a rule id, glob, and stability
+    /// window. Its collection id is derived from the rule id; use
+    /// [`rule_in_collection`] when the collection id itself is under test.
+    fn upload_rule(rule_id: &str, glob: &str, stability_window_secs: i64) -> FileRule {
+        rule_in_collection(
+            rule_id,
+            &format!("{rule_id}-coll"),
+            glob,
+            stability_window_secs,
+        )
+    }
+
+    /// A retention-only FileRule: scanned and ledgered, but never uploaded.
+    fn retention_only_rule(rule_id: &str, glob: &str, stability_window_secs: i64) -> FileRule {
+        FileRule {
+            upload: None,
+            ..upload_rule(rule_id, glob, stability_window_secs)
         }
     }
 
@@ -564,11 +592,10 @@ mod tests {
         scanner
     }
 
-    /// temp dir + `*.mcap` glob + spawned scanner + one deployed rule whose
-    /// `upload_collection_id` is [`DEFAULT_COLL_ID`] (deployment "d",
-    /// rule "r", window `window`). Returns (dir, clock, scanner).
-    /// Hold `dir` to keep the temp tree alive.
-    async fn single_coll(window: i64) -> (dirs::TempDir, Clock, Scanner) {
+    /// temp dir + `*.mcap` glob + spawned scanner + one deployed upload-bearing
+    /// rule keyed [`DEFAULT_RULE_ID`] (deployment "d", window `window`).
+    /// Returns (dir, clock, scanner). Hold `dir` to keep the temp tree alive.
+    async fn single_rule(window: i64) -> (dirs::TempDir, Clock, Scanner) {
         let dir = dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
@@ -576,7 +603,7 @@ mod tests {
         scanner
             .update_rules(
                 deployment("d"),
-                vec![rule_in_collection("r", DEFAULT_COLL_ID, &glob, window)],
+                vec![upload_rule(DEFAULT_RULE_ID, &glob, window)],
             )
             .await
             .unwrap();
@@ -643,17 +670,17 @@ mod tests {
         scanner.get_ledger_count().await.unwrap()
     }
 
-    /// Collection ids with live scanner state, including inactive legacy scanners
-    /// that are still draining candidates.
-    async fn active_collections(scanner: &Scanner) -> BTreeSet<String> {
-        collection_ids(&scanner.get_rules().await.unwrap())
+    /// Rule ids with live scanner state — the scanner map's keys — including
+    /// inactive legacy scanners that are still draining candidates.
+    async fn active_rule_ids(scanner: &Scanner) -> BTreeSet<String> {
+        rule_ids(&scanner.get_rules().await.unwrap())
     }
 
     /// Receive exactly one `StableFile` event, assert its file name is `name`, and
     /// assert no further event follows. The caller supplies the WHY exactly-one
     /// holds at its own site.
     async fn assert_one_stable(rx: &mut tokio::sync::broadcast::Receiver<ScanEvent>, name: &str) {
-        let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+        let ScanEvent::StableFile { file: sf, .. } = rx.recv().await.unwrap();
         assert_eq!(stable_name(&sf), name.to_string());
         assert!(
             rx.try_recv().is_err(),
@@ -695,13 +722,13 @@ mod tests {
         state_path: File,
     }
 
-    async fn persisted_coll(window: i64) -> PersistedScannerFixture {
+    async fn persisted_rule(window: i64) -> PersistedScannerFixture {
         let dir = dirs::temp("testing").unwrap();
         let state_path = dir.file("scanner.json");
         let clock = Clock::new(1000);
         let scanner = spawn_persisted(&clock, &state_path).await;
         let glob = mcap_glob(&dir);
-        let rule = rule_in_collection("r", DEFAULT_COLL_ID, &glob, window);
+        let rule = upload_rule(DEFAULT_RULE_ID, &glob, window);
         deploy(&scanner, vec![rule]).await;
         PersistedScannerFixture {
             dir,
@@ -735,7 +762,7 @@ mod tests {
 
         #[tokio::test]
         async fn missing_state_file_starts_fresh() {
-            let fxtr = persisted_coll(0).await;
+            let fxtr = persisted_rule(0).await;
             write(&fxtr.dir, "a.mcap", b"aaaa").await;
             scan_once(&fxtr.scanner).await;
             tick(&fxtr.scanner, &fxtr.clock, 1).await;
@@ -743,7 +770,7 @@ mod tests {
 
             assert!(fxtr.state_path.exists());
             let snapshot = read_snapshot(&fxtr.state_path).await;
-            assert!(snapshot.collections.contains_key(DEFAULT_COLL_ID));
+            assert!(snapshot.rules.contains_key(DEFAULT_RULE_ID));
         }
 
         #[tokio::test]
@@ -754,7 +781,7 @@ mod tests {
 
             let clock = Clock::new(1000);
             let scanner = spawn_persisted(&clock, &state_path).await;
-            let rule = rule_in_collection("r", DEFAULT_COLL_ID, &mcap_glob(&dir), 0);
+            let rule = upload_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0);
             deploy(&scanner, vec![rule]).await;
             write(&dir, "a.mcap", b"aaaa").await;
             scan_once(&scanner).await;
@@ -762,21 +789,54 @@ mod tests {
             assert_eq!(ledger_count(&scanner).await, 1);
 
             let snapshot = read_snapshot(&state_path).await;
-            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            let state = snapshot.rules.get(DEFAULT_RULE_ID).unwrap();
             assert_eq!(state.ledger.len(), 1);
+        }
+
+        /// A snapshot written by a pre-rule-keying agent has a `collections`
+        /// field instead of `rules`. Both were `HashMap<String, _>`, so without
+        /// the field rename it would deserialize cleanly and attach one rule's
+        /// ledger to a different rule. It must fail to parse and start fresh.
+        #[tokio::test]
+        async fn stale_collection_keyed_state_file_starts_fresh() {
+            let dir = dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            files::seed(
+                &state_path,
+                r#"{"collections":{"coll-1":{"cfg":{"deployment":{},"rule":{}},
+                   "preexisting":{},"candidates":{},"ledger":{}}},
+                   "deployed":["coll-1"]}"#,
+            )
+            .await;
+
+            let clock = Clock::new(1000);
+            let scanner = spawn_persisted(&clock, &state_path).await;
+
+            // nothing carried over from the stale snapshot.
+            assert!(scanner.get_rules().await.unwrap().is_empty());
+
+            // and the scanner is usable: a fresh rule-keyed snapshot is written.
+            let rule = upload_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0);
+            deploy(&scanner, vec![rule]).await;
+            write(&dir, "a.mcap", b"aaaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+
+            let snapshot = read_snapshot(&state_path).await;
+            assert!(snapshot.rules.contains_key(DEFAULT_RULE_ID));
         }
 
         #[tokio::test]
         async fn existing_state_file_restores_scanner() {
             let dir = dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
-            let collection_state = RuleState::new(Config {
+            let rule_state = RuleState::new(Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+                rule: upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0),
             });
             let expected = ScannerSnapshot {
-                collections: HashMap::from([(DEFAULT_COLL_ID.to_string(), collection_state)]),
-                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+                rules: HashMap::from([(DEFAULT_RULE_ID.to_string(), rule_state)]),
+                deployed: HashSet::from([DEFAULT_RULE_ID.to_string()]),
             };
             let mut snapshot_file = state_file(&state_path).await;
             snapshot_file.patch(expected.clone()).await.unwrap();
@@ -789,8 +849,8 @@ mod tests {
 
             assert_eq!(scanner.deployed, expected.deployed);
             assert_eq!(
-                scanner.scanners.get(DEFAULT_COLL_ID).unwrap().state(),
-                expected.collections.get(DEFAULT_COLL_ID).unwrap()
+                scanner.scanners.get(DEFAULT_RULE_ID).unwrap().state(),
+                expected.rules.get(DEFAULT_RULE_ID).unwrap()
             );
         }
     }
@@ -804,11 +864,11 @@ mod tests {
             let state_path = dir.file("scanner.json");
             let config = Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+                rule: upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0),
             };
             let expected = ScannerSnapshot {
-                collections: HashMap::from([(DEFAULT_COLL_ID.to_string(), RuleState::new(config))]),
-                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+                rules: HashMap::from([(DEFAULT_RULE_ID.to_string(), RuleState::new(config))]),
+                deployed: HashSet::from([DEFAULT_RULE_ID.to_string()]),
             };
             let mut snapshot_file = state_file(&state_path).await;
             snapshot_file.patch(expected.clone()).await.unwrap();
@@ -832,15 +892,12 @@ mod tests {
             let clock = Clock::new(1000);
             let config = Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+                rule: upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0),
             };
-            let collection_state = RuleState::new(config);
+            let rule_state = RuleState::new(config);
             let expected = ScannerSnapshot {
-                collections: HashMap::from([(
-                    DEFAULT_COLL_ID.to_string(),
-                    collection_state.clone(),
-                )]),
-                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+                rules: HashMap::from([(DEFAULT_RULE_ID.to_string(), rule_state.clone())]),
+                deployed: HashSet::from([DEFAULT_RULE_ID.to_string()]),
             };
             let mut scanner = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
@@ -849,10 +906,10 @@ mod tests {
             })
             .unwrap();
             scanner.scanners.insert(
-                DEFAULT_COLL_ID.to_string(),
-                RuleScanner::from_state(collection_state, Options::default()),
+                DEFAULT_RULE_ID.to_string(),
+                RuleScanner::from_state(rule_state, Options::default()),
             );
-            scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
+            scanner.deployed.insert(DEFAULT_RULE_ID.to_string());
 
             scanner.persist_snapshot().await;
 
@@ -863,9 +920,9 @@ mod tests {
         async fn write_failure_is_swallowed() {
             let dir = dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
-            let collection_state = RuleState::new(Config {
+            let rule_state = RuleState::new(Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
+                rule: upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0),
             });
             let mut scanner = SingleThreadScanner::new(ScannerArgs {
                 snapshot_file: Some(state_file(&state_path).await),
@@ -873,10 +930,10 @@ mod tests {
             })
             .unwrap();
             scanner.scanners.insert(
-                DEFAULT_COLL_ID.to_string(),
-                RuleScanner::from_state(collection_state, Options::default()),
+                DEFAULT_RULE_ID.to_string(),
+                RuleScanner::from_state(rule_state, Options::default()),
             );
-            scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
+            scanner.deployed.insert(DEFAULT_RULE_ID.to_string());
 
             files::delete(&state_path).await.unwrap();
             dirs::create(&Dir::new(state_path.path().clone()))
@@ -887,8 +944,8 @@ mod tests {
 
             let cached = scanner.snapshot_file.as_ref().unwrap().read();
             assert_eq!(cached.as_ref(), &ScannerSnapshot::default());
-            assert!(scanner.scanners.contains_key(DEFAULT_COLL_ID));
-            assert!(scanner.deployed.contains(DEFAULT_COLL_ID));
+            assert!(scanner.scanners.contains_key(DEFAULT_RULE_ID));
+            assert!(scanner.deployed.contains(DEFAULT_RULE_ID));
         }
     }
 
@@ -903,7 +960,7 @@ mod tests {
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            let rule = rule_in_collection("rule-1", DEFAULT_COLL_ID, &glob, 0);
+            let rule = upload_rule("rule-1", &glob, 0);
             scanner
                 .update_rules(deployment("dpl-1"), vec![rule])
                 .await
@@ -931,14 +988,59 @@ mod tests {
             scan_once(&scanner).await; // discover
             tick(&scanner, &clock, 1).await; // evaluate => emit
 
-            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+            let ScanEvent::StableFile { file: sf, .. } = rx.recv().await.unwrap();
             assert_eq!(sf, expected);
+        }
+
+        /// A retention-only rule runs the full scan pipeline — glob, stability
+        /// window, ledger, emit — and its event carries `upload: None` so
+        /// subscribers know not to mint an upload job.
+        #[tokio::test]
+        async fn retention_only_rule_scans_and_emits_without_upload() {
+            let dir = dirs::temp("testing").unwrap();
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+            deploy(
+                &scanner,
+                vec![retention_only_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0)],
+            )
+            .await;
+
+            let mut rx = subscribe(&scanner).await;
+            write(&dir, "keep.mcap", b"aaa").await;
+            scan_once(&scanner).await; // discover
+            tick(&scanner, &clock, 1).await; // evaluate => emit
+
+            let ScanEvent::StableFile { file, upload } = rx.recv().await.unwrap();
+            assert_eq!(stable_name(&file), "keep.mcap");
+            assert_eq!(file.file_rule_id, DEFAULT_RULE_ID);
+            assert_eq!(upload, None);
+
+            // it reached the ledger too — the retention engine reads from there.
+            assert_eq!(ledger_count(&scanner).await, 1);
+        }
+
+        /// An upload-bearing rule's event carries its upload block, so the two
+        /// arms of the bridge's gate are distinguishable at the source.
+        #[tokio::test]
+        async fn upload_rule_emits_its_upload_block() {
+            let (dir, clock, scanner) = single_rule(0).await;
+            let mut rx = subscribe(&scanner).await;
+            write(&dir, "up.mcap", b"aaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+
+            let ScanEvent::StableFile { upload, .. } = rx.recv().await.unwrap();
+            assert_eq!(
+                upload.map(|u| u.upload_collection_id),
+                Some(format!("{DEFAULT_RULE_ID}-coll"))
+            );
         }
 
         // scan() producing stable files with NO subscriber does not error (debug branch).
         #[tokio::test]
         async fn emit_with_no_subscriber_does_not_error() {
-            let (dir, clock, scanner) = single_coll(0).await;
+            let (dir, clock, scanner) = single_rule(0).await;
             write(&dir, "nosub.mcap", b"aaa").await;
 
             scan_once(&scanner).await;
@@ -961,15 +1063,15 @@ mod tests {
 
         #[tokio::test]
         async fn clear_rules_persists_snapshot() {
-            let fxtr = persisted_coll(0).await;
+            let fxtr = persisted_rule(0).await;
             let before = read_snapshot(&fxtr.state_path).await;
-            assert!(before.deployed.contains(DEFAULT_COLL_ID));
+            assert!(before.deployed.contains(DEFAULT_RULE_ID));
 
             fxtr.scanner.clear_rules().await.unwrap();
 
             let after = read_snapshot(&fxtr.state_path).await;
             assert!(after.deployed.is_empty());
-            assert!(after.collections.contains_key(DEFAULT_COLL_ID));
+            assert!(after.rules.contains_key(DEFAULT_RULE_ID));
         }
 
         // clear_rules empties `deployed` but leaves scanners in place; a subsequent
@@ -978,15 +1080,15 @@ mod tests {
         // pool).
         #[tokio::test]
         async fn clear_rules_still_evaluates_remaining_candidates() {
-            let (dir, clock, scanner) = single_coll(0).await;
+            let (dir, clock, scanner) = single_rule(0).await;
             write(&dir, "drain.mcap", b"aaa").await;
 
             // discover a candidate while deployed.
             scan_once(&scanner).await;
             scanner.clear_rules().await.unwrap();
 
-            // The collection remains active while its existing candidate drains.
-            assert_eq!(active_collections(&scanner).await.len(), 1);
+            // The rule's scanner remains active while its existing candidate drains.
+            assert_eq!(active_rule_ids(&scanner).await.len(), 1);
 
             // subscribe before the evaluating scan so we observe the emitted StableFile.
             let mut rx = subscribe(&scanner).await;
@@ -1001,13 +1103,13 @@ mod tests {
         // candidates and is pruned on the next scan (drain-then-prune).
         #[tokio::test]
         async fn clear_rules_drains_unstable_candidate_then_prunes() {
-            let (dir, clock, scanner) = single_coll(5).await;
+            let (dir, clock, scanner) = single_rule(5).await;
             let file = write(&dir, "drain.mcap", b"aaa").await;
 
             // discover a candidate while deployed.
             scan_once(&scanner).await;
             scanner.clear_rules().await.unwrap();
-            assert_eq!(active_collections(&scanner).await.len(), 1);
+            assert_eq!(active_rule_ids(&scanner).await.len(), 1);
 
             // delete the file so evaluation drops the candidate (Unstable), emptying the
             // inactive scanner's pool.
@@ -1021,46 +1123,69 @@ mod tests {
     mod update_rules {
         use super::*;
 
-        // A rule set with two rules sharing one collection id is rejected BEFORE any
+        // A rule set with two rules sharing one rule id is rejected BEFORE any
         // state mutation.
         #[tokio::test]
-        async fn update_rules_duplicate_collection_id_errors() {
+        async fn update_rules_duplicate_rule_id_errors() {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            // seed a known-good single collection first.
-            let rule0 = rule_in_collection("r0", "coll-existing", "/none/*.mcap", 0);
-            deploy(&scanner, vec![rule0]).await;
-            let before = active_collections(&scanner).await;
+            // seed a known-good single rule first.
+            deploy(&scanner, vec![upload_rule("r0", "/none/*.mcap", 0)]).await;
+            let before = active_rule_ids(&scanner).await;
 
-            // push a set with a duplicate collection id => error.
-            let rulea = rule_in_collection("a", "dup", "/none/*.mcap", 0);
-            let ruleb = rule_in_collection("b", "dup", "/none/*.mcap", 0);
-            let rules = vec![rulea, ruleb];
+            // push a set with a duplicate rule id => error.
+            let rules = vec![
+                upload_rule("dup", "/a/*.mcap", 0),
+                upload_rule("dup", "/b/*.mcap", 0),
+            ];
             let err = scanner
                 .update_rules(deployment("d"), rules)
                 .await
                 .unwrap_err();
-            assert!(matches!(
-                err,
-                crate::scan::ScanErr::DuplicateCollectionID(_)
-            ));
+            assert!(matches!(err, crate::scan::ScanErr::DuplicateFileRuleID(_)));
 
-            // No state mutated: the existing active collection is untouched and the
+            // No state mutated: the existing active rule is untouched and the
             // duplicate set was not applied.
-            assert_eq!(active_collections(&scanner).await, before);
+            assert_eq!(active_rule_ids(&scanner).await, before);
         }
 
-        // Pushing a new collection id creates an active scanner reflected in get_rules.
+        // Collection ids are no longer keys, so two rules may share one. Under the
+        // old collection-keyed scanner this was a hard error; now both rules get
+        // their own scanner.
         #[tokio::test]
-        async fn update_rules_creates_collection() {
+        async fn update_rules_allows_shared_collection_id() {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            let rule = rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0);
+
+            let rules = vec![
+                rule_in_collection("r1", "shared", "/a/*.mcap", 0),
+                rule_in_collection("r2", "shared", "/b/*.mcap", 0),
+            ];
+            deploy(&scanner, rules).await;
+
+            // two scanners, one per rule id...
+            assert_eq!(
+                active_rule_ids(&scanner).await,
+                BTreeSet::from(["r1".to_string(), "r2".to_string()])
+            );
+            // ...both pointing at the same upload collection.
+            assert_eq!(
+                collection_ids(&scanner.get_rules().await.unwrap()),
+                BTreeSet::from(["shared".to_string()])
+            );
+        }
+
+        // Pushing a new rule id creates an active scanner reflected in get_rules.
+        #[tokio::test]
+        async fn update_rules_creates_scanner() {
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner(&clock);
+            let rule = upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0);
             deploy(&scanner, vec![rule]).await;
             assert_eq!(
-                active_collections(&scanner).await,
-                BTreeSet::from([DEFAULT_COLL_ID.to_string()])
+                active_rule_ids(&scanner).await,
+                BTreeSet::from([DEFAULT_RULE_ID.to_string()])
             );
             assert_eq!(
                 rule_ids(&scanner.get_rules().await.unwrap()),
@@ -1068,21 +1193,28 @@ mod tests {
             );
         }
 
-        // A file rule with no upload block has no collection to scan, so it is
-        // skipped rather than panicking or erroring. Unreachable with the v0.4
-        // wire adapter (which always produces an upload block), but the code
-        // path must be total.
+        // A retention-only rule (no upload block) still gets a scanner: its glob
+        // must be walked so the retention engine has files to act on. Unreachable
+        // with the v0.4 wire adapter (which always produces an upload block), but
+        // the pipeline must be capable of it ahead of the v0.5 wire flip.
         #[tokio::test]
-        async fn update_rules_skips_rule_without_upload() {
+        async fn update_rules_scans_rule_without_upload() {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            let mut rule = rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0);
-            rule.upload = None;
-            deploy(&scanner, vec![rule]).await;
+            deploy(
+                &scanner,
+                vec![retention_only_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0)],
+            )
+            .await;
 
-            assert_eq!(active_collections(&scanner).await, BTreeSet::new());
-            assert!(scanner.get_rules().await.unwrap().is_empty());
+            assert_eq!(
+                active_rule_ids(&scanner).await,
+                BTreeSet::from([DEFAULT_RULE_ID.to_string()])
+            );
+            let rules = scanner.get_rules().await.unwrap();
+            assert_eq!(rules.len(), 1);
+            assert!(rules[0].upload.is_none());
         }
 
         #[tokio::test]
@@ -1093,27 +1225,26 @@ mod tests {
             let scanner = spawn_persisted(&clock, &state_path).await;
             assert_eq!(read_snapshot(&state_path).await, ScannerSnapshot::default());
 
-            let rule = rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0);
+            let rule = upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0);
             deploy(&scanner, vec![rule]).await;
 
             let snapshot = read_snapshot(&state_path).await;
-            assert!(snapshot.deployed.contains(DEFAULT_COLL_ID));
-            assert!(snapshot.collections.contains_key(DEFAULT_COLL_ID));
+            assert!(snapshot.deployed.contains(DEFAULT_RULE_ID));
+            assert!(snapshot.rules.contains_key(DEFAULT_RULE_ID));
         }
 
-        // Pushing the SAME upload_collection_id with a new rule updates config in place
-        // and carries over ledger state, so an already-reported file is not
+        // Pushing the SAME rule id with a new rule generation updates config in
+        // place and carries over ledger state, so an already-reported file is not
         // re-reported.
         #[tokio::test]
         async fn update_rules_updates_in_place_carrying_state() {
             let dir = dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
-            let upload_collection_id = DEFAULT_COLL_ID;
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            let mut v1 = rule_in_collection("r1", upload_collection_id, &glob, 0);
+            let mut v1 = upload_rule(DEFAULT_RULE_ID, &glob, 0);
             v1.digest = "d1".to_string();
             deploy(&scanner, vec![v1]).await;
 
@@ -1123,8 +1254,8 @@ mod tests {
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
 
-            // v2: same upload_collection_id, new rule id + digest.
-            let mut v2 = rule_in_collection("r2", upload_collection_id, &glob, 0);
+            // v2: same rule id, new digest.
+            let mut v2 = upload_rule(DEFAULT_RULE_ID, &glob, 0);
             v2.digest = "d2".to_string();
             deploy(&scanner, vec![v2]).await;
 
@@ -1149,24 +1280,25 @@ mod tests {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            let rulea = rule_in_collection("a", "coll-A", "/none/*.mcap", 0);
-            let ruleb = rule_in_collection("b", "coll-B", "/none/*.mcap", 0);
-            deploy(&scanner, vec![rulea, ruleb]).await;
+            let rules = vec![
+                upload_rule("a", "/none/*.mcap", 0),
+                upload_rule("b", "/none/*.mcap", 0),
+            ];
+            deploy(&scanner, rules).await;
 
-            let rulec = rule_in_collection("c", "coll-C", "/none/*.mcap", 0);
-            deploy(&scanner, vec![rulec]).await;
+            deploy(&scanner, vec![upload_rule("c", "/none/*.mcap", 0)]).await;
 
             // A and B are no longer deployed and have no candidates, so the next scan
             // removes them from the active scanner set.
             scan_once(&scanner).await;
             assert_eq!(
-                active_collections(&scanner).await,
-                BTreeSet::from(["coll-C".to_string()])
+                active_rule_ids(&scanner).await,
+                BTreeSet::from(["c".to_string()])
             );
         }
 
-        // Replacing collection A with collection B keeps A's scanner alive long enough
-        // to drain its existing candidates, while only B discovers newly added files.
+        // Replacing rule A with rule B keeps A's scanner alive long enough to
+        // drain its existing candidates, while only B discovers newly added files.
         #[tokio::test]
         async fn update_rules_keeps_legacy_scanner_until_candidates_drain() {
             let dir = dirs::temp("testing").unwrap();
@@ -1174,17 +1306,15 @@ mod tests {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
-            let rulelegacy = rule_in_collection("legacy-rule", "legacy", &glob, 10);
-            deploy(&scanner, vec![rulelegacy]).await;
+            deploy(&scanner, vec![upload_rule("legacy-rule", &glob, 10)]).await;
             write(&dir, "legacy.mcap", b"legacy").await;
             scan_once(&scanner).await;
 
-            let rulecurrent = rule_in_collection("current-rule", "current", &glob, 10);
-            deploy(&scanner, vec![rulecurrent]).await;
-            // The deployed collection and draining legacy collection are both active.
+            deploy(&scanner, vec![upload_rule("current-rule", &glob, 10)]).await;
+            // The deployed rule and the draining legacy rule are both active.
             assert_eq!(
-                active_collections(&scanner).await,
-                BTreeSet::from(["current".to_string(), "legacy".to_string()])
+                active_rule_ids(&scanner).await,
+                BTreeSet::from(["current-rule".to_string(), "legacy-rule".to_string()])
             );
 
             write(&dir, "current.mcap", b"current").await;
@@ -1193,34 +1323,34 @@ mod tests {
             tick(&scanner, &clock, 10).await;
 
             let mut emitted = BTreeSet::new();
-            while let Ok(ScanEvent::StableFile(stable)) = rx.try_recv() {
+            while let Ok(ScanEvent::StableFile { file: stable, .. }) = rx.try_recv() {
                 emitted.insert((stable.file_rule_id.clone(), stable_name(&stable)));
             }
             let event1 = ("current-rule".to_string(), "current.mcap".to_string());
             let event2 = ("legacy-rule".to_string(), "legacy.mcap".to_string());
             assert_eq!(emitted, BTreeSet::from([event1, event2]));
-            // The legacy collection is no longer active once its candidate pool drains.
+            // The legacy rule is no longer active once its candidate pool drains.
             assert_eq!(
-                active_collections(&scanner).await,
-                BTreeSet::from(["current".to_string()])
+                active_rule_ids(&scanner).await,
+                BTreeSet::from(["current-rule".to_string()])
             );
         }
 
-        // update_rules re-snapshots preexisting: redeploying the same
-        // upload_collection_id after a new file appears suppresses that file (it is
-        // re-discovered as preexisting).
+        // update_rules re-snapshots preexisting: redeploying the same rule id
+        // after a new file appears suppresses that file (it is re-discovered as
+        // preexisting).
         #[tokio::test]
         async fn update_rules_resnapshots_preexisting() {
-            let (dir, clock, scanner) = single_coll(0).await;
+            let (dir, clock, scanner) = single_rule(0).await;
             let glob = format!("{}/*.mcap", dir.path().display());
 
-            // a file appears after the collection was created.
+            // a file appears after the scanner was created.
             write(&dir, "late.mcap", b"aaa").await;
 
-            // same upload_collection_id as single_coll (rule id differs): update_config
-            // re-runs discover_preexisting, so the now-present file is snapshotted as
+            // same rule id, new glob generation: update_config re-runs
+            // discover_preexisting, so the now-present file is snapshotted as
             // preexisting.
-            let rule = rule_in_collection("r2", DEFAULT_COLL_ID, &glob, 0);
+            let rule = upload_rule(DEFAULT_RULE_ID, &glob, 0);
             deploy(&scanner, vec![rule]).await;
 
             scan_once(&scanner).await;
@@ -1248,21 +1378,21 @@ mod tests {
 
         #[tokio::test]
         async fn scan_persists_snapshot() {
-            let fxtr = persisted_coll(10).await;
+            let fxtr = persisted_rule(10).await;
             let file = write(&fxtr.dir, "candidate.mcap", b"aaaa").await;
 
             scan_once(&fxtr.scanner).await;
 
             let snapshot = read_snapshot(&fxtr.state_path).await;
-            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            let state = snapshot.rules.get(DEFAULT_RULE_ID).unwrap();
             assert!(state.candidates.contains_key(&file));
         }
 
         #[tokio::test]
-        async fn deployed_collection_discovers_and_evaluates() {
-            let (dir, clock, scanner) = single_coll(0).await;
+        async fn deployed_rule_discovers_and_evaluates() {
+            let (dir, clock, scanner) = single_rule(0).await;
 
-            // file created after the collection => not preexisting => a candidate.
+            // file created after the scanner => not preexisting => a candidate.
             write(&dir, "new.mcap", b"aaa").await;
 
             scan_once(&scanner).await;
@@ -1272,11 +1402,11 @@ mod tests {
         }
 
         // A non-deployed scanner keeps evaluating its existing candidate pool but does
-        // NOT discover new files. clear_rules drops the collection from `deployed` but
+        // NOT discover new files. clear_rules drops the rule from `deployed` but
         // leaves the scanner in place.
         #[tokio::test]
         async fn inactive_scanner_evaluates_but_does_not_discover() {
-            let (dir, clock, scanner) = single_coll(10).await;
+            let (dir, clock, scanner) = single_rule(10).await;
 
             // discover one candidate while deployed
             write(&dir, "first.mcap", b"aaa").await;
@@ -1290,34 +1420,33 @@ mod tests {
             clock.advance(10);
             scan_once(&scanner).await;
             assert_one_stable(&mut rx, "first.mcap").await;
-            // The now-empty inactive collection is no longer active after this tick.
-            assert!(!active_collections(&scanner).await.contains(DEFAULT_COLL_ID));
+            // The now-empty inactive rule is no longer active after this tick.
+            assert!(!active_rule_ids(&scanner).await.contains(DEFAULT_RULE_ID));
         }
 
         // An inactive scanner with no remaining candidates is removed from the active
-        // collection set on the next scan (get_rules no longer reflects it).
+        // rule set on the next scan (get_rules no longer reflects it).
         #[tokio::test]
         async fn inactive_empty_scanner_is_pruned() {
-            let (_dir, _clock, scanner) = single_coll(0).await;
-            assert_eq!(active_collections(&scanner).await.len(), 1);
+            let (_dir, _clock, scanner) = single_rule(0).await;
+            assert_eq!(active_rule_ids(&scanner).await.len(), 1);
 
             scanner.clear_rules().await.unwrap();
             scan_once(&scanner).await;
             assert!(scanner.get_rules().await.unwrap().is_empty());
         }
 
-        // Two distinct collections matching the same file do NOT share dedup state, so
-        // the summed ledger count is 2 (per-collection isolation).
+        // Two distinct rules matching the same file do NOT share dedup state, so
+        // the summed ledger count is 2 (per-rule isolation).
         #[tokio::test]
-        async fn distinct_collections_do_not_share_dedup() {
+        async fn distinct_rules_do_not_share_dedup() {
             let dir = dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
-            let rulec1 = rule_in_collection("c1", "coll-1", &glob, 0);
-            let rulec2 = rule_in_collection("c2", "coll-2", &glob, 0);
-            deploy(&scanner, vec![rulec1, rulec2]).await;
+            let rules = vec![upload_rule("c1", &glob, 0), upload_rule("c2", &glob, 0)];
+            deploy(&scanner, rules).await;
             write(&dir, "shared.mcap", b"sss").await;
 
             let mut rx = subscribe(&scanner).await;
@@ -1328,19 +1457,22 @@ mod tests {
 
             // exactly two StableFiles, one per distinct rule.
             let mut emitted = Vec::new();
-            while let Ok(ScanEvent::StableFile(sf)) = rx.try_recv() {
+            while let Ok(ScanEvent::StableFile { file: sf, .. }) = rx.try_recv() {
                 emitted.push(sf);
             }
             assert_eq!(emitted.len(), 2, "expected exactly two StableFiles");
-            let colls: BTreeSet<String> =
+            let rule_ids: BTreeSet<String> =
                 emitted.iter().map(|sf| sf.file_rule_id.clone()).collect();
-            assert_eq!(colls, BTreeSet::from(["c1".to_string(), "c2".to_string()]));
+            assert_eq!(
+                rule_ids,
+                BTreeSet::from(["c1".to_string(), "c2".to_string()])
+            );
         }
 
-        // A discovery error in one collection does not prevent a sibling collection
-        // from emitting its stable file.
+        // A discovery error in one rule does not prevent a sibling rule from
+        // emitting its stable file.
         #[tokio::test]
-        async fn scan_isolates_bad_glob_collection_from_emitting_sibling() {
+        async fn scan_isolates_bad_glob_rule_from_emitting_sibling() {
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
@@ -1349,12 +1481,12 @@ mod tests {
             })
             .unwrap();
 
-            // --- good collection: a real file, discovered as a candidate at t=1000. ---
+            // --- good rule: a real file, discovered as a candidate at t=1000. ---
             let good_dir = dirs::temp("testing").unwrap();
             let good_glob = format!("{}/*.mcap", good_dir.path().display());
             let good_cfg = Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r-good", "good", &good_glob, 0),
+                rule: upload_rule("r-good", &good_glob, 0),
             };
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
@@ -1362,10 +1494,10 @@ mod tests {
             write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
-            // --- bad collection: a MALFORMED glob that errors at discover time. ---
+            // --- bad rule: a MALFORMED glob that errors at discover time. ---
             let bad_cfg = Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r-bad", "bad", "[", 0),
+                rule: upload_rule("r-bad", "[", 0),
             };
             // from_state skips the constructor glob, so the bad pattern only bites at
             // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
@@ -1384,7 +1516,7 @@ mod tests {
             single.scan().await.unwrap();
 
             // the good collection's StableFile was emitted despite the sibling error.
-            let ScanEvent::StableFile(sf) = rx.recv().await.unwrap();
+            let ScanEvent::StableFile { file: sf, .. } = rx.recv().await.unwrap();
             assert_eq!(stable_name(&sf), "good.mcap".to_string());
             assert_eq!(sf.file_rule_id, "r-good".to_string());
             assert!(
@@ -1418,7 +1550,7 @@ mod tests {
                 first_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
                 last_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
                 deployment_id: "d".to_string(),
-                file_rule_id: DEFAULT_COLL_ID.to_string(),
+                file_rule_id: DEFAULT_RULE_ID.to_string(),
                 retention: None,
             }]
         }
@@ -1435,13 +1567,13 @@ mod tests {
             files
         }
 
-        /// A RuleState for `DEFAULT_COLL_ID` globbing `dir` with a
+        /// A RuleState for `DEFAULT_RULE_ID` globbing `dir` with a
         /// threshold-opening ledger: one entry for the (real) `live` file plus
         /// LEDGER_PRUNE_THRESHOLD stale entries. Returns the stale keys too.
         fn padded_state(dir: &Dir, live: &File, window: i64) -> (RuleState, Vec<File>) {
             let cfg = Config {
                 deployment: deployment("d"),
-                rule: rule_in_collection("r", DEFAULT_COLL_ID, &mcap_glob(dir), window),
+                rule: upload_rule(DEFAULT_RULE_ID, &mcap_glob(dir), window),
             };
             let mut state = RuleState::new(cfg);
             state.ledger.insert(live.clone(), ledger_entry(live));
@@ -1466,7 +1598,7 @@ mod tests {
             let live = write(&dir, "live.mcap", b"aaaa").await;
             let (state, stale) = padded_state(&dir, &live, 0);
             single.scanners.insert(
-                DEFAULT_COLL_ID.to_string(),
+                DEFAULT_RULE_ID.to_string(),
                 RuleScanner::from_state(
                     state,
                     Options {
@@ -1474,11 +1606,11 @@ mod tests {
                     },
                 ),
             );
-            single.deployed.insert(DEFAULT_COLL_ID.to_string());
+            single.deployed.insert(DEFAULT_RULE_ID.to_string());
 
             single.scan().await.unwrap();
 
-            let ledger = &single.scanners.get(DEFAULT_COLL_ID).unwrap().state().ledger;
+            let ledger = &single.scanners.get(DEFAULT_RULE_ID).unwrap().state().ledger;
             assert_eq!(ledger.len(), 1);
             assert!(ledger.contains_key(&live));
             assert!(!ledger.contains_key(&stale[0]));
@@ -1494,8 +1626,8 @@ mod tests {
             let live = write(&dir, "live.mcap", b"aaaa").await;
             let (coll_state, stale) = padded_state(&dir, &live, 0);
             let padded = ScannerSnapshot {
-                collections: HashMap::from([(DEFAULT_COLL_ID.to_string(), coll_state)]),
-                deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
+                rules: HashMap::from([(DEFAULT_RULE_ID.to_string(), coll_state)]),
+                deployed: HashSet::from([DEFAULT_RULE_ID.to_string()]),
             };
             let mut snapshot_file = state_file(&state_path).await;
             snapshot_file.patch(padded).await.unwrap();
@@ -1513,7 +1645,7 @@ mod tests {
             scan_once(&scanner).await;
 
             let snapshot = read_snapshot(&state_path).await;
-            let state = snapshot.collections.get(DEFAULT_COLL_ID).unwrap();
+            let state = snapshot.rules.get(DEFAULT_RULE_ID).unwrap();
             assert_eq!(state.ledger.len(), 1);
             assert!(state.ledger.contains_key(&live));
             assert!(!state.ledger.contains_key(&stale[0]));
@@ -1549,12 +1681,12 @@ mod tests {
                         size: 4,
                         mtime: SystemTime::UNIX_EPOCH,
                         deployment_id: "d".to_string(),
-                        file_rule_id: DEFAULT_COLL_ID.to_string(),
+                        file_rule_id: DEFAULT_RULE_ID.to_string(),
                     },
                 },
             );
             single.scanners.insert(
-                DEFAULT_COLL_ID.to_string(),
+                DEFAULT_RULE_ID.to_string(),
                 RuleScanner::from_state(
                     state,
                     Options {
@@ -1566,7 +1698,7 @@ mod tests {
 
             single.scan().await.unwrap();
 
-            let ledger = &single.scanners.get(DEFAULT_COLL_ID).unwrap().state().ledger;
+            let ledger = &single.scanners.get(DEFAULT_RULE_ID).unwrap().state().ledger;
             assert_eq!(ledger.len(), LEDGER_PRUNE_THRESHOLD + 1);
             assert!(ledger.contains_key(&stale[0]));
         }

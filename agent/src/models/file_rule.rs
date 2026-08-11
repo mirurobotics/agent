@@ -26,7 +26,7 @@ impl From<backend_client::UploadRuleSource> for FileRuleSource {
 }
 
 // ============================= FILE RULE UPLOAD ================================== //
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRuleUpload {
     pub upload_collection_id: UploadCollectionID,
     pub upload_collection_name: String,
