@@ -6,9 +6,9 @@ use std::sync::Arc;
 use crate::models::{Deployment, FileRule, UploadCollectionID};
 pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
-    collection::{CollectionScanner, Options},
     errors::*,
-    state::{CollectionState, ScanSnapshotFile, ScannerSnapshot},
+    rule::{Options, RuleScanner},
+    state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
 };
 use crate::trace;
 
@@ -53,7 +53,7 @@ impl Default for ScannerArgs {
 }
 
 pub struct SingleThreadScanner {
-    scanners: HashMap<UploadCollectionID, CollectionScanner>,
+    scanners: HashMap<UploadCollectionID, RuleScanner>,
     deployed: HashSet<UploadCollectionID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     subscriber_tx: broadcast::Sender<ScanEvent>,
@@ -70,7 +70,7 @@ impl SingleThreadScanner {
             .map(|(cid, state)| {
                 (
                     cid.clone(),
-                    CollectionScanner::from_state(state.clone(), Options::default()),
+                    RuleScanner::from_state(state.clone(), Options::default()),
                 )
             })
             .collect();
@@ -97,7 +97,7 @@ impl SingleThreadScanner {
         let Some(state_file) = self.snapshot_file.as_mut() else {
             return;
         };
-        let collections: HashMap<UploadCollectionID, CollectionState> = self
+        let collections: HashMap<UploadCollectionID, RuleState> = self
             .scanners
             .iter()
             .map(|(cid, scanner)| (cid.clone(), scanner.state().clone()))
@@ -138,7 +138,7 @@ impl SingleThreadScanner {
         let count = self
             .scanners
             .values()
-            .map(CollectionScanner::ledger_count)
+            .map(RuleScanner::ledger_count)
             .sum::<usize>();
         Ok(count)
     }
@@ -185,7 +185,7 @@ impl SingleThreadScanner {
                 None => {
                     self.scanners.insert(
                         upload.upload_collection_id.clone(),
-                        CollectionScanner::new(config, now, Options::default()).await?,
+                        RuleScanner::new(config, now, Options::default()).await?,
                     );
                 }
             }
@@ -473,8 +473,8 @@ mod tests {
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
-    use crate::scan::collection::CollectionScanner;
-    use crate::scan::state::{CollectionState, Config, ScanSnapshotFile, ScannerSnapshot};
+    use crate::scan::rule::RuleScanner;
+    use crate::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -770,7 +770,7 @@ mod tests {
         async fn existing_state_file_restores_scanner() {
             let dir = dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
-            let collection_state = CollectionState::new(Config {
+            let collection_state = RuleState::new(Config {
                 deployment: deployment("d"),
                 rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
             });
@@ -807,10 +807,7 @@ mod tests {
                 rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
             };
             let expected = ScannerSnapshot {
-                collections: HashMap::from([(
-                    DEFAULT_COLL_ID.to_string(),
-                    CollectionState::new(config),
-                )]),
+                collections: HashMap::from([(DEFAULT_COLL_ID.to_string(), RuleState::new(config))]),
                 deployed: HashSet::from([DEFAULT_COLL_ID.to_string()]),
             };
             let mut snapshot_file = state_file(&state_path).await;
@@ -826,7 +823,7 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::collection::Options;
+        use crate::scan::rule::Options;
 
         #[tokio::test]
         async fn writes_current_snapshot() {
@@ -837,7 +834,7 @@ mod tests {
                 deployment: deployment("d"),
                 rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
             };
-            let collection_state = CollectionState::new(config);
+            let collection_state = RuleState::new(config);
             let expected = ScannerSnapshot {
                 collections: HashMap::from([(
                     DEFAULT_COLL_ID.to_string(),
@@ -853,7 +850,7 @@ mod tests {
             .unwrap();
             scanner.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(collection_state, Options::default()),
+                RuleScanner::from_state(collection_state, Options::default()),
             );
             scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
 
@@ -866,7 +863,7 @@ mod tests {
         async fn write_failure_is_swallowed() {
             let dir = dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
-            let collection_state = CollectionState::new(Config {
+            let collection_state = RuleState::new(Config {
                 deployment: deployment("d"),
                 rule: rule_in_collection("r", DEFAULT_COLL_ID, "/none/*.mcap", 0),
             });
@@ -877,7 +874,7 @@ mod tests {
             .unwrap();
             scanner.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(collection_state, Options::default()),
+                RuleScanner::from_state(collection_state, Options::default()),
             );
             scanner.deployed.insert(DEFAULT_COLL_ID.to_string());
 
@@ -1237,7 +1234,7 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::collection::Options;
+        use crate::scan::rule::Options;
 
         #[tokio::test]
         async fn empty_set_scan_is_noop() {
@@ -1361,8 +1358,7 @@ mod tests {
             };
             // build empty (no preexisting), then create the file and discover it so it
             // is a tracked candidate BEFORE the scan under test.
-            let mut good =
-                CollectionScanner::from_state(CollectionState::new(good_cfg), Options::default());
+            let mut good = RuleScanner::from_state(RuleState::new(good_cfg), Options::default());
             write(&good_dir, "good.mcap", b"aaaa").await;
             good.discover_candidates(clock.now_fn()()).await.unwrap();
 
@@ -1373,8 +1369,7 @@ mod tests {
             };
             // from_state skips the constructor glob, so the bad pattern only bites at
             // scan() time (discover_candidates -> files::glob("[") -> InvalidGlobErr).
-            let bad =
-                CollectionScanner::from_state(CollectionState::new(bad_cfg), Options::default());
+            let bad = RuleScanner::from_state(RuleState::new(bad_cfg), Options::default());
 
             single.scanners.insert("good".to_string(), good);
             single.scanners.insert("bad".to_string(), bad);
@@ -1403,7 +1398,7 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::collection::Options;
+        use crate::scan::rule::Options;
         use crate::scan::state::{Candidate, Observation};
 
         // external crates
@@ -1430,7 +1425,7 @@ mod tests {
 
         /// Seed `n` ledger histories keyed to never-created `gone{i}.mcap`
         /// paths inside `dir` (absent from every glob result).
-        fn seed_stale(state: &mut CollectionState, dir: &Dir, n: usize) -> Vec<File> {
+        fn seed_stale(state: &mut RuleState, dir: &Dir, n: usize) -> Vec<File> {
             let mut files = Vec::with_capacity(n);
             for i in 0..n {
                 let file = dir.file(&format!("gone{i}.mcap"));
@@ -1440,15 +1435,15 @@ mod tests {
             files
         }
 
-        /// A CollectionState for `DEFAULT_COLL_ID` globbing `dir` with a
+        /// A RuleState for `DEFAULT_COLL_ID` globbing `dir` with a
         /// threshold-opening ledger: one entry for the (real) `live` file plus
         /// LEDGER_PRUNE_THRESHOLD stale entries. Returns the stale keys too.
-        fn padded_state(dir: &Dir, live: &File, window: i64) -> (CollectionState, Vec<File>) {
+        fn padded_state(dir: &Dir, live: &File, window: i64) -> (RuleState, Vec<File>) {
             let cfg = Config {
                 deployment: deployment("d"),
                 rule: rule_in_collection("r", DEFAULT_COLL_ID, &mcap_glob(dir), window),
             };
-            let mut state = CollectionState::new(cfg);
+            let mut state = RuleState::new(cfg);
             state.ledger.insert(live.clone(), ledger_entry(live));
             let stale = seed_stale(&mut state, dir, LEDGER_PRUNE_THRESHOLD);
             (state, stale)
@@ -1472,7 +1467,7 @@ mod tests {
             let (state, stale) = padded_state(&dir, &live, 0);
             single.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(
+                RuleScanner::from_state(
                     state,
                     Options {
                         prune_threshold: LEDGER_PRUNE_THRESHOLD,
@@ -1560,7 +1555,7 @@ mod tests {
             );
             single.scanners.insert(
                 DEFAULT_COLL_ID.to_string(),
-                CollectionScanner::from_state(
+                RuleScanner::from_state(
                     state,
                     Options {
                         prune_threshold: LEDGER_PRUNE_THRESHOLD,
