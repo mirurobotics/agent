@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // internal crates
-use crate::models::{Deployment, FileRule, FileRuleID, FileRuleUpload};
+use crate::models::{Deployment, FileRule, FileRuleID};
 pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
     errors::*,
@@ -21,13 +21,7 @@ use tracing::{debug, error, info, warn};
 // =============================== SCANNER EVENTS ================================== //
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanEvent {
-    /// A file the scanner considers stable, plus the upload block of the rule
-    /// that matched it. `upload: None` means the rule is retention-only —
-    /// subscribers must not mint an upload job for it.
-    StableFile {
-        file: StableFile,
-        upload: Option<FileRuleUpload>,
-    },
+    StableFile { file: StableFile, rule: FileRule },
 }
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 256;
@@ -121,11 +115,11 @@ impl SingleThreadScanner {
         self.subscriber_tx.subscribe()
     }
 
-    fn emit_stable_files(&self, stable_files: Vec<(StableFile, Option<FileRuleUpload>)>) {
-        for (file, upload) in stable_files {
+    fn emit_stable_files(&self, stable_files: Vec<(StableFile, FileRule)>) {
+        for (file, rule) in stable_files {
             if let Err(e) = self
                 .subscriber_tx
-                .send(ScanEvent::StableFile { file, upload })
+                .send(ScanEvent::StableFile { file, rule })
             {
                 debug!("no stable-file subscribers active: {e:?}");
             }
@@ -181,9 +175,6 @@ impl SingleThreadScanner {
         let now = (self.now_fn)();
         for rule in rules.iter() {
             match self.scanners.get_mut(&rule.id) {
-                // A rule's content is immutable per id (content-digested; edits
-                // mint a new id), so a re-push can only change the deployment
-                // context. No re-glob, no preexisting re-snapshot.
                 Some(scanner) => scanner.set_deployment(deployment.clone()),
                 None => {
                     let config = Config {
@@ -226,11 +217,8 @@ impl SingleThreadScanner {
                         let count = stable.len();
                         debug!("scan: rule {rule_id} produced {count} stable file(s)");
                     }
-                    // Tag each file with its rule's upload block here, while the
-                    // rule is in scope. Subscribers use it to decide whether the
-                    // file becomes an upload job.
-                    let upload = scanner.rule().upload.clone();
-                    stable_files.extend(stable.into_iter().map(|file| (file, upload.clone())));
+                    let rule = scanner.rule().clone();
+                    stable_files.extend(stable.into_iter().map(|file| (file, rule.clone())));
                 }
                 Err(err) => warn!("scan: evaluate failed for rule {rule_id}: {err}"),
             }
@@ -1014,10 +1002,10 @@ mod tests {
             scan_once(&scanner).await; // discover
             tick(&scanner, &clock, 1).await; // evaluate => emit
 
-            let ScanEvent::StableFile { file, upload } = rx.recv().await.unwrap();
+            let ScanEvent::StableFile { file, rule } = rx.recv().await.unwrap();
             assert_eq!(stable_name(&file), "keep.mcap");
             assert_eq!(file.file_rule_id, DEFAULT_RULE_ID);
-            assert_eq!(upload, None);
+            assert_eq!(rule.upload, None);
 
             // it reached the ledger too — the retention engine reads from there.
             assert_eq!(ledger_count(&scanner).await, 1);
@@ -1033,9 +1021,9 @@ mod tests {
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
 
-            let ScanEvent::StableFile { upload, .. } = rx.recv().await.unwrap();
+            let ScanEvent::StableFile { rule, .. } = rx.recv().await.unwrap();
             assert_eq!(
-                upload.map(|u| u.upload_collection_id),
+                rule.upload.map(|u| u.upload_collection_id),
                 Some(format!("{DEFAULT_RULE_ID}-coll"))
             );
         }

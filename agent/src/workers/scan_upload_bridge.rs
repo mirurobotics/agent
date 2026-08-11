@@ -3,7 +3,6 @@ use std::future::Future;
 use std::pin::Pin;
 
 // internal crates
-use crate::models::FileRuleUpload;
 use crate::scan::{scanner::StableFile, ScanEvent, ScannerExt};
 use crate::upload::{Job, UploaderExt};
 
@@ -46,8 +45,14 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
 
     loop {
         match events.recv().await {
-            Ok(ScanEvent::StableFile { file, upload }) => {
-                enqueue_stable_file(uploader, file, upload).await;
+            Ok(ScanEvent::StableFile { file, rule }) => {
+                if rule.upload.is_some() {
+                    enqueue_stable_file(uploader, file).await;
+                } else {
+                    let file = &file.file;
+                    let rule_id = &rule.id;
+                    debug!("scan-upload bridge: rule {rule_id} does not upload; skipping {file}");
+                }
             }
             // broadcast buffer overflowed.
             Err(RecvError::Lagged(dropped)) => {
@@ -72,18 +77,7 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
 /// A rule with no `upload` block is retention-only: its files are scanned and
 /// ledgered so the retention engine can act on them, but they never become
 /// upload jobs.
-async fn enqueue_stable_file<UploaderT: UploaderExt>(
-    uploader: &UploaderT,
-    stable: StableFile,
-    upload: Option<FileRuleUpload>,
-) {
-    if upload.is_none() {
-        let file = &stable.file;
-        let rule_id = &stable.file_rule_id;
-        debug!("scan-upload bridge: rule {rule_id} does not upload; skipping {file}");
-        return;
-    }
-
+async fn enqueue_stable_file<UploaderT: UploaderExt>(uploader: &UploaderT, stable: StableFile) {
     let job = Job {
         file: stable.file,
         size: stable.size,

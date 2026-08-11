@@ -6,7 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{scanner::MockScanner, upload_executor::MockUploadExecutor};
 use miru_agent::filesys::File;
-use miru_agent::models::{FileRuleRetention, FileRuleUpload};
+use miru_agent::models::{FileRule, FileRuleRetention, FileRuleUpload};
 use miru_agent::scan::scanner::StableFile;
 use miru_agent::scan::ScanEvent;
 use miru_agent::upload::{Job, Uploader, UploaderExt, UploaderOptions};
@@ -115,7 +115,10 @@ impl Harness {
     fn emit(&self, stable: StableFile) {
         self.scanner.emit(ScanEvent::StableFile {
             file: stable,
-            upload: Some(FileRuleUpload::default()),
+            rule: FileRule {
+                upload: Some(FileRuleUpload::default()),
+                ..FileRule::default()
+            },
         });
     }
 
@@ -123,7 +126,10 @@ impl Harness {
     fn emit_retention_only(&self, stable: StableFile) {
         self.scanner.emit(ScanEvent::StableFile {
             file: stable,
-            upload: None,
+            rule: FileRule {
+                upload: None,
+                ..FileRule::default()
+            },
         });
     }
 

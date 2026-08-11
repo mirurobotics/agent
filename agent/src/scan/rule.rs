@@ -69,15 +69,6 @@ impl RuleScanner {
         self.state.has_candidates()
     }
 
-    /// Refresh the deployment context on a re-push of the same rule.
-    ///
-    /// This is all a re-push can change: a rule's content is immutable per id
-    /// (content-digested; edits mint a new id), so only the deployment stamped
-    /// onto subsequent observations moves. Deliberately no preexisting
-    /// re-snapshot: that semantic ("don't upload the backlog that predates
-    /// deployment") belongs to a rule's first deploy in `new`. Re-running it
-    /// here would swallow any file that appeared since the last scan tick into
-    /// `preexisting` — silently never uploaded — on every sync re-push.
     pub(crate) fn set_deployment(&mut self, deployment: Deployment) {
         self.state.cfg.deployment = deployment;
     }
