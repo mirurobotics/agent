@@ -6,7 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{scanner::MockScanner, upload_executor::MockUploadExecutor};
 use miru_agent::filesys::File;
-use miru_agent::models::FileRuleRetention;
+use miru_agent::models::{FileRuleRetention, FileRuleUpload};
 use miru_agent::scan::scanner::StableFile;
 use miru_agent::scan::ScanEvent;
 use miru_agent::upload::{Job, Uploader, UploaderExt, UploaderOptions};
@@ -111,8 +111,20 @@ impl Harness {
         }
     }
 
+    /// Emit a stable file from an upload-bearing rule.
     fn emit(&self, stable: StableFile) {
-        self.scanner.emit(ScanEvent::StableFile(stable));
+        self.scanner.emit(ScanEvent::StableFile {
+            file: stable,
+            upload: Some(FileRuleUpload::default()),
+        });
+    }
+
+    /// Emit a stable file from a retention-only rule (no upload block).
+    fn emit_retention_only(&self, stable: StableFile) {
+        self.scanner.emit(ScanEvent::StableFile {
+            file: stable,
+            upload: None,
+        });
     }
 
     /// Wait until the executor has been driven `n` times (it records each job
@@ -181,6 +193,27 @@ async fn idles_when_scanner_stream_closes() {
     );
 
     // the shutdown signal remains the only intended exit, and it works.
+    harness.shutdown().await;
+}
+
+/// A retention-only rule's files are scanned and ledgered, but the bridge must
+/// not mint an upload job for them. Interleaved with an upload-bearing file so
+/// the assertion cannot pass merely because nothing was processed.
+#[tokio::test]
+async fn retention_only_stable_file_becomes_no_job() {
+    let mut harness = Harness::start().await;
+
+    let skipped = stable_file("retention-only.log", "dpl_1", "rule_keep");
+    let uploaded = stable_file("uploaded.log", "dpl_1", "rule_upload");
+    harness.emit_retention_only(skipped.clone());
+    harness.emit(uploaded.clone());
+
+    // Exactly one job is driven, and it is the upload-bearing one. Awaiting one
+    // upload also orders the assertion after both events were consumed.
+    let jobs = harness.await_uploads(1).await;
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].file, uploaded.file);
+
     harness.shutdown().await;
 }
 
