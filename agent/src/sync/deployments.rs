@@ -29,7 +29,7 @@ pub struct Storage<'a> {
     pub cfg_insts: disk::CfgInstRef<'a>,
     pub releases: &'a disk::Releases,
     pub git_commits: &'a disk::GitCommits,
-    pub upload_rules: &'a disk::UploadRules,
+    pub file_rules: &'a disk::FileRules,
 }
 
 impl<'a> Storage<'a> {
@@ -241,25 +241,25 @@ async fn store_deployment(
         .map_err(SyncErr::from)
 }
 
-/// Extracts and caches the expanded release, its upload rules, and its
+/// Extracts and caches the expanded release, its file rules, and its
 /// git_commit from a backend deployment before the deployment itself is stored
 /// (which only keeps the release_id reference).
 ///
-/// Upload rules ride on the expanded release: the syncer always requests
+/// File rules ride on the expanded release: the syncer always requests
 /// `expand=release.upload_rules`, so once a release is present a missing
 /// `upload_rules` array is a contract violation and surfaces as a hard error
 /// (mirroring the `config_instances` expansion). The extraction sits before the
 /// git_commit early-return so a release lacking a git commit still triggers the
-/// required upload-rule check.
+/// required rule check.
 ///
-/// Uses `write_if_absent` because releases, upload rules, and git_commits are
+/// Uses `write_if_absent` because releases, file rules, and git_commits are
 /// immutable on the backend — once created, their fields never change. Skipping
 /// writes for already-cached entries avoids unnecessary I/O on every sync cycle.
 ///
-/// The upload rule ids are linked onto the domain Release (mirroring how
+/// The file rule ids are linked onto the domain Release (mirroring how
 /// `config_instance_ids` are linked onto Deployment) so downstream consumers can
 /// resolve the active rule set by traversal rather than scanning the whole
-/// append-only upload-rules store.
+/// append-only file-rules store.
 async fn store_expanded_release(
     storage: &Storage<'_>,
     backend_dpl: &backend_client::Deployment,
@@ -273,10 +273,10 @@ async fn store_expanded_release(
             deployment_id: backend_dpl.id.clone(),
         })
     })?;
-    let upload_rule_ids: Vec<models::UploadRuleID> =
+    let file_rule_ids: Vec<models::FileRuleID> =
         backend_rules.iter().map(|r| r.id.clone()).collect();
 
-    let release = models::Release::from_backend(backend_release.clone(), upload_rule_ids);
+    let release = models::Release::from_backend(backend_release.clone(), file_rule_ids);
     let release_id = release.id.clone();
     storage
         .releases
@@ -284,10 +284,10 @@ async fn store_expanded_release(
         .await?;
 
     for backend_rule in backend_rules {
-        let rule: models::UploadRule = backend_rule.into();
+        let rule: models::FileRule = backend_rule.into();
         let id = rule.id.clone();
         storage
-            .upload_rules
+            .file_rules
             .write_if_absent(id, rule, |_, _| false)
             .await?;
     }

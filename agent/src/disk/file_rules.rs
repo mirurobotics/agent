@@ -3,34 +3,34 @@ use crate::cache;
 use crate::disk::{Deployments, Releases};
 use crate::models;
 
-pub type UploadRules = cache::FileCache<models::UploadRuleID, models::UploadRule>;
+pub type FileRules = cache::FileCache<models::FileRuleID, models::FileRule>;
 
-/// Resolve the upload rules referenced by a deployment's release: read the
+/// Resolve the file rules referenced by a deployment's release: read the
 /// release, then read each rule body it references.
-pub async fn upload_rules_for_deployment(
+pub async fn file_rules_for_deployment(
     releases: &super::Releases,
-    upload_rules: &UploadRules,
+    file_rules: &FileRules,
     deployment: &models::Deployment,
-) -> Result<Vec<models::UploadRule>, super::DiskErr> {
+) -> Result<Vec<models::FileRule>, super::DiskErr> {
     let release = releases.read(deployment.release_id.clone()).await?;
     let mut rules = Vec::new();
-    for rule_id in &release.upload_rule_ids {
-        rules.push(upload_rules.read(rule_id.clone()).await?);
+    for rule_id in &release.file_rule_ids {
+        rules.push(file_rules.read(rule_id.clone()).await?);
     }
     Ok(rules)
 }
 
-/// Resolve the currently Deployed deployment (if any) and its active upload
+/// Resolve the currently Deployed deployment (if any) and its active file
 /// rules from the disk stores. Composes `deployments::find_deployed` with
-/// `upload_rules_for_deployment` so callers touch a single curated disk API.
-pub async fn upload_rules_for_deployed(
+/// `file_rules_for_deployment` so callers touch a single curated disk API.
+pub async fn file_rules_for_deployed(
     deployments: &Deployments,
     releases: &Releases,
-    upload_rules: &UploadRules,
-) -> Result<Option<(models::Deployment, Vec<models::UploadRule>)>, super::DiskErr> {
+    file_rules: &FileRules,
+) -> Result<Option<(models::Deployment, Vec<models::FileRule>)>, super::DiskErr> {
     match super::deployments::find_deployed(deployments).await? {
         Some(deployment) => {
-            let rules = upload_rules_for_deployment(releases, upload_rules, &deployment).await?;
+            let rules = file_rules_for_deployment(releases, file_rules, &deployment).await?;
             Ok(Some((deployment, rules)))
         }
         None => Ok(None),
@@ -45,15 +45,15 @@ mod tests {
     // internal crates
     use crate::disk::{self, Layout};
     use crate::filesys;
-    use crate::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
+    use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, Release};
 
     // =============================== TEST HELPERS ================================= //
 
-    /// Build an UploadRule from Default with only the source fields set.
-    fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> UploadRule {
-        UploadRule {
+    /// Build a FileRule from Default with only the source fields set.
+    fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> FileRule {
+        FileRule {
             id: id.to_string(),
-            source: UploadRuleSource {
+            source: FileRuleSource {
                 glob: glob.to_string(),
                 stability_window_secs,
             },
@@ -62,7 +62,7 @@ mod tests {
     }
 
     /// The set of resolved rule ids, order-independent.
-    fn ids(rules: &[UploadRule]) -> BTreeSet<String> {
+    fn ids(rules: &[FileRule]) -> BTreeSet<String> {
         rules.iter().map(|r| r.id.clone()).collect()
     }
 
@@ -70,7 +70,7 @@ mod tests {
         _dir: filesys::dirs::TempDir,
         deployments: disk::Deployments,
         releases: disk::Releases,
-        upload_rules: disk::UploadRules,
+        file_rules: disk::FileRules,
     }
 
     impl Stores {
@@ -83,20 +83,20 @@ mod tests {
             let (releases, _) = disk::Releases::spawn(64, layout.releases(), 1000)
                 .await
                 .unwrap();
-            let (upload_rules, _) = disk::UploadRules::spawn(64, layout.upload_rules(), 1000)
+            let (file_rules, _) = disk::FileRules::spawn(64, layout.file_rules(), 1000)
                 .await
                 .unwrap();
             Self {
                 _dir: dir,
                 deployments,
                 releases,
-                upload_rules,
+                file_rules,
             }
         }
 
-        /// Seed a Deployed deployment -> release -> upload rule bodies so the
+        /// Seed a Deployed deployment -> release -> file rule bodies so the
         /// deployment-scoped traversal resolves to the given rules.
-        async fn seed_deployed(&self, dpl_id: &str, release_id: &str, rules: &[UploadRule]) {
+        async fn seed_deployed(&self, dpl_id: &str, release_id: &str, rules: &[FileRule]) {
             let rule_ids = rules.iter().map(|rule| rule.id.clone()).collect::<Vec<_>>();
             self.seed_deployment(dpl_id, DplActivity::Deployed, release_id)
                 .await;
@@ -133,7 +133,7 @@ mod tests {
                     release_id.to_string(),
                     Release {
                         id: release_id.to_string(),
-                        upload_rule_ids: rule_ids.to_vec(),
+                        file_rule_ids: rule_ids.to_vec(),
                         ..Default::default()
                     },
                     |_, _| false,
@@ -142,8 +142,8 @@ mod tests {
                 .unwrap();
         }
 
-        async fn put_rule(&self, rule: UploadRule) {
-            self.upload_rules
+        async fn put_rule(&self, rule: FileRule) {
+            self.file_rules
                 .write_if_absent(rule.id.clone(), rule, |_, _| false)
                 .await
                 .unwrap();
@@ -153,22 +153,22 @@ mod tests {
             crate::disk::deployments::find_deployed(&self.deployments).await
         }
 
-        async fn upload_rules_for_deployment(
+        async fn file_rules_for_deployment(
             &self,
             deployment: &Deployment,
-        ) -> Result<Vec<UploadRule>, disk::DiskErr> {
-            super::upload_rules_for_deployment(&self.releases, &self.upload_rules, deployment).await
+        ) -> Result<Vec<FileRule>, disk::DiskErr> {
+            super::file_rules_for_deployment(&self.releases, &self.file_rules, deployment).await
         }
 
-        async fn upload_rules_for_deployed(
+        async fn file_rules_for_deployed(
             &self,
-        ) -> Result<Option<(Deployment, Vec<UploadRule>)>, disk::DiskErr> {
-            super::upload_rules_for_deployed(&self.deployments, &self.releases, &self.upload_rules)
+        ) -> Result<Option<(Deployment, Vec<FileRule>)>, disk::DiskErr> {
+            super::file_rules_for_deployed(&self.deployments, &self.releases, &self.file_rules)
                 .await
         }
     }
 
-    mod upload_rules_for_deployment {
+    mod file_rules_for_deployment {
         use super::*;
 
         // Deployed deployment -> release ids [r1,r2] with both bodies present resolves
@@ -181,7 +181,7 @@ mod tests {
             stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
 
             let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-            let rules = stores.upload_rules_for_deployment(&deployed).await.unwrap();
+            let rules = stores.file_rules_for_deployment(&deployed).await.unwrap();
             assert_eq!(
                 ids(&rules),
                 BTreeSet::from(["r1".to_string(), "r2".to_string()])
@@ -199,7 +199,7 @@ mod tests {
                 .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
                 .await;
             stores
-                .upload_rules
+                .file_rules
                 .write_if_absent(
                     "r2".to_string(),
                     rule_with("r2", "/none/*.mcap", 0),
@@ -209,7 +209,7 @@ mod tests {
                 .unwrap();
 
             let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-            let rules = stores.upload_rules_for_deployment(&deployed).await.unwrap();
+            let rules = stores.file_rules_for_deployment(&deployed).await.unwrap();
             assert_eq!(ids(&rules), BTreeSet::from(["r1".to_string()]));
         }
 
@@ -240,7 +240,7 @@ mod tests {
                     "rel".to_string(),
                     Release {
                         id: "rel".to_string(),
-                        upload_rule_ids: vec![r1.id.clone(), r2.id.clone()],
+                        file_rule_ids: vec![r1.id.clone(), r2.id.clone()],
                         ..Default::default()
                     },
                     |_, _| false,
@@ -248,14 +248,14 @@ mod tests {
                 .await
                 .unwrap();
             stores
-                .upload_rules
+                .file_rules
                 .write_if_absent(r1.id.clone(), r1, |_, _| false)
                 .await
                 .unwrap();
 
             let deployed = stores.find_deployed().await.unwrap().expect("deployed");
             let err = stores
-                .upload_rules_for_deployment(&deployed)
+                .file_rules_for_deployment(&deployed)
                 .await
                 .unwrap_err();
             // a missing body reads as CacheElementNotFound, wrapped as DiskErr::CacheErr.
@@ -283,13 +283,13 @@ mod tests {
 
             let deployed = stores.find_deployed().await.unwrap().expect("deployed");
             let err = stores
-                .upload_rules_for_deployment(&deployed)
+                .file_rules_for_deployment(&deployed)
                 .await
                 .unwrap_err();
             assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
         }
 
-        // A shut-down releases store makes upload_rules_for_deployment error (replacing the old
+        // A shut-down releases store makes file_rules_for_deployment error (replacing the old
         // "treated as empty" assertion which no longer holds).
         #[tokio::test]
         async fn release_store_shutdown_errors() {
@@ -302,13 +302,13 @@ mod tests {
             stores.releases.shutdown().await.unwrap();
 
             let err = stores
-                .upload_rules_for_deployment(&deployed)
+                .file_rules_for_deployment(&deployed)
                 .await
                 .unwrap_err();
             assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
         }
 
-        // A shut-down upload_rules store makes upload_rules_for_deployment error.
+        // A shut-down file_rules store makes file_rules_for_deployment error.
         #[tokio::test]
         async fn rule_store_shutdown_errors() {
             let stores = Stores::new().await;
@@ -317,20 +317,20 @@ mod tests {
                 .seed_deployed("dpl", "rel", std::slice::from_ref(&r1))
                 .await;
             let deployed = stores.find_deployed().await.unwrap().expect("deployed");
-            stores.upload_rules.shutdown().await.unwrap();
+            stores.file_rules.shutdown().await.unwrap();
 
             let err = stores
-                .upload_rules_for_deployment(&deployed)
+                .file_rules_for_deployment(&deployed)
                 .await
                 .unwrap_err();
             assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
         }
     }
 
-    mod upload_rules_for_deployed {
+    mod file_rules_for_deployed {
         use super::*;
 
-        // upload_rules_for_deployed composes find_deployed + upload_rules_for_deployment:
+        // file_rules_for_deployed composes find_deployed + file_rules_for_deployment:
         // a Deployed deployment resolves to (deployment, rules).
         #[tokio::test]
         async fn deployed_resolves_to_rules() {
@@ -340,7 +340,7 @@ mod tests {
             stores.seed_deployed("dpl", "rel", &[r1, r2]).await;
 
             let (deployment, rules) = stores
-                .upload_rules_for_deployed()
+                .file_rules_for_deployed()
                 .await
                 .unwrap()
                 .expect("expected a deployed deployment");
@@ -351,7 +351,7 @@ mod tests {
             );
         }
 
-        // With only a Queued deployment, upload_rules_for_deployed returns None.
+        // With only a Queued deployment, file_rules_for_deployed returns None.
         #[tokio::test]
         async fn none_when_not_deployed() {
             let stores = Stores::new().await;
@@ -359,7 +359,7 @@ mod tests {
                 .seed_deployment("dpl", DplActivity::Queued, "rel")
                 .await;
 
-            let resolved = stores.upload_rules_for_deployed().await.unwrap();
+            let resolved = stores.file_rules_for_deployed().await.unwrap();
             assert!(resolved.is_none());
         }
 
@@ -378,7 +378,7 @@ mod tests {
                 .await;
             stores.put_rule(r1).await;
 
-            let err = stores.upload_rules_for_deployed().await.unwrap_err();
+            let err = stores.file_rules_for_deployed().await.unwrap_err();
             assert!(matches!(err, crate::disk::DiskErr::CacheErr(_)));
         }
     }

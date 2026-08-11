@@ -344,7 +344,7 @@ async fn init_sync_scan_bridge_worker(
     let storage = sync_scan_bridge::Storage {
         deployments: app_state.storage.deployments.clone(),
         releases: app_state.storage.releases.clone(),
-        upload_rules: app_state.storage.upload_rules.clone(),
+        file_rules: app_state.storage.file_rules.clone(),
     };
     let bridge_handle = tokio::spawn(async move {
         sync_scan_bridge::run(

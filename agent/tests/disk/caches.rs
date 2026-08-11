@@ -23,7 +23,7 @@ pub mod default_capacities {
             cfg_inst_content: 1000,
             deployments: 100,
             releases: 1000,
-            upload_rules: 1000,
+            file_rules: 1000,
             git_commits: 100,
         };
         assert_eq!(actual, expected);
@@ -118,7 +118,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn shutdown_with_pre_closed_upload_rules() {
+    async fn shutdown_with_pre_closed_file_rules() {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
@@ -126,10 +126,10 @@ pub mod init {
             .await
             .unwrap();
 
-        // pre-close the upload_rules store
-        storage.upload_rules.shutdown().await.unwrap();
+        // pre-close the file_rules store
+        storage.file_rules.shutdown().await.unwrap();
 
-        // shutdown fails when it reaches the already-closed upload_rules store
+        // shutdown fails when it reaches the already-closed file_rules store
         storage.shutdown().await.unwrap_err();
     }
 }

@@ -20,7 +20,7 @@ use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
-use miru_agent::models::DeletePolicy;
+use miru_agent::models::FileRuleRetention;
 use miru_agent::upload::executor::new_upl_request;
 use miru_agent::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
 
@@ -41,9 +41,9 @@ fn make_job(name: &str) -> Job {
         mtime: now,
         first_observed_at: now,
         last_observed_at: now,
-        upload_rule_id: "rule_1".to_string(),
+        file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        delete_policy: DeletePolicy::Never,
+        retention: None,
     }
 }
 
@@ -371,9 +371,9 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
     assert_eq!(client.call_count(Call::ConfirmUpload), 1);
 }
 
-// ============================== delete policy =================================== //
+// ================================ retention ===================================== //
 
-async fn delete_policy_setup(
+async fn retention_setup(
     client: Arc<MockClient>,
 ) -> (
     files::TempFile,
@@ -381,7 +381,7 @@ async fn delete_policy_setup(
 ) {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
-    let src = files::temp("upload-delete-policy-test").unwrap();
+    let src = files::temp("upload-retention-test").unwrap();
     files::write_bytes(
         src.file(),
         b"hello world",
@@ -394,40 +394,43 @@ async fn delete_policy_setup(
 }
 
 #[tokio::test]
-async fn after_upload_deletes_source_after_confirm() {
+async fn require_upload_retention_deletes_source_after_confirm() {
     let client = Arc::new(MockClient::default());
-    let (src, executor) = delete_policy_setup(client).await;
+    let (src, executor) = retention_setup(client).await;
     let mut job = make_job("a.log");
     job.file = src.file().clone();
-    job.delete_policy = DeletePolicy::AfterUpload;
+    job.retention = Some(FileRuleRetention {
+        require_upload: true,
+        ttl_secs: 0,
+    });
     let path = job.file.path().clone();
     assert!(path.exists());
 
     executor.upload(&job).await.unwrap();
 
-    // AfterUpload deletes the confirmed source file.
+    // A require-upload retention deletes the confirmed source file.
     assert!(!path.exists());
 }
 
 #[tokio::test]
-async fn never_leaves_source_in_place() {
+async fn no_retention_leaves_source_in_place() {
     let client = Arc::new(MockClient::default());
-    let (src, executor) = delete_policy_setup(client).await;
+    let (src, executor) = retention_setup(client).await;
     let mut job = make_job("a.log");
     job.file = src.file().clone();
-    job.delete_policy = DeletePolicy::Never;
+    job.retention = None;
     let path = job.file.path().clone();
 
     executor.upload(&job).await.unwrap();
 
-    // Never leaves the source file untouched.
+    // No retention leaves the source file untouched.
     assert!(path.exists());
 }
 
 #[tokio::test]
 async fn delete_failure_after_confirm_still_succeeds() {
     let client = Arc::new(MockClient::default());
-    let (src, executor) = delete_policy_setup(client.clone()).await;
+    let (src, executor) = retention_setup(client.clone()).await;
     let mut job = make_job("a.log");
     // Point the source at a child of the written temp file. Its parent is a
     // regular file, not a directory, so `remove_file` fails with a non-NotFound
@@ -435,7 +438,10 @@ async fn delete_failure_after_confirm_still_succeeds() {
     // delete error other than NotFound is swallowed), so the upload — already
     // durably confirmed — still reports Ok.
     job.file = File::new(src.file().path().join("child"));
-    job.delete_policy = DeletePolicy::AfterUpload;
+    job.retention = Some(FileRuleRetention {
+        require_upload: true,
+        ttl_secs: 0,
+    });
 
     // Observable outcome: upload is Ok and confirm ran exactly once, proving the
     // swallowed delete error did not re-drive an already-durable upload.
@@ -453,7 +459,10 @@ async fn missing_source_at_delete_is_success() {
     // A path that never existed (distinct from the present-then-deleted case):
     // `files::delete` maps NotFound to Ok, so upload succeeds.
     job.file = File::new("/data/does-not-exist/never-existed.log");
-    job.delete_policy = DeletePolicy::AfterUpload;
+    job.retention = Some(FileRuleRetention {
+        require_upload: true,
+        ttl_secs: 0,
+    });
 
     executor.upload(&job).await.unwrap();
 }
@@ -469,9 +478,9 @@ fn create_request_maps_job_fields() {
         mtime: Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap(),
         first_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 1, 0).unwrap(),
         last_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 2, 0).unwrap(),
-        upload_rule_id: "rule_1".to_string(),
+        file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        delete_policy: DeletePolicy::Never,
+        retention: None,
     };
 
     let expected = CreateUploadRequest {

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
-use crate::models::{DeletePolicy, Deployment, Patch, UploadCollectionID, UploadRule};
+use crate::models::{Deployment, FileRule, FileRuleRetention, Patch, UploadCollectionID};
 use crate::scan::errors::*;
 use crate::trace;
 
@@ -22,7 +22,7 @@ pub struct CollectionState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     pub deployment: Deployment,
-    pub rule: UploadRule,
+    pub rule: FileRule,
 }
 
 impl CollectionState {
@@ -35,7 +35,7 @@ impl CollectionState {
         }
     }
 
-    pub(crate) fn rule(&self) -> &UploadRule {
+    pub(crate) fn rule(&self) -> &FileRule {
         &self.cfg.rule
     }
 
@@ -72,10 +72,17 @@ impl CollectionState {
     }
 
     pub(crate) fn set_config(&mut self, cfg: Config) -> Result<(), ScanErr> {
-        if self.cfg.rule.upload_collection_id != cfg.rule.upload_collection_id {
+        let existing = self
+            .cfg
+            .rule
+            .upload
+            .as_ref()
+            .map(|u| &u.upload_collection_id);
+        let replacement = cfg.rule.upload.as_ref().map(|u| &u.upload_collection_id);
+        if existing != replacement {
             return Err(ScanErr::InvalidRule(InvalidRule {
-                existing_upload_collection_id: self.cfg.rule.upload_collection_id.clone(),
-                replacement_upload_collection_id: cfg.rule.upload_collection_id,
+                existing_upload_collection_id: existing.cloned().unwrap_or_default(),
+                replacement_upload_collection_id: replacement.cloned().unwrap_or_default(),
                 trace: trace!(),
             }));
         }
@@ -101,7 +108,7 @@ pub struct Observation {
     pub size: u64,
     pub mtime: std::time::SystemTime,
     pub deployment_id: String,
-    pub upload_rule_id: String,
+    pub file_rule_id: String,
 }
 
 impl Observation {
@@ -130,10 +137,10 @@ pub struct StableFile {
     pub first_observed_at: DateTime<Utc>,
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
-    pub upload_rule_id: String,
-    // default to 'never'
+    pub file_rule_id: String,
+    // default to None (never delete)
     #[serde(default)]
-    pub delete_policy: DeletePolicy,
+    pub retention: Option<FileRuleRetention>,
 }
 
 impl StableFile {
@@ -174,7 +181,7 @@ mod tests {
     use super::*;
 
     // internal crates
-    use crate::models::UploadRuleSource;
+    use crate::models::{FileRuleSource, FileRuleUpload};
 
     // external crates
     use std::time::SystemTime;
@@ -190,10 +197,13 @@ mod tests {
         }
     }
 
-    fn rule(collection_id: &str, glob: &str, window: i64) -> UploadRule {
-        UploadRule {
-            upload_collection_id: collection_id.to_string(),
-            source: UploadRuleSource {
+    fn rule(collection_id: &str, glob: &str, window: i64) -> FileRule {
+        FileRule {
+            upload: Some(FileRuleUpload {
+                upload_collection_id: collection_id.to_string(),
+                ..Default::default()
+            }),
+            source: FileRuleSource {
                 glob: glob.to_string(),
                 stability_window_secs: window,
             },
@@ -222,8 +232,8 @@ mod tests {
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
-            delete_policy: DeletePolicy::Never,
+            file_rule_id: "coll".to_string(),
+            retention: None,
         }
     }
 
@@ -235,7 +245,7 @@ mod tests {
             size: 4,
             mtime: SystemTime::UNIX_EPOCH,
             deployment_id: "d".to_string(),
-            upload_rule_id: "coll".to_string(),
+            file_rule_id: "coll".to_string(),
         }
     }
 
@@ -246,7 +256,10 @@ mod tests {
         fn new_starts_empty() {
             let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
 
-            assert_eq!(state.rule().upload_collection_id, "coll");
+            assert_eq!(
+                state.rule().upload.as_ref().unwrap().upload_collection_id,
+                "coll"
+            );
             assert!(state.preexisting.is_empty());
             assert!(state.candidates.is_empty());
             assert!(state.ledger.is_empty());
@@ -323,7 +336,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                file_rule_id: "coll".to_string(),
             }
         }
 
@@ -373,7 +386,10 @@ mod tests {
                 .set_config(config("d", &coll_id_b, "/none/*.mcap", 0))
                 .unwrap_err();
             assert!(matches!(err, ScanErr::InvalidRule(_)));
-            assert_eq!(state.rule().upload_collection_id, "coll_a".to_string());
+            assert_eq!(
+                state.rule().upload.as_ref().unwrap().upload_collection_id,
+                "coll_a".to_string()
+            );
         }
 
         #[test]
@@ -467,7 +483,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                file_rule_id: "coll".to_string(),
             }
         }
 
@@ -528,7 +544,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                file_rule_id: "coll".to_string(),
             }
         }
 
@@ -686,7 +702,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                upload_rule_id: "coll".to_string(),
+                file_rule_id: "coll".to_string(),
             }
         }
 
@@ -735,17 +751,17 @@ mod tests {
         }
 
         #[test]
-        fn without_delete_policy_defaults_to_never() {
+        fn without_retention_defaults_to_none() {
             let sf = stable_file(File::new("/none/s.mcap"), ts(900));
             let mut value = serde_json::to_value(&sf).unwrap();
             value
                 .as_object_mut()
                 .unwrap()
-                .remove("delete_policy")
-                .expect("fixture should serialize a delete_policy field");
+                .remove("retention")
+                .expect("fixture should serialize a retention field");
 
             let parsed: StableFile = serde_json::from_value(value).unwrap();
-            assert_eq!(parsed.delete_policy, DeletePolicy::Never);
+            assert_eq!(parsed.retention, None);
         }
     }
 }

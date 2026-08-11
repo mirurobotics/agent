@@ -127,7 +127,7 @@ pub mod get_release_fallback {
             .await
             .unwrap();
         assert_eq!(
-            result.upload_rule_ids,
+            result.file_rule_ids,
             vec!["upl_1".to_string(), "upl_2".to_string()]
         );
     }

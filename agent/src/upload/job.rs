@@ -1,6 +1,6 @@
 // internal crates
 use crate::filesys::File;
-use crate::models::DeletePolicy;
+use crate::models::FileRuleRetention;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -14,7 +14,8 @@ pub struct Job {
     pub mtime: DateTime<Utc>,
     pub first_observed_at: DateTime<Utc>,
     pub last_observed_at: DateTime<Utc>,
-    pub upload_rule_id: String,
+    pub file_rule_id: String,
     pub deployment_id: String,
-    pub delete_policy: DeletePolicy,
+    #[serde(default)]
+    pub retention: Option<FileRuleRetention>,
 }

@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::mocks::{scanner::MockScanner, syncer::MockSyncer};
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::{dirs, Overwrite};
-use miru_agent::models::{Deployment, DplActivity, Release, UploadRule, UploadRuleSource};
+use miru_agent::models::{Deployment, DplActivity, FileRule, FileRuleSource, Release};
 use miru_agent::scan::ScanErr;
 use miru_agent::sync::syncer::SyncEvent;
 use miru_agent::workers::sync_scan_bridge;
@@ -18,14 +18,14 @@ use tokio::task::JoinHandle;
 
 // =============================== TEST HELPERS ================================= //
 
-/// Real disk stores (deployments / releases / upload_rules) backed by a temp
+/// Real disk stores (deployments / releases / file_rules) backed by a temp
 /// dir, seeded via `write_if_absent` — the same pattern as the
-/// `disk/upload_rules.rs` inline tests.
+/// `disk/file_rules.rs` inline tests.
 struct Stores {
     _dir: dirs::TempDir,
     deployments: Arc<disk::Deployments>,
     releases: Arc<disk::Releases>,
-    upload_rules: Arc<disk::UploadRules>,
+    file_rules: Arc<disk::FileRules>,
 }
 
 impl Stores {
@@ -38,20 +38,20 @@ impl Stores {
         let (releases, _) = disk::Releases::spawn(64, layout.releases(), 1000)
             .await
             .unwrap();
-        let (upload_rules, _) = disk::UploadRules::spawn(64, layout.upload_rules(), 1000)
+        let (file_rules, _) = disk::FileRules::spawn(64, layout.file_rules(), 1000)
             .await
             .unwrap();
         Self {
             _dir: dir,
             deployments: Arc::new(deployments),
             releases: Arc::new(releases),
-            upload_rules: Arc::new(upload_rules),
+            file_rules: Arc::new(file_rules),
         }
     }
 
-    /// Seed a Deployed deployment -> release -> upload rule bodies so the
+    /// Seed a Deployed deployment -> release -> file rule bodies so the
     /// deployment-scoped traversal resolves to the given rules.
-    async fn seed_deployed(&self, dpl_id: &str, release_id: &str, rules: &[UploadRule]) {
+    async fn seed_deployed(&self, dpl_id: &str, release_id: &str, rules: &[FileRule]) {
         self.deployments
             .write_if_absent(
                 dpl_id.to_string(),
@@ -70,7 +70,7 @@ impl Stores {
                 release_id.to_string(),
                 Release {
                     id: release_id.to_string(),
-                    upload_rule_ids: rules.iter().map(|r| r.id.clone()).collect(),
+                    file_rule_ids: rules.iter().map(|r| r.id.clone()).collect(),
                     ..Default::default()
                 },
                 |_, _| false,
@@ -78,7 +78,7 @@ impl Stores {
             .await
             .unwrap();
         for rule in rules {
-            self.upload_rules
+            self.file_rules
                 .write_if_absent(rule.id.clone(), rule.clone(), |_, _| false)
                 .await
                 .unwrap();
@@ -102,10 +102,10 @@ impl Stores {
             .unwrap();
     }
 
-    /// Add an upload rule body (glob only) under `id`, leaving any existing
+    /// Add a file rule body (glob only) under `id`, leaving any existing
     /// release wiring untouched.
     async fn put_rule(&self, id: &str, glob: &str) {
-        self.upload_rules
+        self.file_rules
             .write_if_absent(id.to_string(), rule_with(id, glob, 0), |_, _| false)
             .await
             .unwrap();
@@ -119,7 +119,7 @@ impl Stores {
                 release_id.to_string(),
                 Release {
                     id: release_id.to_string(),
-                    upload_rule_ids: rule_ids.iter().map(|id| id.to_string()).collect(),
+                    file_rule_ids: rule_ids.iter().map(|id| id.to_string()).collect(),
                     ..Default::default()
                 },
                 |_, _| false,
@@ -130,11 +130,11 @@ impl Stores {
     }
 }
 
-/// Build an UploadRule with only its id + source fields set.
-fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> UploadRule {
-    UploadRule {
+/// Build a FileRule with only its id + source fields set.
+fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> FileRule {
+    FileRule {
         id: id.to_string(),
-        source: UploadRuleSource {
+        source: FileRuleSource {
             glob: glob.to_string(),
             stability_window_secs,
         },
@@ -143,7 +143,7 @@ fn rule_with(id: &str, glob: &str, stability_window_secs: i64) -> UploadRule {
 }
 
 /// The set of rule ids of an update_rules call payload, order-independent.
-fn rule_ids(rules: &[UploadRule]) -> BTreeSet<String> {
+fn rule_ids(rules: &[FileRule]) -> BTreeSet<String> {
     rules.iter().map(|r| r.id.clone()).collect()
 }
 
@@ -173,7 +173,7 @@ where
 /// Wait until the scanner has recorded `n` update_rules calls, then return
 /// the nth call's rules payload. Fuses the `wait_until(len == n)` +
 /// `[n - 1].1` idiom used by the resolution assertions.
-async fn await_nth_update_rules(scanner: &MockScanner, n: usize) -> Vec<UploadRule> {
+async fn await_nth_update_rules(scanner: &MockScanner, n: usize) -> Vec<FileRule> {
     wait_until(|| scanner.update_rules_calls().len() == n).await;
     scanner.update_rules_calls()[n - 1].1.clone()
 }
@@ -202,7 +202,7 @@ fn spawn_bridge(
     let storage = sync_scan_bridge::Storage {
         deployments: stores.deployments.clone(),
         releases: stores.releases.clone(),
-        upload_rules: stores.upload_rules.clone(),
+        file_rules: stores.file_rules.clone(),
     };
     let handle = tokio::spawn(async move {
         sync_scan_bridge::run(scanner.as_ref(), syncer.as_ref(), &storage, shutdown_signal).await;

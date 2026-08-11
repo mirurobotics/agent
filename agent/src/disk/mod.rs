@@ -7,22 +7,22 @@ pub mod config_instances;
 pub mod deployments;
 pub mod device;
 pub mod errors;
+pub mod file_rules;
 pub mod git_commits;
 pub mod layout;
 pub mod releases;
 pub mod settings;
 pub mod setup;
-pub mod upload_rules;
 
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{assert_activated, resolve_device_id, Device};
 pub use self::errors::{DeviceNotActivatedErr, DiskErr};
+pub use self::file_rules::{file_rules_for_deployed, file_rules_for_deployment, FileRules};
 pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings};
-pub use self::upload_rules::{upload_rules_for_deployed, upload_rules_for_deployment, UploadRules};
 pub use crate::network::{BackendHost, MqttHost};
 
 use self::device::Device as DeviceStorage;
@@ -39,7 +39,7 @@ pub struct Capacities {
     pub cfg_inst_content: usize,
     pub deployments: usize,
     pub releases: usize,
-    pub upload_rules: usize,
+    pub file_rules: usize,
     pub git_commits: usize,
 }
 
@@ -50,7 +50,7 @@ impl Default for Capacities {
             cfg_inst_content: 1000,
             deployments: 100,
             releases: 1000,
-            upload_rules: 1000,
+            file_rules: 1000,
             git_commits: 100,
         }
     }
@@ -82,7 +82,7 @@ pub struct Storage {
     pub cfg_insts: CfgInstStor,
     pub deployments: Arc<Deployments>,
     pub releases: Arc<Releases>,
-    pub upload_rules: Arc<UploadRules>,
+    pub file_rules: Arc<FileRules>,
     pub git_commits: Arc<GitCommits>,
 }
 
@@ -139,10 +139,10 @@ impl Storage {
             Releases::spawn(64, layout.releases(), capacities.releases).await?;
         let releases = Arc::new(release_stor);
 
-        // upload rules
-        let (upload_rule_stor, upload_rule_stor_handle) =
-            UploadRules::spawn(64, layout.upload_rules(), capacities.upload_rules).await?;
-        let upload_rules = Arc::new(upload_rule_stor);
+        // file rules
+        let (file_rule_stor, file_rule_stor_handle) =
+            FileRules::spawn(64, layout.file_rules(), capacities.file_rules).await?;
+        let file_rules = Arc::new(file_rule_stor);
 
         // git commits
         let (git_commit_stor, git_commit_stor_handle) =
@@ -156,7 +156,7 @@ impl Storage {
                 cfg_inst_content_stor_handle,
                 deployment_stor_handle,
                 release_stor_handle,
-                upload_rule_stor_handle,
+                file_rule_stor_handle,
                 git_commit_stor_handle,
             ];
 
@@ -172,7 +172,7 @@ impl Storage {
                 },
                 deployments,
                 releases,
-                upload_rules,
+                file_rules,
                 git_commits,
             },
             shutdown_handle,
@@ -225,8 +225,8 @@ impl Storage {
         first_err = record(first_err, "releases store", self.releases.shutdown().await);
         first_err = record(
             first_err,
-            "upload rules store",
-            self.upload_rules.shutdown().await,
+            "file rules store",
+            self.file_rules.shutdown().await,
         );
         first_err = record(
             first_err,

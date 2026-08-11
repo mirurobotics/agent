@@ -38,7 +38,7 @@ impl ModelFixture for Release {
                 default_value: json!("1970-01-01T00:00:00Z"),
             },
             OptionalField {
-                key: "upload_rule_ids",
+                key: "file_rule_ids",
                 value: json!(["upl_rule_1", "upl_rule_2"]),
                 default_value: json!([]),
             },
@@ -59,7 +59,7 @@ fn defaults() {
         git_commit_id: None,
         created_at: DateTime::<Utc>::UNIX_EPOCH,
         updated_at: DateTime::<Utc>::UNIX_EPOCH,
-        upload_rule_ids: Vec::new(),
+        file_rule_ids: Vec::new(),
     };
     assert_eq!(actual, expected);
 }
@@ -91,7 +91,7 @@ fn from_backend() {
         git_commit_id: Some("gc_123".to_string()),
         created_at: now,
         updated_at: now,
-        upload_rule_ids: vec!["upl_rule_1".to_string(), "upl_rule_2".to_string()],
+        file_rule_ids: vec!["upl_rule_1".to_string(), "upl_rule_2".to_string()],
     };
     assert!(release.created_at > DateTime::<Utc>::UNIX_EPOCH);
     assert!(release.updated_at > DateTime::<Utc>::UNIX_EPOCH);
@@ -115,5 +115,5 @@ fn from_backend_invalid_dates() {
     assert_eq!(release.id, "rel_789");
     assert_eq!(release.created_at, DateTime::<Utc>::UNIX_EPOCH);
     assert_eq!(release.updated_at, DateTime::<Utc>::UNIX_EPOCH);
-    assert!(release.upload_rule_ids.is_empty());
+    assert!(release.file_rule_ids.is_empty());
 }
