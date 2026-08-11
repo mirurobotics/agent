@@ -1,5 +1,5 @@
-pub(crate) mod collection;
 pub mod errors;
+pub(crate) mod rule;
 pub mod scanner;
 pub(crate) mod state;
 

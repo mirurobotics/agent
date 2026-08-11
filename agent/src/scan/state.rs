@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CollectionState {
+pub struct RuleState {
     pub(crate) cfg: Config,
     pub(crate) preexisting: HashMap<File, Observation>,
     pub(crate) candidates: HashMap<File, Candidate>,
@@ -25,7 +25,7 @@ pub struct Config {
     pub rule: FileRule,
 }
 
-impl CollectionState {
+impl RuleState {
     pub(crate) fn new(cfg: Config) -> Self {
         Self {
             cfg,
@@ -119,7 +119,7 @@ impl Observation {
 
 // A file that is a candidate for upload. Holds the single observation taken at
 // discovery; re-discovery of a tracked candidate is skipped (see
-// `CollectionState::is_candidate`), so a candidate never accumulates a second observation.
+// `RuleState::is_candidate`), so a candidate never accumulates a second observation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub file: File,
@@ -164,7 +164,7 @@ impl StableFile {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScannerSnapshot {
-    pub(crate) collections: HashMap<UploadCollectionID, CollectionState>,
+    pub(crate) collections: HashMap<UploadCollectionID, RuleState>,
     pub(crate) deployed: HashSet<UploadCollectionID>,
 }
 
@@ -254,7 +254,7 @@ mod tests {
 
         #[test]
         fn new_starts_empty() {
-            let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
 
             assert_eq!(
                 state.rule().upload.as_ref().unwrap().upload_collection_id,
@@ -271,7 +271,7 @@ mod tests {
         fn rule() {
             let mut cfg = config("d", "coll", "/logs/*.mcap", 60);
             cfg.rule.id = "rule-42".to_string();
-            let state = CollectionState::new(cfg);
+            let state = RuleState::new(cfg);
 
             assert_eq!(state.rule().id, "rule-42");
             assert_eq!(state.rule().source.glob, "/logs/*.mcap");
@@ -279,7 +279,7 @@ mod tests {
 
         #[test]
         fn ledger_count() {
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             assert_eq!(state.ledger_count(), 0);
 
             let file = File::new("/none/a.mcap");
@@ -291,7 +291,7 @@ mod tests {
 
         #[test]
         fn has_candidates() {
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             assert!(!state.has_candidates());
 
             let file = File::new("/none/c.mcap");
@@ -308,7 +308,7 @@ mod tests {
         #[test]
         fn is_candidate() {
             let file = File::new("/none/c.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
 
             assert!(!state.is_candidate(&file));
 
@@ -342,7 +342,7 @@ mod tests {
 
         #[test]
         fn does_not_exist() {
-            let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             let obs = observation(File::new("/none/p.mcap"));
             assert!(!state.is_preexisting(&obs));
         }
@@ -350,7 +350,7 @@ mod tests {
         #[test]
         fn metadata_not_equal() {
             let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .preexisting
                 .insert(file.clone(), observation(file.clone()));
@@ -367,7 +367,7 @@ mod tests {
         #[test]
         fn is_preexisting() {
             let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             let obs = observation(file.clone());
             state.preexisting.insert(file, obs.clone());
             assert!(state.is_preexisting(&obs));
@@ -381,7 +381,7 @@ mod tests {
         fn collect_ids_differ() {
             let coll_id_a = "coll_a".to_string();
             let coll_id_b = "coll_b".to_string();
-            let mut state = CollectionState::new(config("d", &coll_id_a, "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", &coll_id_a, "/none/*.mcap", 0));
             let err = state
                 .set_config(config("d", &coll_id_b, "/none/*.mcap", 0))
                 .unwrap_err();
@@ -394,7 +394,7 @@ mod tests {
 
         #[test]
         fn success() {
-            let mut state = CollectionState::new(config("d", "coll", "/old/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/old/*.mcap", 0));
             let mut replacement = rule("coll", "/new/*.mcap", 5);
             replacement.id = "r2".to_string();
             state
@@ -414,7 +414,7 @@ mod tests {
         /// Seed `n` single-entry ledger histories keyed to `/none/{i}.mcap`,
         /// returning the seeded keys in order. No I/O: pruning never inspects
         /// the filesystem, only the glob set it is handed.
-        fn seed_n(state: &mut CollectionState, n: usize) -> Vec<File> {
+        fn seed_n(state: &mut RuleState, n: usize) -> Vec<File> {
             let mut files = Vec::with_capacity(n);
             for i in 0..n {
                 let file = File::new(format!("/none/{i}.mcap"));
@@ -430,7 +430,7 @@ mod tests {
         // set (the maximally aggressive input): the audit-history guarantee.
         #[test]
         fn below_threshold_prunes_nothing() {
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             seed_n(&mut state, 2);
 
             state.prune_ledger(&[], 3);
@@ -441,7 +441,7 @@ mod tests {
         // glob-set members keep their full Vec history, everything else drops.
         #[test]
         fn at_threshold_drops_unglobbed_keeps_globbed() {
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             let seeded = seed_n(&mut state, 4);
             let kept = &seeded[..3];
             // give one retained key a two-entry history to prove the whole
@@ -464,7 +464,7 @@ mod tests {
         // Pruning an empty ledger is a no-op (the gate returns early).
         #[test]
         fn empty_ledger_noop() {
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             state.prune_ledger(&[], 1);
             assert_eq!(state.ledger_count(), 0);
         }
@@ -551,7 +551,7 @@ mod tests {
         #[test]
         fn matches() {
             let file = File::new("/none/l.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             state.ledger.insert(file.clone(), vec![entry]);
@@ -561,7 +561,7 @@ mod tests {
         #[test]
         fn metadata_differs() {
             let file = File::new("/none/l.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             state.ledger.insert(file.clone(), vec![entry]);
@@ -578,7 +578,7 @@ mod tests {
         #[test]
         fn absent() {
             let file = File::new("/none/l.mcap");
-            let state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             assert!(!state.is_latest_ledger_entry(&obs(file)));
         }
     }
@@ -589,7 +589,7 @@ mod tests {
         #[test]
         fn appends_alias() {
             let file = File::new("/none/l.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file.clone(), ts(900))]);
@@ -605,7 +605,7 @@ mod tests {
         #[test]
         fn none_when_absent() {
             let file = File::new("/none/l.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
             assert!(state.latest_ledger_entry_mut(&file).is_none());
         }
     }
@@ -637,11 +637,11 @@ mod tests {
     mod persistence {
         use super::*;
 
-        /// A CollectionState with one preexisting file, one candidate, and one ledger
+        /// A RuleState with one preexisting file, one candidate, and one ledger
         /// entry, so every map in the snapshot is exercised.
-        fn populated_state() -> CollectionState {
+        fn populated_state() -> RuleState {
             let file = File::new("/none/p.mcap");
-            let mut state = CollectionState::new(config("d", "coll", "/none/*.mcap", 10));
+            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 10));
             state
                 .preexisting
                 .insert(file.clone(), observation(file.clone()));
@@ -678,7 +678,7 @@ mod tests {
             let new = ScannerSnapshot {
                 collections: HashMap::from([(
                     "coll2".to_string(),
-                    CollectionState::new(config("d2", "coll2", "/none/*.mcap", 0)),
+                    RuleState::new(config("d2", "coll2", "/none/*.mcap", 0)),
                 )]),
                 deployed: HashSet::from(["coll2".to_string()]),
             };
