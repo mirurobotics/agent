@@ -267,9 +267,6 @@ mod requeue {
 
     #[tokio::test]
     async fn full_queue_still_accepts_requeue() {
-        // An already-admitted job must never be evicted by a newer arrival
-        // that took its slot while it was in flight, so requeue bypasses
-        // capacity and the queue transiently exceeds it.
         let mut queue = Queue::new(1);
         queue.enqueue(make_job("a.log")).await.unwrap();
 

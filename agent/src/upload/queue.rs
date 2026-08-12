@@ -92,10 +92,6 @@ impl Queue {
     }
 
     /// Push a previously popped job back at the tail, preserving its attempt
-    /// count. Deliberately not capacity-checked: the entry was admitted when
-    /// it was first enqueued, so a job arriving while it is in flight must
-    /// never evict it. The queue therefore holds at most `capacity` entries
-    /// plus the single in-flight one.
     pub async fn requeue(&mut self, entry: QueueEntry) {
         self.jobs.push_back(entry);
         self.persist().await;
