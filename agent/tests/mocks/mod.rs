@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod deleter;
 pub mod error;
 pub mod http_client;
 pub mod mqtt_client;
