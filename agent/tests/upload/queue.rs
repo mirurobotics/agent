@@ -19,6 +19,16 @@ fn make_job(name: &str) -> Job {
     }
 }
 
+/// The largest backoff a test entry could legitimately be stamped with.
+/// `pop_ready` treats any deadline beyond `now + horizon()` as a stale
+/// stamp from before a backward clock step. Comfortably larger than every
+/// deadline the other tests stamp, so only the tests that mean to probe
+/// the boundary do. A plain fn, not a `const`: `TimeDelta::hours` is not
+/// `const`.
+fn horizon() -> TimeDelta {
+    TimeDelta::hours(24)
+}
+
 /// A fresh snapshot file over `path`. Reopening the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
 async fn open(path: &File) -> QueueSnapshotFile {
@@ -32,7 +42,7 @@ async fn open(path: &File) -> QueueSnapshotFile {
 /// whole-`Job` equality across a reload does not hold).
 async fn digests(queue: &mut Queue) -> Vec<String> {
     let mut out = Vec::new();
-    while let Some(entry) = queue.pop_ready(Utc::now()).await {
+    while let Some(entry) = queue.pop_ready(Utc::now(), horizon()).await {
         out.push(entry.job.digest);
     }
     out
@@ -75,7 +85,7 @@ mod from_snapshot {
         // if deserialization failed, new_with_default would silently write an
         // empty default snapshot and the pop below would find nothing
         let mut queue = Queue::from_snapshot(8, open(&path).await);
-        let entry = queue.pop_ready(Utc::now()).await.unwrap();
+        let entry = queue.pop_ready(Utc::now(), horizon()).await.unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);
     }
@@ -212,9 +222,9 @@ mod requeue {
             })
             .await;
 
-        let first = queue.pop_ready(Utc::now()).await.unwrap();
+        let first = queue.pop_ready(Utc::now(), horizon()).await.unwrap();
         assert_eq!(first.job, job_a);
-        let second = queue.pop_ready(Utc::now()).await.unwrap();
+        let second = queue.pop_ready(Utc::now(), horizon()).await.unwrap();
         assert_eq!(second.job, requeued_job);
         assert_eq!(second.attempts, 3);
     }
@@ -236,7 +246,7 @@ mod requeue {
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_ready(Utc::now()).await.unwrap();
+        let entry = reloaded.pop_ready(Utc::now(), horizon()).await.unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 5);
     }
@@ -259,7 +269,7 @@ mod requeue {
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_ready(deadline).await.unwrap();
+        let entry = reloaded.pop_ready(deadline, horizon()).await.unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 5);
         assert_eq!(entry.next_attempt_at, Some(deadline));
@@ -300,11 +310,11 @@ mod pop_ready {
         }
 
         for expected in jobs {
-            let entry = queue.pop_ready(Utc::now()).await.unwrap();
+            let entry = queue.pop_ready(Utc::now(), horizon()).await.unwrap();
             assert_eq!(entry.job, expected);
             assert_eq!(entry.attempts, 0);
         }
-        assert!(queue.pop_ready(Utc::now()).await.is_none());
+        assert!(queue.pop_ready(Utc::now(), horizon()).await.is_none());
     }
 
     #[tokio::test]
@@ -324,15 +334,15 @@ mod pop_ready {
 
         // waiting A is skipped; eligible entries still pop in FIFO order
         assert_eq!(
-            queue.pop_ready(now).await.unwrap().job.digest,
+            queue.pop_ready(now, horizon()).await.unwrap().job.digest,
             "sha256:b.log"
         );
         assert_eq!(
-            queue.pop_ready(now).await.unwrap().job.digest,
+            queue.pop_ready(now, horizon()).await.unwrap().job.digest,
             "sha256:c.log"
         );
         // the deadline itself is eligible: the comparison is inclusive
-        let entry = queue.pop_ready(deadline).await.unwrap();
+        let entry = queue.pop_ready(deadline, horizon()).await.unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 1);
     }
@@ -349,7 +359,45 @@ mod pop_ready {
             })
             .await;
 
-        assert!(queue.pop_ready(now).await.is_none());
+        assert!(queue.pop_ready(now, horizon()).await.is_none());
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn deadline_beyond_horizon_is_eligible_now() {
+        let mut queue = Queue::new(4);
+        let now = Utc::now();
+        // no 24h-max backoff schedule could have stamped this: it is what a
+        // snapshot written before a backward clock step looks like
+        queue
+            .requeue(QueueEntry {
+                job: make_job("a.log"),
+                attempts: 7,
+                next_attempt_at: Some(now + TimeDelta::hours(48)),
+            })
+            .await;
+
+        let entry = queue.pop_ready(now, horizon()).await.unwrap();
+
+        assert_eq!(entry.job.digest, "sha256:a.log");
+        assert_eq!(entry.attempts, 7);
+        assert!(queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn deadline_at_horizon_is_still_waiting() {
+        let mut queue = Queue::new(4);
+        let now = Utc::now();
+        // exactly at the horizon: an ordinary maximum-backoff wait, still honored
+        queue
+            .requeue(QueueEntry {
+                job: make_job("a.log"),
+                attempts: 7,
+                next_attempt_at: Some(now + horizon()),
+            })
+            .await;
+
+        assert!(queue.pop_ready(now, horizon()).await.is_none());
         assert_eq!(queue.len(), 1);
     }
 
@@ -362,7 +410,7 @@ mod pop_ready {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
             queue.enqueue(make_job("a.log")).await.unwrap();
             queue.enqueue(make_job("b.log")).await.unwrap();
-            queue.pop_ready(Utc::now()).await.unwrap();
+            queue.pop_ready(Utc::now(), horizon()).await.unwrap();
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
