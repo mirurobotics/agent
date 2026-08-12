@@ -11,7 +11,7 @@ use miru_agent::scan::{scanner::StableFile, StableFileSink};
 use miru_agent::upload::{Job, UploadStableFileSink, Uploader, UploaderExt, UploaderOptions};
 
 // external crates
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -76,6 +76,7 @@ impl Harness {
             UploaderOptions::default(),
             None,
             |_: Duration| async {},
+            Utc::now,
         )
         .unwrap();
         let uploader = Arc::new(uploader);
