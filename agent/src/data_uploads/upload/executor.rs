@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
-use crate::filesys::files;
-use crate::http::{self, ClientI};
-use crate::models::FileRuleRetention;
-use crate::upload::{
+use crate::data_uploads::upload::{
     errors::{classified_executor_err, executor_err, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
 };
+use crate::filesys::files;
+use crate::http::{self, ClientI};
+use crate::models::FileRuleRetention;
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates

@@ -2,15 +2,14 @@
 use crate::authn;
 use crate::cache;
 use crate::crypt;
+use crate::data_uploads::{scan, upload};
 use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::events;
 use crate::filesys;
 use crate::http;
-use crate::scan;
 use crate::services;
 use crate::sync;
-use crate::upload;
 
 #[derive(Debug, thiserror::Error)]
 #[error("shutdown manager was provided the same argument ({arg_name}) twice")]

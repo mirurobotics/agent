@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{Job, UploadErr, UploadExecutor};
+use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::{Job, UploadErr, UploadExecutor};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};

@@ -6,15 +6,17 @@ use std::sync::Arc;
 use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
+use crate::data_uploads::{
+    scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt},
+    upload::{self, UploaderExt},
+};
 use crate::deploy::{apply, fsm};
 use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
-use crate::scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
-use crate::upload::{self, UploaderExt};
 
 #[derive(Clone, Debug)]
 pub struct AppState {

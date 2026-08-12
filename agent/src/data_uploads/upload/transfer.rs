@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::future::Future;
 
 // internal crates
+use crate::data_uploads::upload::errors::{executor_err, UploadErr};
 use crate::filesys::File;
 use crate::gcs;
 use crate::s3;
-use crate::upload::errors::{executor_err, UploadErr};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 

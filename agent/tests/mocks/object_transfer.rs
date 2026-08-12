@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{UploadCredentials, UploadDestination};
+use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::{ObjectTransfer, UploadErr};
 use miru_agent::filesys::File;
-use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{ObjectTransfer, UploadErr};
 
 /// One recorded `transfer` call's arguments.
 pub type TransferCall = (

@@ -5,10 +5,10 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
+use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
 use miru_agent::errors::Error;
 use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
-use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

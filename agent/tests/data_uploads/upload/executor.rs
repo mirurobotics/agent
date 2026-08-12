@@ -16,13 +16,13 @@ use backend_api::models::{
 };
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
+use miru_agent::data_uploads::upload::executor::new_upl_request;
+use miru_agent::data_uploads::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
 use miru_agent::errors::Error;
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
 use miru_agent::models::FileRuleRetention;
-use miru_agent::upload::executor::new_upl_request;
-use miru_agent::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};

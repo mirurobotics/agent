@@ -4,8 +4,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
+use crate::data_uploads::scan::{errors::ScanErr, ScannerExt};
 use crate::disk;
-use crate::scan::{errors::ScanErr, ScannerExt};
 use crate::sync::{syncer::SyncEvent, SyncerExt};
 use crate::workers::next_sync_event;
 
@@ -102,7 +102,7 @@ fn disk_err_to_scan_err(e: disk::DiskErr) -> ScanErr {
     match e {
         disk::DiskErr::CacheErr(c) => ScanErr::CacheErr(c),
         disk::DiskErr::FileSysErr(f) => ScanErr::FileSysErr(f),
-        other => ScanErr::InternalError(crate::scan::errors::InternalError {
+        other => ScanErr::InternalError(crate::data_uploads::scan::errors::InternalError {
             message: format!("unexpected disk error resolving file rules: {other:?}"),
             trace: crate::trace!(),
         }),
