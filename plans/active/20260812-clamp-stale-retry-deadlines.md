@@ -20,13 +20,14 @@ This change also fixes three inaccurate doc comments in the same two files (see 
 
 ## Progress
 
-- [ ] M1: `Queue::pop_ready` takes a horizon; `Worker::run` derives one horizon local and uses it for both the pop and a ceiling on the idle wait; three doc-comment fixes.
-- [ ] M2: Queue tests updated for the new argument; two new tests covering both sides of the horizon.
+- [x] M1: `Queue::pop_ready` takes a horizon; `Worker::run` derives one horizon local and uses it for both the pop and a ceiling on the idle wait; three doc-comment fixes. (`854bcaa`)
+- [x] M2: Queue tests updated for the new argument; two new tests covering both sides of the horizon. (`5df33e3`)
 - [ ] M3: Preflight CLEAN locally, pushed, draft PR opened, CI watched on branch head.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The upload suite is 75 tests on this branch (73 on `main` at `e07b6f5`, plus the two new ones) — as the plan anticipated, the count moves with `main`, so acceptance was checked on `0 failed` plus the two named tests rather than a total.
+- No other change was needed: every pre-existing `pop_ready` call site took the new `horizon()` argument with all assertions intact, and no uploader test changed behavior — confirming the plan's read that nothing stamps a deadline past the default 3600s `max_secs`.
 
 ## Decision Log
 
