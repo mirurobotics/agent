@@ -8,23 +8,16 @@ pub use crate::scan::state::{Config, StableFile};
 use crate::scan::{
     errors::*,
     rule::{Options, RuleScanner},
+    sink::StableFileSink,
     state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
 };
 use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
-
-// =============================== SCANNER EVENTS ================================== //
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScanEvent {
-    StableFile { file: StableFile, rule: FileRule },
-}
-
-const DEFAULT_BROADCAST_CAPACITY: usize = 256;
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -38,7 +31,7 @@ macro_rules! dispatch {
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct ScannerArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    pub broadcast_capacity: usize,
+    pub sinks: Vec<Arc<dyn StableFileSink>>,
     pub(crate) snapshot_file: Option<ScanSnapshotFile>,
 }
 
@@ -46,7 +39,7 @@ impl Default for ScannerArgs {
     fn default() -> Self {
         Self {
             now_fn: Arc::new(Utc::now),
-            broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+            sinks: Vec::new(),
             snapshot_file: None,
         }
     }
@@ -56,13 +49,12 @@ pub struct SingleThreadScanner {
     scanners: HashMap<FileRuleID, RuleScanner>,
     deployed: HashSet<FileRuleID>,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    subscriber_tx: broadcast::Sender<ScanEvent>,
+    sinks: Vec<Arc<dyn StableFileSink>>,
     snapshot_file: Option<ScanSnapshotFile>,
 }
 
 impl SingleThreadScanner {
     pub fn new(args: ScannerArgs) -> Result<Self, ScanErr> {
-        let (subscriber_tx, _) = broadcast::channel(args.broadcast_capacity);
         let persisted = Self::load_snapshot(&args.snapshot_file);
         let scanners = persisted
             .rules
@@ -78,7 +70,7 @@ impl SingleThreadScanner {
             scanners,
             deployed: persisted.deployed,
             now_fn: args.now_fn,
-            subscriber_tx,
+            sinks: args.sinks,
             snapshot_file: args.snapshot_file,
         })
     }
@@ -111,18 +103,19 @@ impl SingleThreadScanner {
         }
     }
 
-    fn subscribe(&self) -> broadcast::Receiver<ScanEvent> {
-        self.subscriber_tx.subscribe()
-    }
-
-    fn emit_stable_files(&self, stable_files: Vec<(StableFile, FileRule)>) {
-        for (file, rule) in stable_files {
-            if let Err(e) = self
-                .subscriber_tx
-                .send(ScanEvent::StableFile { file, rule })
-            {
-                debug!("no stable-file subscribers active: {e:?}");
+    async fn dispatch_stable_files(&self, stable_files: Vec<(StableFile, FileRule)>) {
+        let Some((last, rest)) = self.sinks.split_last() else {
+            if !stable_files.is_empty() {
+                let count = stable_files.len();
+                debug!("scan: no sinks attached; {count} stable file(s) not delivered");
             }
+            return;
+        };
+        for (file, rule) in stable_files {
+            for sink in rest {
+                sink.on_stable_file(file.clone(), &rule).await;
+            }
+            last.on_stable_file(file, &rule).await;
         }
     }
 
@@ -242,11 +235,11 @@ impl SingleThreadScanner {
         }
 
         self.persist_snapshot().await;
-        let emitted = stable_files.len();
-        self.emit_stable_files(stable_files);
+        let delivered = stable_files.len();
+        self.dispatch_stable_files(stable_files).await;
 
         debug!(
-            "scan: tick complete; {emitted} stable file(s) emitted, \
+            "scan: tick complete; {delivered} stable file(s) delivered to sinks, \
              {pruned} inactive rule(s) pruned"
         );
 
@@ -264,7 +257,6 @@ pub trait ScannerExt {
         rules: Vec<FileRule>,
     ) -> Result<(), ScanErr>;
     async fn scan(&self) -> Result<(), ScanErr>;
-    async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr>;
     async fn shutdown(&self) -> Result<(), ScanErr>;
 }
 
@@ -279,9 +271,6 @@ pub enum Command {
     },
     Scan {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
-    },
-    Subscribe {
-        respond_to: oneshot::Sender<Result<broadcast::Receiver<ScanEvent>, ScanErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
@@ -339,11 +328,6 @@ impl Worker {
                         respond_to,
                         "Actor failed to send scan response"
                     );
-                }
-                Command::Subscribe { respond_to } => {
-                    if respond_to.send(Ok(self.scanner.subscribe())).is_err() {
-                        error!("Actor failed to send subscribe response");
-                    }
                 }
                 #[cfg(feature = "test")]
                 Command::GetRules { respond_to } => {
@@ -447,11 +431,6 @@ impl ScannerExt for Scanner {
             .await?
     }
 
-    async fn subscribe(&self) -> Result<broadcast::Receiver<ScanEvent>, ScanErr> {
-        self.send_command(|tx| Command::Subscribe { respond_to: tx })
-            .await?
-    }
-
     async fn shutdown(&self) -> Result<(), ScanErr> {
         self.send_command(|tx| Command::Shutdown { respond_to: tx })
             .await??;
@@ -464,12 +443,14 @@ impl ScannerExt for Scanner {
 mod tests {
     // standard crates
     use std::collections::{BTreeSet, HashMap, HashSet};
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicI64, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     // internal crates
-    use super::{ScanEvent, ScannerExt, DEFAULT_BROADCAST_CAPACITY};
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
+    use super::{ScannerExt, StableFileSink};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
     use crate::scan::rule::RuleScanner;
@@ -562,20 +543,83 @@ mod tests {
         }
     }
 
-    /// Spawn a scanner actor with a deterministic injected clock and the default
-    /// broadcast capacity.
-    fn spawn_scanner(clock: &Clock) -> Scanner {
-        spawn_scanner_with_capacity(clock, DEFAULT_BROADCAST_CAPACITY)
+    /// A recording [`StableFileSink`]: captures every delivered
+    /// `(StableFile, FileRule)` pair for assertions after a tick. Clone-shared —
+    /// the scanner holds one handle, the test another.
+    #[derive(Clone, Default)]
+    pub struct RecordingSink {
+        events: Arc<Mutex<Vec<(StableFile, FileRule)>>>,
     }
 
-    /// Spawn a scanner with a deterministic injected clock and an explicit broadcast
-    /// capacity.
-    fn spawn_scanner_with_capacity(clock: &Clock, capacity: usize) -> Scanner {
+    impl RecordingSink {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        /// The recorded `(StableFile, FileRule)` pairs, in delivery order.
+        fn events(&self) -> Vec<(StableFile, FileRule)> {
+            self.events.lock().unwrap().clone()
+        }
+
+        /// The recorded stable files' names, in delivery order.
+        fn names(&self) -> Vec<String> {
+            self.events().iter().map(|(f, _)| stable_name(f)).collect()
+        }
+
+        /// The number of recorded deliveries.
+        fn count(&self) -> usize {
+            self.events.lock().unwrap().len()
+        }
+
+        /// Assert exactly one delivery so far, named `name`. The caller supplies
+        /// the WHY exactly-one holds at its own site.
+        fn assert_one_stable(&self, name: &str) {
+            assert_eq!(self.names(), vec![name.to_string()]);
+        }
+    }
+
+    impl StableFileSink for RecordingSink {
+        fn on_stable_file<'a>(
+            &'a self,
+            file: StableFile,
+            rule: &'a FileRule,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                // yield before recording: proves the scan tick awaits the sink
+                // future to completion rather than fire-and-forgetting it.
+                tokio::task::yield_now().await;
+                self.events.lock().unwrap().push((file, rule.clone()));
+            })
+        }
+    }
+
+    /// Spawn a scanner actor with a deterministic injected clock and a discarded
+    /// recording sink, for tests that only assert ledger/snapshot state. The
+    /// sink is attached anyway so every test runs the production shape — the
+    /// app always wires at least one sink — and the dispatch path executes even
+    /// where its output goes unasserted. Zero-sink dispatch is pinned by the
+    /// dedicated `scan_with_no_sinks_does_not_error` test.
+    fn spawn_scanner(clock: &Clock) -> Scanner {
+        let (scanner, _sink) = spawn_scanner_with_sink(clock);
+        scanner
+    }
+
+    /// Spawn a scanner actor with a deterministic injected clock and one
+    /// recording sink; returns the test's sink handle alongside the scanner.
+    fn spawn_scanner_with_sink(clock: &Clock) -> (Scanner, RecordingSink) {
+        let sink = RecordingSink::new();
+        let scanner = spawn_scanner_with_sinks(clock, vec![Arc::new(sink.clone())]);
+        (scanner, sink)
+    }
+
+    /// Spawn a scanner actor with a deterministic injected clock and the given
+    /// sinks.
+    fn spawn_scanner_with_sinks(clock: &Clock, sinks: Vec<Arc<dyn StableFileSink>>) -> Scanner {
         let (scanner, _h) = Scanner::spawn(
             64,
             ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                broadcast_capacity: capacity,
+                sinks,
                 snapshot_file: None,
             },
         )
@@ -583,22 +627,38 @@ mod tests {
         scanner
     }
 
-    /// temp dir + `*.mcap` glob + spawned scanner + one deployed upload-bearing
-    /// rule keyed [`DEFAULT_RULE_ID`] (deployment "d", window `window`).
-    /// Returns (dir, clock, scanner). Hold `dir` to keep the temp tree alive.
+    /// temp dir + `*.mcap` glob + spawned scanner + one deployed upload-bearing rule
+    /// keyed [`DEFAULT_RULE_ID`] (deployment "d", window `window`). Returns (dir,
+    /// clock, scanner). Hold `dir` to keep the temp tree alive.
     async fn single_rule(window: i64) -> (dirs::TempDir, Clock, Scanner) {
         let dir = dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
         let scanner = spawn_scanner(&clock);
+        deploy_single_rule(&scanner, &glob, window).await;
+        (dir, clock, scanner)
+    }
+
+    /// [`single_rule`], but with a recording sink attached at spawn.
+    async fn single_rule_with_sink(window: i64) -> (dirs::TempDir, Clock, Scanner, RecordingSink) {
+        let dir = dirs::temp("testing").unwrap();
+        let glob = format!("{}/*.mcap", dir.path().display());
+        let clock = Clock::new(1000);
+        let (scanner, sink) = spawn_scanner_with_sink(&clock);
+        deploy_single_rule(&scanner, &glob, window).await;
+        (dir, clock, scanner, sink)
+    }
+
+    /// Deploy one upload-bearing rule keyed [`DEFAULT_RULE_ID`] under
+    /// deployment "d".
+    async fn deploy_single_rule(scanner: &Scanner, glob: &str, window: i64) {
         scanner
             .update_rules(
                 deployment("d"),
-                vec![upload_rule(DEFAULT_RULE_ID, &glob, window)],
+                vec![upload_rule(DEFAULT_RULE_ID, glob, window)],
             )
             .await
             .unwrap();
-        (dir, clock, scanner)
     }
 
     /// The set of rule ids currently held by the scanner.
@@ -651,11 +711,6 @@ mod tests {
         scanner.scan().await.unwrap();
     }
 
-    /// Subscribe to the scanner's event stream.
-    async fn subscribe(scanner: &Scanner) -> tokio::sync::broadcast::Receiver<ScanEvent> {
-        scanner.subscribe().await.unwrap()
-    }
-
     /// The number of entries in the scanner's ledger.
     async fn ledger_count(scanner: &Scanner) -> usize {
         scanner.get_ledger_count().await.unwrap()
@@ -665,18 +720,6 @@ mod tests {
     /// inactive legacy scanners that are still draining candidates.
     async fn active_rule_ids(scanner: &Scanner) -> BTreeSet<String> {
         rule_ids(&scanner.get_rules().await.unwrap())
-    }
-
-    /// Receive exactly one `StableFile` event, assert its file name is `name`, and
-    /// assert no further event follows. The caller supplies the WHY exactly-one
-    /// holds at its own site.
-    async fn assert_one_stable(rx: &mut tokio::sync::broadcast::Receiver<ScanEvent>, name: &str) {
-        let ScanEvent::StableFile { file: sf, .. } = rx.recv().await.unwrap();
-        assert_eq!(stable_name(&sf), name.to_string());
-        assert!(
-            rx.try_recv().is_err(),
-            "expected exactly one StableFile event"
-        );
     }
 
     async fn state_file(file: &File) -> ScanSnapshotFile {
@@ -690,7 +733,7 @@ mod tests {
             64,
             ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: Some(state_file(file).await),
             },
         )
@@ -834,6 +877,7 @@ mod tests {
 
             let scanner = SingleThreadScanner::new(ScannerArgs {
                 snapshot_file: Some(snapshot_file),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 ..ScannerArgs::default()
             })
             .unwrap();
@@ -892,7 +936,7 @@ mod tests {
             };
             let mut scanner = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: Some(state_file(&state_path).await),
             })
             .unwrap();
@@ -917,6 +961,7 @@ mod tests {
             });
             let mut scanner = SingleThreadScanner::new(ScannerArgs {
                 snapshot_file: Some(state_file(&state_path).await),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 ..ScannerArgs::default()
             })
             .unwrap();
@@ -940,17 +985,18 @@ mod tests {
         }
     }
 
-    mod subscribe {
+    mod sinks {
         use super::*;
 
-        // subscribe() before scan(): a StableFile event carries the expected payload.
+        // a delivered StableFile carries the expected payload; dispatch is
+        // awaited inside scan(), so the sink is populated when the tick returns.
         #[tokio::test]
-        async fn subscribe_receives_stable_file_payload() {
+        async fn sink_receives_stable_file_payload() {
             let dir = dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
             let rule = upload_rule("rule-1", &glob, 0);
             scanner
                 .update_rules(deployment("dpl-1"), vec![rule])
@@ -974,36 +1020,36 @@ mod tests {
                 retention: None,
             };
 
-            let mut rx = subscribe(&scanner).await;
-
             scan_once(&scanner).await; // discover
-            tick(&scanner, &clock, 1).await; // evaluate => emit
+            tick(&scanner, &clock, 1).await; // evaluate => deliver
 
-            let ScanEvent::StableFile { file: sf, .. } = rx.recv().await.unwrap();
-            assert_eq!(sf, expected);
+            let events = sink.events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].0, expected);
         }
 
         /// A retention-only rule runs the full scan pipeline — glob, stability
-        /// window, ledger, emit — and its event carries `upload: None` so
-        /// subscribers know not to mint an upload job.
+        /// window, ledger, deliver — and its delivery carries `upload: None` so
+        /// sinks know not to mint an upload job.
         #[tokio::test]
-        async fn retention_only_rule_scans_and_emits_without_upload() {
+        async fn retention_only_rule_scans_and_delivers_without_upload() {
             let dir = dirs::temp("testing").unwrap();
             let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
             deploy(
                 &scanner,
                 vec![retention_only_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0)],
             )
             .await;
 
-            let mut rx = subscribe(&scanner).await;
             write(&dir, "keep.mcap", b"aaa").await;
             scan_once(&scanner).await; // discover
-            tick(&scanner, &clock, 1).await; // evaluate => emit
+            tick(&scanner, &clock, 1).await; // evaluate => deliver
 
-            let ScanEvent::StableFile { file, rule } = rx.recv().await.unwrap();
-            assert_eq!(stable_name(&file), "keep.mcap");
+            let events = sink.events();
+            assert_eq!(events.len(), 1);
+            let (file, rule) = &events[0];
+            assert_eq!(stable_name(file), "keep.mcap");
             assert_eq!(file.file_rule_id, DEFAULT_RULE_ID);
             assert_eq!(rule.upload, None);
 
@@ -1011,32 +1057,66 @@ mod tests {
             assert_eq!(ledger_count(&scanner).await, 1);
         }
 
-        /// An upload-bearing rule's event carries its upload block, so the two
-        /// arms of the bridge's gate are distinguishable at the source.
+        /// An upload-bearing rule's delivery carries its upload block, so the
+        /// two arms of the upload sink's gate are distinguishable at the source.
         #[tokio::test]
-        async fn upload_rule_emits_its_upload_block() {
-            let (dir, clock, scanner) = single_rule(0).await;
-            let mut rx = subscribe(&scanner).await;
+        async fn upload_rule_delivers_its_upload_block() {
+            let (dir, clock, scanner, sink) = single_rule_with_sink(0).await;
             write(&dir, "up.mcap", b"aaa").await;
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
 
-            let ScanEvent::StableFile { rule, .. } = rx.recv().await.unwrap();
+            let events = sink.events();
+            assert_eq!(events.len(), 1);
+            let rule = events[0].1.clone();
             assert_eq!(
                 rule.upload.map(|u| u.upload_collection_id),
                 Some(format!("{DEFAULT_RULE_ID}-coll"))
             );
         }
 
-        // scan() producing stable files with NO subscriber does not error (debug branch).
+        // scan() producing stable files with NO sinks attached does not error.
+        // Zero sinks cannot occur in the app (init always wires the upload
+        // sink) but is ScannerArgs::default(); this is the one test that
+        // exercises the empty-dispatch branch.
         #[tokio::test]
-        async fn emit_with_no_subscriber_does_not_error() {
-            let (dir, clock, scanner) = single_rule(0).await;
-            write(&dir, "nosub.mcap", b"aaa").await;
+        async fn scan_with_no_sinks_does_not_error() {
+            let dir = dirs::temp("testing").unwrap();
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner_with_sinks(&clock, Vec::new());
+            deploy(
+                &scanner,
+                vec![upload_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0)],
+            )
+            .await;
+            write(&dir, "nosink.mcap", b"aaa").await;
 
             scan_once(&scanner).await;
-            tick(&scanner, &clock, 1).await; // emits with no subscriber, must not error
+            tick(&scanner, &clock, 1).await; // delivers to zero sinks, must not error
             assert_eq!(ledger_count(&scanner).await, 1);
+        }
+
+        /// Every sink in the vec receives every stable file (PR 3b adds a
+        /// second production sink; the fan-out must already hold).
+        #[tokio::test]
+        async fn every_sink_receives_every_stable_file() {
+            let dir = dirs::temp("testing").unwrap();
+            let glob = format!("{}/*.mcap", dir.path().display());
+            let clock = Clock::new(1000);
+            let first = RecordingSink::new();
+            let second = RecordingSink::new();
+            let scanner = spawn_scanner_with_sinks(
+                &clock,
+                vec![Arc::new(first.clone()), Arc::new(second.clone())],
+            );
+            deploy_single_rule(&scanner, &glob, 0).await;
+
+            write(&dir, "fanout.mcap", b"aaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+
+            first.assert_one_stable("fanout.mcap");
+            second.assert_one_stable("fanout.mcap");
         }
     }
 
@@ -1071,7 +1151,7 @@ mod tests {
         // pool).
         #[tokio::test]
         async fn clear_rules_still_evaluates_remaining_candidates() {
-            let (dir, clock, scanner) = single_rule(0).await;
+            let (dir, clock, scanner, sink) = single_rule_with_sink(0).await;
             write(&dir, "drain.mcap", b"aaa").await;
 
             // discover a candidate while deployed.
@@ -1081,10 +1161,10 @@ mod tests {
             // The rule's scanner remains active while its existing candidate drains.
             assert_eq!(active_rule_ids(&scanner).await.len(), 1);
 
-            // subscribe before the evaluating scan so we observe the emitted StableFile.
-            let mut rx = subscribe(&scanner).await;
+            // the evaluating scan delivers the drained StableFile — exactly one
+            // event total, since the discover tick emitted nothing.
             tick(&scanner, &clock, 1).await;
-            assert_one_stable(&mut rx, "drain.mcap").await;
+            sink.assert_one_stable("drain.mcap");
 
             // the now-empty inactive scanner was pruned this tick.
             assert!(scanner.get_rules().await.unwrap().is_empty());
@@ -1234,7 +1314,7 @@ mod tests {
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
             deploy(&scanner, vec![upload_rule(DEFAULT_RULE_ID, &glob, 0)]).await;
 
             // file appears after creation and goes stable under deployment "d".
@@ -1242,6 +1322,7 @@ mod tests {
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
+            let delivered_before_repush = sink.count();
 
             // the same rule arrives again under a new deployment.
             scanner
@@ -1253,12 +1334,12 @@ mod tests {
                 .unwrap();
 
             // the ledger carried: no re-report of the already-reported file.
-            let mut rx = subscribe(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 1);
-            assert!(
-                rx.try_recv().is_err(),
-                "carried dedup state must not re-emit the already-reported file"
+            assert_eq!(
+                sink.count(),
+                delivered_before_repush,
+                "carried dedup state must not re-deliver the already-reported file"
             );
             assert_eq!(scanner.get_rules().await.unwrap().len(), 1);
 
@@ -1266,7 +1347,7 @@ mod tests {
             write(&dir, "after.mcap", b"aaa").await;
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
-            let ScanEvent::StableFile { file, .. } = rx.recv().await.unwrap();
+            let (file, _) = sink.events().last().unwrap().clone();
             assert_eq!(stable_name(&file), "after.mcap");
             assert_eq!(file.deployment_id, "d2");
         }
@@ -1302,7 +1383,7 @@ mod tests {
             let dir = dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
             let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
 
             deploy(&scanner, vec![upload_rule("legacy-rule", &glob, 10)]).await;
             write(&dir, "legacy.mcap", b"legacy").await;
@@ -1317,16 +1398,18 @@ mod tests {
 
             write(&dir, "current.mcap", b"current").await;
             scan_once(&scanner).await;
-            let mut rx = subscribe(&scanner).await;
             tick(&scanner, &clock, 10).await;
 
-            let mut emitted = BTreeSet::new();
-            while let Ok(ScanEvent::StableFile { file: stable, .. }) = rx.try_recv() {
-                emitted.insert((stable.file_rule_id.clone(), stable_name(&stable)));
-            }
+            // the earlier ticks only discovered (window 10), so these are the
+            // first and only deliveries.
+            let delivered: BTreeSet<(String, String)> = sink
+                .events()
+                .iter()
+                .map(|(stable, _)| (stable.file_rule_id.clone(), stable_name(stable)))
+                .collect();
             let event1 = ("current-rule".to_string(), "current.mcap".to_string());
             let event2 = ("legacy-rule".to_string(), "legacy.mcap".to_string());
-            assert_eq!(emitted, BTreeSet::from([event1, event2]));
+            assert_eq!(delivered, BTreeSet::from([event1, event2]));
             // The legacy rule is no longer active once its candidate pool drains.
             assert_eq!(
                 active_rule_ids(&scanner).await,
@@ -1403,7 +1486,7 @@ mod tests {
         // leaves the scanner in place.
         #[tokio::test]
         async fn inactive_scanner_evaluates_but_does_not_discover() {
-            let (dir, clock, scanner) = single_rule(10).await;
+            let (dir, clock, scanner, sink) = single_rule_with_sink(10).await;
 
             // discover one candidate while deployed
             write(&dir, "first.mcap", b"aaa").await;
@@ -1413,10 +1496,11 @@ mod tests {
             scanner.clear_rules().await.unwrap();
             write(&dir, "second.mcap", b"bbb").await;
 
-            let mut rx = subscribe(&scanner).await;
             clock.advance(10);
             scan_once(&scanner).await;
-            assert_one_stable(&mut rx, "first.mcap").await;
+            // exactly one delivery across all ticks: second.mcap was never
+            // discovered, and first.mcap only went stable this tick.
+            sink.assert_one_stable("first.mcap");
             // The now-empty inactive rule is no longer active after this tick.
             assert!(!active_rule_ids(&scanner).await.contains(DEFAULT_RULE_ID));
         }
@@ -1441,25 +1525,22 @@ mod tests {
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
-            let scanner = spawn_scanner(&clock);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
             let rules = vec![upload_rule("c1", &glob, 0), upload_rule("c2", &glob, 0)];
             deploy(&scanner, rules).await;
             write(&dir, "shared.mcap", b"sss").await;
-
-            let mut rx = subscribe(&scanner).await;
 
             scan_once(&scanner).await;
             tick(&scanner, &clock, 1).await;
             assert_eq!(ledger_count(&scanner).await, 2);
 
             // exactly two StableFiles, one per distinct rule.
-            let mut emitted = Vec::new();
-            while let Ok(ScanEvent::StableFile { file: sf, .. }) = rx.try_recv() {
-                emitted.push(sf);
-            }
-            assert_eq!(emitted.len(), 2, "expected exactly two StableFiles");
-            let rule_ids: BTreeSet<String> =
-                emitted.iter().map(|sf| sf.file_rule_id.clone()).collect();
+            let delivered = sink.events();
+            assert_eq!(delivered.len(), 2, "expected exactly two StableFiles");
+            let rule_ids: BTreeSet<String> = delivered
+                .iter()
+                .map(|(sf, _)| sf.file_rule_id.clone())
+                .collect();
             assert_eq!(
                 rule_ids,
                 BTreeSet::from(["c1".to_string(), "c2".to_string()])
@@ -1471,9 +1552,10 @@ mod tests {
         #[tokio::test]
         async fn scan_isolates_bad_glob_rule_from_emitting_sibling() {
             let clock = Clock::new(1000);
+            let sink = RecordingSink::new();
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                sinks: vec![Arc::new(sink.clone())],
                 snapshot_file: None,
             })
             .unwrap();
@@ -1505,21 +1587,19 @@ mod tests {
             single.deployed.insert("good".to_string());
             single.deployed.insert("bad".to_string());
 
-            let mut rx = single.subscribe();
-
             // advance past the window and run one tick. The bad collection's discover
-            // errors, so the good collection still emits.
+            // errors, so the good collection still delivers.
             clock.advance(1);
             single.scan().await.unwrap();
 
-            // the good collection's StableFile was emitted despite the sibling error.
-            let ScanEvent::StableFile { file: sf, .. } = rx.recv().await.unwrap();
-            assert_eq!(stable_name(&sf), "good.mcap".to_string());
+            // the good collection's StableFile was delivered despite the
+            // sibling error — and nothing else was ("only the good rule
+            // delivers").
+            let delivered = sink.events();
+            assert_eq!(delivered.len(), 1, "only the good collection delivers");
+            let sf = &delivered[0].0;
+            assert_eq!(stable_name(sf), "good.mcap".to_string());
             assert_eq!(sf.file_rule_id, "r-good".to_string());
-            assert!(
-                rx.try_recv().is_err(),
-                "only the good collection should emit"
-            );
         }
     }
 
@@ -1586,7 +1666,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: None,
             })
             .unwrap();
@@ -1634,7 +1714,7 @@ mod tests {
                 64,
                 ScannerArgs {
                     now_fn: Arc::new(clock.now_fn()),
-                    broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                    sinks: Vec::new(),
                     snapshot_file: Some(snapshot_file),
                 },
             )
@@ -1657,7 +1737,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: None,
             })
             .unwrap();
