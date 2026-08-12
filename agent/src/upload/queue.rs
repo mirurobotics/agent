@@ -92,13 +92,14 @@ impl Queue {
     }
 
     /// Push a previously popped job back at the tail, preserving its attempt
-    /// count.
-    pub async fn requeue(&mut self, entry: QueueEntry) -> Result<(), UploadErr> {
-        self.verify_capacity(&entry.job).await?;
+    /// count. Deliberately not capacity-checked: the entry was admitted when
+    /// it was first enqueued, so a job arriving while it is in flight must
+    /// never evict it. The queue therefore holds at most `capacity` entries
+    /// plus the single in-flight one.
+    pub async fn requeue(&mut self, entry: QueueEntry) {
         self.jobs.push_back(entry);
         self.persist().await;
         info!("upload: job requeued; queue length {}", self.jobs.len());
-        Ok(())
     }
 
     /// Remove and return the first entry whose `next_attempt_at` is `None` or
