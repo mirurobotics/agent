@@ -37,14 +37,22 @@ Not in this PR (→ 3b): the stability-eligible producer for retention-only /
 
 ## Progress
 
-- [ ] M1: Port `delete/` module (queue, deleter actor, errors) from #191, adapted to FileRuleRetention
-- [ ] M2: Executor enqueues on confirm; inline delete removed
-- [ ] M3: Interval worker + app wiring (options, state, shutdown ordering)
-- [ ] M4: Tests (port + adapt #191's), covgate, preflight, push
+- [x] M1: Port `delete/` module (queue, deleter actor, errors) from #191, adapted to FileRuleRetention
+- [x] M2: Executor enqueues on confirm; inline delete removed
+- [x] M3: Interval worker + app wiring (options, state, shutdown ordering)
+- [x] M4: Tests (port + adapt #191's), covgate, preflight, push
 
 ## Surprises & Discoveries
 
-_(filled as work proceeds)_
+- **The port was almost entirely mechanical** — #191's `PendingDelete` doc comment had
+  already promised this evolution ("producers, not fields"), and its sweep/queue code
+  needed only the vocabulary swap. The one real semantic addition beyond #191: the
+  `require_upload: false` executor no-op (with its double-enqueue rationale) and the
+  `due_at` overflow saturation replacing the old negative-delay clamp (ttl is u64 now).
+- **#191's test surface ported at full strength**: 17 deleter unit tests, the worker
+  driver trio, executor enqueue matrix, app init/degrade/shutdown tests — all pass
+  unmodified after the rename, plus two new cases (`non_require_upload_retention_enqueues_nothing`,
+  `adds_ttl_and_saturates_on_overflow`). delete covgate 98.71% vs 98.39 required.
 
 ## Decision Log
 
