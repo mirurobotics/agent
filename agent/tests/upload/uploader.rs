@@ -10,7 +10,7 @@ use miru_agent::upload::errors::ExecutorErr;
 use miru_agent::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -66,6 +66,11 @@ async fn make_real_job(dir: &filesys::Dir, name: &str, contents: &str) -> Job {
 }
 
 /// Spawn an uploader with default options and a no-op sleep.
+///
+/// Safe ONLY for tests whose script never leaves a stamped (backoff) entry
+/// waiting in the queue: a no-op sleep plus a non-advancing clock busy-loops
+/// the current-thread runtime and hangs the test binary. Use
+/// [`spawn_with_test_clock`] or [`spawn_frozen`] for anything backoff-shaped.
 fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
     Uploader::spawn(
         16,
@@ -73,6 +78,48 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
         UploaderOptions::default(),
         None,
         |_: Duration| async {},
+        Utc::now,
+    )
+    .unwrap()
+}
+
+/// Spawn an uploader over a shared test clock: `sleep_fn` records each
+/// requested duration into the returned log and advances the clock by it, so
+/// backoff waits complete instantly and stamped entries become eligible
+/// deterministically.
+fn spawn_with_test_clock(
+    mock: Arc<MockUploadExecutor>,
+    options: UploaderOptions,
+) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
+    let clock = Arc::new(Mutex::new(Utc::now()));
+    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+    let now_clock = clock.clone();
+    let now_fn = move || *now_clock.lock().unwrap();
+    let recorded = sleeps.clone();
+    let sleep_fn = move |duration: Duration| {
+        recorded.lock().unwrap().push(duration);
+        *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+        async {}
+    };
+    let (uploader, handle) = Uploader::spawn(16, mock, options, None, sleep_fn, now_fn).unwrap();
+    (uploader, handle, sleeps)
+}
+
+/// Spawn an uploader over a clock frozen at spawn time and a sleep that never
+/// completes: stamped (backoff) entries never become eligible, so the worker
+/// parks in its idle wait until a command arrives.
+fn spawn_frozen(
+    mock: Arc<MockUploadExecutor>,
+    options: UploaderOptions,
+) -> (Uploader, JoinHandle<()>) {
+    let epoch = Utc::now();
+    Uploader::spawn(
+        16,
+        mock,
+        options,
+        None,
+        |_: Duration| std::future::pending::<()>(),
+        move || epoch,
     )
     .unwrap()
 }
@@ -127,15 +174,14 @@ async fn processes_enqueued_job() {
 }
 
 #[tokio::test]
-async fn failing_round_requeues_at_tail_behind_later_job() {
+async fn failed_upload_moves_on_to_next_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
     mock.push_step(MockStep::Hang(release_rx));
-    mock.push_step(MockStep::Err);
-    mock.push_step(MockStep::Err);
     mock.push_step(MockStep::Ok);
     mock.push_step(MockStep::Ok);
-    let (uploader, handle) = spawn_uploader(mock.clone());
+    let (uploader, handle, _sleeps) =
+        spawn_with_test_clock(mock.clone(), UploaderOptions::default());
     let job_a = make_job("a.log");
     let job_b = make_job("b.log");
 
@@ -144,41 +190,46 @@ async fn failing_round_requeues_at_tail_behind_later_job() {
     // B is queued while A is in flight, so it lands ahead of A's requeue slot
     timed(uploader.enqueue(job_b.clone())).await.unwrap();
     release_tx.send(scripted_err()).unwrap();
-    for _ in 0..4 {
+    for _ in 0..2 {
         timed(started_rx.recv()).await.unwrap();
     }
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    // three in-place attempts for A, then B, then A's second round succeeding
-    let expected = vec![job_a.clone(), job_a.clone(), job_a.clone(), job_b, job_a];
-    assert_eq!(mock.recorded_calls(), expected);
+    // A's failure requeues it at the tail: B runs next, then A's retry succeeds
+    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b, job_a]);
 }
 
 #[tokio::test]
-async fn global_attempt_cap_drops_job() {
+async fn attempt_cap_drops_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
-    for _ in 0..9 {
+    for _ in 0..3 {
         mock.push_step(MockStep::Err);
     }
-    let (uploader, handle) = spawn_uploader(mock.clone());
+    mock.push_step(MockStep::Ok);
+    let options = UploaderOptions {
+        attempts: 3,
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
     let job_a = make_job("a.log");
     let job_b = make_job("b.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
-    // three rounds of three attempts each
-    for _ in 0..9 {
+    // the script is positional: enqueue B only after all three of A's attempts
+    // have started, or B would pop during A's backoff and consume A's Err step
+    for _ in 0..3 {
         timed(started_rx.recv()).await.unwrap();
     }
 
     // A was dropped at the cap with the actor still healthy: B processes next
     timed(uploader.enqueue(job_b.clone())).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    let mut expected = vec![job_a; 9];
-    expected.push(job_b);
+    let expected = vec![job_a.clone(), job_a.clone(), job_a, job_b];
     assert_eq!(mock.recorded_calls(), expected);
 }
 
@@ -208,44 +259,37 @@ async fn terminal_failure_drops_job_without_requeue() {
 #[tokio::test]
 async fn retry_backoff_follows_expected_sequence() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
-    for _ in 0..6 {
+    for _ in 0..4 {
         mock.push_step(MockStep::Err);
     }
     mock.push_step(MockStep::Ok);
-    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-    let recorded = sleeps.clone();
-    let sleep_fn = move |duration: Duration| {
-        recorded.lock().unwrap().push(duration);
-        async {}
-    };
     // pin the backoff so the assertion is independent of production defaults
     let options = UploaderOptions {
+        attempts: 5,
         backoff: miru_agent::cooldown::Backoff {
             base_secs: 1,
             growth_factor: 2,
-            max_secs: 30,
+            max_secs: 4,
         },
         ..UploaderOptions::default()
     };
-    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();
+    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), options);
 
     timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
-    for _ in 0..7 {
+    for _ in 0..5 {
         timed(started_rx.recv()).await.unwrap();
     }
 
-    // in-place sleeps only (exponent = this round's attempts - 1); none around
-    // the two requeues, and the backoff resets with each round
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // the exponent is the lifetime attempt count minus one, capped at max_secs
     let expected = vec![
         Duration::from_secs(1),
         Duration::from_secs(2),
-        Duration::from_secs(1),
-        Duration::from_secs(2),
+        Duration::from_secs(4),
+        Duration::from_secs(4),
     ];
     assert_eq!(*sleeps.lock().unwrap(), expected);
-
-    timed(uploader.shutdown()).await.unwrap();
-    timed(handle).await.unwrap();
 }
 
 #[tokio::test(start_paused = true)]
@@ -256,15 +300,6 @@ async fn hung_attempt_times_out_and_is_retried() {
     // the hang is never released: only the attempt deadline can end it
     mock.push_step(MockStep::Hang(release_rx));
     mock.push_step(MockStep::Ok);
-    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-    let recorded = sleeps.clone();
-
-    // instant sleeps, so the attempt deadline is the only pending timer and
-    // the paused clock auto-advances straight to it
-    let sleep_fn = move |duration: Duration| {
-        recorded.lock().unwrap().push(duration);
-        async {}
-    };
 
     // pin the deadline inputs: make_job's 42 bytes yield a 2s deadline,
     // safely under timed()'s 5s guard
@@ -273,17 +308,22 @@ async fn hung_attempt_times_out_and_is_retried() {
         attempt_timeout_bytes_per_sec: 64 * 1024,
         ..UploaderOptions::default()
     };
-    let (uploader, handle) = Uploader::spawn(16, mock.clone(), options, None, sleep_fn).unwrap();
+    // the test clock's instant sleeps leave the attempt deadline as the only
+    // pending timer, so the paused tokio clock auto-advances straight to it;
+    // the chrono test clock then advances past the backoff stamp so the
+    // requeued job becomes eligible deterministically
+    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), options);
     let job = make_job("a.log");
 
     timed(uploader.enqueue(job.clone())).await.unwrap();
     // first attempt starts and hangs on the never-released oneshot
     timed(started_rx.recv()).await.unwrap();
-    // the deadline fires in virtual time and the retry attempt starts
+    // the deadline fires in virtual time; the job is stamped with a backoff
+    // deadline, requeued, and retried once the test clock reaches the stamp
     timed(started_rx.recv()).await.unwrap();
 
     // the same job was attempted twice: the timeout was treated as a
-    // retryable failure, taking the normal in-place backoff path
+    // retryable failure, taking the normal backoff/requeue path
     assert_eq!(mock.recorded_calls(), vec![job.clone(), job]);
     assert!(!sleeps.lock().unwrap().is_empty());
 
@@ -319,15 +359,20 @@ async fn requeue_into_full_queue_drops_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
     mock.push_step(MockStep::Hang(release_rx));
-    mock.push_step(MockStep::Err);
-    mock.push_step(MockStep::Err);
     mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
         queue_capacity: 1,
         ..Default::default()
     };
-    let (uploader, handle) =
-        Uploader::spawn(16, mock.clone(), options, None, |_: Duration| async {}).unwrap();
+    let (uploader, handle) = Uploader::spawn(
+        16,
+        mock.clone(),
+        options,
+        None,
+        |_: Duration| async {},
+        Utc::now,
+    )
+    .unwrap();
     let job_a = make_job("a.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
@@ -336,30 +381,28 @@ async fn requeue_into_full_queue_drops_job() {
     // full
     timed(uploader.enqueue(job_b.clone())).await.unwrap();
     release_tx.send(scripted_err()).unwrap();
-    for _ in 0..3 {
-        timed(started_rx.recv()).await.unwrap();
-    }
+    timed(started_rx.recv()).await.unwrap();
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    // A's failed round could not requeue: A dropped, then B succeeded
-    assert_eq!(
-        mock.recorded_calls(),
-        vec![job_a.clone(), job_a.clone(), job_a, job_b]
-    );
+    // A's single failed attempt could not requeue into the full queue, so it
+    // dropped and B ran
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
 }
 
 #[tokio::test]
 async fn shutdown_during_backoff_sleep_returns_promptly() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     mock.push_step(MockStep::Err);
-    // a sleep that never completes: shutdown must interrupt the backoff
+    // a sleep that never completes: shutdown must interrupt the idle wait
+    // over the requeued entry's backoff deadline
     let (uploader, handle) = Uploader::spawn(
         16,
         mock.clone(),
         UploaderOptions::default(),
         None,
         |_: Duration| std::future::pending::<()>(),
+        Utc::now,
     )
     .unwrap();
 
@@ -370,6 +413,46 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
         .await
         .expect("shutdown timed out awaiting the backoff sleep")
         .unwrap();
+    timed(handle).await.unwrap();
+}
+
+#[tokio::test]
+async fn waiting_job_is_skipped_and_enqueue_wakes_idle_wait() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::Err);
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle) = spawn_frozen(mock.clone(), UploaderOptions::default());
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    // A is stamped with a deadline the frozen clock never reaches; the enqueue
+    // must wake the idle wait so B runs while A keeps waiting
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 1);
+
+    timeout(Duration::from_secs(1), uploader.shutdown())
+        .await
+        .expect("shutdown timed out awaiting the idle wait")
+        .unwrap();
+    timed(handle).await.unwrap();
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+}
+
+#[tokio::test]
+async fn worker_exits_when_handles_dropped_during_idle_wait() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::Err);
+    let (uploader, handle) = spawn_frozen(mock.clone(), UploaderOptions::default());
+
+    timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+
+    // the worker is parked in its idle wait over A's backoff deadline;
+    // dropping the last handle must end it
+    drop(uploader);
     timed(handle).await.unwrap();
 }
 
@@ -402,6 +485,32 @@ async fn len_after_shutdown_returns_send_err() {
         matches!(result, Err(UploadErr::SendActorMessageErr(_))),
         "expected SendActorMessageErr, got: {result:?}"
     );
+}
+
+#[tokio::test]
+async fn command_pending_at_shutdown_returns_receive_err() {
+    let (mock, _started_rx) = MockUploadExecutor::new();
+    let (uploader, handle) = spawn_uploader(mock.clone());
+
+    // queue a shutdown command, then drop its response channel: the worker
+    // must still shut down even though its acknowledgement has nowhere to go
+    let mut shutdown_fut = Box::pin(uploader.shutdown());
+    std::future::poll_fn(|cx| {
+        assert!(shutdown_fut.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(shutdown_fut);
+
+    // on the current-thread runtime the worker only wakes once this await
+    // yields, so the len command is already queued behind the shutdown; the
+    // worker's exit drops it unanswered
+    let result = timed(uploader.len()).await;
+    assert!(
+        matches!(result, Err(UploadErr::ReceiveActorMessageErr(_))),
+        "expected ReceiveActorMessageErr, got: {result:?}"
+    );
+    timed(handle).await.unwrap();
 }
 
 #[tokio::test]
@@ -479,4 +588,11 @@ async fn len_reports_queued_jobs() {
     release_tx.send(Ok(())).unwrap();
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
+}
+
+#[test]
+fn default_options_retry_for_hours() {
+    let options = UploaderOptions::default();
+    assert_eq!(options.attempts, 30);
+    assert_eq!(options.backoff.max_secs, 3600);
 }

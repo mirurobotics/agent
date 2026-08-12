@@ -76,6 +76,7 @@ impl Harness {
             UploaderOptions::default(),
             None,
             |_: Duration| async {},
+            chrono::Utc::now,
         )
         .unwrap();
         let uploader = Arc::new(uploader);

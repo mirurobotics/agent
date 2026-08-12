@@ -215,6 +215,7 @@ impl AppState {
             upload::UploaderOptions::default(),
             snapshot_file,
             |wait| tokio::time::sleep(wait),
+            chrono::Utc::now,
         ) {
             Ok((uploader, handle)) => (Some(Arc::new(uploader)), Some(handle)),
             Err(e) => {

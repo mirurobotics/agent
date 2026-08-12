@@ -1,9 +1,9 @@
 // internal crates
-use miru_agent::filesys::{dirs, File};
+use miru_agent::filesys::{dirs, files, File, WriteOptions};
 use miru_agent::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr};
 
 // external crates
-use chrono::Utc;
+use chrono::{DateTime, TimeDelta, Utc};
 
 fn make_job(name: &str) -> Job {
     Job {
@@ -32,7 +32,7 @@ async fn open(path: &File) -> QueueSnapshotFile {
 /// whole-`Job` equality across a reload does not hold).
 async fn digests(queue: &mut Queue) -> Vec<String> {
     let mut out = Vec::new();
-    while let Some(entry) = queue.pop_front().await {
+    while let Some(entry) = queue.pop_ready(Utc::now()).await {
         out.push(entry.job.digest);
     }
     out
@@ -49,6 +49,35 @@ mod from_snapshot {
         let queue = Queue::from_snapshot(8, open(&path).await);
 
         assert!(queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_snapshot_without_next_attempt_at_loads() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let snapshot = QueueSnapshot {
+            entries: vec![QueueEntry {
+                job: make_job("a.log"),
+                attempts: 2,
+                next_attempt_at: None,
+            }],
+        };
+
+        // strip the field a pre-backoff agent never wrote
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        for entry in value["entries"].as_array_mut().unwrap() {
+            entry.as_object_mut().unwrap().remove("next_attempt_at");
+        }
+        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        // if deserialization failed, new_with_default would silently write an
+        // empty default snapshot and the pop below would find nothing
+        let mut queue = Queue::from_snapshot(8, open(&path).await);
+        let entry = queue.pop_ready(Utc::now()).await.unwrap();
+        assert_eq!(entry.attempts, 2);
+        assert_eq!(entry.next_attempt_at, None);
     }
 }
 
@@ -179,13 +208,14 @@ mod requeue {
             .requeue(QueueEntry {
                 job: requeued_job.clone(),
                 attempts: 3,
+                next_attempt_at: None,
             })
             .await
             .unwrap();
 
-        let first = queue.pop_front().await.unwrap();
+        let first = queue.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(first.job, job_a);
-        let second = queue.pop_front().await.unwrap();
+        let second = queue.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(second.job, requeued_job);
         assert_eq!(second.attempts, 3);
     }
@@ -201,15 +231,41 @@ mod requeue {
                 .requeue(QueueEntry {
                     job: make_job("a.log"),
                     attempts: 5,
+                    next_attempt_at: None,
                 })
                 .await
                 .unwrap();
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_front().await.unwrap();
+        let entry = reloaded.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 5);
+    }
+
+    #[tokio::test]
+    async fn next_attempt_at_survives_reload() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let deadline = DateTime::from_timestamp(2_000_000_000, 0).unwrap();
+
+        {
+            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            queue
+                .requeue(QueueEntry {
+                    job: make_job("a.log"),
+                    attempts: 5,
+                    next_attempt_at: Some(deadline),
+                })
+                .await
+                .unwrap();
+        }
+
+        let mut reloaded = Queue::from_snapshot(8, open(&path).await);
+        let entry = reloaded.pop_ready(deadline).await.unwrap();
+        assert_eq!(entry.job.digest, "sha256:a.log");
+        assert_eq!(entry.attempts, 5);
+        assert_eq!(entry.next_attempt_at, Some(deadline));
     }
 
     #[tokio::test]
@@ -222,6 +278,7 @@ mod requeue {
             .requeue(QueueEntry {
                 job: make_job("b.log"),
                 attempts: 2,
+                next_attempt_at: None,
             })
             .await;
 
@@ -233,7 +290,7 @@ mod requeue {
     }
 }
 
-mod pop_front {
+mod pop_ready {
     use super::*;
 
     #[tokio::test]
@@ -247,11 +304,59 @@ mod pop_front {
         }
 
         for expected in jobs {
-            let entry = queue.pop_front().await.unwrap();
+            let entry = queue.pop_ready(Utc::now()).await.unwrap();
             assert_eq!(entry.job, expected);
             assert_eq!(entry.attempts, 0);
         }
-        assert!(queue.pop_front().await.is_none());
+        assert!(queue.pop_ready(Utc::now()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn skips_waiting_entries() {
+        let mut queue = Queue::new(4);
+        let now = Utc::now();
+        let deadline = now + TimeDelta::hours(1);
+        queue
+            .requeue(QueueEntry {
+                job: make_job("a.log"),
+                attempts: 1,
+                next_attempt_at: Some(deadline),
+            })
+            .await
+            .unwrap();
+        queue.enqueue(make_job("b.log")).await.unwrap();
+        queue.enqueue(make_job("c.log")).await.unwrap();
+
+        // waiting A is skipped; eligible entries still pop in FIFO order
+        assert_eq!(
+            queue.pop_ready(now).await.unwrap().job.digest,
+            "sha256:b.log"
+        );
+        assert_eq!(
+            queue.pop_ready(now).await.unwrap().job.digest,
+            "sha256:c.log"
+        );
+        // the deadline itself is eligible: the comparison is inclusive
+        let entry = queue.pop_ready(deadline).await.unwrap();
+        assert_eq!(entry.job.digest, "sha256:a.log");
+        assert_eq!(entry.attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn returns_none_when_all_waiting() {
+        let mut queue = Queue::new(4);
+        let now = Utc::now();
+        queue
+            .requeue(QueueEntry {
+                job: make_job("a.log"),
+                attempts: 1,
+                next_attempt_at: Some(now + TimeDelta::hours(1)),
+            })
+            .await
+            .unwrap();
+
+        assert!(queue.pop_ready(now).await.is_none());
+        assert_eq!(queue.len(), 1);
     }
 
     #[tokio::test]
@@ -263,13 +368,60 @@ mod pop_front {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
             queue.enqueue(make_job("a.log")).await.unwrap();
             queue.enqueue(make_job("b.log")).await.unwrap();
-            queue.pop_front().await.unwrap();
+            queue.pop_ready(Utc::now()).await.unwrap();
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
         assert_eq!(
             digests(&mut reloaded).await,
             vec!["sha256:b.log".to_string()]
+        );
+    }
+}
+
+mod earliest_next_attempt {
+    use super::*;
+
+    #[test]
+    fn none_when_empty() {
+        assert_eq!(Queue::new(4).earliest_next_attempt(), None);
+    }
+
+    #[tokio::test]
+    async fn returns_min_deadline() {
+        let mut queue = Queue::new(4);
+        let t1 = DateTime::from_timestamp(1_000_000_000, 0).unwrap();
+        let t2 = DateTime::from_timestamp(1_500_000_000, 0).unwrap();
+        for (name, deadline) in [("a.log", t2), ("b.log", t1)] {
+            queue
+                .requeue(QueueEntry {
+                    job: make_job(name),
+                    attempts: 1,
+                    next_attempt_at: Some(deadline),
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(queue.earliest_next_attempt(), Some(t1));
+    }
+
+    #[tokio::test]
+    async fn none_deadline_counts_as_min_utc() {
+        let mut queue = Queue::new(4);
+        queue
+            .requeue(QueueEntry {
+                job: make_job("a.log"),
+                attempts: 1,
+                next_attempt_at: Some(Utc::now() + TimeDelta::hours(1)),
+            })
+            .await
+            .unwrap();
+        queue.enqueue(make_job("b.log")).await.unwrap();
+
+        assert_eq!(
+            queue.earliest_next_attempt(),
+            Some(DateTime::<Utc>::MIN_UTC)
         );
     }
 }

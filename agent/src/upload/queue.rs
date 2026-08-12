@@ -11,6 +11,7 @@ use crate::upload::{
 };
 
 // external crates
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -18,6 +19,10 @@ use tracing::{info, warn};
 pub struct QueueEntry {
     pub job: Job,
     pub attempts: u32,
+    /// Earliest instant this entry is eligible to be popped; `None` means
+    /// "eligible now".
+    #[serde(default)]
+    pub next_attempt_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -76,7 +81,11 @@ impl Queue {
     /// rejected with `UploadErr::QueueFullErr`.
     pub async fn enqueue(&mut self, job: Job) -> Result<(), UploadErr> {
         self.verify_capacity(&job).await?;
-        self.jobs.push_back(QueueEntry { job, attempts: 0 });
+        self.jobs.push_back(QueueEntry {
+            job,
+            attempts: 0,
+            next_attempt_at: None,
+        });
         self.persist().await;
         info!("upload: job enqueued; queue length {}", self.jobs.len());
         Ok(())
@@ -92,13 +101,30 @@ impl Queue {
         Ok(())
     }
 
-    pub async fn pop_front(&mut self) -> Option<QueueEntry> {
-        let entry = self.jobs.pop_front();
+    /// Remove and return the first entry whose `next_attempt_at` is `None` or
+    /// `<= now`, preserving the order of the remaining entries. Returns `None`
+    /// (without persisting) when no entry is eligible.
+    pub async fn pop_ready(&mut self, now: DateTime<Utc>) -> Option<QueueEntry> {
+        let idx = self
+            .jobs
+            .iter()
+            .position(|entry| entry.next_attempt_at.is_none_or(|at| at <= now))?;
+        let entry = self.jobs.remove(idx);
         if entry.is_some() {
             self.persist().await;
             info!("upload: job dequeued; queue length {}", self.jobs.len());
         }
         entry
+    }
+
+    /// The minimum effective deadline over all entries, where a `None`
+    /// deadline counts as `DateTime::<Utc>::MIN_UTC`. Returns `None` only when
+    /// the queue is empty. The worker uses it to size an idle sleep.
+    pub fn earliest_next_attempt(&self) -> Option<DateTime<Utc>> {
+        self.jobs
+            .iter()
+            .map(|entry| entry.next_attempt_at.unwrap_or(DateTime::<Utc>::MIN_UTC))
+            .min()
     }
 
     async fn verify_capacity(&mut self, job: &Job) -> Result<(), UploadErr> {
