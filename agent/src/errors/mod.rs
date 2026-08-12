@@ -39,8 +39,6 @@ pub trait Error: std::error::Error {
     fn is_network_conn_err(&self) -> bool {
         false
     }
-    /// True when retrying can never succeed (e.g. the backend rejected the
-    /// request with a non-transient 4xx). Default: false.
     fn is_terminal(&self) -> bool {
         false
     }

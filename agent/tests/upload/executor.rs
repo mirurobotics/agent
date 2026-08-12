@@ -16,7 +16,7 @@ use backend_api::models::{
 };
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
-use miru_agent::errors::{Error, HTTPCode};
+use miru_agent::errors::Error;
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
@@ -276,7 +276,7 @@ async fn confirm_failure_maps_to_executor_err() {
 // ===== terminal classification =====
 
 #[tokio::test]
-async fn create_4xx_failure_is_terminal_with_status() {
+async fn create_4xx_failure_is_terminal() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(request_failed_err(404)));
     let transfer = MockObjectTransfer::new();
@@ -284,7 +284,6 @@ async fn create_4xx_failure_is_terminal_with_status() {
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
-    assert_eq!(err.terminal_status(), Some(HTTPCode::NOT_FOUND));
     assert!(err.is_terminal());
 }
 
@@ -298,7 +297,6 @@ async fn create_transient_statuses_are_not_terminal() {
 
         let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
-        assert_eq!(err.terminal_status(), None, "status {status}");
         assert!(!err.is_terminal(), "status {status}");
     }
 }
@@ -313,7 +311,6 @@ async fn confirm_4xx_failure_is_terminal() {
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
-    assert_eq!(err.terminal_status(), Some(HTTPCode::UNPROCESSABLE_ENTITY));
     assert!(err.is_terminal());
 }
 

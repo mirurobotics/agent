@@ -5,7 +5,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::cooldown;
-use crate::errors::HTTPCode;
+use crate::errors::Error;
 use crate::trace;
 use crate::upload::{
     errors::*,
@@ -208,8 +208,8 @@ where
             }
         };
 
-        if let Some(status) = err.terminal_status() {
-            Self::log_terminal_drop(&entry, status, &err);
+        if err.is_terminal() {
+            Self::log_terminal_drop(&entry, &err);
             return Flow::Continue;
         }
 
@@ -292,9 +292,9 @@ where
         );
     }
 
-    fn log_terminal_drop(entry: &QueueEntry, status: HTTPCode, err: &UploadErr) {
+    fn log_terminal_drop(entry: &QueueEntry, err: &UploadErr) {
         error!(
-            "dropping upload job: backend rejected it with terminal HTTP status {status} \
+            "dropping upload job: backend rejected the upload attempt \
              (rule {}, file {}, digest {}, attempt {}); the backend will not learn this \
              upload died: {err:?}",
             entry.job.file_rule_id, entry.job.file, entry.job.digest, entry.attempts

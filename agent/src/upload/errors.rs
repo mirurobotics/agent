@@ -1,5 +1,5 @@
 // internal crates
-use crate::errors::{HTTPCode, Trace};
+use crate::errors::Trace;
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -19,14 +19,13 @@ impl crate::errors::Error for QueueFullErr {}
 pub struct ExecutorErr {
     #[source]
     pub source: Box<dyn std::error::Error + Send + Sync>,
-    /// Some(status) when the wrapped failure was classified terminal at wrap time.
-    pub terminal_status: Option<HTTPCode>,
+    pub is_terminal: bool,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ExecutorErr {
     fn is_terminal(&self) -> bool {
-        self.terminal_status.is_some()
+        self.is_terminal
     }
 }
 
@@ -63,39 +62,31 @@ crate::impl_error!(UploadErr {
     ReceiveActorMessageErr
 });
 
-impl UploadErr {
-    /// The backend HTTP status behind a terminal failure, if any.
-    pub fn terminal_status(&self) -> Option<HTTPCode> {
-        match self {
-            Self::ExecutorErr(e) => e.terminal_status,
-            _ => None,
-        }
-    }
-}
-
 /// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the single
 /// error surface the actor sees from executor and transfer failures.
 pub(crate) fn executor_err<E>(source: E) -> UploadErr
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    UploadErr::ExecutorErr(ExecutorErr {
-        source: source.into(),
-        terminal_status: None,
-        trace: crate::trace!(),
-    })
+    wrap_executor_err(source, false)
 }
 
-/// Like [`executor_err`], but captures the terminal classification (and
-/// the backend status behind it) before the type is erased.
+/// Wraps a Miru error while preserving its terminal classification.
 pub(crate) fn classified_executor_err<E>(source: E) -> UploadErr
 where
     E: crate::errors::Error + Send + Sync + 'static,
 {
-    let terminal_status = source.is_terminal().then_some(source.http_status());
+    let is_terminal = source.is_terminal();
+    wrap_executor_err(source, is_terminal)
+}
+
+fn wrap_executor_err<E>(source: E, is_terminal: bool) -> UploadErr
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     UploadErr::ExecutorErr(ExecutorErr {
-        source: Box::new(source),
-        terminal_status,
+        source: source.into(),
+        is_terminal,
         trace: crate::trace!(),
     })
 }
