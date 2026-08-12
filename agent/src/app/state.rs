@@ -231,7 +231,7 @@ impl AppState {
             http_client,
             token_mngr,
             upload::SdkTransfer::default(),
-            Some(deleter),
+            deleter,
         ));
         let (uploader, handle) = upload::Uploader::spawn(
             64,

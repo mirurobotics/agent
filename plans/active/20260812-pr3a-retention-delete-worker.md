@@ -59,6 +59,15 @@ Not in this PR (→ 3b): the stability-eligible producer for retention-only /
 - **Standalone delete subsystem, scanner retention-unaware** (Ben, 2026-08-12) — see the
   umbrella plan's revised PR 3 section for the full rationale and rejected alternatives
   (scan-tick sweep with ledger eligibility; direct scanner handle for confirms).
+- **Deleter is a required actor (rebase modernization, 2026-08-13).** This PR predates
+  #199's collapse of dead optionality; rebasing over it, the deleter adopts the same
+  pattern: `AppState.deleter: Arc<Deleter>`, no enable flag, spawn errors fail boot
+  (structurally impossible today), snapshot errors still fail open to no persistence.
+  The executor's handle is likewise required (`Arc<D>`, not `Option<Arc<D>>`), so the
+  "no deleter available; skipping deletion" arm and its test
+  (`require_upload_without_deleter_still_succeeds`) are gone — that state is
+  unrepresentable. Init order: deleter → uploader (executor consumes it) → scanner
+  (sinks consume the uploader), mirroring #198's dependency-ordered init.
 - **`PendingDelete` keeps #191's event-agnostic shape** — records name *when* a file
   became deletable, never *why*; 3b adds a producer, not fields. Changes from #191:
   `delete_delay_secs: i64` → `ttl_secs: u64` (from `FileRuleRetention`, so no negative

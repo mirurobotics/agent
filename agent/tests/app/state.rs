@@ -300,7 +300,6 @@ pub mod init {
         // nothing replaced the blocking directory with a snapshot file
         assert!(env.layout.delete_queue().path().is_dir());
     }
-
 }
 
 pub mod shutdown {

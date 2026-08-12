@@ -36,18 +36,11 @@ pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: De
     http_client: Arc<C>,
     token_mngr: Arc<T>,
     transfer: X,
-    /// `None` degrades to uploads-without-deletion (a deleter spawn failure
-    /// must never take uploads down with it).
-    deleter: Option<Arc<D>>,
+    deleter: Arc<D>,
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: DeleterExt> LiveExecutor<C, T, X, D> {
-    pub fn new(
-        http_client: Arc<C>,
-        token_mngr: Arc<T>,
-        transfer: X,
-        deleter: Option<Arc<D>>,
-    ) -> Self {
+    pub fn new(http_client: Arc<C>, token_mngr: Arc<T>, transfer: X, deleter: Arc<D>) -> Self {
         Self {
             http_client,
             token_mngr,
@@ -104,13 +97,6 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: DeleterExt> LiveExecu
         if !retention.require_upload {
             return;
         }
-        let Some(deleter) = &self.deleter else {
-            warn!(
-                "upload: no deleter available; skipping deletion for {}",
-                job.file
-            );
-            return;
-        };
         let record = PendingDelete {
             file: job.file.clone(),
             size: job.size,
@@ -123,7 +109,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: DeleterExt> LiveExecu
         };
         // best-effort: the upload is already confirmed durable; a failed
         // enqueue must never fail the job (that would re-drive it).
-        if let Err(e) = deleter.enqueue(record).await {
+        if let Err(e) = self.deleter.enqueue(record).await {
             warn!(
                 "upload for {} confirmed but enqueueing its deletion failed: {e:?}",
                 job.file
