@@ -22,7 +22,7 @@ This change also fixes three inaccurate doc comments in the same two files (see 
 
 - [x] M1: `Queue::pop_ready` takes a horizon; `Worker::run` derives one horizon local and uses it for both the pop and a ceiling on the idle wait; three doc-comment fixes. (`854bcaa`)
 - [x] M2: Queue tests updated for the new argument; two new tests covering both sides of the horizon. (`5df33e3`)
-- [ ] M3: Preflight CLEAN locally, pushed, draft PR opened, CI watched on branch head.
+- [x] M3: Preflight CLEAN locally, pushed, draft PR #202 opened, CI green on branch head.
 
 ## Surprises & Discoveries
 
@@ -37,7 +37,34 @@ This change also fixes three inaccurate doc comments in the same two files (see 
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Executed exactly as planned; no deviations from the Plan of Work. Draft PR
+[#202](https://github.com/mirurobotics/agent/pull/202) onto `main`, three commits:
+
+- `854bcaa` — `fix(upload): clamp retry deadlines beyond the max backoff so a backward clock step cannot stall the queue`
+- `5df33e3` — `test(upload): cover both sides of the pop_ready staleness horizon`
+- `31eb910` — `docs(plans): record M1/M2 progress and discoveries for the stale-deadline clamp`
+
+All acceptance criteria in Validation and Acceptance were checked and hold: both
+new tests pass and pin the clamp as strictly `>`; the pre-existing eligibility
+tests pass unchanged apart from the new argument; `grep` confirms `queue.rs`
+still has no `Backoff`/`UploaderOptions`/`cooldown` reference and no longer
+mentions the worker's idle sleep; `Worker::run` derives `max_wait` once and uses
+it for both the pop and the ceiling; the `idle_wait` doc opens with "Sleep for
+`wait`" and the "Deliberately NOT" paragraph is intact.
+
+Validation results: `cargo test --features test upload::` 75 passed / 0 failed;
+`cargo fmt -p miru-agent -- --check` clean; `./scripts/lint.sh` exit 0 (only the
+pre-existing, unrelated `RUSTSEC-2026-0253` allowed warning); `./scripts/covgate.sh`
+upload 96.69% against the 96.00 gate; `./scripts/preflight.sh` printed
+`Preflight clean`. CI on the pushed branch head: `lint`, `test`, and `tools` all
+green. The PR is deliberately left in draft.
+
+Retrospective: the plan's key call — passing the horizon as an argument rather
+than storing it on `Queue` — paid off immediately in the tests, which pick a 24h
+horizon independent of the 3600s production default and so can probe the boundary
+without touching `UploaderOptions`. The one judgment call left to execution was
+the covgate margin, and the added predicate arm and `.min()` are both exercised,
+so the gate cleared with room. Everything else was mechanical.
 
 ## Context and Orientation
 
