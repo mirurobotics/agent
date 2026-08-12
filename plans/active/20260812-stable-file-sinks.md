@@ -16,14 +16,16 @@ The fix: delete the event channel and the bridge worker entirely. The scanner ta
 
 ## Progress
 
-- [ ] M1: `StableFileSink` trait in scan/, scanner takes sinks in `ScannerArgs`, tick awaits sinks; delete ScanEvent/broadcast/subscribe machinery
-- [ ] M2: `UploadStableFileSink` in upload/ (relocated bridge policy); delete workers/scan_upload_bridge.rs and its app wiring; flip uploader/scanner init order in app/state.rs
-- [ ] M3: Test surface — rework scanner in-source tests to recording sinks (incl. >256 burst no-loss test), port bridge tests to sink tests, strip MockScanner subscribe machinery
+- [x] M1: `StableFileSink` trait in scan/, scanner takes sinks in `ScannerArgs`, tick awaits sinks; delete ScanEvent/broadcast/subscribe machinery
+- [x] M2: `UploadStableFileSink` in upload/ (relocated bridge policy); delete workers/scan_upload_bridge.rs and its app wiring; flip uploader/scanner init order in app/state.rs
+- [x] M3: Test surface — rework scanner in-source tests to recording sinks (incl. >256 burst no-loss test), port bridge tests to sink tests, strip MockScanner subscribe machinery
 - [ ] M4: Preflight CLEAN locally, push, CI green on branch head, draft PR
 
 ## Surprises & Discoveries
 
-(fill in during execution)
+- **No covgate adjustments were needed.** Deleting the bridge left workers/ at 85.82% (gate 84.67), scan at 99.24% (98.83), upload at 97.09% (96.00), app at 94.08% (90.38). Every gate passes unmodified.
+- **Pre-existing flaky test**: `deploy::fsm::tests::next_action_fn::deployed_activity` failed one full-suite run with `expected wait time PT3600S is not equal to actual wait time PT3599.998972073S` — a wall-clock drift flake unrelated to this change (file untouched since commit 1053f4e). It passed in isolation and on the next full-suite run.
+- **The RecordingSink yields (`tokio::task::yield_now`) before recording**, so every sink-based assertion doubles as proof that the scan tick awaits sink futures to completion rather than fire-and-forgetting them — the planned "slow-sink nice-to-have" folded into the base helper for free.
 
 ## Decision Log
 
@@ -48,6 +50,8 @@ Decisions below marked "(agreed with repo owner)" were settled before planning �
 - **Init-order flip in app/state.rs (planner decision)**: `AppState::init` currently creates the scanner BEFORE the uploader (state.rs lines 93-103), but sinks need the uploader handle at scanner construction. `init_uploader` has no dependency on the scanner, so the cleanest resolution is to simply swap the two calls: uploader first, then build `Vec<Arc<dyn StableFileSink>>` (upload sink present iff the uploader spawned) and pass it into `init_scanner`. No late-binding, no `OnceCell`, no Option-swap dance.
 - **Shutdown ordering unchanged**: `AppState::shutdown` keeps shutting the uploader down first, then the scanner (as today). If a scan tick races shutdown and the sink enqueues into a stopped uploader, the sink logs a warn and the tick completes — acceptable by design since sinks only enqueue. The stale comment at state.rs:230-231 ("its feeder (the scan-upload bridge worker) has already been joined") must be rewritten to describe the sink reality.
 - **ScannerArgs keeps `Default`**: `sinks` defaults to an empty Vec (a sink-less scanner scans and ledgers but delivers nowhere — exactly what many existing scanner unit tests want).
+- **`UploadStableFileSink` is concrete over `Arc<Uploader>`, not generic (executor decision)**: the plan sketched `UploadStableFileSink<U: UploaderExt>`, but `UploaderExt` uses plain `async fn` in trait — for a generic `U` the returned futures are not provably `Send`, so the impl body cannot be boxed as `Pin<Box<dyn Future + Send>>` (the scanner worker is `tokio::spawn`ed and requires `Send`). The concrete `Uploader` gets auto-trait leakage and compiles; the tests use the real `Uploader` + `MockUploadExecutor` anyway (the house pattern), so nothing needed the generic.
+- **run.rs scan-upload ShutdownManager tests deleted, not retargeted (executor decision)**: `register_handle_rejects_scan_upload_bridge_duplicates` and `shutdown_impl_maps_scan_upload_bridge_worker_join_error` were exact clones of the surviving scan-worker and sync-scan-bridge variants, which keep both the duplicate-registration and join-error paths covered (app/ covgate passes at 94.08 vs 90.38 required).
 - **Covgate handling**: deleting src/workers/scan_upload_bridge.rs shifts the workers/ coverage ratio (gate 84.67) and adding scan/sink.rs + upload/sink.rs adds lines under the 98.83 scan and 96.00 upload gates. Run scripts/covgate.sh; if a gate fails purely because deletion/addition shifted ratios (not because new code is untested), adjust via scripts/update-covgates.sh and record the before/after numbers in Surprises & Discoveries. New sink code must itself be tested to the neighborhood of its module's gate.
 
 ## Context and Orientation
