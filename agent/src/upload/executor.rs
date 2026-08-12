@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
-use crate::filesys::files;
+use crate::delete::{DeleterExt, PendingDelete};
 use crate::http::{self, ClientI};
-use crate::models::FileRuleRetention;
 use crate::upload::{
     errors::{classified_executor_err, executor_err, UploadErr},
     job::Job,
@@ -14,6 +13,7 @@ use crate::upload::{
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
+use chrono::Utc;
 use tracing::{info, warn};
 
 /// The seam between the upload actor and the transfer mechanics.
@@ -32,18 +32,27 @@ pub trait UploadExecutor: Send + Sync {
     fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
-pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
+pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: DeleterExt> {
     http_client: Arc<C>,
     token_mngr: Arc<T>,
     transfer: X,
+    /// `None` degrades to uploads-without-deletion (a deleter spawn failure
+    /// must never take uploads down with it).
+    deleter: Option<Arc<D>>,
 }
 
-impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
-    pub fn new(http_client: Arc<C>, token_mngr: Arc<T>, transfer: X) -> Self {
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: DeleterExt> LiveExecutor<C, T, X, D> {
+    pub fn new(
+        http_client: Arc<C>,
+        token_mngr: Arc<T>,
+        transfer: X,
+        deleter: Option<Arc<D>>,
+    ) -> Self {
         Self {
             http_client,
             token_mngr,
             transfer,
+            deleter,
         }
     }
 
@@ -79,28 +88,53 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         .map_err(classified_executor_err)
     }
 
-    async fn delete_source_file(&self, job: &Job) {
-        if job.retention
-            == Some(FileRuleRetention {
-                require_upload: true,
-                ttl_secs: 0,
-            })
-        {
-            info!(
-                "upload: deleting local source file {} per retention policy",
+    /// Hand the confirmed upload's source file to the delete worker as a
+    /// [`PendingDelete`] record — the executor never deletes inline. Only
+    /// rules whose retention *requires* the upload enqueue here: eligibility
+    /// for `require_upload: false` (and retention-only) rules is stability,
+    /// which is the scan-side producer's trigger (PR 3b) — enqueueing here
+    /// too would double-enqueue. Cancel safe: if the future is dropped before
+    /// the enqueue, the file stays on disk; scanner re-observation plus
+    /// backend digest dedup re-drive the upload exactly as today, and its
+    /// confirmation re-enqueues the deletion.
+    async fn enqueue_pending_delete(&self, job: &Job) {
+        let Some(retention) = &job.retention else {
+            return;
+        };
+        if !retention.require_upload {
+            return;
+        }
+        let Some(deleter) = &self.deleter else {
+            warn!(
+                "upload: no deleter available; skipping deletion for {}",
                 job.file
             );
-            if let Err(e) = files::delete(&job.file).await {
-                warn!(
-                    "upload for {} confirmed but deleting the local source file failed: {e:?}",
-                    job.file
-                );
-            }
+            return;
+        };
+        let record = PendingDelete {
+            file: job.file.clone(),
+            size: job.size,
+            mtime: job.mtime,
+            digest: job.digest.clone(),
+            eligible_at: Utc::now(),
+            ttl_secs: retention.ttl_secs,
+            file_rule_id: job.file_rule_id.clone(),
+            deployment_id: job.deployment_id.clone(),
+        };
+        // best-effort: the upload is already confirmed durable; a failed
+        // enqueue must never fail the job (that would re-drive it).
+        if let Err(e) = deleter.enqueue(record).await {
+            warn!(
+                "upload for {} confirmed but enqueueing its deletion failed: {e:?}",
+                job.file
+            );
         }
     }
 }
 
-impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
+impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer, D: DeleterExt> UploadExecutor
+    for LiveExecutor<C, T, X, D>
+{
     async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         let resp = self.create_upload(job).await?;
         info!(
@@ -127,7 +161,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
         );
         self.confirm_upload(&resp.upload.id).await?;
 
-        self.delete_source_file(job).await;
+        self.enqueue_pending_delete(job).await;
         Ok(())
     }
 }

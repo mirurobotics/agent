@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::mocks::{
+    deleter::{MockDeleter, MockStep as MockDeleteStep},
     http_client::{Call, MockClient},
     object_transfer::MockObjectTransfer,
     stub_token_manager::StubTokenManager,
@@ -16,6 +17,7 @@ use backend_api::models::{
 };
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::{AuthnErr, Token};
+use miru_agent::delete::PendingDelete;
 use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
@@ -106,6 +108,11 @@ fn token_manager() -> Arc<MockTokenManager> {
     }))
 }
 
+/// The absent-deleter argument for tests that never reach the enqueue path.
+fn no_deleter() -> Option<Arc<MockDeleter>> {
+    None
+}
+
 fn non_network_http_err() -> HTTPErr {
     HTTPErr::MockErr(HttpMockErr {
         is_network_conn_err: false,
@@ -158,7 +165,12 @@ async fn happy_path_creates_transfers_confirms() {
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
     let transfer = MockObjectTransfer::new();
     let job = make_job("a.log");
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     executor.upload(&job).await.unwrap();
 
@@ -195,7 +207,12 @@ async fn unknown_status_proceeds_like_pending() {
     // with transfer and confirm rather than stranding the file.
     client.set_create_upload(|| Ok(response_with_status(UploadStatus::UploadStatusUnknown)));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     executor.upload(&make_job("a.log")).await.unwrap();
 
@@ -211,7 +228,7 @@ async fn token_failure_maps_to_executor_err() {
         trace: miru_agent::trace!(),
     })));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone(), no_deleter());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -228,7 +245,12 @@ async fn create_failure_maps_to_executor_err() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(non_network_http_err()));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -245,7 +267,12 @@ async fn transfer_failure_propagates_and_skips_confirm() {
     client.set_create_upload(|| Ok(pending_response()));
     let transfer = MockObjectTransfer::new();
     transfer.push_err();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -262,7 +289,12 @@ async fn confirm_failure_maps_to_executor_err() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Err(non_network_http_err()));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -280,7 +312,12 @@ async fn create_4xx_failure_is_terminal_with_status() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(request_failed_err(404)));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
@@ -294,7 +331,12 @@ async fn create_transient_statuses_are_not_terminal() {
         let client = Arc::new(MockClient::default());
         client.set_create_upload(move || Err(request_failed_err(status)));
         let transfer = MockObjectTransfer::new();
-        let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+        let executor = LiveExecutor::new(
+            client.clone(),
+            token_manager(),
+            transfer.clone(),
+            no_deleter(),
+        );
 
         let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
@@ -309,7 +351,12 @@ async fn confirm_4xx_failure_is_terminal() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Err(request_failed_err(422)));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        transfer.clone(),
+        no_deleter(),
+    );
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
@@ -353,6 +400,7 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
         client.clone(),
         token_manager(),
         SdkTransfer::with_s3_http_client(replay.clone()),
+        no_deleter(),
     );
 
     executor.upload(&job).await.unwrap();
@@ -377,7 +425,8 @@ async fn retention_setup(
     client: Arc<MockClient>,
 ) -> (
     files::TempFile,
-    LiveExecutor<MockClient, MockTokenManager, MockObjectTransfer>,
+    Arc<MockDeleter>,
+    LiveExecutor<MockClient, MockTokenManager, MockObjectTransfer, MockDeleter>,
 ) {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
@@ -389,33 +438,55 @@ async fn retention_setup(
     )
     .await
     .unwrap();
-    let executor = LiveExecutor::new(client, token_manager(), MockObjectTransfer::new());
-    (src, executor)
+    let deleter = MockDeleter::new();
+    let executor = LiveExecutor::new(
+        client,
+        token_manager(),
+        MockObjectTransfer::new(),
+        Some(deleter.clone()),
+    );
+    (src, deleter, executor)
 }
 
 #[tokio::test]
-async fn require_upload_retention_deletes_source_after_confirm() {
+async fn require_upload_retention_enqueues_pending_delete_and_keeps_source() {
     let client = Arc::new(MockClient::default());
-    let (src, executor) = retention_setup(client).await;
+    let (src, deleter, executor) = retention_setup(client).await;
     let mut job = make_job("a.log");
     job.file = src.file().clone();
     job.retention = Some(FileRuleRetention {
         require_upload: true,
-        ttl_secs: 0,
+        ttl_secs: 300,
     });
     let path = job.file.path().clone();
-    assert!(path.exists());
+    let before = Utc::now();
 
     executor.upload(&job).await.unwrap();
 
-    // A require-upload retention deletes the confirmed source file.
-    assert!(!path.exists());
+    // no inline delete: the confirmed source file is still on disk...
+    assert!(path.exists());
+    // ...and exactly one pending deletion carrying the job's identity was
+    // enqueued, stamped eligible at the confirmation instant.
+    let records = deleter.recorded_calls();
+    assert_eq!(records.len(), 1);
+    assert!(records[0].eligible_at >= before && records[0].eligible_at <= Utc::now());
+    let expected = PendingDelete {
+        file: job.file.clone(),
+        size: job.size,
+        mtime: job.mtime,
+        digest: job.digest.clone(),
+        eligible_at: records[0].eligible_at,
+        ttl_secs: 300,
+        file_rule_id: job.file_rule_id.clone(),
+        deployment_id: job.deployment_id.clone(),
+    };
+    assert_eq!(records, vec![expected]);
 }
 
 #[tokio::test]
-async fn no_retention_leaves_source_in_place() {
+async fn no_retention_leaves_source_and_enqueues_nothing() {
     let client = Arc::new(MockClient::default());
-    let (src, executor) = retention_setup(client).await;
+    let (src, deleter, executor) = retention_setup(client).await;
     let mut job = make_job("a.log");
     job.file = src.file().clone();
     job.retention = None;
@@ -423,48 +494,86 @@ async fn no_retention_leaves_source_in_place() {
 
     executor.upload(&job).await.unwrap();
 
-    // No retention leaves the source file untouched.
+    // No retention leaves the source file untouched and records nothing.
     assert!(path.exists());
+    assert_eq!(deleter.recorded_calls(), vec![]);
+}
+
+// Eligibility for a rule that does not require the upload is stability, which
+// is the scan-side producer's trigger (PR 3b) — the executor enqueueing here
+// too would double-enqueue the same file.
+#[tokio::test]
+async fn non_require_upload_retention_enqueues_nothing() {
+    let client = Arc::new(MockClient::default());
+    let (src, deleter, executor) = retention_setup(client).await;
+    let mut job = make_job("a.log");
+    job.file = src.file().clone();
+    job.retention = Some(FileRuleRetention {
+        require_upload: false,
+        ttl_secs: 60,
+    });
+
+    executor.upload(&job).await.unwrap();
+
+    assert!(src.file().exists());
+    assert_eq!(deleter.recorded_calls(), vec![]);
 }
 
 #[tokio::test]
-async fn delete_failure_after_confirm_still_succeeds() {
+async fn enqueue_failure_after_confirm_still_succeeds() {
     let client = Arc::new(MockClient::default());
-    let (src, executor) = retention_setup(client.clone()).await;
+    let (src, deleter, executor) = retention_setup(client.clone()).await;
+    // the deleter rejects the pending deletion (e.g. its queue is full); the
+    // executor logs and swallows the error (best-effort, like the inline
+    // delete it replaced), so the upload — already durably confirmed — still
+    // reports Ok rather than re-driving itself.
+    deleter.push_step(MockDeleteStep::Err);
     let mut job = make_job("a.log");
-    // Point the source at a child of the written temp file. Its parent is a
-    // regular file, not a directory, so `remove_file` fails with a non-NotFound
-    // kind. `files::delete` returns Err; the executor logs and swallows it (any
-    // delete error other than NotFound is swallowed), so the upload — already
-    // durably confirmed — still reports Ok.
-    job.file = File::new(src.file().path().join("child"));
+    job.file = src.file().clone();
     job.retention = Some(FileRuleRetention {
         require_upload: true,
         ttl_secs: 0,
     });
 
-    // Observable outcome: upload is Ok and confirm ran exactly once, proving the
-    // swallowed delete error did not re-drive an already-durable upload.
+    // Observable outcome: upload is Ok, confirm ran exactly once, and the
+    // source file is untouched (nothing deletes inline anymore).
     executor.upload(&job).await.unwrap();
     assert_eq!(client.call_count(Call::ConfirmUpload), 1);
+    assert_eq!(deleter.recorded_calls().len(), 1);
+    assert!(src.file().exists());
 }
 
 #[tokio::test]
-async fn missing_source_at_delete_is_success() {
+async fn require_upload_without_deleter_still_succeeds() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
-    let executor = LiveExecutor::new(client, token_manager(), MockObjectTransfer::new());
-    let mut job = make_job("never-existed.log");
-    // A path that never existed (distinct from the present-then-deleted case):
-    // `files::delete` maps NotFound to Ok, so upload succeeds.
-    job.file = File::new("/data/does-not-exist/never-existed.log");
+    let src = files::temp("upload-retention-test").unwrap();
+    files::write_bytes(
+        src.file(),
+        b"hello world",
+        WriteOptions::OVERWRITE_NONATOMIC,
+    )
+    .await
+    .unwrap();
+    let executor = LiveExecutor::new(
+        client.clone(),
+        token_manager(),
+        MockObjectTransfer::new(),
+        no_deleter(),
+    );
+    let mut job = make_job("a.log");
+    job.file = src.file().clone();
     job.retention = Some(FileRuleRetention {
         require_upload: true,
         ttl_secs: 0,
     });
 
+    // an absent deleter degrades to keeping the file (with a warning), never
+    // to a failed job.
     executor.upload(&job).await.unwrap();
+    assert_eq!(client.call_count(Call::ConfirmUpload), 1);
+    assert!(src.file().exists());
 }
 
 // ================================ create_request ================================= //
