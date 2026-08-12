@@ -8,7 +8,7 @@ use crate::upload::{Job, UploaderExt};
 
 // external crates
 use tokio::sync::broadcast::error::RecvError;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Bridge scanner observations into upload jobs. Subscribes to the scanner's
 /// stable-file events and enqueues an upload job for each. Runs in the
@@ -45,8 +45,14 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
 
     loop {
         match events.recv().await {
-            Ok(ScanEvent::StableFile(stable)) => {
-                enqueue_stable_file(uploader, stable).await;
+            Ok(ScanEvent::StableFile { file, rule }) => {
+                if rule.upload.is_some() {
+                    enqueue_stable_file(uploader, file).await;
+                } else {
+                    let file = &file.file;
+                    let rule_id = &rule.id;
+                    debug!("scan-upload bridge: rule {rule_id} does not upload; skipping {file}");
+                }
             }
             // broadcast buffer overflowed.
             Err(RecvError::Lagged(dropped)) => {
@@ -66,7 +72,7 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
     }
 }
 
-/// Enqueue an upload job for `stable`.
+/// Enqueue an upload job for `stable`, if its rule uploads at all.
 async fn enqueue_stable_file<UploaderT: UploaderExt>(uploader: &UploaderT, stable: StableFile) {
     let job = Job {
         file: stable.file,

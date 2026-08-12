@@ -10,7 +10,7 @@ use tracing::error;
 use uuid::Uuid;
 
 // ============================= FILE RULE SOURCE ================================== //
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRuleSource {
     pub glob: String,
     pub stability_window_secs: i64,
@@ -26,7 +26,7 @@ impl From<backend_client::UploadRuleSource> for FileRuleSource {
 }
 
 // ============================= FILE RULE UPLOAD ================================== //
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRuleUpload {
     pub upload_collection_id: UploadCollectionID,
     pub upload_collection_name: String,
@@ -46,7 +46,7 @@ pub struct FileRuleRetention {
 pub type FileRuleID = String;
 pub type UploadCollectionID = String;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Eq)]
 pub struct FileRule {
     pub id: FileRuleID,
     pub name: String,

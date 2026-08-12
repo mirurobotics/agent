@@ -3,9 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
-use crate::models::{Deployment, FileRule, FileRuleRetention, Patch, UploadCollectionID};
-use crate::scan::errors::*;
-use crate::trace;
+use crate::models::{Deployment, FileRule, FileRuleID, FileRuleRetention, Patch};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -69,26 +67,6 @@ impl RuleState {
         self.ledger
             .get_mut(file)
             .and_then(|entries| entries.last_mut())
-    }
-
-    pub(crate) fn set_config(&mut self, cfg: Config) -> Result<(), ScanErr> {
-        let existing = self
-            .cfg
-            .rule
-            .upload
-            .as_ref()
-            .map(|u| &u.upload_collection_id);
-        let replacement = cfg.rule.upload.as_ref().map(|u| &u.upload_collection_id);
-        if existing != replacement {
-            return Err(ScanErr::InvalidRule(InvalidRule {
-                existing_upload_collection_id: existing.cloned().unwrap_or_default(),
-                replacement_upload_collection_id: replacement.cloned().unwrap_or_default(),
-                trace: trace!(),
-            }));
-        }
-
-        self.cfg = cfg;
-        Ok(())
     }
 
     /// Drop ledger entries whose file is absent from this pass's glob set.
@@ -164,8 +142,8 @@ impl StableFile {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScannerSnapshot {
-    pub(crate) collections: HashMap<UploadCollectionID, RuleState>,
-    pub(crate) deployed: HashSet<UploadCollectionID>,
+    pub(crate) rules: HashMap<FileRuleID, RuleState>,
+    pub(crate) deployed: HashSet<FileRuleID>,
 }
 
 impl Patch<ScannerSnapshot> for ScannerSnapshot {
@@ -197,10 +175,11 @@ mod tests {
         }
     }
 
-    fn rule(collection_id: &str, glob: &str, window: i64) -> FileRule {
+    fn rule(rule_id: &str, glob: &str, window: i64) -> FileRule {
         FileRule {
+            id: rule_id.to_string(),
             upload: Some(FileRuleUpload {
-                upload_collection_id: collection_id.to_string(),
+                upload_collection_id: format!("{rule_id}-coll"),
                 ..Default::default()
             }),
             source: FileRuleSource {
@@ -211,10 +190,10 @@ mod tests {
         }
     }
 
-    fn config(dpl_id: &str, collection_id: &str, glob: &str, window: i64) -> Config {
+    fn config(dpl_id: &str, rule_id: &str, glob: &str, window: i64) -> Config {
         Config {
             deployment: deployment(dpl_id),
-            rule: rule(collection_id, glob, window),
+            rule: rule(rule_id, glob, window),
         }
     }
 
@@ -232,7 +211,7 @@ mod tests {
             first_observed_at,
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
-            file_rule_id: "coll".to_string(),
+            file_rule_id: "r1".to_string(),
             retention: None,
         }
     }
@@ -245,7 +224,7 @@ mod tests {
             size: 4,
             mtime: SystemTime::UNIX_EPOCH,
             deployment_id: "d".to_string(),
-            file_rule_id: "coll".to_string(),
+            file_rule_id: "r1".to_string(),
         }
     }
 
@@ -254,12 +233,9 @@ mod tests {
 
         #[test]
         fn new_starts_empty() {
-            let state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
 
-            assert_eq!(
-                state.rule().upload.as_ref().unwrap().upload_collection_id,
-                "coll"
-            );
+            assert_eq!(state.rule().id, "r1");
             assert!(state.preexisting.is_empty());
             assert!(state.candidates.is_empty());
             assert!(state.ledger.is_empty());
@@ -269,7 +245,7 @@ mod tests {
 
         #[test]
         fn rule() {
-            let mut cfg = config("d", "coll", "/logs/*.mcap", 60);
+            let mut cfg = config("d", "r1", "/logs/*.mcap", 60);
             cfg.rule.id = "rule-42".to_string();
             let state = RuleState::new(cfg);
 
@@ -279,7 +255,7 @@ mod tests {
 
         #[test]
         fn ledger_count() {
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert_eq!(state.ledger_count(), 0);
 
             let file = File::new("/none/a.mcap");
@@ -291,7 +267,7 @@ mod tests {
 
         #[test]
         fn has_candidates() {
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert!(!state.has_candidates());
 
             let file = File::new("/none/c.mcap");
@@ -308,7 +284,7 @@ mod tests {
         #[test]
         fn is_candidate() {
             let file = File::new("/none/c.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
 
             assert!(!state.is_candidate(&file));
 
@@ -336,13 +312,13 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                file_rule_id: "coll".to_string(),
+                file_rule_id: "r1".to_string(),
             }
         }
 
         #[test]
         fn does_not_exist() {
-            let state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let obs = observation(File::new("/none/p.mcap"));
             assert!(!state.is_preexisting(&obs));
         }
@@ -350,7 +326,7 @@ mod tests {
         #[test]
         fn metadata_not_equal() {
             let file = File::new("/none/p.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             state
                 .preexisting
                 .insert(file.clone(), observation(file.clone()));
@@ -367,44 +343,10 @@ mod tests {
         #[test]
         fn is_preexisting() {
             let file = File::new("/none/p.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let obs = observation(file.clone());
             state.preexisting.insert(file, obs.clone());
             assert!(state.is_preexisting(&obs));
-        }
-    }
-
-    mod set_config {
-        use super::*;
-
-        #[test]
-        fn collect_ids_differ() {
-            let coll_id_a = "coll_a".to_string();
-            let coll_id_b = "coll_b".to_string();
-            let mut state = RuleState::new(config("d", &coll_id_a, "/none/*.mcap", 0));
-            let err = state
-                .set_config(config("d", &coll_id_b, "/none/*.mcap", 0))
-                .unwrap_err();
-            assert!(matches!(err, ScanErr::InvalidRule(_)));
-            assert_eq!(
-                state.rule().upload.as_ref().unwrap().upload_collection_id,
-                "coll_a".to_string()
-            );
-        }
-
-        #[test]
-        fn success() {
-            let mut state = RuleState::new(config("d", "coll", "/old/*.mcap", 0));
-            let mut replacement = rule("coll", "/new/*.mcap", 5);
-            replacement.id = "r2".to_string();
-            state
-                .set_config(Config {
-                    deployment: deployment("d"),
-                    rule: replacement,
-                })
-                .unwrap();
-            assert_eq!(state.rule().id, "r2".to_string());
-            assert_eq!(state.rule().source.glob, "/new/*.mcap".to_string());
         }
     }
 
@@ -430,7 +372,7 @@ mod tests {
         // set (the maximally aggressive input): the audit-history guarantee.
         #[test]
         fn below_threshold_prunes_nothing() {
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             seed_n(&mut state, 2);
 
             state.prune_ledger(&[], 3);
@@ -441,7 +383,7 @@ mod tests {
         // glob-set members keep their full Vec history, everything else drops.
         #[test]
         fn at_threshold_drops_unglobbed_keeps_globbed() {
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let seeded = seed_n(&mut state, 4);
             let kept = &seeded[..3];
             // give one retained key a two-entry history to prove the whole
@@ -464,7 +406,7 @@ mod tests {
         // Pruning an empty ledger is a no-op (the gate returns early).
         #[test]
         fn empty_ledger_noop() {
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             state.prune_ledger(&[], 1);
             assert_eq!(state.ledger_count(), 0);
         }
@@ -483,7 +425,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                file_rule_id: "coll".to_string(),
+                file_rule_id: "r1".to_string(),
             }
         }
 
@@ -544,14 +486,14 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                file_rule_id: "coll".to_string(),
+                file_rule_id: "r1".to_string(),
             }
         }
 
         #[test]
         fn matches() {
             let file = File::new("/none/l.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             state.ledger.insert(file.clone(), vec![entry]);
@@ -561,7 +503,7 @@ mod tests {
         #[test]
         fn metadata_differs() {
             let file = File::new("/none/l.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             state.ledger.insert(file.clone(), vec![entry]);
@@ -578,7 +520,7 @@ mod tests {
         #[test]
         fn absent() {
             let file = File::new("/none/l.mcap");
-            let state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert!(!state.is_latest_ledger_entry(&obs(file)));
         }
     }
@@ -589,7 +531,7 @@ mod tests {
         #[test]
         fn appends_alias() {
             let file = File::new("/none/l.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file.clone(), ts(900))]);
@@ -605,7 +547,7 @@ mod tests {
         #[test]
         fn none_when_absent() {
             let file = File::new("/none/l.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 0));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert!(state.latest_ledger_entry_mut(&file).is_none());
         }
     }
@@ -641,7 +583,7 @@ mod tests {
         /// entry, so every map in the snapshot is exercised.
         fn populated_state() -> RuleState {
             let file = File::new("/none/p.mcap");
-            let mut state = RuleState::new(config("d", "coll", "/none/*.mcap", 10));
+            let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 10));
             state
                 .preexisting
                 .insert(file.clone(), observation(file.clone()));
@@ -661,8 +603,8 @@ mod tests {
         #[test]
         fn snapshot_round_trips_serde_json() {
             let original = ScannerSnapshot {
-                collections: HashMap::from([("coll".to_string(), populated_state())]),
-                deployed: HashSet::from(["coll".to_string()]),
+                rules: HashMap::from([("r1".to_string(), populated_state())]),
+                deployed: HashSet::from(["r1".to_string()]),
             };
             let json = serde_json::to_string(&original).unwrap();
             let back: ScannerSnapshot = serde_json::from_str(&json).unwrap();
@@ -672,15 +614,15 @@ mod tests {
         #[test]
         fn patch_replaces_whole_value() {
             let mut old = ScannerSnapshot {
-                collections: HashMap::from([("coll".to_string(), populated_state())]),
-                deployed: HashSet::from(["coll".to_string()]),
+                rules: HashMap::from([("r1".to_string(), populated_state())]),
+                deployed: HashSet::from(["r1".to_string()]),
             };
             let new = ScannerSnapshot {
-                collections: HashMap::from([(
-                    "coll2".to_string(),
-                    RuleState::new(config("d2", "coll2", "/none/*.mcap", 0)),
+                rules: HashMap::from([(
+                    "r2".to_string(),
+                    RuleState::new(config("d2", "r2", "/none/*.mcap", 0)),
                 )]),
-                deployed: HashSet::from(["coll2".to_string()]),
+                deployed: HashSet::from(["r2".to_string()]),
             };
             old.patch(new.clone());
             assert_eq!(old, new);
@@ -702,7 +644,7 @@ mod tests {
                 size: 4,
                 mtime: SystemTime::UNIX_EPOCH,
                 deployment_id: "d".to_string(),
-                file_rule_id: "coll".to_string(),
+                file_rule_id: "r1".to_string(),
             }
         }
 
