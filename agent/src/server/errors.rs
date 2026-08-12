@@ -2,6 +2,7 @@
 use crate::authn;
 use crate::cache;
 use crate::crypt;
+use crate::delete;
 use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::events;
@@ -85,6 +86,8 @@ pub enum ServerErr {
     #[error(transparent)]
     DiskErr(DiskErr),
     #[error(transparent)]
+    DeleteErr(Box<delete::DeleteErr>),
+    #[error(transparent)]
     ScanErr(Box<scan::ScanErr>),
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
@@ -148,6 +151,12 @@ impl From<DiskErr> for ServerErr {
     }
 }
 
+impl From<delete::DeleteErr> for ServerErr {
+    fn from(e: delete::DeleteErr) -> Self {
+        Self::DeleteErr(Box::new(e))
+    }
+}
+
 impl From<scan::ScanErr> for ServerErr {
     fn from(e: scan::ScanErr) -> Self {
         Self::ScanErr(Box::new(e))
@@ -177,6 +186,7 @@ crate::impl_error!(ServerErr {
     HTTPErr,
     ServiceErr,
     DiskErr,
+    DeleteErr,
     ScanErr,
     SyncErr,
     UploadErr,
