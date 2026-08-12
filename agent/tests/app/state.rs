@@ -84,13 +84,12 @@ impl TestEnv {
         .unwrap();
     }
 
-    async fn init(&self, enable_scanner: bool) -> Result<(AppState, ShutdownHandle), ServerErr> {
+    async fn init(&self) -> Result<(AppState, ShutdownHandle), ServerErr> {
         let (state, handle) = AppState::init(
             &self.layout,
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
-            enable_scanner,
         )
         .await?;
         Ok((state, Box::pin(handle)))
@@ -103,7 +102,7 @@ pub mod init {
     #[tokio::test]
     async fn fail_missing_private_key_file() {
         let env = TestEnv::new();
-        let result = env.init(false).await;
+        let result = env.init().await;
         match result {
             Err(ServerErr::FileSysErr(e)) => {
                 assert!(matches!(e, FileSysErr::PathDoesNotExistErr(_)));
@@ -121,7 +120,7 @@ pub mod init {
     async fn fail_missing_public_key_file() {
         let env = TestEnv::new();
         env.write_private_key().await;
-        let result = env.init(false).await;
+        let result = env.init().await;
         match result {
             Err(ServerErr::FileSysErr(e)) => {
                 assert!(matches!(e, FileSysErr::PathDoesNotExistErr(_)));
@@ -139,7 +138,7 @@ pub mod init {
     async fn fail_missing_device_id() {
         let env = TestEnv::new();
         env.write_keys().await;
-        let result = env.init(false).await;
+        let result = env.init().await;
         assert!(matches!(
             result,
             Err(ServerErr::DiskErr(DiskErr::ResolveDeviceIDErr(_)))
@@ -162,7 +161,7 @@ pub mod init {
             .await
             .unwrap();
 
-        let (state, _) = env.init(false).await.unwrap();
+        let (state, _) = env.init().await.unwrap();
 
         // check last activity
         assert!(state.activity_tracker.last_touched() <= Utc::now().timestamp() as u64);
@@ -185,7 +184,7 @@ pub mod init {
         let begin_test = Utc::now().timestamp();
         let env = TestEnv::valid().await;
 
-        let (state, _) = env.init(false).await.unwrap();
+        let (state, _) = env.init().await.unwrap();
 
         // the token file should now have the default token
         let token_file = env.layout.auth().token();
@@ -209,7 +208,7 @@ pub mod init {
         };
         env.write_device(&device).await;
 
-        let _ = env.init(false).await.unwrap();
+        let _ = env.init().await.unwrap();
 
         // the device file should now have the device set to offline
         let device_file = env.layout.device();
@@ -218,13 +217,13 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn scanner_spawned_when_enabled() {
+    async fn scanner_spawned() {
         let env = TestEnv::valid().await;
 
-        let (state, state_handle) = env.init(true).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // the scanner actor is spawned and its snapshot file is seeded on disk
-        assert!(state.scanner.is_some());
+        state.scanner.get_rules().await.unwrap();
         assert!(env.layout.scanner_snapshot().exists());
 
         // clean up the spawned actors so they don't leak
@@ -241,10 +240,10 @@ pub mod init {
             .await
             .unwrap();
 
-        let (state, state_handle) = env.init(true).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the scanner runs without persistence
-        assert!(state.scanner.is_some());
+        state.scanner.get_rules().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -254,40 +253,13 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn scanner_absent_when_disabled() {
+    async fn uploader_spawned() {
         let env = TestEnv::valid().await;
 
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
-        // no scanner actor is spawned and nothing touches the snapshot file
-        assert!(state.scanner.is_none());
-        assert!(!env.layout.scanner_snapshot().exists());
-
-        state.shutdown().await.unwrap();
-        state_handle.await;
-    }
-
-    #[tokio::test]
-    async fn uploader_spawned_when_enabled() {
-        let env = TestEnv::valid().await;
-
-        let (state, state_handle) = env.init(true).await.unwrap();
-
-        // the uploader shares the scanner enable flag: it is fed by the
-        // scan-upload bridge, which only runs when scanning is on
-        assert!(state.uploader.is_some());
-
-        state.shutdown().await.unwrap();
-        state_handle.await;
-    }
-
-    #[tokio::test]
-    async fn uploader_absent_when_disabled() {
-        let env = TestEnv::valid().await;
-
-        let (state, state_handle) = env.init(false).await.unwrap();
-
-        assert!(state.uploader.is_none());
+        // the uploader is always spawned alongside the scanner that feeds it
+        state.uploader.len().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -301,7 +273,7 @@ pub mod shutdown {
     async fn success_device_offline() {
         let env = TestEnv::valid().await;
 
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
         state.shutdown().await.unwrap();
         state_handle.await;
     }
@@ -317,7 +289,7 @@ pub mod shutdown {
         let env = TestEnv::valid().await;
 
         let before_shutdown = Utc::now();
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // set the device to be online
         state
@@ -341,7 +313,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn scanner_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(true).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves the
         // storage shutdown actually ran
@@ -353,7 +325,7 @@ pub mod shutdown {
             .unwrap();
 
         // stop the scanner actor directly so AppState::shutdown errors
-        state.scanner.as_ref().unwrap().shutdown().await.unwrap();
+        state.scanner.shutdown().await.unwrap();
 
         let err = state.shutdown().await.expect_err("scanner error surfaces");
         assert!(matches!(err, ServerErr::ScanErr(_)));
@@ -368,7 +340,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn uploader_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(true).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves teardown
         // continued through storage after the uploader error
@@ -381,7 +353,7 @@ pub mod shutdown {
 
         // stop the uploader actor directly so AppState::shutdown errors on it
         // (the uploader is torn down first, so its error is the one surfaced)
-        state.uploader.as_ref().unwrap().shutdown().await.unwrap();
+        state.uploader.shutdown().await.unwrap();
 
         let err = state.shutdown().await.expect_err("uploader error surfaces");
         assert!(matches!(err, ServerErr::UploadErr(_)));
@@ -396,7 +368,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn syncer_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves the
         // storage shutdown actually ran
@@ -423,7 +395,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn event_hub_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves the
         // storage shutdown actually ran
@@ -453,7 +425,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn storage_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // shut storage down directly so AppState::shutdown errors
         state.storage.shutdown().await.unwrap();
@@ -466,7 +438,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn token_mngr_shutdown_error_is_surfaced() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves the
         // storage shutdown actually ran
@@ -497,7 +469,7 @@ pub mod shutdown {
     async fn success_with_scanner_enabled() {
         let env = TestEnv::valid().await;
 
-        let (state, state_handle) = env.init(true).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // shutdown completing (and the bundled shutdown handle resolving)
         // proves the scanner actor shut down and its JoinHandle joined; a hung
@@ -509,7 +481,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn returns_first_error_with_multiple_failures() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // pre-close the syncer (fails first) and token manager (fails last)
         state.syncer.shutdown().await.unwrap();
@@ -527,7 +499,7 @@ pub mod shutdown {
     #[tokio::test]
     async fn continues_past_storage_substore_failure() {
         let env = TestEnv::valid().await;
-        let (state, state_handle) = env.init(false).await.unwrap();
+        let (state, state_handle) = env.init().await.unwrap();
 
         // pre-close one storage substore so the storage step fails partway
         // through Storage::shutdown

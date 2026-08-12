@@ -155,31 +155,27 @@ async fn init(
         .await?;
     }
 
-    if let Some(scanner) = &app_state.scanner {
-        init_scan_worker(
-            options.scanner.clone(),
-            scanner.clone(),
-            shutdown_manager,
-            shutdown_tx.subscribe(),
-        )
-        .await?;
-        init_sync_scan_bridge_worker(
-            scanner.clone(),
-            app_state.clone(),
-            shutdown_manager,
-            shutdown_tx.subscribe(),
-        )
-        .await?;
-        if let Some(uploader) = &app_state.uploader {
-            init_scan_upload_bridge_worker(
-                scanner.clone(),
-                uploader.clone(),
-                shutdown_manager,
-                shutdown_tx.subscribe(),
-            )
-            .await?;
-        }
-    }
+    init_scan_worker(
+        options.scanner.clone(),
+        app_state.scanner.clone(),
+        shutdown_manager,
+        shutdown_tx.subscribe(),
+    )
+    .await?;
+    init_sync_scan_bridge_worker(
+        app_state.scanner.clone(),
+        app_state.clone(),
+        shutdown_manager,
+        shutdown_tx.subscribe(),
+    )
+    .await?;
+    init_scan_upload_bridge_worker(
+        app_state.scanner.clone(),
+        app_state.uploader.clone(),
+        shutdown_manager,
+        shutdown_tx.subscribe(),
+    )
+    .await?;
 
     Ok(app_state)
 }
@@ -193,7 +189,6 @@ async fn init_app_state(
         options.storage.capacities,
         Arc::new(http::Client::new(&options.backend_host.as_url())?),
         options.dpl_retry_policy,
-        options.enable_scanner,
     )
     .await?;
     let app_state = Arc::new(app_state);
@@ -734,7 +729,6 @@ mod tests {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
-            false,
         )
         .await
         .unwrap();
