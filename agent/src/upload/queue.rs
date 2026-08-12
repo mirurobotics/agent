@@ -11,7 +11,7 @@ use crate::upload::{
 };
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -98,14 +98,31 @@ impl Queue {
         info!("upload: job requeued; queue length {}", self.jobs.len());
     }
 
-    /// Remove and return the first entry whose `next_attempt_at` is `None` or
-    /// `<= now`, preserving the order of the remaining entries. Returns `None`
-    /// (without persisting) when no entry is eligible.
-    pub async fn pop_ready(&mut self, now: DateTime<Utc>) -> Option<QueueEntry> {
-        let idx = self
-            .jobs
-            .iter()
-            .position(|entry| entry.next_attempt_at.is_none_or(|at| at <= now))?;
+    /// Remove and return the first eligible entry, preserving the order of the
+    /// remaining entries. An entry is eligible when its `next_attempt_at` is
+    /// `None`, is `<= now`, or is beyond `now + max_wait`.
+    ///
+    /// `max_wait` is the largest wait the caller's retry schedule can produce,
+    /// so a deadline further out than `now + max_wait` cannot have been stamped
+    /// by that schedule. It is treated as evidence of a backward clock step —
+    /// an unset real-time clock at boot, or a large NTP correction applied
+    /// after the deadline was persisted — and the entry is released as due now
+    /// rather than stranded forever.
+    ///
+    /// Returns `None` (without persisting) when no entry is eligible.
+    pub async fn pop_ready(
+        &mut self,
+        now: DateTime<Utc>,
+        max_wait: TimeDelta,
+    ) -> Option<QueueEntry> {
+        let horizon = now
+            .checked_add_signed(max_wait)
+            .unwrap_or(DateTime::<Utc>::MAX_UTC);
+        let idx = self.jobs.iter().position(|entry| {
+            entry
+                .next_attempt_at
+                .is_none_or(|at| at <= now || at > horizon)
+        })?;
         let entry = self.jobs.remove(idx);
         if entry.is_some() {
             self.persist().await;
@@ -116,7 +133,7 @@ impl Queue {
 
     /// The minimum effective deadline over all entries, where a `None`
     /// deadline counts as `DateTime::<Utc>::MIN_UTC`. Returns `None` only when
-    /// the queue is empty. The worker uses it to size an idle sleep.
+    /// the queue is empty.
     pub fn earliest_next_attempt(&self) -> Option<DateTime<Utc>> {
         self.jobs
             .iter()

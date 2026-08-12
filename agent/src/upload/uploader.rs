@@ -145,7 +145,8 @@ where
     pub(crate) async fn run(mut self) {
         loop {
             let now = (self.now_fn)();
-            match self.queue.pop_ready(now).await {
+            let max_wait = TimeDelta::seconds(self.options.backoff.max_secs.max(0));
+            match self.queue.pop_ready(now, max_wait).await {
                 Some(entry) => {
                     if let Flow::Shutdown = self.run_attempt(entry).await {
                         break;
@@ -167,8 +168,12 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
+                    // the ceiling is defense-in-depth: with the same horizon and the same
+                    // `now`, pop_ready has already released any deadline beyond it, so this
+                    // only matters if the two ever diverge
+                    let ceiling = max_wait.to_std().unwrap_or(Duration::ZERO);
                     let wait = match self.queue.earliest_next_attempt() {
-                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
+                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO).min(ceiling),
                         // unreachable: the queue is non-empty here
                         None => Duration::ZERO,
                     };
@@ -226,12 +231,11 @@ where
         Flow::Continue
     }
 
-    /// Wait out the shortest backoff among queued entries, staying responsive
-    /// to commands. Deliberately NOT [`Self::run_until_shutdown`]: that helper
-    /// keeps driving its future after handling a command, but an enqueue here
-    /// must return to the run loop immediately so a newly eligible entry is
-    /// re-evaluated rather than waiting out the sleep. Any non-shutdown
-    /// command — like the sleep completing — returns [`Flow::Continue`].
+    /// Sleep for `wait`, staying responsive to commands. Deliberately NOT
+    /// [`Self::run_until_shutdown`]: that helper keeps driving its future after
+    /// handling a command, but an enqueue here must return to the run loop
+    /// immediately so a newly eligible entry is re-evaluated rather than
+    /// waiting out the sleep.
     async fn idle_wait(&mut self, wait: Duration) -> Flow {
         let sleep_fut = (self.sleep_fn)(wait);
         tokio::select! {
