@@ -21,11 +21,11 @@ Verification of behavior preservation: `./scripts/test.sh` passes with test coun
 
 ## Progress
 
-- [ ] M0: Record baselines on main HEAD (test counts, covgate output)
-- [ ] M1: `git mv` both src dirs; new `data_uploads/mod.rs`; lib.rs swap; path rewrite across agent/src
-- [ ] M2: Tests mirror — `git mv agent/tests/upload` under `agent/tests/data_uploads/`; path rewrite across agent/tests
-- [ ] M3: Docs — ARCHITECTURE.md codemap entry for `data_uploads/`
-- [ ] M4: Validation — test counts vs baseline, covgate, lint, fmt, clippy, no-features check; preflight CLEAN; push; CI green; draft PR
+- [x] M0: Record baselines on main HEAD (test counts, covgate output)
+- [x] M1: `git mv` both src dirs; new `data_uploads/mod.rs`; lib.rs swap; path rewrite across agent/src
+- [x] M2: Tests mirror — `git mv agent/tests/upload` under `agent/tests/data_uploads/`; path rewrite across agent/tests
+- [x] M3: Docs — ARCHITECTURE.md codemap entry for `data_uploads/`
+- [x] M4: Validation — test counts vs baseline, covgate, lint, fmt, clippy, no-features check; preflight CLEAN; push; CI green; draft PR
 
 ## Surprises & Discoveries
 
@@ -34,6 +34,9 @@ Verification of behavior preservation: `./scripts/test.sh` passes with test coun
 - **`agent/tests/scan/` does not exist on main.** All scan tests are in-source (`#[cfg(test)]` in agent/src/scan/scanner.rs etc. — see plans/completed/20260812-stable-file-sinks.md M3, which reworked them in-source). Only `agent/tests/upload/` exists and moves. The tests mirror therefore gains `agent/tests/data_uploads/upload/` but no `scan/` — the mirror stays exact w.r.t. what exists.
 - **ARCHITECTURE.md's codemap never mentions scan or upload at all** (`grep -ci "scan\|upload" ARCHITECTURE.md` → 0; the codemap at ARCHITECTURE.md:16 predates the feature — it also lacks disk/, gcs/, s3/). There are no stale path references to fix; instead M3 adds one small codemap entry for the new parent module.
 - **AGENTS.md:11 says lib.rs lists "all 22 public modules" — already stale on main** (29 today, 28 after this change). Left alone; not this PR's drift to fix.
+- **(executor) The import linter's normalizer enforces same-root merging, not just sorting**: after the mechanical rewrite it emitted `split-internal-imports` ("merge `crate::data_uploads` imports into a single grouped use") for app/state.rs, data_uploads/upload/sink.rs, and server/errors.rs — the two anticipated `use crate::data_uploads::scan...` / `use crate::data_uploads::upload...` lines in each file had to merge into one nested grouped `use crate::data_uploads::{scan..., upload...};`. The plan's "may merge if the linter prefers it" hedge for server/errors.rs turned out to be mandatory, and applied to all three files. Short names `scan`/`upload` stay bound, so interior qualified usages still needed no edits.
+- **(executor) Within-group sort ordering is delegated to `cargo fmt`** (tools/lint/src/checker/mod.rs comment: "Sorting within groups is left to `cargo fmt` (reorder_imports)"), so no manual re-sorting was needed — `cargo fmt -p miru-agent` repositioned every rewritten `use` line.
+- **(executor) `cargo clippy --package miru-agent --all-features -- -D warnings` fails on main and on this branch alike** with two `manual_map` errors in generated `libs/backend-api` code (verified by running it on a clean main checkout). AGENTS.md:96 documents that clippy warnings in generated code are expected; `scripts/lint.sh` (which scopes clippy correctly) and `scripts/preflight.sh` both pass clean. Not this PR's issue.
 
 ## Decision Log
 
