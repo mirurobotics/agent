@@ -270,19 +270,12 @@ where
         }
     }
 
-    /// Requeue `entry` at the tail with its attempt count preserved, dropping
-    /// it with a warning if the queue rejects it.
+    /// Requeue `entry` at the tail with its attempt count preserved.
     async fn requeue(&mut self, entry: QueueEntry) {
-        let job = entry.job.clone();
-        let file = &job.file;
+        let file = &entry.job.file;
         let attempts = entry.attempts;
         info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
-        if let Err(requeue_err) = self.queue.requeue(entry).await {
-            error!(
-                "dropping upload job (rule {}, file {}, digest {}): requeue failed: {requeue_err:?}",
-                job.file_rule_id, job.file, job.digest
-            );
-        }
+        self.queue.requeue(entry).await;
     }
 
     fn log_success(entry: &QueueEntry) {

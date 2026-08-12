@@ -353,41 +353,36 @@ async fn shutdown_during_in_flight_upload_returns_promptly() {
 }
 
 #[tokio::test]
-async fn requeue_into_full_queue_drops_job() {
+async fn requeue_into_full_queue_retains_job() {
     let dir = dirs::create_temp("uploader_requeue_full").await.unwrap();
     let job_b = make_real_job(&dir, "b.log", "contents b").await;
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
     mock.push_step(MockStep::Hang(release_rx));
     mock.push_step(MockStep::Ok);
+    mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
         queue_capacity: 1,
         ..Default::default()
     };
-    let (uploader, handle) = Uploader::spawn(
-        16,
-        mock.clone(),
-        options,
-        None,
-        |_: Duration| async {},
-        Utc::now,
-    )
-    .unwrap();
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
     let job_a = make_job("a.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
-    // fill the queue with a fresh (unprunable) job so A's requeue finds it
-    // full
+    // B takes the slot A freed when it was popped, so A's requeue lands into
+    // an already-full queue
     timed(uploader.enqueue(job_b.clone())).await.unwrap();
     release_tx.send(scripted_err()).unwrap();
+    // B, then A on its second attempt once the test clock clears its backoff
+    timed(started_rx.recv()).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    // A's single failed attempt could not requeue into the full queue, so it
-    // dropped and B ran
-    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+    // A was already admitted, so a newer arrival must not evict it: it
+    // requeues past capacity and is retried after B
+    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b, job_a]);
 }
 
 #[tokio::test]
