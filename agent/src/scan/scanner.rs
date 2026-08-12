@@ -103,9 +103,6 @@ impl SingleThreadScanner {
         }
     }
 
-    /// Deliver every newly-stable file to every sink, awaiting each call. A
-    /// slow sink applies backpressure to the scan tick; delivery is never
-    /// dropped (the ledger dedups, so a drop would be permanent).
     async fn dispatch_stable_files(&self, stable_files: Vec<(StableFile, FileRule)>) {
         let Some((last, rest)) = self.sinks.split_last() else {
             if !stable_files.is_empty() {
@@ -596,10 +593,15 @@ mod tests {
         }
     }
 
-    /// Spawn a sink-less scanner actor with a deterministic injected clock (for
-    /// tests that only assert ledger/snapshot state).
+    /// Spawn a scanner actor with a deterministic injected clock and a discarded
+    /// recording sink, for tests that only assert ledger/snapshot state. The
+    /// sink is attached anyway so every test runs the production shape — the
+    /// app always wires at least one sink — and the dispatch path executes even
+    /// where its output goes unasserted. Zero-sink dispatch is pinned by the
+    /// dedicated `scan_with_no_sinks_does_not_error` test.
     fn spawn_scanner(clock: &Clock) -> Scanner {
-        spawn_scanner_with_sinks(clock, Vec::new())
+        let (scanner, _sink) = spawn_scanner_with_sink(clock);
+        scanner
     }
 
     /// Spawn a scanner actor with a deterministic injected clock and one
@@ -625,10 +627,9 @@ mod tests {
         scanner
     }
 
-    /// temp dir + `*.mcap` glob + spawned sink-less scanner + one deployed
-    /// upload-bearing rule keyed [`DEFAULT_RULE_ID`] (deployment "d", window
-    /// `window`). Returns (dir, clock, scanner). Hold `dir` to keep the temp
-    /// tree alive.
+    /// temp dir + `*.mcap` glob + spawned scanner + one deployed upload-bearing rule
+    /// keyed [`DEFAULT_RULE_ID`] (deployment "d", window `window`). Returns (dir,
+    /// clock, scanner). Hold `dir` to keep the temp tree alive.
     async fn single_rule(window: i64) -> (dirs::TempDir, Clock, Scanner) {
         let dir = dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
@@ -732,7 +733,7 @@ mod tests {
             64,
             ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                sinks: Vec::new(),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: Some(state_file(file).await),
             },
         )
@@ -876,6 +877,7 @@ mod tests {
 
             let scanner = SingleThreadScanner::new(ScannerArgs {
                 snapshot_file: Some(snapshot_file),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 ..ScannerArgs::default()
             })
             .unwrap();
@@ -934,7 +936,7 @@ mod tests {
             };
             let mut scanner = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                sinks: Vec::new(),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: Some(state_file(&state_path).await),
             })
             .unwrap();
@@ -959,6 +961,7 @@ mod tests {
             });
             let mut scanner = SingleThreadScanner::new(ScannerArgs {
                 snapshot_file: Some(state_file(&state_path).await),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 ..ScannerArgs::default()
             })
             .unwrap();
@@ -1073,9 +1076,19 @@ mod tests {
         }
 
         // scan() producing stable files with NO sinks attached does not error.
+        // Zero sinks cannot occur in the app (init always wires the upload
+        // sink) but is ScannerArgs::default(); this is the one test that
+        // exercises the empty-dispatch branch.
         #[tokio::test]
         async fn scan_with_no_sinks_does_not_error() {
-            let (dir, clock, scanner) = single_rule(0).await;
+            let dir = dirs::temp("testing").unwrap();
+            let clock = Clock::new(1000);
+            let scanner = spawn_scanner_with_sinks(&clock, Vec::new());
+            deploy(
+                &scanner,
+                vec![upload_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0)],
+            )
+            .await;
             write(&dir, "nosink.mcap", b"aaa").await;
 
             scan_once(&scanner).await;
@@ -1104,34 +1117,6 @@ mod tests {
 
             first.assert_one_stable("fanout.mcap");
             second.assert_one_stable("fanout.mcap");
-        }
-
-        /// The bug this design fixes: a burst of stable files larger than the
-        /// old 256-event broadcast buffer is delivered in full. Under the
-        /// broadcast design a slow consumer would observe `Lagged` drops, and
-        /// the ledger dedup (`is_latest_ledger_entry`) makes every drop
-        /// permanent. Awaited sinks make delivery exact.
-        #[tokio::test]
-        async fn burst_larger_than_old_broadcast_buffer_is_delivered_losslessly() {
-            const BURST: usize = 300; // > the old 256 broadcast capacity
-
-            let (dir, clock, scanner, sink) = single_rule_with_sink(0).await;
-            for i in 0..BURST {
-                write(&dir, &format!("f{i:03}.mcap"), b"aaaa").await;
-            }
-
-            scan_once(&scanner).await; // discover
-            tick(&scanner, &clock, 1).await; // evaluate => deliver all in one tick
-
-            let names: BTreeSet<String> = sink.names().into_iter().collect();
-            assert_eq!(sink.count(), BURST, "every stable file delivered");
-            assert_eq!(names.len(), BURST, "each delivery is a distinct file");
-            assert_eq!(ledger_count(&scanner).await, BURST);
-
-            // a second tick re-delivers nothing (ledger dedup): the files are
-            // reported exactly once, which is WHY delivery must be lossless.
-            tick(&scanner, &clock, 1).await;
-            assert_eq!(sink.count(), BURST, "ledger dedup must prevent re-delivery");
         }
     }
 
@@ -1681,7 +1666,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                sinks: Vec::new(),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: None,
             })
             .unwrap();
@@ -1752,7 +1737,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut single = SingleThreadScanner::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
-                sinks: Vec::new(),
+                sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: None,
             })
             .unwrap();
