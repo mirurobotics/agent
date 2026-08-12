@@ -73,10 +73,6 @@ async fn run_impl<ScannerT: ScannerExt, UploaderT: UploaderExt>(
 }
 
 /// Enqueue an upload job for `stable`, if its rule uploads at all.
-///
-/// A rule with no `upload` block is retention-only: its files are scanned and
-/// ledgered so the retention engine can act on them, but they never become
-/// upload jobs.
 async fn enqueue_stable_file<UploaderT: UploaderExt>(uploader: &UploaderT, stable: StableFile) {
     let job = Job {
         file: stable.file,

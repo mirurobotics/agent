@@ -593,10 +593,6 @@ mod tests {
     mod set_deployment {
         use super::*;
 
-        // set_deployment swaps only the deployment; every other piece of state —
-        // preexisting, candidates, ledger — is untouched. No glob runs, so a
-        // file that appeared since the last scan is NOT swallowed into
-        // preexisting: it is discovered as a candidate afterwards.
         #[tokio::test]
         async fn late_file_survives_deployment_refresh() {
             let dir = dirs::temp("testing").unwrap();
