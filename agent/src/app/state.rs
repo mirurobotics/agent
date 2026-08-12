@@ -89,12 +89,16 @@ impl AppState {
         // initialize the activity tracker
         let activity_tracker = Arc::new(activity::Tracker::new());
 
-        // initialize the scanner
-        let (scanner, scanner_handle) = Self::init_scanner(layout).await?;
-
-        // initialize the uploader
+        // initialize the uploader before the scanner: the scanner's
+        // stable-file sinks are built from the uploader handle
         let (uploader, uploader_handle) =
             Self::init_uploader(layout, http_client.clone(), token_mngr.clone()).await?;
+
+        // initialize the scanner with the upload sink
+        let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![Arc::new(
+            upload::UploadStableFileSink::new(uploader.clone()),
+        )];
+        let (scanner, scanner_handle) = Self::init_scanner(layout, sinks).await?;
 
         let shutdown_handle = async move {
             let handles = vec![
@@ -129,6 +133,7 @@ impl AppState {
     /// error path currently exists (`Scanner::spawn` cannot fail today).
     async fn init_scanner(
         layout: &disk::Layout,
+        sinks: Vec<Arc<dyn scan::StableFileSink>>,
     ) -> Result<(Arc<scan::Scanner>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match ScanSnapshotFile::new_with_default(
             layout.scanner_snapshot(),
@@ -147,6 +152,7 @@ impl AppState {
 
         let args = ScannerArgs {
             snapshot_file,
+            sinks,
             ..ScannerArgs::default()
         };
         let (scanner, handle) = scan::Scanner::spawn(64, args)?;
@@ -196,8 +202,10 @@ impl AppState {
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the uploader first: it depends on nothing else in the app, and its
-        // feeder (the scan-upload bridge worker) has already been joined by this point.
+        // shutdown the uploader first: it depends on nothing else in the app. The
+        // scanner's upload sink may still enqueue into the stopped uploader if a
+        // scan tick races this shutdown; the sink logs a warn and the tick
+        // completes, so ordering stays safe.
         if let Err(e) = self.uploader.shutdown().await {
             tracing::error!("failed to shutdown uploader: {e}");
             first_err.get_or_insert(e.into());
