@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 // internal crates
-use crate::filesys::{errors::*, files, File, PathExt};
-use crate::models::{Deployment, FileRuleRetention};
-use crate::scan::{
+use crate::data_uploads::scan::{
     errors::*,
     state::{Candidate, Config, Observation, RuleState, StableFile},
 };
+use crate::filesys::{errors::*, files, File, PathExt};
+use crate::models::{Deployment, FileRuleRetention};
 use crate::trace;
 
 // external crates
@@ -330,9 +330,9 @@ mod tests {
     use super::*;
 
     // internal crates
+    use crate::data_uploads::scan::state::{Candidate, Config, Observation, RuleState, StableFile};
     use crate::filesys::{dirs, dirs::TempDir, Dir, PathExt, WriteOptions};
     use crate::models::{Deployment, FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
-    use crate::scan::state::{Candidate, Config, Observation, RuleState, StableFile};
 
     // external crates
     use std::time::SystemTime;

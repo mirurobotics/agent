@@ -4,9 +4,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
+use crate::data_uploads::{
+    scan::{scanner::StableFile, sink::StableFileSink},
+    upload::{Job, Uploader, UploaderExt},
+};
 use crate::models::FileRule;
-use crate::scan::{scanner::StableFile, sink::StableFileSink};
-use crate::upload::{Job, Uploader, UploaderExt};
 
 // external crates
 use tracing::{debug, warn};

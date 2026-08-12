@@ -51,6 +51,8 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `deploy` — deployment state machine. The FSM in `deploy/fsm` manages the lifecycle: download artifacts to a staging directory, apply to the target config directory, report status. `deploy/apply` handles the actual file operations.
 
+`data_uploads/` — parent module for the file-upload pipeline. Submodule `scan` watches rule-configured directories and emits stable files to sinks (the `StableFileSink` seam in `scan/sink.rs`); submodule `upload` queues and executes uploads to object storage. The drivers that schedule the scanner live in `workers/` (`scan.rs`, `sync_scan_bridge.rs`), not here.
+
 `services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `git_commit` (commit tracking), `release` (release management).
 
 `cache` — file-system-backed cache with TTL. Used for caching backend responses.

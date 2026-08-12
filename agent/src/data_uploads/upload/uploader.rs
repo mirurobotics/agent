@@ -5,14 +5,14 @@ use std::time::Duration;
 
 // internal crates
 use crate::cooldown;
-use crate::errors::Error;
-use crate::trace;
-use crate::upload::{
+use crate::data_uploads::upload::{
     errors::*,
     executor::UploadExecutor,
     job::Job,
     queue::{Queue, QueueEntry, QueueSnapshotFile},
 };
+use crate::errors::Error;
+use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

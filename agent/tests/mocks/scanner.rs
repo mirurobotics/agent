@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // internal crates
+use miru_agent::data_uploads::scan::{ScanErr, ScannerExt};
 use miru_agent::models::{Deployment, FileRule};
-use miru_agent::scan::{ScanErr, ScannerExt};
 
 type ResultFn = Box<dyn Fn() -> Result<(), ScanErr> + Send + Sync>;
 type UpdateRulesCalls = Arc<Mutex<Vec<(Deployment, Vec<FileRule>)>>>;

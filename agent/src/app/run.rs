@@ -11,8 +11,8 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::{self, TokenManagerExt};
+use crate::data_uploads::scan;
 use crate::http;
-use crate::scan;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
 use crate::workers::{

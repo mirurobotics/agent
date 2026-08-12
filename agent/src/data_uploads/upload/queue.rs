@@ -2,13 +2,13 @@
 use std::collections::VecDeque;
 
 // internal crates
-use crate::filesys::state_file::SingleThreadStateFile;
-use crate::models::Patch;
-use crate::trace;
-use crate::upload::{
+use crate::data_uploads::upload::{
     errors::{QueueFullErr, UploadErr},
     job::Job,
 };
+use crate::filesys::state_file::SingleThreadStateFile;
+use crate::models::Patch;
+use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};

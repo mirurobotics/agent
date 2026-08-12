@@ -5,10 +5,10 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::{scanner::MockScanner, syncer::MockSyncer};
+use miru_agent::data_uploads::scan::ScanErr;
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::{dirs, Overwrite};
 use miru_agent::models::{Deployment, DplActivity, FileRule, FileRuleSource, Release};
-use miru_agent::scan::ScanErr;
 use miru_agent::sync::syncer::SyncEvent;
 use miru_agent::workers::sync_scan_bridge;
 
@@ -479,7 +479,7 @@ pub mod resolve_and_push {
         // Fail the startup update.
         scanner.set_update_rules(|| {
             Err(ScanErr::InternalError(
-                miru_agent::scan::errors::InternalError {
+                miru_agent::data_uploads::scan::errors::InternalError {
                     message: "boom".to_string(),
                     trace: miru_agent::trace!(),
                 },
@@ -506,7 +506,7 @@ pub mod resolve_and_push {
         // Fail the startup clear.
         scanner.set_clear_rules(|| {
             Err(ScanErr::InternalError(
-                miru_agent::scan::errors::InternalError {
+                miru_agent::data_uploads::scan::errors::InternalError {
                     message: "boom".to_string(),
                     trace: miru_agent::trace!(),
                 },

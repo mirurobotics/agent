@@ -7,16 +7,16 @@ use std::sync::Arc;
 // internal crates
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
+use miru_agent::data_uploads::scan::ScannerExt;
+use miru_agent::data_uploads::upload::UploaderExt;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
 use miru_agent::filesys::{dirs, files, Dir, FileSysErr, PathExt, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
-use miru_agent::scan::ScannerExt;
 use miru_agent::server::ServerErr;
 use miru_agent::sync::SyncerExt;
-use miru_agent::upload::UploaderExt;
 
 // external crates
 use chrono::Utc;

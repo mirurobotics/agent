@@ -1,4 +1,4 @@
-// External driver for the `crate::scan` scanner actor. The actor is reactive,
+// External driver for the `crate::data_uploads::scan` scanner actor. The actor is reactive,
 // not self-scheduling: this worker imposes the cadence that drives repeated
 // scan passes.
 
@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 // internal crates
-use crate::scan::ScannerExt;
+use crate::data_uploads::scan::ScannerExt;
 
 // external crates
 use tracing::{debug, error, info};

@@ -3,14 +3,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // internal crates
-use crate::models::{Deployment, FileRule, FileRuleID};
-pub use crate::scan::state::{Config, StableFile};
-use crate::scan::{
+pub use crate::data_uploads::scan::state::{Config, StableFile};
+use crate::data_uploads::scan::{
     errors::*,
     rule::{Options, RuleScanner},
     sink::StableFileSink,
     state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
 };
+use crate::models::{Deployment, FileRule, FileRuleID};
 use crate::trace;
 
 // external crates
@@ -451,10 +451,10 @@ mod tests {
     // internal crates
     use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
     use super::{ScannerExt, StableFileSink};
+    use crate::data_uploads::scan::rule::RuleScanner;
+    use crate::data_uploads::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
-    use crate::scan::rule::RuleScanner;
-    use crate::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -791,7 +791,10 @@ mod tests {
             scanner.shutdown().await.unwrap();
             handle.await.unwrap();
             let err = scanner.get_ledger_count().await.unwrap_err();
-            assert!(matches!(err, crate::scan::ScanErr::SendActorMessageErr(_)));
+            assert!(matches!(
+                err,
+                crate::data_uploads::scan::ScanErr::SendActorMessageErr(_)
+            ));
         }
 
         #[tokio::test]
@@ -918,7 +921,7 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::rule::Options;
+        use crate::data_uploads::scan::rule::Options;
 
         #[tokio::test]
         async fn writes_current_snapshot() {
@@ -1214,7 +1217,10 @@ mod tests {
                 .update_rules(deployment("d"), rules)
                 .await
                 .unwrap_err();
-            assert!(matches!(err, crate::scan::ScanErr::DuplicateFileRuleID(_)));
+            assert!(matches!(
+                err,
+                crate::data_uploads::scan::ScanErr::DuplicateFileRuleID(_)
+            ));
 
             // No state mutated: the existing active rule is untouched and the
             // duplicate set was not applied.
@@ -1444,7 +1450,7 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::rule::Options;
+        use crate::data_uploads::scan::rule::Options;
 
         #[tokio::test]
         async fn empty_set_scan_is_noop() {
@@ -1607,8 +1613,8 @@ mod tests {
         use super::*;
 
         // internal crates
-        use crate::scan::rule::Options;
-        use crate::scan::state::{Candidate, Observation};
+        use crate::data_uploads::scan::rule::Options;
+        use crate::data_uploads::scan::state::{Candidate, Observation};
 
         // external crates
         use std::time::SystemTime;
@@ -1801,7 +1807,10 @@ mod tests {
             handle.await.unwrap();
 
             let err = scanner.scan().await.unwrap_err();
-            assert!(matches!(err, crate::scan::ScanErr::SendActorMessageErr(_)));
+            assert!(matches!(
+                err,
+                crate::data_uploads::scan::ScanErr::SendActorMessageErr(_)
+            ));
         }
     }
 }

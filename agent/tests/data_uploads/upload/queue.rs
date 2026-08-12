@@ -1,6 +1,8 @@
 // internal crates
+use miru_agent::data_uploads::upload::{
+    Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr,
+};
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
-use miru_agent::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
