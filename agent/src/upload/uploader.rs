@@ -143,10 +143,15 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     pub(crate) async fn run(mut self) {
+        // a persisted deadline beyond one maximum backoff cannot have come from
+        // the retry schedule, so release it once here on the load path rather
+        // than leaving it stranded for the life of the process
+        let horizon = (self.now_fn)() + TimeDelta::seconds(self.options.backoff.max_secs.max(0));
+        self.queue.release_stale_deadlines(horizon).await;
+
         loop {
             let now = (self.now_fn)();
-            let max_wait = TimeDelta::seconds(self.options.backoff.max_secs.max(0));
-            match self.queue.pop_ready(now, max_wait).await {
+            match self.queue.pop_ready(now).await {
                 Some(entry) => {
                     if let Flow::Shutdown = self.run_attempt(entry).await {
                         break;
@@ -168,10 +173,13 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
-                    // the ceiling is defense-in-depth: with the same horizon and the same
-                    // `now`, pop_ready has already released any deadline beyond it, so this
-                    // only matters if the two ever diverge
-                    let ceiling = max_wait.to_std().unwrap_or(Duration::ZERO);
+                    // without a ceiling the worker can commit to a decades-long sleep that a
+                    // later forward clock correction would never interrupt; bounding the wait
+                    // makes it re-evaluate at least once per maximum backoff, so the queue
+                    // recovers once the clock is corrected
+                    let ceiling = TimeDelta::seconds(self.options.backoff.max_secs.max(0))
+                        .to_std()
+                        .unwrap_or(Duration::ZERO);
                     let wait = match self.queue.earliest_next_attempt() {
                         Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO).min(ceiling),
                         // unreachable: the queue is non-empty here

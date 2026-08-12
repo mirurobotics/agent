@@ -11,7 +11,7 @@ use crate::upload::{
 };
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -98,37 +98,53 @@ impl Queue {
         info!("upload: job requeued; queue length {}", self.jobs.len());
     }
 
-    /// Remove and return the first eligible entry, preserving the order of the
-    /// remaining entries. An entry is eligible when its `next_attempt_at` is
-    /// `None`, is `<= now`, or is beyond `now + max_wait`.
-    ///
-    /// `max_wait` is the largest wait the caller's retry schedule can produce,
-    /// so a deadline further out than `now + max_wait` cannot have been stamped
-    /// by that schedule. It is treated as evidence of a backward clock step —
-    /// an unset real-time clock at boot, or a large NTP correction applied
-    /// after the deadline was persisted — and the entry is released as due now
-    /// rather than stranded forever.
-    ///
-    /// Returns `None` (without persisting) when no entry is eligible.
-    pub async fn pop_ready(
-        &mut self,
-        now: DateTime<Utc>,
-        max_wait: TimeDelta,
-    ) -> Option<QueueEntry> {
-        let horizon = now
-            .checked_add_signed(max_wait)
-            .unwrap_or(DateTime::<Utc>::MAX_UTC);
-        let idx = self.jobs.iter().position(|entry| {
-            entry
-                .next_attempt_at
-                .is_none_or(|at| at <= now || at > horizon)
-        })?;
+    /// Remove and return the first entry whose `next_attempt_at` is `None` or
+    /// `<= now`, preserving the order of the remaining entries. Returns `None`
+    /// (without persisting) when no entry is eligible.
+    pub async fn pop_ready(&mut self, now: DateTime<Utc>) -> Option<QueueEntry> {
+        let idx = self
+            .jobs
+            .iter()
+            .position(|entry| entry.next_attempt_at.is_none_or(|at| at <= now))?;
         let entry = self.jobs.remove(idx);
         if entry.is_some() {
             self.persist().await;
             info!("upload: job dequeued; queue length {}", self.jobs.len());
         }
         entry
+    }
+
+    /// Clear every `next_attempt_at` strictly beyond `horizon`, making those
+    /// entries eligible immediately.
+    ///
+    /// `horizon` is `now` plus the largest wait the caller's retry schedule can
+    /// produce, so a persisted deadline further out than that cannot have been
+    /// stamped by that schedule. It is evidence of a backward clock step — an
+    /// unset real-time clock at boot, or a large NTP correction applied after
+    /// the deadline was persisted. Left alone, such an entry is never popped
+    /// and never counts an attempt, so it is stranded forever; clearing it
+    /// makes it eligible now.
+    ///
+    /// Called once at startup, on the load path, because a reboot is the
+    /// dominant way a snapshot acquires far-future deadlines. It warns rather
+    /// than logging quietly: a clock anomaly is worth surfacing in device logs.
+    /// Does not persist when nothing was released.
+    pub async fn release_stale_deadlines(&mut self, horizon: DateTime<Utc>) {
+        let mut released = 0;
+        for entry in self.jobs.iter_mut() {
+            if entry.next_attempt_at.is_some_and(|at| at > horizon) {
+                entry.next_attempt_at = None;
+                released += 1;
+            }
+        }
+        if released == 0 {
+            return;
+        }
+        warn!(
+            "upload: released {released} retry deadline(s) beyond {horizon}; \
+             the device clock appears to have stepped backward"
+        );
+        self.persist().await;
     }
 
     /// The minimum effective deadline over all entries, where a `None`
