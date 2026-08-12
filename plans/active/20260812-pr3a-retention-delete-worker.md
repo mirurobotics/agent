@@ -23,8 +23,8 @@ This PR makes deletion a first-class subsystem, deliberately **outside the scann
 (Ben's call: the scanner shouldn't know about retention — it emits stable files with
 their full rule attached, and downstream subsystems own their own policy):
 
-- `agent/src/delete/`: persisted pending-delete queue (`delete_queue.json`) of
-  `PendingDelete` records + `Deleter` actor with a metadata-and-digest-checked sweep.
+- `agent/src/data_uploads/retention/`: persisted job queue (`delete_queue.json`) of
+  `retention::Job` records + `Deleter` actor with a metadata-and-digest-checked sweep.
 - `LiveExecutor` enqueues a pending delete on confirmed upload when
   `retention.require_upload` is true (any `ttl_secs`), instead of deleting inline.
   Enqueue failure never fails the already-confirmed upload.
@@ -51,17 +51,18 @@ _(filled as work proceeds)_
 - **Standalone delete subsystem, scanner retention-unaware** (Ben, 2026-08-12) — see the
   umbrella plan's revised PR 3 section for the full rationale and rejected alternatives
   (scan-tick sweep with ledger eligibility; direct scanner handle for confirms).
-- **`PendingDelete` keeps #191's event-agnostic shape** — records name *when* a file
-  became deletable, never *why*; 3b adds a producer, not fields. Changes from #191:
-  `delete_delay_secs: i64` → `ttl_secs: u64` (from `FileRuleRetention`, so no negative
-  clamp), `upload_rule_id` → `file_rule_id`.
+- **`retention::Job` keeps #191's event-agnostic shape** — jobs name *when* a file
+  became deletable, never *why*; 3b adds a producer, not fields. Named `Job` (not
+  `PendingDelete`) to rhyme with `upload::Job`; the module prefix distinguishes them.
+  Changes from #191: `delete_delay_secs: i64` → `ttl_secs: u64` (from
+  `FileRuleRetention`, so no negative clamp), `upload_rule_id` → `file_rule_id`.
 - **Enqueue condition**: `job.retention` is `Some` with `require_upload: true` — the
   `ttl_secs: 0` exact-match at the delete site is gone; nonzero TTLs now work. With
   `require_upload: false`, the executor does NOT enqueue (that file's eligibility is
   stability, the 3b producer's job — enqueueing here too would double-enqueue).
 - **Timing change, accepted**: today's inline delete-at-confirm becomes
   delete-at-next-sweep (≤ ~60s later) for ttl-0 rules. Zero production users.
-- **Sweep safety (ported from #191)**: only paths carried by `PendingDelete` records are
+- **Sweep safety (ported from #191)**: only paths carried by `retention::Job` records are
   ever deleted; each due entry is re-stat'd — size+mtime match → delete; mtime-only
   change → re-hash, delete only on digest match; any other mismatch or a vanished file →
   drop the record without deleting.

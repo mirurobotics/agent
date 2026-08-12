@@ -1,7 +1,5 @@
 // internal crates
-use miru_agent::data_uploads::retention::{
-    DeleteErr, Deleter, DeleterArgs, DeleterExt, PendingDelete,
-};
+use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 
 // external crates
@@ -18,10 +16,10 @@ async fn temp_file(contents: &[u8]) -> files::TempFile {
     tmp
 }
 
-/// A zero-delay `PendingDelete` for `file` that is due immediately: its
+/// A zero-delay `Job` for `file` that is due immediately: its
 /// size/mtime/digest reflect the file's current on-disk state.
-async fn make_record(file: &File) -> PendingDelete {
-    PendingDelete {
+async fn make_job(file: &File) -> Job {
+    Job {
         file: file.clone(),
         size: files::size(file).await.unwrap(),
         mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
@@ -43,10 +41,7 @@ async fn actor_round_trip() {
     let src = temp_file(b"hello world").await;
     let (deleter, handle) = spawn_deleter();
 
-    deleter
-        .enqueue(make_record(src.file()).await)
-        .await
-        .unwrap();
+    deleter.enqueue(make_job(src.file()).await).await.unwrap();
     assert_eq!(deleter.len().await.unwrap(), 1);
 
     // the zero-delay record is due immediately: one sweep deletes the file
@@ -68,7 +63,7 @@ async fn enqueue_after_shutdown_errors() {
     handle.await.unwrap();
 
     let err = deleter
-        .enqueue(make_record(src.file()).await)
+        .enqueue(make_job(src.file()).await)
         .await
         .unwrap_err();
     assert!(matches!(err, DeleteErr::SendActorMessageErr(_)));

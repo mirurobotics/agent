@@ -123,8 +123,8 @@ delete subsystem — draft #191's architecture, modernized to `FileRuleRetention
 scanner's job ends at emitting stable files (its events carry the full `FileRule` since
 PR 2's follow-ups, which is what makes retention-unaware producers possible).
 
-- `delete/` module: a persisted pending-delete queue (`delete_queue.json`) of
-  event-agnostic `PendingDelete` records ("this exact file — path, size, mtime, digest —
+- `data_uploads::retention`: a persisted job queue (`delete_queue.json`) of
+  event-agnostic `retention::Job` records ("this exact file — path, size, mtime, digest —
   became deletable at `eligible_at`; delete it `ttl_secs` later") and a `Deleter` actor
   whose sweep re-stats each due entry: size+mtime match → delete; mtime-only change →
   re-hash and delete only on digest match; otherwise drop without deleting.

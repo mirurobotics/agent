@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::data_uploads::retention::errors::QueueFullErr;
-use miru_agent::data_uploads::retention::{DeleteErr, DeleterExt, PendingDelete};
+use miru_agent::data_uploads::retention::{DeleteErr, DeleterExt, Job};
 
 type ResultFn = Box<dyn Fn() -> Result<(), DeleteErr> + Send + Sync>;
 
@@ -16,13 +16,13 @@ pub enum MockStep {
 }
 
 /// A test double for [`DeleterExt`] that records every `enqueue`d
-/// [`PendingDelete`] and follows a scripted result queue (an empty script
+/// [`Job`] and follows a scripted result queue (an empty script
 /// defaults to `Ok`), mirroring `MockUploadExecutor`. `sweep` calls are
 /// counted with a settable result (mirroring `MockScanner`'s `scan`). The
 /// other trait methods return sensible defaults.
 pub struct MockDeleter {
     script: Mutex<VecDeque<MockStep>>,
-    pub calls: Mutex<Vec<PendingDelete>>,
+    pub calls: Mutex<Vec<Job>>,
     num_sweep_calls: AtomicUsize,
     sweep_fn: Arc<Mutex<ResultFn>>,
 }
@@ -41,7 +41,7 @@ impl MockDeleter {
         self.script.lock().unwrap().push_back(step);
     }
 
-    pub fn recorded_calls(&self) -> Vec<PendingDelete> {
+    pub fn recorded_calls(&self) -> Vec<Job> {
         self.calls.lock().unwrap().clone()
     }
 
@@ -61,9 +61,9 @@ impl MockDeleter {
 }
 
 impl DeleterExt for MockDeleter {
-    async fn enqueue(&self, pending: PendingDelete) -> Result<(), DeleteErr> {
-        let file = pending.file.to_string();
-        self.calls.lock().unwrap().push(pending);
+    async fn enqueue(&self, job: Job) -> Result<(), DeleteErr> {
+        let file = job.file.to_string();
+        self.calls.lock().unwrap().push(job);
         let step = self.script.lock().unwrap().pop_front();
         match step {
             None | Some(MockStep::Ok) => Ok(()),

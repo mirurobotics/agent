@@ -5,7 +5,7 @@ pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 
 #[derive(Debug, thiserror::Error)]
-#[error("delete queue is full (capacity {capacity}); rejected pending deletion for file {file}")]
+#[error("delete queue is full (capacity {capacity}); rejected job for file {file}")]
 pub struct QueueFullErr {
     pub capacity: usize,
     pub file: String,

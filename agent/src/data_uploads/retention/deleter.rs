@@ -5,7 +5,8 @@ use std::time::SystemTime;
 // internal crates
 use crate::data_uploads::retention::{
     errors::*,
-    queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile, PendingDelete},
+    job::Job,
+    queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile},
 };
 use crate::filesys::{errors::FileSysErr, files};
 use crate::trace;
@@ -45,7 +46,7 @@ impl Default for DeleterArgs {
 }
 
 pub struct SingleThreadDeleter {
-    entries: Vec<PendingDelete>,
+    entries: Vec<Job>,
     capacity: usize,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     snapshot_file: Option<DeleteQueueSnapshotFile>,
@@ -73,33 +74,30 @@ impl SingleThreadDeleter {
         self.entries.len()
     }
 
-    /// Record `pending` as the queue's newest knowledge of its path: any
-    /// existing entry for the same file is replaced (newest record wins), so
-    /// the queue holds at most one entry per path. At capacity a NEW path is
-    /// rejected with [`DeleteErr::QueueFullErr`] — the file simply stays on
-    /// disk, the safe direction — while a same-path replacement always
-    /// succeeds (it never grows the queue), even on a snapshot-seeded
-    /// over-capacity backlog.
-    async fn enqueue(&mut self, pending: PendingDelete) -> Result<(), DeleteErr> {
-        let replaces_existing = self.entries.iter().any(|entry| entry.file == pending.file);
+    /// Record `job` as the queue's newest knowledge of its path: any existing
+    /// entry for the same file is replaced (newest job wins), so the queue
+    /// holds at most one entry per path. At capacity a NEW path is rejected
+    /// with [`DeleteErr::QueueFullErr`] — the file simply stays on disk, the
+    /// safe direction — while a same-path replacement always succeeds (it
+    /// never grows the queue), even on a snapshot-seeded over-capacity
+    /// backlog.
+    async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
+        let replaces_existing = self.entries.iter().any(|entry| entry.file == job.file);
         if !replaces_existing && self.entries.len() >= self.capacity {
             warn!(
-                "delete: queue is full (capacity {}); rejecting pending deletion for file {}",
-                self.capacity, pending.file
+                "delete: queue is full (capacity {}); rejecting job for file {}",
+                self.capacity, job.file
             );
             return Err(DeleteErr::QueueFullErr(QueueFullErr {
                 capacity: self.capacity,
-                file: pending.file.to_string(),
+                file: job.file.to_string(),
                 trace: trace!(),
             }));
         }
-        self.entries.retain(|entry| entry.file != pending.file);
-        self.entries.push(pending);
+        self.entries.retain(|entry| entry.file != job.file);
+        self.entries.push(job);
         self.persist_snapshot().await;
-        info!(
-            "delete: pending deletion enqueued; queue length {}",
-            self.entries.len()
-        );
+        info!("delete: job enqueued; queue length {}", self.entries.len());
         Ok(())
     }
 
@@ -127,7 +125,7 @@ impl SingleThreadDeleter {
     /// match when only the mtime moved; every other outcome either drops the
     /// entry WITHOUT deleting (already gone, changed since upload) or keeps it
     /// for the next sweep (not yet due, stat, hash, or delete failure).
-    async fn sweep_entry(entry: &PendingDelete, now: DateTime<Utc>) -> bool {
+    async fn sweep_entry(entry: &Job, now: DateTime<Utc>) -> bool {
         if now < entry.due_at() {
             return true;
         }
@@ -224,17 +222,13 @@ impl SingleThreadDeleter {
 // an async, actor-round-tripping is_empty would be dead weight next to len()
 #[allow(clippy::len_without_is_empty)]
 pub trait DeleterExt: Send + Sync {
-    /// Record a pending deletion, replacing any existing entry for the same
-    /// file.
-    fn enqueue(
-        &self,
-        pending: PendingDelete,
-    ) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
+    /// Enqueue a job, replacing any existing entry for the same file.
+    fn enqueue(&self, job: Job) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
     /// Perform one sweep pass over the queue.
     fn sweep(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
-    /// The number of pending deletions in the queue.
+    /// The number of jobs in the queue.
     fn len(&self) -> impl std::future::Future<Output = Result<usize, DeleteErr>> + Send;
-    /// Stop the actor. Pending entries stay in the persisted snapshot and are
+    /// Stop the actor. Queued jobs stay in the persisted snapshot and are
     /// re-seeded on the next spawn.
     fn shutdown(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
 }
@@ -242,7 +236,7 @@ pub trait DeleterExt: Send + Sync {
 // ================================== WORKER ======================================= //
 pub(crate) enum Command {
     Enqueue {
-        pending: PendingDelete,
+        job: Job,
         respond_to: oneshot::Sender<Result<(), DeleteErr>>,
     },
     Sweep {
@@ -271,12 +265,9 @@ impl Worker {
                     }
                     break;
                 }
-                Command::Enqueue {
-                    pending,
-                    respond_to,
-                } => {
+                Command::Enqueue { job, respond_to } => {
                     dispatch!(
-                        self.deleter.enqueue(pending).await,
+                        self.deleter.enqueue(job).await,
                         respond_to,
                         "Actor failed to send enqueue response"
                     );
@@ -303,7 +294,7 @@ impl Worker {
 // ================================== HANDLE ======================================= //
 /// Command handle to the [`SingleThreadDeleter`] actor. Reactive, not
 /// self-scheduling: each [`sweep`](DeleterExt::sweep) call performs exactly one
-/// pass over the pending-deletion queue. The cadence that drives repeated
+/// pass over the job queue. The cadence that drives repeated
 /// passes is imposed by an external driver, not by this type.
 #[derive(Debug)]
 pub struct Deleter {
@@ -345,9 +336,9 @@ impl Deleter {
 }
 
 impl DeleterExt for Deleter {
-    async fn enqueue(&self, pending: PendingDelete) -> Result<(), DeleteErr> {
+    async fn enqueue(&self, job: Job) -> Result<(), DeleteErr> {
         self.send_command(|tx| Command::Enqueue {
-            pending,
+            job,
             respond_to: tx,
         })
         .await?
@@ -380,9 +371,8 @@ mod tests {
     // internal crates
     use super::{DeleterArgs, SingleThreadDeleter};
     use crate::data_uploads::retention::errors::DeleteErr;
-    use crate::data_uploads::retention::queue::{
-        DeleteQueueSnapshot, DeleteQueueSnapshotFile, PendingDelete,
-    };
+    use crate::data_uploads::retention::job::Job;
+    use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, File, PathExt, WriteOptions};
 
     // external crates
@@ -427,10 +417,10 @@ mod tests {
         tmp
     }
 
-    /// A `PendingDelete` for `file` whose size/mtime/digest reflect the file's
+    /// A `Job` for `file` whose size/mtime/digest reflect the file's
     /// current on-disk state.
-    async fn pending(file: &File, eligible_secs: i64, ttl_secs: u64) -> PendingDelete {
-        PendingDelete {
+    async fn make_job(file: &File, eligible_secs: i64, ttl_secs: u64) -> Job {
+        Job {
             file: file.clone(),
             size: files::size(file).await.unwrap(),
             mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
@@ -463,12 +453,12 @@ mod tests {
         #[tokio::test]
         async fn adds_ttl_and_saturates_on_overflow() {
             let tmp = temp_file(b"aaaa").await;
-            let record = pending(tmp.file(), 1000, 300).await;
+            let record = make_job(tmp.file(), 1000, 300).await;
             assert_eq!(record.due_at(), DateTime::from_timestamp(1300, 0).unwrap());
 
             // a TTL beyond what chrono can represent saturates to "never due"
             // instead of panicking.
-            let absurd = PendingDelete {
+            let absurd = Job {
                 ttl_secs: u64::MAX,
                 ..record
             };
@@ -484,8 +474,8 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let first = pending(tmp.file(), 1000, 100).await;
-            let second = pending(tmp.file(), 1200, 0).await;
+            let first = make_job(tmp.file(), 1000, 100).await;
+            let second = make_job(tmp.file(), 1200, 0).await;
 
             deleter.enqueue(first).await.unwrap();
             deleter.enqueue(second.clone()).await.unwrap();
@@ -504,12 +494,12 @@ mod tests {
                 queue_capacity: 1,
                 snapshot_file: None,
             });
-            let first = pending(tmp_a.file(), 1000, 0).await;
+            let first = make_job(tmp_a.file(), 1000, 0).await;
             deleter.enqueue(first.clone()).await.unwrap();
 
             // a new path is rejected at capacity; the queue is unchanged and
             // the rejected file stays on disk.
-            let rejected = pending(tmp_b.file(), 1000, 0).await;
+            let rejected = make_job(tmp_b.file(), 1000, 0).await;
             let err = deleter.enqueue(rejected).await.unwrap_err();
             assert!(matches!(err, DeleteErr::QueueFullErr(_)));
             assert!(err.to_string().contains("capacity 1"));
@@ -518,7 +508,7 @@ mod tests {
 
             // a same-path record still replaces at capacity (the net queue
             // length is unchanged).
-            let replacement = pending(tmp_a.file(), 1200, 30).await;
+            let replacement = make_job(tmp_a.file(), 1200, 30).await;
             deleter.enqueue(replacement.clone()).await.unwrap();
             assert_eq!(deleter.entries, vec![replacement]);
         }
@@ -533,8 +523,8 @@ mod tests {
             let tmp_a = temp_file(b"aaaa").await;
             let tmp_b = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
-            let first_a = pending(tmp_a.file(), 1000, 100).await;
-            let first_b = pending(tmp_b.file(), 1000, 100).await;
+            let first_a = make_job(tmp_a.file(), 1000, 100).await;
+            let first_b = make_job(tmp_b.file(), 1000, 100).await;
 
             // write a two-entry snapshot, then rebuild with capacity 1: the
             // seeded backlog exceeds capacity by design.
@@ -556,14 +546,14 @@ mod tests {
 
             // a same-path record replaces its entry (newest record wins);
             // nothing is silently lost from the over-capacity queue.
-            let replacement = pending(tmp_a.file(), 1200, 0).await;
+            let replacement = make_job(tmp_a.file(), 1200, 0).await;
             deleter.enqueue(replacement.clone()).await.unwrap();
             assert_eq!(deleter.entries, vec![first_b.clone(), replacement]);
 
             // a genuinely new path is still rejected, leaving the queue intact.
             let tmp_c = temp_file(b"cccc").await;
             let err = deleter
-                .enqueue(pending(tmp_c.file(), 1000, 0).await)
+                .enqueue(make_job(tmp_c.file(), 1000, 0).await)
                 .await
                 .unwrap_err();
             assert!(matches!(err, DeleteErr::QueueFullErr(_)));
@@ -580,7 +570,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(pending(tmp.file(), 1000, 0).await)
+                .enqueue(make_job(tmp.file(), 1000, 0).await)
                 .await
                 .unwrap();
 
@@ -595,7 +585,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = pending(tmp.file(), 1000, 500).await;
+            let record = make_job(tmp.file(), 1000, 500).await;
             deleter.enqueue(record.clone()).await.unwrap();
 
             // not yet due: both 1000 and 1499 are before due_at (1500).
@@ -618,7 +608,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(pending(tmp.file(), 1000, 0).await)
+                .enqueue(make_job(tmp.file(), 1000, 0).await)
                 .await
                 .unwrap();
 
@@ -638,7 +628,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let mut record = pending(tmp.file(), 1000, 0).await;
+            let mut record = make_job(tmp.file(), 1000, 0).await;
             // same size, different recorded mtime: the re-stat mismatches, but
             // the untouched file's digest still matches, so the sweep deletes.
             record.mtime += chrono::Duration::seconds(1);
@@ -655,7 +645,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let mut record = pending(tmp.file(), 1000, 0).await;
+            let mut record = make_job(tmp.file(), 1000, 0).await;
             // deterministic mtime mismatch: the record carries a sentinel.
             record.mtime = DateTime::from_timestamp(1, 0).unwrap();
             deleter.enqueue(record).await.unwrap();
@@ -681,7 +671,7 @@ mod tests {
             let metadata = files::metadata(&target).await.unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = PendingDelete {
+            let record = Job {
                 file: target.clone(),
                 size: metadata.len(),
                 // sentinel mtime: the re-stat mismatches, forcing the re-hash.
@@ -706,7 +696,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(pending(tmp.file(), 1000, 0).await)
+                .enqueue(make_job(tmp.file(), 1000, 0).await)
                 .await
                 .unwrap();
             files::delete(tmp.file()).await.unwrap();
@@ -726,7 +716,7 @@ mod tests {
             let metadata = files::metadata(&target).await.unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = PendingDelete {
+            let record = Job {
                 file: target.clone(),
                 size: metadata.len(),
                 mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
@@ -752,7 +742,7 @@ mod tests {
             let child = File::new(parent.file().path().join("child"));
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = PendingDelete {
+            let record = Job {
                 file: child,
                 size: 4,
                 mtime: DateTime::from_timestamp(900, 0).unwrap(),
@@ -779,7 +769,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
-            let record = pending(tmp.file(), 1000, 500).await;
+            let record = make_job(tmp.file(), 1000, 500).await;
 
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {
                 now_fn: Arc::new(clock.now_fn()),
@@ -789,7 +779,7 @@ mod tests {
             deleter.enqueue(record.clone()).await.unwrap();
             drop(deleter);
 
-            // a rebuild from the same file re-seeds the pending entries.
+            // a rebuild from the same file re-seeds the queued jobs.
             let mut rebuilt = SingleThreadDeleter::new(DeleterArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 snapshot_file: Some(snapshot_file(&state_path).await),
@@ -830,7 +820,7 @@ mod tests {
 
             // the enqueue still succeeds; the persist failure is only logged.
             deleter
-                .enqueue(pending(tmp.file(), 1000, 500).await)
+                .enqueue(make_job(tmp.file(), 1000, 500).await)
                 .await
                 .unwrap();
             assert_eq!(deleter.entries.len(), 1);
