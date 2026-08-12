@@ -210,8 +210,7 @@ mod requeue {
                 attempts: 3,
                 next_attempt_at: None,
             })
-            .await
-            .unwrap();
+            .await;
 
         let first = queue.pop_ready(Utc::now()).await.unwrap();
         assert_eq!(first.job, job_a);
@@ -233,8 +232,7 @@ mod requeue {
                     attempts: 5,
                     next_attempt_at: None,
                 })
-                .await
-                .unwrap();
+                .await;
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
@@ -257,8 +255,7 @@ mod requeue {
                     attempts: 5,
                     next_attempt_at: Some(deadline),
                 })
-                .await
-                .unwrap();
+                .await;
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
@@ -269,12 +266,14 @@ mod requeue {
     }
 
     #[tokio::test]
-    async fn full_queue_rejects_requeue() {
-        // Requeue honors capacity too — it never evicts to make room.
+    async fn full_queue_still_accepts_requeue() {
+        // An already-admitted job must never be evicted by a newer arrival
+        // that took its slot while it was in flight, so requeue bypasses
+        // capacity and the queue transiently exceeds it.
         let mut queue = Queue::new(1);
         queue.enqueue(make_job("a.log")).await.unwrap();
 
-        let result = queue
+        queue
             .requeue(QueueEntry {
                 job: make_job("b.log"),
                 attempts: 2,
@@ -282,11 +281,11 @@ mod requeue {
             })
             .await;
 
-        assert!(
-            matches!(result, Err(UploadErr::QueueFullErr(_))),
-            "expected QueueFullErr, got: {result:?}"
+        assert_eq!(queue.len(), 2);
+        assert_eq!(
+            digests(&mut queue).await,
+            vec!["sha256:a.log".to_string(), "sha256:b.log".to_string()]
         );
-        assert_eq!(queue.len(), 1);
     }
 }
 
@@ -322,8 +321,7 @@ mod pop_ready {
                 attempts: 1,
                 next_attempt_at: Some(deadline),
             })
-            .await
-            .unwrap();
+            .await;
         queue.enqueue(make_job("b.log")).await.unwrap();
         queue.enqueue(make_job("c.log")).await.unwrap();
 
@@ -352,8 +350,7 @@ mod pop_ready {
                 attempts: 1,
                 next_attempt_at: Some(now + TimeDelta::hours(1)),
             })
-            .await
-            .unwrap();
+            .await;
 
         assert!(queue.pop_ready(now).await.is_none());
         assert_eq!(queue.len(), 1);
@@ -399,8 +396,7 @@ mod earliest_next_attempt {
                     attempts: 1,
                     next_attempt_at: Some(deadline),
                 })
-                .await
-                .unwrap();
+                .await;
         }
 
         assert_eq!(queue.earliest_next_attempt(), Some(t1));
@@ -415,8 +411,7 @@ mod earliest_next_attempt {
                 attempts: 1,
                 next_attempt_at: Some(Utc::now() + TimeDelta::hours(1)),
             })
-            .await
-            .unwrap();
+            .await;
         queue.enqueue(make_job("b.log")).await.unwrap();
 
         assert_eq!(
