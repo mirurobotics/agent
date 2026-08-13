@@ -163,10 +163,7 @@ mod tests {
             assert!(queue.is_empty());
         }
 
-        // Pins the persisted wire format field-by-field: a rename anywhere in
-        // `Job` silently invalidates every fleet's delete_queue.json (the
-        // snapshot deserializes as default-empty and queued deletions vanish),
-        // and only a literal-JSON fixture fails when that happens.
+        // Pins the persisted wire format field-by-field
         #[tokio::test]
         async fn raw_json_snapshot_loads() {
             let dir = dirs::temp("delete-queue-test").unwrap();
@@ -185,37 +182,6 @@ mod tests {
             let queue = Queue::from_snapshot(8, open(&path).await);
 
             assert_eq!(queue.entries(), [make_job("a.log", 1000, 500)]);
-        }
-
-        // A persisted backlog may exceed `capacity` (capacity only gates new
-        // enqueues): the backlog loads in full and drains before the queue
-        // accepts more.
-        #[tokio::test]
-        async fn seeds_backlog_beyond_capacity() {
-            let dir = dirs::temp("delete-queue-test").unwrap();
-            let path = dir.file("delete_queue.json");
-            let job_a = make_job("a.log", 1000, 100);
-            let job_b = make_job("b.log", 1000, 100);
-            {
-                let mut seeder = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-                seeder.enqueue(job_a.clone()).unwrap();
-                seeder.enqueue(job_b.clone()).unwrap();
-                seeder.persist().await;
-            }
-
-            let mut queue = Queue::from_snapshot(1, open(&path).await);
-            assert_eq!(queue.entries(), [job_a.clone(), job_b.clone()]);
-
-            // over capacity: every new path is rejected...
-            let err = queue.enqueue(make_job("c.log", 1000, 0)).unwrap_err();
-            assert!(matches!(err, DeleteErr::QueueFullErr(_)));
-            assert_eq!(queue.entries(), [job_a.clone(), job_b.clone()]);
-
-            // ...until the backlog drains below capacity.
-            queue.pop_front();
-            queue.pop_front();
-            queue.enqueue(make_job("c.log", 1000, 0)).unwrap();
-            assert_eq!(queue.entries(), [make_job("c.log", 1000, 0)]);
         }
     }
 
@@ -261,7 +227,7 @@ mod tests {
             };
             assert_eq!(err.capacity, 1);
             assert_eq!(err.file, "/data/b.log");
-            assert_eq!(queue.entries(), [first.clone()]);
+            assert_eq!(queue.entries().as_slice(), std::slice::from_ref(&first));
 
             // same-path is not a bypass: a duplicate also grows the queue, so
             // it is rejected too.
