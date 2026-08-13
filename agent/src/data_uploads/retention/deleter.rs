@@ -67,23 +67,29 @@ impl SingleThreadDeleter {
     }
 
     async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        self.queue.enqueue(job).await
+        self.queue.enqueue(job)?;
+        self.queue.persist().await;
+        Ok(())
     }
 
-    /// One pass over the queue: delete every due entry whose file is provably
-    /// unchanged since upload; keep the rest. Per-entry failures are logged
-    /// and never propagated — `sweep` always returns `Ok(())`.
+    /// Walk the queue one job at a time. Each job is popped into ownership
+    /// so a drop cannot hit a different entry. A dropped job is persisted
+    /// before the next is considered; a kept job is requeued at the tail.
+    /// Per-entry failures are logged and never propagated — `sweep` always
+    /// returns `Ok(())`.
     async fn sweep(&mut self) -> Result<(), DeleteErr> {
         let now = (self.now_fn)();
-        let entries = self.queue.drain();
-        let before = entries.len();
-        let mut kept = Vec::with_capacity(before);
-        for entry in entries {
+        let n = self.queue.len();
+        for _ in 0..n {
+            let Some(entry) = self.queue.pop_front() else {
+                break;
+            };
             if Self::sweep_entry(&entry, now).await {
-                kept.push(entry);
+                self.queue.requeue(entry);
+            } else {
+                self.queue.persist().await;
             }
         }
-        self.queue.restore(kept, before).await;
         Ok(())
     }
 
@@ -178,9 +184,9 @@ impl SingleThreadDeleter {
 // an async, actor-round-tripping is_empty would be dead weight next to len()
 #[allow(clippy::len_without_is_empty)]
 pub trait DeleterExt: Send + Sync {
-    /// Enqueue a job, replacing any existing entry for the same file.
+    /// Enqueue a job.
     fn enqueue(&self, job: Job) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
-    /// Perform one sweep pass over the queue.
+    /// Walk the queue one job at a time, persisting after each drop.
     fn sweep(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
     /// The number of jobs in the queue.
     fn len(&self) -> impl std::future::Future<Output = Result<usize, DeleteErr>> + Send;
@@ -249,9 +255,9 @@ impl Worker {
 
 // ================================== HANDLE ======================================= //
 /// Command handle to the [`SingleThreadDeleter`] actor. Reactive, not
-/// self-scheduling: each [`sweep`](DeleterExt::sweep) call performs exactly one
-/// pass over the job queue. The cadence that drives repeated
-/// passes is imposed by an external driver, not by this type.
+/// self-scheduling: each [`sweep`](DeleterExt::sweep) call walks the queue
+/// one job at a time. The cadence that drives repeated sweeps is imposed
+/// by an external driver, not by this type.
 #[derive(Debug)]
 pub struct Deleter {
     sender: mpsc::Sender<Command>,
@@ -327,6 +333,7 @@ mod tests {
     // internal crates
     use super::{DeleterArgs, SingleThreadDeleter};
     use crate::data_uploads::retention::job::Job;
+    use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, File, PathExt, WriteOptions};
 
     // external crates
@@ -373,13 +380,15 @@ mod tests {
 
     /// A `Job` for `file` whose size/mtime/digest reflect the file's
     /// current on-disk state.
-    async fn make_job(file: &File, eligible_secs: i64, ttl_secs: u64) -> Job {
+    async fn make_job(file: &File, observed_secs: i64, ttl_secs: u64) -> Job {
+        let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
         Job {
             file: file.clone(),
             size: files::size(file).await.unwrap(),
-            mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
             digest: files::hash(file).await.unwrap(),
-            eligible_at: DateTime::from_timestamp(eligible_secs, 0).unwrap(),
+            mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
+            first_observed_at: observed_at,
+            last_observed_at: observed_at,
             ttl_secs,
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
@@ -392,6 +401,13 @@ mod tests {
             now_fn: Arc::new(clock.now_fn()),
             ..DeleterArgs::default()
         })
+    }
+
+    /// A persistence handle for the snapshot at `file`.
+    async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
+        DeleteQueueSnapshotFile::new_with_default(file.clone(), DeleteQueueSnapshot::default())
+            .await
+            .unwrap()
     }
 
     mod sweep {
@@ -411,6 +427,39 @@ mod tests {
 
             assert!(deleter.queue.is_empty());
             assert!(!tmp.file().exists());
+        }
+
+        #[tokio::test]
+        async fn each_drop_is_persisted_before_the_next_job() {
+            let dir = dirs::temp("delete-sweep-persist").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let due = temp_file(b"aaaa").await;
+            let waiting = temp_file(b"bbbb").await;
+            let clock = Clock::new(1000);
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                snapshot_file: Some(snapshot_file(&state_path).await),
+                ..DeleterArgs::default()
+            });
+            let waiting_job = make_job(waiting.file(), 1000, 500).await;
+            deleter
+                .enqueue(make_job(due.file(), 1000, 0).await)
+                .await
+                .unwrap();
+            deleter.enqueue(waiting_job.clone()).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+            drop(deleter);
+
+            // the due job was persisted-out before the waiting job was
+            // considered, so a rebuild sees only the waiting job.
+            let restored = SingleThreadDeleter::new(DeleterArgs {
+                snapshot_file: Some(snapshot_file(&state_path).await),
+                ..DeleterArgs::default()
+            });
+            assert!(!due.file().exists());
+            assert!(waiting.file().exists());
+            assert_eq!(restored.queue.entries(), [waiting_job]);
         }
 
         #[tokio::test]
@@ -507,10 +556,11 @@ mod tests {
             let record = Job {
                 file: target.clone(),
                 size: metadata.len(),
+                digest: "sha256:unused".to_string(),
                 // sentinel mtime: the re-stat mismatches, forcing the re-hash.
                 mtime: DateTime::from_timestamp(1, 0).unwrap(),
-                digest: "sha256:unused".to_string(),
-                eligible_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
                 ttl_secs: 0,
                 file_rule_id: "rule_1".to_string(),
                 deployment_id: "dpl_1".to_string(),
@@ -552,9 +602,10 @@ mod tests {
             let record = Job {
                 file: target.clone(),
                 size: metadata.len(),
-                mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
                 digest: "sha256:unused".to_string(),
-                eligible_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
+                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
                 ttl_secs: 0,
                 file_rule_id: "rule_1".to_string(),
                 deployment_id: "dpl_1".to_string(),
@@ -578,9 +629,10 @@ mod tests {
             let record = Job {
                 file: child,
                 size: 4,
-                mtime: DateTime::from_timestamp(900, 0).unwrap(),
                 digest: "sha256:unused".to_string(),
-                eligible_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                mtime: DateTime::from_timestamp(900, 0).unwrap(),
+                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
                 ttl_secs: 0,
                 file_rule_id: "rule_1".to_string(),
                 deployment_id: "dpl_1".to_string(),

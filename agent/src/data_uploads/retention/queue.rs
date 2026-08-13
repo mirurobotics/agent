@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::VecDeque;
+
 // internal crates
 use crate::data_uploads::retention::{errors::*, job::Job};
 use crate::filesys::state_file::SingleThreadStateFile;
@@ -23,13 +26,11 @@ impl Patch<DeleteQueueSnapshot> for DeleteQueueSnapshot {
 /// in-memory cache. Mirrors the uploader's `QueueSnapshotFile`.
 pub type DeleteQueueSnapshotFile = SingleThreadStateFile<DeleteQueueSnapshot, DeleteQueueSnapshot>;
 
-/// Membership policy for the retention worker's jobs, mirroring the uploader's
-/// `upload::queue::Queue`: at most one entry per file path (newest job wins), a
-/// capacity bound that gates only new paths, and snapshot persistence on every
-/// mutation. The queue decides *what is in the set*; the sweep's filesystem
-/// mechanics live with the deleter.
+/// In-memory job queue with an optional snapshot. Mutations (`enqueue`,
+/// `pop_front`, `requeue`) only touch memory; [`persist`] is the sole
+/// writer to disk.
 pub struct Queue {
-    entries: Vec<Job>,
+    entries: VecDeque<Job>,
     capacity: usize,
     snapshot_file: Option<DeleteQueueSnapshotFile>,
 }
@@ -37,18 +38,17 @@ pub struct Queue {
 impl Queue {
     pub fn new(capacity: usize) -> Self {
         Self {
-            entries: Vec::new(),
+            entries: VecDeque::new(),
             capacity,
             snapshot_file: None,
         }
     }
 
-    /// Seed the queue from `snapshot_file`'s persisted entries. The backlog is
-    /// loaded in full even if it exceeds `capacity`; capacity only gates new
-    /// enqueues, so an over-capacity backlog simply drains before the queue
-    /// accepts more.
+    /// Seed the queue from `snapshot_file`'s persisted entries. The backlog is loaded
+    /// in full even if it exceeds `capacity`; capacity only gates new enqueues, so an
+    /// over-capacity backlog simply drains before the queue accepts more.
     pub fn from_snapshot(capacity: usize, snapshot_file: DeleteQueueSnapshotFile) -> Self {
-        let entries = snapshot_file.read().entries.clone();
+        let entries = snapshot_file.read().entries.iter().cloned().collect();
         Self {
             entries,
             capacity,
@@ -64,16 +64,8 @@ impl Queue {
         self.entries.is_empty()
     }
 
-    /// Record `job` as the queue's newest knowledge of its path: any existing
-    /// entry for the same file is replaced (newest job wins), so the queue
-    /// holds at most one entry per path. At capacity a NEW path is rejected
-    /// with [`DeleteErr::QueueFullErr`] — the file simply stays on disk, the
-    /// safe direction — while a same-path replacement always succeeds (it
-    /// never grows the queue), even on a snapshot-seeded over-capacity
-    /// backlog.
-    pub async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        let replaces_existing = self.entries.iter().any(|entry| entry.file == job.file);
-        if !replaces_existing && self.entries.len() >= self.capacity {
+    pub fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
+        if self.entries.len() >= self.capacity {
             warn!(
                 "delete: queue is full (capacity {}); rejecting job for file {}",
                 self.capacity, job.file
@@ -84,35 +76,28 @@ impl Queue {
                 trace: trace!(),
             }));
         }
-        self.entries.retain(|entry| entry.file != job.file);
-        self.entries.push(job);
-        self.persist_snapshot().await;
+        self.entries.push_back(job);
         info!("delete: job enqueued; queue length {}", self.entries.len());
         Ok(())
     }
 
-    /// Take every job out of the queue for a sweep pass. The caller must hand
-    /// the survivors back via [`restore`](Self::restore) — the queue is empty
-    /// (and its snapshot intentionally untouched) in between.
-    pub fn drain(&mut self) -> Vec<Job> {
-        std::mem::take(&mut self.entries)
+    pub fn pop_front(&mut self) -> Option<Job> {
+        self.entries.pop_front()
     }
 
-    /// Put a sweep pass's surviving jobs back, persisting iff the pass dropped
-    /// any (`before` is the count handed out by [`drain`](Self::drain)).
-    pub async fn restore(&mut self, kept: Vec<Job>, before: usize) {
-        self.entries = kept;
-        if self.entries.len() != before {
-            self.persist_snapshot().await;
-        }
+    /// Push a previously popped job back at the tail.
+    pub fn requeue(&mut self, job: Job) {
+        self.entries.push_back(job);
     }
 
-    async fn persist_snapshot(&mut self) {
+    /// Write the in-memory queue to the snapshot. The only function that
+    /// touches disk; call it after a mutation that should survive a restart.
+    pub async fn persist(&mut self) {
         let Some(snapshot_file) = self.snapshot_file.as_mut() else {
             return;
         };
         let snapshot = DeleteQueueSnapshot {
-            entries: self.entries.clone(),
+            entries: self.entries.iter().cloned().collect(),
         };
         if let Err(err) = snapshot_file.patch(snapshot).await {
             warn!("delete: failed to persist delete queue: {err}");
@@ -121,8 +106,8 @@ impl Queue {
 
     /// The queued jobs, oldest enqueue first (test observability only).
     #[cfg(test)]
-    pub(crate) fn entries(&self) -> &[Job] {
-        &self.entries
+    pub(crate) fn entries(&self) -> Vec<Job> {
+        self.entries.iter().cloned().collect()
     }
 }
 
@@ -151,13 +136,15 @@ mod tests {
 
     /// A `Job` for `file` whose size/mtime/digest reflect the file's current
     /// on-disk state.
-    async fn make_job(file: &File, eligible_secs: i64, ttl_secs: u64) -> Job {
+    async fn make_job(file: &File, observed_secs: i64, ttl_secs: u64) -> Job {
+        let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
         Job {
             file: file.clone(),
             size: files::size(file).await.unwrap(),
-            mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
             digest: files::hash(file).await.unwrap(),
-            eligible_at: DateTime::from_timestamp(eligible_secs, 0).unwrap(),
+            mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
+            first_observed_at: observed_at,
+            last_observed_at: observed_at,
             ttl_secs,
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
@@ -175,48 +162,48 @@ mod tests {
         use super::*;
 
         #[tokio::test]
-        async fn same_path_enqueue_replaces_older_job() {
+        async fn same_path_enqueue_appends() {
             let tmp = temp_file(b"aaaa").await;
             let mut queue = Queue::new(DEFAULT_CAPACITY);
             let first = make_job(tmp.file(), 1000, 100).await;
             let second = make_job(tmp.file(), 1200, 0).await;
 
-            queue.enqueue(first).await.unwrap();
-            queue.enqueue(second.clone()).await.unwrap();
+            queue.enqueue(first.clone()).unwrap();
+            queue.enqueue(second.clone()).unwrap();
 
-            // newest job wins: at most one entry per path.
-            assert_eq!(queue.entries(), [second]);
+            assert_eq!(queue.entries(), [first, second]);
         }
 
         #[tokio::test]
-        async fn full_queue_rejects_new_paths_but_replaces_existing() {
+        async fn full_queue_returns_queue_full_err() {
             let tmp_a = temp_file(b"aaaa").await;
             let tmp_b = temp_file(b"bbbb").await;
             let mut queue = Queue::new(1);
             let first = make_job(tmp_a.file(), 1000, 0).await;
-            queue.enqueue(first.clone()).await.unwrap();
+            queue.enqueue(first.clone()).unwrap();
 
             // a new path is rejected at capacity; the queue is unchanged and
             // the rejected file stays on disk.
             let rejected = make_job(tmp_b.file(), 1000, 0).await;
-            let err = queue.enqueue(rejected).await.unwrap_err();
+            let err = queue.enqueue(rejected).unwrap_err();
             assert!(matches!(err, DeleteErr::QueueFullErr(_)));
             assert!(err.to_string().contains("capacity 1"));
             assert_eq!(queue.entries(), [first.clone()]);
             assert!(tmp_b.file().exists());
 
-            // a same-path job still replaces at capacity (the net queue length
-            // is unchanged).
-            let replacement = make_job(tmp_a.file(), 1200, 30).await;
-            queue.enqueue(replacement.clone()).await.unwrap();
-            assert_eq!(queue.entries(), [replacement]);
+            // same-path is not a bypass: a second job for `tmp_a` also grows
+            // the queue, so it is rejected too.
+            let err = queue
+                .enqueue(make_job(tmp_a.file(), 1200, 30).await)
+                .unwrap_err();
+            assert!(matches!(err, DeleteErr::QueueFullErr(_)));
+            assert_eq!(queue.entries(), [first]);
         }
 
         // A snapshot-seeded backlog may exceed `capacity` (capacity only gates
-        // new enqueues). A same-path job must still replace on such a queue
-        // rather than being rejected after its older job was dropped.
+        // new enqueues). Same-path is not a bypass on such a queue either.
         #[tokio::test]
-        async fn over_capacity_backlog_still_replaces_existing() {
+        async fn over_capacity_backlog_rejects_new_enqueues() {
             let dir = dirs::temp("delete-over-capacity").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp_a = temp_file(b"aaaa").await;
@@ -229,23 +216,22 @@ mod tests {
             {
                 let mut seeder =
                     Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
-                seeder.enqueue(first_a.clone()).await.unwrap();
-                seeder.enqueue(first_b.clone()).await.unwrap();
+                seeder.enqueue(first_a.clone()).unwrap();
+                seeder.enqueue(first_b.clone()).unwrap();
+                seeder.persist().await;
             }
             let mut queue = Queue::from_snapshot(1, snapshot_file(&state_path).await);
             assert_eq!(queue.entries(), [first_a.clone(), first_b.clone()]);
 
-            // a same-path job replaces its entry (newest job wins); nothing is
-            // silently lost from the over-capacity queue.
-            let replacement = make_job(tmp_a.file(), 1200, 0).await;
-            queue.enqueue(replacement.clone()).await.unwrap();
-            assert_eq!(queue.entries(), [first_b.clone(), replacement]);
+            let err = queue
+                .enqueue(make_job(tmp_a.file(), 1200, 0).await)
+                .unwrap_err();
+            assert!(matches!(err, DeleteErr::QueueFullErr(_)));
+            assert_eq!(queue.entries(), [first_a.clone(), first_b.clone()]);
 
-            // a genuinely new path is still rejected, leaving the queue intact.
             let tmp_c = temp_file(b"cccc").await;
             let err = queue
                 .enqueue(make_job(tmp_c.file(), 1000, 0).await)
-                .await
                 .unwrap_err();
             assert!(matches!(err, DeleteErr::QueueFullErr(_)));
             assert_eq!(queue.len(), 2);
@@ -256,6 +242,22 @@ mod tests {
         use super::*;
 
         #[tokio::test]
+        async fn enqueue_does_not_persist() {
+            let dir = dirs::temp("delete-snapshot").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let tmp = temp_file(b"aaaa").await;
+            let mut queue =
+                Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
+            queue
+                .enqueue(make_job(tmp.file(), 1000, 500).await)
+                .unwrap();
+            drop(queue);
+
+            let rebuilt = Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
+            assert!(rebuilt.is_empty());
+        }
+
+        #[tokio::test]
         async fn queue_survives_rebuild_from_snapshot() {
             let dir = dirs::temp("delete-snapshot").unwrap();
             let state_path = dir.file("delete_queue.json");
@@ -264,7 +266,8 @@ mod tests {
 
             let mut queue =
                 Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
-            queue.enqueue(job.clone()).await.unwrap();
+            queue.enqueue(job.clone()).unwrap();
+            queue.persist().await;
             drop(queue);
 
             // a rebuild from the same file re-seeds the queued jobs.
@@ -273,7 +276,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn restore_persists_only_when_jobs_were_dropped() {
+        async fn pop_front_does_not_persist() {
             let dir = dirs::temp("delete-snapshot").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp_a = temp_file(b"aaaa").await;
@@ -282,14 +285,35 @@ mod tests {
                 Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
             let job_a = make_job(tmp_a.file(), 1000, 0).await;
             let job_b = make_job(tmp_b.file(), 1000, 500).await;
-            queue.enqueue(job_a).await.unwrap();
-            queue.enqueue(job_b.clone()).await.unwrap();
+            queue.enqueue(job_a.clone()).unwrap();
+            queue.enqueue(job_b.clone()).unwrap();
+            queue.persist().await;
 
-            // a pass that drops a job persists the survivors.
-            let taken = queue.drain();
-            let before = taken.len();
-            let kept: Vec<_> = taken.into_iter().filter(|j| j.ttl_secs > 0).collect();
-            queue.restore(kept, before).await;
+            // in-flight: the job is out of memory but still on disk, so a
+            // crash before persist reloads both.
+            assert!(queue.pop_front().is_some());
+            drop(queue);
+
+            let restored = Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
+            assert_eq!(restored.entries(), [job_a, job_b]);
+        }
+
+        #[tokio::test]
+        async fn persist_after_pop_drops_the_front_job() {
+            let dir = dirs::temp("delete-snapshot").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let tmp_a = temp_file(b"aaaa").await;
+            let tmp_b = temp_file(b"bbbb").await;
+            let mut queue =
+                Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
+            let job_a = make_job(tmp_a.file(), 1000, 0).await;
+            let job_b = make_job(tmp_b.file(), 1000, 500).await;
+            queue.enqueue(job_a).unwrap();
+            queue.enqueue(job_b.clone()).unwrap();
+            queue.persist().await;
+
+            assert!(queue.pop_front().is_some());
+            queue.persist().await;
             drop(queue);
 
             let restored = Queue::from_snapshot(DEFAULT_CAPACITY, snapshot_file(&state_path).await);
@@ -310,11 +334,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            // the enqueue still succeeds; the persist failure is only logged.
             queue
                 .enqueue(make_job(tmp.file(), 1000, 500).await)
-                .await
                 .unwrap();
+            // the persist failure is only logged; memory still holds the job.
+            queue.persist().await;
             assert_eq!(queue.len(), 1);
         }
     }

@@ -19,12 +19,14 @@ async fn temp_file(contents: &[u8]) -> files::TempFile {
 /// A zero-delay `Job` for `file` that is due immediately: its
 /// size/mtime/digest reflect the file's current on-disk state.
 async fn make_job(file: &File) -> Job {
+    let now = Utc::now();
     Job {
         file: file.clone(),
         size: files::size(file).await.unwrap(),
-        mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
         digest: files::hash(file).await.unwrap(),
-        eligible_at: Utc::now(),
+        mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
+        first_observed_at: now,
+        last_observed_at: now,
         ttl_secs: 0,
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
