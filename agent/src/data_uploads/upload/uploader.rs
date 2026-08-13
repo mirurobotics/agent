@@ -181,6 +181,15 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
+                    // a deadline beyond one maximum backoff cannot have come from
+                    // the retry schedule, so pull it back before sizing the sleep.
+                    // Done here rather than once at startup because the clock can
+                    // step backward at any point in a long-lived process, and the
+                    // sleep below is monotonic: a later correction would never cut
+                    // it short.
+                    self.queue.reset_invalid_deadlines(
+                        now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)),
+                    );
                     let wait = match self.queue.earliest_next_attempt() {
                         Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
                         // unreachable: the queue is non-empty here
@@ -461,14 +470,10 @@ impl Uploader {
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
-        let mut queue = match snapshot_file {
+        let queue = match snapshot_file {
             Some(file) => Queue::from_snapshot(options.queue_capacity, file),
             None => Queue::new(options.queue_capacity),
         };
-        // a loaded deadline beyond one maximum backoff cannot have come from the retry
-        // schedule, reset it here rather than leaving it stranded 
-        let horizon = now_fn() + TimeDelta::seconds(options.backoff.max_secs.max(0));
-        queue.reset_invalid_deadlines(horizon);
         let worker = Worker {
             receiver,
             queue,

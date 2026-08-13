@@ -138,26 +138,20 @@ impl Queue {
         Some(entry.clone())
     }
 
-    /// Reset every `next_attempt_at` strictly beyond `horizon`.
-    ///
-    /// `horizon` is `now` plus the retry schedule's maximum wait, so a persisted
-    /// deadline past it cannot be a real backoff stamp — typically a backward clock
-    /// step. Resetting it makes the entry eligible now instead of leaving it stranded.
+    /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no
+    /// entry can be deferred past a deadline the caller considers reachable.
     pub fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
-        let mut released = 0;
+        let mut reset = 0;
         for entry in self.jobs.iter_mut() {
             if entry.next_attempt_at.is_some_and(|at| at > horizon) {
-                entry.next_attempt_at = None;
-                released += 1;
+                entry.next_attempt_at = Some(horizon);
+                reset += 1;
             }
         }
-        if released == 0 {
+        if reset == 0 {
             return;
         }
-        warn!(
-            "upload: released {released} retry deadline(s) beyond {horizon}; \
-             the device clock appears to have stepped backward"
-        );
+        warn!("upload: pulled {reset} deadline(s) back to {horizon}");
     }
 
     /// The minimum effective deadline over all entries, where a `None`
