@@ -20,13 +20,15 @@ This is the past-side mirror of the future-side fix in PR #212 (`Queue::reset_in
 
 ## Progress
 
-- [ ] Milestone 1: implausible-age guard and split drop logging in `agent/src/data_uploads/upload/uploader.rs`; commit.
-- [ ] Milestone 2: tests in `agent/tests/data_uploads/upload/uploader.rs`; commit.
-- [ ] Milestone 3: full validation (lint, test, covgate, preflight) and push; PR leaves draft only once CI is green.
+- [x] Milestone 1: implausible-age guard and split drop logging in `agent/src/data_uploads/upload/uploader.rs`; commit `e871612`.
+- [x] Milestone 2: tests in `agent/tests/data_uploads/upload/uploader.rs`; commit `3096b91`.
+- [x] Milestone 3: full validation (lint, test, covgate, preflight), push, and draft PR.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The revert-and-watch-it-fail check (Concrete Steps step 6) was run and is recorded here because it is the plan's load-bearing claim. With the guard hand-reverted to the original unconditional drop, **all three** new tests failed — `network_failure_with_implausible_age_keeps_job`, `implausible_age_boundary_is_pinned_from_both_sides`, and `durability::implausible_age_keeps_job_on_disk` — while the other 95 in the module passed. Each failed as `test timed out` at the `timed()` helper (`agent/tests/data_uploads/upload/uploader.rs:32`): the job is dropped on its first network failure, so the second executor call that the test waits on never arrives. The guard was then restored with `git checkout HEAD -- agent/src/data_uploads/upload/uploader.rs` and all four tests (including the pre-existing `network_failure_past_max_job_age_drops_job`) pass.
+
+- The boundary test uses 29-day and 31-day ages around a pinned 30-day `max_plausible_job_age` rather than an age of exactly 30 days. `spawn_with_test_clock` seeds its clock from its own `Utc::now()`, which is strictly later than the `Utc::now()` used to stamp the job, so an "exactly at the bound" age would land a fraction of a millisecond *past* the bound and the drop side of the test would silently invert. The one-day margin on each side keeps the test deterministic while still pinning the guard from both directions; the `<=` versus `<` choice at exact equality is documented in the production code rather than asserted.
 
 ## Decision Log
 
@@ -40,7 +42,11 @@ This is the past-side mirror of the future-side fix in PR #212 (`Queue::reset_in
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Shipped as planned, with no deviation from the Plan of Work. Two production edits (`max_plausible_job_age` on `UploaderOptions` plus the guarded drop in `handle_network_failure`, and the new `log_implausible_age` warn) and three new tests; `log_age_drop` is untouched and is now unreachable for the skew case. `network_failure_past_max_job_age_drops_job` still passes unchanged, so the backstop's purpose survives intact.
+
+All four behavioral acceptance criteria hold and are pinned by tests. `./scripts/preflight.sh` reported `Preflight clean` on the first run — the known parallelism flake did not appear, so no per-gate re-run was needed. Per-module coverage held without a `.covgate` change: the new guard branch is exercised from both sides by `implausible_age_boundary_is_pinned_from_both_sides`.
+
+The only judgment call made during execution was the boundary test's one-day margins, recorded in Surprises & Discoveries.
 
 ## Context and Orientation
 
