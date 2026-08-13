@@ -1014,6 +1014,54 @@ mod durability {
         .unwrap()
     }
 
+    /// [`spawn_persisted`] over the shared test clock, so an idle wait completes
+    /// instantly and the duration it asked for is recorded.
+    fn spawn_persisted_with_test_clock(
+        mock: Arc<MockUploadExecutor>,
+        snapshot: QueueSnapshotFile,
+    ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
+        let clock = Arc::new(Mutex::new(Utc::now()));
+        let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+        let now_clock = clock.clone();
+        let now_fn = move || *now_clock.lock().unwrap();
+        let recorded = sleeps.clone();
+        let sleep_fn = move |duration: Duration| {
+            recorded.lock().unwrap().push(duration);
+            *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+            async {}
+        };
+        let (uploader, handle) = Uploader::spawn(
+            16,
+            mock,
+            MockDeleter::new(),
+            UploaderOptions::default(),
+            Some(snapshot),
+            sleep_fn,
+            now_fn,
+        )
+        .unwrap();
+        (uploader, handle, sleeps)
+    }
+
+    /// Seed `path` with one entry stamped `deadline`, as a snapshot written
+    /// before a clock step would look.
+    async fn seed(path: &File, deadline: DateTime<Utc>) -> Job {
+        let job = make_job("stranded.log");
+        let mut snapshot = open(path).await;
+        snapshot
+            .patch(QueueSnapshot {
+                entries: vec![QueueEntry {
+                    id: uuid::Uuid::new_v4(),
+                    job: job.clone(),
+                    attempts: 1,
+                    next_attempt_at: Some(deadline),
+                }],
+            })
+            .await
+            .unwrap();
+        job
+    }
+
     /// The digests currently on disk, read through a fresh handle.
     async fn on_disk(path: &File) -> Vec<String> {
         open(path)
@@ -1142,54 +1190,6 @@ mod durability {
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
-    }
-
-    /// [`spawn_persisted`] over the shared test clock, so an idle wait completes
-    /// instantly and the duration it asked for is recorded.
-    fn spawn_persisted_with_test_clock(
-        mock: Arc<MockUploadExecutor>,
-        snapshot: QueueSnapshotFile,
-    ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
-        let clock = Arc::new(Mutex::new(Utc::now()));
-        let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-        let now_clock = clock.clone();
-        let now_fn = move || *now_clock.lock().unwrap();
-        let recorded = sleeps.clone();
-        let sleep_fn = move |duration: Duration| {
-            recorded.lock().unwrap().push(duration);
-            *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
-            async {}
-        };
-        let (uploader, handle) = Uploader::spawn(
-            16,
-            mock,
-            MockDeleter::new(),
-            UploaderOptions::default(),
-            Some(snapshot),
-            sleep_fn,
-            now_fn,
-        )
-        .unwrap();
-        (uploader, handle, sleeps)
-    }
-
-    /// Seed `path` with one entry stamped `deadline`, as a snapshot written
-    /// before a clock step would look.
-    async fn seed(path: &File, deadline: DateTime<Utc>) -> Job {
-        let job = make_job("stranded.log");
-        let mut snapshot = open(path).await;
-        snapshot
-            .patch(QueueSnapshot {
-                entries: vec![QueueEntry {
-                    id: uuid::Uuid::new_v4(),
-                    job: job.clone(),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                }],
-            })
-            .await
-            .unwrap();
-        job
     }
 
     #[tokio::test]

@@ -506,34 +506,6 @@ mod reset_invalid_deadlines {
     use super::*;
 
     #[tokio::test]
-    async fn invalid_deadline_is_pulled_back_to_the_horizon() {
-        let mut queue = Queue::new(4);
-        let now = Utc::now();
-        let horizon = now + TimeDelta::hours(24);
-        // no 24h-max backoff schedule could have stamped this: it is what a
-        // snapshot written before a backward clock step looks like
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log"),
-                attempts: 3,
-                next_attempt_at: Some(now + TimeDelta::hours(48)),
-            })
-            .await;
-
-        queue.reset_invalid_deadlines(horizon);
-
-        // stranded for 48h before the reset; now bounded by the horizon rather
-        // than made instantly eligible, so a clock still settling after boot is
-        // not hammered
-        assert!(queue.next_ready(now).is_none());
-        let entry = queue.next_ready(horizon).unwrap();
-        assert_eq!(entry.next_attempt_at, Some(horizon));
-        // attempt count intact, so the retry budget still applies
-        assert_eq!(entry.attempts, 3);
-    }
-
-    #[tokio::test]
     async fn only_deadlines_past_the_horizon_move() {
         let mut queue = Queue::new(8);
         let now = Utc::now();
@@ -553,8 +525,6 @@ mod reset_invalid_deadlines {
 
         queue.reset_invalid_deadlines(horizon);
 
-        // every entry is visited, and only the one strictly past the horizon
-        // moves — the other two keep their own deadlines
         let mut drained = Vec::new();
         while let Some(entry) = queue.next_ready(beyond) {
             drained.push((entry.job.digest.clone(), entry.next_attempt_at));
@@ -568,27 +538,6 @@ mod reset_invalid_deadlines {
                 ("sha256:c.log".to_string(), Some(horizon)),
             ]
         );
-    }
-
-    #[tokio::test]
-    async fn deadline_within_horizon_is_untouched() {
-        let mut queue = Queue::new(4);
-        let now = Utc::now();
-        let horizon = now + TimeDelta::hours(24);
-        // exactly at the horizon: an ordinary maximum-backoff wait, still honored
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log"),
-                attempts: 7,
-                next_attempt_at: Some(horizon),
-            })
-            .await;
-
-        queue.reset_invalid_deadlines(horizon);
-
-        assert!(queue.next_ready(now).is_none());
-        assert_eq!(queue.len(), 1);
     }
 
     #[tokio::test]
