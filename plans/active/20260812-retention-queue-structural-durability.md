@@ -30,14 +30,36 @@ The reference implementation is the upload queue after `5a6cae2` ("fix(upload): 
 
 ## Progress
 
-- [ ] M1: `Queue` gains entry identity, `next_ready`, `remove`; `persist` becomes private and every mutator persists.
-- [ ] M2: `SingleThreadDeleter::sweep` becomes select-and-resolve; `SweepOutcome::NotDue` disappears; inline deleter tests updated.
-- [ ] M3: Queue tests move to `agent/tests/data_uploads/retention/queue.rs`, mirroring `agent/tests/data_uploads/upload/queue.rs`, plus the mid-sweep-persist durability test.
+- [x] M1: `Queue` gains entry identity, `next_ready`, `remove`; `persist` becomes private and every mutator persists.
+- [x] M2: `SingleThreadDeleter::sweep` becomes select-and-resolve; `SweepOutcome::NotDue` disappears; inline deleter tests updated.
+- [x] M3: Queue tests move to `agent/tests/data_uploads/retention/queue.rs`, mirroring `agent/tests/data_uploads/upload/queue.rs`, plus the mid-sweep-persist durability test.
 - [ ] M4: Preflight CLEAN locally, pushed, draft PR opened, CI green on branch head before the PR leaves draft.
 
 ## Surprises & Discoveries
 
-_(fill in during execution)_
+- **`sweep::not_due_entry_is_left_in_place_and_not_persisted` cannot pin "not
+  persisted".** A persist failure is swallowed and a successful persist of an
+  unchanged queue is indistinguishable from no persist through the public
+  surface. Worse, `main`'s rotation is order-preserving over a full lap
+  (`[A,B]` → `[B,A]` → `[A,B]`), so even the entry order cannot discriminate.
+  The test landed as `sweep::not_due_entries_are_left_untouched`: two not-due
+  entries and one due entry, asserting the snapshot after the sweep is exactly
+  the first two entries — same order, same ids — while the due entry resolves.
+  That pins what is observable (a not-due entry is never selected and never
+  moved) without claiming a no-write it cannot see.
+- **`TempDir` derefs to `Dir`**, so integration tests can use `dir.file(...)`
+  directly; the upload tests' `dir.to_dir().file(...)` is not required.
+- **`Dir` must be imported from `miru_agent::filesys`, not `filesys::dirs`** —
+  `dirs::Dir` is a private re-export, so the persist-failure trick needs
+  `use miru_agent::filesys::{Dir, PathExt}`.
+- **`on_disk` had to be non-destructive.** The uploader's `digests` helper
+  drains via `next_ready` + `remove`, which rewrites the snapshot; the
+  durability test reads the snapshot three times, so `on_disk` reads
+  `open(path).read().entries` through a fresh handle instead.
+- **No import of `QueueEntry` was needed in `deleter.rs`**, as the plan
+  predicted: ids flow inside the entry value returned by `next_ready`.
+- **Every inline `deleter.rs` test passed with zero behavioral edits** (17/17
+  before the new test was added), confirming sweep semantics are unchanged.
 
 ## Decision Log
 
@@ -253,4 +275,17 @@ Every step is an ordinary edit or a read-only check on an existing branch; all a
 
 ## Outcomes & Retrospective
 
-_(fill in at completion)_
+Landed as two commits on `refactor/deleter-queue-identity-removal`:
+`refactor(retention): keep a delete job queued until its sweep resolves it`
+and `test(retention): pin queue identity, selection, and mid-sweep durability`.
+
+The regression check in step 7 was performed in a scratch `git worktree` on
+`main` with a throwaway inline test replaying the `main`-shaped sequence
+(`enqueue a, b; persist; pop_front(); enqueue c; persist`). It failed as
+predicted:
+
+    left:  ["/data/b.log", "/data/c.log"]
+    right: ["/data/a.log", "/data/b.log", "/data/c.log"]
+
+The in-flight entry is written out of the snapshot on `main` the moment
+anything else persists. The worktree was removed without committing.
