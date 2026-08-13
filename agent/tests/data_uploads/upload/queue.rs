@@ -502,11 +502,11 @@ mod earliest_next_attempt {
     }
 }
 
-mod release_stale_deadlines {
+mod reset_invalid_deadlines {
     use super::*;
 
     #[tokio::test]
-    async fn stale_deadline_is_released() {
+    async fn invalid_deadline_is_reset() {
         let mut queue = Queue::new(4);
         let now = Utc::now();
         // no 24h-max backoff schedule could have stamped this: it is what a
@@ -520,9 +520,9 @@ mod release_stale_deadlines {
             })
             .await;
 
-        queue.release_stale_deadlines(now + TimeDelta::hours(24));
+        queue.reset_invalid_deadlines(now + TimeDelta::hours(24));
 
-        // stranded before the release; eligible immediately after, with its
+        // stranded before the reset; eligible immediately after, with its
         // attempt count intact so the retry budget still applies
         let entry = queue.next_ready(now).unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
@@ -545,14 +545,14 @@ mod release_stale_deadlines {
             })
             .await;
 
-        queue.release_stale_deadlines(horizon);
+        queue.reset_invalid_deadlines(horizon);
 
         assert!(queue.next_ready(now).is_none());
         assert_eq!(queue.len(), 1);
     }
 
     #[tokio::test]
-    async fn release_is_in_memory_until_the_next_mutation() {
+    async fn reset_is_in_memory_until_the_next_mutation() {
         let dir = dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let now = Utc::now();
@@ -572,7 +572,7 @@ mod release_stale_deadlines {
                 .await;
         }
 
-        queue.release_stale_deadlines(now + TimeDelta::hours(24));
+        queue.reset_invalid_deadlines(now + TimeDelta::hours(24));
 
         let head_deadline = |raw: &str| -> serde_json::Value {
             serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]

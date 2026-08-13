@@ -138,26 +138,12 @@ impl Queue {
         Some(entry.clone())
     }
 
-    /// Clear every `next_attempt_at` strictly beyond `horizon`, making those
-    /// entries eligible immediately.
+    /// Reset every `next_attempt_at` strictly beyond `horizon`.
     ///
-    /// `horizon` is `now` plus the largest wait the caller's retry schedule can
-    /// produce, so a persisted deadline further out than that cannot have been
-    /// stamped by that schedule. It is evidence of a backward clock step — an
-    /// unset real-time clock at boot, or a large NTP correction applied after
-    /// the deadline was persisted. Left alone such an entry is never eligible
-    /// and never counts an attempt, so it is stranded forever; clearing it
-    /// makes it eligible now.
-    ///
-    /// Called once at construction, because a reboot is the dominant way a
-    /// snapshot acquires far-future deadlines. It warns rather than logging
-    /// quietly: a clock anomaly is worth surfacing in device logs.
-    ///
-    /// Releases in memory only, which is why this is not `async`. The write
-    /// would buy nothing: the release is idempotent and re-derived on every
-    /// load, and the next mutation persists the corrected entries anyway. A
-    /// snapshot read before that first mutation still shows the stale stamps.
-    pub fn release_stale_deadlines(&mut self, horizon: DateTime<Utc>) {
+    /// `horizon` is `now` plus the retry schedule's maximum wait, so a persisted
+    /// deadline past it cannot be a real backoff stamp — typically a backward clock
+    /// step. Resetting it makes the entry eligible now instead of leaving it stranded.
+    pub fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
         let mut released = 0;
         for entry in self.jobs.iter_mut() {
             if entry.next_attempt_at.is_some_and(|at| at > horizon) {

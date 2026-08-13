@@ -473,11 +473,10 @@ impl Uploader {
             Some(file) => Queue::from_snapshot(options.queue_capacity, file),
             None => Queue::new(options.queue_capacity),
         };
-        // a loaded deadline beyond one maximum backoff cannot have come from the
-        // retry schedule, so release it here rather than leaving it stranded for
-        // the life of the process
+        // a loaded deadline beyond one maximum backoff cannot have come from the retry
+        // schedule, reset it here rather than leaving it stranded 
         let horizon = now_fn() + TimeDelta::seconds(options.backoff.max_secs.max(0));
-        queue.release_stale_deadlines(horizon);
+        queue.reset_invalid_deadlines(horizon);
         let worker = Worker {
             receiver,
             queue,
