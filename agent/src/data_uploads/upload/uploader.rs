@@ -19,7 +19,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -48,6 +48,10 @@ pub struct UploaderOptions {
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
     pub attempt_timeout_bytes_per_sec: u64,
+    /// Backstop on the network-error attempt exemption: a job first observed
+    /// longer ago than this is dropped even if every failure so far was
+    /// network-classified.
+    pub max_job_age: TimeDelta,
 }
 
 impl Default for UploaderOptions {
@@ -62,6 +66,7 @@ impl Default for UploaderOptions {
             },
             attempt_timeout_floor: Duration::from_secs(120),
             attempt_timeout_bytes_per_sec: 64 * 1024,
+            max_job_age: TimeDelta::days(7),
         }
     }
 }
@@ -180,50 +185,71 @@ where
         }
     }
 
-    /// Drive one executor attempt on `entry`, while staying responsive to
-    /// commands. On a retryable failure the entry is stamped with its
-    /// next-attempt deadline and requeued at the tail — no sleeping here; at
-    /// `options.attempts` total failures (or a terminal failure) it is
-    /// dropped.
     async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
-        entry.attempts += 1;
-
-        let file = &entry.job.file;
-        let rule = &entry.job.file_rule_id;
-        let size = entry.job.size;
-        let attempt = entry.attempts;
-        info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
-
-        let err = match self.attempt_upload(&entry).await {
-            AttemptOutcome::ShuttingDown => return Flow::Shutdown,
+        Self::log_attempt(&entry);
+        match self.attempt_upload(&entry).await {
+            AttemptOutcome::ShuttingDown => Flow::Shutdown,
             AttemptOutcome::Succeeded => {
+                entry.attempts += 1;
                 Self::log_success(&entry);
-                return Flow::Continue;
+                Flow::Continue
             }
-            AttemptOutcome::Failed(err) => {
-                let file = &entry.job.file;
-                let attempt = entry.attempts;
-                warn!("upload: attempt {attempt} for file {file} failed: {err:?}");
-                err
+            AttemptOutcome::Failed(err) if err.is_network_conn_err() => {
+                self.handle_network_failure(entry, err).await
             }
-        };
+            AttemptOutcome::Failed(err) => self.handle_counted_failure(entry, err).await,
+        }
+    }
+
+    /// Network connection errors are expected and do not count toward the
+    /// attempt budget. Drop the job if it has aged past the backstop;
+    /// otherwise stamp a flat cooldown and requeue at the tail.
+    async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) -> Flow {
+        let age = (self.now_fn)() - entry.job.first_observed_at;
+        if age >= self.options.max_job_age {
+            Self::log_age_drop(&entry, age, &err);
+            return Flow::Continue;
+        }
+
+        let wait = self.options.backoff.base_secs.max(0);
+        debug!(
+            "upload: network connection error for file {}; not counting attempt, \
+             retrying in {wait}s: {err:?}",
+            entry.job.file
+        );
+        self.requeue_after(entry, wait).await;
+        Flow::Continue
+    }
+
+    /// Counted failures bump the attempt budget. Drop on a terminal error or
+    /// when the budget is exhausted; otherwise stamp the growing backoff and
+    /// requeue at the tail.
+    async fn handle_counted_failure(&mut self, mut entry: QueueEntry, err: UploadErr) -> Flow {
+        entry.attempts += 1;
+        warn!(
+            "upload: attempt {} for file {} failed: {err:?}",
+            entry.attempts, entry.job.file
+        );
 
         if err.is_terminal() {
             Self::log_terminal_drop(&entry, &err);
             return Flow::Continue;
         }
-
         if entry.attempts >= self.options.attempts {
             Self::log_dropped(&entry, &err);
             return Flow::Continue;
         }
 
         let wait = cooldown::calc(&self.options.backoff, entry.attempts - 1).max(0);
-        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait));
-        let file = &entry.job.file;
-        info!("upload: retrying {file} in {wait}s");
-        self.requeue(entry).await;
+        info!("upload: retrying {} in {wait}s", entry.job.file);
+        self.requeue_after(entry, wait).await;
         Flow::Continue
+    }
+
+    /// Stamp `entry` eligible after `wait_secs` and append it at the tail.
+    async fn requeue_after(&mut self, mut entry: QueueEntry, wait_secs: i64) {
+        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait_secs));
+        self.requeue(entry).await;
     }
 
     /// Wait out the shortest backoff among queued entries, staying responsive
@@ -278,6 +304,14 @@ where
         self.queue.requeue(entry).await;
     }
 
+    fn log_attempt(entry: &QueueEntry) {
+        let file = &entry.job.file;
+        let rule = &entry.job.file_rule_id;
+        let size = entry.job.size;
+        let attempt = entry.attempts + 1;
+        info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
+    }
+
     fn log_success(entry: &QueueEntry) {
         info!(
             "uploaded file {} (rule {}, digest {}) on attempt {}",
@@ -289,6 +323,19 @@ where
         error!(
             "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
             entry.attempts, entry.job.file_rule_id, entry.job.file, entry.job.digest
+        );
+    }
+
+    fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &UploadErr) {
+        error!(
+            "dropping upload job: network-classified failures only, for {} days since the file \
+             was first observed (rule {}, file {}, digest {}, attempt {}); suspect a permanent \
+             failure misclassified as a network error: {err:?}",
+            age.num_days(),
+            entry.job.file_rule_id,
+            entry.job.file,
+            entry.job.digest,
+            entry.attempts
         );
     }
 

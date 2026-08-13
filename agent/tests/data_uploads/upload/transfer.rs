@@ -7,6 +7,7 @@ use crate::mocks::http_client::run_server;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 use miru_agent::data_uploads::upload::transfer::s3_config;
 use miru_agent::data_uploads::upload::{ObjectTransfer, SdkTransfer, UploadErr};
+use miru_agent::errors::Error as ErrorTrait;
 use miru_agent::filesys::{files, File, WriteOptions};
 
 // external crates
@@ -251,6 +252,8 @@ async fn s3_put_failure_maps_to_executor_err() {
         .unwrap_err();
 
     assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
+    assert!(!err.is_network_conn_err());
+    assert!(!err.is_terminal());
 }
 
 #[tokio::test]
@@ -305,6 +308,8 @@ async fn gcs_invalid_token_surfaces_executor_err() {
         .unwrap_err();
 
     assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
+    assert!(!err.is_network_conn_err());
+    assert!(!err.is_terminal());
 }
 
 #[tokio::test]
@@ -359,6 +364,8 @@ async fn gcs_put_failure_maps_to_executor_err() {
         .unwrap_err();
 
     assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
+    assert!(!err.is_network_conn_err());
+    assert!(!err.is_terminal());
 }
 
 #[tokio::test]
@@ -391,4 +398,20 @@ fn s3_config_maps_credentials() {
         ),
         ("us-east-1", "AKIA_TEST", "secret", "session")
     );
+}
+
+#[tokio::test]
+async fn gcs_connection_failure_is_classified_network() {
+    let src = temp_file_with(b"hello world").await;
+    let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
+
+    // the GCS counterpart of s3_connection_failure_is_classified_network
+    let err = SdkTransfer::with_gcs_endpoint("http://127.0.0.1:1".to_string())
+        .transfer(&creds, &destination(), src.file(), &HashMap::new())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
+    assert!(err.is_network_conn_err(), "got: {err:?}");
+    assert!(!err.is_terminal());
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
 use crate::data_uploads::upload::{
-    errors::{classified_executor_err, executor_err, UploadErr},
+    errors::{classified_executor_err, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
 };
@@ -48,7 +48,10 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
     }
 
     async fn token(&self) -> Result<Arc<Token>, UploadErr> {
-        self.token_mngr.get_token().await.map_err(executor_err)
+        self.token_mngr
+            .get_token()
+            .await
+            .map_err(classified_executor_err)
     }
 
     async fn create_upload(&self, job: &Job) -> Result<UploadWithCredentials, UploadErr> {
