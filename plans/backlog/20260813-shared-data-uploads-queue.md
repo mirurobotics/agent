@@ -8,9 +8,9 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 |-----------|--------|-------------|
 | `agent/` (this repo, `mirurobotics/agent`) | read-write | All changes: the new shared queue module, the two worker migrations, and test consolidation. |
 
-This plan lives in `plans/backlog/` in this repo because all code written by it is in this repo's Rust crate `miru-agent` (source rooted at `agent/src/`). Work happens on the existing branch `refactor/shared-worker-queue`, which is at the same commit as `main` (`c1ebf64`).
+This plan lives in `plans/backlog/` in this repo because all code written by it is in this repo's Rust crate `miru-agent` (source rooted at `agent/src/`). Work happens on the existing branch `refactor/shared-worker-queue`, branched from `main` at `c1ebf64`.
 
-Note: the repo root contains both `AGENTS.md` and `CLAUDE.md`; `CLAUDE.md` is a symlink to `AGENTS.md`, so there is one conventions file, not two.
+Note: the repo root contains both `AGENTS.md` and `CLAUDE.md`. `CLAUDE.md` is a symlink, but its target is `AGENTS.MD` (uppercase extension), which does not exist on this case-sensitive filesystem — so the symlink is currently broken and `cat CLAUDE.md` fails. Read `AGENTS.md` directly; it is the single conventions file.
 
 ## Purpose / Big Picture
 
@@ -87,7 +87,7 @@ A generic `QueueEntry<J>` / `QueueSnapshot<J>` serializes **identically** to tod
 ### Callers
 
 - `agent/src/data_uploads/upload/uploader.rs` is the only production consumer of the upload queue: constructs it at `:467-470`, then uses `next_ready` `:162`, `is_empty` `:169`, `reset_invalid_deadlines` `:184`, `earliest_next_attempt` `:187`, `remove` `:210/:252/:278/:283`, `requeue` `:347` (via `requeue_after` `:294`), `enqueue` `:425`, `len` `:433`; imports `QueueSnapshotFile` at `:14` and `:455`.
-- `agent/src/data_uploads/retention/deleter.rs` is the only production consumer of the delete queue: constructs it at `:80-83`, then `len` `:93`, `enqueue` `:97`, `count_ready` `:106`, `next_ready` `:108`, `remove` `:113/:126`, `requeue` `:136`.
+- `agent/src/data_uploads/retention/deleter.rs` is the only production consumer of the delete queue: constructs it at `:80-83`, then `len` `:93`, `enqueue` `:97`, `count_ready` `:106`, `next_ready` `:107`, `remove` `:113/:126`, `requeue` `:136`.
 - `agent/src/app/state.rs` only constructs the two snapshot files (`:182` delete, `:217` upload), both failing open to `None`.
 - Re-exports: `agent/src/data_uploads/upload/mod.rs:12` and `agent/src/data_uploads/retention/mod.rs:10`.
 
@@ -99,9 +99,9 @@ A generic `QueueEntry<J>` / `QueueSnapshot<J>` serializes **identically** to tod
 
 Existing thresholds relevant here: `agent/src/data_uploads/upload/.covgate` = `96.00`, `agent/src/data_uploads/retention/.covgate` = `98.39`, `agent/src/data_uploads/scan/.covgate` = `98.83`. There is **no** `.covgate` at `agent/src/` and **none** at `agent/src/data_uploads/` — so anything placed directly in `agent/src/data_uploads/` would be ungated. `agent/src/services/` and `agent/src/services/deployment/` show that nesting a gate inside a gated directory is an established pattern.
 
-`AGENTS.md` is explicit: "Never edit a `.covgate` file; a failing gate is a missing test, not a threshold to lower." `scripts/update-covgates.sh` only ratchets values **up** and will not create a new file. Creating a `.covgate` for a genuinely new gated directory is allowed and is required by AGENTS.md's "Adding a new module" checklist.
+`AGENTS.md:81` says: "Each module has a `.covgate` file with a minimum coverage percentage. Run `scripts/covgate.sh` to enforce. When adding or modifying code, verify coverage still passes." **This plan adds its own hard constraint on top of that: never lower an existing `.covgate` value — a failing gate here is a missing test, not a threshold to lower.** `scripts/update-covgates.sh` only ratchets values **up** and will not create a new file. Creating a `.covgate` for a genuinely new gated directory is allowed and is required by AGENTS.md's "Adding a new module" checklist (`AGENTS.md:105`).
 
-**The risk this plan must actively manage:** `upload/queue.rs` is 193 of roughly 1128 non-`mod.rs` lines in `upload/` and is exhaustively tested. Removing it leaves the remaining `upload/` files — dominated by `uploader.rs` at 542 lines — to clear 96.00 on their own. The same applies to `retention/` at 98.39, though `deleter.rs`'s large inline test suite makes it likelier to hold. This is measured, not assumed, at the end of M3 and M4.
+**The risk this plan must actively manage:** `upload/queue.rs` is 193 of 1314 non-`mod.rs` lines in `upload/` (~14.7%) and is exhaustively tested. Removing it leaves the remaining `upload/` files — dominated by `uploader.rs` at 542 lines — to clear 96.00 on their own. The same applies to `retention/` at 98.39, though `deleter.rs`'s large inline test suite makes it likelier to hold. This is measured, not assumed, at the end of M3 and M4.
 
 ### Repo conventions that will bite a newcomer
 
@@ -138,14 +138,14 @@ It contains:
         fn due_at(&self) -> DateTime<Utc>;
         /// The file this job concerns, for logs and the capacity error.
         fn file(&self) -> String;
-        fn queue_full_err(capacity: usize, file: String, trace: Box<Trace>) -> Self::QueueFullErr;
+        fn queue_full_err(capacity: usize, file: String) -> Self::QueueFullErr;
     }
 
 `upload::Job::due_at()` returns `DateTime::<Utc>::MIN_UTC` ("always due"). That collapses `is_ready` to one implementation — `entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)` — which is exactly upload's behavior when the first clause is vacuously true, and makes `count_ready` correct for both workers for free.
 
 The error hook is an associated type with a factory, rather than a shared `QueueFullErr` leaf with `From` impls, because it lets `enqueue` keep its exact current signatures — `Result<(), UploadErr>` and `Result<(), DeleteErr>` — so `uploader.rs`, `deleter.rs`, and both test suites compile and assert unchanged. `upload::Job` sets `type QueueFullErr = UploadErr` and returns `UploadErr::QueueFullErr(upload::errors::QueueFullErr { .. })`; `retention::Job` sets `type QueueFullErr = DeleteErr` similarly. Both `Display` strings ("upload queue is full …" / "delete queue is full …") are untouched, so upload's `err.to_string().contains("queue is full")` assertion and retention's `DeleteErr::QueueFullErr(full)` destructuring both keep passing.
 
-`trace!()` is invoked at the trait-impl site (inside each worker's module), not inside the generic, so the recorded trace location stays inside the worker rather than pointing at shared code.
+Note that `queue_full_err` deliberately takes **no** `trace` argument. Each worker's impl — in `agent/src/data_uploads/upload/queue.rs` and `agent/src/data_uploads/retention/queue.rs` — calls `crate::trace!()` inside its own method body when building the error. That way `trace!()` is invoked at the trait-impl site (inside each worker's module), not inside the generic, so the recorded trace location stays inside the worker rather than pointing at shared code. Threading a `Box<Trace>` in as a parameter would defeat this, since the queue's only call site is `verify_capacity` inside `agent/src/data_uploads/queue/mod.rs`.
 
 **2. The data types.**
 
@@ -169,16 +169,20 @@ The error hook is an associated type with a factory, rather than a shared `Queue
 
 Two derive pitfalls to expect, both of which produce confusing compiler errors:
 
-- **Do not put `J: QueueJob` bounds on the struct definitions.** `#[derive(Deserialize)]` generates a `J: Deserialize<'de>` bound, which does not unify with a `DeserializeOwned` bound written on the struct. Leave the structs unbounded and put `J: QueueJob` on the `impl Queue<J>` block only. If serde's inferred bounds still fight you, add `#[serde(bound(serialize = "J: Serialize", deserialize = "J: DeserializeOwned"))]` — that is a bound annotation only and does not alter the emitted JSON.
+- **Do not put `J: QueueJob` bounds on `QueueEntry<J>` / `QueueSnapshot<J>`.** `#[derive(Deserialize)]` generates a `J: Deserialize<'de>` bound, which does not unify with a `DeserializeOwned` bound written on the struct. Leave *these two* structs unbounded (serde's derive emits its own per-field bounds) and put `J: QueueJob` on the `impl` blocks. If serde's inferred bounds still fight you, add `#[serde(bound(serialize = "J: Serialize", deserialize = "J: DeserializeOwned"))]` — that is a bound annotation only and does not alter the emitted JSON. This guidance is specific to these two serde-derived types; it does **not** extend to `Queue<J>`, which must carry `J: QueueJob` on its own definition (see below).
 - **Do not `#[derive(Default)]` on `QueueSnapshot<J>`.** The derive adds a spurious `J: Default` bound that neither `Job` type satisfies, and `agent/src/app/state.rs:182` and `:217` call `Default::default()` on the snapshot. Hand-write it:
 
       impl<J> Default for QueueSnapshot<J> { fn default() -> Self { Self { entries: Vec::new() } } }
 
 **3. The queue.**
 
-    pub struct Queue<J> { entries: VecDeque<QueueEntry<J>>, capacity: usize, snapshot_file: Option<QueueSnapshotFile<J>> }
+    pub struct Queue<J: QueueJob> { entries: VecDeque<QueueEntry<J>>, capacity: usize, snapshot_file: Option<QueueSnapshotFile<J>> }
+
+The bound on the **definition** (equivalently a `where J: QueueJob` clause) is required, not optional: the `snapshot_file` field is `Option<QueueSnapshotFile<J>>` = `SingleThreadStateFile<QueueSnapshot<J>, QueueSnapshot<J>>`, and `SingleThreadStateFile` carries its bounds on its own struct definition (`agent/src/filesys/state_file.rs:29-32`: `where ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq`). An unbounded `Queue<J>` therefore fails well-formedness with `E0277`.
 
 `impl<J: QueueJob> Queue<J>` provides the **superset** of both current method sets: `new`, `from_snapshot`, `len`, `is_empty`, `enqueue`, `remove`, `requeue`, `next_ready`, `count_ready`, `reset_invalid_deadlines`, `earliest_next_attempt`, plus private `remove_impl`, `is_ready`, `persist`. Bodies are copied verbatim from the existing implementations, with the `upload:` / `delete:` literals replaced by `{}` formatted with `J::LABEL` and the capacity check factored into a private `verify_capacity` (upload's shape). `#[allow(dead_code)]` is **not** used; unused methods on a shared generic are acceptable, and are covered by the shared test suite (see below).
+
+**Watch the persist warning specifically.** The worker name appears **twice** in it, and only the first occurrence is the log prefix: `agent/src/data_uploads/upload/queue.rs:190` is `warn!("upload: failed to persist upload queue: {err}")`, and `agent/src/data_uploads/retention/queue.rs:165` has the same shape. Substitute **both** occurrences, so the generic reads `warn!("{label}: failed to persist {label} queue: {err}")`. Mechanically replacing only the prefix would make the retention worker log "failed to persist **upload** queue".
 
 Retention's two `#[cfg(test)] pub(crate)` accessors (`entries()`, `queue_entries()`) move onto the generic `impl` unchanged. `#[cfg(test)]` applies to the same unit-test build as `deleter.rs`'s inline `mod tests`, and `pub(crate)` reaches crate-wide, so `deleter.rs`'s ~15 call sites need no edit.
 
@@ -202,6 +206,8 @@ Only two, both log-only and neither asserted by any test:
 1. `retention::Queue::next_ready` starts emitting the `info!("{label}: job dequeued; queue length {n}")` line that upload already emits.
 2. Retention's capacity `warn!` text normalizes from `"delete: queue is full (capacity …)"` to upload's `"{label} queue is full (capacity …)"` shape — i.e. `"delete queue is full (capacity …)"`. The `DeleteErr` **`Display` string is unchanged**; only the log line moves.
 
+The persist `warn!` is deliberately **not** on this list — but it is only delta-free if both occurrences of the worker name are substituted as described above. `"{label}: failed to persist {label} queue: {err}"` renders byte-identically to today's text for both workers; substituting only the prefix would make it a third (and wrong) delta.
+
 Everything else — public API, method semantics, error types and messages, JSON — is identical.
 
 ### Test strategy
@@ -210,7 +216,7 @@ Everything else — public API, method semantics, error types and messages, JSON
 - Every generic method must be tested, including `count_ready`, `reset_invalid_deadlines`, and `earliest_next_attempt` for **both** job types, even though each is used by only one worker today. Uncovered methods are uncovered LLVM regions and will drag the new `.covgate` down.
 - Cases to move here (they exist today in both suites, ~70% overlapping intent): `empty_snapshot_loads_empty_queue`, `full_queue_returns_queue_full_err`, `rejection_does_not_persist`, `persist_failure_is_swallowed`, `unknown_id_is_ignored`, `removing_one_duplicate_leaves_the_other`, `leaves_the_entry_on_disk_until_removed`, `removes_the_entry_from_disk`, the duplicate-jobs cases, attempts-survive-reload, and next_attempt_at-survives-reload.
 - Cases that stay put: upload-specific `earliest_next_attempt` / `reset_invalid_deadlines` scenarios in `agent/tests/data_uploads/upload/queue.rs`; retention's TTL / `due_at` readiness cases, `count_ready` budget cases, and the `durability` mid-sweep-persist test in `agent/tests/data_uploads/retention/queue.rs`.
-- The two existing suites use different idioms; pick the tighter one for the shared file. Prefer retention's deterministic `now()` fixture at t=2000 over upload's `Utc::now()`-based `make_job` (upload's helper is non-deterministic, which is why its assertions go on `digest` rather than whole `Job` values). Prefer `dir.file(..)` over `dir.to_dir().file(..)` — `TempDir` derefs to `Dir`, so `to_dir()` is redundant. For the persist-failure case, the directory-at-path trick (retention) is more portable than `chmod 0555` (upload); if you keep the chmod variant, keep its `#[serial]` annotation if it has one.
+- The two existing suites use different idioms; pick the tighter one for the shared file. Prefer retention's deterministic `now()` fixture at t=2000 over upload's `Utc::now()`-based `make_job` (upload's helper is non-deterministic, which is why its assertions go on `digest` rather than whole `Job` values). Prefer `dir.file(..)` over `dir.to_dir().file(..)` — `TempDir` derefs to `Dir`, so `to_dir()` is redundant. For the persist-failure case, the directory-at-path trick (retention) is more portable than `chmod 0555` (upload). The chmod variant (`persist_failure_is_swallowed`, `agent/tests/data_uploads/upload/queue.rs:167`) carries no `#[serial]` annotation and needs none: it chmods a per-test subdirectory under a fresh `dirs::temp(...)`, not a fixed global path, and `AGENTS.md:71-75` reserves `#[serial]` for shared OS resources.
 
 ## Concrete Steps
 
@@ -284,7 +290,7 @@ At this point the module is *unused* by both workers, which is fine; the tests i
 **Decision point.** `./scripts/covgate.sh` must still report `✅` for `data_uploads/upload` at `96.00`. Removing a heavily-tested 193-line file from that directory can push the remaining files below the gate. If it fails:
 
 - **Do**: add tests to the remaining `upload/` files (chiefly `agent/src/data_uploads/upload/uploader.rs`) until the gate passes, and/or reconsider placement of the generic (e.g. nesting it under one of the two worker directories so its coverage counts toward that gate).
-- **Do not**: lower `agent/src/data_uploads/upload/.covgate`. AGENTS.md forbids it and this plan forbids it.
+- **Do not**: lower `agent/src/data_uploads/upload/.covgate`. This plan's hard constraint (see *Coverage gates* above) forbids it.
 
 Record the outcome and the number in Surprises & Discoveries either way.
 
@@ -302,7 +308,7 @@ Record the outcome and the number in Surprises & Discoveries either way.
        ./scripts/lint.sh
        ./scripts/covgate.sh
 
-**Decision point.** `data_uploads/retention` must still report `✅` at `98.39`, under the same do / do-not rules as M3.
+**Decision point.** `data_uploads/retention` must still report `✅` at `98.39`, under the same do / do-not rules as M3 (add tests or relocate the generic; never lower the gate, per this plan's own constraint).
 
 4. Commit:
 
