@@ -22,8 +22,8 @@ After this change, each of those tests fails if the behavior it names regresses:
 - [x] Milestone 1: pin backoff and assert exact sleeps in `retried_upload_enqueues_once_at_confirm_time`.
 - [x] Milestone 1: perturbation check (both tests fail with the perturbed constant, pass with it restored).
 - [x] Milestone 1: commit.
-- [ ] Milestone 2: drop the message assertion in `full_queue_returns_queue_full_err`, assert the carried fields.
-- [ ] Milestone 2: commit.
+- [x] Milestone 2: drop the message assertion in `full_queue_returns_queue_full_err`, assert the carried fields.
+- [x] Milestone 2: commit.
 - [ ] Milestone 3: add `TransferErr` to `agent/src/data_uploads/upload/errors.rs`; use it at the three `transfer.rs` construction sites.
 - [ ] Milestone 3: update the three transfer tests to assert by type; perturbation check.
 - [ ] Milestone 3: commit.
