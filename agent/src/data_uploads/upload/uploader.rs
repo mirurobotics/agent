@@ -181,6 +181,9 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
+                    self.queue.reset_invalid_deadlines(
+                        now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)),
+                    );
                     let wait = match self.queue.earliest_next_attempt() {
                         Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
                         // unreachable: the queue is non-empty here
@@ -293,12 +296,11 @@ where
         self.requeue(entry).await;
     }
 
-    /// Wait out the shortest backoff among queued entries, staying responsive
-    /// to commands. Deliberately NOT [`Self::run_until_shutdown`]: that helper
-    /// keeps driving its future after handling a command, but an enqueue here
-    /// must return to the run loop immediately so a newly eligible entry is
-    /// re-evaluated rather than waiting out the sleep. Any non-shutdown
-    /// command — like the sleep completing — returns [`Flow::Continue`].
+    /// Sleep for `wait`, staying responsive to commands. Deliberately NOT
+    /// [`Self::run_until_shutdown`]: that helper keeps driving its future after
+    /// handling a command, but an enqueue here must return to the run loop
+    /// immediately so a newly eligible entry is re-evaluated rather than
+    /// waiting out the sleep.
     async fn idle_wait(&mut self, wait: Duration) -> Flow {
         let sleep_fut = (self.sleep_fn)(wait);
         tokio::select! {

@@ -501,3 +501,89 @@ mod earliest_next_attempt {
         );
     }
 }
+
+mod reset_invalid_deadlines {
+    use super::*;
+
+    #[tokio::test]
+    async fn only_deadlines_past_the_horizon_move() {
+        let mut queue = Queue::new(8);
+        let now = Utc::now();
+        let horizon = now + TimeDelta::hours(24);
+        let inside = horizon - TimeDelta::seconds(1);
+        let beyond = horizon + TimeDelta::seconds(1);
+        for (name, deadline) in [("a.log", inside), ("b.log", horizon), ("c.log", beyond)] {
+            queue
+                .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job(name),
+                    attempts: 1,
+                    next_attempt_at: Some(deadline),
+                })
+                .await;
+        }
+
+        queue.reset_invalid_deadlines(horizon);
+
+        let mut drained = Vec::new();
+        while let Some(entry) = queue.next_ready(beyond) {
+            drained.push((entry.job.digest.clone(), entry.next_attempt_at));
+            queue.remove(entry.id).await;
+        }
+        assert_eq!(
+            drained,
+            vec![
+                ("sha256:a.log".to_string(), Some(inside)),
+                ("sha256:b.log".to_string(), Some(horizon)),
+                ("sha256:c.log".to_string(), Some(horizon)),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_is_in_memory_until_the_next_mutation() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let now = Utc::now();
+        let stale = now + TimeDelta::hours(48);
+
+        let horizon = now + TimeDelta::hours(24);
+
+        let mut queue = Queue::from_snapshot(8, open(&path).await);
+        // the requeues persist the stale stamps; the reset deliberately does
+        // not write, so the file still carries them afterwards
+        for name in ["a.log", "b.log"] {
+            queue
+                .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job(name),
+                    attempts: 2,
+                    next_attempt_at: Some(stale),
+                })
+                .await;
+        }
+
+        queue.reset_invalid_deadlines(horizon);
+
+        let head_deadline = |raw: &str| -> serde_json::Value {
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]
+                .clone()
+        };
+        let raw = files::read_string(&path).await.unwrap();
+        assert_eq!(
+            head_deadline(&raw),
+            serde_json::to_value(stale).unwrap(),
+            "the reset should not have rewritten the snapshot: {raw}"
+        );
+
+        // the next mutation writes the corrected entries through
+        let entry = queue.next_ready(horizon).unwrap();
+        queue.remove(entry.id).await;
+        let raw = files::read_string(&path).await.unwrap();
+        assert_eq!(
+            head_deadline(&raw),
+            serde_json::to_value(horizon).unwrap(),
+            "the removal should have persisted the pulled-back deadline: {raw}"
+        );
+    }
+}
