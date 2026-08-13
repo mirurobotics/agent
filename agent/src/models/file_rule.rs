@@ -16,8 +16,10 @@ pub struct FileRuleSource {
     pub stability_window_secs: i64,
 }
 
-impl From<backend_client::UploadRuleSource> for FileRuleSource {
-    fn from(source: backend_client::UploadRuleSource) -> FileRuleSource {
+// `backend_client::FileRuleSource` is the wire type; the unqualified `FileRuleSource`
+// is the domain type of the same name, disambiguated by the `backend_client` alias.
+impl From<backend_client::FileRuleSource> for FileRuleSource {
+    fn from(source: backend_client::FileRuleSource) -> FileRuleSource {
         FileRuleSource {
             glob: source.glob,
             stability_window_secs: source.stability_window_secs,
@@ -33,6 +35,18 @@ pub struct FileRuleUpload {
     pub bucket_id: String,
     pub bucket_name: String,
     pub path: String,
+}
+
+impl From<backend_client::FileRuleUpload> for FileRuleUpload {
+    fn from(upload: backend_client::FileRuleUpload) -> FileRuleUpload {
+        FileRuleUpload {
+            upload_collection_id: upload.upload_collection_id,
+            upload_collection_name: upload.upload_collection_name,
+            bucket_id: upload.bucket_id,
+            bucket_name: upload.bucket_name,
+            path: upload.path,
+        }
+    }
 }
 
 // ============================ FILE RULE RETENTION ================================ //
@@ -73,32 +87,21 @@ impl Default for FileRule {
     }
 }
 
-impl From<backend_client::BaseUploadRule> for FileRule {
-    fn from(rule: backend_client::BaseUploadRule) -> FileRule {
-        let destination = *rule.destination;
-        let retention = match destination.delete_policy {
-            backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD => {
-                Some(FileRuleRetention {
-                    require_upload: true,
-                    ttl_secs: 0,
-                })
-            }
-            backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_NEVER
-            | backend_client::UploadDeletePolicy::UploadDeletePolicyUnknown => None,
-        };
+impl From<backend_client::BaseFileRule> for FileRule {
+    fn from(rule: backend_client::BaseFileRule) -> FileRule {
         FileRule {
             id: rule.id,
-            name: rule.upload_collection_name.clone(),
+            name: rule.name,
             digest: rule.digest,
             source: (*rule.source).into(),
-            upload: Some(FileRuleUpload {
-                upload_collection_id: rule.upload_collection_id,
-                upload_collection_name: rule.upload_collection_name,
-                bucket_id: destination.bucket_id,
-                bucket_name: destination.bucket_name,
-                path: destination.path,
+            upload: rule.upload.map(|u| (*u).into()),
+            retention: rule.retention.map(|r| FileRuleRetention {
+                // the spec marks require_upload optional: it is present exactly
+                // when the rule has an upload block. absent => nothing to wait on.
+                require_upload: r.require_upload.unwrap_or(false),
+                // the spec types ttl_secs as int64; the domain uses u64.
+                ttl_secs: r.ttl_secs.max(0) as u64,
             }),
-            retention,
             created_at: rule
                 .created_at
                 .parse::<DateTime<Utc>>()
