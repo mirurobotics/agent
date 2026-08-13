@@ -36,10 +36,7 @@ pub struct DeleterArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub queue_capacity: usize,
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
-    /// Total sweep attempts per job before it is dropped.
     pub attempts: u32,
-    /// Backoff between attempts; the exponent is the entry's attempt count
-    /// minus one, so waits grow across requeues and cap at `max_secs`.
     pub backoff: cooldown::Backoff,
 }
 
@@ -107,31 +104,36 @@ impl SingleThreadDeleter {
         // budget is exactly enough to visit each due entry once and never
         // twice.
         for _ in 0..self.queue.count_ready(now) {
-            let Some(mut entry) = self.queue.next_ready(now) else {
+            let Some(entry) = self.queue.next_ready(now) else {
                 break;
             };
             match Self::sweep_entry(&entry.job).await {
-                SweepOutcome::Failed => {
-                    entry.attempts += 1;
-                    if entry.attempts >= self.attempts {
-                        Self::log_exhausted_drop(&entry);
-                        self.queue.remove(entry.id).await;
-                    } else {
-                        let wait = cooldown::calc(&self.backoff, entry.attempts - 1).max(0);
-                        warn!(
-                            "delete: attempt {} of {} failed for {}; retrying in {wait}s",
-                            entry.attempts, self.attempts, entry.job.file
-                        );
-                        entry.next_attempt_at = Some(now + TimeDelta::seconds(wait));
-                        self.queue.requeue(entry).await;
-                    }
-                }
+                SweepOutcome::Failed => self.handle_counted_failure(entry, now).await,
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
                     self.queue.remove(entry.id).await;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Counted failures bump the attempt budget. Drop when the budget is
+    /// exhausted; otherwise stamp the growing backoff and requeue at the tail.
+    async fn handle_counted_failure(&mut self, mut entry: QueueEntry, now: DateTime<Utc>) {
+        entry.attempts += 1;
+        if entry.attempts >= self.attempts {
+            Self::log_exhausted_drop(&entry);
+            self.queue.remove(entry.id).await;
+            return;
+        }
+
+        let wait = cooldown::calc(&self.backoff, entry.attempts - 1).max(0);
+        warn!(
+            "delete: attempt {} of {} failed for {}; retrying in {wait}s",
+            entry.attempts, self.attempts, entry.job.file
+        );
+        entry.next_attempt_at = Some(now + TimeDelta::seconds(wait));
+        self.queue.requeue(entry).await;
     }
 
     /// Consider one selected job: delete only when the on-disk file still

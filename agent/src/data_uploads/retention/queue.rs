@@ -13,24 +13,13 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// A queued job plus the queue's own identity for it. `id` is minted at
-/// enqueue and is meaningless to the job: two identical jobs for the same path
-/// legitimately coexist, so no field of `Job` is a usable key.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueEntry {
-    /// Defaulted so a hand-written snapshot need not carry ids. Unlike the
-    /// uploader's, this default buys no migration of the previous on-disk
-    /// format: the entry shape itself changed from a flat `Job` to `{id, job}`.
     #[serde(default = "Uuid::new_v4")]
     pub id: Uuid,
     pub job: Job,
-    /// Failed sweeps charged against this entry's attempt budget. Defaulted so
-    /// a snapshot written before the field existed loads with a full budget.
     #[serde(default)]
     pub attempts: u32,
-    /// Earliest instant this entry may be swept again, stamped by the backoff
-    /// after a failed attempt. `None` means no deferral. Defaulted so a
-    /// snapshot written before the field existed loads as immediately ready.
     #[serde(default)]
     pub next_attempt_at: Option<DateTime<Utc>>,
 }
@@ -133,10 +122,6 @@ impl Queue {
             .count()
     }
 
-    /// An entry is ready once its TTL has elapsed *and* any backoff stamped by
-    /// a previous failure has expired. The sole readiness predicate, so
-    /// `next_ready` and `count_ready` cannot disagree and desynchronize the
-    /// sweep's loop budget from what it can actually pop.
     fn is_ready(entry: &QueueEntry, now: DateTime<Utc>) -> bool {
         entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }

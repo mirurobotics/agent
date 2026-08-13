@@ -159,6 +159,41 @@ _(filled as work proceeds)_
   so a shape-only commit is a `dead_code` failure. Shape and policy therefore land as one
   reviewable commit (M1), tests as the next (M2), validation as the last (M3).
 
+- **D9 — D4 is OVERRULED; D5 is REVERSED (2026-08-13, post-review)**. The user reviewed the
+  merged-ready branch and scoped the feature down to exactly: *"I just want to keep track of
+  failed deletion attempts, have a backoff, and throw away the job / log an error once ten
+  attempts are reached."* Two consequences, applied on top of `1b91d75`:
+
+  - **D4 (error classification) is deleted, not amended.** `SweepOutcome::CountedRetry` and
+    `SweepOutcome::TerminalFailure` collapse into a single `SweepOutcome::Failed`;
+    `SingleThreadDeleter::classify`, `io_kind`, the `std::io::ErrorKind` matching and
+    `log_terminal_drop` are removed outright, along with the seven `mod classify` unit tests
+    and the sweep tests that existed only to pin terminal-vs-counted behavior. Every failure
+    now counts one attempt and the cap is the only backstop. The judgment D4 made — "state
+    deliberately which classes consume budget" — was real but not worth its cost: it bought
+    an early drop on a handful of `ErrorKind`s at the price of a classification table, a
+    second drop-with-error path, and a third of the module's tests. There is now exactly one
+    failure path and one drop-with-error path. **`SweepOutcome::AlreadyGone` survives** and is
+    not classification: a vanished file means there is nothing left to delete, i.e. success.
+    Folding it into `Failed` would make a rotated-away file burn all ten attempts and then
+    log an alarming error about a file that no longer exists.
+
+  - **D5 (no backoff) is reversed; the deleter now backs off.** D5 argued the fixed 60s sweep
+    interval already paces retries. The user asked for a backoff explicitly, and with
+    classification gone the cap is the *only* guard, so pacing it matters more than it did.
+    Implementation mirrors the uploader rather than inventing anything: `QueueEntry` gains
+    `#[serde(default)] next_attempt_at: Option<DateTime<Utc>>`, `DeleterArgs` gains
+    `backoff: cooldown::Backoff` with the uploader's defaults (10s base, ×2, 3600s cap), and a
+    counted failure below the cap stamps `next_attempt_at = now + cooldown::calc(&backoff,
+    attempts - 1)` before requeueing — `requeue` already persists, so the deferral is durable
+    across restarts. Readiness moves behind a single `Queue::is_ready` predicate shared by
+    `next_ready` and `count_ready`, so the sweep's loop budget cannot desynchronize from what
+    it can actually pop. The uploader's early-wake machinery is deliberately **not** ported:
+    the deleter sweeps on a fixed interval, so a deferred entry is simply skipped until due.
+
+  D1, D2, D3, D6, D7 stand unchanged, except that D7's "or on the first terminal failure"
+  clause is void — exhaustion is now the sole loud-drop trigger.
+
 ## Context and Orientation
 
 Read this section as if you have never opened this repository. Every path below is
