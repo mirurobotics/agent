@@ -11,13 +11,12 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::{self, TokenManagerExt};
+use crate::data_uploads::scan;
 use crate::http;
-use crate::scan;
 use crate::server::{self, errors::*, serve::serve};
 use crate::trace;
-use crate::upload;
 use crate::workers::{
-    mqtt, poller, scan_upload_bridge, sync_scan_bridge,
+    mqtt, poller, sync_scan_bridge,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
 };
 
@@ -155,31 +154,27 @@ async fn init(
         .await?;
     }
 
-    if let Some(scanner) = &app_state.scanner {
-        init_scan_worker(
-            options.scanner.clone(),
-            scanner.clone(),
-            shutdown_manager,
-            shutdown_tx.subscribe(),
-        )
-        .await?;
-        init_sync_scan_bridge_worker(
-            scanner.clone(),
-            app_state.clone(),
-            shutdown_manager,
-            shutdown_tx.subscribe(),
-        )
-        .await?;
-        if let Some(uploader) = &app_state.uploader {
-            init_scan_upload_bridge_worker(
-                scanner.clone(),
-                uploader.clone(),
-                shutdown_manager,
-                shutdown_tx.subscribe(),
-            )
-            .await?;
-        }
-    }
+    init_scan_worker(
+        options.scanner.clone(),
+        app_state.scanner.clone(),
+        shutdown_manager,
+        shutdown_tx.subscribe(),
+    )
+    .await?;
+    init_sync_scan_bridge_worker(
+        app_state.scanner.clone(),
+        app_state.clone(),
+        shutdown_manager,
+        shutdown_tx.subscribe(),
+    )
+    .await?;
+    init_delete_worker(
+        options.delete_worker.clone(),
+        app_state.deleter.clone(),
+        shutdown_manager,
+        shutdown_tx.subscribe(),
+    )
+    .await?;
 
     Ok(app_state)
 }
@@ -193,7 +188,6 @@ async fn init_app_state(
         options.storage.capacities,
         Arc::new(http::Client::new(&options.backend_host.as_url())?),
         options.dpl_retry_policy,
-        options.enable_scanner,
     )
     .await?;
     let app_state = Arc::new(app_state);
@@ -344,7 +338,7 @@ async fn init_sync_scan_bridge_worker(
     let storage = sync_scan_bridge::Storage {
         deployments: app_state.storage.deployments.clone(),
         releases: app_state.storage.releases.clone(),
-        upload_rules: app_state.storage.upload_rules.clone(),
+        file_rules: app_state.storage.file_rules.clone(),
     };
     let bridge_handle = tokio::spawn(async move {
         sync_scan_bridge::run(
@@ -365,17 +359,18 @@ async fn init_sync_scan_bridge_worker(
     Ok(())
 }
 
-async fn init_scan_upload_bridge_worker(
-    scanner: Arc<scan::Scanner>,
-    uploader: Arc<upload::Uploader>,
+async fn init_delete_worker(
+    options: crate::workers::delete::Options,
+    deleter: Arc<crate::data_uploads::retention::Deleter>,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(), ServerErr> {
-    info!("Initializing scan-upload bridge worker...");
-    let bridge_handle = tokio::spawn(async move {
-        scan_upload_bridge::run(
-            scanner.as_ref(),
-            uploader.as_ref(),
+    info!("Initializing delete driver worker...");
+    let delete_handle = tokio::spawn(async move {
+        crate::workers::delete::run(
+            &options,
+            deleter.as_ref(),
+            tokio::time::sleep,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
             }),
@@ -383,9 +378,9 @@ async fn init_scan_upload_bridge_worker(
         .await;
     });
     shutdown_manager.register_handle(
-        |mgr| &mut mgr.scan_upload_bridge_worker_handle,
-        "scan_upload_bridge_handle",
-        bridge_handle,
+        |mgr| &mut mgr.delete_worker_handle,
+        "delete_worker_handle",
+        delete_handle,
     )?;
     Ok(())
 }
@@ -437,7 +432,7 @@ struct ShutdownManager {
     token_refresh_worker_handle: Option<JoinHandle<()>>,
     scan_worker_handle: Option<JoinHandle<()>>,
     sync_scan_bridge_worker_handle: Option<JoinHandle<()>>,
-    scan_upload_bridge_worker_handle: Option<JoinHandle<()>>,
+    delete_worker_handle: Option<JoinHandle<()>>,
 }
 
 impl ShutdownManager {
@@ -452,7 +447,7 @@ impl ShutdownManager {
             token_refresh_worker_handle: None,
             scan_worker_handle: None,
             sync_scan_bridge_worker_handle: None,
-            scan_upload_bridge_worker_handle: None,
+            delete_worker_handle: None,
         }
     }
 
@@ -642,11 +637,11 @@ impl ShutdownManager {
             info!("Sync-scan bridge worker handle not found, skipping sync-scan bridge worker shutdown...");
         }
 
-        // 7. scan-upload bridge worker
-        if let Some(scan_upload_bridge_worker_handle) = self.scan_upload_bridge_worker_handle.take()
-        {
-            if let Err(e) = scan_upload_bridge_worker_handle.await {
-                error!("Failed to shutdown scan-upload bridge worker: {}", e);
+        // 7. delete driver worker (must join before app state shutdown so no
+        // sweeps race the deleter actor's shutdown)
+        if let Some(delete_worker_handle) = self.delete_worker_handle.take() {
+            if let Err(e) = delete_worker_handle.await {
+                error!("Failed to shutdown delete driver worker: {}", e);
                 first_err.get_or_insert_with(|| {
                     ServerErr::JoinHandleErr(JoinHandleErr {
                         source: Box::new(e),
@@ -656,7 +651,7 @@ impl ShutdownManager {
             }
         } else {
             info!(
-                "Scan-upload bridge worker handle not found, skipping scan-upload bridge worker shutdown..."
+                "Delete driver worker handle not found, skipping delete driver worker shutdown..."
             );
         }
 
@@ -734,7 +729,6 @@ mod tests {
             Capacities::default(),
             Arc::new(http::Client::new("doesntmatter").unwrap()),
             fsm::RetryPolicy::default(),
-            false,
         )
         .await
         .unwrap();
@@ -882,28 +876,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_handle_rejects_scan_upload_bridge_duplicates() {
+    async fn register_handle_rejects_delete_worker_duplicates() {
         let mut shutdown_manager = new_shutdown_manager();
 
         shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.scan_upload_bridge_worker_handle,
-                "scan_upload_bridge_handle",
+                |mgr| &mut mgr.delete_worker_handle,
+                "delete_worker_handle",
                 spawn_immediate_handle(),
             )
             .unwrap();
 
         let err = shutdown_manager
             .register_handle(
-                |mgr| &mut mgr.scan_upload_bridge_worker_handle,
-                "scan_upload_bridge_handle",
+                |mgr| &mut mgr.delete_worker_handle,
+                "delete_worker_handle",
                 spawn_immediate_handle(),
             )
-            .expect_err("duplicate scan-upload bridge handle should error");
+            .expect_err("duplicate delete worker handle should error");
 
         match err {
             ServerErr::ShutdownMngrDuplicateArgErr(err) => {
-                assert_eq!(err.arg_name, "scan_upload_bridge_handle");
+                assert_eq!(err.arg_name, "delete_worker_handle");
             }
             _ => panic!("expected ShutdownMngrDuplicateArgErr"),
         }
@@ -1054,25 +1048,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_impl_maps_scan_upload_bridge_worker_join_error() {
-        let mut mgr = new_shutdown_manager();
-        mgr.register_handle(
-            |mgr| &mut mgr.scan_upload_bridge_worker_handle,
-            "scan_upload_bridge_handle",
-            spawn_panicking_handle(),
-        )
-        .unwrap();
-
-        let err = mgr
-            .shutdown_impl()
-            .await
-            .expect_err("scan-upload bridge worker panic should surface");
-
-        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
-        assert!(mgr.scan_upload_bridge_worker_handle.is_none());
-    }
-
-    #[tokio::test]
     async fn shutdown_impl_ok_when_all_steps_succeed() {
         let mut mgr = new_shutdown_manager();
         mgr.register_handle(
@@ -1107,12 +1082,6 @@ mod tests {
             spawn_immediate_handle(),
         )
         .unwrap();
-        mgr.register_handle(
-            |mgr| &mut mgr.scan_upload_bridge_worker_handle,
-            "scan_upload_bridge_handle",
-            spawn_immediate_handle(),
-        )
-        .unwrap();
 
         mgr.shutdown_impl().await.unwrap();
 
@@ -1122,6 +1091,5 @@ mod tests {
         assert!(mgr.socket_server_handle.is_none());
         assert!(mgr.scan_worker_handle.is_none());
         assert!(mgr.sync_scan_bridge_worker_handle.is_none());
-        assert!(mgr.scan_upload_bridge_worker_handle.is_none());
     }
 }

@@ -50,6 +50,10 @@ impl Layout {
         self.root().file("upload_queue.json")
     }
 
+    pub fn delete_queue(&self) -> filesys::File {
+        self.root().file("delete_queue.json")
+    }
+
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }
@@ -70,8 +74,8 @@ impl Layout {
         self.resources().file("releases.json")
     }
 
-    pub fn upload_rules(&self) -> filesys::File {
-        self.resources().file("upload_rules.json")
+    pub fn file_rules(&self) -> filesys::File {
+        self.resources().file("file_rules.json")
     }
 
     pub fn git_commits(&self) -> filesys::File {

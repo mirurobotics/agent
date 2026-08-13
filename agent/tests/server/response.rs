@@ -219,7 +219,7 @@ pub mod release_response {
             git_commit_id: None,
             created_at: t,
             updated_at: t,
-            upload_rule_ids: Vec::new(),
+            file_rule_ids: Vec::new(),
         };
 
         let expected = openapi::Release {
@@ -243,7 +243,7 @@ pub mod release_response {
             git_commit_id: Some("gc-1".into()),
             created_at: t,
             updated_at: t,
-            upload_rule_ids: Vec::new(),
+            file_rule_ids: Vec::new(),
         };
 
         let expected = openapi::Release {

@@ -57,6 +57,13 @@ pub mod storage_layout {
     }
 
     #[test]
+    fn delete_queue() {
+        let layout = Layout::default();
+        let file = layout.delete_queue();
+        assert_eq!(file.to_string(), "/var/lib/miru/delete_queue.json");
+    }
+
+    #[test]
     fn resources() {
         let layout = Layout::default();
         let dir = layout.resources();
@@ -98,13 +105,10 @@ pub mod storage_layout {
     }
 
     #[test]
-    fn upload_rules() {
+    fn file_rules() {
         let layout = Layout::default();
-        let file = layout.upload_rules();
-        assert_eq!(
-            file.to_string(),
-            "/var/lib/miru/resources/upload_rules.json"
-        );
+        let file = layout.file_rules();
+        assert_eq!(file.to_string(), "/var/lib/miru/resources/file_rules.json");
     }
 
     #[test]

@@ -197,7 +197,7 @@ pub mod get_current_release_fallback {
             id: "rls_1".to_string(),
             version: "4.0.0".to_string(),
             git_commit_id: Some("gc_1".to_string()),
-            upload_rules: Some(vec![]),
+            file_rules: Some(vec![]),
             ..Default::default()
         };
         let stub = StubBackend::new().with_release(Ok(backend_rls));

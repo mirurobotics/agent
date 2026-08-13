@@ -4,8 +4,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
+use crate::data_uploads::scan::{errors::ScanErr, ScannerExt};
 use crate::disk;
-use crate::scan::{errors::ScanErr, ScannerExt};
 use crate::sync::{syncer::SyncEvent, SyncerExt};
 use crate::workers::next_sync_event;
 
@@ -15,7 +15,7 @@ use tracing::{error, info};
 pub struct Storage {
     pub deployments: Arc<disk::Deployments>,
     pub releases: Arc<disk::Releases>,
-    pub upload_rules: Arc<disk::UploadRules>,
+    pub file_rules: Arc<disk::FileRules>,
 }
 
 pub async fn run<ScannerT: ScannerExt, SyncerT: SyncerExt>(
@@ -75,15 +75,12 @@ async fn idle_forever() {
     std::future::pending::<()>().await
 }
 
-/// Resolve active upload rules from disk and push them into the scanner
+/// Resolve active file rules from disk and push them into the scanner
 async fn resolve_and_push<ScannerT: ScannerExt>(scanner: &ScannerT, storage: &Storage) {
-    let result = disk::upload_rules_for_deployed(
-        &storage.deployments,
-        &storage.releases,
-        &storage.upload_rules,
-    )
-    .await
-    .map_err(disk_err_to_scan_err);
+    let result =
+        disk::file_rules_for_deployed(&storage.deployments, &storage.releases, &storage.file_rules)
+            .await
+            .map_err(disk_err_to_scan_err);
     match result {
         Ok(Some((deployment, rules))) => {
             if let Err(e) = scanner.update_rules(deployment, rules).await {
@@ -96,7 +93,7 @@ async fn resolve_and_push<ScannerT: ScannerExt>(scanner: &ScannerT, storage: &St
             }
         }
         Err(e) => {
-            error!("sync-scan bridge: failed to resolve active upload rules: {e:?}");
+            error!("sync-scan bridge: failed to resolve active file rules: {e:?}");
         }
     }
 }
@@ -105,8 +102,8 @@ fn disk_err_to_scan_err(e: disk::DiskErr) -> ScanErr {
     match e {
         disk::DiskErr::CacheErr(c) => ScanErr::CacheErr(c),
         disk::DiskErr::FileSysErr(f) => ScanErr::FileSysErr(f),
-        other => ScanErr::InternalError(crate::scan::errors::InternalError {
-            message: format!("unexpected disk error resolving upload rules: {other:?}"),
+        other => ScanErr::InternalError(crate::data_uploads::scan::errors::InternalError {
+            message: format!("unexpected disk error resolving file rules: {other:?}"),
             trace: crate::trace!(),
         }),
     }

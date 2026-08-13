@@ -7,22 +7,22 @@ pub mod config_instances;
 pub mod deployments;
 pub mod device;
 pub mod errors;
+pub mod file_rules;
 pub mod git_commits;
 pub mod layout;
 pub mod releases;
 pub mod settings;
 pub mod setup;
-pub mod upload_rules;
 
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{assert_activated, resolve_device_id, Device};
 pub use self::errors::{DeviceNotActivatedErr, DiskErr};
+pub use self::file_rules::{file_rules_for_deployed, file_rules_for_deployment, FileRules};
 pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings};
-pub use self::upload_rules::{upload_rules_for_deployed, upload_rules_for_deployment, UploadRules};
 pub use crate::network::{BackendHost, MqttHost};
 
 use self::device::Device as DeviceStorage;
@@ -31,7 +31,7 @@ use self::layout::Layout as StorLayout;
 use crate::filesys::Overwrite;
 use crate::models;
 
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Capacities {
@@ -39,7 +39,7 @@ pub struct Capacities {
     pub cfg_inst_content: usize,
     pub deployments: usize,
     pub releases: usize,
-    pub upload_rules: usize,
+    pub file_rules: usize,
     pub git_commits: usize,
 }
 
@@ -50,7 +50,7 @@ impl Default for Capacities {
             cfg_inst_content: 1000,
             deployments: 100,
             releases: 1000,
-            upload_rules: 1000,
+            file_rules: 1000,
             git_commits: 100,
         }
     }
@@ -82,7 +82,7 @@ pub struct Storage {
     pub cfg_insts: CfgInstStor,
     pub deployments: Arc<Deployments>,
     pub releases: Arc<Releases>,
-    pub upload_rules: Arc<UploadRules>,
+    pub file_rules: Arc<FileRules>,
     pub git_commits: Arc<GitCommits>,
 }
 
@@ -139,10 +139,10 @@ impl Storage {
             Releases::spawn(64, layout.releases(), capacities.releases).await?;
         let releases = Arc::new(release_stor);
 
-        // upload rules
-        let (upload_rule_stor, upload_rule_stor_handle) =
-            UploadRules::spawn(64, layout.upload_rules(), capacities.upload_rules).await?;
-        let upload_rules = Arc::new(upload_rule_stor);
+        // file rules
+        let (file_rule_stor, file_rule_stor_handle) =
+            FileRules::spawn(64, layout.file_rules(), capacities.file_rules).await?;
+        let file_rules = Arc::new(file_rule_stor);
 
         // git commits
         let (git_commit_stor, git_commit_stor_handle) =
@@ -156,7 +156,7 @@ impl Storage {
                 cfg_inst_content_stor_handle,
                 deployment_stor_handle,
                 release_stor_handle,
-                upload_rule_stor_handle,
+                file_rule_stor_handle,
                 git_commit_stor_handle,
             ];
 
@@ -172,7 +172,7 @@ impl Storage {
                 },
                 deployments,
                 releases,
-                upload_rules,
+                file_rules,
                 git_commits,
             },
             shutdown_handle,
@@ -180,29 +180,81 @@ impl Storage {
     }
 
     pub async fn shutdown(&self) -> Result<(), StorErr> {
+        // best-effort: attempt every step, return the first error at the end
+        let mut first_err: Option<StorErr> = None;
+
         // if the device is online, set it to offline before shutting down
-        let device_data = self.device.read().await?;
-        match device_data.status {
-            models::DeviceStatus::Online => {
-                info!("Shutting down device storage, setting device to offline");
-                self.device
-                    .patch(models::device::Updates::disconnected())
-                    .await?;
-            }
-            models::DeviceStatus::Offline => {
-                info!("Shutting down device storage, device is already offline");
+        match self.device.read().await {
+            Ok(device_data) => match device_data.status {
+                models::DeviceStatus::Online => {
+                    info!("Shutting down device storage, setting device to offline");
+                    first_err = record(
+                        first_err,
+                        "device offline patch",
+                        self.device
+                            .patch(models::device::Updates::disconnected())
+                            .await,
+                    );
+                }
+                models::DeviceStatus::Offline => {
+                    info!("Shutting down device storage, device is already offline");
+                }
+            },
+            Err(e) => {
+                error!("failed to read device data during shutdown: {e}");
+                first_err = first_err.or(Some(e.into()));
             }
         }
 
-        self.device.shutdown().await?;
-        self.cfg_insts.meta.shutdown().await?;
-        self.cfg_insts.content.shutdown().await?;
-        self.deployments.shutdown().await?;
-        self.releases.shutdown().await?;
-        self.upload_rules.shutdown().await?;
-        self.git_commits.shutdown().await?;
+        first_err = record(first_err, "device store", self.device.shutdown().await);
+        first_err = record(
+            first_err,
+            "config instance metadata store",
+            self.cfg_insts.meta.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "config instance content store",
+            self.cfg_insts.content.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "deployments store",
+            self.deployments.shutdown().await,
+        );
+        first_err = record(first_err, "releases store", self.releases.shutdown().await);
+        first_err = record(
+            first_err,
+            "file rules store",
+            self.file_rules.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "git commits store",
+            self.git_commits.shutdown().await,
+        );
 
-        Ok(())
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+// Logs a failed shutdown step and folds it into the running first error:
+// the earliest error wins, later ones are logged only.
+fn record<E: Into<StorErr>>(
+    first_err: Option<StorErr>,
+    target: &str,
+    result: Result<(), E>,
+) -> Option<StorErr> {
+    match result {
+        Ok(()) => first_err,
+        Err(e) => {
+            let e = e.into();
+            error!("failed to shutdown {target}: {e}");
+            first_err.or(Some(e))
+        }
     }
 }
 

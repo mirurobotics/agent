@@ -2,15 +2,14 @@
 use crate::authn;
 use crate::cache;
 use crate::crypt;
+use crate::data_uploads::{retention, scan, upload};
 use crate::disk::DiskErr;
 use crate::errors::Trace;
 use crate::events;
 use crate::filesys;
 use crate::http;
-use crate::scan;
 use crate::services;
 use crate::sync;
-use crate::upload;
 
 #[derive(Debug, thiserror::Error)]
 #[error("shutdown manager was provided the same argument ({arg_name}) twice")]
@@ -85,6 +84,8 @@ pub enum ServerErr {
     #[error(transparent)]
     DiskErr(DiskErr),
     #[error(transparent)]
+    DeleteErr(Box<retention::DeleteErr>),
+    #[error(transparent)]
     ScanErr(Box<scan::ScanErr>),
     #[error(transparent)]
     SyncErr(Box<sync::SyncErr>),
@@ -148,6 +149,12 @@ impl From<DiskErr> for ServerErr {
     }
 }
 
+impl From<retention::DeleteErr> for ServerErr {
+    fn from(e: retention::DeleteErr) -> Self {
+        Self::DeleteErr(Box::new(e))
+    }
+}
+
 impl From<scan::ScanErr> for ServerErr {
     fn from(e: scan::ScanErr) -> Self {
         Self::ScanErr(Box::new(e))
@@ -177,6 +184,7 @@ crate::impl_error!(ServerErr {
     HTTPErr,
     ServiceErr,
     DiskErr,
+    DeleteErr,
     ScanErr,
     SyncErr,
     UploadErr,

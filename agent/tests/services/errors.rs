@@ -8,7 +8,7 @@ use miru_agent::http::errors::MockErr as HTTPMockErr;
 use miru_agent::http::HTTPErr;
 use miru_agent::models::errors::DateTimeParseErr;
 use miru_agent::models::ModelsErr;
-use miru_agent::services::errors::UploadRulesNotExpandedErr;
+use miru_agent::services::errors::FileRulesNotExpandedErr;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
@@ -51,8 +51,8 @@ fn sync_err() -> SyncErr {
     })
 }
 
-fn upload_rules_not_expanded_err() -> UploadRulesNotExpandedErr {
-    UploadRulesNotExpandedErr {
+fn file_rules_not_expanded_err() -> FileRulesNotExpandedErr {
+    FileRulesNotExpandedErr {
         release_id: "rls_123".to_string(),
     }
 }
@@ -97,8 +97,8 @@ mod from_conversions {
     }
 
     #[test]
-    fn upload_rules_not_expanded_err_maps_to_service_variant() {
-        let err: ServiceErr = upload_rules_not_expanded_err().into();
-        assert!(matches!(err, ServiceErr::UploadRulesNotExpanded(_)));
+    fn file_rules_not_expanded_err_maps_to_service_variant() {
+        let err: ServiceErr = file_rules_not_expanded_err().into();
+        assert!(matches!(err, ServiceErr::FileRulesNotExpanded(_)));
     }
 }

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 // internal crates
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::disk::{
-    self, CfgInstContent, CfgInsts, Deployments, GitCommits, Releases, UploadRules,
+    self, CfgInstContent, CfgInsts, Deployments, FileRules, GitCommits, Releases,
 };
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{dirs, Overwrite, PathExt};
@@ -33,7 +33,7 @@ struct Fixture {
     cfg_inst_content_stor: CfgInstContent,
     release_stor: Releases,
     git_commit_stor: GitCommits,
-    upload_rule_stor: UploadRules,
+    file_rule_stor: FileRules,
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
     event_hub: EventHub,
@@ -59,7 +59,7 @@ impl Fixture {
         let (git_commit_stor, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
             .await
             .unwrap();
-        let (upload_rule_stor, _) = UploadRules::spawn(16, dir.file("upload_rules.json"), 1000)
+        let (file_rule_stor, _) = FileRules::spawn(16, dir.file("file_rules.json"), 1000)
             .await
             .unwrap();
         let log_file = dir.file("events.jsonl");
@@ -72,7 +72,7 @@ impl Fixture {
             cfg_inst_content_stor,
             release_stor,
             git_commit_stor,
-            upload_rule_stor,
+            file_rule_stor,
             http_client: MockClient::default(),
             retry_policy: fsm::RetryPolicy::default(),
             event_hub,
@@ -93,7 +93,7 @@ impl Fixture {
                 },
                 releases: &self.release_stor,
                 git_commits: &self.git_commit_stor,
-                upload_rules: &self.upload_rule_stor,
+                file_rules: &self.file_rule_stor,
             },
             http_client: &self.http_client,
             opts: &opts,
@@ -192,10 +192,10 @@ mod pull_success {
     }
 
     #[tokio::test]
-    async fn stores_upload_rules_from_expanded_release() {
-        let f = Fixture::new("sync_upload_rules").await;
+    async fn stores_file_rules_from_expanded_release() {
+        let f = Fixture::new("sync_file_rules").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
-        let dpl = make_deployment_with_release_upload_rules(
+        let dpl = make_deployment_with_release_file_rules(
             "dpl_1",
             cfg_inst_args,
             &["upl_rule_1", "upl_rule_2"],
@@ -206,15 +206,15 @@ mod pull_success {
         f.sync().await.unwrap();
 
         assert_deployment_stored(&f.deployment_stor, "dpl_1").await;
-        assert_upload_rule_stored(&f.upload_rule_stor, "upl_rule_1").await;
-        assert_upload_rule_stored(&f.upload_rule_stor, "upl_rule_2").await;
+        assert_file_rule_stored(&f.file_rule_stor, "upl_rule_1").await;
+        assert_file_rule_stored(&f.file_rule_stor, "upl_rule_2").await;
     }
 
     #[tokio::test]
-    async fn populates_release_upload_rule_ids() {
-        let f = Fixture::new("sync_release_upload_rule_ids").await;
+    async fn populates_release_file_rule_ids() {
+        let f = Fixture::new("sync_release_file_rule_ids").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
-        let dpl = make_deployment_with_release_upload_rules(
+        let dpl = make_deployment_with_release_file_rules(
             "dpl_1",
             cfg_inst_args,
             &["upl_rule_1", "upl_rule_2"],
@@ -226,7 +226,7 @@ mod pull_success {
 
         let release = read_release(&f.release_stor, "dpl_1_rel").await;
         assert_eq!(
-            release.upload_rule_ids,
+            release.file_rule_ids,
             vec!["upl_rule_1".to_string(), "upl_rule_2".to_string()]
         );
     }
@@ -499,23 +499,23 @@ mod pull_failure {
     }
 
     #[tokio::test]
-    async fn upload_rules_not_expanded_error() {
-        let f = Fixture::new("upload_rules_not_expanded_error").await;
+    async fn file_rules_not_expanded_error() {
+        let f = Fixture::new("file_rules_not_expanded_error").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
         let mut unexpanded = make_deployment_with_release("dpl_1", cfg_inst_args, "rel_1", None);
-        unexpanded.release.as_mut().unwrap().upload_rules = None;
+        unexpanded.release.as_mut().unwrap().file_rules = None;
         f.http_client
             .set_list_all_deployments(move || Ok(vec![unexpanded.clone()]));
 
         let err = f.sync().await.unwrap_err();
-        let is_upload_rules_not_expanded = matches!(err, SyncErr::UploadRulesNotExpanded(_))
+        let is_file_rules_not_expanded = matches!(err, SyncErr::FileRulesNotExpanded(_))
             || matches!(
                 &err,
-                SyncErr::SyncErrors(se) if se.errors.iter().any(|e| matches!(e, SyncErr::UploadRulesNotExpanded(_)))
+                SyncErr::SyncErrors(se) if se.errors.iter().any(|e| matches!(e, SyncErr::FileRulesNotExpanded(_)))
             );
         assert!(
-            is_upload_rules_not_expanded,
-            "expected UploadRulesNotExpanded (or SyncErrors containing it), got: {err:?}"
+            is_file_rules_not_expanded,
+            "expected FileRulesNotExpanded (or SyncErrors containing it), got: {err:?}"
         );
     }
 

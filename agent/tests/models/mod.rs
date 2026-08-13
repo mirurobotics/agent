@@ -3,6 +3,6 @@ pub mod harnesses;
 pub mod config_instance;
 pub mod deployment;
 pub mod device;
+pub mod file_rule;
 pub mod git_commit;
 pub mod release;
-pub mod upload_rule;

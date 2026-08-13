@@ -3,9 +3,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::errors::HTTPCode;
-use miru_agent::upload::errors::ExecutorErr;
-use miru_agent::upload::{Job, UploadErr, UploadExecutor};
+use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::{Job, UploadErr, UploadExecutor};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
@@ -16,6 +15,8 @@ pub enum MockStep {
     Err,
     /// Fail with an error classified terminal (HTTP 400)
     TerminalErr,
+    /// Fail with an error classified as a network connection error
+    NetworkErr,
     /// Await the receiver and return the sent result (or `Ok(())` if the
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
@@ -64,12 +65,20 @@ impl UploadExecutor for MockUploadExecutor {
             None | Some(MockStep::Ok) => Ok(()),
             Some(MockStep::Err) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted failure")),
-                terminal_status: None,
+                is_terminal: false,
+                is_network_conn_err: false,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::TerminalErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted terminal failure")),
-                terminal_status: Some(HTTPCode::BAD_REQUEST),
+                is_terminal: true,
+                is_network_conn_err: false,
+                trace: miru_agent::trace!(),
+            })),
+            Some(MockStep::NetworkErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
+                source: Box::new(std::io::Error::other("scripted network failure")),
+                is_terminal: false,
+                is_network_conn_err: true,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),

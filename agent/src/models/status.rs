@@ -13,7 +13,7 @@
 //   - local        : neither `agent_type` nor `backend_type` (e.g. `LogLevel`)
 //   - agent         : `agent_type` only (e.g. `DeviceStatus`)
 //   - backend+agent : `agent_type` + `backend_type` (e.g. the `Dpl*` enums)
-//   - backend-only  : `backend_type` only (e.g. `DeletePolicy`)
+//   - backend-only  : `backend_type` only (no current users)
 //
 // See the "Enum conventions" section of `AGENTS.md` for the canonical decision
 // tree describing which facility to reach for.

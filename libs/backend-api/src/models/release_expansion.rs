@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ReleaseExpansion {
-    #[serde(rename = "upload_rules")]
-    RELEASE_EXPAND_UPLOAD_RULES,
+    #[serde(rename = "file_rules")]
+    RELEASE_EXPAND_FILE_RULES,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
@@ -25,7 +25,7 @@ pub enum ReleaseExpansion {
 impl std::fmt::Display for ReleaseExpansion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::RELEASE_EXPAND_UPLOAD_RULES => write!(f, "upload_rules"),
+            Self::RELEASE_EXPAND_FILE_RULES => write!(f, "file_rules"),
             Self::ReleaseExpansionUnknown => write!(f, "unknown"),
         }
     }
@@ -33,7 +33,7 @@ impl std::fmt::Display for ReleaseExpansion {
 
 impl Default for ReleaseExpansion {
     fn default() -> ReleaseExpansion {
-        Self::RELEASE_EXPAND_UPLOAD_RULES
+        Self::RELEASE_EXPAND_FILE_RULES
     }
 }
 

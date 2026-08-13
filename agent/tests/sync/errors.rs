@@ -11,7 +11,7 @@ use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::sync::errors::{
-    CfgInstsNotExpandedErr, SyncErrors, SyncerInCooldownErr, UploadRulesNotExpandedErr,
+    CfgInstsNotExpandedErr, FileRulesNotExpandedErr, SyncErrors, SyncerInCooldownErr,
 };
 use miru_agent::sync::SyncErr;
 
@@ -102,12 +102,12 @@ mod from_conversions {
     }
 
     #[test]
-    fn upload_rules_not_expanded_err_maps() {
-        let err: SyncErr = UploadRulesNotExpandedErr {
+    fn file_rules_not_expanded_err_maps() {
+        let err: SyncErr = FileRulesNotExpandedErr {
             deployment_id: "dpl_1".to_string(),
         }
         .into();
-        assert!(matches!(err, SyncErr::UploadRulesNotExpanded(_)));
+        assert!(matches!(err, SyncErr::FileRulesNotExpanded(_)));
     }
 }
 

@@ -6,23 +6,27 @@ use std::sync::Arc;
 use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
+use crate::data_uploads::{
+    retention::{self, DeleterExt},
+    scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt},
+    upload::{self, UploaderExt},
+};
 use crate::deploy::{apply, fsm};
 use crate::disk;
 use crate::events;
 use crate::filesys::PathExt;
 use crate::http;
-use crate::scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
-use crate::upload::{self, UploaderExt};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<disk::Storage>,
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
-    pub scanner: Option<Arc<scan::Scanner>>,
-    pub uploader: Option<Arc<upload::Uploader>>,
+    pub scanner: Arc<scan::Scanner>,
+    pub deleter: Arc<retention::Deleter>,
+    pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
@@ -34,7 +38,6 @@ impl AppState {
         capacities: disk::Capacities,
         http_client: Arc<http::Client>,
         dpl_retry_policy: fsm::RetryPolicy,
-        enable_uploader: bool,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
         let auth_dir = layout.auth();
@@ -90,26 +93,33 @@ impl AppState {
         // initialize the activity tracker
         let activity_tracker = Arc::new(activity::Tracker::new());
 
-        // initialize the scanner (optional)
-        let (scanner, scanner_handle) = Self::init_scanner(layout, enable_uploader).await;
-
-        // initialize the uploader (optional)
+        // initialize the deleter and uploader before the scanner: the
+        // scanner's stable-file sinks are built from their handles
+        let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
         let (uploader, uploader_handle) = Self::init_uploader(
             layout,
-            enable_uploader,
             http_client.clone(),
             token_mngr.clone(),
+            deleter.clone(),
         )
-        .await;
+        .await?;
+
+        // initialize the scanner with the upload and retention sinks
+        let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![
+            Arc::new(upload::UploadStableFileSink::new(uploader.clone())),
+            Arc::new(retention::RetentionStableFileSink::new(deleter.clone())),
+        ];
+        let (scanner, scanner_handle) = Self::init_scanner(layout, sinks).await?;
 
         let shutdown_handle = async move {
-            let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
-            if let Some(handle) = scanner_handle {
-                handles.push(handle);
-            }
-            if let Some(handle) = uploader_handle {
-                handles.push(handle);
-            }
+            let handles = vec![
+                token_mngr_handle,
+                syncer_handle,
+                event_hub_handle,
+                scanner_handle,
+                deleter_handle,
+                uploader_handle,
+            ];
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -120,6 +130,7 @@ impl AppState {
                 http_client,
                 syncer,
                 scanner,
+                deleter,
                 uploader,
                 token_mngr,
                 activity_tracker,
@@ -129,21 +140,14 @@ impl AppState {
         ))
     }
 
-    /// Spawn the scanner actor with an on-disk snapshot. Fail-open by design:
-    /// a snapshot-file error degrades to scanning without persistence, and a
-    /// spawn error degrades to no scanner at all — the agent must boot even
-    /// when the scanner cannot.
+    /// Spawn the scanner actor with an on-disk snapshot. A snapshot-file error
+    /// degrades to scanning without persistence (fail-open — a bad disk must
+    /// not brick config deployment); a spawn error fails boot, but no such
+    /// error path currently exists (`Scanner::spawn` cannot fail today).
     async fn init_scanner(
         layout: &disk::Layout,
-        enable_scanner: bool,
-    ) -> (
-        Option<Arc<scan::Scanner>>,
-        Option<tokio::task::JoinHandle<()>>,
-    ) {
-        if !enable_scanner {
-            return (None, None);
-        }
-
+        sinks: Vec<Arc<dyn scan::StableFileSink>>,
+    ) -> Result<(Arc<scan::Scanner>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match ScanSnapshotFile::new_with_default(
             layout.scanner_snapshot(),
             Default::default(),
@@ -161,34 +165,55 @@ impl AppState {
 
         let args = ScannerArgs {
             snapshot_file,
+            sinks,
             ..ScannerArgs::default()
         };
-        match scan::Scanner::spawn(64, args) {
-            Ok((scanner, handle)) => (Some(Arc::new(scanner)), Some(handle)),
+        let (scanner, handle) = scan::Scanner::spawn(64, args)?;
+        Ok((Arc::new(scanner), handle))
+    }
+
+    /// Spawn the deleter actor with an on-disk snapshot. A snapshot-file error
+    /// degrades to deleting without queue persistence (fail-open); a spawn
+    /// error fails boot, but no such error path currently exists
+    /// (`Deleter::spawn` cannot fail today).
+    async fn init_deleter(
+        layout: &disk::Layout,
+    ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
+        let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
+            layout.delete_queue(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
             Err(e) => {
-                tracing::error!("failed to spawn scanner; continuing without scanning: {e}");
-                (None, None)
+                tracing::error!(
+                    "failed to initialize delete queue snapshot file; deletions will run without persistence: {e}"
+                );
+                None
             }
-        }
+        };
+
+        let args = retention::DeleterArgs {
+            snapshot_file,
+            ..retention::DeleterArgs::default()
+        };
+        let (deleter, handle) = retention::Deleter::spawn(64, args)?;
+        Ok((Arc::new(deleter), handle))
     }
 
     /// Spawn the uploader actor driving the live executor (credential mint → native SDK
-    /// transfer → confirm). Fail-open by design: a snapshot-file error degrades to
-    /// uploading without queue persistence, and a spawn error degrades to no uploader
-    /// — the agent must boot even when the uploader cannot.
+    /// transfer → confirm). The deleter handle receives a delete job whenever a
+    /// confirmed upload's retention requires the upload. A snapshot-file error
+    /// degrades to uploading without queue persistence (fail-open); a spawn
+    /// error fails boot, but no such error path currently exists
+    /// (`Uploader::spawn` cannot fail today).
     async fn init_uploader(
         layout: &disk::Layout,
-        enable_scanner: bool,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
-    ) -> (
-        Option<Arc<upload::Uploader>>,
-        Option<tokio::task::JoinHandle<()>>,
-    ) {
-        if !enable_scanner {
-            return (None, None);
-        }
-
+        deleter: Arc<retention::Deleter>,
+    ) -> Result<(Arc<upload::Uploader>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match upload::QueueSnapshotFile::new_with_default(
             layout.upload_queue(),
             Default::default(),
@@ -209,40 +234,43 @@ impl AppState {
             token_mngr,
             upload::SdkTransfer::default(),
         ));
-        match upload::Uploader::spawn(
+        let (uploader, handle) = upload::Uploader::spawn(
             64,
             executor,
+            deleter,
             upload::UploaderOptions::default(),
             snapshot_file,
             |wait| tokio::time::sleep(wait),
-        ) {
-            Ok((uploader, handle)) => (Some(Arc::new(uploader)), Some(handle)),
-            Err(e) => {
-                tracing::error!("failed to spawn uploader; continuing without uploads: {e}");
-                (None, None)
-            }
-        }
+            chrono::Utc::now,
+        )?;
+        Ok((Arc::new(uploader), handle))
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the uploader first: it depends on nothing else in the app, and its
-        // feeder (the scan-upload bridge worker) has already been joined by this point.
-        if let Some(uploader) = &self.uploader {
-            if let Err(e) = uploader.shutdown().await {
-                tracing::error!("failed to shutdown uploader: {e}");
-                first_err.get_or_insert(e.into());
-            }
+        // shutdown the uploader first: it depends on nothing else in the app. The
+        // scanner's upload sink may still enqueue into the stopped uploader if a
+        // scan tick races this shutdown; the sink logs a warn and the tick
+        // completes, so ordering stays safe.
+        if let Err(e) = self.uploader.shutdown().await {
+            tracing::error!("failed to shutdown uploader: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        // shutdown the deleter after the uploader and alongside the scanner's
+        // retention sink going quiet; a sink racing this shutdown logs a warn
+        // and the tick completes, same as the upload sink.
+        if let Err(e) = self.deleter.shutdown().await {
+            tracing::error!("failed to shutdown deleter: {e}");
+            first_err.get_or_insert(e.into());
         }
 
         // shutdown the scanner before the syncer (it uses syncer to determine the
         // correct set of rules to use for scanning)
-        if let Some(scanner) = &self.scanner {
-            if let Err(e) = scanner.shutdown().await {
-                tracing::error!("failed to shutdown scanner: {e}");
-                first_err.get_or_insert(e.into());
-            }
+        if let Err(e) = self.scanner.shutdown().await {
+            tracing::error!("failed to shutdown scanner: {e}");
+            first_err.get_or_insert(e.into());
         }
 
         // shutdown the syncer before storage (it uses storage during sync)

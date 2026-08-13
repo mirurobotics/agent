@@ -23,6 +23,9 @@ pub struct BaseConfigInstance {
     /// The absolute file system path where this config instance is written.
     #[serde(rename = "filepath")]
     pub filepath: String,
+    /// The key of the config schema slot this instance is bound to. Must match the `key` of one of the slots declared by this instance's config schema.
+    #[serde(rename = "slot_key")]
+    pub slot_key: String,
     /// The timestamp of when the config instance was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
@@ -35,12 +38,13 @@ pub struct BaseConfigInstance {
 }
 
 impl BaseConfigInstance {
-    pub fn new(object: Object, id: String, config_type_name: String, filepath: String, created_at: String, config_schema_id: String, config_type_id: String) -> BaseConfigInstance {
+    pub fn new(object: Object, id: String, config_type_name: String, filepath: String, slot_key: String, created_at: String, config_schema_id: String, config_type_id: String) -> BaseConfigInstance {
         BaseConfigInstance {
             object,
             id,
             config_type_name,
             filepath,
+            slot_key,
             created_at,
             config_schema_id,
             config_type_id,
