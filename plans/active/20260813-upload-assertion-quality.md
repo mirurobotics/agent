@@ -27,7 +27,7 @@ After this change, each of those tests fails if the behavior it names regresses:
 - [x] Milestone 3: add `TransferErr` to `agent/src/data_uploads/upload/errors.rs`; use it at the three `transfer.rs` construction sites.
 - [x] Milestone 3: update the three transfer tests to assert by type; perturbation check.
 - [x] Milestone 3: commit.
-- [ ] Milestone 4: full gate run (lint, test, covgate, preflight) and push; preflight CLEAN before the PR leaves draft.
+- [x] Milestone 4: full gate run (lint, test, covgate, preflight) and push; preflight CLEAN before the PR leaves draft.
 
 ## Surprises & Discoveries
 
@@ -107,7 +107,39 @@ After this change, each of those tests fails if the behavior it names regresses:
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Delivered as planned, in three commits on `test/upload-assertion-quality`:
+
+- `ae666d3` — exact backoff assertions in `hung_attempt_times_out_and_is_retried`
+  and `retention_producer::retried_upload_enqueues_once_at_confirm_time`, each
+  with a pinned `Backoff { base_secs: 1, growth_factor: 2, max_secs: 4 }` and
+  the arithmetic stated as a comment.
+- `ccbef4b` — `full_queue_returns_queue_full_err` now destructures
+  `UploadErr::QueueFullErr` and asserts `capacity == 1` and
+  `file == "/data/b.log"`; the `contains("queue is full")` check is gone.
+- `095975f` — `TransferErr` added to `agent/src/data_uploads/upload/errors.rs`
+  and wired into the three `transfer.rs` construction sites; the three transfer
+  tests assert by variant through a `transfer_err(&UploadErr) -> &TransferErr`
+  downcast helper.
+
+Every expected value in the plan was derived rather than measured, and every
+one of them matched the code on the first run — no expectation was adjusted to
+fit observed behavior.
+
+Both mandatory perturbation checks were executed and both produced the
+predicted failures (recorded verbatim in Surprises & Discoveries), so the
+tightened assertions demonstrably constrain the behavior they name.
+
+Gates: `cargo test --features test data_uploads::upload` reports `0 failed`
+including all six named tests; `cargo fmt -p miru-agent -- --check` is silent;
+`./scripts/lint.sh` passes (only the two pre-existing allowed RUSTSEC advisories
+on transitive deps); `./scripts/covgate.sh` passes with `.covgate` unchanged;
+`./scripts/preflight.sh` reports `Preflight clean` on the first run — the known
+parallelism flake did not occur.
+
+Scope held: no queue capacity/eviction policy, no jitter, no `Clock` trait, and
+no behavior change to the uploader or transfer layer beyond introducing
+`TransferErr`. Nothing about what these errors *mean* changed — only whether a
+caller can tell them apart.
 
 ## Context and Orientation
 
