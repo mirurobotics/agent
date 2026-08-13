@@ -115,17 +115,36 @@ when the backend is ready.
 - Scanning (glob + stability window + ledger) now runs for every rule regardless of
   upload. `StableFile` carries the rule's retention config instead of `delete_policy`.
 
-### PR 3 — Retention engine
+### PR 3 — Retention engine (architecture revised 2026-08-12, Ben's call)
 
-- Eligibility tracking in the scanner ledger: stability timestamp always; upload-confirm
-  timestamp fed back from the executor when `require_upload` (new confirm→scan feedback
-  path, or ledger update via the existing bridge machinery).
-- A deletion sweep (extend the scan tick or a small worker) deletes files whose
-  eligibility + `ttl_secs` has elapsed; persists across restarts via `scanner.json`.
-- Covers: retention-only, upload+retention (`require_upload` true/false), ttl 0 and
-  nonzero, restart mid-TTL, file disappearing before the sweep.
-- This PR is the design-heavy one — write its ExecPlan carefully (interaction with the
-  ledger-prune work in `plans/active/20260717-prune-ledger-via-discovery-glob.md`).
+**The scanner stays retention-unaware.** The original sketch (eligibility in the scanner
+ledger, confirm fed back to the scanner) is superseded: eligibility lives in a standalone
+delete subsystem — draft #191's architecture, modernized to `FileRuleRetention`. The
+scanner's job ends at emitting stable files (its events carry the full `FileRule` since
+PR 2's follow-ups, which is what makes retention-unaware producers possible).
+
+- `data_uploads::retention`: a persisted job queue (`delete_queue.json`) of
+  event-agnostic `retention::Job` records ("this exact file — path, size, mtime, digest —
+  became deletable at `eligible_at`; delete it `ttl_secs` later") and a `Deleter` actor
+  whose sweep re-stats each due entry: size+mtime match → delete; mtime-only change →
+  re-hash and delete only on digest match; otherwise drop without deleting.
+- Two producers, one per eligibility trigger:
+  1. **Upload confirm** (`retention.require_upload: true`): `LiveExecutor` enqueues on
+     confirm instead of deleting inline; enqueue failure never fails the upload.
+  2. **Stability** (retention present, `require_upload` false or absent — includes
+     retention-only rules): a scan-event subscriber enqueues from the stable-file event,
+     taking `ttl_secs` from the event's rule.
+- `workers/delete.rs` interval driver (60s default, mirroring `workers/scan.rs`);
+  fail-open init (deleter spawn failure degrades to uploads-without-deletion).
+- Ships as two PRs: **3a** = queue + actor + worker + the upload-confirm producer
+  (behavior-preserving modulo timing: ttl-0 deletes on the next sweep instead of inline);
+  **3b** = the stability producer + drop `StableFile.retention` (the ledger keeps only
+  file facts; retention travels on the event's rule).
+- Draft #191 is closed as superseded; its queue/actor/sweep code is ported, its
+  `delete_delay_secs` threading is not (superseded by `FileRuleRetention.ttl_secs`).
+- Known gap, accepted: a crash between a stable-file emit and the enqueue persisting
+  loses that pending delete — fail-open (file retained), never fail-deadly. The ledger
+  dedups re-emits, so the record is not reproduced on restart.
 
 ### PR 4 — Wire flip: re-vendor spec v0.5.0-beta.1 + regen
 

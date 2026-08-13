@@ -57,9 +57,9 @@ impl Queue {
     }
 
     /// A disk-backed queue: `snapshot_file`'s persisted entries seed the initial
-    /// backlog, and every subsequent mutation is written back. Persisted entries
-    /// are loaded in full even if they exceed `capacity`; capacity only gates new
-    /// enqueues, so an over-capacity backlog simply drains before it accepts more.
+    /// backlog, and every subsequent mutation is written back. Persisted entries are
+    /// loaded in full even if they exceed `capacity`; capacity only gates new enqueues,
+    /// so an over-capacity backlog simply drains before it accepts more.
     pub fn from_snapshot(capacity: usize, snapshot_file: QueueSnapshotFile) -> Self {
         let jobs = snapshot_file.read().entries.iter().cloned().collect();
         Self {
