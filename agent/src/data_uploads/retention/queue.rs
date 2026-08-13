@@ -24,9 +24,8 @@ pub struct QueueEntry {
     #[serde(default = "Uuid::new_v4")]
     pub id: Uuid,
     pub job: Job,
-    /// Sweeps that failed in a way we chose to count (see `SweepOutcome` in
-    /// `deleter.rs`). Defaulted so a snapshot written before this field
-    /// existed loads with a full budget rather than resetting the queue.
+    /// Failed sweeps charged against this entry's attempt budget. Defaulted so
+    /// a snapshot written before the field existed loads with a full budget.
     #[serde(default)]
     pub attempts: u32,
 }

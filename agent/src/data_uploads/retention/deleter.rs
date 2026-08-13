@@ -184,6 +184,10 @@ impl SingleThreadDeleter {
                 );
                 Some(SweepOutcome::Changed)
             }
+            Err(FileSysErr::PathDoesNotExistErr(_)) => {
+                info!("delete: {} already gone; dropping entry", entry.file);
+                Some(SweepOutcome::AlreadyGone)
+            }
             Err(err) => {
                 warn!(
                     "delete: failed to hash {}: {err:?}; classifying failure",
@@ -250,10 +254,8 @@ impl SingleThreadDeleter {
         );
     }
 
-    /// `attempts` counts *consumed* attempts and the terminal path deliberately
-    /// consumes none, so log the ordinal of the sweep that failed —
-    /// `attempts + 1` — not the field. Without the `+ 1` the headline case (a
-    /// terminal failure on the very first sweep) logs "attempt 0".
+    /// Logs the ordinal of the failing sweep (`attempts + 1`); the terminal
+    /// path consumes no attempt, so the field itself is one short.
     fn log_terminal_drop(entry: &QueueEntry) {
         error!(
             "delete: giving up on {} on attempt {} after a permanent filesystem \
@@ -679,9 +681,8 @@ mod tests {
             assert!(deleter.queue.is_empty());
         }
 
-        // a stat failure that is not NotFound (here ENOTDIR: the recorded
-        // path's parent is a file) can never resolve for this path, so the
-        // entry is dropped on the first sweep rather than retried.
+        // ENOTDIR: the recorded path's parent is a file, so the stat can never
+        // succeed for this path.
         #[tokio::test]
         async fn stat_permanent_failure_drops_entry() {
             let parent = temp_file(b"not a dir").await;
@@ -766,9 +767,8 @@ mod tests {
             assert!(tmp.file().exists());
         }
 
-        // a hash failure (EISDIR: the recorded path is a directory, whose read
-        // fails) is permanent for this path, so the entry is dropped on the
-        // first sweep and the pass never panics.
+        // EISDIR: the recorded path is a directory, so the hash read fails
+        // permanently; the pass must drop the entry, not panic.
         #[tokio::test]
         async fn hash_permanent_failure_drops_entry() {
             let dir = dirs::temp("delete-hash-eisdir").unwrap();
@@ -812,9 +812,9 @@ mod tests {
             assert!(!tmp.file().exists());
         }
 
-        // files::delete failure (EISDIR: the recorded path is a directory, and
-        // unlink refuses directories) is terminal: the job is dropped on the
-        // first sweep, without consuming the default budget of 10 attempts.
+        // EISDIR: the recorded path is a directory and unlink refuses
+        // directories, so files::delete fails permanently. The deleter keeps
+        // the default budget of 10 attempts.
         #[tokio::test]
         async fn terminal_failure_drops_job_without_burning_attempts() {
             let dir = dirs::temp("delete-eisdir").unwrap();
@@ -837,7 +837,6 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            // the drop happens on sweep 1, not sweep 10.
             assert!(deleter.queue.is_empty());
             assert!(target.exists());
         }
