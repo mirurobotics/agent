@@ -125,11 +125,15 @@ impl Queue {
     /// and never counts an attempt, so it is stranded forever; clearing it
     /// makes it eligible now.
     ///
-    /// Called once at startup, on the load path, because a reboot is the
-    /// dominant way a snapshot acquires far-future deadlines. It warns rather
-    /// than logging quietly: a clock anomaly is worth surfacing in device logs.
-    /// Does not persist when nothing was released.
-    pub async fn release_stale_deadlines(&mut self, horizon: DateTime<Utc>) {
+    /// Called once at load, because a reboot is the dominant way a snapshot
+    /// acquires far-future deadlines. It warns rather than logging quietly: a
+    /// clock anomaly is worth surfacing in device logs.
+    ///
+    /// Releases in memory only, which is why this is not `async`. The write
+    /// would buy nothing: the release is idempotent and re-derived on every
+    /// load, and the next mutation persists the corrected entries anyway. A
+    /// snapshot read before that first mutation still shows the stale stamps.
+    pub fn release_stale_deadlines(&mut self, horizon: DateTime<Utc>) {
         let mut released = 0;
         for entry in self.jobs.iter_mut() {
             if entry.next_attempt_at.is_some_and(|at| at > horizon) {
@@ -144,7 +148,6 @@ impl Queue {
             "upload: released {released} retry deadline(s) beyond {horizon}; \
              the device clock appears to have stepped backward"
         );
-        self.persist().await;
     }
 
     /// The minimum effective deadline over all entries, where a `None`

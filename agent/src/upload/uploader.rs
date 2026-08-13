@@ -143,12 +143,6 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     pub(crate) async fn run(mut self) {
-        // a persisted deadline beyond one maximum backoff cannot have come from
-        // the retry schedule, so release it once here on the load path rather
-        // than leaving it stranded for the life of the process
-        let horizon = (self.now_fn)() + TimeDelta::seconds(self.options.backoff.max_secs.max(0));
-        self.queue.release_stale_deadlines(horizon).await;
-
         loop {
             let now = (self.now_fn)();
             match self.queue.pop_ready(now).await {
@@ -384,10 +378,15 @@ impl Uploader {
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
-        let queue = match snapshot_file {
+        let mut queue = match snapshot_file {
             Some(file) => Queue::from_snapshot(options.queue_capacity, file),
             None => Queue::new(options.queue_capacity),
         };
+        // a loaded deadline beyond one maximum backoff cannot have come from the
+        // retry schedule, so release it here rather than leaving it stranded for
+        // the life of the process
+        let horizon = now_fn() + TimeDelta::seconds(options.backoff.max_secs.max(0));
+        queue.release_stale_deadlines(horizon);
         let worker = Worker {
             receiver,
             queue,

@@ -377,39 +377,24 @@ mod release_stale_deadlines {
     use super::*;
 
     #[tokio::test]
-    async fn stale_deadline_is_released_and_survives_reload() {
-        let dir = dirs::temp("upload_queue_test").unwrap();
-        let path = dir.to_dir().file("upload_queue.json");
+    async fn stale_deadline_is_released() {
+        let mut queue = Queue::new(4);
         let now = Utc::now();
+        // no 24h-max backoff schedule could have stamped this: it is what a
+        // snapshot written before a backward clock step looks like
+        queue
+            .requeue(QueueEntry {
+                job: make_job("a.log"),
+                attempts: 3,
+                next_attempt_at: Some(now + TimeDelta::hours(48)),
+            })
+            .await;
 
-        {
-            let mut queue = Queue::from_snapshot(8, open(&path).await);
-            // no 24h-max backoff schedule could have stamped this: it is what a
-            // snapshot written before a backward clock step looks like
-            queue
-                .requeue(QueueEntry {
-                    job: make_job("a.log"),
-                    attempts: 3,
-                    next_attempt_at: Some(now + TimeDelta::hours(48)),
-                })
-                .await;
+        queue.release_stale_deadlines(now + TimeDelta::hours(24));
 
-            queue
-                .release_stale_deadlines(now + TimeDelta::hours(24))
-                .await;
-
-            // the entry is still queued, now with no deadline: `None` reads back
-            // as the `MIN_UTC` sentinel
-            assert_eq!(queue.len(), 1);
-            assert_eq!(
-                queue.earliest_next_attempt(),
-                Some(DateTime::<Utc>::MIN_UTC)
-            );
-        }
-
-        // the release was persisted: a fresh load pops the entry immediately
-        let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_ready(now).await.unwrap();
+        // stranded before the release; eligible immediately after, with its
+        // attempt count intact so the retry budget still applies
+        let entry = queue.pop_ready(now).await.unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.next_attempt_at, None);
         assert_eq!(entry.attempts, 3);
@@ -429,46 +414,50 @@ mod release_stale_deadlines {
             })
             .await;
 
-        queue.release_stale_deadlines(horizon).await;
+        queue.release_stale_deadlines(horizon);
 
         assert!(queue.pop_ready(now).await.is_none());
         assert_eq!(queue.len(), 1);
     }
 
     #[tokio::test]
-    async fn no_stale_deadline_does_not_persist() {
+    async fn release_is_in_memory_until_the_next_mutation() {
         let dir = dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let now = Utc::now();
-        let snapshot = QueueSnapshot {
-            entries: vec![QueueEntry {
-                job: make_job("a.log"),
-                attempts: 2,
-                next_attempt_at: None,
-            }],
-        };
-
-        // seed the legacy on-disk shape (no `next_attempt_at` field). The
-        // assertion is indirect: a persist would rewrite the file in the
-        // current shape, so the field's continued absence proves no write
-        // happened.
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        for entry in value["entries"].as_array_mut().unwrap() {
-            entry.as_object_mut().unwrap().remove("next_attempt_at");
-        }
-        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
+        let stale = now + TimeDelta::hours(48);
 
         let mut queue = Queue::from_snapshot(8, open(&path).await);
-        queue
-            .release_stale_deadlines(now + TimeDelta::hours(24))
-            .await;
+        // the requeues persist the stale stamps; the release deliberately does
+        // not write, so the file still carries them afterwards
+        for name in ["a.log", "b.log"] {
+            queue
+                .requeue(QueueEntry {
+                    job: make_job(name),
+                    attempts: 2,
+                    next_attempt_at: Some(stale),
+                })
+                .await;
+        }
 
+        queue.release_stale_deadlines(now + TimeDelta::hours(24));
+
+        let on_disk = |raw: &str| -> serde_json::Value {
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]
+                .clone()
+        };
         let raw = files::read_string(&path).await.unwrap();
         assert!(
-            !raw.contains("next_attempt_at"),
-            "snapshot was rewritten: {raw}"
+            !on_disk(&raw).is_null(),
+            "release should not have rewritten the snapshot: {raw}"
+        );
+
+        // the next mutation writes the corrected entries through
+        queue.pop_ready(now).await.unwrap();
+        let raw = files::read_string(&path).await.unwrap();
+        assert!(
+            on_disk(&raw).is_null(),
+            "the pop should have persisted the released state: {raw}"
         );
     }
 }
