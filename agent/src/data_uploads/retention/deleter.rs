@@ -486,11 +486,11 @@ mod tests {
                 .enqueue(make_job(tmp_b.file(), 1000, 0).await)
                 .await
                 .unwrap_err();
-            let DeleteErr::QueueFullErr(err) = err else {
+            let DeleteErr::QueueFullErr(full) = err else {
                 panic!("expected QueueFullErr, got: {err:?}");
             };
-            assert_eq!(err.capacity, 1);
-            assert_eq!(err.file, tmp_b.file().to_string());
+            assert_eq!(full.capacity, 1);
+            assert_eq!(full.file, tmp_b.file().to_string());
         }
 
         #[tokio::test]
@@ -519,6 +519,53 @@ mod tests {
 
     mod sweep {
         use super::*;
+
+        // Pins the walk's exactly-once guarantee: a not-due entry at the head
+        // is requeued at the tail and must not stop the pass — a due job
+        // behind it still deletes in the same sweep.
+        #[tokio::test]
+        async fn due_entry_behind_a_not_due_entry_is_still_swept() {
+            let waiting = temp_file(b"aaaa").await;
+            let due = temp_file(b"bbbb").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            let waiting_job = make_job(waiting.file(), 1000, 500).await;
+            deleter.enqueue(waiting_job.clone()).await.unwrap();
+            deleter
+                .enqueue(make_job(due.file(), 1000, 0).await)
+                .await
+                .unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert!(!due.file().exists());
+            assert!(waiting.file().exists());
+            assert_eq!(deleter.queue.entries(), [waiting_job]);
+        }
+
+        // Same-path duplicates coexist in the queue (no dedup on enqueue);
+        // the safety argument is that a sweep resolves them: the first job
+        // deletes the file and the stale duplicate drops as already-gone in
+        // the same pass.
+        #[tokio::test]
+        async fn same_path_duplicate_resolves_in_one_sweep() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            deleter
+                .enqueue(make_job(tmp.file(), 900, 0).await)
+                .await
+                .unwrap();
+            deleter
+                .enqueue(make_job(tmp.file(), 1000, 0).await)
+                .await
+                .unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert!(deleter.queue.is_empty());
+            assert!(!tmp.file().exists());
+        }
 
         #[tokio::test]
         async fn positive_delay_entry_waits_for_due_at() {

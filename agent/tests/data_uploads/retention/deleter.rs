@@ -56,6 +56,38 @@ async fn actor_round_trip() {
     handle.await.unwrap();
 }
 
+// A domain error crosses the actor boundary intact: the worker's dispatch
+// plumbing must not flatten an inner Err into a successful send.
+#[tokio::test]
+async fn enqueue_on_full_queue_errors_through_the_handle() {
+    let src_a = temp_file(b"hello world").await;
+    let src_b = temp_file(b"other bytes").await;
+    let (deleter, handle) = Deleter::spawn(
+        16,
+        DeleterArgs {
+            queue_capacity: 1,
+            ..DeleterArgs::default()
+        },
+    )
+    .unwrap();
+
+    deleter.enqueue(make_job(src_a.file()).await).await.unwrap();
+    let err = deleter
+        .enqueue(make_job(src_b.file()).await)
+        .await
+        .unwrap_err();
+
+    let DeleteErr::QueueFullErr(err) = err else {
+        panic!("expected QueueFullErr, got: {err:?}");
+    };
+    assert_eq!(err.capacity, 1);
+    assert_eq!(err.file, src_b.file().to_string());
+    assert_eq!(deleter.len().await.unwrap(), 1);
+
+    deleter.shutdown().await.unwrap();
+    handle.await.unwrap();
+}
+
 #[tokio::test]
 async fn enqueue_after_shutdown_errors() {
     let src = temp_file(b"hello world").await;
