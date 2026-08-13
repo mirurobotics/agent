@@ -8,13 +8,11 @@ use crate::data_uploads::upload::{
     job::Job,
     transfer::ObjectTransfer,
 };
-use crate::filesys::files;
 use crate::http::{self, ClientI};
-use crate::models::FileRuleRetention;
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
-use tracing::{info, warn};
+use tracing::info;
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
@@ -83,26 +81,6 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         .map(|_| ())
         .map_err(classified_executor_err)
     }
-
-    async fn delete_source_file(&self, job: &Job) {
-        if job.retention
-            == Some(FileRuleRetention {
-                require_upload: true,
-                ttl_secs: 0,
-            })
-        {
-            info!(
-                "upload: deleting local source file {} per retention policy",
-                job.file
-            );
-            if let Err(e) = files::delete(&job.file).await {
-                warn!(
-                    "upload for {} confirmed but deleting the local source file failed: {e:?}",
-                    job.file
-                );
-            }
-        }
-    }
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
@@ -131,8 +109,6 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             resp.upload.id, job.file
         );
         self.confirm_upload(&resp.upload.id).await?;
-
-        self.delete_source_file(job).await;
         Ok(())
     }
 }

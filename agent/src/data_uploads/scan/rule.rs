@@ -8,7 +8,7 @@ use crate::data_uploads::scan::{
     state::{Candidate, Config, Observation, RuleState, StableFile},
 };
 use crate::filesys::{errors::*, files, File, PathExt};
-use crate::models::{Deployment, FileRuleRetention};
+use crate::models::Deployment;
 use crate::trace;
 
 // external crates
@@ -288,7 +288,6 @@ async fn differs_from_previous(
         candidate,
         observation.timestamp,
         digest,
-        state.rule().retention.clone(),
     )))
 }
 
@@ -296,7 +295,6 @@ fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
     digest: Digest,
-    retention: Option<FileRuleRetention>,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
@@ -309,7 +307,6 @@ fn build_stable_file(
         last_observed_at,
         deployment_id: first_obs.deployment_id.clone(),
         file_rule_id: first_obs.file_rule_id.clone(),
-        retention,
     }
 }
 
@@ -332,7 +329,7 @@ mod tests {
     // internal crates
     use crate::data_uploads::scan::state::{Candidate, Config, Observation, RuleState, StableFile};
     use crate::filesys::{dirs, dirs::TempDir, Dir, PathExt, WriteOptions};
-    use crate::models::{Deployment, FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
+    use crate::models::{Deployment, FileRule, FileRuleSource, FileRuleUpload};
 
     // external crates
     use std::time::SystemTime;
@@ -441,7 +438,6 @@ mod tests {
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
             file_rule_id: "r1".to_string(),
-            retention: None,
         }
     }
 
@@ -467,7 +463,6 @@ mod tests {
             last_observed_at,
             deployment_id: obs.deployment_id.clone(),
             file_rule_id: obs.file_rule_id.clone(),
-            retention: None,
         }
     }
 
@@ -882,45 +877,6 @@ mod tests {
                     .await
                     .unwrap(),
             );
-        }
-
-        /// Extract the `StableFile` from a `Stable` outcome, panicking otherwise.
-        fn stable_file_of(outcome: Outcome) -> StableFile {
-            match outcome {
-                Outcome::Stable(sf) => sf,
-                _ => panic!("expected Outcome::Stable"),
-            }
-        }
-
-        // The emitted StableFile stamps the rule's retention: a rule with a
-        // retention block yields the same retention on the StableFile.
-        #[tokio::test]
-        async fn stamps_retention_from_rule() {
-            let mut c = case("s.mcap", 0).await;
-            c.state.cfg.rule.retention = Some(FileRuleRetention {
-                require_upload: true,
-                ttl_secs: 0,
-            });
-            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
-                .await
-                .unwrap();
-            assert_eq!(
-                stable_file_of(outcome).retention,
-                Some(FileRuleRetention {
-                    require_upload: true,
-                    ttl_secs: 0,
-                })
-            );
-        }
-
-        // The default rule (no retention) yields None on the StableFile.
-        #[tokio::test]
-        async fn stamps_no_retention_from_default_rule() {
-            let c = case("s.mcap", 0).await;
-            let outcome = differs_from_previous(&c.state, &c.cand, &c.obs)
-                .await
-                .unwrap();
-            assert_eq!(stable_file_of(outcome).retention, None);
         }
     }
 

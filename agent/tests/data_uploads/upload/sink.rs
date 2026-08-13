@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::upload_executor::MockUploadExecutor;
+use crate::mocks::{deleter::MockDeleter, upload_executor::MockUploadExecutor};
 use miru_agent::data_uploads::scan::{scanner::StableFile, StableFileSink};
 use miru_agent::data_uploads::upload::{
     Job, UploadStableFileSink, Uploader, UploaderExt, UploaderOptions,
@@ -36,17 +36,18 @@ fn stable_file(name: &str, deployment_id: &str, rule_id: &str) -> StableFile {
         last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
         deployment_id: deployment_id.to_string(),
         file_rule_id: rule_id.to_string(),
-        retention: Some(FileRuleRetention {
-            require_upload: true,
-            ttl_secs: 0,
-        }),
     }
 }
 
-/// An upload-bearing FileRule.
+/// An upload-bearing FileRule with a retention block, so the sink's
+/// rule-to-job retention stamping is observable.
 fn upload_rule() -> FileRule {
     FileRule {
         upload: Some(FileRuleUpload::default()),
+        retention: Some(FileRuleRetention {
+            require_upload: true,
+            ttl_secs: 60,
+        }),
         ..FileRule::default()
     }
 }
@@ -75,6 +76,7 @@ impl Harness {
         let (uploader, uploader_handle) = Uploader::spawn(
             16,
             executor.clone(),
+            MockDeleter::new(),
             UploaderOptions::default(),
             None,
             |_: Duration| async {},
@@ -121,10 +123,12 @@ async fn stable_file_becomes_upload_job() {
     let mut harness = Harness::start();
 
     let stable = stable_file("a.log", "dpl_1", "rule_1");
-    harness.deliver(stable.clone(), &upload_rule()).await;
+    let rule = upload_rule();
+    harness.deliver(stable.clone(), &rule).await;
 
     let jobs = harness.await_uploads(1).await;
     assert_eq!(jobs.len(), 1);
+    // retention comes from the rule, not the (retention-less) stable file
     let expected = Job {
         file: stable.file,
         size: stable.size,
@@ -134,7 +138,7 @@ async fn stable_file_becomes_upload_job() {
         last_observed_at: stable.last_observed_at,
         file_rule_id: stable.file_rule_id,
         deployment_id: stable.deployment_id,
-        retention: stable.retention,
+        retention: rule.retention,
     };
     assert_eq!(expected, jobs[0]);
 

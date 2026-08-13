@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
-use crate::models::{Deployment, FileRule, FileRuleID, FileRuleRetention, Patch};
+use crate::models::{Deployment, FileRule, FileRuleID, Patch};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -116,9 +116,6 @@ pub struct StableFile {
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub file_rule_id: String,
-    // default to None (never delete)
-    #[serde(default)]
-    pub retention: Option<FileRuleRetention>,
 }
 
 impl StableFile {
@@ -212,7 +209,6 @@ mod tests {
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
             file_rule_id: "r1".to_string(),
-            retention: None,
         }
     }
 
@@ -692,18 +688,20 @@ mod tests {
             assert!(!entry.equal_metadata(&observation));
         }
 
+        // Old `scanner.json` snapshots stamped a now-removed `retention` field
+        // on each ledger entry; serde ignores unknown fields by default, so
+        // they must keep deserializing without migration.
         #[test]
-        fn without_retention_defaults_to_none() {
+        fn stale_retention_field_is_ignored() {
             let sf = stable_file(File::new("/none/s.mcap"), ts(900));
             let mut value = serde_json::to_value(&sf).unwrap();
-            value
-                .as_object_mut()
-                .unwrap()
-                .remove("retention")
-                .expect("fixture should serialize a retention field");
+            value.as_object_mut().unwrap().insert(
+                "retention".to_string(),
+                serde_json::json!({ "require_upload": true, "ttl_secs": 60 }),
+            );
 
             let parsed: StableFile = serde_json::from_value(value).unwrap();
-            assert_eq!(parsed.retention, None);
+            assert_eq!(parsed, sf);
         }
     }
 }

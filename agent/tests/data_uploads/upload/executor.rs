@@ -19,10 +19,9 @@ use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
 use miru_agent::errors::Error;
-use miru_agent::filesys::{files, File, PathExt, WriteOptions};
+use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
-use miru_agent::models::FileRuleRetention;
 
 // external crates
 use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -384,102 +383,6 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
         Some("dvc_1")
     );
     assert_eq!(client.call_count(Call::ConfirmUpload), 1);
-}
-
-// ================================ retention ===================================== //
-
-async fn retention_setup(
-    client: Arc<MockClient>,
-) -> (
-    files::TempFile,
-    LiveExecutor<MockClient, MockTokenManager, MockObjectTransfer>,
-) {
-    client.set_create_upload(|| Ok(pending_response()));
-    client.set_confirm_upload(|| Ok(*uploaded_response().upload));
-    let src = files::temp("upload-retention-test").unwrap();
-    files::write_bytes(
-        src.file(),
-        b"hello world",
-        WriteOptions::OVERWRITE_NONATOMIC,
-    )
-    .await
-    .unwrap();
-    let executor = LiveExecutor::new(client, token_manager(), MockObjectTransfer::new());
-    (src, executor)
-}
-
-#[tokio::test]
-async fn require_upload_retention_deletes_source_after_confirm() {
-    let client = Arc::new(MockClient::default());
-    let (src, executor) = retention_setup(client).await;
-    let mut job = make_job("a.log");
-    job.file = src.file().clone();
-    job.retention = Some(FileRuleRetention {
-        require_upload: true,
-        ttl_secs: 0,
-    });
-    let path = job.file.path().clone();
-    assert!(path.exists());
-
-    executor.upload(&job).await.unwrap();
-
-    // A require-upload retention deletes the confirmed source file.
-    assert!(!path.exists());
-}
-
-#[tokio::test]
-async fn no_retention_leaves_source_in_place() {
-    let client = Arc::new(MockClient::default());
-    let (src, executor) = retention_setup(client).await;
-    let mut job = make_job("a.log");
-    job.file = src.file().clone();
-    job.retention = None;
-    let path = job.file.path().clone();
-
-    executor.upload(&job).await.unwrap();
-
-    // No retention leaves the source file untouched.
-    assert!(path.exists());
-}
-
-#[tokio::test]
-async fn delete_failure_after_confirm_still_succeeds() {
-    let client = Arc::new(MockClient::default());
-    let (src, executor) = retention_setup(client.clone()).await;
-    let mut job = make_job("a.log");
-    // Point the source at a child of the written temp file. Its parent is a
-    // regular file, not a directory, so `remove_file` fails with a non-NotFound
-    // kind. `files::delete` returns Err; the executor logs and swallows it (any
-    // delete error other than NotFound is swallowed), so the upload — already
-    // durably confirmed — still reports Ok.
-    job.file = File::new(src.file().path().join("child"));
-    job.retention = Some(FileRuleRetention {
-        require_upload: true,
-        ttl_secs: 0,
-    });
-
-    // Observable outcome: upload is Ok and confirm ran exactly once, proving the
-    // swallowed delete error did not re-drive an already-durable upload.
-    executor.upload(&job).await.unwrap();
-    assert_eq!(client.call_count(Call::ConfirmUpload), 1);
-}
-
-#[tokio::test]
-async fn missing_source_at_delete_is_success() {
-    let client = Arc::new(MockClient::default());
-    client.set_create_upload(|| Ok(pending_response()));
-    client.set_confirm_upload(|| Ok(*uploaded_response().upload));
-    let executor = LiveExecutor::new(client, token_manager(), MockObjectTransfer::new());
-    let mut job = make_job("never-existed.log");
-    // A path that never existed (distinct from the present-then-deleted case):
-    // `files::delete` maps NotFound to Ok, so upload succeeds.
-    job.file = File::new("/data/does-not-exist/never-existed.log");
-    job.retention = Some(FileRuleRetention {
-        require_upload: true,
-        ttl_secs: 0,
-    });
-
-    executor.upload(&job).await.unwrap();
 }
 
 // ================================ create_request ================================= //
