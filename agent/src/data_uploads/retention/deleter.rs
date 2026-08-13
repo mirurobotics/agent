@@ -53,8 +53,6 @@ pub struct SingleThreadDeleter {
 
 /// Outcome of considering one queued job during a sweep.
 enum SweepOutcome {
-    /// Not yet due; requeue.
-    NotDue,
     /// Transient stat/hash/delete failure; requeue and try next sweep.
     Retry,
     /// File was deleted; drop the job.
@@ -82,41 +80,41 @@ impl SingleThreadDeleter {
     }
 
     async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        self.queue.enqueue(job)?;
-        self.queue.persist().await;
-        Ok(())
+        self.queue.enqueue(job).await
     }
 
-    /// Walk the queue one job at a time. Each job is popped into ownership
-    /// so a drop cannot hit a different entry. A dropped job is persisted
-    /// before the next is considered; a kept job is requeued at the tail.
+    /// Walk the due jobs one at a time. Each job is *selected*, not removed:
+    /// it stays in the queue — and therefore in every snapshot written while
+    /// it is being worked, by this sweep or by any concurrent command — until
+    /// it resolves. A resolved job is removed and persisted before the next is
+    /// selected; a transient failure rotates the entry to the tail. A job that
+    /// is not due is never selected, so it is neither rotated nor persisted.
     /// Per-entry failures are logged and never propagated — `sweep` always
     /// returns `Ok(())`.
     async fn sweep(&mut self) -> Result<(), DeleteErr> {
         let now = (self.now_fn)();
-        let n = self.queue.len();
-        for _ in 0..n {
-            let Some(entry) = self.queue.pop_front() else {
+        // Budget: one visit per entry that is due at `now`. A retried entry is
+        // requeued at the tail, behind every entry not yet visited, so this
+        // budget is exactly enough to visit each due entry once and never
+        // twice.
+        for _ in 0..self.queue.count_ready(now) {
+            let Some(entry) = self.queue.next_ready(now) else {
                 break;
             };
-            match Self::sweep_entry(&entry, now).await {
-                SweepOutcome::NotDue | SweepOutcome::Retry => {
-                    self.queue.requeue(entry);
-                }
+            match Self::sweep_entry(&entry.job).await {
+                SweepOutcome::Retry => self.queue.requeue(entry).await,
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
-                    self.queue.persist().await;
+                    self.queue.remove(entry.id).await;
                 }
             }
         }
         Ok(())
     }
 
-    /// Consider one job: delete only when it is due and the on-disk file still
-    /// matches the tagged size/mtime/digest.
-    async fn sweep_entry(entry: &Job, now: DateTime<Utc>) -> SweepOutcome {
-        if now < entry.due_at() {
-            return SweepOutcome::NotDue;
-        }
+    /// Consider one selected job: delete only when the on-disk file still
+    /// matches the tagged size/mtime/digest. Readiness is the queue's concern
+    /// — a job that is not due is never selected.
+    async fn sweep_entry(entry: &Job) -> SweepOutcome {
         let metadata = match Self::stat_file(entry).await {
             Ok(metadata) => metadata,
             Err(outcome) => return outcome,
@@ -210,6 +208,8 @@ pub trait DeleterExt: Send + Sync {
     fn enqueue(&self, job: Job) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
     /// Run one deletion pass over the queued jobs.
     fn sweep(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
+    /// The number of queued jobs, including one currently being swept: a
+    /// selected job stays queued until its sweep resolves it.
     fn len(&self) -> impl std::future::Future<Output = Result<usize, DeleteErr>> + Send;
     /// Stop the actor. Queued jobs stay in the persisted snapshot and are
     /// re-seeded on the next spawn.
@@ -278,7 +278,10 @@ impl Worker {
 /// Command handle to the [`SingleThreadDeleter`] actor. Reactive, not
 /// self-scheduling: each [`sweep`](DeleterExt::sweep) call walks the queue
 /// one job at a time. The cadence that drives repeated sweeps is imposed
-/// by an external driver, not by this type.
+/// by an external driver, not by this type. A sweep may safely be
+/// interleaved with commands: a selected job never leaves the queue until
+/// it resolves, so a persist triggered by another command cannot write the
+/// in-flight job out of the snapshot.
 #[derive(Debug)]
 pub struct Deleter {
     sender: mpsc::Sender<Command>,
@@ -787,8 +790,9 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // the due job was persisted-out before the waiting job was
-            // considered, so a rebuild sees only the waiting job.
+            // the due job was removed-and-persisted (Queue::remove) before the
+            // waiting job was considered, so a rebuild sees only the waiting
+            // job.
             let restored = SingleThreadDeleter::new(DeleterArgs {
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -796,6 +800,40 @@ mod tests {
             assert!(!due.file().exists());
             assert!(waiting.file().exists());
             assert_eq!(restored.queue.entries(), [waiting_job]);
+        }
+
+        // A not-due entry is never selected, so a sweep leaves it exactly
+        // where it is — same position, same id — even while a due entry
+        // behind it resolves and rewrites the snapshot.
+        #[tokio::test]
+        async fn not_due_entries_are_left_untouched() {
+            let dir = dirs::temp("delete-sweep-not-due").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let waiting_a = temp_file(b"aaaa").await;
+            let waiting_b = temp_file(b"bbbb").await;
+            let due = temp_file(b"cccc").await;
+            let clock = Clock::new(1000);
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                snapshot_file: Some(snapshot_file(&state_path).await),
+                ..DeleterArgs::default()
+            });
+            for job in [
+                make_job(waiting_a.file(), 1000, 500).await,
+                make_job(waiting_b.file(), 1000, 900).await,
+                make_job(due.file(), 1000, 0).await,
+            ] {
+                deleter.enqueue(job).await.unwrap();
+            }
+            let before = snapshot_file(&state_path).await.read().entries.clone();
+
+            deleter.sweep().await.unwrap();
+
+            let after = snapshot_file(&state_path).await.read().entries.clone();
+            assert_eq!(after, before[..2]);
+            assert!(waiting_a.file().exists());
+            assert!(waiting_b.file().exists());
+            assert!(!due.file().exists());
         }
     }
 }
