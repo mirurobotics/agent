@@ -203,12 +203,6 @@ where
             AttemptOutcome::Succeeded => {
                 entry.attempts += 1;
                 Self::log_success(&entry);
-                // enqueue the delete job before removing the upload from the
-                // queue. The ordering is not load-bearing: a crash between the
-                // two re-drives the upload (its queue entry is still on disk)
-                // and the re-confirmed upload re-enqueues a delete; duplicate
-                // delete jobs are harmless (the sweep re-stats the file and
-                // the stale one drops as already-gone).
                 self.enqueue_delete_job(&entry).await;
                 self.queue.remove(entry.id).await;
                 Flow::Continue
@@ -220,25 +214,10 @@ where
         }
     }
 
-    /// A file whose retention requires an upload becomes deletion-eligible at
-    /// upload confirmation, so a confirmed upload under such a retention
-    /// enqueues a delete job on the deleter. `last_observed_at` carries the
-    /// confirm instant so the TTL counts from eligibility — uploads can retry
-    /// for hours, and counting from the scan-time observation would delete
-    /// late-confirmed files instantly. Enqueue failures are logged and
-    /// swallowed: the upload is already durably confirmed, and a full delete
-    /// queue must never turn it into a failed attempt.
-    ///
-    /// `require_upload: false` files are NOT enqueued here — they became
-    /// eligible at stability and were already enqueued by the retention sink;
-    /// enqueueing again would double-enqueue.
     async fn enqueue_delete_job(&mut self, entry: &QueueEntry) {
         let Some(retention) = &entry.job.retention else {
             return;
         };
-        if !retention.require_upload {
-            return;
-        }
 
         let job = &entry.job;
         let delete_job = DeleteJob {

@@ -867,15 +867,16 @@ mod retention_producer {
         );
     }
 
-    // require_upload: false files became deletion-eligible at stability and
-    // were already enqueued by the retention sink — enqueueing here too would
-    // double-enqueue.
+    // require_upload: false files were already enqueued at stability by the
+    // retention sink; the confirm-time enqueue is a same-path duplicate, which
+    // the queue permits and the sweep resolves harmlessly. Any retention on a
+    // confirmed upload produces a delete job.
     #[tokio::test]
-    async fn unrequired_retention_enqueues_nothing() {
+    async fn unrequired_retention_also_enqueues_a_delete_job() {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::Ok);
         let deleter = MockDeleter::new();
-        let (uploader, handle, _sleeps, _clock) = spawn_with_test_clock_and_deleter(
+        let (uploader, handle, _sleeps, clock) = spawn_with_test_clock_and_deleter(
             mock.clone(),
             deleter.clone(),
             UploaderOptions::default(),
@@ -886,13 +887,17 @@ mod retention_producer {
             ttl_secs: 300,
         });
 
-        timed(uploader.enqueue(job)).await.unwrap();
+        timed(uploader.enqueue(job.clone())).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
         await_drained(&uploader).await;
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
-        assert_eq!(deleter.recorded_calls(), []);
+        let confirmed_at = *clock.lock().unwrap();
+        assert_eq!(
+            deleter.recorded_calls(),
+            [expected_delete_job(&job, confirmed_at)]
+        );
     }
 
     #[tokio::test]

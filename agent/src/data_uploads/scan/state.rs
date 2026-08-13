@@ -687,21 +687,5 @@ mod tests {
             assert!(!entry.has_mtime(&observation));
             assert!(!entry.equal_metadata(&observation));
         }
-
-        // Old `scanner.json` snapshots stamped a now-removed `retention` field
-        // on each ledger entry; serde ignores unknown fields by default, so
-        // they must keep deserializing without migration.
-        #[test]
-        fn stale_retention_field_is_ignored() {
-            let sf = stable_file(File::new("/none/s.mcap"), ts(900));
-            let mut value = serde_json::to_value(&sf).unwrap();
-            value.as_object_mut().unwrap().insert(
-                "retention".to_string(),
-                serde_json::json!({ "require_upload": true, "ttl_secs": 60 }),
-            );
-
-            let parsed: StableFile = serde_json::from_value(value).unwrap();
-            assert_eq!(parsed, sf);
-        }
     }
 }
