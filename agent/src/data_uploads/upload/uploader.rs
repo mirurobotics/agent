@@ -181,8 +181,16 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
+                    // without a ceiling the worker can commit to a decades-long
+                    // sleep that a later forward clock correction would never
+                    // interrupt; bounding the wait makes it re-evaluate at least
+                    // once per maximum backoff, so the queue recovers once the
+                    // clock is corrected
+                    let ceiling = TimeDelta::seconds(self.options.backoff.max_secs.max(0))
+                        .to_std()
+                        .unwrap_or(Duration::ZERO);
                     let wait = match self.queue.earliest_next_attempt() {
-                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
+                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO).min(ceiling),
                         // unreachable: the queue is non-empty here
                         None => Duration::ZERO,
                     };
@@ -293,12 +301,11 @@ where
         self.requeue(entry).await;
     }
 
-    /// Wait out the shortest backoff among queued entries, staying responsive
-    /// to commands. Deliberately NOT [`Self::run_until_shutdown`]: that helper
-    /// keeps driving its future after handling a command, but an enqueue here
-    /// must return to the run loop immediately so a newly eligible entry is
-    /// re-evaluated rather than waiting out the sleep. Any non-shutdown
-    /// command — like the sleep completing — returns [`Flow::Continue`].
+    /// Sleep for `wait`, staying responsive to commands. Deliberately NOT
+    /// [`Self::run_until_shutdown`]: that helper keeps driving its future after
+    /// handling a command, but an enqueue here must return to the run loop
+    /// immediately so a newly eligible entry is re-evaluated rather than
+    /// waiting out the sleep.
     async fn idle_wait(&mut self, wait: Duration) -> Flow {
         let sleep_fut = (self.sleep_fn)(wait);
         tokio::select! {
@@ -462,10 +469,15 @@ impl Uploader {
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
-        let queue = match snapshot_file {
+        let mut queue = match snapshot_file {
             Some(file) => Queue::from_snapshot(options.queue_capacity, file),
             None => Queue::new(options.queue_capacity),
         };
+        // a loaded deadline beyond one maximum backoff cannot have come from the
+        // retry schedule, so release it here rather than leaving it stranded for
+        // the life of the process
+        let horizon = now_fn() + TimeDelta::seconds(options.backoff.max_secs.max(0));
+        queue.release_stale_deadlines(horizon);
         let worker = Worker {
             receiver,
             queue,

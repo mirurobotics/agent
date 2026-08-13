@@ -138,9 +138,45 @@ impl Queue {
         Some(entry.clone())
     }
 
+    /// Clear every `next_attempt_at` strictly beyond `horizon`, making those
+    /// entries eligible immediately.
+    ///
+    /// `horizon` is `now` plus the largest wait the caller's retry schedule can
+    /// produce, so a persisted deadline further out than that cannot have been
+    /// stamped by that schedule. It is evidence of a backward clock step — an
+    /// unset real-time clock at boot, or a large NTP correction applied after
+    /// the deadline was persisted. Left alone such an entry is never eligible
+    /// and never counts an attempt, so it is stranded forever; clearing it
+    /// makes it eligible now.
+    ///
+    /// Called once at construction, because a reboot is the dominant way a
+    /// snapshot acquires far-future deadlines. It warns rather than logging
+    /// quietly: a clock anomaly is worth surfacing in device logs.
+    ///
+    /// Releases in memory only, which is why this is not `async`. The write
+    /// would buy nothing: the release is idempotent and re-derived on every
+    /// load, and the next mutation persists the corrected entries anyway. A
+    /// snapshot read before that first mutation still shows the stale stamps.
+    pub fn release_stale_deadlines(&mut self, horizon: DateTime<Utc>) {
+        let mut released = 0;
+        for entry in self.jobs.iter_mut() {
+            if entry.next_attempt_at.is_some_and(|at| at > horizon) {
+                entry.next_attempt_at = None;
+                released += 1;
+            }
+        }
+        if released == 0 {
+            return;
+        }
+        warn!(
+            "upload: released {released} retry deadline(s) beyond {horizon}; \
+             the device clock appears to have stepped backward"
+        );
+    }
+
     /// The minimum effective deadline over all entries, where a `None`
     /// deadline counts as `DateTime::<Utc>::MIN_UTC`. Returns `None` only when
-    /// the queue is empty. The worker uses it to size an idle sleep.
+    /// the queue is empty.
     pub fn earliest_next_attempt(&self) -> Option<DateTime<Utc>> {
         self.jobs
             .iter()
