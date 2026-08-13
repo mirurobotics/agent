@@ -2,791 +2,15 @@ openapi: 3.0.3
 info:
   title: Miru Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.4
+  version: v0.5
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.4.1
+  x-release-version: v0.5.0-beta.2
   x-git-commit:
-    sha: e170551d48a37498e7bd3efaff9b5573f07dbb5b
-    url: https://github.com/mirurobotics/openapi/commit/e170551d48a37498e7bd3efaff9b5573f07dbb5b
-    message: 'chore(deps): bump the actions-minor group across 1 directory with 2
-      updates (#182)
-
-
-      Bumps the actions-minor group with 2 updates in the / directory:
-
-      [dorny/paths-filter](https://github.com/dorny/paths-filter) and
-
-      [marocchino/sticky-pull-request-comment](https://github.com/marocchino/sticky-pull-request-comment).
-
-
-      Updates `dorny/paths-filter` from 4.0.1 to 4.0.2
-
-      <details>
-
-      <summary>Release notes</summary>
-
-      <p><em>Sourced from <a
-
-      href="https://github.com/dorny/paths-filter/releases">dorny/paths-filter''s
-
-      releases</a>.</em></p>
-
-      <blockquote>
-
-      <h2>v4.0.2</h2>
-
-      <h2>What''s Changed</h2>
-
-      <ul>
-
-      <li>fix warning message by <a
-
-      href="https://github.com/cgundy"><code>@​cgundy</code></a> in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/282">dorny/paths-filter#282</a></li>
-
-      <li>chore: fix GitHub spelling in logs by <a
-
-      href="https://github.com/squat"><code>@​squat</code></a> in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/278">dorny/paths-filter#278</a></li>
-
-      <li>fix: use rev-parse instead of branch --show-current for older git
-
-      compat by <a
-
-      href="https://github.com/saschabratton"><code>@​saschabratton</code></a>
-
-      in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/303">dorny/paths-filter#303</a></li>
-
-      <li>fix: work around git dubious ownership errors in container jobs by
-
-      <a
-
-      href="https://github.com/saschabratton"><code>@​saschabratton</code></a>
-
-      in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/317">dorny/paths-filter#317</a></li>
-
-      <li>docs: update changelog for v4.0.2 by <a
-
-      href="https://github.com/saschabratton"><code>@​saschabratton</code></a>
-
-      in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/318">dorny/paths-filter#318</a></li>
-
-      </ul>
-
-      <h2>New Contributors</h2>
-
-      <ul>
-
-      <li><a href="https://github.com/cgundy"><code>@​cgundy</code></a> made
-
-      their first contribution in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/282">dorny/paths-filter#282</a></li>
-
-      <li><a href="https://github.com/squat"><code>@​squat</code></a> made
-
-      their first contribution in <a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/278">dorny/paths-filter#278</a></li>
-
-      </ul>
-
-      <p><strong>Full Changelog</strong>: <a
-
-      href="https://github.com/dorny/paths-filter/compare/v4.0.1...v4.0.2">https://github.com/dorny/paths-filter/compare/v4.0.1...v4.0.2</a></p>
-
-      </blockquote>
-
-      </details>
-
-      <details>
-
-      <summary>Changelog</summary>
-
-      <p><em>Sourced from <a
-
-      href="https://github.com/dorny/paths-filter/blob/master/CHANGELOG.md">dorny/paths-filter''s
-
-      changelog</a>.</em></p>
-
-      <blockquote>
-
-      <h1>Changelog</h1>
-
-      <h2>v4.0.2</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/317">Work
-
-      around git dubious ownership errors in container jobs</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/303">Use
-
-      rev-parse instead of branch --show-current for older git compat</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/282">Fix
-
-      warning message</a></li>
-
-      </ul>
-
-      <h2>v4.0.1</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/255">Support
-
-      merge queue</a></li>
-
-      </ul>
-
-      <h2>v4.0.0</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/294">Update
-
-      action runtime to node24</a></li>
-
-      </ul>
-
-      <h2>v3.0.3</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/279">Add
-
-      missing predicate-quantifier</a></li>
-
-      </ul>
-
-      <h2>v3.0.2</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/224">Add
-
-      config parameter for predicate quantifier</a></li>
-
-      </ul>
-
-      <h2>v3.0.1</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/133">Compare
-
-      base and ref when token is empty</a></li>
-
-      </ul>
-
-      <h2>v3.0.0</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/210">Update to
-
-      Node.js 20</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/215">Update
-
-      all dependencies</a></li>
-
-      </ul>
-
-      <h2>v2.11.1</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/167">Update
-
-      @​actions/core to v1.10.0 - Fixes warning about deprecated
-
-      set-output</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/168">Document
-
-      need for pull-requests: read permission</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/164">Updating
-
-      to actions/checkout@v3</a></li>
-
-      </ul>
-
-      <h2>v2.11.0</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/157">Set
-
-      list-files input parameter as not required</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/161">Update
-
-      Node.js</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/162">Fix
-
-      incorrect handling of Unicode characters in exec()</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/163">Use
-
-      Octokit pagination</a></li>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/160">Updates
-
-      real world links</a></li>
-
-      </ul>
-
-      <h2>v2.10.2</h2>
-
-      <ul>
-
-      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/91">Fix
-
-      getLocalRef() returns wrong ref</a></li>
-
-      </ul>
-
-      <h2>v2.10.1</h2>
-
-      <ul>
-
-      <li><a
-
-      href="https://redirect.github.com/dorny/paths-filter/pull/85">Improve
-
-      robustness of change detection</a></li>
-
-      </ul>
-
-      <h2>v2.10.0</h2>
-
-      <ul>
-
-      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/82">Add
-
-      ref input parameter</a></li>
-
-      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/83">Fix
-
-      change detection in PR when pullRequest.changed_files is
-
-      incorrect</a></li>
-
-      </ul>
-
-      <h2>v2.9.3</h2>
-
-      <ul>
-
-      <li><a href="https://redirect.github.com/dorny/paths-filter/pull/78">Fix
-
-      change detection when base is a tag</a></li>
-
-      </ul>
-
-      <!-- raw HTML omitted -->
-
-      </blockquote>
-
-      <p>... (truncated)</p>
-
-      </details>
-
-      <details>
-
-      <summary>Commits</summary>
-
-      <ul>
-
-      <li><a
-
-      href="https://github.com/dorny/paths-filter/commit/7b450fff21473bca461d4b92ce414b9d0420d706"><code>7b450ff</code></a>
-
-      docs: update changelog for v4.0.2 (<a
-
-      href="https://redirect.github.com/dorny/paths-filter/issues/318">#318</a>)</li>
-
-      <li><a
-
-      href="https://github.com/dorny/paths-filter/commit/928037783a71f24983ea250c6e55290c1b2de54f"><code>9280377</code></a>
-
-      fix: work around git dubious ownership errors in container jobs (<a
-
-      href="https://redirect.github.com/dorny/paths-filter/issues/317">#317</a>)</li>
-
-      <li><a
-
-      href="https://github.com/dorny/paths-filter/commit/f3ceefdc7ef57bc2d8560787d4b6c33e44044cec"><code>f3ceefd</code></a>
-
-      fix: use rev-parse instead of branch --show-current for older git compat
-
-      (<a
-
-      href="https://redirect.github.com/dorny/paths-filter/issues/303">#303</a>)</li>
-
-      <li><a
-
-      href="https://github.com/dorny/paths-filter/commit/61f87a10cd2c304679af17bb73ef192addf33c1c"><code>61f87a1</code></a>
-
-      chore: fix GitHub spelling in logs (<a
-
-      href="https://redirect.github.com/dorny/paths-filter/issues/278">#278</a>)</li>
-
-      <li><a
-
-      href="https://github.com/dorny/paths-filter/commit/b82ff81ffbe6fb4b636bb5b47e37fd8d12b32632"><code>b82ff81</code></a>
-
-      fix warning message (<a
-
-      href="https://redirect.github.com/dorny/paths-filter/issues/282">#282</a>)</li>
-
-      <li>See full diff in <a
-
-      href="https://github.com/dorny/paths-filter/compare/fbd0ab8f3e69293af611ebaee6363fc25e6d187d...7b450fff21473bca461d4b92ce414b9d0420d706">compare
-
-      view</a></li>
-
-      </ul>
-
-      </details>
-
-      <br />
-
-
-      Updates `marocchino/sticky-pull-request-comment` from 3.0.4 to 3.0.5
-
-      <details>
-
-      <summary>Release notes</summary>
-
-      <p><em>Sourced from <a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/releases">marocchino/sticky-pull-request-comment''s
-
-      releases</a>.</em></p>
-
-      <blockquote>
-
-      <h2>v3.0.5</h2>
-
-      <h2>What''s Changed</h2>
-
-      <ul>
-
-      <li>build(deps-dev): Bump rollup from 4.60.1 to 4.60.2 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1687">marocchino/sticky-pull-request-comment#1687</a></li>
-
-      <li>build(deps-dev): Bump typescript from 6.0.2 to 6.0.3 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1686">marocchino/sticky-pull-request-comment#1686</a></li>
-
-      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.11 to
-
-      2.4.12 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1685">marocchino/sticky-pull-request-comment#1685</a></li>
-
-      <li>build(deps-dev): Bump vitest from 4.1.4 to 4.1.5 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1688">marocchino/sticky-pull-request-comment#1688</a></li>
-
-      <li>build(deps): Bump <code>@​actions/glob</code> from 0.6.1 to 0.7.0 by
-
-      <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1689">marocchino/sticky-pull-request-comment#1689</a></li>
-
-      <li>build(deps): Bump <code>@​actions/core</code> from 3.0.0 to 3.0.1 by
-
-      <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1690">marocchino/sticky-pull-request-comment#1690</a></li>
-
-      <li>build(deps): Bump <code>@​actions/github</code> from 9.1.0 to 9.1.1
-
-      by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1691">marocchino/sticky-pull-request-comment#1691</a></li>
-
-      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.12 to
-
-      2.4.13 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1693">marocchino/sticky-pull-request-comment#1693</a></li>
-
-      <li>feat: embed file content in message template via
-
-      <code>{{{content}}}</code> placeholder by <a
-
-      href="https://github.com/marocchino"><code>@​marocchino</code></a> with
-
-      <a href="https://github.com/Copilot"><code>@​Copilot</code></a> in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1665">marocchino/sticky-pull-request-comment#1665</a></li>
-
-      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.13 to
-
-      2.4.14 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1694">marocchino/sticky-pull-request-comment#1694</a></li>
-
-      <li>build(deps-dev): Bump rollup from 4.60.2 to 4.60.3 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1695">marocchino/sticky-pull-request-comment#1695</a></li>
-
-      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.6.0 to
-
-      25.6.2 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1698">marocchino/sticky-pull-request-comment#1698</a></li>
-
-      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.6.2 to
-
-      25.7.0 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1700">marocchino/sticky-pull-request-comment#1700</a></li>
-
-      <li>build(deps-dev): Bump vitest from 4.1.5 to 4.1.6 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1701">marocchino/sticky-pull-request-comment#1701</a></li>
-
-      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.7.0 to
-
-      25.8.0 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1703">marocchino/sticky-pull-request-comment#1703</a></li>
-
-      <li>build(deps-dev): Bump rollup from 4.60.3 to 4.60.4 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1704">marocchino/sticky-pull-request-comment#1704</a></li>
-
-      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.8.0 to
-
-      25.9.1 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1707">marocchino/sticky-pull-request-comment#1707</a></li>
-
-      <li>build(deps-dev): Bump vitest from 4.1.6 to 4.1.7 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1708">marocchino/sticky-pull-request-comment#1708</a></li>
-
-      <li>build(deps): Bump brace-expansion from 5.0.5 to 5.0.6 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1705">marocchino/sticky-pull-request-comment#1705</a></li>
-
-      <li>build(deps): Bump undici from 6.24.0 to 6.27.0 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1725">marocchino/sticky-pull-request-comment#1725</a></li>
-
-      <li>build(deps-dev): Bump rollup from 4.60.4 to 4.62.2 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1722">marocchino/sticky-pull-request-comment#1722</a></li>
-
-      <li>build(deps): Bump actions/checkout from 6 to 7 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1721">marocchino/sticky-pull-request-comment#1721</a></li>
-
-      <li>build(deps-dev): Bump vite from 8.0.13 to 8.0.16 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1720">marocchino/sticky-pull-request-comment#1720</a></li>
-
-      <li>build(deps-dev): Bump vitest from 4.1.7 to 4.1.9 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1719">marocchino/sticky-pull-request-comment#1719</a></li>
-
-      <li>build(deps-dev): Bump <code>@​types/node</code> from 25.9.1 to
-
-      26.1.0 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1731">marocchino/sticky-pull-request-comment#1731</a></li>
-
-      <li>build(deps-dev): Bump <code>@​rollup/plugin-commonjs</code> from
-
-      29.0.2 to 29.0.3 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1710">marocchino/sticky-pull-request-comment#1710</a></li>
-
-      <li>build(deps-dev): Bump js-yaml from 4.1.1 to 5.2.1 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1732">marocchino/sticky-pull-request-comment#1732</a></li>
-
-      <li>build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.14 to
-
-      2.5.2 by <a
-
-      href="https://github.com/dependabot"><code>@​dependabot</code></a>[bot]
-
-      in <a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/pull/1730">marocchino/sticky-pull-request-comment#1730</a></li>
-
-      </ul>
-
-      <p><strong>Full Changelog</strong>: <a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/compare/v3.0.4...v3.0.5">https://github.com/marocchino/sticky-pull-request-comment/compare/v3.0.4...v3.0.5</a></p>
-
-      </blockquote>
-
-      </details>
-
-      <details>
-
-      <summary>Commits</summary>
-
-      <ul>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/5770ad5eb8f42dd2c4f34da00c94c5381e49af88"><code>5770ad5</code></a>
-
-      📦️ Build</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/2c190609760f3bf7b8298e5e88612e77a6d49ecc"><code>2c19060</code></a>
-
-      build(deps-dev): Bump <code>@​biomejs/biome</code> from 2.4.14 to 2.5.2
-
-      (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1730">#1730</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/3d24e5ae13e5cb81ea2bc10645b7d737cf11902f"><code>3d24e5a</code></a>
-
-      build(deps-dev): Bump js-yaml from 4.1.1 to 5.2.1 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1732">#1732</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/36048210fda2e47994091215455a64526baf9829"><code>3604821</code></a>
-
-      build(deps-dev): Bump <code>@​rollup/plugin-commonjs</code> from 29.0.2
-
-      to 29.0.3 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1710">#1710</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/a4d9c0f61c8b826000881e93dcf8d3c3de9e6d82"><code>a4d9c0f</code></a>
-
-      build(deps-dev): Bump <code>@​types/node</code> from 25.9.1 to 26.1.0
-
-      (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1731">#1731</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/ae65a58300ab21f85000f649966645a4f8b98c7e"><code>ae65a58</code></a>
-
-      build(deps-dev): Bump vitest from 4.1.7 to 4.1.9 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1719">#1719</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/86803217fddacb4de85c3e9724a5562badaa8c8e"><code>8680321</code></a>
-
-      build(deps-dev): Bump vite from 8.0.13 to 8.0.16 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1720">#1720</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/5d402391401fd084c1a074525b8c1f306989428f"><code>5d40239</code></a>
-
-      build(deps): Bump actions/checkout from 6 to 7 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1721">#1721</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/39ab01d7848066124dd3483f4186a8ec4b5f8f3d"><code>39ab01d</code></a>
-
-      build(deps-dev): Bump rollup from 4.60.4 to 4.62.2 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1722">#1722</a>)</li>
-
-      <li><a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/commit/b2660f1f0ba080a208cdb3834816c6012377e8b6"><code>b2660f1</code></a>
-
-      build(deps): Bump undici from 6.24.0 to 6.27.0 (<a
-
-      href="https://redirect.github.com/marocchino/sticky-pull-request-comment/issues/1725">#1725</a>)</li>
-
-      <li>Additional commits viewable in <a
-
-      href="https://github.com/marocchino/sticky-pull-request-comment/compare/0ea0beb66eb9baf113663a64ec522f60e49231c0...5770ad5eb8f42dd2c4f34da00c94c5381e49af88">compare
-
-      view</a></li>
-
-      </ul>
-
-      </details>
-
-      <br />
+    sha: 76d489f858e2076150e2ced2b9923cbd3c043622
+    url: https://github.com/mirurobotics/openapi/commit/76d489f858e2076150e2ced2b9923cbd3c043622
+    message: 'chore: bump cli-sdk default version (#240)
 
 
       <!-- codesmith:footer -->
@@ -795,7 +19,7 @@ info:
 
       <a
 
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/182"><picture><source
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/240"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -805,13 +29,13 @@ info:
 
       srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg"><img
 
-      alt="View with Codesmith"
+      alt="View with [code]smith"
 
       src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"></picture></a>
 
       <a
 
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1787173487&installation_model_id=425273&pr_number=182&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F182&signature=9d0dbc5838b77a36236b6692f2024d1b488eb5a6be849dd6f356aa4971e02b21"><picture><source
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1789019089&installation_model_id=425273&pr_number=240&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F240&signature=1f1bfb326b7c94e0e5c01f9f037d2872a8f874114b326fe80989bf7d47a2d362"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -821,7 +45,7 @@ info:
 
       srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
 
-      alt="Autofix with Codesmith"
+      alt="Autofix with [code]smith"
 
       src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"></picture></a>
 
@@ -832,19 +56,12 @@ info:
 
       <!-- codesmith:autofix:disabled -->
 
-      <!-- /codesmith:footer -->
-
-
-      Signed-off-by: dependabot[bot] <support@github.com>
-
-      Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
-
-      Co-authored-by: ben-miru <ben@mirurobotics.com>'
-    author: dependabot[bot]
+      <!-- /codesmith:footer -->'
+    author: ben-miru
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-07-21T06:41:39.429166+00:00'
+    built_at: '2026-08-11T23:04:46.437454+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -1335,21 +552,21 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.4
+      - v0.5
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     ReleaseVersion:
       type: string
       enum:
-      - v0.4.1
+      - v0.5.0-beta.2
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - e170551d48a37498e7bd3efaff9b5573f07dbb5b
+      - 76d489f858e2076150e2ced2b9923cbd3c043622
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1777,8 +994,8 @@ components:
         repository_url: https://github.com/user/repo
         commit_url: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
         created_at: '2021-01-01T00:00:00Z'
-    UploadRuleSource:
-      title: Upload Rule Source
+    FileRuleSource:
+      title: File Rule Source
       type: object
       required:
       - glob
@@ -1787,9 +1004,11 @@ components:
         glob:
           type: string
           pattern: ^/
+          maxLength: 1024
           example: /var/log/robot/*.log
-          description: An absolute glob pattern (must start with `/`) that selects
-            the files to upload.
+          description: A glob pattern selecting the files this rule manages. Must
+            be absolute (start with `/`), at most 1024 bytes, and must contain no
+            `..` segments and no empty path segments.
         stability_window_secs:
           type: integer
           format: int64
@@ -1802,33 +1021,26 @@ components:
       example:
         glob: /var/log/robot/*.log
         stability_window_secs: 60
-    UploadDeletePolicy:
-      title: Upload Delete Policy
-      type: string
-      description: 'When the device deletes the local source file after collecting
-        it for upload.
-
-        - `never`: never delete the local file.
-
-        - `after_upload`: delete the local file immediately once the upload is durably
-        confirmed.
-
-        '
-      enum:
-      - never
-      - after_upload
-      x-enum-varnames:
-      - UPLOAD_DELETE_POLICY_NEVER
-      - UPLOAD_DELETE_POLICY_AFTER_UPLOAD
-    UploadRuleDestination:
-      title: Upload Rule Destination
+    FileRuleUpload:
+      title: File Rule Upload
       type: object
       required:
+      - upload_collection_id
+      - upload_collection_name
       - bucket_id
       - bucket_name
       - path
-      - delete_policy
       properties:
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection the resulting uploads are grouped
+            into.
+        upload_collection_name:
+          type: string
+          example: Robot Logs
+          description: The name of the upload collection the resulting uploads are
+            grouped into.
         bucket_id:
           type: string
           example: bkt_123
@@ -1839,87 +1051,171 @@ components:
           description: Name of the bucket this rule uploads to.
         path:
           type: string
-          pattern: .*\{device_id\}.*
-          example: logs/{device_id}/{filename}
+          pattern: .*\{upload_id\}.*
+          maxLength: 1024
+          example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
           description: The object-path template the collected file is written to.
-            MUST contain `{device_id}` so each device's uploads are namespaced under
-            its own verified ID.
-        delete_policy:
-          allOf:
-          - $ref: '#/components/schemas/UploadDeletePolicy'
-          description: When the device deletes the local source file after collecting
-            it.
+            Must contain `{upload_id}` so every upload lands on a distinct object
+            key, be at most 1024 bytes, have balanced braces, and contain no `..`
+            segments and no empty path segments. The supported variables are `{device_id}`,
+            `{device_name}`, `{file_name}`, `{upload_id}`, `{year}`, `{month}`, `{day}`,
+            `{hour}`, and `{minute}`.
       example:
+        upload_collection_id: upl_col_123
+        upload_collection_name: Robot Logs
         bucket_id: bkt_123
         bucket_name: my-uploads-bucket
-        path: logs/{device_id}/{filename}
-        delete_policy: never
-    BaseUploadRule:
-      title: Base Upload Rule
+        path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+    FileRuleRetention:
+      title: File Rule Retention
       type: object
+      description: 'The retention block a file rule carries when it deletes local
+        files; a
+
+        rule without one keeps matching files indefinitely and Miru never
+
+        deletes them. Retention operates in two phases. The retention guarantee
+
+        ends once a matching file goes quiescent — its size and modification
+
+        time have stayed unchanged for `source.stability_window_secs` — and,
+
+        when `require_upload` is `true`, once its upload has been durably
+
+        confirmed; the file is then eligible for deletion, and callers may no
+
+        longer rely on it being present. `ttl_secs` schedules the enforcement
+
+        that follows: how long the file lives on after the guarantee ends
+
+        before the device deletes it. Both phases keep running on the device
+
+        even when no release is deployed, so tearing down a deployment does not
+
+        silently stop reclaiming disk.
+
+        '
+      required:
+      - ttl_secs
+      properties:
+        require_upload:
+          type: boolean
+          example: true
+          description: 'Whether a file must have its upload durably confirmed before
+            it may be deleted. Present exactly when the rule has an `upload` block.
+            When `true`, a slow or failing upload keeps the local file: the device
+            abandons an upload after 9 attempts, so a permanently failing upload retains
+            the file indefinitely. When `false`, the upload is best-effort: the file
+            may be deleted once eligible even if its upload has not completed, and
+            an unfinished upload is abandoned.'
+        ttl_secs:
+          type: integer
+          format: int64
+          example: 604800
+          description: 'How long, in seconds, the file lives on after it becomes eligible
+            for deletion. The clock starts when the retention guarantee ends, not
+            when the file was written: this schedules enforcement of a guarantee that
+            has already ended, so it defers the deletion, not the end of the guarantee.
+            `0` means the file is deleted as soon as it becomes eligible.'
+      example:
+        require_upload: true
+        ttl_secs: 604800
+    BaseFileRule:
+      title: Base File Rule
+      type: object
+      description: 'A file rule declares which files on a device Miru manages and
+        what to do
+
+        with them: upload them to a bucket, delete the local copies once they
+
+        are no longer needed, or both. `retention` is optional and marks the
+
+        rules that delete: when it is absent the device keeps matching files
+
+        indefinitely — Miru never deletes them — and when it is present the rule
+
+        deletes each matching file once its retention guarantee ends. A rule
+
+        that both deletes and uploads always states `retention.require_upload`,
+
+        so whether local deletion waits for the upload is itself an explicit
+
+        decision.
+
+        '
       required:
       - object
       - id
-      - upload_collection_id
-      - upload_collection_name
+      - name
       - digest
       - source
-      - destination
       - created_at
       - updated_at
       properties:
         object:
           type: string
           enum:
-          - upload_rule
-          example: upload_rule
+          - file_rule
+          example: file_rule
           x-stainless-const: true
-          description: The object type, which is always `upload_rule`.
+          description: The object type, which is always `file_rule`.
         id:
           type: string
-          example: upl_rule_123
-          description: ID of the upload rule.
-        upload_collection_id:
-          type: string
-          example: upl_col_123
-          description: ID of the upload collection this rule belongs to.
-        upload_collection_name:
+          example: file_rule_123
+          description: ID of the file rule.
+        name:
           type: string
           example: Robot Logs
-          description: The name of the upload collection this rule belongs to.
+          description: 'A human-readable name for the file rule. Not unique within
+            a workspace: file rules are immutable, so each authored revision mints
+            a new rule and several rules may share a name. The name participates in
+            the rule''s digest, so renaming a rule mints a new rule.'
         digest:
           type: string
           example: sha256:1234567890
-          description: The digest of the upload rule. Upload rules are immutable and
-            deduplicated by digest within an upload collection.
+          description: The digest of the file rule. File rules are immutable and deduplicated
+            by digest within a workspace.
         source:
-          $ref: '#/components/schemas/UploadRuleSource'
-        destination:
-          $ref: '#/components/schemas/UploadRuleDestination'
+          $ref: '#/components/schemas/FileRuleSource'
+        upload:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleUpload'
+          description: Where matching files are uploaded. Absent when the rule only
+            enforces local retention.
+        retention:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleRetention'
+          description: Governs deletion of the local copies of matching files. Absent
+            when the device keeps matching files indefinitely — Miru never deletes
+            them; present when the rule deletes each matching file once its retention
+            guarantee ends.
         created_at:
           type: string
           format: date-time
           example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the upload rule was created.
+          description: Timestamp of when the file rule was created.
         updated_at:
           type: string
           format: date-time
           example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the upload rule was last updated.
+          description: Timestamp of when the file rule was last updated.
       example:
-        object: upload_rule
-        id: upl_rule_123
-        upload_collection_id: upl_col_123
-        upload_collection_name: Robot Logs
+        object: file_rule
+        id: file_rule_123
+        name: Robot Logs
         digest: sha256:1234567890
         source:
           glob: /var/log/robot/*.log
           stability_window_secs: 60
-        destination:
+        upload:
+          upload_collection_id: upl_col_123
+          upload_collection_name: Robot Logs
           bucket_id: bkt_123
           bucket_name: my-uploads-bucket
-          path: logs/{device_id}/{filename}
-          delete_policy: never
+          path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+        retention:
+          require_upload: true
+          ttl_secs: 604800
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
     Release:
@@ -1933,26 +1229,29 @@ components:
             nullable: true
             allOf:
             - $ref: '#/components/schemas/GitCommit'
-          upload_rules:
+          file_rules:
             type: array
             items:
-              $ref: '#/components/schemas/BaseUploadRule'
-            description: The upload rules included in this release. Expand using 'expand=upload_rules'
+              $ref: '#/components/schemas/BaseFileRule'
+            description: The file rules included in this release. Expand using 'expand=file_rules'
               in the query string.
             example:
-            - object: upload_rule
-              id: upl_rule_123
-              upload_collection_id: upl_col_123
-              upload_collection_name: Robot Logs
+            - object: file_rule
+              id: file_rule_123
+              name: Robot Logs
               digest: sha256:1234567890
               source:
                 glob: /var/log/robot/*.log
                 stability_window_secs: 60
-              destination:
+              upload:
+                upload_collection_id: upl_col_123
+                upload_collection_name: Robot Logs
                 bucket_id: bkt_123
                 bucket_name: my-uploads-bucket
-                path: logs/{device_id}/{filename}
-                delete_policy: never
+                path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+              retention:
+                require_upload: true
+                ttl_secs: 604800
               created_at: '2021-01-01T00:00:00Z'
               updated_at: '2021-01-01T00:00:00Z'
       example:
@@ -1973,6 +1272,7 @@ components:
       - created_at
       - config_schema_id
       - config_type_id
+      - slot_key
       properties:
         object:
           type: string
@@ -1994,6 +1294,12 @@ components:
           example: /srv/miru/configs/v1/motion-control.json
           description: The absolute file system path where this config instance is
             written.
+        slot_key:
+          type: string
+          example: controller_2
+          description: The key of the config schema slot this instance is bound to.
+            Must match the `key` of one of the slots declared by this instance's config
+            schema.
         created_at:
           type: string
           format: date-time
@@ -2021,15 +1327,23 @@ components:
 
         - `jsonc`: JSON with comments (JSON plus `//` and `/* */` comment syntax).
 
+        - `xml`: XML.
+
+        - `text`: plain, unstructured text with no specific format.
+
         '
       enum:
       - json
       - yaml
       - jsonc
+      - xml
+      - text
       x-enum-varnames:
       - INSTANCE_FORMAT_JSON
       - INSTANCE_FORMAT_YAML
       - INSTANCE_FORMAT_JSONC
+      - INSTANCE_FORMAT_XML
+      - INSTANCE_FORMAT_TEXT
     InstanceContent:
       title: Instance Content
       type: object
@@ -2064,6 +1378,7 @@ components:
         id: cfg_inst_123
         config_type_name: Motion Control
         filepath: /srv/miru/configs/v1/motion-control.json
+        slot_key: default
         created_at: '2021-01-01T00:00:00Z'
         config_schema_id: cfg_sch_123
         config_type_id: cfg_typ_123
@@ -2088,6 +1403,7 @@ components:
               id: cfg_inst_123
               config_type_name: Motion Control
               filepath: /srv/miru/configs/v1/motion-control.json
+              slot_key: default
               created_at: '2021-01-01T00:00:00Z'
               config_schema_id: cfg_sch_123
               config_type_id: cfg_typ_123
@@ -2095,6 +1411,7 @@ components:
               id: cfg_inst_456
               config_type_name: Localization
               filepath: /srv/miru/configs/v1/localization.json
+              slot_key: default
               created_at: '2021-01-02T00:00:00Z'
               config_schema_id: cfg_sch_456
               config_type_id: cfg_typ_456
@@ -2158,9 +1475,9 @@ components:
     ReleaseExpansion:
       type: string
       enum:
-      - upload_rules
+      - file_rules
       x-enum-varnames:
-      - RELEASE_EXPAND_UPLOAD_RULES
+      - RELEASE_EXPAND_FILE_RULES
     UploadSource:
       title: Upload Source
       type: object
@@ -2176,7 +1493,7 @@ components:
           type: string
           example: /var/log/robot/robot.log
           description: Absolute path of the file on the device. Its basename renders
-            the `{filename}` token in the destination path template.
+            the `{file_name}` token in the upload path template.
         mtime:
           type: string
           format: date-time
@@ -2204,16 +1521,16 @@ components:
       title: Create Upload Request
       type: object
       required:
-      - upload_rule_id
+      - file_rule_id
       - source
       - digest
       - size
       - deployment_id
       properties:
-        upload_rule_id:
+        file_rule_id:
           type: string
-          example: upl_rule_123
-          description: ID of the upload rule that selected this file.
+          example: file_rule_123
+          description: ID of the file rule that selected this file.
         source:
           allOf:
           - $ref: '#/components/schemas/UploadSource'
@@ -2290,7 +1607,7 @@ components:
       - object
       - id
       - device_id
-      - upload_rule_id
+      - file_rule_id
       - upload_collection_name
       - source
       - destination
@@ -2320,15 +1637,15 @@ components:
           type: string
           example: dvc_123
           description: ID of the device that produced the upload.
-        upload_rule_id:
+        file_rule_id:
           type: string
-          example: upl_rule_123
-          description: ID of the upload rule that produced the upload.
+          example: file_rule_123
+          description: ID of the file rule that produced the upload.
         upload_collection_name:
           type: string
           example: Robot Logs
-          description: The name of the upload collection the producing upload rule
-            belongs to.
+          description: The name of the upload collection the producing file rule uploads
+            to.
         source:
           allOf:
           - $ref: '#/components/schemas/UploadSource'
@@ -2392,7 +1709,7 @@ components:
         object: upload
         id: upl_123
         device_id: dvc_123
-        upload_rule_id: upl_rule_123
+        file_rule_id: file_rule_123
         upload_collection_name: Robot Logs
         source:
           file_path: /var/log/robot/robot.log
@@ -2634,7 +1951,7 @@ components:
           object: upload
           id: upl_123
           device_id: dvc_123
-          upload_rule_id: upl_rule_123
+          file_rule_id: file_rule_123
           upload_collection_name: Robot Logs
           source:
             file_path: /var/log/robot/robot.log
@@ -2949,7 +2266,7 @@ components:
       required: true
       schema:
         type: string
-        example: v0.4
+        example: v0.5
       description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id
@@ -3056,7 +2373,7 @@ components:
         items:
           $ref: '#/components/schemas/ReleaseExpansion'
         example:
-        - upload_rules
+        - file_rules
     upload_id:
       name: upload_id
       in: path
