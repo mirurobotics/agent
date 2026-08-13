@@ -6,12 +6,14 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{Job, UploadErr, Uploader, UploaderExt, UploaderOptions};
+use miru_agent::data_uploads::upload::{
+    Job, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt, UploaderOptions,
+};
 use miru_agent::errors::Error;
-use miru_agent::filesys::{self, dirs, files, File, WriteOptions};
+use miru_agent::filesys::{dirs, File};
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{TimeDelta, Utc};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -54,26 +56,6 @@ fn scripted_network_err() -> Result<(), UploadErr> {
         is_network_conn_err: true,
         trace: miru_agent::trace!(),
     }))
-}
-
-/// Build a job backed by a real temp file, so queue staleness checks see it
-/// as fresh.
-async fn make_real_job(dir: &filesys::Dir, name: &str, contents: &str) -> Job {
-    let file = dir.file(name);
-    files::write_string(&file, contents, WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
-    Job {
-        file: file.clone(),
-        size: files::size(&file).await.unwrap(),
-        digest: files::hash(&file).await.unwrap(),
-        mtime: DateTime::<Utc>::from(files::last_modified(&file).await.unwrap()),
-        first_observed_at: Utc::now(),
-        last_observed_at: Utc::now(),
-        file_rule_id: "rule_1".to_string(),
-        deployment_id: "dpl_1".to_string(),
-        retention: None,
-    }
 }
 
 /// Spawn an uploader with default options and a no-op sleep.
@@ -515,14 +497,14 @@ async fn shutdown_during_in_flight_upload_returns_promptly() {
     drop(release_tx);
 }
 
+/// An in-flight job keeps its slot: it stays queued until it is confirmed,
+/// so it is still counted against capacity. A requeue can therefore never
+/// push the queue past capacity the way it could when the pop freed the slot.
 #[tokio::test]
-async fn requeue_into_full_queue_retains_job() {
-    let dir = dirs::create_temp("uploader_requeue_full").await.unwrap();
-    let job_b = make_real_job(&dir, "b.log", "contents b").await;
+async fn in_flight_job_holds_its_capacity_slot() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
     mock.push_step(MockStep::Hang(release_rx));
-    mock.push_step(MockStep::Ok);
     mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
         queue_capacity: 1,
@@ -533,19 +515,22 @@ async fn requeue_into_full_queue_retains_job() {
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
-    // B takes the slot A freed when it was popped, so A's requeue lands into
-    // an already-full queue
-    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    // A still occupies the only slot, so B is rejected rather than admitted
+    let err = timed(uploader.enqueue(make_job("b.log")))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, UploadErr::QueueFullErr(_)),
+        "expected QueueFullErr, got: {err:?}"
+    );
+
+    // A's failure requeues it in place: still one job, retried after backoff
     release_tx.send(scripted_err()).unwrap();
-    // B, then A on its second attempt once the test clock clears its backoff
-    timed(started_rx.recv()).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    // A was already admitted, so a newer arrival must not evict it: it
-    // requeues past capacity and is retried after B
-    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b, job_a]);
+    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_a]);
 }
 
 #[tokio::test]
@@ -740,12 +725,175 @@ async fn len_reports_queued_jobs() {
     timed(uploader.enqueue(make_job("b.log"))).await.unwrap();
     timed(uploader.enqueue(make_job("c.log"))).await.unwrap();
 
-    // in-flight A is excluded
-    assert_eq!(timed(uploader.len()).await.unwrap(), 2);
+    // the in-flight job stays queued until it is confirmed, so it counts
+    assert_eq!(timed(uploader.len()).await.unwrap(), 3);
 
     release_tx.send(Ok(())).unwrap();
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
+}
+
+mod durability {
+    use super::*;
+
+    /// A queue persisted to `path`, so a test can inspect what is on disk
+    /// while an attempt is still running.
+    async fn open(path: &File) -> QueueSnapshotFile {
+        QueueSnapshotFile::new_with_default(path.clone(), QueueSnapshot::default())
+            .await
+            .unwrap()
+    }
+
+    fn spawn_persisted(
+        mock: Arc<MockUploadExecutor>,
+        snapshot: QueueSnapshotFile,
+    ) -> (Uploader, JoinHandle<()>) {
+        Uploader::spawn(
+            16,
+            mock,
+            UploaderOptions::default(),
+            Some(snapshot),
+            |_: Duration| async {},
+            Utc::now,
+        )
+        .unwrap()
+    }
+
+    /// The digests currently on disk, read through a fresh handle.
+    async fn on_disk(path: &File) -> Vec<String> {
+        open(path)
+            .await
+            .read()
+            .entries
+            .iter()
+            .map(|entry| entry.job.digest.clone())
+            .collect()
+    }
+
+    /// Wait until the queue is empty. Releasing a hung attempt and shutting
+    /// down immediately is a race — `run_until_shutdown`'s select is not
+    /// biased, so it may take the shutdown before the completed upload —
+    /// and this makes the completion the thing we wait on.
+    async fn await_drained(uploader: &Uploader) {
+        timed(async {
+            while uploader.len().await.unwrap() > 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    }
+
+    /// The core guarantee: a job being uploaded is still on disk, so a crash
+    /// mid-transfer leaves it to be retried rather than losing it.
+    #[tokio::test]
+    async fn job_stays_on_disk_during_attempt() {
+        let dir = dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::Hang(release_rx));
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+
+        assert_eq!(on_disk(&path).await, vec!["sha256:a.log".to_string()]);
+
+        release_tx.send(Ok(())).unwrap();
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn confirmed_job_leaves_disk() {
+        let dir = dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::Hang(release_rx));
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        release_tx.send(Ok(())).unwrap();
+        await_drained(&uploader).await;
+
+        assert!(on_disk(&path).await.is_empty());
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+    }
+
+    /// Clean shutdown is the common trigger, not just a crash: every restart
+    /// used to drop whatever was in flight.
+    #[tokio::test]
+    async fn shutdown_mid_attempt_leaves_job_queued() {
+        let dir = dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (_release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::Hang(release_rx));
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        // shut down while the attempt is still hanging
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+
+        assert_eq!(on_disk(&path).await, vec!["sha256:a.log".to_string()]);
+    }
+
+    /// End to end: the job the shutdown interrupted is uploaded by the next
+    /// process, which is what makes the queue at-least-once.
+    #[tokio::test]
+    async fn restart_resumes_the_interrupted_job() {
+        let dir = dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let job = make_job("a.log");
+
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (_release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::Hang(release_rx));
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+
+        // a second process over the same snapshot file picks the job back up
+        let (mock2, mut started2_rx) = MockUploadExecutor::new();
+        mock2.push_step(MockStep::Ok);
+        let (uploader2, handle2) = spawn_persisted(mock2.clone(), open(&path).await);
+        timed(started2_rx.recv()).await.unwrap();
+        await_drained(&uploader2).await;
+
+        assert_eq!(mock2.recorded_calls(), vec![job]);
+        assert!(on_disk(&path).await.is_empty());
+
+        timed(uploader2.shutdown()).await.unwrap();
+        timed(handle2).await.unwrap();
+    }
+
+    /// The drop paths used to rely on the pop having already removed the
+    /// entry; they now have to persist the removal themselves.
+    #[tokio::test]
+    async fn terminal_failure_removes_job_from_disk() {
+        let dir = dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::TerminalErr);
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        assert!(on_disk(&path).await.is_empty());
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+    }
 }
 
 #[test]

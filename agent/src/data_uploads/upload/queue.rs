@@ -14,9 +14,12 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueEntry {
+    #[serde(default = "Uuid::new_v4")]
+    pub id: Uuid,
     pub job: Job,
     pub attempts: u32,
     /// Earliest instant this entry is eligible to be popped; `None` means
@@ -82,6 +85,7 @@ impl Queue {
     pub async fn enqueue(&mut self, job: Job) -> Result<(), UploadErr> {
         self.verify_capacity(&job).await?;
         self.jobs.push_back(QueueEntry {
+            id: Uuid::new_v4(),
             job,
             attempts: 0,
             next_attempt_at: None,
@@ -91,27 +95,47 @@ impl Queue {
         Ok(())
     }
 
-    /// Push a previously popped job back at the tail, preserving its attempt
+    /// Drop the entry with `id` and persist the shortened queue. This is the
+    /// only point at which a job leaves durable storage, so call it only once
+    /// the backend has confirmed the upload or the job has been explicitly
+    /// dropped. Unknown ids are ignored.
+    pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry> {
+        if let Some(entry) = self.remove_impl(id) {
+            self.persist().await;
+            info!("upload: job removed; queue length {}", self.jobs.len());
+            return Some(entry);
+        }
+        None
+    }
+
+    fn remove_impl(&mut self, id: Uuid) -> Option<QueueEntry> {
+        let idx = self.jobs.iter().position(|entry| entry.id == id)?;
+        self.jobs.remove(idx)
+    }
+
+    /// Move `entry` to the tail, replacing whatever is queued under its id so
+    /// the caller's updated attempt count and backoff deadline are persisted.
     pub async fn requeue(&mut self, entry: QueueEntry) {
+        self.remove_impl(entry.id);
         self.jobs.push_back(entry);
         self.persist().await;
         info!("upload: job requeued; queue length {}", self.jobs.len());
     }
 
-    /// Remove and return the first entry whose `next_attempt_at` is `None` or
-    /// `<= now`, preserving the order of the remaining entries. Returns `None`
-    /// (without persisting) when no entry is eligible.
-    pub async fn pop_ready(&mut self, now: DateTime<Utc>) -> Option<QueueEntry> {
-        let idx = self
+    /// Return a clone of the first entry whose `next_attempt_at` is `None` or
+    /// `<= now`. The entry is deliberately LEFT in the queue — and so in the
+    /// persisted snapshot — until the caller passes its id back to
+    /// [`Self::remove`] or hands the entry to [`Self::requeue`]. That is what
+    /// makes the queue at-least-once: an upload cut short by a crash, a kill,
+    /// or a shutdown is still on disk at the next boot and is retried.
+    /// Returns `None` when no entry is eligible.
+    pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry> {
+        let entry = self
             .jobs
             .iter()
-            .position(|entry| entry.next_attempt_at.is_none_or(|at| at <= now))?;
-        let entry = self.jobs.remove(idx);
-        if entry.is_some() {
-            self.persist().await;
-            info!("upload: job dequeued; queue length {}", self.jobs.len());
-        }
-        entry
+            .find(|entry| entry.next_attempt_at.is_none_or(|at| at <= now))?;
+        info!("upload: job dequeued; queue length {}", self.jobs.len());
+        Some(entry.clone())
     }
 
     /// The minimum effective deadline over all entries, where a `None`

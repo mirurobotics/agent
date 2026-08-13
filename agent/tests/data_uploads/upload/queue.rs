@@ -6,6 +6,7 @@ use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
+use uuid::Uuid;
 
 fn make_job(name: &str) -> Job {
     Job {
@@ -34,8 +35,11 @@ async fn open(path: &File) -> QueueSnapshotFile {
 /// whole-`Job` equality across a reload does not hold).
 async fn digests(queue: &mut Queue) -> Vec<String> {
     let mut out = Vec::new();
-    while let Some(entry) = queue.pop_ready(Utc::now()).await {
+    // remove as the worker does: next_ready leaves the entry in place, so
+    // draining without removing would return the same entry forever
+    while let Some(entry) = queue.next_ready(Utc::now()) {
         out.push(entry.job.digest);
+        queue.remove(entry.id).await;
     }
     out
 }
@@ -59,6 +63,7 @@ mod from_snapshot {
         let path = dir.to_dir().file("upload_queue.json");
         let snapshot = QueueSnapshot {
             entries: vec![QueueEntry {
+                id: Uuid::new_v4(),
                 job: make_job("a.log"),
                 attempts: 2,
                 next_attempt_at: None,
@@ -76,10 +81,50 @@ mod from_snapshot {
 
         // if deserialization failed, new_with_default would silently write an
         // empty default snapshot and the pop below would find nothing
-        let mut queue = Queue::from_snapshot(8, open(&path).await);
-        let entry = queue.pop_ready(Utc::now()).await.unwrap();
+        let queue = Queue::from_snapshot(8, open(&path).await);
+        let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);
+    }
+
+    /// A queue written before entries carried ids still loads, and each entry
+    /// gets a distinct id so they stay independently resolvable.
+    #[tokio::test]
+    async fn legacy_snapshot_without_ids_gets_distinct_ids() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let snapshot = QueueSnapshot {
+            entries: vec![
+                QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job("a.log"),
+                    attempts: 0,
+                    next_attempt_at: None,
+                },
+                QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job("b.log"),
+                    attempts: 0,
+                    next_attempt_at: None,
+                },
+            ],
+        };
+
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        for entry in value["entries"].as_array_mut().unwrap() {
+            entry.as_object_mut().unwrap().remove("id");
+        }
+        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let mut queue = Queue::from_snapshot(8, open(&path).await);
+        let first = queue.next_ready(Utc::now()).unwrap();
+        queue.remove(first.id).await;
+        let second = queue.next_ready(Utc::now()).unwrap();
+
+        assert_ne!(first.id, second.id);
+        assert_eq!(second.job.digest, "sha256:b.log");
     }
 }
 
@@ -208,15 +253,17 @@ mod requeue {
         let requeued_job = make_job("b.log");
         queue
             .requeue(QueueEntry {
+                id: Uuid::new_v4(),
                 job: requeued_job.clone(),
                 attempts: 3,
                 next_attempt_at: None,
             })
             .await;
 
-        let first = queue.pop_ready(Utc::now()).await.unwrap();
+        let first = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(first.job, job_a);
-        let second = queue.pop_ready(Utc::now()).await.unwrap();
+        queue.remove(first.id).await;
+        let second = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(second.job, requeued_job);
         assert_eq!(second.attempts, 3);
     }
@@ -230,6 +277,7 @@ mod requeue {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
             queue
                 .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
                     job: make_job("a.log"),
                     attempts: 5,
                     next_attempt_at: None,
@@ -237,8 +285,8 @@ mod requeue {
                 .await;
         }
 
-        let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_ready(Utc::now()).await.unwrap();
+        let reloaded = Queue::from_snapshot(8, open(&path).await);
+        let entry = reloaded.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 5);
     }
@@ -253,6 +301,7 @@ mod requeue {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
             queue
                 .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
                     job: make_job("a.log"),
                     attempts: 5,
                     next_attempt_at: Some(deadline),
@@ -260,8 +309,8 @@ mod requeue {
                 .await;
         }
 
-        let mut reloaded = Queue::from_snapshot(8, open(&path).await);
-        let entry = reloaded.pop_ready(deadline).await.unwrap();
+        let reloaded = Queue::from_snapshot(8, open(&path).await);
+        let entry = reloaded.next_ready(deadline).unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 5);
         assert_eq!(entry.next_attempt_at, Some(deadline));
@@ -274,6 +323,7 @@ mod requeue {
 
         queue
             .requeue(QueueEntry {
+                id: Uuid::new_v4(),
                 job: make_job("b.log"),
                 attempts: 2,
                 next_attempt_at: None,
@@ -286,9 +336,28 @@ mod requeue {
             vec!["sha256:a.log".to_string(), "sha256:b.log".to_string()]
         );
     }
+
+    /// Requeuing an entry the queue already holds moves it, rather than
+    /// leaving a stale copy behind under the same id.
+    #[tokio::test]
+    async fn replaces_the_entry_with_the_same_id() {
+        let mut queue = Queue::new(4);
+        queue.enqueue(make_job("a.log")).await.unwrap();
+        let entry = queue.next_ready(Utc::now()).unwrap();
+
+        queue
+            .requeue(QueueEntry {
+                attempts: 1,
+                ..entry
+            })
+            .await;
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.next_ready(Utc::now()).unwrap().attempts, 1);
+    }
 }
 
-mod pop_ready {
+mod next_ready {
     use super::*;
 
     #[tokio::test]
@@ -302,11 +371,12 @@ mod pop_ready {
         }
 
         for expected in jobs {
-            let entry = queue.pop_ready(Utc::now()).await.unwrap();
+            let entry = queue.next_ready(Utc::now()).unwrap();
             assert_eq!(entry.job, expected);
             assert_eq!(entry.attempts, 0);
+            queue.remove(entry.id).await;
         }
-        assert!(queue.pop_ready(Utc::now()).await.is_none());
+        assert!(queue.next_ready(Utc::now()).is_none());
     }
 
     #[tokio::test]
@@ -316,6 +386,7 @@ mod pop_ready {
         let deadline = now + TimeDelta::hours(1);
         queue
             .requeue(QueueEntry {
+                id: Uuid::new_v4(),
                 job: make_job("a.log"),
                 attempts: 1,
                 next_attempt_at: Some(deadline),
@@ -325,16 +396,14 @@ mod pop_ready {
         queue.enqueue(make_job("c.log")).await.unwrap();
 
         // waiting A is skipped; eligible entries still pop in FIFO order
-        assert_eq!(
-            queue.pop_ready(now).await.unwrap().job.digest,
-            "sha256:b.log"
-        );
-        assert_eq!(
-            queue.pop_ready(now).await.unwrap().job.digest,
-            "sha256:c.log"
-        );
+        let b = queue.next_ready(now).unwrap();
+        assert_eq!(b.job.digest, "sha256:b.log");
+        queue.remove(b.id).await;
+        let c = queue.next_ready(now).unwrap();
+        assert_eq!(c.job.digest, "sha256:c.log");
+        queue.remove(c.id).await;
         // the deadline itself is eligible: the comparison is inclusive
-        let entry = queue.pop_ready(deadline).await.unwrap();
+        let entry = queue.next_ready(deadline).unwrap();
         assert_eq!(entry.job.digest, "sha256:a.log");
         assert_eq!(entry.attempts, 1);
     }
@@ -345,18 +414,21 @@ mod pop_ready {
         let now = Utc::now();
         queue
             .requeue(QueueEntry {
+                id: Uuid::new_v4(),
                 job: make_job("a.log"),
                 attempts: 1,
                 next_attempt_at: Some(now + TimeDelta::hours(1)),
             })
             .await;
 
-        assert!(queue.pop_ready(now).await.is_none());
+        assert!(queue.next_ready(now).is_none());
         assert_eq!(queue.len(), 1);
     }
 
+    /// The durability guarantee: an entry handed to the worker is still on
+    /// disk, so a crash mid-upload leaves it to be retried at the next boot.
     #[tokio::test]
-    async fn persists_shorter_backlog() {
+    async fn leaves_the_entry_on_disk_until_removed() {
         let dir = dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
 
@@ -364,7 +436,32 @@ mod pop_ready {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
             queue.enqueue(make_job("a.log")).await.unwrap();
             queue.enqueue(make_job("b.log")).await.unwrap();
-            queue.pop_ready(Utc::now()).await.unwrap();
+            queue.next_ready(Utc::now()).unwrap();
+        }
+
+        let mut reloaded = Queue::from_snapshot(8, open(&path).await);
+        assert_eq!(
+            digests(&mut reloaded).await,
+            vec!["sha256:a.log".to_string(), "sha256:b.log".to_string()]
+        );
+    }
+}
+
+mod remove {
+    use super::*;
+
+    #[tokio::test]
+    async fn removes_the_entry_from_disk() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+
+        {
+            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            queue.enqueue(make_job("a.log")).await.unwrap();
+            queue.enqueue(make_job("b.log")).await.unwrap();
+            let entry = queue.next_ready(Utc::now()).unwrap();
+            let removed = queue.remove(entry.id).await.unwrap();
+            assert_eq!(removed.id, entry.id);
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
@@ -372,6 +469,31 @@ mod pop_ready {
             digests(&mut reloaded).await,
             vec!["sha256:b.log".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_id_is_ignored() {
+        let mut queue = Queue::new(4);
+        queue.enqueue(make_job("a.log")).await.unwrap();
+
+        assert!(queue.remove(Uuid::new_v4()).await.is_none());
+        assert_eq!(queue.len(), 1);
+    }
+
+    /// Identity is per-entry, not per-job: enqueuing the same file twice
+    /// leaves two entries that are removable independently.
+    #[tokio::test]
+    async fn removing_one_duplicate_leaves_the_other() {
+        let mut queue = Queue::new(4);
+        let job = make_job("a.log");
+        queue.enqueue(job.clone()).await.unwrap();
+        queue.enqueue(job).await.unwrap();
+
+        let entry = queue.next_ready(Utc::now()).unwrap();
+        queue.remove(entry.id).await.unwrap();
+
+        assert_eq!(queue.len(), 1);
+        assert_ne!(queue.next_ready(Utc::now()).unwrap().id, entry.id);
     }
 }
 
@@ -391,6 +513,7 @@ mod earliest_next_attempt {
         for (name, deadline) in [("a.log", t2), ("b.log", t1)] {
             queue
                 .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
                     job: make_job(name),
                     attempts: 1,
                     next_attempt_at: Some(deadline),
@@ -406,6 +529,7 @@ mod earliest_next_attempt {
         let mut queue = Queue::new(4);
         queue
             .requeue(QueueEntry {
+                id: Uuid::new_v4(),
                 job: make_job("a.log"),
                 attempts: 1,
                 next_attempt_at: Some(Utc::now() + TimeDelta::hours(1)),
