@@ -155,7 +155,11 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
         .unwrap();
     assert_eq!(deleter.len().await.unwrap(), 1);
 
+    // one counted failure: the job stays queued rather than being dropped.
     deleter.sweep().await.unwrap();
+    assert_eq!(deleter.len().await.unwrap(), 1);
+
+    // the second failure hits the budget of 2 and the job is given up on.
     deleter.sweep().await.unwrap();
     assert_eq!(deleter.len().await.unwrap(), 0);
 

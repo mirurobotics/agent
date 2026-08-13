@@ -1105,6 +1105,22 @@ mod tests {
             assert_eq!(outcome.as_ref().map(outcome_label), Some("counted-retry"));
         }
 
+        /// The unlink step's counted arm. `delete_file` classifies its own
+        /// failures, and the only failure that reaches it through `sweep` is
+        /// EISDIR, which is terminal — so the counted branch is exercised
+        /// directly. A path *through* a symlink loop ELOOPs in `remove_file`
+        /// while resolving the `loop-a` component.
+        #[tokio::test]
+        async fn unlink_of_a_wedged_path_is_counted() {
+            let dir = dirs::temp("delete-unlink-eloop").unwrap();
+            symlink_loop(&dir);
+            let job = wedged_job(File::new(dir.path().join("loop-a").join("child")));
+
+            let outcome = SingleThreadDeleter::delete_file(&job).await;
+
+            assert_eq!(outcome_label(&outcome), "counted-retry");
+        }
+
         #[tokio::test]
         async fn counted_failure_increments_attempts() {
             let dir = dirs::temp("delete-attempts-counted").unwrap();
