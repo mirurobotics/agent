@@ -7,7 +7,7 @@ use crate::mocks::http_client::run_server;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 use miru_agent::data_uploads::upload::transfer::s3_config;
 use miru_agent::data_uploads::upload::{ObjectTransfer, SdkTransfer, UploadErr};
-use miru_agent::errors::Error as _;
+use miru_agent::errors::Error as ErrorTrait;
 use miru_agent::filesys::{files, File, WriteOptions};
 
 // external crates

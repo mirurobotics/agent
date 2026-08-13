@@ -470,6 +470,32 @@ async fn network_failures_do_not_consume_attempt_budget() {
 }
 
 #[tokio::test]
+async fn network_failure_past_max_job_age_drops_job() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::NetworkErr);
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle, _sleeps) =
+        spawn_with_test_clock(mock.clone(), UploaderOptions::default());
+    // first observed past the backstop, so the network exemption no longer
+    // applies — the only way a misclassified permanent failure ever exits
+    let mut job_a = make_job("a.log");
+    job_a.first_observed_at = Utc::now() - TimeDelta::days(8);
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+
+    // A was dropped on its single network failure, not requeued: B runs next
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+}
+
+#[tokio::test]
 async fn shutdown_during_in_flight_upload_returns_promptly() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();

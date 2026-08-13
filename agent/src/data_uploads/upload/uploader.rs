@@ -48,6 +48,10 @@ pub struct UploaderOptions {
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
     pub attempt_timeout_bytes_per_sec: u64,
+    /// Backstop on the network-error attempt exemption: a job first observed
+    /// longer ago than this is dropped even if every failure so far was
+    /// network-classified.
+    pub max_job_age: TimeDelta,
 }
 
 impl Default for UploaderOptions {
@@ -62,6 +66,7 @@ impl Default for UploaderOptions {
             },
             attempt_timeout_floor: Duration::from_secs(120),
             attempt_timeout_bytes_per_sec: 64 * 1024,
+            max_job_age: TimeDelta::days(7),
         }
     }
 }
@@ -180,14 +185,6 @@ where
         }
     }
 
-    /// Drive one executor attempt on `entry`, while staying responsive to
-    /// commands. On a retryable failure the entry is stamped with its
-    /// next-attempt deadline and requeued at the tail — no sleeping here; at
-    /// `options.attempts` total failures (or a terminal failure) it is
-    /// dropped. Network connection errors are exempt from attempt accounting:
-    /// they do not bump `entry.attempts` (so they can never exhaust the
-    /// attempt budget) and cool down for the flat base period rather than the
-    /// growing backoff.
     async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
         let file = &entry.job.file;
         let rule = &entry.job.file_rule_id;
@@ -206,9 +203,14 @@ where
         };
 
         // network connection errors are expected and do not count toward the
-        // attempt budget: the entry keeps its attempt count and cools down for
-        // the flat base period instead of the growing backoff
+        // attempt budget
         if err.is_network_conn_err() {
+            let age = (self.now_fn)() - entry.job.first_observed_at;
+            if age >= self.options.max_job_age {
+                Self::log_age_drop(&entry, age, &err);
+                return Flow::Continue;
+            }
+
             let wait = self.options.backoff.base_secs.max(0);
             entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait));
             let file = &entry.job.file;
@@ -306,6 +308,19 @@ where
         error!(
             "dropping upload job after {} attempts (rule {}, file {}, digest {}): {err:?}",
             entry.attempts, entry.job.file_rule_id, entry.job.file, entry.job.digest
+        );
+    }
+
+    fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &UploadErr) {
+        error!(
+            "dropping upload job: network-classified failures only, for {} days since the file \
+             was first observed (rule {}, file {}, digest {}, attempt {}); suspect a permanent \
+             failure misclassified as a network error: {err:?}",
+            age.num_days(),
+            entry.job.file_rule_id,
+            entry.job.file,
+            entry.job.digest,
+            entry.attempts
         );
     }
 

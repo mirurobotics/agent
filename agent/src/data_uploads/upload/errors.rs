@@ -20,8 +20,6 @@ pub struct ExecutorErr {
     #[source]
     pub source: Box<dyn std::error::Error + Send + Sync>,
     pub is_terminal: bool,
-    /// True when the wrapped failure was classified a network connection error
-    /// at wrap time.
     pub is_network_conn_err: bool,
     pub trace: Box<Trace>,
 }
