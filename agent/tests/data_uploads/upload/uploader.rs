@@ -508,6 +508,68 @@ async fn network_failure_past_max_job_age_drops_job() {
 }
 
 #[tokio::test]
+async fn network_failure_with_implausible_age_keeps_job() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::NetworkErr);
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle, _sleeps) =
+        spawn_with_test_clock(mock.clone(), UploaderOptions::default());
+    // stamped by a device that booted with an unset clock (1970) before NTP
+    // stepped it forward: the computed age is decades, which is a clock
+    // artifact rather than an old file, so the backstop must not fire
+    let mut job_a = make_job("a.log");
+    job_a.first_observed_at = DateTime::from_timestamp(0, 0).unwrap();
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    for _ in 0..2 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // requeued after the network failure and retried, not dropped
+    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_a]);
+}
+
+#[tokio::test]
+async fn implausible_age_boundary_is_pinned_from_both_sides() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    // A's single failure drops it; B's is exempt, so B fails and then succeeds
+    for step in [MockStep::NetworkErr, MockStep::NetworkErr, MockStep::Ok] {
+        mock.push_step(step);
+    }
+    // pinned independently of the production defaults
+    let options = UploaderOptions {
+        max_job_age: TimeDelta::days(7),
+        max_plausible_job_age: TimeDelta::days(30),
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
+    // past the backstop but still a believable file age: dropped
+    let mut job_a = make_job("a.log");
+    job_a.first_observed_at = Utc::now() - TimeDelta::days(29);
+    // beyond the believable bound: read as clock skew and kept
+    let mut job_b = make_job("b.log");
+    job_b.first_observed_at = Utc::now() - TimeDelta::days(31);
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    for _ in 0..2 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    // A ran once and left; B ran twice, so only B survived its network failure
+    assert_eq!(
+        mock.recorded_calls(),
+        vec![job_a, job_b.clone(), job_b],
+        "at the bound the job must drop; beyond it the job must survive"
+    );
+}
+
+#[tokio::test]
 async fn shutdown_during_in_flight_upload_returns_promptly() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
@@ -1187,6 +1249,34 @@ mod durability {
         await_drained(&uploader).await;
 
         assert!(on_disk(&path).await.is_empty());
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+    }
+
+    /// The offline backlog is exactly what the durable queue exists to protect,
+    /// so a clock step must not erase it from disk.
+    #[tokio::test]
+    async fn implausible_age_keeps_job_on_disk() {
+        let dir = dirs::temp("uploader_clock_skew").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (_release_tx, release_rx) = oneshot::channel();
+        // fail the network on the first attempt, then hang the retry so the
+        // snapshot can be read while the job is still queued
+        mock.push_step(MockStep::NetworkErr);
+        mock.push_step(MockStep::Hang(release_rx));
+        let (uploader, handle, _sleeps) =
+            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
+
+        let mut job = make_job("a.log");
+        job.first_observed_at = DateTime::from_timestamp(0, 0).unwrap();
+        timed(uploader.enqueue(job)).await.unwrap();
+        for _ in 0..2 {
+            timed(started_rx.recv()).await.unwrap();
+        }
+
+        assert_eq!(on_disk(&path).await, vec!["sha256:a.log".to_string()]);
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
