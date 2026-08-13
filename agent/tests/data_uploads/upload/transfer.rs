@@ -399,3 +399,19 @@ fn s3_config_maps_credentials() {
         ("us-east-1", "AKIA_TEST", "secret", "session")
     );
 }
+
+#[tokio::test]
+async fn gcs_connection_failure_is_classified_network() {
+    let src = temp_file_with(b"hello world").await;
+    let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
+
+    // the GCS counterpart of s3_connection_failure_is_classified_network
+    let err = SdkTransfer::with_gcs_endpoint("http://127.0.0.1:1".to_string())
+        .transfer(&creds, &destination(), src.file(), &HashMap::new())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
+    assert!(err.is_network_conn_err(), "got: {err:?}");
+    assert!(!err.is_terminal());
+}
