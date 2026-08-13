@@ -22,7 +22,7 @@ This is a **pure refactor**. Nothing a user can observe changes: no wire format 
 
 ## Progress
 
-- [ ] M1 — Pin the upload queue's on-disk JSON shape with a raw-JSON round-trip test (regression guard for everything after).
+- [x] M1 — Pin the upload queue's on-disk JSON shape with a raw-JSON round-trip test (regression guard for everything after).
 - [ ] M2 — Add the generic queue module `agent/src/data_uploads/queue/`, the two `QueueJob` impls, its test file, and a measured `.covgate`.
 - [ ] M3 — Migrate the uploader's queue onto the generic (delete the duplicated implementation, add the aliases); measure `upload/` covgate.
 - [ ] M4 — Migrate the retention deleter's queue onto the generic (delete the duplicated implementation, add the aliases); measure `retention/` covgate.
@@ -31,11 +31,17 @@ This is a **pure refactor**. Nothing a user can observe changes: no wire format 
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- **M1 — `upload::Job` has a ninth field, `retention: Option<FileRuleRetention>`** (`agent/src/data_uploads/upload/job.rs:19`, `#[serde(default)]`), which `retention::Job` does not. The literal JSON in the new pin therefore carries `"retention":null`; the two job objects are *not* interchangeable between the two pins. Anything that changes `upload::Job`'s field set must update the literal in `raw_json_snapshot_loads`.
+- **M1 — the field-by-field-assert linter does not fire on `serde_json::Value` indexing.** `tools/lint/src/asserts/extract.rs::root_receiver` only attributes an assert to a receiver when the expression chain contains a `syn::Expr::Field` node; `entry["attempts"]` is `Expr::Index` over a path with no field access, so it returns `None`. The write-side pin has five `assert_eq!` on `entry[...]` and needs no `// lint:allow(field-by-field-assert)`. Only genuine `x.field` chains count toward the threshold of 4.
+- **M1 — the load-side pin needs an explicit length assertion to be meaningful.** `SingleThreadStateFile::new_with_default` overwrites an unparseable snapshot with the default instead of erroring, so a broken wire format yields an *empty* queue, not a failure. `assert_eq!(queue.len(), 1)` before the entry assertions is what turns a silent wipe into a red test — do not drop it when consolidating tests in M5.
+
+
 
 ## Decision Log
 
 (Add entries as you go. The authoring-time decisions are stated inline in Plan of Work; record any departure from them here with a rationale.)
+
+- **M1 — kept the upload suite's local idioms in the new pin** (`dir.to_dir().file(..)`, `Utc::now()` for readiness, `make_job` on the write side) rather than importing retention's `dir.file(..)` / fixed-`now()` idioms. Rationale: the plan's "prefer the tighter idiom" guidance in *Test strategy* applies to the **shared** file created in M5; mixing idioms inside the existing per-worker file now would make the M5 diff noisier. The load-side pin does spell out a fully deterministic expected `Job` (rather than calling the non-deterministic `make_job`), because whole-`Job` equality against a literal JSON string requires it.
 
 ## Outcomes & Retrospective
 
