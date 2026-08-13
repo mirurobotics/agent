@@ -1,4 +1,5 @@
 // internal crates
+use miru_agent::cooldown;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 
@@ -144,6 +145,13 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
         16,
         DeleterArgs {
             attempts: 2,
+            // zero backoff: the second sweep must reach the wedged entry
+            // rather than finding it deferred.
+            backoff: cooldown::Backoff {
+                base_secs: 0,
+                growth_factor: 2,
+                max_secs: 0,
+            },
             ..DeleterArgs::default()
         },
     )

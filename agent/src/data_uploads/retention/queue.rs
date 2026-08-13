@@ -28,6 +28,11 @@ pub struct QueueEntry {
     /// a snapshot written before the field existed loads with a full budget.
     #[serde(default)]
     pub attempts: u32,
+    /// Earliest instant this entry may be swept again, stamped by the backoff
+    /// after a failed attempt. `None` means no deferral. Defaulted so a
+    /// snapshot written before the field existed loads as immediately ready.
+    #[serde(default)]
+    pub next_attempt_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -105,6 +110,7 @@ impl Queue {
             id: Uuid::new_v4(),
             job,
             attempts: 0,
+            next_attempt_at: None,
         });
         self.persist().await;
         info!("delete: job enqueued; queue length {}", self.entries.len());
@@ -114,7 +120,7 @@ impl Queue {
     pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry> {
         self.entries
             .iter()
-            .find(|entry| entry.job.due_at() <= now)
+            .find(|entry| Self::is_ready(entry, now))
             .cloned()
     }
 
@@ -123,8 +129,16 @@ impl Queue {
     pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
         self.entries
             .iter()
-            .filter(|entry| entry.job.due_at() <= now)
+            .filter(|entry| Self::is_ready(entry, now))
             .count()
+    }
+
+    /// An entry is ready once its TTL has elapsed *and* any backoff stamped by
+    /// a previous failure has expired. The sole readiness predicate, so
+    /// `next_ready` and `count_ready` cannot disagree and desynchronize the
+    /// sweep's loop budget from what it can actually pop.
+    fn is_ready(entry: &QueueEntry, now: DateTime<Utc>) -> bool {
+        entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }
 
     /// Drop the entry with `id` and persist the shortened queue. This is the

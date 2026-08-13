@@ -120,6 +120,7 @@ mod from_snapshot {
                 id: Uuid::new_v4(),
                 job: make_job("a.log", 1000, 0),
                 attempts: 0,
+                next_attempt_at: None,
             }],
         };
         let mut value = serde_json::to_value(&snapshot).unwrap();
@@ -150,6 +151,7 @@ mod from_snapshot {
                 id: Uuid::new_v4(),
                 job: make_job("a.log", 1000, 0),
                 attempts: 0,
+                next_attempt_at: None,
             }],
         };
         let mut value = serde_json::to_value(&snapshot).unwrap();
@@ -164,6 +166,32 @@ mod from_snapshot {
         // empty default snapshot and next_ready below would find nothing.
         let queue = Queue::from_snapshot(8, open(&path).await);
         assert_eq!(queue.next_ready(now()).unwrap().attempts, 0);
+    }
+
+    /// An entry written before the backoff stamp existed loads as immediately
+    /// ready rather than failing to deserialize.
+    #[tokio::test]
+    async fn entry_without_next_attempt_at_defaults_to_none() {
+        let dir = dirs::temp("delete-queue-test").unwrap();
+        let path = dir.file("delete_queue.json");
+        let snapshot = DeleteQueueSnapshot {
+            entries: vec![QueueEntry {
+                id: Uuid::new_v4(),
+                job: make_job("a.log", 1000, 0),
+                attempts: 0,
+                next_attempt_at: None,
+            }],
+        };
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        for entry in value["entries"].as_array_mut().unwrap() {
+            entry.as_object_mut().unwrap().remove("next_attempt_at");
+        }
+        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let queue = Queue::from_snapshot(8, open(&path).await);
+        assert_eq!(queue.next_ready(now()).unwrap().next_attempt_at, None);
     }
 }
 

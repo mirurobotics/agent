@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 // internal crates
+use crate::cooldown;
 use crate::data_uploads::retention::{
     errors::*,
     job::Job,
@@ -13,7 +14,7 @@ use crate::filesys::{errors::FileSysErr, files};
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
@@ -37,6 +38,9 @@ pub struct DeleterArgs {
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
     /// Total sweep attempts per job before it is dropped.
     pub attempts: u32,
+    /// Backoff between attempts; the exponent is the entry's attempt count
+    /// minus one, so waits grow across requeues and cap at `max_secs`.
+    pub backoff: cooldown::Backoff,
 }
 
 impl Default for DeleterArgs {
@@ -46,6 +50,11 @@ impl Default for DeleterArgs {
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
             snapshot_file: None,
             attempts: DEFAULT_ATTEMPTS,
+            backoff: cooldown::Backoff {
+                base_secs: 10,
+                growth_factor: 2,
+                max_secs: 3600,
+            },
         }
     }
 }
@@ -54,15 +63,13 @@ pub struct SingleThreadDeleter {
     queue: Queue,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     attempts: u32,
+    backoff: cooldown::Backoff,
 }
 
 /// Outcome of considering one queued job during a sweep.
 enum SweepOutcome {
-    /// A failure whose class might resolve on its own; consumes one attempt.
-    CountedRetry,
-    /// A failure whose class will never resolve for this recorded path;
-    /// drop immediately rather than burning the whole attempt budget.
-    TerminalFailure,
+    /// The sweep could not resolve the job; consumes one attempt.
+    Failed,
     /// File was deleted; drop the job.
     Deleted,
     /// File is already gone; drop the job.
@@ -81,6 +88,7 @@ impl SingleThreadDeleter {
             queue,
             now_fn: args.now_fn,
             attempts: args.attempts,
+            backoff: args.backoff,
         }
     }
 
@@ -103,22 +111,20 @@ impl SingleThreadDeleter {
                 break;
             };
             match Self::sweep_entry(&entry.job).await {
-                SweepOutcome::CountedRetry => {
+                SweepOutcome::Failed => {
                     entry.attempts += 1;
                     if entry.attempts >= self.attempts {
                         Self::log_exhausted_drop(&entry);
                         self.queue.remove(entry.id).await;
                     } else {
+                        let wait = cooldown::calc(&self.backoff, entry.attempts - 1).max(0);
                         warn!(
-                            "delete: attempt {} of {} failed for {}; retrying next sweep",
+                            "delete: attempt {} of {} failed for {}; retrying in {wait}s",
                             entry.attempts, self.attempts, entry.job.file
                         );
+                        entry.next_attempt_at = Some(now + TimeDelta::seconds(wait));
                         self.queue.requeue(entry).await;
                     }
-                }
-                SweepOutcome::TerminalFailure => {
-                    Self::log_terminal_drop(&entry);
-                    self.queue.remove(entry.id).await;
                 }
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
                     self.queue.remove(entry.id).await;
@@ -150,11 +156,8 @@ impl SingleThreadDeleter {
                 Err(SweepOutcome::AlreadyGone)
             }
             Err(err) => {
-                warn!(
-                    "delete: failed to stat {}: {err:?}; classifying failure",
-                    entry.file
-                );
-                Err(Self::classify(&err))
+                warn!("delete: failed to stat {}: {err:?}", entry.file);
+                Err(SweepOutcome::Failed)
             }
         }
     }
@@ -189,11 +192,8 @@ impl SingleThreadDeleter {
                 Some(SweepOutcome::AlreadyGone)
             }
             Err(err) => {
-                warn!(
-                    "delete: failed to hash {}: {err:?}; classifying failure",
-                    entry.file
-                );
-                Some(Self::classify(&err))
+                warn!("delete: failed to hash {}: {err:?}", entry.file);
+                Some(SweepOutcome::Failed)
             }
         }
     }
@@ -208,37 +208,9 @@ impl SingleThreadDeleter {
                 SweepOutcome::Deleted
             }
             Err(err) => {
-                warn!(
-                    "delete: failed to delete {}: {err:?}; classifying failure",
-                    entry.file
-                );
-                Self::classify(&err)
+                warn!("delete: failed to delete {}: {err:?}", entry.file);
+                SweepOutcome::Failed
             }
-        }
-    }
-
-    /// The `io::ErrorKind` behind a filesystem error, when one is available.
-    fn io_kind(err: &FileSysErr) -> Option<std::io::ErrorKind> {
-        match err {
-            FileSysErr::FileMetadataErr(e) => Some(e.source.kind()),
-            FileSysErr::OpenFileErr(e) => Some(e.source.kind()),
-            FileSysErr::ReadFileErr(e) => Some(e.source.kind()),
-            FileSysErr::DeleteFileErr(e) => Some(e.source.kind()),
-            _ => None,
-        }
-    }
-
-    /// Failures that cannot succeed on a later sweep for the same recorded
-    /// path. Everything else — including errors we cannot classify — is
-    /// counted, and the attempt cap is the backstop.
-    fn classify(err: &FileSysErr) -> SweepOutcome {
-        use std::io::ErrorKind::*;
-        match Self::io_kind(err) {
-            Some(
-                PermissionDenied | ReadOnlyFilesystem | IsADirectory | NotADirectory
-                | InvalidFilename,
-            ) => SweepOutcome::TerminalFailure,
-            _ => SweepOutcome::CountedRetry,
         }
     }
 
@@ -248,21 +220,6 @@ impl SingleThreadDeleter {
              digest {}); the file is left on disk and the agent will not retry it",
             entry.job.file,
             entry.attempts,
-            entry.job.file_rule_id,
-            entry.job.deployment_id,
-            entry.job.digest
-        );
-    }
-
-    /// Logs the ordinal of the failing sweep (`attempts + 1`); the terminal
-    /// path consumes no attempt, so the field itself is one short.
-    fn log_terminal_drop(entry: &QueueEntry) {
-        error!(
-            "delete: giving up on {} on attempt {} after a permanent filesystem \
-             failure (rule {}, deployment {}, digest {}); the file is left on \
-             disk and the agent will not retry it",
-            entry.job.file,
-            entry.attempts + 1,
             entry.job.file_rule_id,
             entry.job.deployment_id,
             entry.job.digest
@@ -429,13 +386,10 @@ mod tests {
 
     // internal crates
     use super::{DeleterArgs, SingleThreadDeleter, SweepOutcome};
+    use crate::cooldown;
     use crate::data_uploads::retention::job::Job;
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
-    use crate::filesys::errors::{
-        DeleteFileErr, FileMetadataErr, FileSysErr, OpenFileErr, PathExistsErr, ReadFileErr,
-    };
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-    use crate::trace;
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -496,10 +450,21 @@ mod tests {
         }
     }
 
-    /// A deleter with the injected clock, default capacity, and no persistence.
+    /// A zero-length backoff: a counted failure is retryable immediately, so a
+    /// test can drive successive attempts without stepping the clock. The
+    /// backoff's own growth is pinned separately, in `mod backoff`.
+    const NO_BACKOFF: cooldown::Backoff = cooldown::Backoff {
+        base_secs: 0,
+        growth_factor: 2,
+        max_secs: 0,
+    };
+
+    /// A deleter with the injected clock, default capacity, no persistence,
+    /// and no backoff.
     fn deleter(clock: &Clock) -> SingleThreadDeleter {
         SingleThreadDeleter::new(DeleterArgs {
             now_fn: Arc::new(clock.now_fn()),
+            backoff: NO_BACKOFF,
             ..DeleterArgs::default()
         })
     }
@@ -511,23 +476,8 @@ mod tests {
             .unwrap()
     }
 
-    /// A comparable name for a sweep outcome. `SweepOutcome` deliberately
-    /// derives neither `Debug` nor `PartialEq`, so tests compare this label —
-    /// which also makes a failure report the outcome it actually got.
-    fn outcome_label(outcome: &SweepOutcome) -> &'static str {
-        match outcome {
-            SweepOutcome::CountedRetry => "counted-retry",
-            SweepOutcome::TerminalFailure => "terminal-failure",
-            SweepOutcome::Deleted => "deleted",
-            SweepOutcome::AlreadyGone => "already-gone",
-            SweepOutcome::Changed => "changed",
-        }
-    }
-
     /// Two symlinks pointing at each other. `stat` and `open` on either fail
-    /// with ELOOP, which has no `ErrorKind` variant nameable on stable 1.97.0
-    /// and therefore classifies as a counted retry, not a terminal failure.
-    /// Built with `std::os::unix::fs::symlink` rather than
+    /// with ELOOP. Built with `std::os::unix::fs::symlink` rather than
     /// `files::create_symlink` because the latter asserts the target exists.
     fn symlink_loop(dir: &Dir) -> File {
         let a = dir.file("loop-a");
@@ -642,125 +592,6 @@ mod tests {
         }
     }
 
-    mod classify {
-        use super::*;
-
-        fn io(kind: std::io::ErrorKind) -> Box<std::io::Error> {
-            Box::new(std::io::Error::from(kind))
-        }
-
-        #[test]
-        fn permission_denied_is_terminal() {
-            let err = FileSysErr::DeleteFileErr(DeleteFileErr {
-                source: io(std::io::ErrorKind::PermissionDenied),
-                file: File::new("/data/a.log"),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "terminal-failure"
-            );
-        }
-
-        #[test]
-        fn read_only_filesystem_is_terminal() {
-            let err = FileSysErr::FileMetadataErr(FileMetadataErr {
-                file: File::new("/data/a.log"),
-                source: io(std::io::ErrorKind::ReadOnlyFilesystem),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "terminal-failure"
-            );
-        }
-
-        #[test]
-        fn is_a_directory_is_terminal() {
-            let err = FileSysErr::OpenFileErr(OpenFileErr {
-                source: io(std::io::ErrorKind::IsADirectory),
-                file: File::new("/data/a.log"),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "terminal-failure"
-            );
-        }
-
-        #[test]
-        fn not_a_directory_is_terminal() {
-            let err = FileSysErr::ReadFileErr(ReadFileErr {
-                source: io(std::io::ErrorKind::NotADirectory),
-                file: File::new("/data/a.log"),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "terminal-failure"
-            );
-        }
-
-        #[test]
-        fn invalid_filename_is_terminal() {
-            let err = FileSysErr::DeleteFileErr(DeleteFileErr {
-                source: io(std::io::ErrorKind::InvalidFilename),
-                file: File::new("/data/a.log"),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "terminal-failure"
-            );
-        }
-
-        #[test]
-        fn unclassified_io_error_is_counted() {
-            let err = FileSysErr::ReadFileErr(ReadFileErr {
-                source: io(std::io::ErrorKind::TimedOut),
-                file: File::new("/data/a.log"),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "counted-retry"
-            );
-        }
-
-        /// Pins `io_kind`'s catch-all arm: a filesystem error carrying no
-        /// `io::Error` is unclassifiable and therefore counted.
-        #[test]
-        fn error_without_an_io_source_is_counted() {
-            let err = FileSysErr::PathExistsErr(PathExistsErr {
-                path: std::path::PathBuf::from("/data/a.log"),
-                trace: trace!(),
-            });
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "counted-retry"
-            );
-        }
-
-        /// ELOOP is the real-filesystem failure the counted-retry tests below
-        /// are built on. Assert on the classification, never on the
-        /// `ErrorKind` variant name — `FilesystemLoop` is behind the unstable
-        /// `io_error_more` feature on 1.97.0 and naming it is E0658. If a
-        /// platform ever maps ELOOP to a terminal kind, this is the single
-        /// place to re-point.
-        #[tokio::test]
-        async fn symlink_loop_is_counted() {
-            let dir = dirs::temp("delete-classify-eloop").unwrap();
-            let head = symlink_loop(&dir);
-
-            let err = files::metadata(&head).await.unwrap_err();
-
-            assert_eq!(
-                outcome_label(&SingleThreadDeleter::classify(&err)),
-                "counted-retry"
-            );
-        }
-    }
-
     mod sweep {
         use super::*;
 
@@ -849,30 +680,19 @@ mod tests {
             assert!(deleter.queue.is_empty());
         }
 
-        // ENOTDIR: the recorded path's parent is a file, so the stat can never
-        // succeed for this path.
+        // ENOTDIR: the recorded path's parent is a file, so the stat fails.
+        // The failure is counted like any other, not specially classified.
         #[tokio::test]
-        async fn stat_permanent_failure_drops_entry() {
+        async fn stat_failure_counts_an_attempt() {
             let parent = temp_file(b"not a dir").await;
             let child = File::new(parent.file().path().join("child"));
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = Job {
-                file: child,
-                size: 4,
-                digest: "sha256:unused".to_string(),
-                mtime: DateTime::from_timestamp(900, 0).unwrap(),
-                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                ttl_secs: 0,
-                file_rule_id: "rule_1".to_string(),
-                deployment_id: "dpl_1".to_string(),
-            };
-            deleter.enqueue(record).await.unwrap();
+            deleter.enqueue(wedged_job(child)).await.unwrap();
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.queue.is_empty());
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
         }
 
         #[tokio::test]
@@ -935,10 +755,10 @@ mod tests {
             assert!(tmp.file().exists());
         }
 
-        // EISDIR: the recorded path is a directory, so the hash read fails
-        // permanently; the pass must drop the entry, not panic.
+        // EISDIR: the recorded path is a directory, so the hash read fails;
+        // the pass must count an attempt and keep going, not panic.
         #[tokio::test]
-        async fn hash_permanent_failure_drops_entry() {
+        async fn hash_failure_counts_an_attempt() {
             let dir = dirs::temp("delete-hash-eisdir").unwrap();
             let target = File::new(dir.path().clone());
             let metadata = files::metadata(&target).await.unwrap();
@@ -960,7 +780,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.queue.is_empty());
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
             assert!(target.exists());
         }
 
@@ -981,10 +801,9 @@ mod tests {
         }
 
         // EISDIR: the recorded path is a directory and unlink refuses
-        // directories, so files::delete fails permanently. The deleter keeps
-        // the default budget of 10 attempts.
+        // directories, so files::delete fails at the unlink step.
         #[tokio::test]
-        async fn terminal_failure_drops_job_without_burning_attempts() {
+        async fn unlink_failure_counts_an_attempt() {
             let dir = dirs::temp("delete-eisdir").unwrap();
             let target = File::new(dir.path().clone());
             let metadata = files::metadata(&target).await.unwrap();
@@ -1005,7 +824,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.queue.is_empty());
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
             assert!(target.exists());
         }
 
@@ -1090,35 +909,7 @@ mod tests {
 
             let outcome = SingleThreadDeleter::check_digest_mismatch(&job).await;
 
-            assert_eq!(outcome.as_ref().map(outcome_label), Some("already-gone"));
-        }
-
-        /// The sibling of the above: a hash failure that is *not* a vanished
-        /// file still consumes an attempt rather than dropping the job.
-        #[tokio::test]
-        async fn hash_of_a_wedged_path_is_counted() {
-            let dir = dirs::temp("delete-hash-eloop").unwrap();
-            let job = wedged_job(symlink_loop(&dir));
-
-            let outcome = SingleThreadDeleter::check_digest_mismatch(&job).await;
-
-            assert_eq!(outcome.as_ref().map(outcome_label), Some("counted-retry"));
-        }
-
-        /// The unlink step's counted arm. `delete_file` classifies its own
-        /// failures, and the only failure that reaches it through `sweep` is
-        /// EISDIR, which is terminal — so the counted branch is exercised
-        /// directly. A path *through* a symlink loop ELOOPs in `remove_file`
-        /// while resolving the `loop-a` component.
-        #[tokio::test]
-        async fn unlink_of_a_wedged_path_is_counted() {
-            let dir = dirs::temp("delete-unlink-eloop").unwrap();
-            symlink_loop(&dir);
-            let job = wedged_job(File::new(dir.path().join("loop-a").join("child")));
-
-            let outcome = SingleThreadDeleter::delete_file(&job).await;
-
-            assert_eq!(outcome_label(&outcome), "counted-retry");
+            assert!(matches!(outcome, Some(SweepOutcome::AlreadyGone)));
         }
 
         #[tokio::test]
@@ -1146,6 +937,7 @@ mod tests {
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 attempts: 3,
+                backoff: NO_BACKOFF,
                 ..DeleterArgs::default()
             });
             deleter
@@ -1210,6 +1002,130 @@ mod tests {
         }
     }
 
+    mod backoff {
+        use super::*;
+
+        /// The backoff every test in this module runs under: 10s, doubling,
+        /// capped at 40s — small enough to step a test clock over.
+        const BACKOFF: cooldown::Backoff = cooldown::Backoff {
+            base_secs: 10,
+            growth_factor: 2,
+            max_secs: 40,
+        };
+
+        /// A deleter on `clock` that backs off under [`BACKOFF`], persisting to
+        /// `state_path` when one is given.
+        async fn backoff_deleter(clock: &Clock, state_path: Option<&File>) -> SingleThreadDeleter {
+            let snapshot_file = match state_path {
+                Some(path) => Some(snapshot_file(path).await),
+                None => None,
+            };
+            SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                backoff: BACKOFF,
+                snapshot_file,
+                ..DeleterArgs::default()
+            })
+        }
+
+        #[tokio::test]
+        async fn failure_defers_the_next_attempt() {
+            let dir = dirs::temp("delete-backoff-defer").unwrap();
+            let clock = Clock::new(1000);
+            let mut deleter = backoff_deleter(&clock, None).await;
+            deleter
+                .enqueue(wedged_job(symlink_loop(&dir)))
+                .await
+                .unwrap();
+
+            deleter.sweep().await.unwrap();
+            let entry = deleter.queue.queue_entries()[0].clone();
+            assert_eq!(entry.attempts, 1);
+            assert_eq!(
+                entry.next_attempt_at,
+                Some(DateTime::from_timestamp(1010, 0).unwrap())
+            );
+
+            // still deferred: the next sweep must not touch it.
+            clock.advance(9);
+            deleter.sweep().await.unwrap();
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
+
+            // due exactly at next_attempt_at.
+            clock.advance(1);
+            deleter.sweep().await.unwrap();
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
+        }
+
+        #[tokio::test]
+        async fn the_delay_grows_and_caps() {
+            let dir = dirs::temp("delete-backoff-growth").unwrap();
+            let clock = Clock::new(1000);
+            let mut deleter = backoff_deleter(&clock, None).await;
+            deleter
+                .enqueue(wedged_job(symlink_loop(&dir)))
+                .await
+                .unwrap();
+
+            // 10, 20, 40, then pinned at the 40s cap.
+            let mut at = 1000;
+            for wait in [10, 20, 40, 40, 40] {
+                deleter.sweep().await.unwrap();
+                at += wait;
+                assert_eq!(
+                    deleter.queue.queue_entries()[0].next_attempt_at,
+                    Some(DateTime::from_timestamp(at, 0).unwrap()),
+                    "after a {wait}s wait"
+                );
+                clock.advance(wait);
+            }
+        }
+
+        #[tokio::test]
+        async fn next_attempt_at_survives_a_reload() {
+            let dir = dirs::temp("delete-backoff-reload").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let clock = Clock::new(1000);
+            let mut deleter = backoff_deleter(&clock, Some(&state_path)).await;
+            deleter
+                .enqueue(wedged_job(symlink_loop(&dir)))
+                .await
+                .unwrap();
+            deleter.sweep().await.unwrap();
+            drop(deleter);
+
+            let restored = backoff_deleter(&clock, Some(&state_path)).await;
+
+            assert_eq!(
+                restored.queue.queue_entries()[0].next_attempt_at,
+                Some(DateTime::from_timestamp(1010, 0).unwrap())
+            );
+        }
+
+        /// The sweep's loop budget comes from `count_ready` and its pops from
+        /// `next_ready`; a deferred entry must be invisible to both or the two
+        /// desynchronize.
+        #[tokio::test]
+        async fn count_ready_and_next_ready_agree_about_a_deferred_entry() {
+            let dir = dirs::temp("delete-backoff-agree").unwrap();
+            let clock = Clock::new(1000);
+            let mut deleter = backoff_deleter(&clock, None).await;
+            deleter
+                .enqueue(wedged_job(symlink_loop(&dir)))
+                .await
+                .unwrap();
+            deleter.sweep().await.unwrap();
+
+            let deferred = DateTime::from_timestamp(1005, 0).unwrap();
+            assert_eq!(deleter.queue.count_ready(deferred), 0);
+            assert!(deleter.queue.next_ready(deferred).is_none());
+
+            let due = DateTime::from_timestamp(1010, 0).unwrap();
+            assert_eq!(deleter.queue.count_ready(due), 1);
+            assert!(deleter.queue.next_ready(due).is_some());
+        }
+    }
+
     mod persistence {
         use super::*;
 
@@ -1224,6 +1140,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {
                 now_fn: Arc::new(clock.now_fn()),
+                backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
