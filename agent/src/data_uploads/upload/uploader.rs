@@ -5,11 +5,14 @@ use std::time::Duration;
 
 // internal crates
 use crate::cooldown;
-use crate::data_uploads::upload::{
-    errors::*,
-    executor::UploadExecutor,
-    job::Job,
-    queue::{Queue, QueueEntry, QueueSnapshotFile},
+use crate::data_uploads::{
+    retention::{DeleterExt, Job as DeleteJob},
+    upload::{
+        errors::*,
+        executor::UploadExecutor,
+        job::Job,
+        queue::{Queue, QueueEntry, QueueSnapshotFile},
+    },
 };
 use crate::errors::Error;
 use crate::trace;
@@ -128,9 +131,10 @@ enum AttemptOutcome {
     ShuttingDown,
 }
 
-pub(crate) struct Worker<ExecutorT, F, Fut, N>
+pub(crate) struct Worker<ExecutorT, D, F, Fut, N>
 where
     ExecutorT: UploadExecutor,
+    D: DeleterExt + 'static,
     F: Fn(Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
@@ -138,14 +142,16 @@ where
     receiver: Receiver<Command>,
     queue: Queue,
     executor: Arc<ExecutorT>,
+    deleter: Arc<D>,
     options: UploaderOptions,
     sleep_fn: F,
     now_fn: N,
 }
 
-impl<ExecutorT, F, Fut, N> Worker<ExecutorT, F, Fut, N>
+impl<ExecutorT, D, F, Fut, N> Worker<ExecutorT, D, F, Fut, N>
 where
     ExecutorT: UploadExecutor,
+    D: DeleterExt + 'static,
     F: Fn(Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
@@ -197,6 +203,7 @@ where
             AttemptOutcome::Succeeded => {
                 entry.attempts += 1;
                 Self::log_success(&entry);
+                self.enqueue_delete_job(&entry).await;
                 self.queue.remove(entry.id).await;
                 Flow::Continue
             }
@@ -204,6 +211,31 @@ where
                 self.handle_network_failure(entry, err).await
             }
             AttemptOutcome::Failed(err) => self.handle_counted_failure(entry, err).await,
+        }
+    }
+
+    async fn enqueue_delete_job(&mut self, entry: &QueueEntry) {
+        let Some(retention) = &entry.job.retention else {
+            return;
+        };
+
+        let job = &entry.job;
+        let delete_job = DeleteJob {
+            file: job.file.clone(),
+            size: job.size,
+            digest: job.digest.clone(),
+            mtime: job.mtime,
+            first_observed_at: job.first_observed_at,
+            last_observed_at: (self.now_fn)(),
+            ttl_secs: retention.ttl_secs,
+            file_rule_id: job.file_rule_id.clone(),
+            deployment_id: job.deployment_id.clone(),
+        };
+        if let Err(e) = self.deleter.enqueue(delete_job).await {
+            warn!(
+                "upload: confirmed {} but failed to enqueue its delete job: {e:?}",
+                job.file
+            );
         }
     }
 
@@ -413,9 +445,10 @@ pub struct Uploader {
 }
 
 impl Uploader {
-    pub fn spawn<ExecutorT, F, Fut, N>(
+    pub fn spawn<ExecutorT, D, F, Fut, N>(
         buffer_size: usize,
         executor: Arc<ExecutorT>,
+        deleter: Arc<D>,
         options: UploaderOptions,
         snapshot_file: Option<QueueSnapshotFile>,
         sleep_fn: F,
@@ -423,6 +456,7 @@ impl Uploader {
     ) -> Result<(Self, JoinHandle<()>), UploadErr>
     where
         ExecutorT: UploadExecutor + 'static,
+        D: DeleterExt + 'static,
         F: Fn(Duration) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
@@ -436,6 +470,7 @@ impl Uploader {
             receiver,
             queue,
             executor,
+            deleter,
             options,
             sleep_fn,
             now_fn,

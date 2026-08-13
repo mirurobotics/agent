@@ -4,16 +4,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::upload_executor::{MockStep, MockUploadExecutor};
+use crate::mocks::{
+    deleter::{MockDeleter, MockStep as DeleterStep},
+    upload_executor::{MockStep, MockUploadExecutor},
+};
+use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
     Job, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt, UploaderOptions,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::{dirs, File};
+use miru_agent::models::FileRuleRetention;
 
 // external crates
-use chrono::{TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -68,6 +73,7 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
     Uploader::spawn(
         16,
         mock,
+        MockDeleter::new(),
         UploaderOptions::default(),
         None,
         |_: Duration| async {},
@@ -84,18 +90,40 @@ fn spawn_with_test_clock(
     mock: Arc<MockUploadExecutor>,
     options: UploaderOptions,
 ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
+    let (uploader, handle, sleeps, _clock) =
+        spawn_with_test_clock_and_deleter(mock, MockDeleter::new(), options);
+    (uploader, handle, sleeps)
+}
+
+/// [`spawn_with_test_clock`] with an injected deleter and the clock exposed,
+/// for the confirm-time retention-producer tests: the clock's value when an
+/// upload confirms is the `last_observed_at` the enqueued delete job must
+/// carry.
+#[allow(clippy::type_complexity)]
+fn spawn_with_test_clock_and_deleter(
+    mock: Arc<MockUploadExecutor>,
+    deleter: Arc<MockDeleter>,
+    options: UploaderOptions,
+) -> (
+    Uploader,
+    JoinHandle<()>,
+    Arc<Mutex<Vec<Duration>>>,
+    Arc<Mutex<DateTime<Utc>>>,
+) {
     let clock = Arc::new(Mutex::new(Utc::now()));
     let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
     let now_clock = clock.clone();
     let now_fn = move || *now_clock.lock().unwrap();
     let recorded = sleeps.clone();
+    let sleep_clock = clock.clone();
     let sleep_fn = move |duration: Duration| {
         recorded.lock().unwrap().push(duration);
-        *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+        *sleep_clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
         async {}
     };
-    let (uploader, handle) = Uploader::spawn(16, mock, options, None, sleep_fn, now_fn).unwrap();
-    (uploader, handle, sleeps)
+    let (uploader, handle) =
+        Uploader::spawn(16, mock, deleter, options, None, sleep_fn, now_fn).unwrap();
+    (uploader, handle, sleeps, clock)
 }
 
 /// Spawn an uploader over a clock frozen at spawn time and a sleep that never
@@ -109,6 +137,7 @@ fn spawn_frozen(
     Uploader::spawn(
         16,
         mock,
+        MockDeleter::new(),
         options,
         None,
         |_: Duration| std::future::pending::<()>(),
@@ -542,6 +571,7 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
     let (uploader, handle) = Uploader::spawn(
         16,
         mock.clone(),
+        MockDeleter::new(),
         UploaderOptions::default(),
         None,
         |_: Duration| std::future::pending::<()>(),
@@ -733,6 +763,229 @@ async fn len_reports_queued_jobs() {
     timed(handle).await.unwrap();
 }
 
+/// The confirm-time retention producer: a confirmed upload whose retention
+/// requires the upload enqueues a delete job on the deleter, with the TTL
+/// counting from the confirm instant.
+mod retention_producer {
+    use super::*;
+
+    /// A retention block requiring the upload, with `ttl_secs`.
+    fn required(ttl_secs: u64) -> Option<FileRuleRetention> {
+        Some(FileRuleRetention {
+            require_upload: true,
+            ttl_secs,
+        })
+    }
+
+    /// The delete job the producer must build from `job` at confirm time:
+    /// every identity field copies off the upload job, `ttl_secs` comes from
+    /// its retention, and `last_observed_at` is the confirm instant.
+    fn expected_delete_job(job: &Job, confirmed_at: DateTime<Utc>) -> DeleteJob {
+        DeleteJob {
+            file: job.file.clone(),
+            size: job.size,
+            digest: job.digest.clone(),
+            mtime: job.mtime,
+            first_observed_at: job.first_observed_at,
+            last_observed_at: confirmed_at,
+            ttl_secs: job.retention.as_ref().unwrap().ttl_secs,
+            file_rule_id: job.file_rule_id.clone(),
+            deployment_id: job.deployment_id.clone(),
+        }
+    }
+
+    /// Wait until the queue is empty: the job's `queue.remove` — which runs
+    /// after the producer's enqueue — has happened.
+    async fn await_drained(uploader: &Uploader) {
+        timed(async {
+            while uploader.len().await.unwrap() > 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn confirmed_upload_with_required_retention_enqueues_a_delete_job() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::Ok);
+        let deleter = MockDeleter::new();
+        let (uploader, handle, _sleeps, clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+        let mut job = make_job("a.log");
+        job.retention = required(300);
+
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        // no sleeps ran, so the clock still holds the confirm-time value
+        let confirmed_at = *clock.lock().unwrap();
+        assert_eq!(
+            deleter.recorded_calls(),
+            [expected_delete_job(&job, confirmed_at)]
+        );
+    }
+
+    // TTL counts from eligibility (the confirm instant), not from the
+    // scan-time observation: a retried upload's delete job is stamped with
+    // the clock as of the confirming attempt, after the backoff advanced it.
+    #[tokio::test]
+    async fn retried_upload_enqueues_once_at_confirm_time() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::Err);
+        mock.push_step(MockStep::Ok);
+        let deleter = MockDeleter::new();
+        let (uploader, handle, sleeps, clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+        let mut job = make_job("a.log");
+        job.retention = required(300);
+
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        for _ in 0..2 {
+            timed(started_rx.recv()).await.unwrap();
+        }
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        // the failed attempt enqueued nothing; the confirm-time stamp sits
+        // after the backoff sleep the retry waited out
+        assert!(!sleeps.lock().unwrap().is_empty());
+        let confirmed_at = *clock.lock().unwrap();
+        assert_eq!(
+            deleter.recorded_calls(),
+            [expected_delete_job(&job, confirmed_at)]
+        );
+    }
+
+    // require_upload: false files were already enqueued at stability by the
+    // retention sink; the confirm-time enqueue is a same-path duplicate, which
+    // the queue permits and the sweep resolves harmlessly. Any retention on a
+    // confirmed upload produces a delete job.
+    #[tokio::test]
+    async fn unrequired_retention_also_enqueues_a_delete_job() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::Ok);
+        let deleter = MockDeleter::new();
+        let (uploader, handle, _sleeps, clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+        let mut job = make_job("a.log");
+        job.retention = Some(FileRuleRetention {
+            require_upload: false,
+            ttl_secs: 300,
+        });
+
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        let confirmed_at = *clock.lock().unwrap();
+        assert_eq!(
+            deleter.recorded_calls(),
+            [expected_delete_job(&job, confirmed_at)]
+        );
+    }
+
+    #[tokio::test]
+    async fn absent_retention_enqueues_nothing() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::Ok);
+        let deleter = MockDeleter::new();
+        let (uploader, handle, _sleeps, _clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+
+        // make_job carries no retention
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        assert_eq!(deleter.recorded_calls(), []);
+    }
+
+    // a terminal failure never confirms, so it must never produce a delete
+    // job no matter what the retention says.
+    #[tokio::test]
+    async fn terminal_failure_enqueues_nothing() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::TerminalErr);
+        let deleter = MockDeleter::new();
+        let (uploader, handle, _sleeps, _clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+        let mut job = make_job("a.log");
+        job.retention = required(0);
+
+        timed(uploader.enqueue(job)).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        assert_eq!(deleter.recorded_calls(), []);
+    }
+
+    // enqueue failures are swallowed: the upload is already durably
+    // confirmed, so a dead deleter must not fail the attempt or the worker.
+    #[tokio::test]
+    async fn enqueue_failure_is_swallowed_and_worker_continues() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::Ok);
+        mock.push_step(MockStep::Ok);
+        let deleter = MockDeleter::new();
+        deleter.push_step(DeleterStep::Err);
+        let (uploader, handle, _sleeps, clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+        let mut job_a = make_job("a.log");
+        job_a.retention = required(60);
+        let mut job_b = make_job("b.log");
+        job_b.retention = required(60);
+
+        timed(uploader.enqueue(job_a.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        // a second job still runs and produces its delete job: the failed
+        // enqueue neither re-drove A's upload nor wedged the worker
+        timed(uploader.enqueue(job_b.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b.clone()]);
+        let confirmed_at = *clock.lock().unwrap();
+        assert_eq!(
+            deleter.recorded_calls(),
+            [
+                expected_delete_job(&job_a, confirmed_at),
+                expected_delete_job(&job_b, confirmed_at),
+            ]
+        );
+    }
+}
+
 mod durability {
     use super::*;
 
@@ -751,6 +1004,7 @@ mod durability {
         Uploader::spawn(
             16,
             mock,
+            MockDeleter::new(),
             UploaderOptions::default(),
             Some(snapshot),
             |_: Duration| async {},

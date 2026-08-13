@@ -1020,7 +1020,6 @@ mod tests {
                 last_observed_at: DateTime::from_timestamp(1001, 0).unwrap(),
                 deployment_id: "dpl-1".to_string(),
                 file_rule_id: "rule-1".to_string(),
-                retention: None,
             };
 
             scan_once(&scanner).await; // discover
@@ -1634,7 +1633,6 @@ mod tests {
                 last_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
                 deployment_id: "d".to_string(),
                 file_rule_id: DEFAULT_RULE_ID.to_string(),
-                retention: None,
             }]
         }
 

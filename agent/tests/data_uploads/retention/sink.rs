@@ -19,7 +19,6 @@ fn stable_file(name: &str) -> StableFile {
         last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
         deployment_id: "dpl_1".to_string(),
         file_rule_id: "rule_1".to_string(),
-        retention: None,
     }
 }
 

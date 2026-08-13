@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::filesys::{state_file::SingleThreadStateFile, File};
-use crate::models::{Deployment, FileRule, FileRuleID, FileRuleRetention, Patch};
+use crate::models::{Deployment, FileRule, FileRuleID, Patch};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -116,9 +116,6 @@ pub struct StableFile {
     pub last_observed_at: DateTime<Utc>,
     pub deployment_id: String,
     pub file_rule_id: String,
-    // default to None (never delete)
-    #[serde(default)]
-    pub retention: Option<FileRuleRetention>,
 }
 
 impl StableFile {
@@ -212,7 +209,6 @@ mod tests {
             last_observed_at: first_observed_at,
             deployment_id: "d".to_string(),
             file_rule_id: "r1".to_string(),
-            retention: None,
         }
     }
 
@@ -690,20 +686,6 @@ mod tests {
             observation.mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
             assert!(!entry.has_mtime(&observation));
             assert!(!entry.equal_metadata(&observation));
-        }
-
-        #[test]
-        fn without_retention_defaults_to_none() {
-            let sf = stable_file(File::new("/none/s.mcap"), ts(900));
-            let mut value = serde_json::to_value(&sf).unwrap();
-            value
-                .as_object_mut()
-                .unwrap()
-                .remove("retention")
-                .expect("fixture should serialize a retention field");
-
-            let parsed: StableFile = serde_json::from_value(value).unwrap();
-            assert_eq!(parsed.retention, None);
         }
     }
 }
