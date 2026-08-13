@@ -6,7 +6,7 @@ use crate::deploy::fsm;
 use crate::disk::{Capacities, Layout};
 use crate::network::BackendHost;
 use crate::server;
-use crate::workers::{mqtt, poller, scan, token_refresh::TokenRefreshWorkerOptions};
+use crate::workers::{delete, mqtt, poller, scan, token_refresh::TokenRefreshWorkerOptions};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LifecycleOptions {
@@ -55,6 +55,7 @@ pub struct AppOptions {
     pub poller: poller::Options,
 
     pub scanner: scan::Options,
+    pub delete_worker: delete::Options,
 }
 
 impl Default for AppOptions {
@@ -78,6 +79,7 @@ impl Default for AppOptions {
             poller: poller::Options::default(),
 
             scanner: Default::default(),
+            delete_worker: Default::default(),
         }
     }
 }

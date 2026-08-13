@@ -7,6 +7,7 @@ use crate::sync::syncer::SyncEvent;
 // external crates
 use tokio::sync::watch;
 
+pub mod delete;
 pub mod mqtt;
 pub mod poller;
 pub mod scan;

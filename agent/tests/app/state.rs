@@ -7,6 +7,7 @@ use std::sync::Arc;
 // internal crates
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
+use miru_agent::data_uploads::retention::DeleterExt;
 use miru_agent::data_uploads::scan::ScannerExt;
 use miru_agent::data_uploads::upload::UploaderExt;
 use miru_agent::deploy::fsm;
@@ -263,6 +264,41 @@ pub mod init {
 
         state.shutdown().await.unwrap();
         state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn deleter_spawned() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // the actor is spawned and its queue snapshot file is seeded on disk
+        state.deleter.len().await.unwrap();
+        assert!(env.layout.delete_queue().exists());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn deleter_degrades_when_snapshot_path_unwritable() {
+        let env = TestEnv::valid().await;
+        // a directory at the snapshot FILE path makes
+        // DeleteQueueSnapshotFile::new_with_default fail on both read and create
+        dirs::create(&Dir::new(env.layout.delete_queue().path().clone()))
+            .await
+            .unwrap();
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // fail-open: the agent boots and the deleter runs without persistence
+        state.deleter.len().await.unwrap();
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+
+        // nothing replaced the blocking directory with a snapshot file
+        assert!(env.layout.delete_queue().path().is_dir());
     }
 }
 
