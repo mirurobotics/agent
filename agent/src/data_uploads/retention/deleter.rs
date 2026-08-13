@@ -433,57 +433,94 @@ mod tests {
             .unwrap()
     }
 
-    mod sweep {
+    mod enqueue {
         use super::*;
+        use crate::data_uploads::retention::errors::DeleteErr;
 
         #[tokio::test]
-        async fn zero_delay_entry_is_deleted_on_first_sweep() {
+        async fn appends_the_job() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            deleter
-                .enqueue(make_job(tmp.file(), 1000, 0).await)
-                .await
-                .unwrap();
+            let job = make_job(tmp.file(), 1000, 0).await;
 
-            deleter.sweep().await.unwrap();
+            deleter.enqueue(job.clone()).await.unwrap();
 
-            assert!(deleter.queue.is_empty());
-            assert!(!tmp.file().exists());
+            assert_eq!(deleter.queue.entries(), [job]);
         }
 
         #[tokio::test]
-        async fn each_drop_is_persisted_before_the_next_job() {
-            let dir = dirs::temp("delete-sweep-persist").unwrap();
+        async fn persists_to_disk() {
+            let dir = dirs::temp("delete-enqueue-persist").unwrap();
             let state_path = dir.file("delete_queue.json");
-            let due = temp_file(b"aaaa").await;
-            let waiting = temp_file(b"bbbb").await;
+            let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
-            let waiting_job = make_job(waiting.file(), 1000, 500).await;
-            deleter
-                .enqueue(make_job(due.file(), 1000, 0).await)
-                .await
-                .unwrap();
-            deleter.enqueue(waiting_job.clone()).await.unwrap();
-
-            deleter.sweep().await.unwrap();
+            let job = make_job(tmp.file(), 1000, 500).await;
+            deleter.enqueue(job.clone()).await.unwrap();
             drop(deleter);
 
-            // the due job was persisted-out before the waiting job was
-            // considered, so a rebuild sees only the waiting job.
             let restored = SingleThreadDeleter::new(DeleterArgs {
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
-            assert!(!due.file().exists());
-            assert!(waiting.file().exists());
-            assert_eq!(restored.queue.entries(), [waiting_job]);
+            assert_eq!(restored.queue.entries(), [job]);
         }
+
+        #[tokio::test]
+        async fn full_queue_returns_queue_full_err() {
+            let tmp_a = temp_file(b"aaaa").await;
+            let tmp_b = temp_file(b"bbbb").await;
+            let clock = Clock::new(1000);
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                queue_capacity: 1,
+                ..DeleterArgs::default()
+            });
+            let first = make_job(tmp_a.file(), 1000, 0).await;
+            deleter.enqueue(first.clone()).await.unwrap();
+
+            let err = deleter
+                .enqueue(make_job(tmp_b.file(), 1000, 0).await)
+                .await
+                .unwrap_err();
+            let DeleteErr::QueueFullErr(err) = err else {
+                panic!("expected QueueFullErr, got: {err:?}");
+            };
+            assert_eq!(err.capacity, 1);
+            assert_eq!(err.file, tmp_b.file().to_string());
+        }
+
+        #[tokio::test]
+        async fn persist_failure_is_swallowed() {
+            let dir = dirs::temp("delete-enqueue-persist-fail").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                snapshot_file: Some(snapshot_file(&state_path).await),
+                ..DeleterArgs::default()
+            });
+
+            // make the snapshot path unwritable: a DIRECTORY now sits there.
+            files::delete(&state_path).await.unwrap();
+            dirs::create(&crate::filesys::Dir::new(state_path.path().clone()))
+                .await
+                .unwrap();
+
+            let job = make_job(tmp.file(), 1000, 0).await;
+            deleter.enqueue(job.clone()).await.unwrap();
+            assert_eq!(deleter.queue.entries(), [job]);
+        }
+    }
+
+    mod sweep {
+        use super::*;
 
         #[tokio::test]
         async fn positive_delay_entry_waits_for_due_at() {
@@ -505,6 +542,48 @@ mod tests {
             deleter.sweep().await.unwrap();
             assert!(deleter.queue.is_empty());
             assert!(!tmp.file().exists());
+        }
+
+        #[tokio::test]
+        async fn missing_file_is_dropped_as_success() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            deleter
+                .enqueue(make_job(tmp.file(), 1000, 0).await)
+                .await
+                .unwrap();
+            files::delete(tmp.file()).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert!(deleter.queue.is_empty());
+        }
+
+        // a stat failure that is not NotFound (here ENOTDIR: the recorded
+        // path's parent is a file) keeps the entry for the next sweep.
+        #[tokio::test]
+        async fn stat_failure_retains_entry() {
+            let parent = temp_file(b"not a dir").await;
+            let child = File::new(parent.file().path().join("child"));
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            let record = Job {
+                file: child,
+                size: 4,
+                digest: "sha256:unused".to_string(),
+                mtime: DateTime::from_timestamp(900, 0).unwrap(),
+                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+                ttl_secs: 0,
+                file_rule_id: "rule_1".to_string(),
+                deployment_id: "dpl_1".to_string(),
+            };
+            deleter.enqueue(record.clone()).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert_eq!(deleter.queue.entries(), [record]);
         }
 
         #[tokio::test]
@@ -597,7 +676,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn missing_file_is_dropped_as_success() {
+        async fn zero_delay_entry_is_deleted_on_first_sweep() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
@@ -605,11 +684,11 @@ mod tests {
                 .enqueue(make_job(tmp.file(), 1000, 0).await)
                 .await
                 .unwrap();
-            files::delete(tmp.file()).await.unwrap();
 
             deleter.sweep().await.unwrap();
 
             assert!(deleter.queue.is_empty());
+            assert!(!tmp.file().exists());
         }
 
         // files::delete failure (EISDIR: the recorded path is a directory, and
@@ -641,30 +720,37 @@ mod tests {
             assert!(target.exists());
         }
 
-        // a stat failure that is not NotFound (here ENOTDIR: the recorded
-        // path's parent is a file) keeps the entry for the next sweep.
         #[tokio::test]
-        async fn stat_failure_retains_entry() {
-            let parent = temp_file(b"not a dir").await;
-            let child = File::new(parent.file().path().join("child"));
+        async fn each_drop_is_persisted_before_the_next_job() {
+            let dir = dirs::temp("delete-sweep-persist").unwrap();
+            let state_path = dir.file("delete_queue.json");
+            let due = temp_file(b"aaaa").await;
+            let waiting = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
-            let mut deleter = deleter(&clock);
-            let record = Job {
-                file: child,
-                size: 4,
-                digest: "sha256:unused".to_string(),
-                mtime: DateTime::from_timestamp(900, 0).unwrap(),
-                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                ttl_secs: 0,
-                file_rule_id: "rule_1".to_string(),
-                deployment_id: "dpl_1".to_string(),
-            };
-            deleter.enqueue(record.clone()).await.unwrap();
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                snapshot_file: Some(snapshot_file(&state_path).await),
+                ..DeleterArgs::default()
+            });
+            let waiting_job = make_job(waiting.file(), 1000, 500).await;
+            deleter
+                .enqueue(make_job(due.file(), 1000, 0).await)
+                .await
+                .unwrap();
+            deleter.enqueue(waiting_job.clone()).await.unwrap();
 
             deleter.sweep().await.unwrap();
+            drop(deleter);
 
-            assert_eq!(deleter.queue.entries(), [record]);
+            // the due job was persisted-out before the waiting job was
+            // considered, so a rebuild sees only the waiting job.
+            let restored = SingleThreadDeleter::new(DeleterArgs {
+                snapshot_file: Some(snapshot_file(&state_path).await),
+                ..DeleterArgs::default()
+            });
+            assert!(!due.file().exists());
+            assert!(waiting.file().exists());
+            assert_eq!(restored.queue.entries(), [waiting_job]);
         }
     }
 }
