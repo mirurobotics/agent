@@ -898,13 +898,6 @@ mod tests {
             assert!(!due.file().exists());
         }
 
-        /// The hash step's already-gone arm. There is no deterministic
-        /// real-filesystem route to it through `sweep`: reaching the hash
-        /// requires a successful stat, and `files::metadata` follows symlinks,
-        /// so any path that ENOENTs on open also ENOENTs on stat and is caught
-        /// by `stat_file` first. It is a genuine TOCTOU window — the file
-        /// vanishes between the stat and the re-hash — so the helper is
-        /// exercised directly.
         #[tokio::test]
         async fn vanished_file_at_the_hash_step_is_already_gone() {
             let job = wedged_job(File::new("/nonexistent/miru-delete-test/a.log"));
@@ -1131,10 +1124,6 @@ mod tests {
     mod persistence {
         use super::*;
 
-        /// A restart is not a fresh budget: the counter is persisted with the
-        /// entry, so a job that has already burned attempts resumes where it
-        /// left off. `dir` must outlive the whole test — dropping it deletes
-        /// the symlinks and turns the failure into an already-gone drop.
         #[tokio::test]
         async fn attempts_survive_a_restart() {
             let dir = dirs::temp("delete-attempts-restart").unwrap();
