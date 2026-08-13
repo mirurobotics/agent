@@ -7,6 +7,7 @@ use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
 use crate::data_uploads::{
+    retention::{self, DeleterExt},
     scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt},
     upload::{self, UploaderExt},
 };
@@ -24,6 +25,7 @@ pub struct AppState {
     pub http_client: Arc<http::Client>,
     pub syncer: Arc<sync::Syncer>,
     pub scanner: Arc<scan::Scanner>,
+    pub deleter: Arc<retention::Deleter>,
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub activity_tracker: Arc<activity::Tracker>,
@@ -91,15 +93,17 @@ impl AppState {
         // initialize the activity tracker
         let activity_tracker = Arc::new(activity::Tracker::new());
 
-        // initialize the uploader before the scanner: the scanner's
-        // stable-file sinks are built from the uploader handle
+        // initialize the deleter and uploader before the scanner: the
+        // scanner's stable-file sinks are built from their handles
+        let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
         let (uploader, uploader_handle) =
             Self::init_uploader(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        // initialize the scanner with the upload sink
-        let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![Arc::new(
-            upload::UploadStableFileSink::new(uploader.clone()),
-        )];
+        // initialize the scanner with the upload and retention sinks
+        let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![
+            Arc::new(upload::UploadStableFileSink::new(uploader.clone())),
+            Arc::new(retention::RetentionStableFileSink::new(deleter.clone())),
+        ];
         let (scanner, scanner_handle) = Self::init_scanner(layout, sinks).await?;
 
         let shutdown_handle = async move {
@@ -108,6 +112,7 @@ impl AppState {
                 syncer_handle,
                 event_hub_handle,
                 scanner_handle,
+                deleter_handle,
                 uploader_handle,
             ];
 
@@ -120,6 +125,7 @@ impl AppState {
                 http_client,
                 syncer,
                 scanner,
+                deleter,
                 uploader,
                 token_mngr,
                 activity_tracker,
@@ -159,6 +165,36 @@ impl AppState {
         };
         let (scanner, handle) = scan::Scanner::spawn(64, args)?;
         Ok((Arc::new(scanner), handle))
+    }
+
+    /// Spawn the deleter actor with an on-disk snapshot. A snapshot-file error
+    /// degrades to deleting without queue persistence (fail-open); a spawn
+    /// error fails boot, but no such error path currently exists
+    /// (`Deleter::spawn` cannot fail today).
+    async fn init_deleter(
+        layout: &disk::Layout,
+    ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
+        let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
+            layout.delete_queue(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                    "failed to initialize delete queue snapshot file; deletions will run without persistence: {e}"
+                );
+                None
+            }
+        };
+
+        let args = retention::DeleterArgs {
+            snapshot_file,
+            ..retention::DeleterArgs::default()
+        };
+        let (deleter, handle) = retention::Deleter::spawn(64, args)?;
+        Ok((Arc::new(deleter), handle))
     }
 
     /// Spawn the uploader actor driving the live executor (credential mint → native SDK
@@ -210,6 +246,14 @@ impl AppState {
         // completes, so ordering stays safe.
         if let Err(e) = self.uploader.shutdown().await {
             tracing::error!("failed to shutdown uploader: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        // shutdown the deleter after the uploader and alongside the scanner's
+        // retention sink going quiet; a sink racing this shutdown logs a warn
+        // and the tick completes, same as the upload sink.
+        if let Err(e) = self.deleter.shutdown().await {
+            tracing::error!("failed to shutdown deleter: {e}");
             first_err.get_or_insert(e.into());
         }
 
