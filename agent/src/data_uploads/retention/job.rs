@@ -48,3 +48,38 @@ impl Job {
             .unwrap_or(DateTime::<Utc>::MAX_UTC)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::Job;
+    use crate::filesys::File;
+
+    // external crates
+    use chrono::{DateTime, Utc};
+
+    fn job(eligible_secs: i64, ttl_secs: u64) -> Job {
+        Job {
+            file: File::new("/data/a.log"),
+            size: 4,
+            mtime: DateTime::from_timestamp(900, 0).unwrap(),
+            digest: "sha256:unused".to_string(),
+            eligible_at: DateTime::from_timestamp(eligible_secs, 0).unwrap(),
+            ttl_secs,
+            file_rule_id: "file_rule_1".to_string(),
+            deployment_id: "dpl_1".to_string(),
+        }
+    }
+
+    #[test]
+    fn due_at_adds_ttl_and_saturates_on_overflow() {
+        assert_eq!(
+            job(1000, 300).due_at(),
+            DateTime::from_timestamp(1300, 0).unwrap()
+        );
+
+        // a TTL beyond what chrono can represent saturates to "never due"
+        // instead of panicking.
+        assert_eq!(job(1000, u64::MAX).due_at(), DateTime::<Utc>::MAX_UTC);
+    }
+}

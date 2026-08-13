@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use crate::data_uploads::retention::{
     errors::*,
     job::Job,
-    queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile},
+    queue::{DeleteQueueSnapshotFile, Queue},
 };
 use crate::filesys::{errors::FileSysErr, files};
 use crate::trace;
@@ -46,59 +46,28 @@ impl Default for DeleterArgs {
 }
 
 pub struct SingleThreadDeleter {
-    entries: Vec<Job>,
-    capacity: usize,
+    queue: Queue,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    snapshot_file: Option<DeleteQueueSnapshotFile>,
 }
 
 impl SingleThreadDeleter {
-    /// Seeds the queue from `args.snapshot_file`'s persisted entries (loaded in
-    /// full even if they exceed `queue_capacity`; capacity only gates new
-    /// enqueues, so an over-capacity backlog simply drains before it accepts
-    /// more).
     pub fn new(args: DeleterArgs) -> Self {
-        let entries = match &args.snapshot_file {
-            Some(snapshot_file) => snapshot_file.read().entries.clone(),
-            None => Vec::new(),
+        let queue = match args.snapshot_file {
+            Some(snapshot_file) => Queue::from_snapshot(args.queue_capacity, snapshot_file),
+            None => Queue::new(args.queue_capacity),
         };
         Self {
-            entries,
-            capacity: args.queue_capacity,
+            queue,
             now_fn: args.now_fn,
-            snapshot_file: args.snapshot_file,
         }
     }
 
     fn len(&self) -> usize {
-        self.entries.len()
+        self.queue.len()
     }
 
-    /// Record `job` as the queue's newest knowledge of its path: any existing
-    /// entry for the same file is replaced (newest job wins), so the queue
-    /// holds at most one entry per path. At capacity a NEW path is rejected
-    /// with [`DeleteErr::QueueFullErr`] — the file simply stays on disk, the
-    /// safe direction — while a same-path replacement always succeeds (it
-    /// never grows the queue), even on a snapshot-seeded over-capacity
-    /// backlog.
     async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        let replaces_existing = self.entries.iter().any(|entry| entry.file == job.file);
-        if !replaces_existing && self.entries.len() >= self.capacity {
-            warn!(
-                "delete: queue is full (capacity {}); rejecting job for file {}",
-                self.capacity, job.file
-            );
-            return Err(DeleteErr::QueueFullErr(QueueFullErr {
-                capacity: self.capacity,
-                file: job.file.to_string(),
-                trace: trace!(),
-            }));
-        }
-        self.entries.retain(|entry| entry.file != job.file);
-        self.entries.push(job);
-        self.persist_snapshot().await;
-        info!("delete: job enqueued; queue length {}", self.entries.len());
-        Ok(())
+        self.queue.enqueue(job).await
     }
 
     /// One pass over the queue: delete every due entry whose file is provably
@@ -106,16 +75,15 @@ impl SingleThreadDeleter {
     /// and never propagated — `sweep` always returns `Ok(())`.
     async fn sweep(&mut self) -> Result<(), DeleteErr> {
         let now = (self.now_fn)();
-        let before = self.entries.len();
-        let entries = std::mem::take(&mut self.entries);
+        let entries = self.queue.drain();
+        let before = entries.len();
+        let mut kept = Vec::with_capacity(before);
         for entry in entries {
             if Self::sweep_entry(&entry, now).await {
-                self.entries.push(entry);
+                kept.push(entry);
             }
         }
-        if self.entries.len() != before {
-            self.persist_snapshot().await;
-        }
+        self.queue.restore(kept, before).await;
         Ok(())
     }
 
@@ -198,18 +166,6 @@ impl SingleThreadDeleter {
                 );
                 true
             }
-        }
-    }
-
-    async fn persist_snapshot(&mut self) {
-        let Some(snapshot_file) = self.snapshot_file.as_mut() else {
-            return;
-        };
-        let snapshot = DeleteQueueSnapshot {
-            entries: self.entries.clone(),
-        };
-        if let Err(err) = snapshot_file.patch(snapshot).await {
-            warn!("delete: failed to persist delete queue: {err}");
         }
     }
 }
@@ -370,9 +326,7 @@ mod tests {
 
     // internal crates
     use super::{DeleterArgs, SingleThreadDeleter};
-    use crate::data_uploads::retention::errors::DeleteErr;
     use crate::data_uploads::retention::job::Job;
-    use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, File, PathExt, WriteOptions};
 
     // external crates
@@ -440,127 +394,6 @@ mod tests {
         })
     }
 
-    /// A persistence handle for the snapshot at `file`.
-    async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
-        DeleteQueueSnapshotFile::new_with_default(file.clone(), DeleteQueueSnapshot::default())
-            .await
-            .unwrap()
-    }
-
-    mod due_at {
-        use super::*;
-
-        #[tokio::test]
-        async fn adds_ttl_and_saturates_on_overflow() {
-            let tmp = temp_file(b"aaaa").await;
-            let record = make_job(tmp.file(), 1000, 300).await;
-            assert_eq!(record.due_at(), DateTime::from_timestamp(1300, 0).unwrap());
-
-            // a TTL beyond what chrono can represent saturates to "never due"
-            // instead of panicking.
-            let absurd = Job {
-                ttl_secs: u64::MAX,
-                ..record
-            };
-            assert_eq!(absurd.due_at(), DateTime::<Utc>::MAX_UTC);
-        }
-    }
-
-    mod enqueue {
-        use super::*;
-
-        #[tokio::test]
-        async fn same_path_enqueue_replaces_older_record() {
-            let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
-            let mut deleter = deleter(&clock);
-            let first = make_job(tmp.file(), 1000, 100).await;
-            let second = make_job(tmp.file(), 1200, 0).await;
-
-            deleter.enqueue(first).await.unwrap();
-            deleter.enqueue(second.clone()).await.unwrap();
-
-            // newest record wins: at most one entry per path.
-            assert_eq!(deleter.entries, vec![second]);
-        }
-
-        #[tokio::test]
-        async fn full_queue_rejects_new_paths_but_replaces_existing() {
-            let tmp_a = temp_file(b"aaaa").await;
-            let tmp_b = temp_file(b"bbbb").await;
-            let clock = Clock::new(1000);
-            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
-                queue_capacity: 1,
-                snapshot_file: None,
-            });
-            let first = make_job(tmp_a.file(), 1000, 0).await;
-            deleter.enqueue(first.clone()).await.unwrap();
-
-            // a new path is rejected at capacity; the queue is unchanged and
-            // the rejected file stays on disk.
-            let rejected = make_job(tmp_b.file(), 1000, 0).await;
-            let err = deleter.enqueue(rejected).await.unwrap_err();
-            assert!(matches!(err, DeleteErr::QueueFullErr(_)));
-            assert!(err.to_string().contains("capacity 1"));
-            assert_eq!(deleter.entries, vec![first]);
-            assert!(tmp_b.file().exists());
-
-            // a same-path record still replaces at capacity (the net queue
-            // length is unchanged).
-            let replacement = make_job(tmp_a.file(), 1200, 30).await;
-            deleter.enqueue(replacement.clone()).await.unwrap();
-            assert_eq!(deleter.entries, vec![replacement]);
-        }
-
-        // A snapshot-seeded backlog may exceed `queue_capacity` (capacity only
-        // gates new enqueues). A same-path record must still replace on such a
-        // queue rather than being rejected after its older record was dropped.
-        #[tokio::test]
-        async fn over_capacity_backlog_still_replaces_existing() {
-            let dir = dirs::temp("delete-over-capacity").unwrap();
-            let state_path = dir.file("delete_queue.json");
-            let tmp_a = temp_file(b"aaaa").await;
-            let tmp_b = temp_file(b"bbbb").await;
-            let clock = Clock::new(1000);
-            let first_a = make_job(tmp_a.file(), 1000, 100).await;
-            let first_b = make_job(tmp_b.file(), 1000, 100).await;
-
-            // write a two-entry snapshot, then rebuild with capacity 1: the
-            // seeded backlog exceeds capacity by design.
-            {
-                let mut seeder = SingleThreadDeleter::new(DeleterArgs {
-                    now_fn: Arc::new(clock.now_fn()),
-                    snapshot_file: Some(snapshot_file(&state_path).await),
-                    ..DeleterArgs::default()
-                });
-                seeder.enqueue(first_a.clone()).await.unwrap();
-                seeder.enqueue(first_b.clone()).await.unwrap();
-            }
-            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
-                queue_capacity: 1,
-                snapshot_file: Some(snapshot_file(&state_path).await),
-            });
-            assert_eq!(deleter.entries, vec![first_a.clone(), first_b.clone()]);
-
-            // a same-path record replaces its entry (newest record wins);
-            // nothing is silently lost from the over-capacity queue.
-            let replacement = make_job(tmp_a.file(), 1200, 0).await;
-            deleter.enqueue(replacement.clone()).await.unwrap();
-            assert_eq!(deleter.entries, vec![first_b.clone(), replacement]);
-
-            // a genuinely new path is still rejected, leaving the queue intact.
-            let tmp_c = temp_file(b"cccc").await;
-            let err = deleter
-                .enqueue(make_job(tmp_c.file(), 1000, 0).await)
-                .await
-                .unwrap_err();
-            assert!(matches!(err, DeleteErr::QueueFullErr(_)));
-            assert_eq!(deleter.entries.len(), 2);
-        }
-    }
-
     mod sweep {
         use super::*;
 
@@ -576,7 +409,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.entries.is_empty());
+            assert!(deleter.queue.is_empty());
             assert!(!tmp.file().exists());
         }
 
@@ -592,13 +425,13 @@ mod tests {
             deleter.sweep().await.unwrap();
             clock.advance(499);
             deleter.sweep().await.unwrap();
-            assert_eq!(deleter.entries, vec![record]);
+            assert_eq!(deleter.queue.entries(), [record]);
             assert!(tmp.file().exists());
 
             // due exactly at due_at.
             clock.advance(1);
             deleter.sweep().await.unwrap();
-            assert!(deleter.entries.is_empty());
+            assert!(deleter.queue.is_empty());
             assert!(!tmp.file().exists());
         }
 
@@ -619,7 +452,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.entries.is_empty());
+            assert!(deleter.queue.is_empty());
             assert!(tmp.file().exists());
         }
 
@@ -636,7 +469,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.entries.is_empty());
+            assert!(deleter.queue.is_empty());
             assert!(!tmp.file().exists());
         }
 
@@ -658,7 +491,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.entries.is_empty());
+            assert!(deleter.queue.is_empty());
             assert!(tmp.file().exists());
         }
 
@@ -686,7 +519,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert_eq!(deleter.entries, vec![record]);
+            assert_eq!(deleter.queue.entries(), [record]);
             assert!(target.exists());
         }
 
@@ -703,7 +536,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert!(deleter.entries.is_empty());
+            assert!(deleter.queue.is_empty());
         }
 
         // files::delete failure (EISDIR: the recorded path is a directory, and
@@ -730,7 +563,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert_eq!(deleter.entries, vec![record]);
+            assert_eq!(deleter.queue.entries(), [record]);
             assert!(target.exists());
         }
 
@@ -756,74 +589,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert_eq!(deleter.entries, vec![record]);
-        }
-    }
-
-    mod persistence {
-        use super::*;
-
-        #[tokio::test]
-        async fn queue_survives_rebuild_from_snapshot() {
-            let dir = dirs::temp("delete-snapshot").unwrap();
-            let state_path = dir.file("delete_queue.json");
-            let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
-            let record = make_job(tmp.file(), 1000, 500).await;
-
-            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
-                snapshot_file: Some(snapshot_file(&state_path).await),
-                ..DeleterArgs::default()
-            });
-            deleter.enqueue(record.clone()).await.unwrap();
-            drop(deleter);
-
-            // a rebuild from the same file re-seeds the queued jobs.
-            let mut rebuilt = SingleThreadDeleter::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
-                snapshot_file: Some(snapshot_file(&state_path).await),
-                ..DeleterArgs::default()
-            });
-            assert_eq!(rebuilt.entries, vec![record]);
-
-            // sweeping the now-due entry persists the drop too.
-            clock.advance(500);
-            rebuilt.sweep().await.unwrap();
-            drop(rebuilt);
-
-            let restored = SingleThreadDeleter::new(DeleterArgs {
-                snapshot_file: Some(snapshot_file(&state_path).await),
-                ..DeleterArgs::default()
-            });
-            assert!(restored.entries.is_empty());
-            assert!(!tmp.file().exists());
-        }
-
-        #[tokio::test]
-        async fn persist_failure_is_swallowed() {
-            let dir = dirs::temp("delete-snapshot").unwrap();
-            let state_path = dir.file("delete_queue.json");
-            let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
-            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
-                snapshot_file: Some(snapshot_file(&state_path).await),
-                ..DeleterArgs::default()
-            });
-
-            // make the snapshot path unwritable: a DIRECTORY now sits there.
-            files::delete(&state_path).await.unwrap();
-            dirs::create(&crate::filesys::Dir::new(state_path.path().clone()))
-                .await
-                .unwrap();
-
-            // the enqueue still succeeds; the persist failure is only logged.
-            deleter
-                .enqueue(make_job(tmp.file(), 1000, 500).await)
-                .await
-                .unwrap();
-            assert_eq!(deleter.entries.len(), 1);
+            assert_eq!(deleter.queue.entries(), [record]);
         }
     }
 }
