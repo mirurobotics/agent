@@ -31,14 +31,23 @@ ported from the superseded #197 branch, modernized form (required actor, no enab
 
 ## Progress
 
-- [ ] M1: `retention::sink::RetentionStableFileSink` + in-source/integration tests
-- [ ] M2: `workers/delete.rs` driver (port), app wiring (init_deleter, sink vec, shutdown
+- [x] M1: `retention::sink::RetentionStableFileSink` + in-source/integration tests
+- [x] M2: `workers/delete.rs` driver (port), app wiring (init_deleter, sink vec, shutdown
       ordering, ShutdownManager slot) + ported tests
-- [ ] M3: Full validation, push, PR
+- [x] M3: Full validation, push, PR
 
 ## Surprises & Discoveries
 
-_(filled during execution)_
+- **The sink went generic over `DeleterExt`** where the upload sink is concrete: the
+  uploader's jobs are observable through the executor seam, but the deleter has no
+  downstream observation point, so sink tests inject `MockDeleter` and assert whole
+  Jobs. Recorded as the deliberate asymmetry between the two sinks.
+- **The #197 ports were near-verbatim**: `workers/delete.rs` needed only the module-path
+  rename, and the modernized (required-actor) app wiring from that branch's final commit
+  transplanted cleanly onto the sink-vec init. `ServerErr` needed a `DeleteErr` variant —
+  the one piece #197 carried that no longer existed anywhere.
+- Retention covgate rose to 99.01% (gate 98.39) with the sink included; workers holds at
+  86.12% with the ported driver tests.
 
 ## Decision Log
 
