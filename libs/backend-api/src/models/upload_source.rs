@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// UploadSource : Source-side details of the file on the device that produced an upload.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UploadSource {
-    /// Absolute path of the file on the device. Its basename renders the `{filename}` token in the destination path template.
+    /// Absolute path of the file on the device. Its basename renders the `{file_name}` token in the upload path template.
     #[serde(rename = "file_path")]
     pub file_path: String,
     /// The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.

@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateUploadRequest {
-    /// ID of the upload rule that selected this file.
-    #[serde(rename = "upload_rule_id")]
-    pub upload_rule_id: String,
+    /// ID of the file rule that selected this file.
+    #[serde(rename = "file_rule_id")]
+    pub file_rule_id: String,
     /// Source-side details of the file on the device.
     #[serde(rename = "source")]
     pub source: Box<models::UploadSource>,
@@ -32,9 +32,9 @@ pub struct CreateUploadRequest {
 }
 
 impl CreateUploadRequest {
-    pub fn new(upload_rule_id: String, source: models::UploadSource, digest: String, size: i64, deployment_id: String) -> CreateUploadRequest {
+    pub fn new(file_rule_id: String, source: models::UploadSource, digest: String, size: i64, deployment_id: String) -> CreateUploadRequest {
         CreateUploadRequest {
-            upload_rule_id,
+            file_rule_id,
             source: Box::new(source),
             digest,
             size,

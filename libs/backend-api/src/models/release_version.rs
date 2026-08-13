@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ReleaseVersion {
-    #[serde(rename = "v0.4.1")]
+    #[serde(rename = "v0.5.0-beta.2")]
     RELEASE_VERSION,
 
     /// Catch-all for values added by the API after this client was
@@ -25,7 +25,7 @@ pub enum ReleaseVersion {
 impl std::fmt::Display for ReleaseVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::RELEASE_VERSION => write!(f, "v0.4.1"),
+            Self::RELEASE_VERSION => write!(f, "v0.5.0-beta.2"),
             Self::ReleaseVersionUnknown => write!(f, "unknown"),
         }
     }
