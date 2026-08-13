@@ -41,16 +41,31 @@ upload confirmation (`require_upload: true`, via the uploader worker).
 
 ## Progress
 
-- [ ] M1: Uploader worker gains a `D: DeleterExt` handle and the confirm-time producer;
+- [x] M1: Uploader worker gains a `D: DeleterExt` handle and the confirm-time producer;
       app wiring passes the deleter into `init_uploader`
-- [ ] M2: Executor inline delete removed; upload sink stamps retention from the rule;
+- [x] M2: Executor inline delete removed; upload sink stamps retention from the rule;
       `StableFile.retention` deleted from the ledger
-- [ ] M3: Tests (producer, sink stamping, dead-test removal, serde tolerance), covgate
-- [ ] M4: Full validation, push, PR (leave draft until CI green on the pushed head)
+- [x] M3: Tests (producer, sink stamping, dead-test removal, serde tolerance), covgate
+- [x] M4: Full validation, push, PR (leave draft until CI green on the pushed head)
 
 ## Surprises & Discoveries
 
-_(filled as work proceeds)_
+- No structural surprises: every file:line in the Context map was accurate at
+  implementation time. The producer, wiring, and cleanup landed exactly as planned.
+- Test-harness shape: rather than changing `spawn_with_test_clock`'s widely-used
+  3-tuple signature, a `spawn_with_test_clock_and_deleter` variant exposes the deleter
+  and the shared clock; the old helper delegates to it with a throwaway `MockDeleter`.
+  The producer tests read the clock after shutdown to get the deterministic
+  confirm-time `last_observed_at` (no sleeps run after a success, so the clock still
+  holds the confirm instant).
+- The serde-tolerance test inverted cleanly: the old `without_retention_defaults_to_none`
+  removed the key from serialized JSON; its replacement `stale_retention_field_is_ignored`
+  inserts a legacy `retention` object and asserts round-trip equality.
+- `scripts/update-deps.sh` (house rule: run before lint) refreshed ~100 external crate
+  versions in `Cargo.lock`; committed separately as a chore commit.
+- Coverage after the change: `data_uploads/upload` 97.6% (gate 96.00%),
+  `data_uploads/scan` 99.25% (gate 98.83%), `data_uploads/retention` 99.01% (gate
+  98.39%) — all modules green.
 
 ## Decision Log
 
