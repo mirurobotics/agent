@@ -106,14 +106,6 @@ impl Queue {
         Ok(())
     }
 
-    /// Return a clone of the first entry that is due at `now`, skipping
-    /// not-due entries without moving them. The entry is deliberately LEFT in
-    /// the queue — and so in the persisted snapshot — until the caller passes
-    /// its id to [`Self::remove`] or hands the entry to [`Self::requeue`].
-    /// That is what makes the queue at-least-once: a sweep cut short by a
-    /// crash, a kill, or a shutdown leaves the entry on disk to be retried,
-    /// and a persist from any other source cannot write the in-flight entry
-    /// out of the snapshot. Returns `None` when nothing is due.
     pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry> {
         self.entries
             .iter()

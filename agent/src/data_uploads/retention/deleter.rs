@@ -83,14 +83,6 @@ impl SingleThreadDeleter {
         self.queue.enqueue(job).await
     }
 
-    /// Walk the due jobs one at a time. Each job is *selected*, not removed:
-    /// it stays in the queue — and therefore in every snapshot written while
-    /// it is being worked, by this sweep or by any concurrent command — until
-    /// it resolves. A resolved job is removed and persisted before the next is
-    /// selected; a transient failure rotates the entry to the tail. A job that
-    /// is not due is never selected, so it is neither rotated nor persisted.
-    /// Per-entry failures are logged and never propagated — `sweep` always
-    /// returns `Ok(())`.
     async fn sweep(&mut self) -> Result<(), DeleteErr> {
         let now = (self.now_fn)();
         // Budget: one visit per entry that is due at `now`. A retried entry is
