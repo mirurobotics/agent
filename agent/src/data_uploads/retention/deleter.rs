@@ -1,4 +1,5 @@
 // standard crates
+use std::fs::Metadata;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -50,6 +51,20 @@ pub struct SingleThreadDeleter {
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
+/// Outcome of considering one queued job during a sweep.
+enum SweepOutcome {
+    /// Not yet due; requeue.
+    NotDue,
+    /// Transient stat/hash/delete failure; requeue and try next sweep.
+    Retry,
+    /// File was deleted.
+    Deleted,
+    /// File is already gone; drop the job.
+    AlreadyGone,
+    /// On-disk identity no longer matches the tagged file; drop without deleting.
+    Changed,
+}
+
 impl SingleThreadDeleter {
     pub fn new(args: DeleterArgs) -> Self {
         let queue = match args.snapshot_file {
@@ -84,93 +99,101 @@ impl SingleThreadDeleter {
             let Some(entry) = self.queue.pop_front() else {
                 break;
             };
-            if Self::sweep_entry(&entry, now).await {
-                self.queue.requeue(entry);
-            } else {
-                self.queue.persist().await;
+            match Self::sweep_entry(&entry, now).await {
+                SweepOutcome::NotDue | SweepOutcome::Retry => {
+                    self.queue.requeue(entry);
+                }
+                SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
+                    self.queue.persist().await;
+                }
             }
         }
         Ok(())
     }
 
-    /// Whether `entry` should stay in the queue after this pass. Deletes the
-    /// file only when it is due and provably unchanged since upload — its
-    /// current size and mtime still match the record, or its size and digest
-    /// match when only the mtime moved; every other outcome either drops the
-    /// entry WITHOUT deleting (already gone, changed since upload) or keeps it
-    /// for the next sweep (not yet due, stat, hash, or delete failure).
-    async fn sweep_entry(entry: &Job, now: DateTime<Utc>) -> bool {
+    /// Consider one job: delete only when it is due and the on-disk file still
+    /// matches the tagged size/mtime/digest.
+    async fn sweep_entry(entry: &Job, now: DateTime<Utc>) -> SweepOutcome {
         if now < entry.due_at() {
-            return true;
+            return SweepOutcome::NotDue;
         }
-
-        let metadata = match files::metadata(&entry.file).await {
+        let metadata = match Self::stat_file(entry).await {
             Ok(metadata) => metadata,
+            Err(outcome) => return outcome,
+        };
+        if let Some(outcome) = Self::check_file_identity(entry, &metadata).await {
+            return outcome;
+        }
+        Self::delete_file(entry).await
+    }
+
+    async fn stat_file(entry: &Job) -> Result<Metadata, SweepOutcome> {
+        match files::metadata(&entry.file).await {
+            Ok(metadata) => Ok(metadata),
             Err(FileSysErr::PathDoesNotExistErr(_)) => {
                 info!("delete: {} already gone; dropping entry", entry.file);
-                return false;
+                Err(SweepOutcome::AlreadyGone)
             }
             Err(err) => {
                 warn!(
                     "delete: failed to stat {}: {err:?}; retrying next sweep",
                     entry.file
                 );
-                return true;
+                Err(SweepOutcome::Retry)
             }
-        };
+        }
+    }
 
-        // Convert the stat's SystemTime before comparing, exactly as the
-        // scanner does when it records the mtime (never compare a SystemTime
-        // to a DateTime<Utc> directly).
-        let mtime = DateTime::<Utc>::from(metadata.modified().unwrap_or(SystemTime::now()));
+    async fn check_file_identity(entry: &Job, metadata: &Metadata) -> Option<SweepOutcome> {
         if metadata.len() != entry.size {
             info!(
                 "delete: {} changed since upload; dropping without deleting",
                 entry.file
             );
-            return false;
+            return Some(SweepOutcome::Changed);
         }
-        if mtime != entry.mtime {
-            // Same size but a different mtime is how a touched-but-unchanged
-            // file presents — and the scanner absorbs exactly that case as an
-            // mtime alias (AlreadyInLedger) without re-uploading, so no fresh
-            // record would ever replace a dropped one. Re-hash to disambiguate:
-            // a digest match proves the uploaded bytes are still on disk
-            // (delete); a mismatch means real new content (drop without
-            // deleting — the scanner re-uploads it and re-enqueues).
-            match files::hash(&entry.file).await {
-                Ok(digest) if digest == entry.digest => {}
-                Ok(_) => {
-                    info!(
-                        "delete: {} changed since upload; dropping without deleting",
-                        entry.file
-                    );
-                    return false;
-                }
-                Err(err) => {
-                    warn!(
-                        "delete: failed to hash {}: {err:?}; retrying next sweep",
-                        entry.file
-                    );
-                    return true;
-                }
+        let mtime = DateTime::<Utc>::from(metadata.modified().unwrap_or(SystemTime::now()));
+        if mtime == entry.mtime {
+            return None;
+        }
+        Self::check_digest_mismatch(entry).await
+    }
+
+    async fn check_digest_mismatch(entry: &Job) -> Option<SweepOutcome> {
+        match files::hash(&entry.file).await {
+            Ok(digest) if digest == entry.digest => None,
+            Ok(_) => {
+                info!(
+                    "delete: {} changed since upload; dropping without deleting",
+                    entry.file
+                );
+                Some(SweepOutcome::Changed)
+            }
+            Err(err) => {
+                warn!(
+                    "delete: failed to hash {}: {err:?}; retrying next sweep",
+                    entry.file
+                );
+                Some(SweepOutcome::Retry)
             }
         }
+    }
 
+    async fn delete_file(entry: &Job) -> SweepOutcome {
         match files::delete(&entry.file).await {
             Ok(()) => {
                 info!(
                     "delete: deleted {} (rule {}, deployment {})",
                     entry.file, entry.file_rule_id, entry.deployment_id
                 );
-                false
+                SweepOutcome::Deleted
             }
             Err(err) => {
                 warn!(
                     "delete: failed to delete {}: {err:?}; retrying next sweep",
                     entry.file
                 );
-                true
+                SweepOutcome::Retry
             }
         }
     }
