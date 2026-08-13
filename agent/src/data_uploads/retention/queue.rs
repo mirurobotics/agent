@@ -13,17 +13,15 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// A queued job plus the queue's own identity for it. `id` is minted at
-/// enqueue and is meaningless to the job: two identical jobs for the same path
-/// legitimately coexist, so no field of `Job` is a usable key.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueEntry {
-    /// Defaulted so a hand-written snapshot need not carry ids. Unlike the
-    /// uploader's, this default buys no migration of the previous on-disk
-    /// format: the entry shape itself changed from a flat `Job` to `{id, job}`.
     #[serde(default = "Uuid::new_v4")]
     pub id: Uuid,
     pub job: Job,
+    #[serde(default)]
+    pub attempts: u32,
+    #[serde(default)]
+    pub next_attempt_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -100,6 +98,8 @@ impl Queue {
         self.entries.push_back(QueueEntry {
             id: Uuid::new_v4(),
             job,
+            attempts: 0,
+            next_attempt_at: None,
         });
         self.persist().await;
         info!("delete: job enqueued; queue length {}", self.entries.len());
@@ -109,7 +109,7 @@ impl Queue {
     pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry> {
         self.entries
             .iter()
-            .find(|entry| entry.job.due_at() <= now)
+            .find(|entry| Self::is_ready(entry, now))
             .cloned()
     }
 
@@ -118,8 +118,12 @@ impl Queue {
     pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
         self.entries
             .iter()
-            .filter(|entry| entry.job.due_at() <= now)
+            .filter(|entry| Self::is_ready(entry, now))
             .count()
+    }
+
+    fn is_ready(entry: &QueueEntry, now: DateTime<Utc>) -> bool {
+        entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }
 
     /// Drop the entry with `id` and persist the shortened queue. This is the
@@ -166,5 +170,11 @@ impl Queue {
     #[cfg(test)]
     pub(crate) fn entries(&self) -> Vec<Job> {
         self.entries.iter().map(|entry| entry.job.clone()).collect()
+    }
+
+    /// The queued entries, oldest enqueue first (test observability only).
+    #[cfg(test)]
+    pub(crate) fn queue_entries(&self) -> Vec<QueueEntry> {
+        self.entries.iter().cloned().collect()
     }
 }
