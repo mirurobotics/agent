@@ -23,9 +23,9 @@ This is a **pure refactor**. Nothing a user can observe changes: no wire format 
 ## Progress
 
 - [ ] M1 — Pin the upload queue's on-disk JSON shape with a raw-JSON round-trip test (regression guard for everything after).
-- [ ] M2 — Add the generic queue module `agent/src/data_uploads/queue/` plus its test file and a measured `.covgate`.
-- [ ] M3 — Migrate the uploader's queue onto the generic; measure `upload/` covgate.
-- [ ] M4 — Migrate the retention deleter's queue onto the generic; measure `retention/` covgate.
+- [ ] M2 — Add the generic queue module `agent/src/data_uploads/queue/`, the two `QueueJob` impls, its test file, and a measured `.covgate`.
+- [ ] M3 — Migrate the uploader's queue onto the generic (delete the duplicated implementation, add the aliases); measure `upload/` covgate.
+- [ ] M4 — Migrate the retention deleter's queue onto the generic (delete the duplicated implementation, add the aliases); measure `retention/` covgate.
 - [ ] M5 — Consolidate the duplicated test cases and re-measure all gates.
 - [ ] M6 — Preflight CLEAN, push, draft PR, CI green on the pushed branch head.
 
@@ -199,6 +199,8 @@ Retention's two `#[cfg(test)] pub(crate)` accessors (`entries()`, `queue_entries
 
 Keeping all four snapshot alias names means `agent/src/app/state.rs`, both `mod.rs` re-export lines, `uploader.rs`, `deleter.rs`, and both integration-test files compile **unchanged**. Keeping the impls in each worker's `queue.rs` (rather than in `job.rs` or `mod.rs`) also keeps the file layout and the `pub use self::queue::{...}` lines stable.
 
+**These two files are edited in two passes, and the split matters.** The `QueueJob` impls land in **M2**, added to `upload/queue.rs` and `retention/queue.rs` *alongside* each file's existing concrete `Queue` implementation, which stays fully in place and still in use by its worker. A bare trait impl for `Job` coexists with a same-named concrete `Queue` struct in the same file without conflict — the impl is on `Job`, not on `Queue` — so nothing else changes at M2. This is required, not cosmetic: M2's test file exercises `Queue<upload::Job>` and `Queue<retention::Job>` against the production job types, which does not compile until both impls exist. The **aliases** land later, in M3 and M4, at the moment each duplicated concrete implementation is deleted.
+
 ### Behavior deltas (the complete list)
 
 Only two, both log-only and neither asserted by any test:
@@ -243,23 +245,24 @@ Expect a clean `test result: ok.` line for the integration test binary. Then:
 
     git add -A && git commit -m "test(upload): pin upload_queue.json on-disk shape"
 
-### M2 — Add the generic queue module
+### M2 — Add the generic queue module and the two job impls
 
 1. Create `agent/src/data_uploads/queue/mod.rs` implementing the design above.
 2. Add `pub mod queue;` to `agent/src/data_uploads/mod.rs`. The current order is `retention`, `scan`, `upload`; insert `queue` as the first line to keep the list alphabetical.
-3. Create `agent/tests/data_uploads/queue.rs` and add `pub mod queue;` to `agent/tests/data_uploads/mod.rs`.
-4. Create `agent/src/data_uploads/queue/.covgate` containing `0` for now — this makes the gate present but skipped, so the module does not fail the build before its coverage is measured in step 6.
+3. Add `impl QueueJob for Job` to `agent/src/data_uploads/upload/queue.rs` and `impl QueueJob for Job` to `agent/src/data_uploads/retention/queue.rs` (the latter's `due_at` delegates to the existing `Job::due_at`; upload's returns `DateTime::<Utc>::MIN_UTC`). **Add only the impls — leave each file's existing concrete `Queue` implementation, its snapshot types, and any inline `mod tests` entirely in place, still compiled and still used by its worker.** No other file changes: `uploader.rs`, `deleter.rs`, `app/state.rs`, both `mod.rs` re-exports, and both per-worker test files are untouched at M2. Without these two impls, step 6 does not compile and step 7 cannot be measured, since the new test file drives the generic with the production job types.
+4. Create `agent/tests/data_uploads/queue.rs` and add `pub mod queue;` to `agent/tests/data_uploads/mod.rs`.
+5. Create `agent/src/data_uploads/queue/.covgate` containing `0` for now — this makes the gate present but skipped, so the module does not fail the build before its coverage is measured in step 7.
 
-At this point the module is *unused* by both workers, which is fine; the tests in `agent/tests/data_uploads/queue.rs` are its only consumer.
+At this point the generic `Queue` is still *unused by production code*, which is fine: both workers keep running on their own concrete queues, and the only thing that lands in their `queue.rs` files is a `QueueJob` impl that no production path calls. The tests in `agent/tests/data_uploads/queue.rs` are the generic queue's only consumer. (Those impls do add regions to the `upload/` and `retention/` gates rather than to the new `queue/` gate; the new test file exercises them, so both should hold — confirm in step 7's `covgate.sh` run.)
 
-5. Run tests and lint:
+6. Run tests and lint:
 
        ./scripts/test.sh
        ./scripts/lint.sh
 
    `lint.sh` auto-fixes some findings (notably `cargo fmt` and clippy `--fix`), so re-check `git status` after it runs and include any fixes in the commit.
 
-6. Measure the new module's coverage:
+7. Measure the new module's coverage:
 
        ./scripts/covgate.sh
 
@@ -273,13 +276,13 @@ At this point the module is *unused* by both workers, which is fine; the tests i
 
    Write the measured value, rounded **down** to two decimals, into `agent/src/data_uploads/queue/.covgate`. If the measured value is below ~95%, add tests for the uncovered methods rather than seeding a low gate — the whole point of the superset method set is that everything is exercised.
 
-7. Commit:
+8. Commit (files touched: `agent/src/data_uploads/queue/mod.rs`, `agent/src/data_uploads/queue/.covgate`, `agent/src/data_uploads/mod.rs`, `agent/src/data_uploads/upload/queue.rs`, `agent/src/data_uploads/retention/queue.rs`, `agent/tests/data_uploads/queue.rs`, `agent/tests/data_uploads/mod.rs`):
 
-       git add -A && git commit -m "feat(data_uploads): add generic job queue shared by upload and retention"
+       git add -A && git commit -m "feat(data_uploads): add generic job queue and its upload and retention job impls"
 
 ### M3 — Migrate the uploader
 
-1. Replace the body of `agent/src/data_uploads/upload/queue.rs` with the `QueueJob` impl for `upload::Job` plus the four type aliases. Delete the duplicated implementation.
+1. In `agent/src/data_uploads/upload/queue.rs`, delete the duplicated concrete implementation (the `Queue` struct and its `impl`, the `QueueEntry` / `QueueSnapshot` / `QueueSnapshotFile` definitions, and the `Patch` impl) and add the four type aliases in their place. The `QueueJob` impl for `upload::Job` is **already in this file from M2** — leave it exactly as it is; do not rewrite it. What remains is that impl plus the aliases.
 2. Leave `agent/src/data_uploads/upload/mod.rs:12`, `agent/src/data_uploads/upload/uploader.rs`, `agent/src/app/state.rs`, and `agent/tests/data_uploads/upload/queue.rs` **untouched**. If any of them fails to compile, the aliases are wrong — fix the aliases, not the caller. The one exception: if `Queue::new` / `Queue::from_snapshot` need turbofish at a call site, that is a legitimate caller edit; note it in Surprises & Discoveries.
 3. Run:
 
@@ -294,13 +297,13 @@ At this point the module is *unused* by both workers, which is fine; the tests i
 
 Record the outcome and the number in Surprises & Discoveries either way.
 
-4. Commit:
+4. Commit (files touched: `agent/src/data_uploads/upload/queue.rs` only, unless the covgate decision point above forced test additions):
 
        git add -A && git commit -m "refactor(upload): back the upload queue with the shared generic queue"
 
 ### M4 — Migrate the retention deleter
 
-1. Replace the body of `agent/src/data_uploads/retention/queue.rs` with the `QueueJob` impl for `retention::Job` (its `due_at` delegates to the existing `Job::due_at`) plus the aliases, keeping the names `DeleteQueueSnapshot` and `DeleteQueueSnapshotFile`.
+1. In `agent/src/data_uploads/retention/queue.rs`, delete the duplicated concrete implementation (the `Queue` struct and its `impl`, including `is_ready` / `count_ready` and the two `#[cfg(test)]` accessors, the `QueueEntry` / `DeleteQueueSnapshot` / `DeleteQueueSnapshotFile` definitions, and the `Patch` impl) and add the aliases in their place, keeping the names `DeleteQueueSnapshot` and `DeleteQueueSnapshotFile`. The `QueueJob` impl for `retention::Job` is **already in this file from M2** — leave it exactly as it is; do not rewrite it. What remains is that impl plus the aliases.
 2. Confirm the `#[cfg(test)] pub(crate)` accessors on the generic satisfy `deleter.rs`'s inline tests. If visibility does not resolve, the fallback is to rewrite the ~15 call sites in `agent/src/data_uploads/retention/deleter.rs` (lines ~524–1183) — but try the accessors-on-the-generic route first, and record which one worked.
 3. Run:
 
@@ -310,7 +313,7 @@ Record the outcome and the number in Surprises & Discoveries either way.
 
 **Decision point.** `data_uploads/retention` must still report `✅` at `98.39`, under the same do / do-not rules as M3 (add tests or relocate the generic; never lower the gate, per this plan's own constraint).
 
-4. Commit:
+4. Commit (files touched: `agent/src/data_uploads/retention/queue.rs`, plus `agent/src/data_uploads/retention/deleter.rs` only if step 2's fallback was needed):
 
        git add -A && git commit -m "refactor(retention): back the delete queue with the shared generic queue"
 
