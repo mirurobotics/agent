@@ -8,12 +8,12 @@ use crate::models;
 use crate::sync;
 
 #[derive(Debug, thiserror::Error)]
-#[error("release '{release_id}' did not have upload_rules expansion (backend did not expand upload_rules)")]
-pub struct UploadRulesNotExpandedErr {
+#[error("release '{release_id}' did not have file_rules expansion (backend did not expand file_rules)")]
+pub struct FileRulesNotExpandedErr {
     pub release_id: String,
 }
 
-impl crate::errors::Error for UploadRulesNotExpandedErr {}
+impl crate::errors::Error for FileRulesNotExpandedErr {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceErr {
@@ -32,7 +32,7 @@ pub enum ServiceErr {
     #[error(transparent)]
     SyncErr(sync::SyncErr),
     #[error(transparent)]
-    UploadRulesNotExpanded(UploadRulesNotExpandedErr),
+    FileRulesNotExpanded(FileRulesNotExpandedErr),
 }
 
 impl From<cache::CacheErr> for ServiceErr {
@@ -77,9 +77,9 @@ impl From<sync::SyncErr> for ServiceErr {
     }
 }
 
-impl From<UploadRulesNotExpandedErr> for ServiceErr {
-    fn from(e: UploadRulesNotExpandedErr) -> Self {
-        Self::UploadRulesNotExpanded(e)
+impl From<FileRulesNotExpandedErr> for ServiceErr {
+    fn from(e: FileRulesNotExpandedErr) -> Self {
+        Self::FileRulesNotExpanded(e)
     }
 }
 
@@ -91,5 +91,5 @@ crate::impl_error!(ServiceErr {
     DiskErr,
     HTTPErr,
     SyncErr,
-    UploadRulesNotExpanded,
+    FileRulesNotExpanded,
 });

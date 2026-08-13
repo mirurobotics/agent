@@ -139,7 +139,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
 
 pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
     CreateUploadRequest {
-        upload_rule_id: job.file_rule_id.clone(),
+        file_rule_id: job.file_rule_id.clone(),
         source: Box::new(UploadSource {
             file_path: job.file.to_string(),
             mtime: job.mtime.to_rfc3339(),
