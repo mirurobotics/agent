@@ -186,63 +186,70 @@ where
     }
 
     async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
-        let file = &entry.job.file;
-        let rule = &entry.job.file_rule_id;
-        let size = entry.job.size;
-        let attempt = entry.attempts + 1;
-        info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
-
-        let err = match self.attempt_upload(&entry).await {
-            AttemptOutcome::ShuttingDown => return Flow::Shutdown,
+        Self::log_attempt(&entry);
+        match self.attempt_upload(&entry).await {
+            AttemptOutcome::ShuttingDown => Flow::Shutdown,
             AttemptOutcome::Succeeded => {
                 entry.attempts += 1;
                 Self::log_success(&entry);
-                return Flow::Continue;
+                Flow::Continue
             }
-            AttemptOutcome::Failed(err) => err,
-        };
-
-        // network connection errors are expected and do not count toward the
-        // attempt budget
-        if err.is_network_conn_err() {
-            let age = (self.now_fn)() - entry.job.first_observed_at;
-            if age >= self.options.max_job_age {
-                Self::log_age_drop(&entry, age, &err);
-                return Flow::Continue;
+            AttemptOutcome::Failed(err) if err.is_network_conn_err() => {
+                self.handle_network_failure(entry, err).await
             }
+            AttemptOutcome::Failed(err) => self.handle_counted_failure(entry, err).await,
+        }
+    }
 
-            let wait = self.options.backoff.base_secs.max(0);
-            entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait));
-            let file = &entry.job.file;
-            debug!(
-                "upload: network connection error for file {file}; not counting attempt, \
-                 retrying in {wait}s: {err:?}"
-            );
-            self.requeue(entry).await;
+    /// Network connection errors are expected and do not count toward the
+    /// attempt budget. Drop the job if it has aged past the backstop;
+    /// otherwise stamp a flat cooldown and requeue at the tail.
+    async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) -> Flow {
+        let age = (self.now_fn)() - entry.job.first_observed_at;
+        if age >= self.options.max_job_age {
+            Self::log_age_drop(&entry, age, &err);
             return Flow::Continue;
         }
 
+        let wait = self.options.backoff.base_secs.max(0);
+        debug!(
+            "upload: network connection error for file {}; not counting attempt, \
+             retrying in {wait}s: {err:?}",
+            entry.job.file
+        );
+        self.requeue_after(entry, wait).await;
+        Flow::Continue
+    }
+
+    /// Counted failures bump the attempt budget. Drop on a terminal error or
+    /// when the budget is exhausted; otherwise stamp the growing backoff and
+    /// requeue at the tail.
+    async fn handle_counted_failure(&mut self, mut entry: QueueEntry, err: UploadErr) -> Flow {
         entry.attempts += 1;
-        let file = &entry.job.file;
-        let attempt = entry.attempts;
-        warn!("upload: attempt {attempt} for file {file} failed: {err:?}");
+        warn!(
+            "upload: attempt {} for file {} failed: {err:?}",
+            entry.attempts, entry.job.file
+        );
 
         if err.is_terminal() {
             Self::log_terminal_drop(&entry, &err);
             return Flow::Continue;
         }
-
         if entry.attempts >= self.options.attempts {
             Self::log_dropped(&entry, &err);
             return Flow::Continue;
         }
 
         let wait = cooldown::calc(&self.options.backoff, entry.attempts - 1).max(0);
-        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait));
-        let file = &entry.job.file;
-        info!("upload: retrying {file} in {wait}s");
-        self.requeue(entry).await;
+        info!("upload: retrying {} in {wait}s", entry.job.file);
+        self.requeue_after(entry, wait).await;
         Flow::Continue
+    }
+
+    /// Stamp `entry` eligible after `wait_secs` and append it at the tail.
+    async fn requeue_after(&mut self, mut entry: QueueEntry, wait_secs: i64) {
+        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait_secs));
+        self.requeue(entry).await;
     }
 
     /// Wait out the shortest backoff among queued entries, staying responsive
@@ -295,6 +302,14 @@ where
         let attempts = entry.attempts;
         info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
         self.queue.requeue(entry).await;
+    }
+
+    fn log_attempt(entry: &QueueEntry) {
+        let file = &entry.job.file;
+        let rule = &entry.job.file_rule_id;
+        let size = entry.job.size;
+        let attempt = entry.attempts + 1;
+        info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
     }
 
     fn log_success(entry: &QueueEntry) {
