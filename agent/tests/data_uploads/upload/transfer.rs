@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use crate::mocks::http_client::run_server;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
+use miru_agent::data_uploads::upload::errors::TransferErr;
 use miru_agent::data_uploads::upload::transfer::s3_config;
 use miru_agent::data_uploads::upload::{ObjectTransfer, SdkTransfer, UploadErr};
 use miru_agent::errors::Error as ErrorTrait;
@@ -19,6 +20,17 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Router;
 use serde_json::{json, Value};
+
+/// Extracts the transfer layer's typed precondition failure from the single
+/// `ExecutorErr` surface the actor sees.
+fn transfer_err(err: &UploadErr) -> &TransferErr {
+    let UploadErr::ExecutorErr(e) = err else {
+        panic!("expected ExecutorErr, got: {err:?}");
+    };
+    e.source
+        .downcast_ref::<TransferErr>()
+        .unwrap_or_else(|| panic!("expected TransferErr source, got: {:?}", e.source))
+}
 
 fn destination() -> UploadDestination {
     UploadDestination {
@@ -185,8 +197,10 @@ async fn unknown_scheme_is_unsupported() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
-    assert!(err.to_string().contains("unrecognized"), "message: {err}");
+    assert!(
+        matches!(transfer_err(&err), TransferErr::UnrecognizedScheme),
+        "got: {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -202,8 +216,10 @@ async fn s3_scheme_without_credentials_errs() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
-    assert!(err.to_string().contains("s3_credentials"), "message: {err}");
+    assert!(
+        matches!(transfer_err(&err), TransferErr::MissingS3Credentials),
+        "got: {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -285,10 +301,9 @@ async fn gcs_scheme_without_credentials_errs() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
     assert!(
-        err.to_string().contains("gcs_credentials"),
-        "message: {err}"
+        matches!(transfer_err(&err), TransferErr::MissingGcsCredentials),
+        "got: {err:?}"
     );
 }
 

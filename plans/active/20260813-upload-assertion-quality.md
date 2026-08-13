@@ -24,9 +24,9 @@ After this change, each of those tests fails if the behavior it names regresses:
 - [x] Milestone 1: commit.
 - [x] Milestone 2: drop the message assertion in `full_queue_returns_queue_full_err`, assert the carried fields.
 - [x] Milestone 2: commit.
-- [ ] Milestone 3: add `TransferErr` to `agent/src/data_uploads/upload/errors.rs`; use it at the three `transfer.rs` construction sites.
-- [ ] Milestone 3: update the three transfer tests to assert by type; perturbation check.
-- [ ] Milestone 3: commit.
+- [x] Milestone 3: add `TransferErr` to `agent/src/data_uploads/upload/errors.rs`; use it at the three `transfer.rs` construction sites.
+- [x] Milestone 3: update the three transfer tests to assert by type; perturbation check.
+- [x] Milestone 3: commit.
 - [ ] Milestone 4: full gate run (lint, test, covgate, preflight) and push; preflight CLEAN before the PR leaves draft.
 
 ## Surprises & Discoveries
@@ -59,6 +59,40 @@ After this change, each of those tests fails if the behavior it names regresses:
   test this milestone copied was already constraining. After
   `git checkout -- agent/src/data_uploads/upload/uploader.rs`, all 39 pass
   (`0 failed`).
+
+- **Perturbation check 2 (Milestone 3), observed.** With `transfer_s3`'s
+  `ok_or_else` changed to `executor_err(TransferErr::UnrecognizedScheme)`,
+  `cargo test --features test data_uploads::upload::transfer` reported
+  `FAILED. 11 passed; 1 failed`, with exactly the intended discrimination:
+
+        test data_uploads::upload::transfer::unknown_scheme_is_unsupported ... ok
+        test data_uploads::upload::transfer::gcs_scheme_without_credentials_errs ... ok
+        test data_uploads::upload::transfer::s3_scheme_without_credentials_errs ... FAILED
+
+        ---- data_uploads::upload::transfer::s3_scheme_without_credentials_errs stdout ----
+        panicked at agent/tests/data_uploads/upload/transfer.rs:219:5:
+        got: ExecutorErr(ExecutorErr { source: UnrecognizedScheme, is_terminal: false,
+             is_network_conn_err: false, trace: Trace { file:
+             "agent/src/data_uploads/upload/errors.rs", line: 113, backtrace: <disabled> } })
+
+  This is the exact bug class the deleted message-substring assertions were
+  guarding, and the type assertion catches it.
+
+- **Recovery hazard hit during perturbation 2.** The plan's own warning —
+  "perturb only files with no other pending edits in that milestone" — was
+  violated: `transfer.rs` already carried the three uncommitted Milestone 3
+  construction-site edits when it was perturbed, so
+  `git checkout -- agent/src/data_uploads/upload/transfer.rs` reverted the file
+  all the way to `HEAD`, silently discarding those edits (the next suite run
+  showed `92 passed; 3 failed`). The three edits were reapplied and
+  `git diff -- agent/src/data_uploads/upload/transfer.rs` was inspected line by
+  line to confirm exactly the intended change and no perturbation remained.
+  Lesson for future perturbation work: either commit the milestone first and
+  perturb from a clean tree, or stash/restore rather than `git checkout --`.
+
+- Coverage did not drop below the gate, so the contingency `Display`-contract
+  unit test in `errors.rs` was not needed: `./scripts/covgate.sh` reports
+  `data_uploads/upload: 97.65% (requires 96.00%)` with `.covgate` unchanged.
 
 ## Decision Log
 
