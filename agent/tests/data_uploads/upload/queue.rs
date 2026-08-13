@@ -506,9 +506,10 @@ mod reset_invalid_deadlines {
     use super::*;
 
     #[tokio::test]
-    async fn invalid_deadline_is_reset() {
+    async fn invalid_deadline_is_pulled_back_to_the_horizon() {
         let mut queue = Queue::new(4);
         let now = Utc::now();
+        let horizon = now + TimeDelta::hours(24);
         // no 24h-max backoff schedule could have stamped this: it is what a
         // snapshot written before a backward clock step looks like
         queue
@@ -520,14 +521,53 @@ mod reset_invalid_deadlines {
             })
             .await;
 
-        queue.reset_invalid_deadlines(now + TimeDelta::hours(24));
+        queue.reset_invalid_deadlines(horizon);
 
-        // stranded before the reset; eligible immediately after, with its
-        // attempt count intact so the retry budget still applies
-        let entry = queue.next_ready(now).unwrap();
-        assert_eq!(entry.job.digest, "sha256:a.log");
-        assert_eq!(entry.next_attempt_at, None);
+        // stranded for 48h before the reset; now bounded by the horizon rather
+        // than made instantly eligible, so a clock still settling after boot is
+        // not hammered
+        assert!(queue.next_ready(now).is_none());
+        let entry = queue.next_ready(horizon).unwrap();
+        assert_eq!(entry.next_attempt_at, Some(horizon));
+        // attempt count intact, so the retry budget still applies
         assert_eq!(entry.attempts, 3);
+    }
+
+    #[tokio::test]
+    async fn only_deadlines_past_the_horizon_move() {
+        let mut queue = Queue::new(8);
+        let now = Utc::now();
+        let horizon = now + TimeDelta::hours(24);
+        let inside = horizon - TimeDelta::seconds(1);
+        let beyond = horizon + TimeDelta::seconds(1);
+        for (name, deadline) in [("a.log", inside), ("b.log", horizon), ("c.log", beyond)] {
+            queue
+                .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job(name),
+                    attempts: 1,
+                    next_attempt_at: Some(deadline),
+                })
+                .await;
+        }
+
+        queue.reset_invalid_deadlines(horizon);
+
+        // every entry is visited, and only the one strictly past the horizon
+        // moves — the other two keep their own deadlines
+        let mut drained = Vec::new();
+        while let Some(entry) = queue.next_ready(beyond) {
+            drained.push((entry.job.digest.clone(), entry.next_attempt_at));
+            queue.remove(entry.id).await;
+        }
+        assert_eq!(
+            drained,
+            vec![
+                ("sha256:a.log".to_string(), Some(inside)),
+                ("sha256:b.log".to_string(), Some(horizon)),
+                ("sha256:c.log".to_string(), Some(horizon)),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -558,8 +598,10 @@ mod reset_invalid_deadlines {
         let now = Utc::now();
         let stale = now + TimeDelta::hours(48);
 
+        let horizon = now + TimeDelta::hours(24);
+
         let mut queue = Queue::from_snapshot(8, open(&path).await);
-        // the requeues persist the stale stamps; the release deliberately does
+        // the requeues persist the stale stamps; the reset deliberately does
         // not write, so the file still carries them afterwards
         for name in ["a.log", "b.log"] {
             queue
@@ -572,25 +614,27 @@ mod reset_invalid_deadlines {
                 .await;
         }
 
-        queue.reset_invalid_deadlines(now + TimeDelta::hours(24));
+        queue.reset_invalid_deadlines(horizon);
 
         let head_deadline = |raw: &str| -> serde_json::Value {
             serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]
                 .clone()
         };
         let raw = files::read_string(&path).await.unwrap();
-        assert!(
-            !head_deadline(&raw).is_null(),
-            "release should not have rewritten the snapshot: {raw}"
+        assert_eq!(
+            head_deadline(&raw),
+            serde_json::to_value(stale).unwrap(),
+            "the reset should not have rewritten the snapshot: {raw}"
         );
 
         // the next mutation writes the corrected entries through
-        let entry = queue.next_ready(now).unwrap();
+        let entry = queue.next_ready(horizon).unwrap();
         queue.remove(entry.id).await;
         let raw = files::read_string(&path).await.unwrap();
-        assert!(
-            head_deadline(&raw).is_null(),
-            "the removal should have persisted the released state: {raw}"
+        assert_eq!(
+            head_deadline(&raw),
+            serde_json::to_value(horizon).unwrap(),
+            "the removal should have persisted the pulled-back deadline: {raw}"
         );
     }
 }
