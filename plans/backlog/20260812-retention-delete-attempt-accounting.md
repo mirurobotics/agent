@@ -34,13 +34,13 @@ most 10 `warn!` lines followed by exactly one `error!` line, instead of an unbou
 stream; the persisted queue at `<agent root>/delete_queue.json` shrinks to `{"entries":[]}`
 instead of holding the wedged entry forever.
 
-**The dropped job is not retried and the file is not deleted.** That is deliberate and is
-the single most important thing to understand about this change; see "Why dropping is safe
-(and what it leaks)" below.
+**The dropped job is not retried and the file is not deleted** — a deliberate,
+fail-open trade; the reasoning and the evidence that no resurrection loop exists are in
+D7 and in "How delete jobs are minted" below.
 
 ## Progress
 
-- [ ] M1: `DeleteQueueEntry { job, attempts }` in `retention/queue.rs`; snapshot shape change; deleter plumbed through the new entry type; `DEFAULT_ATTEMPTS` + `DeleterArgs.attempts`
+- [ ] M1: `DeleteQueueEntry { job, attempts }` in `retention/queue.rs`; snapshot shape change; deleter plumbed through the new entry type; `DEFAULT_ATTEMPTS` + `DeleterArgs.attempts`; update the four `queue.rs` tests that bind a popped entry or pin the wire format
 - [ ] M2: Split `SweepOutcome::Retry` into counted-retry vs terminal; classify `FileSysErr` by `io::ErrorKind`; drop on exhaustion / terminal with `error!`; persist on the counted-retry path
 - [ ] M3: Tests (in-source unit tests + integration test); covgate re-ratchet
 - [ ] M4: `./scripts/preflight.sh` clean, push, CI green, PR out of draft
@@ -136,12 +136,13 @@ relative to the repo root `/home/ben/miru/workbench1/repos/agent-wt-delete-attem
 
 ### Terms
 
-- **Delete job** — `agent/src/data_uploads/retention/job.rs`, `pub struct Job`. Public
-  fields: `file: File`, `size: u64`, `digest: String`, `mtime`, `first_observed_at`,
-  `last_observed_at: DateTime<Utc>`, `ttl_secs: u64`, `file_rule_id: String`,
-  `deployment_id: String`. Derives `Clone, Debug, PartialEq, Serialize, Deserialize`.
-  `Job::due_at()` returns `last_observed_at + ttl_secs`, saturating to
-  `DateTime::<Utc>::MAX_UTC` ("never due") on overflow. There is no id and no attempt
+- **Delete job** — `agent/src/data_uploads/retention/job.rs`, `pub struct Job`: an
+  all-public record of the file to delete, its recorded identity (size, digest, mtime), its
+  observation window, its TTL and its owning rule/deployment. Every field is spelled out in
+  the literal `Job { .. }` construction in M3. Derives
+  `Clone, Debug, PartialEq, Serialize, Deserialize`. `Job::due_at()` returns
+  `last_observed_at + ttl_secs`, saturating to `DateTime::<Utc>::MAX_UTC` ("never due") on
+  overflow. There is no id and no attempt
   count — that is what this plan adds, one level up.
 - **Sweep** — one pass of `SingleThreadDeleter::sweep` over the queue. It reads the queue
   length `n`, then loops `n` times: pop the front entry into ownership, decide, and either
@@ -164,20 +165,9 @@ relative to the repo root `/home/ben/miru/workbench1/repos/agent-wt-delete-attem
 
 ### The files you will edit
 
-`agent/src/data_uploads/retention/queue.rs` (382 lines). Holds:
-
-    #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-    pub struct DeleteQueueSnapshot {
-        pub entries: Vec<Job>,
-    }
-
-    pub type DeleteQueueSnapshotFile = SingleThreadStateFile<DeleteQueueSnapshot, DeleteQueueSnapshot>;
-
-    pub struct Queue {
-        entries: VecDeque<Job>,
-        capacity: usize,
-        snapshot_file: Option<DeleteQueueSnapshotFile>,
-    }
+`agent/src/data_uploads/retention/queue.rs` (382 lines). Holds `DeleteQueueSnapshot`, the
+`DeleteQueueSnapshotFile` type alias over `SingleThreadStateFile`, and `Queue` — all three
+currently in terms of a bare `Job`; M1 restates each field and each change.
 
 `Queue`'s API: `new(capacity)`, `from_snapshot(capacity, snapshot_file)`, `len`,
 `is_empty`, `enqueue(Job) -> Result<(), DeleteErr>` (returns `QueueFullErr` at capacity),
@@ -198,13 +188,6 @@ tests). Holds `const DEFAULT_QUEUE_CAPACITY: usize = 4096;`, `DeleterArgs`,
             self.queue.persist().await;
         }
     }
-
-`SweepOutcome::Retry` is produced at exactly three sites, each a `warn!` followed by
-`Retry`:
-
-1. `stat_file` — any `FileSysErr` other than `PathDoesNotExistErr` from `files::metadata`.
-2. `check_digest_mismatch` — any error from `files::hash`.
-3. `delete_file` — any error from `files::delete`.
 
 `agent/src/data_uploads/retention/mod.rs` re-exports `DeleteQueueSnapshot` and
 `DeleteQueueSnapshotFile`; add `DeleteQueueEntry` there too.
@@ -230,11 +213,19 @@ the sweep can hit, and their `io::Error` field:
   `DeleteFileErr { source: Box<io::Error>, .. }`.
 
 All four `source` fields are `pub`, so `err.source.kind()` is directly available. The
-toolchain is pinned at `1.97.0` (`rust-toolchain.toml`), so the `io_error_more` kinds
-(`IsADirectory`, `NotADirectory`, `ReadOnlyFilesystem`, `InvalidFilename`,
-`FilesystemLoop`, …) are stable and matchable.
+toolchain is pinned at `1.97.0` (`rust-toolchain.toml`), on which `IsADirectory`,
+`NotADirectory`, `ReadOnlyFilesystem` and `InvalidFilename` are stable and matchable by
+name — those are the four this plan lists as terminal (alongside `PermissionDenied`).
 
-### Why dropping is safe (and what it leaks)
+**Not** every `ErrorKind` is nameable on stable: `FilesystemLoop` (ELOOP) is still behind
+the unstable `io_error_more` feature (rust-lang issue #86442) on 1.97.0, so writing
+`std::io::ErrorKind::FilesystemLoop` anywhere — including in a test — is a hard compile
+error (E0658). That is not a problem for this plan: ELOOP has no nameable variant, so it
+lands in `classify`'s `_ =>` arm and is treated as a counted retry, which is exactly the
+behavior the counted-retry tests want. Assert on the *classification*, never on the
+variant name.
+
+### How delete jobs are minted
 
 Delete jobs are minted in exactly one place today: the scanner
 (`agent/src/data_uploads/scan/`) emits a stable file, `scan/scanner.rs:107` fans it out to
@@ -242,13 +233,8 @@ sinks, and `retention/sink.rs` (`RetentionStableFileSink::on_stable_file`) turns
 `Job` and calls `deleter.enqueue`. Re-minting the *same* job is suppressed three ways:
 `RuleState::is_latest_ledger_entry` (`scan/state.rs:59-64`) matches the last ledger entry
 by size + mtime; `differs_from_previous` returns `Outcome::AlreadyInLedger` on a digest
-match (`scan/rule.rs:257-276`); and the ledger persists in the scanner snapshot.
-
-So there is **no resurrection loop** to worry about. The hazard is the opposite one:
-dropping the job means the agent forgets a file it never managed to delete, and the file
-stays on disk. That is why the drop must be `error!`, not `warn!` or `debug!` — the log
-line is the only remaining trace. This is the same failure mode that commits `370483b`
-(#185) and `5a6cae2` (#204) addressed on the upload side.
+match (`scan/rule.rs:257-276`); and the ledger persists in the scanner snapshot. This is
+the evidence behind D7: a dropped job is gone for good, which is why the drop is `error!`.
 
 Note also that PR 3a milestone M2 has not landed: `LiveExecutor::delete_source_file`
 (`agent/src/data_uploads/upload/executor.rs:87-105`) still deletes inline for
@@ -287,6 +273,24 @@ In `agent/src/data_uploads/retention/queue.rs`:
   `#[cfg(test)] pub(crate) fn queue_entries(&self) -> Vec<DeleteQueueEntry>` for the new
   attempt assertions, and `#[cfg(test)] pub(crate) fn attempts(&self) -> Vec<u32>` if it
   reads better at the call sites.
+- Update the four `mod tests` assertions in `queue.rs` that bind or compare a popped entry
+  — these are compile or runtime failures the moment `pop_front`/`requeue` change type, so
+  they land in M1, not M3:
+  - `mod pop_front :: returns_jobs_in_fifo_order` (line 263-266) — compare the job out of
+    the entry: `assert_eq!(queue.pop_front().map(|e| e.job), Some(job_a));` and likewise
+    for `job_b`; the trailing `assert_eq!(queue.pop_front(), None)` still compiles as-is
+    but write it as `.map(|e| e.job)` too for symmetry.
+  - `mod requeue :: appends_at_tail` (line 304-307) — `popped` is now a
+    `DeleteQueueEntry`; assert against `queue.queue_entries()`:
+    `assert_eq!(queue.queue_entries(), [DeleteQueueEntry { job: job_b, attempts: 0 },
+    popped]);`
+  - `mod requeue :: bypasses_capacity` (line 319-323) — same rewrite against
+    `queue_entries()`, keeping the `assert_eq!(queue.len(), 2)` line unchanged.
+  - `mod from_snapshot :: raw_json_snapshot_loads` (line 167-184) — this test pins the
+    persisted wire format and fails at runtime under the new shape. Wrap the job object:
+    `{"entries":[{"job":{"file":"/data/a.log", ... ,"deployment_id":"dpl_1"},"attempts":0}]}`.
+
+  With these four updated, M1 compiles and the whole retention suite stays green.
 
 In `agent/src/data_uploads/retention/deleter.rs`:
 
@@ -321,7 +325,10 @@ All in `agent/src/data_uploads/retention/deleter.rs`.
       /// drop immediately rather than burning the whole attempt budget.
       TerminalFailure,
 
-- Add the classifier, private to this module:
+- Add the classifier as two private associated functions **inside `impl
+  SingleThreadDeleter`**, next to `stat_file`/`check_file_identity`/`delete_file`
+  (`deleter.rs:130-199`), so every call site and test reaches them as `Self::io_kind` /
+  `Self::classify` (from `mod tests`: `SingleThreadDeleter::classify`):
 
       /// The `io::ErrorKind` behind a filesystem error, when one is available.
       fn io_kind(err: &FileSysErr) -> Option<std::io::ErrorKind> {
@@ -339,18 +346,24 @@ All in `agent/src/data_uploads/retention/deleter.rs`.
       /// counted, and the attempt cap is the backstop.
       fn classify(err: &FileSysErr) -> SweepOutcome {
           use std::io::ErrorKind::*;
-          match io_kind(err) {
+          match Self::io_kind(err) {
               Some(PermissionDenied | ReadOnlyFilesystem | IsADirectory | NotADirectory
                    | InvalidFilename) => SweepOutcome::TerminalFailure,
               _ => SweepOutcome::CountedRetry,
           }
       }
 
-  Keep `use std::io::ErrorKind::*;` scoped inside the function so it does not leak into the
-  module namespace.
+  Keep `use std::io::ErrorKind::*;` scoped inside `classify` so it does not leak into
+  the impl or module namespace. Both functions are `fn`, not `async fn`, and take no
+  `self` — they are associated functions, called `Self::classify(&err)` from the sweep
+  helpers and `SingleThreadDeleter::classify(&err)` / `SingleThreadDeleter::io_kind(&err)`
+  from `mod tests`.
 
-- The three `Retry` sites call `Self::classify(&err)` instead of returning `Retry`, and
-  keep their existing `warn!` (the message tail "retrying next sweep" is now a lie for the
+- The three `Retry` sites — `stat_file` (any `FileSysErr` other than `PathDoesNotExistErr`
+  from `files::metadata`), `check_digest_mismatch` (any error from `files::hash`) and
+  `delete_file` (any error from `files::delete`) — call `Self::classify(&err)` instead of
+  returning `Retry`, and keep their existing `warn!` (the tail "retrying next sweep" is now
+  a lie for the
   terminal case — reword to "; classifying failure" and let the sweep loop do the outcome
   logging).
 
@@ -407,13 +420,17 @@ All in `agent/src/data_uploads/retention/deleter.rs`.
           );
       }
 
+      /// `attempts` counts *consumed* attempts and the terminal path deliberately
+      /// consumes none, so log the ordinal of the sweep that failed —
+      /// `attempts + 1` — not the field. Without the `+ 1` the headline case (a
+      /// terminal failure on the very first sweep) logs "attempt 0".
       fn log_terminal_drop(entry: &DeleteQueueEntry) {
           error!(
-              "delete: giving up on {} after a permanent filesystem failure \
-               (rule {}, deployment {}, digest {}, attempt {}); the file is left on \
+              "delete: giving up on {} on attempt {} after a permanent filesystem \
+               failure (rule {}, deployment {}, digest {}); the file is left on \
                disk and the agent will not retry it",
-              entry.job.file, entry.job.file_rule_id, entry.job.deployment_id,
-              entry.job.digest, entry.attempts
+              entry.job.file, entry.attempts + 1, entry.job.file_rule_id,
+              entry.job.deployment_id, entry.job.digest
           );
       }
 
@@ -431,25 +448,29 @@ Three existing in-source tests change meaning, because EISDIR and ENOTDIR are no
   so `read` fails) → `hash_permanent_failure_drops_entry`, same shape; still assert
   `target.exists()` (the directory is untouched).
 - `deleter.rs` `mod sweep :: delete_failure_retains_entry` (EISDIR: `remove_file` refuses a
-  directory) → `delete_permanent_failure_drops_entry`, same shape.
+  directory) → rename to `terminal_failure_drops_job_without_burning_attempts` and rewrite:
+  keep the default `attempts: 10`, sweep once, assert `deleter.queue.is_empty()` and that no
+  attempt was consumed — the drop happens on sweep 1, not sweep 10.
 
-One existing `queue.rs` test pins the wire format and must be updated:
-`mod from_snapshot :: raw_json_snapshot_loads` — wrap the job object in
-`{"job": {...}, "attempts": 0}`.
+The `queue.rs` tests affected by the M1 type and wire-format change — including
+`mod from_snapshot :: raw_json_snapshot_loads` — are updated in M1, not here; see
+the last bullet of M1.
 
 New tests, all using the existing real-filesystem injection style (no fakes, no mocks):
 
 **In `agent/src/data_uploads/retention/deleter.rs`, `mod tests`:**
 
 Add a helper next to `temp_file`/`make_job`, since counted failures need a filesystem error
-whose kind is *not* in the terminal set. A mutual symlink loop gives `ELOOP` →
-`io::ErrorKind::FilesystemLoop`, which is stable, repeatable, and classified as counted:
+whose kind is *not* in the terminal set. A mutual symlink loop gives `ELOOP`
+(`raw_os_error() == Some(40)` on Linux), which is repeatable and — because ELOOP has no
+`ErrorKind` variant nameable on stable 1.97.0 — falls into `classify`'s `_` arm and is
+therefore counted:
 
     /// Two symlinks pointing at each other. `stat` on either fails with ELOOP,
     /// which classifies as a counted retry rather than a terminal failure.
     /// Built with `std::os::unix::fs::symlink` rather than `files::create_symlink`
     /// because the latter asserts the target exists.
-    fn symlink_loop(dir: &crate::filesys::Dir) -> File {
+    fn symlink_loop(dir: &Dir) -> File {
         let a = dir.file("loop-a");
         let b = dir.file("loop-b");
         std::os::unix::fs::symlink(b.path(), a.path()).unwrap();
@@ -457,10 +478,68 @@ whose kind is *not* in the terminal set. A mutual symlink loop gives `ELOOP` →
         a
     }
 
-Before relying on it, confirm the kind empirically once (`assert_eq!(io_kind(&err),
-Some(std::io::ErrorKind::FilesystemLoop))` in the classifier test below). If the platform
-maps ELOOP differently, adjust the classifier test and pick any other non-terminal kind;
-the classifier unit tests below do not depend on the filesystem at all.
+Note the `&Dir` (not `&crate::filesys::Dir`) signature: the helper is copied verbatim into
+`agent/tests/` below, which is a separate integration-test crate where `crate::filesys`
+does not resolve. Relying on the imported `Dir` makes the one text work in both places.
+
+Before relying on it, confirm the classification empirically once, over a real
+ELOOP-producing `FileSysErr` (stat the loop head through `files::metadata` and unwrap the
+error) — assert on the outcome, not on a variant name:
+
+    assert!(matches!(
+        SingleThreadDeleter::classify(&err),
+        SweepOutcome::CountedRetry
+    ));
+
+If some platform maps a symlink loop to a kind that *is* in the terminal set, pick any
+other non-terminal error source; the classifier unit tests below do not depend on the
+filesystem at all.
+
+**`make_job` cannot be used for symlink-loop jobs.** Both `make_job` helpers (the `src`
+one and the `agent/tests/` one) call `files::size(file).await.unwrap()` and
+`files::hash(file).await.unwrap()`, which themselves hit ELOOP on the loop head and panic
+in test setup before the deleter is ever exercised. Every symlink-loop test must build the
+`Job` literally instead, modelled on the existing `stat_failure_retains_entry`:
+
+    let job = Job {
+        file: symlink_loop(&dir),
+        size: 0,
+        digest: "sha256:unused".to_string(),
+        mtime: DateTime::from_timestamp(1000, 0).unwrap(),
+        first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        ttl_secs: 0,
+        file_rule_id: "rule_1".to_string(),
+        deployment_id: "dpl_1".to_string(),
+    };
+
+The recorded size/digest/mtime are never compared, because the sweep fails at the stat
+step before any identity check runs.
+
+The new tests need imports that `mod tests` does not have today. In
+`agent/src/data_uploads/retention/deleter.rs`, `mod tests`, extend the internal-crate
+import block to:
+
+    use super::{DeleterArgs, SingleThreadDeleter, SweepOutcome};
+    use crate::data_uploads::retention::job::Job;
+    use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
+    use crate::filesys::errors::{
+        DeleteFileErr, FileMetadataErr, FileSysErr, OpenFileErr, PathExistsErr, ReadFileErr,
+    };
+    use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+    use crate::trace;
+
+CI clippy runs with `-D warnings`, so keep this list to what is actually named: `Dir` is
+used by `symlink_loop`'s signature above, but `DeleteQueueEntry` is deliberately **not**
+imported here — no `deleter.rs` test names the type (they reach the counter through
+`queue_entries()[0].attempts`). It *is* named by the `queue.rs` tests, but those live in
+`queue.rs`'s own `mod tests`, where `DeleteQueueEntry` is already in scope.
+
+Construct each error struct exactly per its definition in
+`agent/src/filesys/errors.rs` (e.g. `PathExistsErr { path, trace }` at lines 55-58;
+the four io-bearing variants carry `source: Box<std::io::Error>` plus a path/file field
+and `trace`). `SweepOutcome`, `io_kind` and `classify` are private to the module, which
+is fine: `mod tests` is a child module.
 
 New `mod classify` (a sibling of `mod sweep`), constructing `FileSysErr` values directly —
 this is where the mapping is pinned precisely and cheaply:
@@ -493,10 +572,6 @@ New tests in `mod sweep`:
 - `default_attempts_is_ten` — `assert_eq!(DeleterArgs::default().attempts, 10);` plus a
   loop of ten sweeps over the symlink-loop job asserting the queue is non-empty for the
   first nine and empty after the tenth. This is the test that pins the headline number.
-- `terminal_failure_drops_job_without_burning_attempts` — EISDIR delete case (job path is a
-  directory, as in the existing `delete_failure_retains_entry`) with the default
-  `attempts: 10`; one sweep; assert `deleter.queue.is_empty()`. The point is that the drop
-  happens on sweep 1, not sweep 10.
 - `successful_delete_clears_the_entry` — the persistence-aware sibling of the existing
   `zero_delay_entry_is_deleted_on_first_sweep`: build the deleter with a snapshot file,
   enqueue a normal temp-file job, sweep once, assert `deleter.queue.is_empty()` and
@@ -509,11 +584,19 @@ New `mod persistence` in `deleter.rs` `mod tests` (mirroring the existing
 - `attempts_survive_a_restart` — `dirs::temp("delete-attempts-restart")`,
   `state_path = dir.file("delete_queue.json")`, deleter built with
   `snapshot_file: Some(snapshot_file(&state_path).await)`; enqueue a symlink-loop job;
-  sweep twice; `drop(deleter)`; rebuild with `SingleThreadDeleter::new(DeleterArgs {
-  snapshot_file: Some(snapshot_file(&state_path).await), ..DeleterArgs::default() })`;
-  assert `restored.queue.queue_entries()[0].attempts == 2`. Then sweep the *restored*
-  deleter with `attempts: 3` and assert it drops — proving the budget is genuinely
-  cumulative across restarts.
+  sweep twice; `drop(deleter)`; rebuild with a cap of 3 — the cap must be set on the
+  *rebuild*, since `..DeleterArgs::default()` alone would restore the default budget of 10
+  and the third sweep would requeue instead of dropping:
+
+      SingleThreadDeleter::new(DeleterArgs {
+          attempts: 3,
+          snapshot_file: Some(snapshot_file(&state_path).await),
+          ..DeleterArgs::default()
+      })
+
+  Assert `restored.queue.queue_entries()[0].attempts == 2`, then sweep the restored deleter
+  once and assert it drops — the third consumed attempt hits the cap, proving the budget is
+  genuinely cumulative across restarts rather than reset by the rebuild.
 - `dropped_entry_is_absent_from_the_persisted_snapshot` — same setup with
   `DeleterArgs { attempts: 1, .. }`; one sweep; `drop(deleter)`; rebuild; assert
   `restored.queue.is_empty()`. This is the "entry absent from the persisted snapshot"
@@ -536,7 +619,16 @@ so no registration change):
 
 - `wedged_job_is_given_up_on_through_the_actor` — `Deleter::spawn(16, DeleterArgs {
   attempts: 2, ..DeleterArgs::default() })`; enqueue a job over a symlink loop built in a
-  `dirs::temp` directory; `deleter.sweep()` twice; assert `deleter.len().await.unwrap() ==
+  `dirs::temp` directory. The `symlink_loop` helper above lives in the `src` `mod tests`
+  and is not reachable from `agent/tests/`, so copy it into this file (it is five lines)
+  and extend the import at `agent/tests/data_uploads/retention/deleter.rs:3` to
+  `use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};` — the
+  `&Dir` signature is what makes the copy compile here, since `crate::filesys` names this
+  integration-test crate, not the library. This file's `make_job` is unusable for a
+  symlink-loop job for the same ELOOP reason as the `src` one, so build the `Job` literally
+  as shown above; `Utc::now()` is fine for the three timestamps here, since the actor runs
+  on the wall clock rather than an injected one, and `ttl_secs: 0` makes it due at once.
+  Then `deleter.sweep()` twice; assert `deleter.len().await.unwrap() ==
   0`; `shutdown` + `handle.await`. This is the only new integration test — it proves the
   policy is reachable through the public `DeleterExt` surface, which is what the app wires
   up.
@@ -575,10 +667,10 @@ Confirm the starting point first:
 
        ./scripts/test.sh 2>&1 | tail -40
 
-   Expect the retention tests to pass except the four listed in M3 as changing meaning; if
-   they fail here, that is expected mid-milestone — but prefer landing M1 with them still
-   green (M1 alone does not change classification, so they should still pass; only M2 flips
-   them).
+   The whole retention suite must be green here. M1 changes no classification, so the
+   three EISDIR/ENOTDIR sweep tests still pass unchanged; the four `queue.rs` tests
+   listed in M1's last bullet must have been updated in step 1 for this to compile and
+   pass. Do not commit a red M1.
 
 6. Commit:
 
@@ -599,7 +691,7 @@ Confirm the starting point first:
 
 7. Edit `agent/src/data_uploads/retention/deleter.rs` per M2 above.
 8. `cargo check --package miru-agent --features test --all-targets`
-9. Update the four existing tests whose meaning changed (M3, first two lists) so the suite
+9. Update the three existing sweep tests whose meaning changed (M3, first list) so the suite
    is green again:
 
        ./scripts/test.sh 2>&1 | tail -40
@@ -710,36 +802,22 @@ purposes of this plan and say so in the PR description.
 Each of these is a behavior a human can verify by running the suite and reading the test
 names, or by reading the log output of a running agent:
 
-1. **A counted failure consumes exactly one attempt per sweep.** `./scripts/test.sh` runs
-   `counted_failure_increments_attempts`: one sweep over a wedged (ELOOP) delete target
-   leaves `attempts == 1` and the entry still queued; a second leaves `attempts == 2`.
-2. **Ten attempts is the give-up point.** `default_attempts_is_ten` asserts
-   `DeleterArgs::default().attempts == 10` and that the queue is non-empty after nine
-   sweeps and empty after the tenth.
-3. **Exhaustion removes the entry from disk, not just from memory.**
-   `dropped_entry_is_absent_from_the_persisted_snapshot` drops the deleter after the final
-   sweep and rebuilds from `delete_queue.json`; the rebuilt queue is empty.
-4. **A terminal failure does not burn the budget.**
-   `terminal_failure_drops_job_without_burning_attempts` drops an EISDIR target on the
-   *first* sweep even with the default budget of 10.
-5. **The attempt count is cumulative across restarts.** `attempts_survive_a_restart` sweeps
-   twice, drops the deleter, rebuilds from the snapshot file, and finds `attempts == 2`;
-   the restored deleter then reaches its cap.
-6. **A successful delete clears everything.** `successful_delete_clears_the_entry` leaves an
-   empty queue, an unlinked file, and an empty persisted snapshot.
-7. **The actor surface honors the policy.** `wedged_job_is_given_up_on_through_the_actor`
-   drives it entirely through `DeleterExt::enqueue`/`sweep`/`len`, the same API
-   `agent/src/app/state.rs` wires up.
+1. A counted failure consumes one attempt per sweep — `counted_failure_increments_attempts`.
+2. Ten attempts is the give-up point — `default_attempts_is_ten` and `attempt_cap_drops_job`.
+3. Exhaustion removes the entry from disk, not just memory —
+   `dropped_entry_is_absent_from_the_persisted_snapshot`.
+4. A terminal failure does not burn the budget —
+   `terminal_failure_drops_job_without_burning_attempts`.
+5. The attempt count is cumulative across restarts — `attempts_survive_a_restart`.
+6. A successful delete clears queue, file and snapshot — `successful_delete_clears_the_entry`.
+7. The actor surface honors the policy — `wedged_job_is_given_up_on_through_the_actor`,
+   driven through `DeleterExt`, the same API `agent/src/app/state.rs` wires up.
 8. **The give-up is loud.** Run the agent (or grep the sources) and confirm the drop paths
    are `error!`, name the file path, `file_rule_id`, `deployment_id`, `digest` and the
-   attempt count, and say the file is left on disk. A `warn!` here would be a defect: the
+   attempt count, and say the file is left on disk. The terminal drop reports
+   `attempts + 1` (the ordinal of the failing sweep), so a first-sweep terminal drop reads
+   "on attempt 1", never "attempt 0". A `warn!` here would be a defect: the
    log line is the only surviving record of a leaked file.
-
-### What acceptance does *not* claim
-
-The dropped file is not deleted and is not rediscovered. That is the accepted trade (D7).
-If the file is later modified, the scanner re-emits it and it gets a fresh budget — which
-is correct, not a loop.
 
 ## Idempotence and Recovery
 
@@ -755,13 +833,19 @@ is correct, not a loop.
   across tests (each uses its own `dirs::temp`). If you want to prove the reset behavior
   on a live agent root, back the file up first:
 
-      cp ~/.miru/delete_queue.json /tmp/delete_queue.json.bak
+      # <filesystem_root> is the Layout root injected at startup; the snapshot is
+      # <filesystem_root>/var/lib/miru/delete_queue.json (agent/src/disk/layout.rs:14-19, 53)
+      cp <filesystem_root>/var/lib/miru/delete_queue.json /tmp/delete_queue.json.bak
 
-- To abandon the work at any point before pushing:
+- To abandon the *implementation* at any point before pushing and return to the plan
+  commit — `726255c`, the branch's first commit, which contains this document and
+  nothing else:
 
-      git reset --hard 95bc2a5
+      git reset --hard 726255c
 
-  After pushing, prefer a revert commit over a force-push.
+  Do **not** reset to `95bc2a5`: that is `main`, and it predates this plan file, so the
+  reset deletes the document you are executing. (It is recoverable via `git reflog`, but
+  do not rely on that.) After pushing, prefer a revert commit over a force-push.
 - If `./scripts/test.sh` fails only in `agent/src/data_uploads/retention/` after M2, that is
   the expected mid-milestone state for the three renamed EISDIR/ENOTDIR tests; finish step 9
   before concluding anything is wrong.
