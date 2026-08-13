@@ -181,12 +181,6 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
-                    // a deadline beyond one maximum backoff cannot have come from
-                    // the retry schedule, so pull it back before sizing the sleep.
-                    // Done here rather than once at startup because the clock can
-                    // step backward at any point in a long-lived process, and the
-                    // sleep below is monotonic: a later correction would never cut
-                    // it short.
                     self.queue.reset_invalid_deadlines(
                         now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)),
                     );
