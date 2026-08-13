@@ -19,7 +19,7 @@ pub mod create {
         let mock = MockClient::default();
 
         let payload = CreateUploadRequest {
-            upload_rule_id: "uplr_1".to_string(),
+            file_rule_id: "uplr_1".to_string(),
             digest: "sha256:abc123".to_string(),
             size: 42,
             ..CreateUploadRequest::default()

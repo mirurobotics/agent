@@ -1,6 +1,6 @@
 // internal crates
 use backend_api::models::{
-    BaseUploadRule, Deployment as BackendDeployment,
+    BaseFileRule, Deployment as BackendDeployment,
     DeploymentActivityStatus as BackendActivityStatus,
     DeploymentTargetStatus as BackendTargetStatus, GitCommit as BackendGitCommit,
     GitRepositoryType, Release as BackendRelease,
@@ -71,12 +71,12 @@ pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
         created_at: Utc::now().to_rfc3339(),
         updated_at: Utc::now().to_rfc3339(),
         git_commit,
-        upload_rules: Some(Vec::new()),
+        file_rules: Some(Vec::new()),
     }
 }
 
-pub fn make_backend_file_rule(id: &str) -> BaseUploadRule {
-    BaseUploadRule {
+pub fn make_backend_file_rule(id: &str) -> BaseFileRule {
+    BaseFileRule {
         id: id.to_string(),
         created_at: Utc::now().to_rfc3339(),
         updated_at: Utc::now().to_rfc3339(),
@@ -84,8 +84,8 @@ pub fn make_backend_file_rule(id: &str) -> BaseUploadRule {
     }
 }
 
-/// Builds a deployment whose expanded release carries upload rules with the
-/// given ids (upload rules ride on `release.upload_rules` in the contract).
+/// Builds a deployment whose expanded release carries file rules with the
+/// given ids (file rules ride on `release.file_rules` in the contract).
 pub fn make_deployment_with_release_file_rules(
     id: &str,
     cfg_inst_args: Vec<CfgInstArgs>,
@@ -96,7 +96,7 @@ pub fn make_deployment_with_release_file_rules(
         .iter()
         .map(|rid| make_backend_file_rule(rid))
         .collect();
-    dpl.release.as_mut().unwrap().upload_rules = Some(rules);
+    dpl.release.as_mut().unwrap().file_rules = Some(rules);
     dpl
 }
 

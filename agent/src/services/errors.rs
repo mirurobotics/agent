@@ -8,7 +8,9 @@ use crate::models;
 use crate::sync;
 
 #[derive(Debug, thiserror::Error)]
-#[error("release '{release_id}' did not have file_rules expansion (backend did not expand file_rules)")]
+#[error(
+    "release '{release_id}' did not have file_rules expansion (backend did not expand file_rules)"
+)]
 pub struct FileRulesNotExpandedErr {
     pub release_id: String,
 }

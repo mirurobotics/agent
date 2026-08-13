@@ -67,7 +67,7 @@ async fn fetch_release_constructs_url_and_expand_param() {
         method: reqwest::Method::GET,
         path: "/releases/rls_1".to_string(),
         url: "http://mock/releases/rls_1".to_string(),
-        query: vec![("expand".to_string(), "upload_rules".to_string())],
+        query: vec![("expand".to_string(), "file_rules".to_string())],
         body: None,
         token: Some("test-token".to_string()),
     };

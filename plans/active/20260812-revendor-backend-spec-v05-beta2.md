@@ -30,21 +30,26 @@ Observable outcome: `rg 'upload_rules|UploadRule|UploadDeletePolicy|upload_rule_
 
 ## Progress
 
-- [ ] Milestone 1 — Vendor the v0.5.0-beta.2 spec artifact; delete `v04.yaml`; point `api/Makefile` at it. Commit.
-- [ ] Milestone 2 — Run `api/regen.sh`; review the regenerated wire models; confirm `libs/device-api` is unchanged. Commit.
-- [ ] Milestone 3 — Replace the PR-1 adapter in `agent/src/models/file_rule.rs` with the direct `BaseFileRule → FileRule` mapping. Commit.
-- [ ] Milestone 4 — Flip call sites: expansion string literals, `UploadRulesNotExpanded` → `FileRulesNotExpanded` (two error enums), `upload_rule_id` → `file_rule_id`. Commit.
-- [ ] Milestone 5 — Update test fixtures (incl. new required `slot_key`), add adapter unit tests, run full validation. Commit.
+- [x] Milestone 1 — Vendor the v0.5.0-beta.2 spec artifact; delete `v04.yaml`; point `api/Makefile` at it. Commit.
+- [x] Milestone 2 — Run `api/regen.sh`; review the regenerated wire models; confirm `libs/device-api` is unchanged. Commit.
+- [x] Milestone 3 — Replace the PR-1 adapter in `agent/src/models/file_rule.rs` with the direct `BaseFileRule → FileRule` mapping. Commit.
+- [x] Milestone 4 — Flip call sites: expansion string literals, `UploadRulesNotExpanded` → `FileRulesNotExpanded` (two error enums), `upload_rule_id` → `file_rule_id`. Commit.
+- [x] Milestone 5 — Update test fixtures (incl. new required `slot_key`), add adapter unit tests, run full validation. Commit.
 
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- **The release asset was exactly as predicted.** `api/specs/backend/v05.yaml` downloaded at 2400 lines, zero `$API_VERSION$` placeholders, `x-git-commit.sha: 76d489f8…`. No hand-stamping needed.
+- **Regen matched the predicted inventory exactly.** `libs/device-api` came back byte-identical (clean `git status`); `libs/backend-api` showed 4 added, 4 deleted, 13 modified model files. Generated shapes confirmed: `BaseFileRule.source: Box<FileRuleSource>`, `upload`/`retention` as `Option<Box<..>>`, `FileRuleRetention { require_upload: Option<bool>, ttl_secs: i64 }` — the plan's `Box` handling and the two mismatch fixes were correct as written.
+- **`agent/src/workers` covgate passed locally this run (85.82% vs 84.67% required)**, contrary to the recorded pre-existing local-vs-CI gap. The local `target/debug/incremental` cache had to be wiped mid-run (disk was full), forcing a clean instrumented rebuild — that is the likely cause. No `.covgate` file was touched either way.
+- **Two `cargo fmt` violations landed in `agent/src` from the Milestone 4 renames** (the longer `#[error(..)]` message string in `services/errors.rs`, and import ordering in `services/release/get.rs`). `scripts/lint.sh` auto-fixed both; they were folded into the Milestone 5 commit.
 
 
 ## Decision Log
 
 - **2026-08-12 — Vendor the stamped release asset, not the raw bundle (deviation from the umbrella plan).** The umbrella plan instructs copying `apis/apps/backend-server/agent/openapi.gen.yaml` from the openapi repo and hand-stamping `info.version`, `info.x-release-version`, `info.x-git-commit`, and substituting `$API_VERSION$` placeholders. That recipe is stale: the currently vendored `api/specs/backend/v04.yaml` is the *release artifact* produced by the openapi release workflow, not the raw bundle. It carries `info.x-git-commit.{sha,url,message,author,branch,dirty}` and `info.x-build.built_at`, and uses a different YAML dumper style. Following the umbrella recipe literally would produce a ~2764-line pure-reformatting diff and drop the build/author metadata. Instead we download the `agent.yaml` asset attached to the GitHub release for tag `agent/v0.5.0-beta.2`, which is already fully stamped and contains zero `$API_VERSION$` placeholders. See Milestone 1.
+
+- **2026-08-12 — `Cargo.lock` deliberately left unchanged (deviation from Validation and Acceptance).** The plan prescribes running `./scripts/update-deps.sh` before `lint.sh`. Doing so produced 515 lines of unrelated transitive dependency bumps (`cargo update` refreshes everything, not just what this change needs). This change adds no dependencies, and inspection of `scripts/lib/lint.sh` shows it passes no `--locked`/`--frozen` flag anywhere, so a stale lockfile cannot fail it. The lockfile was reverted and `./scripts/lint.sh` was then confirmed to exit 0 (`Lint complete`) against the unmodified `Cargo.lock`. Keeping the dependency bump out of a coordinated breaking-change PR keeps the diff reviewable; a lockfile refresh belongs in its own maintenance PR.
 
 (Add further entries as work proceeds.)
 

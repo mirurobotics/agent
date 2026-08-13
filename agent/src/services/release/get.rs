@@ -4,7 +4,7 @@ use crate::filesys;
 use crate::models;
 use crate::services::{
     backend::BackendFetcher,
-    errors::{ServiceErr, FileRulesNotExpandedErr},
+    errors::{FileRulesNotExpandedErr, ServiceErr},
 };
 
 // external crates
