@@ -824,8 +824,6 @@ mod durability {
         timed(handle).await.unwrap();
     }
 
-    /// Clean shutdown is the common trigger, not just a crash: every restart
-    /// used to drop whatever was in flight.
     #[tokio::test]
     async fn shutdown_mid_attempt_leaves_job_queued() {
         let dir = dirs::temp("uploader_durability").unwrap();
@@ -844,8 +842,6 @@ mod durability {
         assert_eq!(on_disk(&path).await, vec!["sha256:a.log".to_string()]);
     }
 
-    /// End to end: the job the shutdown interrupted is uploaded by the next
-    /// process, which is what makes the queue at-least-once.
     #[tokio::test]
     async fn restart_resumes_the_interrupted_job() {
         let dir = dirs::temp("uploader_durability").unwrap();
@@ -875,8 +871,6 @@ mod durability {
         timed(handle2).await.unwrap();
     }
 
-    /// The drop paths used to rely on the pop having already removed the
-    /// entry; they now have to persist the removal themselves.
     #[tokio::test]
     async fn terminal_failure_removes_job_from_disk() {
         let dir = dirs::temp("uploader_durability").unwrap();

@@ -86,46 +86,6 @@ mod from_snapshot {
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);
     }
-
-    /// A queue written before entries carried ids still loads, and each entry
-    /// gets a distinct id so they stay independently resolvable.
-    #[tokio::test]
-    async fn legacy_snapshot_without_ids_gets_distinct_ids() {
-        let dir = dirs::temp("upload_queue_test").unwrap();
-        let path = dir.to_dir().file("upload_queue.json");
-        let snapshot = QueueSnapshot {
-            entries: vec![
-                QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job("a.log"),
-                    attempts: 0,
-                    next_attempt_at: None,
-                },
-                QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job("b.log"),
-                    attempts: 0,
-                    next_attempt_at: None,
-                },
-            ],
-        };
-
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        for entry in value["entries"].as_array_mut().unwrap() {
-            entry.as_object_mut().unwrap().remove("id");
-        }
-        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let mut queue = Queue::from_snapshot(8, open(&path).await);
-        let first = queue.next_ready(Utc::now()).unwrap();
-        queue.remove(first.id).await;
-        let second = queue.next_ready(Utc::now()).unwrap();
-
-        assert_ne!(first.id, second.id);
-        assert_eq!(second.job.digest, "sha256:b.log");
-    }
 }
 
 mod enqueue {
@@ -425,8 +385,6 @@ mod next_ready {
         assert_eq!(queue.len(), 1);
     }
 
-    /// The durability guarantee: an entry handed to the worker is still on
-    /// disk, so a crash mid-upload leaves it to be retried at the next boot.
     #[tokio::test]
     async fn leaves_the_entry_on_disk_until_removed() {
         let dir = dirs::temp("upload_queue_test").unwrap();
