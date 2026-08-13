@@ -499,7 +499,7 @@ fn create_request_maps_job_fields() {
     };
 
     let expected = CreateUploadRequest {
-        upload_rule_id: "rule_1".to_string(),
+        file_rule_id: "rule_1".to_string(),
         source: Box::new(UploadSource {
             file_path: "/data/a.log".to_string(),
             mtime: "2021-01-01T00:00:00+00:00".to_string(),

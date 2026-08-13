@@ -4,7 +4,7 @@ use crate::filesys;
 use crate::models;
 use crate::services::{
     backend::BackendFetcher,
-    errors::{ServiceErr, UploadRulesNotExpandedErr},
+    errors::{FileRulesNotExpandedErr, ServiceErr},
 };
 
 // external crates
@@ -20,8 +20,8 @@ pub async fn get<B: BackendFetcher>(
         return Ok(rls);
     }
     let backend_rls = backend.fetch_release(&id).await?;
-    let backend_rules = backend_rls.upload_rules.as_ref().ok_or_else(|| {
-        ServiceErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr {
+    let backend_rules = backend_rls.file_rules.as_ref().ok_or_else(|| {
+        ServiceErr::FileRulesNotExpanded(FileRulesNotExpandedErr {
             release_id: id.clone(),
         })
     })?;

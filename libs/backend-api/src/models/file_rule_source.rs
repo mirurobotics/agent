@@ -10,8 +10,8 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct UploadRuleSource {
-    /// An absolute glob pattern (must start with `/`) that selects the files to upload.
+pub struct FileRuleSource {
+    /// A glob pattern selecting the files this rule manages. Must be absolute (start with `/`), at most 1024 bytes, and must contain no `..` segments and no empty path segments.
     #[serde(rename = "glob")]
     pub glob: String,
     /// How long, in seconds, a matching file's size and modification time must stay unchanged (quiescent) before it is considered finished and eligible for upload. Files in a format with a finalization marker (e.g. MCAP, parquet) are detected directly; this window is the fallback for other files.
@@ -19,9 +19,9 @@ pub struct UploadRuleSource {
     pub stability_window_secs: i64,
 }
 
-impl UploadRuleSource {
-    pub fn new(glob: String, stability_window_secs: i64) -> UploadRuleSource {
-        UploadRuleSource {
+impl FileRuleSource {
+    pub fn new(glob: String, stability_window_secs: i64) -> FileRuleSource {
+        FileRuleSource {
             glob,
             stability_window_secs,
         }

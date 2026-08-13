@@ -16,7 +16,7 @@ impl ModelFixture for FileRule {
         vec![
             RequiredField {
                 key: "id",
-                value: json!("upl_rule_123"),
+                value: json!("file_rule_123"),
             },
             RequiredField {
                 key: "name",
@@ -95,27 +95,33 @@ fn defaults() {
 
 // ─── from-backend tests ────────────────────────────────────────────────────
 
+fn backend_upload() -> backend_client::FileRuleUpload {
+    backend_client::FileRuleUpload {
+        upload_collection_id: "upl_col_123".to_string(),
+        upload_collection_name: "camera-logs".to_string(),
+        bucket_id: "buck_123".to_string(),
+        bucket_name: "my-bucket".to_string(),
+        path: "{device_id}/logs".to_string(),
+    }
+}
+
 fn backend_rule(
     created_at: &str,
     updated_at: &str,
-    delete_policy: backend_client::UploadDeletePolicy,
-) -> backend_client::BaseUploadRule {
-    backend_client::BaseUploadRule {
-        object: backend_client::base_upload_rule::Object::UploadRule,
-        id: "upl_rule_123".to_string(),
-        upload_collection_id: "upl_col_123".to_string(),
-        upload_collection_name: "camera-logs".to_string(),
+    upload: Option<backend_client::FileRuleUpload>,
+    retention: Option<backend_client::FileRuleRetention>,
+) -> backend_client::BaseFileRule {
+    backend_client::BaseFileRule {
+        object: backend_client::base_file_rule::Object::FileRule,
+        id: "file_rule_123".to_string(),
+        name: "camera-logs".to_string(),
         digest: "sha256:abc123".to_string(),
-        source: Box::new(backend_client::UploadRuleSource {
+        source: Box::new(backend_client::FileRuleSource {
             glob: "/data/*.mcap".to_string(),
             stability_window_secs: 30,
         }),
-        destination: Box::new(backend_client::UploadRuleDestination {
-            bucket_id: "buck_123".to_string(),
-            bucket_name: "my-bucket".to_string(),
-            path: "{device_id}/logs".to_string(),
-            delete_policy,
-        }),
+        upload: upload.map(Box::new),
+        retention: retention.map(Box::new),
         created_at: created_at.to_string(),
         updated_at: updated_at.to_string(),
     }
@@ -128,12 +134,16 @@ fn from_backend() {
     let backend = backend_rule(
         &created.to_rfc3339(),
         &updated.to_rfc3339(),
-        backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD,
+        Some(backend_upload()),
+        Some(backend_client::FileRuleRetention {
+            require_upload: Some(true),
+            ttl_secs: 3600,
+        }),
     );
 
     let actual: FileRule = backend.into();
     let expected = FileRule {
-        id: "upl_rule_123".to_string(),
+        id: "file_rule_123".to_string(),
         name: "camera-logs".to_string(),
         digest: "sha256:abc123".to_string(),
         source: FileRuleSource {
@@ -149,7 +159,7 @@ fn from_backend() {
         }),
         retention: Some(FileRuleRetention {
             require_upload: true,
-            ttl_secs: 0,
+            ttl_secs: 3600,
         }),
         created_at: created,
         updated_at: updated,
@@ -157,46 +167,104 @@ fn from_backend() {
     assert_eq!(actual, expected); // lint:allow(field-by-field-assert)
 }
 
-// A wire rule with `delete_policy: never` maps to no retention block at all,
-// which is what preserves the old "never delete" behavior.
 #[test]
-fn from_backend_never_delete_policy_has_no_retention() {
-    let now = Utc::now();
-    let backend = backend_rule(
-        &now.to_rfc3339(),
-        &now.to_rfc3339(),
-        backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_NEVER,
-    );
+fn from_backend_no_upload_or_retention() {
+    let created = Utc::now();
+    let updated = Utc::now();
+    let backend = backend_rule(&created.to_rfc3339(), &updated.to_rfc3339(), None, None);
 
-    let rule: FileRule = backend.into();
-    assert_eq!(rule.retention, None);
+    let actual: FileRule = backend.into();
+    let expected = FileRule {
+        id: "file_rule_123".to_string(),
+        name: "camera-logs".to_string(),
+        digest: "sha256:abc123".to_string(),
+        source: FileRuleSource {
+            glob: "/data/*.mcap".to_string(),
+            stability_window_secs: 30,
+        },
+        upload: None,
+        retention: None,
+        created_at: created,
+        updated_at: updated,
+    };
+    assert_eq!(actual, expected); // lint:allow(field-by-field-assert)
 }
 
-// An unrecognized wire delete policy is treated as "never" rather than
-// erroring, so a backend that adds a new policy cannot cause data loss.
 #[test]
-fn from_backend_unknown_delete_policy_has_no_retention() {
-    let now = Utc::now();
+fn from_backend_absent_require_upload_is_false() {
+    let now = Utc::now().to_rfc3339();
     let backend = backend_rule(
-        &now.to_rfc3339(),
-        &now.to_rfc3339(),
-        backend_client::UploadDeletePolicy::UploadDeletePolicyUnknown,
+        &now,
+        &now,
+        None,
+        Some(backend_client::FileRuleRetention {
+            require_upload: None,
+            ttl_secs: 60,
+        }),
     );
 
     let rule: FileRule = backend.into();
-    assert_eq!(rule.retention, None);
+    assert_eq!(
+        rule.retention,
+        Some(FileRuleRetention {
+            require_upload: false,
+            ttl_secs: 60,
+        })
+    );
+}
+
+#[test]
+fn from_backend_negative_ttl_secs_clamps_to_zero() {
+    let now = Utc::now().to_rfc3339();
+    let backend = backend_rule(
+        &now,
+        &now,
+        Some(backend_upload()),
+        Some(backend_client::FileRuleRetention {
+            require_upload: Some(true),
+            ttl_secs: -1,
+        }),
+    );
+
+    let rule: FileRule = backend.into();
+    assert_eq!(
+        rule.retention,
+        Some(FileRuleRetention {
+            require_upload: true,
+            ttl_secs: 0,
+        })
+    );
+}
+
+#[test]
+fn from_backend_zero_ttl_secs_is_preserved() {
+    let now = Utc::now().to_rfc3339();
+    let backend = backend_rule(
+        &now,
+        &now,
+        Some(backend_upload()),
+        Some(backend_client::FileRuleRetention {
+            require_upload: Some(false),
+            ttl_secs: 0,
+        }),
+    );
+
+    let rule: FileRule = backend.into();
+    assert_eq!(
+        rule.retention,
+        Some(FileRuleRetention {
+            require_upload: false,
+            ttl_secs: 0,
+        })
+    );
 }
 
 #[test]
 fn from_backend_invalid_dates() {
-    let backend = backend_rule(
-        "not-a-date",
-        "also-not-a-date",
-        backend_client::UploadDeletePolicy::UPLOAD_DELETE_POLICY_AFTER_UPLOAD,
-    );
+    let backend = backend_rule("not-a-date", "also-not-a-date", None, None);
 
     let rule: FileRule = backend.into();
-    assert_eq!(rule.id, "upl_rule_123");
+    assert_eq!(rule.id, "file_rule_123");
     assert_eq!(rule.created_at, DateTime::<Utc>::UNIX_EPOCH);
     assert_eq!(rule.updated_at, DateTime::<Utc>::UNIX_EPOCH);
 }

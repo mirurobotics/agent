@@ -7,7 +7,7 @@ use miru_agent::filesys::{dirs, Overwrite};
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::Release;
-use miru_agent::services::errors::UploadRulesNotExpandedErr;
+use miru_agent::services::errors::FileRulesNotExpandedErr;
 use miru_agent::services::release as rls_svc;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
@@ -84,7 +84,7 @@ pub mod get_release_fallback {
             id: "rls_1".to_string(),
             version: "1.0.0".to_string(),
             git_commit_id: Some("gc_1".to_string()),
-            upload_rules: Some(vec![]),
+            file_rules: Some(vec![]),
             ..Default::default()
         };
         let stub = StubBackend::new().with_release(Ok(backend_rls));
@@ -104,18 +104,18 @@ pub mod get_release_fallback {
     }
 
     #[tokio::test]
-    async fn cache_miss_backend_release_with_upload_rules_links_ids() {
-        let (_dir, rls_stor) = setup("fb_rls_upload_rules").await;
+    async fn cache_miss_backend_release_with_file_rules_links_ids() {
+        let (_dir, rls_stor) = setup("fb_rls_file_rules").await;
         let backend_rls = backend_client::Release {
             id: "rls_1".to_string(),
             version: "1.0.0".to_string(),
-            upload_rules: Some(vec![
-                backend_client::BaseUploadRule {
-                    id: "upl_1".to_string(),
+            file_rules: Some(vec![
+                backend_client::BaseFileRule {
+                    id: "file_rule_1".to_string(),
                     ..Default::default()
                 },
-                backend_client::BaseUploadRule {
-                    id: "upl_2".to_string(),
+                backend_client::BaseFileRule {
+                    id: "file_rule_2".to_string(),
                     ..Default::default()
                 },
             ]),
@@ -128,7 +128,7 @@ pub mod get_release_fallback {
             .unwrap();
         assert_eq!(
             result.file_rule_ids,
-            vec!["upl_1".to_string(), "upl_2".to_string()]
+            vec!["file_rule_1".to_string(), "file_rule_2".to_string()]
         );
     }
 
@@ -212,12 +212,12 @@ pub mod get_release_fallback {
     }
 
     #[tokio::test]
-    async fn cache_miss_backend_missing_upload_rules_errors_and_does_not_cache() {
-        let (_dir, rls_stor) = setup("fb_rls_missing_upload_rules").await;
+    async fn cache_miss_backend_missing_file_rules_errors_and_does_not_cache() {
+        let (_dir, rls_stor) = setup("fb_rls_missing_file_rules").await;
         let backend_rls = backend_client::Release {
             id: "rls_1".to_string(),
             version: "1.0.0".to_string(),
-            upload_rules: None,
+            file_rules: None,
             ..Default::default()
         };
         let stub = StubBackend::new().with_release(Ok(backend_rls));
@@ -225,8 +225,8 @@ pub mod get_release_fallback {
         let result = rls_svc::get(&rls_stor, &stub, "rls_1".to_string()).await;
         assert!(matches!(
             result,
-            Err(ServiceErr::UploadRulesNotExpanded(
-                UploadRulesNotExpandedErr { .. }
+            Err(ServiceErr::FileRulesNotExpanded(
+                FileRulesNotExpandedErr { .. }
             ))
         ));
         assert_eq!(stub.release_calls(), 1);
@@ -236,7 +236,7 @@ pub mod get_release_fallback {
         let backend_rls = backend_client::Release {
             id: "rls_1".to_string(),
             version: "1.0.0".to_string(),
-            upload_rules: Some(vec![]),
+            file_rules: Some(vec![]),
             ..Default::default()
         };
         let stub2 = StubBackend::new().with_release(Ok(backend_rls));

@@ -499,23 +499,23 @@ mod pull_failure {
     }
 
     #[tokio::test]
-    async fn upload_rules_not_expanded_error() {
-        let f = Fixture::new("upload_rules_not_expanded_error").await;
+    async fn file_rules_not_expanded_error() {
+        let f = Fixture::new("file_rules_not_expanded_error").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
         let mut unexpanded = make_deployment_with_release("dpl_1", cfg_inst_args, "rel_1", None);
-        unexpanded.release.as_mut().unwrap().upload_rules = None;
+        unexpanded.release.as_mut().unwrap().file_rules = None;
         f.http_client
             .set_list_all_deployments(move || Ok(vec![unexpanded.clone()]));
 
         let err = f.sync().await.unwrap_err();
-        let is_upload_rules_not_expanded = matches!(err, SyncErr::UploadRulesNotExpanded(_))
+        let is_file_rules_not_expanded = matches!(err, SyncErr::FileRulesNotExpanded(_))
             || matches!(
                 &err,
-                SyncErr::SyncErrors(se) if se.errors.iter().any(|e| matches!(e, SyncErr::UploadRulesNotExpanded(_)))
+                SyncErr::SyncErrors(se) if se.errors.iter().any(|e| matches!(e, SyncErr::FileRulesNotExpanded(_)))
             );
         assert!(
-            is_upload_rules_not_expanded,
-            "expected UploadRulesNotExpanded (or SyncErrors containing it), got: {err:?}"
+            is_file_rules_not_expanded,
+            "expected FileRulesNotExpanded (or SyncErrors containing it), got: {err:?}"
         );
     }
 

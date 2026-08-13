@@ -131,7 +131,7 @@ async fn fetch_active_deployments<HTTPClientT: http::ClientI>(
     let expansions: &[&str] = &[
         "config_instances",
         "release.git_commit",
-        "release.upload_rules",
+        "release.file_rules",
     ];
     http::with_retry(|| {
         http::deployments::list_all(
@@ -246,8 +246,8 @@ async fn store_deployment(
 /// (which only keeps the release_id reference).
 ///
 /// File rules ride on the expanded release: the syncer always requests
-/// `expand=release.upload_rules`, so once a release is present a missing
-/// `upload_rules` array is a contract violation and surfaces as a hard error
+/// `expand=release.file_rules`, so once a release is present a missing
+/// `file_rules` array is a contract violation and surfaces as a hard error
 /// (mirroring the `config_instances` expansion). The extraction sits before the
 /// git_commit early-return so a release lacking a git commit still triggers the
 /// required rule check.
@@ -268,8 +268,8 @@ async fn store_expanded_release(
         return Ok(());
     };
 
-    let backend_rules = backend_release.upload_rules.clone().ok_or_else(|| {
-        SyncErr::UploadRulesNotExpanded(UploadRulesNotExpandedErr {
+    let backend_rules = backend_release.file_rules.clone().ok_or_else(|| {
+        SyncErr::FileRulesNotExpanded(FileRulesNotExpandedErr {
             deployment_id: backend_dpl.id.clone(),
         })
     })?;
