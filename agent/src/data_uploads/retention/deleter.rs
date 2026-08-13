@@ -57,7 +57,7 @@ enum SweepOutcome {
     NotDue,
     /// Transient stat/hash/delete failure; requeue and try next sweep.
     Retry,
-    /// File was deleted.
+    /// File was deleted; drop the job.
     Deleted,
     /// File is already gone; drop the job.
     AlreadyGone,
@@ -201,17 +201,15 @@ impl SingleThreadDeleter {
 
 // =================================== TRAIT ======================================= //
 // `-> impl Future + Send` (not `async fn`) so callers awaiting a generic
-// `D: DeleterExt` inside their own `Send` futures — the upload executor — can
-// prove those futures `Send` (the `TokenManagerExt`/`ObjectTransfer` pattern).
+// `D: DeleterExt` inside their own `Send` futures can prove those futures
+// `Send`.
 //
 // an async, actor-round-tripping is_empty would be dead weight next to len()
 #[allow(clippy::len_without_is_empty)]
 pub trait DeleterExt: Send + Sync {
-    /// Enqueue a job.
     fn enqueue(&self, job: Job) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
-    /// Walk the queue one job at a time, persisting after each drop.
+    /// Run one deletion pass over the queued jobs.
     fn sweep(&self) -> impl std::future::Future<Output = Result<(), DeleteErr>> + Send;
-    /// The number of jobs in the queue.
     fn len(&self) -> impl std::future::Future<Output = Result<usize, DeleteErr>> + Send;
     /// Stop the actor. Queued jobs stay in the persisted snapshot and are
     /// re-seeded on the next spawn.

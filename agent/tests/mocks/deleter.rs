@@ -17,9 +17,8 @@ pub enum MockStep {
 
 /// A test double for [`DeleterExt`] that records every `enqueue`d
 /// [`Job`] and follows a scripted result queue (an empty script
-/// defaults to `Ok`), mirroring `MockUploadExecutor`. `sweep` calls are
-/// counted with a settable result (mirroring `MockScanner`'s `scan`). The
-/// other trait methods return sensible defaults.
+/// defaults to `Ok`). `sweep` calls are counted with a settable
+/// result. The other trait methods return sensible defaults.
 pub struct MockDeleter {
     script: Mutex<VecDeque<MockStep>>,
     pub calls: Mutex<Vec<Job>>,

@@ -23,7 +23,7 @@ impl Patch<DeleteQueueSnapshot> for DeleteQueueSnapshot {
 }
 
 /// The queue's persistence handle: an atomically-written JSON snapshot with an
-/// in-memory cache. Mirrors the uploader's `QueueSnapshotFile`.
+/// in-memory cache.
 pub type DeleteQueueSnapshotFile = SingleThreadStateFile<DeleteQueueSnapshot, DeleteQueueSnapshot>;
 
 /// In-memory job queue with an optional snapshot. Mutations (`enqueue`,
@@ -90,8 +90,7 @@ impl Queue {
         self.entries.push_back(job);
     }
 
-    /// Write the in-memory queue to the snapshot. The only function that
-    /// touches disk; call it after a mutation that should survive a restart.
+    /// Call after a mutation that should survive a restart.
     pub async fn persist(&mut self) {
         let Some(snapshot_file) = self.snapshot_file.as_mut() else {
             return;
