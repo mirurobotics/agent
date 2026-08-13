@@ -181,16 +181,8 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
-                    // without a ceiling the worker can commit to a decades-long
-                    // sleep that a later forward clock correction would never
-                    // interrupt; bounding the wait makes it re-evaluate at least
-                    // once per maximum backoff, so the queue recovers once the
-                    // clock is corrected
-                    let ceiling = TimeDelta::seconds(self.options.backoff.max_secs.max(0))
-                        .to_std()
-                        .unwrap_or(Duration::ZERO);
                     let wait = match self.queue.earliest_next_attempt() {
-                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO).min(ceiling),
+                        Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
                         // unreachable: the queue is non-empty here
                         None => Duration::ZERO,
                     };
