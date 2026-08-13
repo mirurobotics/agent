@@ -501,3 +501,96 @@ mod earliest_next_attempt {
         );
     }
 }
+
+mod release_stale_deadlines {
+    use super::*;
+
+    #[tokio::test]
+    async fn stale_deadline_is_released() {
+        let mut queue = Queue::new(4);
+        let now = Utc::now();
+        // no 24h-max backoff schedule could have stamped this: it is what a
+        // snapshot written before a backward clock step looks like
+        queue
+            .requeue(QueueEntry {
+                id: Uuid::new_v4(),
+                job: make_job("a.log"),
+                attempts: 3,
+                next_attempt_at: Some(now + TimeDelta::hours(48)),
+            })
+            .await;
+
+        queue.release_stale_deadlines(now + TimeDelta::hours(24));
+
+        // stranded before the release; eligible immediately after, with its
+        // attempt count intact so the retry budget still applies
+        let entry = queue.next_ready(now).unwrap();
+        assert_eq!(entry.job.digest, "sha256:a.log");
+        assert_eq!(entry.next_attempt_at, None);
+        assert_eq!(entry.attempts, 3);
+    }
+
+    #[tokio::test]
+    async fn deadline_within_horizon_is_untouched() {
+        let mut queue = Queue::new(4);
+        let now = Utc::now();
+        let horizon = now + TimeDelta::hours(24);
+        // exactly at the horizon: an ordinary maximum-backoff wait, still honored
+        queue
+            .requeue(QueueEntry {
+                id: Uuid::new_v4(),
+                job: make_job("a.log"),
+                attempts: 7,
+                next_attempt_at: Some(horizon),
+            })
+            .await;
+
+        queue.release_stale_deadlines(horizon);
+
+        assert!(queue.next_ready(now).is_none());
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn release_is_in_memory_until_the_next_mutation() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let now = Utc::now();
+        let stale = now + TimeDelta::hours(48);
+
+        let mut queue = Queue::from_snapshot(8, open(&path).await);
+        // the requeues persist the stale stamps; the release deliberately does
+        // not write, so the file still carries them afterwards
+        for name in ["a.log", "b.log"] {
+            queue
+                .requeue(QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job(name),
+                    attempts: 2,
+                    next_attempt_at: Some(stale),
+                })
+                .await;
+        }
+
+        queue.release_stale_deadlines(now + TimeDelta::hours(24));
+
+        let head_deadline = |raw: &str| -> serde_json::Value {
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]
+                .clone()
+        };
+        let raw = files::read_string(&path).await.unwrap();
+        assert!(
+            !head_deadline(&raw).is_null(),
+            "release should not have rewritten the snapshot: {raw}"
+        );
+
+        // the next mutation writes the corrected entries through
+        let entry = queue.next_ready(now).unwrap();
+        queue.remove(entry.id).await;
+        let raw = files::read_string(&path).await.unwrap();
+        assert!(
+            head_deadline(&raw).is_null(),
+            "the removal should have persisted the released state: {raw}"
+        );
+    }
+}
