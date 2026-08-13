@@ -96,8 +96,13 @@ impl AppState {
         // initialize the deleter and uploader before the scanner: the
         // scanner's stable-file sinks are built from their handles
         let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
-        let (uploader, uploader_handle) =
-            Self::init_uploader(layout, http_client.clone(), token_mngr.clone()).await?;
+        let (uploader, uploader_handle) = Self::init_uploader(
+            layout,
+            http_client.clone(),
+            token_mngr.clone(),
+            deleter.clone(),
+        )
+        .await?;
 
         // initialize the scanner with the upload and retention sinks
         let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![
@@ -198,13 +203,16 @@ impl AppState {
     }
 
     /// Spawn the uploader actor driving the live executor (credential mint → native SDK
-    /// transfer → confirm). A snapshot-file error degrades to uploading without
-    /// queue persistence (fail-open); a spawn error fails boot, but no such
-    /// error path currently exists (`Uploader::spawn` cannot fail today).
+    /// transfer → confirm). The deleter handle receives a delete job whenever a
+    /// confirmed upload's retention requires the upload. A snapshot-file error
+    /// degrades to uploading without queue persistence (fail-open); a spawn
+    /// error fails boot, but no such error path currently exists
+    /// (`Uploader::spawn` cannot fail today).
     async fn init_uploader(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
+        deleter: Arc<retention::Deleter>,
     ) -> Result<(Arc<upload::Uploader>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match upload::QueueSnapshotFile::new_with_default(
             layout.upload_queue(),
@@ -229,6 +237,7 @@ impl AppState {
         let (uploader, handle) = upload::Uploader::spawn(
             64,
             executor,
+            deleter,
             upload::UploaderOptions::default(),
             snapshot_file,
             |wait| tokio::time::sleep(wait),
