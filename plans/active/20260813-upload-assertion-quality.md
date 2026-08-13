@@ -18,10 +18,10 @@ After this change, each of those tests fails if the behavior it names regresses:
 
 ## Progress
 
-- [ ] Milestone 1: pin backoff and assert exact sleeps in `hung_attempt_times_out_and_is_retried`.
-- [ ] Milestone 1: pin backoff and assert exact sleeps in `retried_upload_enqueues_once_at_confirm_time`.
-- [ ] Milestone 1: perturbation check (both tests fail with the perturbed constant, pass with it restored).
-- [ ] Milestone 1: commit.
+- [x] Milestone 1: pin backoff and assert exact sleeps in `hung_attempt_times_out_and_is_retried`.
+- [x] Milestone 1: pin backoff and assert exact sleeps in `retried_upload_enqueues_once_at_confirm_time`.
+- [x] Milestone 1: perturbation check (both tests fail with the perturbed constant, pass with it restored).
+- [x] Milestone 1: commit.
 - [ ] Milestone 2: drop the message assertion in `full_queue_returns_queue_full_err`, assert the carried fields.
 - [ ] Milestone 2: commit.
 - [ ] Milestone 3: add `TransferErr` to `agent/src/data_uploads/upload/errors.rs`; use it at the three `transfer.rs` construction sites.
@@ -31,7 +31,34 @@ After this change, each of those tests fails if the behavior it names regresses:
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The plan's derived arithmetic held exactly: both tightened backoff tests pass
+  with `vec![Duration::from_secs(1)]` as written, with no adjustment to match
+  what the code happened to produce.
+
+- **Perturbation check 1 (Milestone 1), observed.** With
+  `cooldown::calc(&self.options.backoff, entry.attempts - 1)` changed to
+  `entry.attempts` in `agent/src/data_uploads/upload/uploader.rs`,
+  `cargo test --features test data_uploads::upload::uploader` reported
+  `FAILED. 36 passed; 3 failed`:
+
+        ---- data_uploads::upload::uploader::hung_attempt_times_out_and_is_retried stdout ----
+        panicked at agent/tests/data_uploads/upload/uploader.rs:364:5:
+        assertion `left == right` failed
+          left: [2s]
+         right: [1s]
+
+        ---- data_uploads::upload::uploader::retention_producer::retried_upload_enqueues_once_at_confirm_time stdout ----
+        panicked at agent/tests/data_uploads/upload/uploader.rs:887:9:
+        assertion `left == right` failed
+          left: [2s]
+         right: [1s]
+
+  Bonus signal the plan did not predict: the pre-existing
+  `retry_backoff_follows_expected_sequence` also failed
+  (`left: [2s, 4s, 4s, 4s]` / `right: [1s, 2s, 4s, 4s]`), confirming the model
+  test this milestone copied was already constraining. After
+  `git checkout -- agent/src/data_uploads/upload/uploader.rs`, all 39 pass
+  (`0 failed`).
 
 ## Decision Log
 
