@@ -54,8 +54,15 @@ pub struct UploaderOptions {
     pub attempt_timeout_bytes_per_sec: u64,
     /// Backstop on the network-error attempt exemption: a job first observed
     /// longer ago than this is dropped even if every failure so far was
-    /// network-classified.
+    /// network-classified. The drop only fires for ages up to
+    /// `max_plausible_job_age`; see that field.
     pub max_job_age: TimeDelta,
+    /// Upper bound on a believable job age. An age beyond this cannot be a
+    /// real file age on this device, so it is evidence that the wall clock
+    /// jumped between the `first_observed_at` stamp and now (a device with
+    /// no battery-backed RTC boots at 1970, then NTP steps it forward).
+    /// The age backstop is not applied in that case: the job is requeued.
+    pub max_plausible_job_age: TimeDelta,
 }
 
 impl Default for UploaderOptions {
@@ -71,6 +78,7 @@ impl Default for UploaderOptions {
             attempt_timeout_floor: Duration::from_secs(120),
             attempt_timeout_bytes_per_sec: 64 * 1024,
             max_job_age: TimeDelta::days(7),
+            max_plausible_job_age: TimeDelta::days(3650),
         }
     }
 }
@@ -243,14 +251,19 @@ where
     }
 
     /// Network connection errors are expected and do not count toward the
-    /// attempt budget. Drop the job if it has aged past the backstop;
-    /// otherwise stamp a flat cooldown and requeue at the tail.
+    /// attempt budget. Three outcomes: drop the job when it has aged past the
+    /// backstop and the age is still plausible; requeue when the age is
+    /// implausibly large, since that is a wall-clock correction rather than an
+    /// old job; otherwise stamp a flat cooldown and requeue at the tail.
     async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) -> Flow {
         let age = (self.now_fn)() - entry.job.first_observed_at;
         if age >= self.options.max_job_age {
-            Self::log_age_drop(&entry, age, &err);
-            self.queue.remove(entry.id).await;
-            return Flow::Continue;
+            if age <= self.options.max_plausible_job_age {
+                Self::log_age_drop(&entry, age, &err);
+                self.queue.remove(entry.id).await;
+                return Flow::Continue;
+            }
+            Self::log_implausible_age(&entry, age);
         }
 
         let wait = self.options.backoff.base_secs.max(0);
@@ -378,6 +391,20 @@ where
             entry.job.file_rule_id,
             entry.job.file,
             entry.job.digest,
+            entry.attempts
+        );
+    }
+
+    fn log_implausible_age(entry: &QueueEntry, age: TimeDelta) {
+        warn!(
+            "upload: computed job age of {} days is not a believable file age; treating it \
+             as a wall-clock correction rather than an old job and keeping the job queued \
+             (rule {}, file {}, digest {}, first observed at {}, attempt {})",
+            age.num_days(),
+            entry.job.file_rule_id,
+            entry.job.file,
+            entry.job.digest,
+            entry.job.first_observed_at,
             entry.attempts
         );
     }
