@@ -23,7 +23,7 @@ A prior change (referred to below as "PR 1") already introduced the *domain* typ
 
 This plan is "PR 4 — Wire flip" of the umbrella plan `agent/plans/active/20260809-adopt-file-rules-spec-v0.5.md`. After it, the vendored spec is v0.5.0-beta.2, the wire models natively have `BaseFileRule`, and the adapter becomes a direct near-1:1 field copy. Nothing about agent behavior changes for the user other than that the agent now speaks v0.5 to the backend.
 
-Observable outcome: `rg 'upload_rule|UploadRule|upload_rules' agent/src agent/tests` returns no matches for wire-level vocabulary, `api/specs/backend/v05.yaml` exists with `x-release-version: v0.5.0-beta.2`, and `./scripts/preflight.sh` reports `CLEAN`.
+Observable outcome: `rg 'upload_rules|UploadRule|UploadDeletePolicy|upload_rule_id' agent/src agent/tests` returns no matches, `api/specs/backend/v05.yaml` exists with `x-release-version: v0.5.0-beta.2`, `./scripts/preflight.sh` is clean apart from the known-ignorable `agent/src/workers` covgate gap, and CI is green on the pushed head.
 
 **Merge coordination (important):** this is a coordinated breaking change. The agent cannot ship v0.5 until the backend actually serves v0.5, because old-shape and new-shape file rules are not mutually deserializable. The pull request for this work stays a **draft** until the backend is serving v0.5.
 
@@ -220,9 +220,7 @@ Eyeball the diff against the spec-delta inventory in Context and Orientation. Sp
 
 Also confirm the generated `require_upload` is `Option<bool>` and `ttl_secs` is `i64` in `libs/backend-api/src/models/file_rule_retention.rs`, and note the exact parameter order of the generated `BaseConfigInstance::new(..)` / `ConfigInstance::new(..)` — Milestone 5 needs it.
 
-Do **not** attempt to build yet; hand-written code still uses the removed types and will not compile until Milestone 4.
-
-If device generation fails: a completed plan (`plans/completed/20260515-forward-compatible-enums-via-generator.md`, line 38) records that device generation once failed under generator 7.12.0 on a YAML folded-scalar parse bug. `regen.sh` uses `set -e`, so it aborts *after* the backend models were already replaced, leaving a half-applied tree. Recover with `git checkout -- libs/` and re-run.
+If `./api/regen.sh` fails, see **Idempotence and Recovery → A failed regen** before touching `libs/`.
 
 Commit:
 
@@ -314,11 +312,25 @@ Working directory: `/home/ben/miru/workbench1/repos/agent`.
 
 **Expansion literal in tests.** `agent/tests/services/backend.rs:70` asserts the query pair `("expand", "upload_rules")` → change to `"file_rules"`.
 
-**`Release.file_rules` field accesses in tests.** Update: `agent/tests/services/release/get.rs:87,112,220,239`; `agent/tests/services/release/current.rs:200`; `agent/tests/models/release.rs:80,111`; `agent/tests/sync/helpers.rs:74,99`; `agent/tests/sync/deployments.rs:506`.
+**`Release.file_rules` field accesses in tests.** Update: `agent/tests/services/release/get.rs:87,112,220,239`; `agent/tests/services/release/current.rs:200`; `agent/tests/models/release.rs:80,111`; `agent/tests/sync/helpers.rs:74,99`; `agent/tests/sync/deployments.rs:506`. Also update, in the same pass — these match the acceptance grep and/or are `BaseUploadRule` type references that will not compile:
+
+- `agent/tests/services/release/get.rs:113,117` — `backend_client::BaseUploadRule { id: .., ..Default::default() }` literals → `BaseFileRule`.
+- `agent/tests/sync/helpers.rs:3` — the `use backend_api::models::{BaseUploadRule, ..}` import → `BaseFileRule`.
+- `agent/tests/sync/helpers.rs:78-79` — `make_backend_file_rule` returns/constructs `BaseUploadRule` → `BaseFileRule` (the fn name is already correct).
+
+**Test names, fixture directories, and comments.** These do not break the build but do keep the acceptance grep dirty; rename them:
+
+- `agent/tests/services/release/get.rs:107` — `cache_miss_backend_release_with_upload_rules_links_ids` → `..._with_file_rules_...`; `:108` — fixture dir `"fb_rls_upload_rules"` → `"fb_rls_file_rules"`.
+- `agent/tests/services/release/get.rs:215` — `cache_miss_backend_missing_upload_rules_errors_and_does_not_cache` → `..._missing_file_rules_...`; `:216` — `"fb_rls_missing_upload_rules"` → `"fb_rls_missing_file_rules"`.
+- `agent/tests/sync/helpers.rs:88` — doc comment `release.upload_rules` → `release.file_rules`.
+- `agent/tests/sync/deployments.rs:502,503` — the fn name `upload_rules_not_expanded_error` and its fixture string (inside the `502-518` range listed in the error-variant item below; rename them too).
 
 **Error-variant renames in tests.** Update: `agent/tests/services/errors.rs:11,54,55,100-102`; `agent/tests/sync/errors.rs:14,105-110`; `agent/tests/services/release/get.rs:10,228-229`; `agent/tests/sync/deployments.rs:502-518`. Where a test asserts on the error's display string, update the expected text to the new `file_rules` wording.
 
-**`upload_rule_id` in tests.** `agent/tests/http/uploads.rs:22` sets `upload_rule_id: "uplr_1"` on a generated struct — rename the field to `file_rule_id`.
+**`upload_rule_id` in tests.** Two sites, both generated-struct literals; rename the field to `file_rule_id` in each:
+
+- `agent/tests/http/uploads.rs:22` — `upload_rule_id: "uplr_1"` on a `CreateUploadRequest`.
+- `agent/tests/data_uploads/upload/executor.rs:502` — `upload_rule_id: "rule_1"` on the `expected` `CreateUploadRequest`. (The neighbouring `UploadJob` at line 496 already uses the domain field `file_rule_id` and needs no change — do not let that fool you into skipping line 502.)
 
 **New required `slot_key` on generated config instances.** Only fixtures that build the generated `backend_client::ConfigInstance` with a *full struct literal* (no `..Default::default()`) break:
 
@@ -327,14 +339,19 @@ Working directory: `/home/ben/miru/workbench1/repos/agent`.
 
 Use a realistic value such as `"default".to_string()` (the spec's `Deployment` examples use `slot_key: default`). Fixtures that use `..Default::default()` need no change: `agent/tests/services/deployment/get.rs:93`, `agent/tests/models/deployment.rs:653,658`. `agent/src/models/config_instance.rs:38` (`From<backend_client::ConfigInstance>`) simply ignores the new field — no change. Files that construct the *domain* config-instance type (`agent/tests/sync/{syncer,deployments,helpers}.rs`, `agent/tests/deploy/{filesys,apply}.rs`, `agent/src/deploy/filesys.rs`) are unaffected.
 
-**New adapter unit tests.** `agent/src/models/.covgate` is `100`, so every branch of the new `From<backend_client::BaseFileRule>` must be exercised. Add tests (in the existing `agent/tests/models/file_rule.rs` if present, otherwise alongside the other model tests, following the file's existing style) covering, at minimum:
+**Rewrite `agent/tests/models/file_rule.rs` — it exists today and is built on the removed v0.4 types.** Four items must change before the new tests are added:
+
+- Helper `backend_rule()` (lines 98-121) constructs `backend_client::BaseUploadRule` with `object: base_upload_rule::Object::UploadRule`, a `UploadRuleSource`, and a `UploadRuleDestination { .., delete_policy }`. Retarget it to build `backend_client::BaseFileRule` with `source: Box::new(backend_client::FileRuleSource {..})`, `upload`, and `retention`. Drop the `delete_policy` parameter; add `upload`/`retention` parameters (or overloads) so the four new cases below can drive them. Follow the generated `base_file_rule.rs` exactly for `Box` / `Option<Box<..>>` shapes.
+- `from_backend` (line 125): keep, retargeted. Its expected `retention` currently asserts `ttl_secs: 0` synthesized from the delete policy — with v0.5 this becomes whatever `ttl_secs` the fixture sets.
+- `from_backend_never_delete_policy_has_no_retention` (line 163) and `from_backend_unknown_delete_policy_has_no_retention` (line 178): **delete**. `UploadDeletePolicy` no longer exists and the branches they cover are gone.
+- `from_backend_invalid_dates` (line 191): **keep**, retargeted. The parse-with-fallback-to-`UNIX_EPOCH` branch survives Milestone 3 verbatim and is required by the `agent/src/models/.covgate` = 100 gate.
+
+**New adapter unit tests.** `agent/src/models/.covgate` is `100`, so every branch of the new `From<backend_client::BaseFileRule>` must be exercised. Add tests (in `agent/tests/models/file_rule.rs`, after the rewrite above, following the file's existing style) covering, at minimum:
 
 1. **Full rule** — `upload: Some(..)` and `retention: Some(..)` both present. Assert every domain field maps across, including all five `upload` fields and both `source` fields.
 2. **Bare rule** — `upload: None` and `retention: None`. Assert both domain fields are `None` and the rest still map.
 3. **`require_upload` absent** — `retention: Some(..)` with `require_upload: None`. Assert the domain value is `false`.
 4. **`ttl_secs` clamp** — `retention: Some(..)` with a negative `ttl_secs` (e.g. `-1`). Assert the domain value is `0`. Also cover a normal positive value.
-
-Additionally keep or add a test for the timestamp fallback path (an unparseable `created_at` / `updated_at` yields `DateTime::<Utc>::UNIX_EPOCH`) if the previous adapter tests covered it — the branch still exists and still counts toward the 100% gate.
 
 If a test ends up with four or more `assert_eq!` calls on fields of the same variable, add `// lint:allow(field-by-field-assert)` above the test function, per the repo's custom linter rule.
 
@@ -356,12 +373,21 @@ Then push and open the pull request **as a draft**:
     git push -u origin feat/revendor-spec-v05-beta2
     gh pr create --draft --title "Re-vendor backend spec agent/v0.5.0-beta.2 and flip to file rules" --body "<summary>"
 
-The PR body should state that this is a coordinated breaking change (`v0.5.0-beta.x` agent release) that cannot merge or release until the backend serves v0.5, and should flag that there is no CI drift gate between spec and generated models so the regen diff needs a human eyeball.
+The PR body should state that this is a coordinated breaking change (`v0.5.0-beta.x` agent release) that cannot merge or release until the backend serves v0.5, should flag that there is no CI drift gate between spec and generated models so the regen diff needs a human eyeball, and should state that the PR must be **squash-merged** because Milestones 2 through 4 do not build.
 
 
 ## Validation and Acceptance
 
-**The acceptance bar: `./scripts/preflight.sh` must report `CLEAN`, meaning CI is green on the pushed branch head, before the pull request leaves draft or this task is reported complete.** No partial-green result is acceptable, with the one documented exception below.
+**The acceptance bar has two parts, both required before the pull request leaves draft or this task is reported complete.**
+
+**(1) Local:** `./scripts/preflight.sh` prints `Preflight clean`, *or* fails with `tests=1` where the `=== Tests ===` block shows the **only** failing directory is `agent/src/workers` (see the known-ignorable note below). Any other failure, in any of the four blocks, is real. `preflight.sh` is all-or-nothing: it has no "clean except X" exit status, so this exception must be confirmed by reading its output.
+
+**(2) CI:** the `CI` workflow is green on the pushed branch head. `preflight.sh` is entirely local and never queries GitHub, so verify this explicitly. From `/home/ben/miru/workbench1/repos/agent`:
+
+    gh api repos/mirurobotics/agent/actions/runs \
+      --jq '[.workflow_runs[] | select(.head_branch=="feat/revendor-spec-v05-beta2")][0] | {name, status, conclusion, head_sha}'
+
+Expect `"status": "completed"` and `"conclusion": "success"`, with `head_sha` matching `git rev-parse HEAD`. Use `gh api` (REST) rather than GraphQL-backed `gh` subcommands, which are broken in this environment.
 
 Individual commands, in order, all from `/home/ben/miru/workbench1/repos/agent`:
 
@@ -385,14 +411,15 @@ Individual commands, in order, all from `/home/ben/miru/workbench1/repos/agent`:
 
 **Known-ignorable local failure:** `agent/src/workers/.covgate` fails locally on every branch regardless of what is changed — it is a pre-existing local-versus-CI gap and it passes in CI. Do **not** try to fix it and do **not** lower the threshold. Any *other* covgate failure is real.
 
-`./scripts/preflight.sh` — runs `scripts/lint.sh`, `scripts/covgate.sh`, `tools/lint/scripts/lint.sh` (with `LINT_FIX=0`), and `tools/lint/scripts/covgate.sh` in parallel. Expected final report: `CLEAN`.
+`./scripts/preflight.sh` — runs `scripts/lint.sh`, `scripts/covgate.sh`, `tools/lint/scripts/lint.sh` (with `LINT_FIX=0`), and `tools/lint/scripts/covgate.sh` in parallel. Expected final report: `Preflight clean` — or, per the known-ignorable note above, `Preflight FAILED (lint=0 tests=1 tools_lint=0 tools_tests=0)` where the `=== Tests ===` block names only `agent/src/workers`.
 
 Behavioral acceptance checks:
 
     rg -n 'upload_rules|UploadRule|UploadDeletePolicy|upload_rule_id' agent/src agent/tests
-    # expect: no matches (the local helper fns named `upload_rule()` in
-    # data_uploads/scan/scanner.rs and tests/data_uploads/upload/sink.rs are
-    # deliberately out of scope and may still match `upload_rule` — nothing else should)
+    # expect: no matches, unqualified. (The local helper fns named `upload_rule()`
+    # in data_uploads/scan/scanner.rs and tests/data_uploads/upload/sink.rs are
+    # out of scope for this PR, but bare `upload_rule` does not match this
+    # pattern, so they do not appear here. Any hit is a real miss.)
 
     rg -n 'x-release-version' api/specs/backend/v05.yaml   # v0.5.0-beta.2
     test ! -f api/specs/backend/v04.yaml && echo "old spec removed"
@@ -407,11 +434,16 @@ Every step is safe to re-run.
 
 **Re-running `./api/regen.sh`** is fully idempotent: it cleans `api/codegen/` and wholesale-replaces both model directories from scratch. Running it twice produces the same tree.
 
-**Half-applied regen.** `regen.sh` uses `set -e`. If device generation fails, backend models have already been replaced and the tree is inconsistent. Recover with:
+**A failed regen.** `api/Makefile` generates **both** backend and device before `regen.sh` copies anything (`regen.sh:10` runs `make gen`; the first `rm -rf` is at `regen.sh:17`). Under `set -e` this means:
 
-    git checkout -- libs/
+- **Generation failure** — the known historical case is a generator 7.12.0 YAML folded-scalar parse bug on the device spec (recorded in `plans/completed/20260515-forward-compatible-enums-via-generator.md`). `libs/` is untouched and clean; fix the underlying spec/generator issue and re-run. There is nothing to restore.
+- **Copy-stage failure** — the backend copy (`regen.sh:17-23`) succeeded and the device copy (`regen.sh:31-37`) failed, leaving `libs/` half-applied.
 
-then fix the underlying cause and re-run `./api/regen.sh`. The known historical cause is a generator 7.12.0 YAML folded-scalar parse bug on the device spec (`plans/completed/20260515-forward-compatible-enums-via-generator.md:38`).
+Always confirm which one you are in before recovering. From `/home/ben/miru/workbench1/repos/agent`:
+
+    git status --short libs/
+
+Empty output means a generation failure — no recovery needed. Dirty `libs/device-api`, or an unexpectedly dirty `libs/`, means run `git checkout -- libs/`, fix the cause, and re-run `./api/regen.sh`.
 
 **Reverting a milestone.** Each milestone is a single commit, so `git revert <sha>` or `git reset --hard HEAD~1` (before pushing) backs out exactly one step. To abandon everything and start over:
 
@@ -421,4 +453,4 @@ This is destructive to uncommitted work — check `git status` first, and prefer
 
 **Nothing here is destructive outside the agent repo.** The openapi repo is never written to. The only deletion is `git rm api/specs/backend/v04.yaml`, recoverable at any time with `git checkout main -- api/specs/backend/v04.yaml`.
 
-**Intermediate commits do not compile.** Milestones 2 through 4 leave the tree in a non-building state by design (regen renames types before the hand-written call sites are flipped). If you need a compiling tree mid-flight, complete Milestone 4 before running any `cargo` command. Do not bisect within this branch expecting green intermediate commits.
+**Do not bisect within this branch.** As stated in *Plan of Work*, Milestones 2 through 4 do not build. If you need a compiling tree mid-flight, complete Milestone 4 first. Because of this, **the pull request must be squash-merged**, so the non-building commits never reach `main`. That matches the agent repo's existing practice — `main` is fully linear and every commit carries a `(#NNN)` squash suffix (`git log --merges main` is empty) — though note there is no written merge-mode rule in `AGENTS.md` or `.github/`; this is an observed convention.
