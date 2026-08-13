@@ -32,7 +32,8 @@ macro_rules! dispatch {
 
 #[derive(Clone, Debug)]
 pub struct UploaderOptions {
-    /// Maximum number of queued jobs (in-flight job excluded).
+    /// Maximum number of queued jobs. A job being uploaded stays queued until
+    /// the backend confirms it, so it still counts against this.
     pub queue_capacity: usize,
     /// Total executor attempts per job before it is dropped.
     pub attempts: u32,
@@ -88,10 +89,12 @@ impl UploaderOptions {
 pub trait UploaderExt: Send + Sync {
     /// Push a job at the tail of the queue.
     async fn enqueue(&self, job: Job) -> Result<(), UploadErr>;
-    /// The number of queued jobs, excluding any in-flight job.
+    /// The number of queued jobs, including one being uploaded — it stays
+    /// queued until the backend confirms it.
     async fn len(&self) -> Result<usize, UploadErr>;
     /// Stop the actor, dropping any in-flight upload future (see the cancel
-    /// safety contract on [`UploadExecutor`]) and all queued jobs.
+    /// safety contract on [`UploadExecutor`]). Queued jobs, including the
+    /// interrupted one, stay on disk and are retried by the next process.
     async fn shutdown(&self) -> Result<(), UploadErr>;
 }
 
@@ -150,7 +153,7 @@ where
     pub(crate) async fn run(mut self) {
         loop {
             let now = (self.now_fn)();
-            match self.queue.pop_ready(now).await {
+            match self.queue.next_ready(now) {
                 Some(entry) => {
                     if let Flow::Shutdown = self.run_attempt(entry).await {
                         break;
@@ -188,10 +191,13 @@ where
     async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
         Self::log_attempt(&entry);
         match self.attempt_upload(&entry).await {
+            // the attempt was cancelled -> leave the entry in the queue so the next
+            // boot picks it up rather than losing it
             AttemptOutcome::ShuttingDown => Flow::Shutdown,
             AttemptOutcome::Succeeded => {
                 entry.attempts += 1;
                 Self::log_success(&entry);
+                self.queue.remove(entry.id).await;
                 Flow::Continue
             }
             AttemptOutcome::Failed(err) if err.is_network_conn_err() => {
@@ -208,6 +214,7 @@ where
         let age = (self.now_fn)() - entry.job.first_observed_at;
         if age >= self.options.max_job_age {
             Self::log_age_drop(&entry, age, &err);
+            self.queue.remove(entry.id).await;
             return Flow::Continue;
         }
 
@@ -233,10 +240,12 @@ where
 
         if err.is_terminal() {
             Self::log_terminal_drop(&entry, &err);
+            self.queue.remove(entry.id).await;
             return Flow::Continue;
         }
         if entry.attempts >= self.options.attempts {
             Self::log_dropped(&entry, &err);
+            self.queue.remove(entry.id).await;
             return Flow::Continue;
         }
 
