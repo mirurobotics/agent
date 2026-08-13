@@ -16,7 +16,7 @@ impl ModelFixture for FileRule {
         vec![
             RequiredField {
                 key: "id",
-                value: json!("upl_rule_123"),
+                value: json!("file_rule_123"),
             },
             RequiredField {
                 key: "name",
@@ -127,8 +127,6 @@ fn backend_rule(
     }
 }
 
-// A rule that both uploads and deletes: every wire field must land on the
-// domain type, including all five upload fields and both retention fields.
 #[test]
 fn from_backend() {
     let created = Utc::now();
@@ -169,8 +167,6 @@ fn from_backend() {
     assert_eq!(actual, expected); // lint:allow(field-by-field-assert)
 }
 
-// A bare rule carries neither an upload block nor a retention block: both
-// optional domain fields stay `None` while the rest still maps.
 #[test]
 fn from_backend_no_upload_or_retention() {
     let created = Utc::now();
@@ -194,8 +190,6 @@ fn from_backend_no_upload_or_retention() {
     assert_eq!(actual, expected); // lint:allow(field-by-field-assert)
 }
 
-// The spec marks `require_upload` optional: it is present exactly when the rule
-// has an upload block, so an absent value means there is nothing to wait on.
 #[test]
 fn from_backend_absent_require_upload_is_false() {
     let now = Utc::now().to_rfc3339();
@@ -219,8 +213,6 @@ fn from_backend_absent_require_upload_is_false() {
     );
 }
 
-// The wire types `ttl_secs` as a signed int64 while the domain uses u64: a
-// negative wire value clamps to zero rather than wrapping around.
 #[test]
 fn from_backend_negative_ttl_secs_clamps_to_zero() {
     let now = Utc::now().to_rfc3339();

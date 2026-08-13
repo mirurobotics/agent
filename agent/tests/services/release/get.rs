@@ -111,11 +111,11 @@ pub mod get_release_fallback {
             version: "1.0.0".to_string(),
             file_rules: Some(vec![
                 backend_client::BaseFileRule {
-                    id: "upl_1".to_string(),
+                    id: "file_rule_1".to_string(),
                     ..Default::default()
                 },
                 backend_client::BaseFileRule {
-                    id: "upl_2".to_string(),
+                    id: "file_rule_2".to_string(),
                     ..Default::default()
                 },
             ]),
@@ -128,7 +128,7 @@ pub mod get_release_fallback {
             .unwrap();
         assert_eq!(
             result.file_rule_ids,
-            vec!["upl_1".to_string(), "upl_2".to_string()]
+            vec!["file_rule_1".to_string(), "file_rule_2".to_string()]
         );
     }
 

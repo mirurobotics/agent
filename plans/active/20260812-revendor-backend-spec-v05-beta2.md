@@ -56,7 +56,24 @@ Observable outcome: `rg 'upload_rules|UploadRule|UploadDeletePolicy|upload_rule_
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+All five milestones landed as five commits on `feat/revendor-spec-v05-beta2`
+(`00f0510` vendor spec → `c2b2050` fixtures + adapter tests). The vendored spec is
+`api/specs/backend/v05.yaml` at `v0.5.0-beta.2`, `v04.yaml` is gone, `api/Makefile`
+points at the new file, and `libs/device-api` came back byte-identical from the regen.
+
+The adapter in `agent/src/models/file_rule.rs` is now a near-1:1 field copy: the
+`UploadDeletePolicy` match and the `*rule.destination` unwrap are gone, `name` comes
+from the wire instead of `upload_collection_name`, and `upload`/`retention` are both
+genuinely optional. Only two impedance mismatches remain, each covered by a dedicated
+test: `require_upload: Option<bool>` → `unwrap_or(false)` and `ttl_secs: i64` →
+`.max(0) as u64`.
+
+Two deviations from the plan as written are recorded in the Decision Log: the spec was
+vendored from the stamped GitHub release asset rather than the raw openapi bundle, and
+`Cargo.lock` was deliberately left unrefreshed.
+
+Still outstanding: the PR stays a **draft** until the backend serves v0.5, and it must be
+squash-merged because Milestones 2 through 4 do not build.
 
 
 ## Context and Orientation

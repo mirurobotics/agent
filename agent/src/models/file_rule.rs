@@ -16,8 +16,6 @@ pub struct FileRuleSource {
     pub stability_window_secs: i64,
 }
 
-// `backend_client::FileRuleSource` is the wire type; the unqualified `FileRuleSource`
-// is the domain type of the same name, disambiguated by the `backend_client` alias.
 impl From<backend_client::FileRuleSource> for FileRuleSource {
     fn from(source: backend_client::FileRuleSource) -> FileRuleSource {
         FileRuleSource {
@@ -96,10 +94,7 @@ impl From<backend_client::BaseFileRule> for FileRule {
             source: (*rule.source).into(),
             upload: rule.upload.map(|u| (*u).into()),
             retention: rule.retention.map(|r| FileRuleRetention {
-                // the spec marks require_upload optional: it is present exactly
-                // when the rule has an upload block. absent => nothing to wait on.
                 require_upload: r.require_upload.unwrap_or(false),
-                // the spec types ttl_secs as int64; the domain uses u64.
                 ttl_secs: r.ttl_secs.max(0) as u64,
             }),
             created_at: rule
