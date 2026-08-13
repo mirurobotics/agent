@@ -24,6 +24,11 @@ pub struct QueueEntry {
     #[serde(default = "Uuid::new_v4")]
     pub id: Uuid,
     pub job: Job,
+    /// Sweeps that failed in a way we chose to count (see `SweepOutcome` in
+    /// `deleter.rs`). Defaulted so a snapshot written before this field
+    /// existed loads with a full budget rather than resetting the queue.
+    #[serde(default)]
+    pub attempts: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -100,6 +105,7 @@ impl Queue {
         self.entries.push_back(QueueEntry {
             id: Uuid::new_v4(),
             job,
+            attempts: 0,
         });
         self.persist().await;
         info!("delete: job enqueued; queue length {}", self.entries.len());
@@ -166,5 +172,11 @@ impl Queue {
     #[cfg(test)]
     pub(crate) fn entries(&self) -> Vec<Job> {
         self.entries.iter().map(|entry| entry.job.clone()).collect()
+    }
+
+    /// The queued entries, oldest enqueue first (test observability only).
+    #[cfg(test)]
+    pub(crate) fn queue_entries(&self) -> Vec<QueueEntry> {
+        self.entries.iter().cloned().collect()
     }
 }

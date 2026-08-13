@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::data_uploads::retention::{
     errors::*,
     job::Job,
-    queue::{DeleteQueueSnapshotFile, Queue},
+    queue::{DeleteQueueSnapshotFile, Queue, QueueEntry},
 };
 use crate::filesys::{errors::FileSysErr, files};
 use crate::trace;
@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 const DEFAULT_QUEUE_CAPACITY: usize = 4096;
+const DEFAULT_ATTEMPTS: u32 = 10;
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -34,6 +35,8 @@ pub struct DeleterArgs {
     pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     pub queue_capacity: usize,
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
+    /// Total sweep attempts per job before it is dropped.
+    pub attempts: u32,
 }
 
 impl Default for DeleterArgs {
@@ -42,6 +45,7 @@ impl Default for DeleterArgs {
             now_fn: Arc::new(Utc::now),
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
             snapshot_file: None,
+            attempts: DEFAULT_ATTEMPTS,
         }
     }
 }
@@ -49,12 +53,16 @@ impl Default for DeleterArgs {
 pub struct SingleThreadDeleter {
     queue: Queue,
     now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    attempts: u32,
 }
 
 /// Outcome of considering one queued job during a sweep.
 enum SweepOutcome {
-    /// Transient stat/hash/delete failure; requeue and try next sweep.
-    Retry,
+    /// A failure whose class might resolve on its own; consumes one attempt.
+    CountedRetry,
+    /// A failure whose class will never resolve for this recorded path;
+    /// drop immediately rather than burning the whole attempt budget.
+    TerminalFailure,
     /// File was deleted; drop the job.
     Deleted,
     /// File is already gone; drop the job.
@@ -72,6 +80,7 @@ impl SingleThreadDeleter {
         Self {
             queue,
             now_fn: args.now_fn,
+            attempts: args.attempts,
         }
     }
 
@@ -90,11 +99,27 @@ impl SingleThreadDeleter {
         // budget is exactly enough to visit each due entry once and never
         // twice.
         for _ in 0..self.queue.count_ready(now) {
-            let Some(entry) = self.queue.next_ready(now) else {
+            let Some(mut entry) = self.queue.next_ready(now) else {
                 break;
             };
             match Self::sweep_entry(&entry.job).await {
-                SweepOutcome::Retry => self.queue.requeue(entry).await,
+                SweepOutcome::CountedRetry => {
+                    entry.attempts += 1;
+                    if entry.attempts >= self.attempts {
+                        Self::log_exhausted_drop(&entry);
+                        self.queue.remove(entry.id).await;
+                    } else {
+                        warn!(
+                            "delete: attempt {} of {} failed for {}; retrying next sweep",
+                            entry.attempts, self.attempts, entry.job.file
+                        );
+                        self.queue.requeue(entry).await;
+                    }
+                }
+                SweepOutcome::TerminalFailure => {
+                    Self::log_terminal_drop(&entry);
+                    self.queue.remove(entry.id).await;
+                }
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
                     self.queue.remove(entry.id).await;
                 }
@@ -126,10 +151,10 @@ impl SingleThreadDeleter {
             }
             Err(err) => {
                 warn!(
-                    "delete: failed to stat {}: {err:?}; retrying next sweep",
+                    "delete: failed to stat {}: {err:?}; classifying failure",
                     entry.file
                 );
-                Err(SweepOutcome::Retry)
+                Err(Self::classify(&err))
             }
         }
     }
@@ -161,10 +186,10 @@ impl SingleThreadDeleter {
             }
             Err(err) => {
                 warn!(
-                    "delete: failed to hash {}: {err:?}; retrying next sweep",
+                    "delete: failed to hash {}: {err:?}; classifying failure",
                     entry.file
                 );
-                Some(SweepOutcome::Retry)
+                Some(Self::classify(&err))
             }
         }
     }
@@ -180,12 +205,66 @@ impl SingleThreadDeleter {
             }
             Err(err) => {
                 warn!(
-                    "delete: failed to delete {}: {err:?}; retrying next sweep",
+                    "delete: failed to delete {}: {err:?}; classifying failure",
                     entry.file
                 );
-                SweepOutcome::Retry
+                Self::classify(&err)
             }
         }
+    }
+
+    /// The `io::ErrorKind` behind a filesystem error, when one is available.
+    fn io_kind(err: &FileSysErr) -> Option<std::io::ErrorKind> {
+        match err {
+            FileSysErr::FileMetadataErr(e) => Some(e.source.kind()),
+            FileSysErr::OpenFileErr(e) => Some(e.source.kind()),
+            FileSysErr::ReadFileErr(e) => Some(e.source.kind()),
+            FileSysErr::DeleteFileErr(e) => Some(e.source.kind()),
+            _ => None,
+        }
+    }
+
+    /// Failures that cannot succeed on a later sweep for the same recorded
+    /// path. Everything else — including errors we cannot classify — is
+    /// counted, and the attempt cap is the backstop.
+    fn classify(err: &FileSysErr) -> SweepOutcome {
+        use std::io::ErrorKind::*;
+        match Self::io_kind(err) {
+            Some(
+                PermissionDenied | ReadOnlyFilesystem | IsADirectory | NotADirectory
+                | InvalidFilename,
+            ) => SweepOutcome::TerminalFailure,
+            _ => SweepOutcome::CountedRetry,
+        }
+    }
+
+    fn log_exhausted_drop(entry: &QueueEntry) {
+        error!(
+            "delete: giving up on {} after {} attempts (rule {}, deployment {}, \
+             digest {}); the file is left on disk and the agent will not retry it",
+            entry.job.file,
+            entry.attempts,
+            entry.job.file_rule_id,
+            entry.job.deployment_id,
+            entry.job.digest
+        );
+    }
+
+    /// `attempts` counts *consumed* attempts and the terminal path deliberately
+    /// consumes none, so log the ordinal of the sweep that failed —
+    /// `attempts + 1` — not the field. Without the `+ 1` the headline case (a
+    /// terminal failure on the very first sweep) logs "attempt 0".
+    fn log_terminal_drop(entry: &QueueEntry) {
+        error!(
+            "delete: giving up on {} on attempt {} after a permanent filesystem \
+             failure (rule {}, deployment {}, digest {}); the file is left on \
+             disk and the agent will not retry it",
+            entry.job.file,
+            entry.attempts + 1,
+            entry.job.file_rule_id,
+            entry.job.deployment_id,
+            entry.job.digest
+        );
     }
 }
 
@@ -601,9 +680,10 @@ mod tests {
         }
 
         // a stat failure that is not NotFound (here ENOTDIR: the recorded
-        // path's parent is a file) keeps the entry for the next sweep.
+        // path's parent is a file) can never resolve for this path, so the
+        // entry is dropped on the first sweep rather than retried.
         #[tokio::test]
-        async fn stat_failure_retains_entry() {
+        async fn stat_permanent_failure_drops_entry() {
             let parent = temp_file(b"not a dir").await;
             let child = File::new(parent.file().path().join("child"));
             let clock = Clock::new(1000);
@@ -623,7 +703,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert_eq!(deleter.queue.entries(), [record]);
+            assert!(deleter.queue.is_empty());
         }
 
         #[tokio::test]
@@ -687,9 +767,10 @@ mod tests {
         }
 
         // a hash failure (EISDIR: the recorded path is a directory, whose read
-        // fails) keeps the entry for the next sweep and never panics the pass.
+        // fails) is permanent for this path, so the entry is dropped on the
+        // first sweep and the pass never panics.
         #[tokio::test]
-        async fn hash_failure_retains_entry() {
+        async fn hash_permanent_failure_drops_entry() {
             let dir = dirs::temp("delete-hash-eisdir").unwrap();
             let target = File::new(dir.path().clone());
             let metadata = files::metadata(&target).await.unwrap();
@@ -711,7 +792,7 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert_eq!(deleter.queue.entries(), [record]);
+            assert!(deleter.queue.is_empty());
             assert!(target.exists());
         }
 
@@ -732,10 +813,10 @@ mod tests {
         }
 
         // files::delete failure (EISDIR: the recorded path is a directory, and
-        // unlink refuses directories) keeps the entry for the next sweep and
-        // never panics the pass.
+        // unlink refuses directories) is terminal: the job is dropped on the
+        // first sweep, without consuming the default budget of 10 attempts.
         #[tokio::test]
-        async fn delete_failure_retains_entry() {
+        async fn terminal_failure_drops_job_without_burning_attempts() {
             let dir = dirs::temp("delete-eisdir").unwrap();
             let target = File::new(dir.path().clone());
             let metadata = files::metadata(&target).await.unwrap();
@@ -756,7 +837,8 @@ mod tests {
 
             deleter.sweep().await.unwrap();
 
-            assert_eq!(deleter.queue.entries(), [record]);
+            // the drop happens on sweep 1, not sweep 10.
+            assert!(deleter.queue.is_empty());
             assert!(target.exists());
         }
 

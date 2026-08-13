@@ -119,6 +119,7 @@ mod from_snapshot {
             entries: vec![QueueEntry {
                 id: Uuid::new_v4(),
                 job: make_job("a.log", 1000, 0),
+                attempts: 0,
             }],
         };
         let mut value = serde_json::to_value(&snapshot).unwrap();
