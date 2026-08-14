@@ -94,7 +94,7 @@ impl SingleThreadDeleter {
     }
 
     async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        self.queue.enqueue(job).await
+        Ok(self.queue.enqueue(job).await?)
     }
 
     async fn sweep(&mut self) -> Result<(), DeleteErr> {
@@ -567,7 +567,7 @@ mod tests {
                 panic!("expected QueueFullErr, got: {err:?}");
             };
             assert_eq!(full.capacity, 1);
-            assert_eq!(full.file, tmp_b.file().to_string());
+            assert_eq!(full.name, tmp_b.file().to_string());
         }
 
         #[tokio::test]

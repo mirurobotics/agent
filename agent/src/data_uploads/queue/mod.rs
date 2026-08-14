@@ -1,3 +1,7 @@
+pub mod errors;
+
+pub use self::errors::QueueFullErr;
+
 // standard crates
 use std::collections::VecDeque;
 
@@ -15,9 +19,6 @@ use uuid::Uuid;
 pub trait QueueJob:
     Clone + std::fmt::Debug + PartialEq + Serialize + DeserializeOwned + Send + Sync + 'static
 {
-    /// Error returned by [`Queue::enqueue`] when the queue is at capacity.
-    type QueueFullErr;
-
     /// Log prefix, e.g. `"upload"` or `"delete"`.
     const LABEL: &'static str;
 
@@ -25,13 +26,8 @@ pub trait QueueJob:
     /// return `DateTime::<Utc>::MIN_UTC`.
     fn due_at(&self) -> DateTime<Utc>;
 
-    /// The file this job concerns, for logs and the capacity error.
-    fn file(&self) -> String;
-
-    /// Build the capacity rejection. Implementors call `crate::trace!()` in
-    /// their own body so the trace records the implementor's location rather
-    /// than this shared code.
-    fn queue_full_err(capacity: usize, file: String) -> Self::QueueFullErr;
+    /// How this job identifies itself in logs and the capacity error.
+    fn name(&self) -> String;
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,15 +138,15 @@ impl<J: QueueJob> Queue<J> {
             .min()
     }
 
-    async fn verify_capacity(&mut self, job: &J) -> Result<(), J::QueueFullErr> {
+    async fn verify_capacity(&mut self, job: &J) -> Result<(), QueueFullErr> {
         if self.entries.len() >= self.capacity {
             warn!(
-                "{} queue is full (capacity {}); rejecting job for file {}",
+                "{} queue is full (capacity {}); rejecting {}",
                 J::LABEL,
                 self.capacity,
-                job.file()
+                job.name()
             );
-            return Err(J::queue_full_err(self.capacity, job.file()));
+            return Err(QueueFullErr::new(J::LABEL, self.capacity, job.name()));
         }
         Ok(())
     }
@@ -158,8 +154,8 @@ impl<J: QueueJob> Queue<J> {
     // ================ Mutators ================ //
 
     /// Push a new job at the tail under a fresh id. When the queue is full the
-    /// enqueue is rejected with `J::QueueFullErr` and nothing is persisted.
-    pub async fn enqueue(&mut self, job: J) -> Result<(), J::QueueFullErr> {
+    /// enqueue is rejected with [`QueueFullErr`] and nothing is persisted.
+    pub async fn enqueue(&mut self, job: J) -> Result<(), QueueFullErr> {
         self.verify_capacity(&job).await?;
         self.entries.push_back(QueueEntry {
             id: Uuid::new_v4(),

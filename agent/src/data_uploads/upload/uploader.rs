@@ -424,7 +424,7 @@ where
             }
             Command::Enqueue { job, respond_to } => {
                 dispatch!(
-                    self.queue.enqueue(job).await,
+                    self.queue.enqueue(job).await.map_err(Into::into),
                     respond_to,
                     "Actor failed to send enqueue response"
                 );

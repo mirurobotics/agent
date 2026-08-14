@@ -9,8 +9,8 @@
 use miru_agent::data_uploads::queue::{
     Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
-use miru_agent::data_uploads::retention::{self, DeleteErr};
-use miru_agent::data_uploads::upload::{self, UploadErr};
+use miru_agent::data_uploads::retention;
+use miru_agent::data_uploads::upload;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 
 // external crates
@@ -67,7 +67,7 @@ async fn open<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
         .unwrap()
 }
 
-/// `enqueue` without requiring `J::QueueFullErr: Debug`.
+/// `enqueue` without requiring the error to be `Debug`.
 async fn enqueue<J: QueueJob>(queue: &mut Queue<J>, job: J) {
     assert!(queue.enqueue(job).await.is_ok(), "enqueue was rejected");
 }
@@ -78,7 +78,7 @@ async fn enqueue<J: QueueJob>(queue: &mut Queue<J>, job: J) {
 async fn drain<J: QueueJob>(queue: &mut Queue<J>) -> Vec<String> {
     let mut out = Vec::new();
     while let Some(entry) = queue.next_ready(now()) {
-        out.push(entry.job.file());
+        out.push(entry.job.name());
         queue.remove(entry.id).await;
     }
     out
@@ -92,7 +92,7 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
         .read()
         .entries
         .iter()
-        .map(|entry| entry.job.file())
+        .map(|entry| entry.job.name())
         .collect()
 }
 
@@ -219,6 +219,23 @@ async fn check_capacity_rejects_a_duplicate_job<J: QueueJob>(make: fn(&str) -> J
     assert_eq!(drain(&mut queue).await, ["/data/a.log"]);
 }
 
+async fn check_full_queue_rejects_with_queue_full_err<J: QueueJob>(make: fn(&str) -> J) {
+    let mut queue = Queue::<J>::new(1);
+    enqueue(&mut queue, make("a.log")).await;
+
+    let err = queue.enqueue(make("b.log")).await.unwrap_err();
+    assert_eq!(err.label, J::LABEL);
+    assert_eq!(err.capacity, 1);
+    assert_eq!(err.name, "/data/b.log");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "{} queue is full (capacity 1); rejected job for file /data/b.log",
+            J::LABEL
+        )
+    );
+}
+
 /// A persist that cannot write is logged and swallowed, never surfaced.
 async fn check_persist_failure_is_swallowed<J: QueueJob>(name: &str, make: fn(&str) -> J) {
     let (_dir, path) = temp_path(name);
@@ -271,7 +288,7 @@ async fn check_next_ready_skips_waiting_entries<J: QueueJob>(make: fn(&str) -> J
     assert!(queue.next_ready(now()).is_none());
     // the deadline itself is eligible: the comparison is inclusive
     assert_eq!(
-        queue.next_ready(deadline).unwrap().job.file(),
+        queue.next_ready(deadline).unwrap().job.name(),
         "/data/waiting"
     );
 }
@@ -335,10 +352,10 @@ async fn check_requeue_at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str
 
     // the appended entry lands at the tail carrying its attempt count
     let head = queue.next_ready(now()).unwrap();
-    assert_eq!(head.job.file(), "/data/a.log");
+    assert_eq!(head.job.name(), "/data/a.log");
     queue.remove(head.id).await.unwrap();
     let tail = queue.next_ready(now()).unwrap();
-    assert_eq!(tail.job.file(), "/data/b.log");
+    assert_eq!(tail.job.name(), "/data/b.log");
     assert_eq!(tail.attempts, 2);
 }
 
@@ -431,7 +448,7 @@ async fn check_reset_invalid_deadlines<J: QueueJob>(make: fn(&str) -> J) {
 
     let mut drained = Vec::new();
     while let Some(entry) = queue.next_ready(beyond) {
-        drained.push((entry.job.file(), entry.next_attempt_at));
+        drained.push((entry.job.name(), entry.next_attempt_at));
         queue.remove(entry.id).await;
     }
     assert_eq!(
@@ -675,19 +692,9 @@ mod upload_jobs {
         );
     }
 
-    /// The capacity rejection keeps the uploader's exact error type and text.
     #[tokio::test]
-    async fn full_queue_returns_upload_queue_full_err() {
-        let mut queue = Queue::<upload::Job>::new(1);
-        enqueue(&mut queue, upload_job("a.log")).await;
-
-        let err = queue.enqueue(upload_job("b.log")).await.unwrap_err();
-
-        let UploadErr::QueueFullErr(full) = err else {
-            panic!("expected QueueFullErr, got: {err:?}");
-        };
-        assert_eq!(full.capacity, 1);
-        assert_eq!(full.file, "/data/b.log");
+    async fn full_queue_rejects_with_queue_full_err() {
+        check_full_queue_rejects_with_queue_full_err(upload_job).await;
     }
 }
 
@@ -832,24 +839,14 @@ mod retention_jobs {
 
         // due_at is inclusive: "due" is due at exactly `now`
         assert_eq!(queue.count_ready(now()), 1);
-        assert_eq!(queue.next_ready(now()).unwrap().job.file(), "/data/due");
+        assert_eq!(queue.next_ready(now()).unwrap().job.name(), "/data/due");
 
         // the waiting job becomes ready once its TTL elapses
         assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
     }
 
-    /// The capacity rejection keeps the deleter's exact error type and text.
     #[tokio::test]
-    async fn full_queue_returns_delete_queue_full_err() {
-        let mut queue = Queue::<retention::Job>::new(1);
-        enqueue(&mut queue, retention_job("a.log")).await;
-
-        let err = queue.enqueue(retention_job("b.log")).await.unwrap_err();
-
-        let DeleteErr::QueueFullErr(full) = err else {
-            panic!("expected QueueFullErr, got: {err:?}");
-        };
-        assert_eq!(full.capacity, 1);
-        assert_eq!(full.file, "/data/b.log");
+    async fn full_queue_rejects_with_queue_full_err() {
+        check_full_queue_rejects_with_queue_full_err(retention_job).await;
     }
 }

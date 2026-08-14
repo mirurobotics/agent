@@ -66,11 +66,7 @@ impl DeleterExt for MockDeleter {
         let step = self.script.lock().unwrap().pop_front();
         match step {
             None | Some(MockStep::Ok) => Ok(()),
-            Some(MockStep::Err) => Err(DeleteErr::QueueFullErr(QueueFullErr {
-                capacity: 0,
-                file,
-                trace: miru_agent::trace!(),
-            })),
+            Some(MockStep::Err) => Err(QueueFullErr::new("delete", 0, file).into()),
         }
     }
 

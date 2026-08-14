@@ -1,19 +1,10 @@
 // internal crates
-use crate::data_uploads::{
-    queue,
-    upload::{
-        errors::{QueueFullErr, UploadErr},
-        job::Job,
-    },
-};
-use crate::trace;
+use crate::data_uploads::{queue, upload::job::Job};
 
 // external crates
 use chrono::{DateTime, Utc};
 
 impl queue::QueueJob for Job {
-    type QueueFullErr = UploadErr;
-
     const LABEL: &'static str = "upload";
 
     /// An upload job is actionable the moment it is enqueued.
@@ -21,16 +12,8 @@ impl queue::QueueJob for Job {
         DateTime::<Utc>::MIN_UTC
     }
 
-    fn file(&self) -> String {
+    fn name(&self) -> String {
         self.file.to_string()
-    }
-
-    fn queue_full_err(capacity: usize, file: String) -> UploadErr {
-        UploadErr::QueueFullErr(QueueFullErr {
-            capacity,
-            file,
-            trace: trace!(),
-        })
     }
 }
 
