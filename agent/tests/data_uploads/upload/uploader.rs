@@ -329,6 +329,11 @@ async fn hung_attempt_times_out_and_is_retried() {
     let options = UploaderOptions {
         attempt_timeout_floor: Duration::from_secs(1),
         attempt_timeout_bytes_per_sec: 64 * 1024,
+        backoff: miru_agent::cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 4,
+        },
         ..UploaderOptions::default()
     };
     // the test clock's instant sleeps leave the attempt deadline as the only
@@ -348,7 +353,7 @@ async fn hung_attempt_times_out_and_is_retried() {
     // the same job was attempted twice: the timeout was treated as a
     // retryable failure, taking the normal backoff/requeue path
     assert_eq!(mock.recorded_calls(), vec![job.clone(), job]);
-    assert!(!sleeps.lock().unwrap().is_empty());
+    assert_eq!(*sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
@@ -845,7 +850,14 @@ mod retention_producer {
         let (uploader, handle, sleeps, clock) = spawn_with_test_clock_and_deleter(
             mock.clone(),
             deleter.clone(),
-            UploaderOptions::default(),
+            UploaderOptions {
+                backoff: miru_agent::cooldown::Backoff {
+                    base_secs: 1,
+                    growth_factor: 2,
+                    max_secs: 4,
+                },
+                ..UploaderOptions::default()
+            },
         );
         let mut job = make_job("a.log");
         job.retention = required(300);
@@ -858,9 +870,7 @@ mod retention_producer {
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
-        // the failed attempt enqueued nothing; the confirm-time stamp sits
-        // after the backoff sleep the retry waited out
-        assert!(!sleeps.lock().unwrap().is_empty());
+        assert_eq!(*sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
         let confirmed_at = *clock.lock().unwrap();
         assert_eq!(
             deleter.recorded_calls(),

@@ -137,11 +137,11 @@ mod enqueue {
 
         let err = queue.enqueue(make_job("b.log")).await.unwrap_err();
 
-        assert!(
-            matches!(err, UploadErr::QueueFullErr(_)),
-            "expected QueueFullErr, got: {err:?}"
-        );
-        assert!(err.to_string().contains("queue is full"), "message: {err}");
+        let UploadErr::QueueFullErr(e) = err else {
+            panic!("expected QueueFullErr, got: {err:?}");
+        };
+        assert_eq!(e.capacity, 1);
+        assert_eq!(e.file, "/data/b.log");
         assert_eq!(queue.len(), 1);
     }
 

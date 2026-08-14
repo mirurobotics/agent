@@ -44,6 +44,22 @@ pub struct AttemptTimeoutErr {
 
 impl crate::errors::Error for AttemptTimeoutErr {}
 
+/// The transfer layer's own preconditions, as a type so tests and callers can
+/// tell them apart. Carried as the `source` of an [`ExecutorErr`];
+/// classification is unchanged (non-terminal, non-network) and the `Display`
+/// text is what already appeared in logs.
+#[derive(Debug, thiserror::Error)]
+pub enum TransferErr {
+    #[error("unrecognized upload credential scheme")]
+    UnrecognizedScheme,
+    #[error("s3 scheme is missing s3_credentials")]
+    MissingS3Credentials,
+    #[error("gcs scheme is missing gcs_credentials")]
+    MissingGcsCredentials,
+}
+
+impl crate::errors::Error for TransferErr {}
+
 #[derive(Debug, thiserror::Error)]
 pub enum UploadErr {
     #[error(transparent)]
