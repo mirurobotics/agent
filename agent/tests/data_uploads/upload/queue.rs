@@ -1,18 +1,18 @@
-//! Upload-queue cases that are *not* shared with the retention queue.
+//! The on-disk wire pin for `upload_queue.json`.
 //!
-//! Everything the two queues have in common now lives in
-//! `agent/tests/data_uploads/queue.rs`, which exercises the one generic
-//! implementation against both production job types. What remains here is the
-//! on-disk wire pin for `upload_queue.json` — a per-worker artifact — and the
-//! two methods only the uploader calls, `earliest_next_attempt` and
-//! `reset_invalid_deadlines`, in their uploader-shaped scenarios.
+//! Queue *behavior* is exercised in `agent/tests/data_uploads/queue.rs`, which
+//! drives the one generic implementation against both production job types.
+//! What cannot live there is this: the generic suite is parameterized over the
+//! job type and so cannot spell a concrete payload, but the bytes on disk are
+//! a per-worker artifact — and this file is released user data, so a shape
+//! change would wipe a real queue rather than fail.
 
 // internal crates
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 fn make_job(name: &str) -> Job {
@@ -163,125 +163,5 @@ mod from_snapshot {
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);
-    }
-}
-
-mod earliest_next_attempt {
-    use super::*;
-
-    #[test]
-    fn none_when_empty() {
-        assert_eq!(Queue::new(4).earliest_next_attempt(), None);
-    }
-
-    #[tokio::test]
-    async fn returns_min_deadline() {
-        let mut queue = Queue::new(4);
-        let t1 = DateTime::from_timestamp(1_000_000_000, 0).unwrap();
-        let t2 = DateTime::from_timestamp(1_500_000_000, 0).unwrap();
-        for (name, deadline) in [("a.log", t2), ("b.log", t1)] {
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job(name),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
-        }
-
-        assert_eq!(queue.earliest_next_attempt(), Some(t1));
-    }
-
-    #[tokio::test]
-    async fn none_deadline_counts_as_min_utc() {
-        let mut queue = Queue::new(4);
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log"),
-                attempts: 1,
-                next_attempt_at: Some(Utc::now() + TimeDelta::hours(1)),
-            })
-            .await;
-        queue.enqueue(make_job("b.log")).await.unwrap();
-
-        assert_eq!(
-            queue.earliest_next_attempt(),
-            Some(DateTime::<Utc>::MIN_UTC)
-        );
-    }
-}
-
-mod reset_invalid_deadlines {
-    use super::*;
-
-    #[tokio::test]
-    async fn only_deadlines_past_the_horizon_move() {
-        let mut queue = Queue::new(8);
-        let now = Utc::now();
-        let horizon = now + TimeDelta::hours(24);
-        let inside = horizon - TimeDelta::seconds(1);
-        let beyond = horizon + TimeDelta::seconds(1);
-        for (name, deadline) in [("a.log", inside), ("b.log", horizon), ("c.log", beyond)] {
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job(name),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
-        }
-
-        queue.reset_invalid_deadlines(horizon).await;
-
-        let mut drained = Vec::new();
-        while let Some(entry) = queue.next_ready(beyond) {
-            drained.push((entry.job.digest.clone(), entry.next_attempt_at));
-            queue.remove(entry.id).await;
-        }
-        assert_eq!(
-            drained,
-            vec![
-                ("sha256:a.log".to_string(), Some(inside)),
-                ("sha256:b.log".to_string(), Some(horizon)),
-                ("sha256:c.log".to_string(), Some(horizon)),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn reset_persists_the_pulled_back_deadlines() {
-        let dir = dirs::temp("upload_queue_test").unwrap();
-        let path = dir.to_dir().file("upload_queue.json");
-        let now = Utc::now();
-        let stale = now + TimeDelta::hours(48);
-        let horizon = now + TimeDelta::hours(24);
-
-        let mut queue = Queue::from_snapshot(8, open(&path).await);
-        for name in ["a.log", "b.log"] {
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job(name),
-                    attempts: 2,
-                    next_attempt_at: Some(stale),
-                })
-                .await;
-        }
-
-        queue.reset_invalid_deadlines(horizon).await;
-
-        let head_deadline = |raw: &str| -> serde_json::Value {
-            serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]
-                .clone()
-        };
-        let raw = files::read_string(&path).await.unwrap();
-        assert_eq!(
-            head_deadline(&raw),
-            serde_json::to_value(horizon).unwrap(),
-            "the reset should have rewritten the snapshot: {raw}"
-        );
     }
 }

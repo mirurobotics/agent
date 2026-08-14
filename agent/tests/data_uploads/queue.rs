@@ -268,6 +268,44 @@ async fn check_leaves_the_entry_on_disk_until_removed<J: QueueJob>(
     assert_eq!(on_disk::<J>(&path).await, ["/data/b.log"]);
 }
 
+/// A persist landing between an entry's selection and its resolution must not
+/// write the selected entry out of the snapshot. Stronger than
+/// [`check_leaves_the_entry_on_disk_until_removed`], which only pins that
+/// selection itself does not write: here an unrelated mutation does the
+/// writing while the entry is in flight.
+///
+/// This is exercised at the `Queue` level because neither worker's run loop
+/// can currently interleave a command with in-flight work — each awaits the
+/// work to completion inside its match arm — so the interleaving is performed
+/// directly on the queue. The test exists so that making a run loop
+/// responsive to shutdown via `select!` cannot silently reintroduce the loss.
+async fn check_persist_during_an_in_flight_entry_keeps_it_on_disk<J: QueueJob>(
+    name: &str,
+    make: fn(&str) -> J,
+) {
+    let (_dir, path) = temp_path(name);
+    let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+    enqueue(&mut queue, make("a.log")).await;
+    enqueue(&mut queue, make("b.log")).await;
+
+    // the worker selects `a` and holds it: this is the in-flight state.
+    let in_flight = queue.next_ready(now()).unwrap();
+    assert_eq!(in_flight.job.name(), "/data/a.log");
+
+    // an enqueue serviced mid-flight. Its persist is the write a `select!`
+    // driven run loop would perform while `a` is still being worked.
+    enqueue(&mut queue, make("c.log")).await;
+
+    assert_eq!(
+        on_disk::<J>(&path).await,
+        ["/data/a.log", "/data/b.log", "/data/c.log"]
+    );
+
+    // `a` leaves disk only when the worker resolves it.
+    queue.remove(in_flight.id).await.unwrap();
+    assert_eq!(on_disk::<J>(&path).await, ["/data/b.log", "/data/c.log"]);
+}
+
 async fn check_next_ready_skips_waiting_entries<J: QueueJob>(make: fn(&str) -> J) {
     let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
     let deadline = now() + TimeDelta::hours(1);
@@ -613,6 +651,15 @@ mod upload_jobs {
     }
 
     #[tokio::test]
+    async fn persist_during_an_in_flight_entry_keeps_it_on_disk() {
+        check_persist_during_an_in_flight_entry_keeps_it_on_disk(
+            "upload-generic-queue-test",
+            upload_job,
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn next_ready_skips_waiting_entries() {
         check_next_ready_skips_waiting_entries(upload_job).await;
     }
@@ -756,6 +803,15 @@ mod retention_jobs {
     async fn leaves_the_entry_on_disk_until_removed() {
         check_leaves_the_entry_on_disk_until_removed("delete-generic-queue-test", retention_job)
             .await;
+    }
+
+    #[tokio::test]
+    async fn persist_during_an_in_flight_entry_keeps_it_on_disk() {
+        check_persist_during_an_in_flight_entry_keeps_it_on_disk(
+            "delete-generic-queue-test",
+            retention_job,
+        )
+        .await;
     }
 
     #[tokio::test]
