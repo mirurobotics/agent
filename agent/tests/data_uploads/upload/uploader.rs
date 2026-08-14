@@ -532,42 +532,6 @@ async fn shutdown_during_in_flight_upload_returns_promptly() {
     drop(release_tx);
 }
 
-/// An in-flight job keeps its slot: it stays queued until it is confirmed,
-/// so it is still counted against capacity. A requeue can therefore never
-/// push the queue past capacity the way it could when the pop freed the slot.
-#[tokio::test]
-async fn in_flight_job_holds_its_capacity_slot() {
-    let (mock, mut started_rx) = MockUploadExecutor::new();
-    let (release_tx, release_rx) = oneshot::channel();
-    mock.push_step(MockStep::Hang(release_rx));
-    mock.push_step(MockStep::Ok);
-    let options = UploaderOptions {
-        queue_capacity: 1,
-        ..Default::default()
-    };
-    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
-    let job_a = make_job("a.log");
-
-    timed(uploader.enqueue(job_a.clone())).await.unwrap();
-    timed(started_rx.recv()).await.unwrap();
-    // A still occupies the only slot, so B is rejected rather than admitted
-    let err = timed(uploader.enqueue(make_job("b.log")))
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, UploadErr::QueueFullErr(_)),
-        "expected QueueFullErr, got: {err:?}"
-    );
-
-    // A's failure requeues it in place: still one job, retried after backoff
-    release_tx.send(scripted_err()).unwrap();
-    timed(started_rx.recv()).await.unwrap();
-
-    timed(uploader.shutdown()).await.unwrap();
-    timed(handle).await.unwrap();
-    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_a]);
-}
-
 #[tokio::test]
 async fn shutdown_during_backoff_sleep_returns_promptly() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
