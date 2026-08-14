@@ -234,7 +234,7 @@ mod reset_invalid_deadlines {
                 .await;
         }
 
-        queue.reset_invalid_deadlines(horizon);
+        queue.reset_invalid_deadlines(horizon).await;
 
         let mut drained = Vec::new();
         while let Some(entry) = queue.next_ready(beyond) {
@@ -252,17 +252,14 @@ mod reset_invalid_deadlines {
     }
 
     #[tokio::test]
-    async fn reset_is_in_memory_until_the_next_mutation() {
+    async fn reset_persists_the_pulled_back_deadlines() {
         let dir = dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let now = Utc::now();
         let stale = now + TimeDelta::hours(48);
-
         let horizon = now + TimeDelta::hours(24);
 
         let mut queue = Queue::from_snapshot(8, open(&path).await);
-        // the requeues persist the stale stamps; the reset deliberately does
-        // not write, so the file still carries them afterwards
         for name in ["a.log", "b.log"] {
             queue
                 .requeue(QueueEntry {
@@ -274,7 +271,7 @@ mod reset_invalid_deadlines {
                 .await;
         }
 
-        queue.reset_invalid_deadlines(horizon);
+        queue.reset_invalid_deadlines(horizon).await;
 
         let head_deadline = |raw: &str| -> serde_json::Value {
             serde_json::from_str::<serde_json::Value>(raw).unwrap()["entries"][0]["next_attempt_at"]
@@ -283,18 +280,8 @@ mod reset_invalid_deadlines {
         let raw = files::read_string(&path).await.unwrap();
         assert_eq!(
             head_deadline(&raw),
-            serde_json::to_value(stale).unwrap(),
-            "the reset should not have rewritten the snapshot: {raw}"
-        );
-
-        // the next mutation writes the corrected entries through
-        let entry = queue.next_ready(horizon).unwrap();
-        queue.remove(entry.id).await;
-        let raw = files::read_string(&path).await.unwrap();
-        assert_eq!(
-            head_deadline(&raw),
             serde_json::to_value(horizon).unwrap(),
-            "the removal should have persisted the pulled-back deadline: {raw}"
+            "the reset should have rewritten the snapshot: {raw}"
         );
     }
 }

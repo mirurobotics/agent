@@ -41,8 +41,7 @@ pub struct QueueEntry<J> {
     pub job: J,
     #[serde(default)]
     pub attempts: u32,
-    /// Earliest instant this entry is eligible to be popped; `None` means
-    /// "eligible now".
+    /// Earliest instant this entry is eligible; `None` means "eligible now".
     #[serde(default)]
     pub next_attempt_at: Option<DateTime<Utc>>,
 }
@@ -73,9 +72,10 @@ impl<J> Patch<QueueSnapshot<J>> for QueueSnapshot<J> {
 pub type QueueSnapshotFile<J> = SingleThreadStateFile<QueueSnapshot<J>, QueueSnapshot<J>>;
 
 /// In-memory job queue with an optional snapshot. Every mutation (`enqueue`,
-/// `remove`, `requeue`) persists as its last act, so there is exactly one
-/// persist implementation and no caller can forget to call it. Selection
-/// (`next_ready`, `count_ready`) never mutates and never persists.
+/// `remove`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
+/// so there is exactly one persist implementation and no caller can forget
+/// to call it. Selection (`next_ready`, `count_ready`) never mutates and
+/// never persists.
 pub struct Queue<J: QueueJob> {
     entries: VecDeque<QueueEntry<J>>,
     capacity: usize,
@@ -92,10 +92,6 @@ impl<J: QueueJob> Queue<J> {
         }
     }
 
-    /// A disk-backed queue: `snapshot_file`'s persisted entries seed the initial
-    /// backlog, and every subsequent mutation is written back. Persisted entries are
-    /// loaded in full even if they exceed `capacity`; capacity only gates new enqueues,
-    /// so an over-capacity backlog simply drains before it accepts more.
     pub fn from_snapshot(capacity: usize, snapshot_file: QueueSnapshotFile<J>) -> Self {
         let entries = snapshot_file.read().entries.iter().cloned().collect();
         Self {
@@ -105,8 +101,8 @@ impl<J: QueueJob> Queue<J> {
         }
     }
 
-    /// The number of queued entries, including one currently in flight: a
-    /// selected entry stays queued until it resolves.
+    // ================ Accessors ================ //
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -114,6 +110,52 @@ impl<J: QueueJob> Queue<J> {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    fn is_ready(entry: &QueueEntry<J>, now: DateTime<Utc>) -> bool {
+        entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
+    }
+
+    pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| Self::is_ready(entry, now))
+            .count()
+    }
+
+    pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry<J>> {
+        let entry = self
+            .entries
+            .iter()
+            .find(|entry| Self::is_ready(entry, now))?;
+        info!(
+            "{}: job dequeued; queue length {}",
+            J::LABEL,
+            self.entries.len()
+        );
+        Some(entry.clone())
+    }
+
+    pub fn earliest_next_attempt(&self) -> Option<DateTime<Utc>> {
+        self.entries
+            .iter()
+            .map(|entry| entry.next_attempt_at.unwrap_or(DateTime::<Utc>::MIN_UTC))
+            .min()
+    }
+
+    async fn verify_capacity(&mut self, job: &J) -> Result<(), J::QueueFullErr> {
+        if self.entries.len() >= self.capacity {
+            warn!(
+                "{} queue is full (capacity {}); rejecting job for file {}",
+                J::LABEL,
+                self.capacity,
+                job.file()
+            );
+            return Err(J::queue_full_err(self.capacity, job.file()));
+        }
+        Ok(())
+    }
+
+    // ================ Mutators ================ //
 
     /// Push a new job at the tail under a fresh id. When the queue is full the
     /// enqueue is rejected with `J::QueueFullErr` and nothing is persisted.
@@ -170,42 +212,11 @@ impl<J: QueueJob> Queue<J> {
         );
     }
 
-    /// Return a clone of the first entry that is due at `now` and whose
-    /// `next_attempt_at` is `None` or `<= now`. The entry is deliberately LEFT
-    /// in the queue — and so in the persisted snapshot — until the caller
-    /// passes its id back to [`Self::remove`] or hands the entry to
-    /// [`Self::requeue`]. That is what makes the queue at-least-once: work cut
-    /// short by a crash, a kill, or a shutdown is still on disk at the next
-    /// boot and is retried. Returns `None` when no entry is eligible.
-    pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry<J>> {
-        let entry = self
-            .entries
-            .iter()
-            .find(|entry| Self::is_ready(entry, now))?;
-        info!(
-            "{}: job dequeued; queue length {}",
-            J::LABEL,
-            self.entries.len()
-        );
-        Some(entry.clone())
-    }
-
-    /// How many entries are due at `now`. This is a sweep's loop budget — one
-    /// visit per due entry — not an idle accessor.
-    pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
-        self.entries
-            .iter()
-            .filter(|entry| Self::is_ready(entry, now))
-            .count()
-    }
-
-    fn is_ready(entry: &QueueEntry<J>, now: DateTime<Utc>) -> bool {
-        entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
-    }
-
     /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no
     /// entry can be deferred past a deadline the caller considers reachable.
-    pub fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
+    /// A no-op when every deadline is already inside the horizon, so nothing
+    /// is persisted in that case.
+    pub async fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
         let mut reset = 0;
         for entry in self.entries.iter_mut() {
             if entry.next_attempt_at.is_some_and(|at| at > horizon) {
@@ -216,30 +227,8 @@ impl<J: QueueJob> Queue<J> {
         if reset == 0 {
             return;
         }
+        self.persist().await;
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
-    }
-
-    /// The minimum effective deadline over all entries, where a `None`
-    /// deadline counts as `DateTime::<Utc>::MIN_UTC`. Returns `None` only when
-    /// the queue is empty.
-    pub fn earliest_next_attempt(&self) -> Option<DateTime<Utc>> {
-        self.entries
-            .iter()
-            .map(|entry| entry.next_attempt_at.unwrap_or(DateTime::<Utc>::MIN_UTC))
-            .min()
-    }
-
-    async fn verify_capacity(&mut self, job: &J) -> Result<(), J::QueueFullErr> {
-        if self.entries.len() >= self.capacity {
-            warn!(
-                "{} queue is full (capacity {}); rejecting job for file {}",
-                J::LABEL,
-                self.capacity,
-                job.file()
-            );
-            return Err(J::queue_full_err(self.capacity, job.file()));
-        }
-        Ok(())
     }
 
     /// The sole writer to disk. Called by every mutator as its last act.

@@ -427,7 +427,7 @@ async fn check_reset_invalid_deadlines<J: QueueJob>(make: fn(&str) -> J) {
             .await;
     }
 
-    queue.reset_invalid_deadlines(horizon);
+    queue.reset_invalid_deadlines(horizon).await;
 
     let mut drained = Vec::new();
     while let Some(entry) = queue.next_ready(beyond) {
@@ -450,9 +450,34 @@ async fn check_reset_invalid_deadlines_is_a_noop_when_all_inside<J: QueueJob>(ma
     let horizon = now() + TimeDelta::hours(24);
     enqueue(&mut queue, make("a.log")).await;
 
-    queue.reset_invalid_deadlines(horizon);
+    queue.reset_invalid_deadlines(horizon).await;
 
     assert_eq!(queue.next_ready(now()).unwrap().next_attempt_at, None);
+}
+
+/// A reset that actually moves a deadline is durable: the pulled-back stamp
+/// survives a restart, without waiting for a later mutation to write it.
+async fn check_reset_invalid_deadlines_persists<J: QueueJob>(name: &str, make: fn(&str) -> J) {
+    let (_dir, path) = temp_path(name);
+    let horizon = now() + TimeDelta::hours(24);
+    let beyond = horizon + TimeDelta::seconds(1);
+
+    {
+        let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+        queue
+            .requeue(QueueEntry {
+                id: Uuid::new_v4(),
+                job: make("a.log"),
+                attempts: 1,
+                next_attempt_at: Some(beyond),
+            })
+            .await;
+        queue.reset_invalid_deadlines(horizon).await;
+    }
+
+    let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+    let entry = reloaded.next_ready(horizon).unwrap();
+    assert_eq!(entry.next_attempt_at, Some(horizon));
 }
 
 async fn check_earliest_next_attempt<J: QueueJob>(make: fn(&str) -> J) {
@@ -626,6 +651,11 @@ mod upload_jobs {
     }
 
     #[tokio::test]
+    async fn reset_invalid_deadlines_persists() {
+        check_reset_invalid_deadlines_persists("upload-generic-queue-test", upload_job).await;
+    }
+
+    #[tokio::test]
     async fn earliest_next_attempt_returns_the_minimum() {
         check_earliest_next_attempt(upload_job).await;
     }
@@ -775,6 +805,11 @@ mod retention_jobs {
     #[tokio::test]
     async fn reset_invalid_deadlines_is_a_noop_when_all_inside() {
         check_reset_invalid_deadlines_is_a_noop_when_all_inside(retention_job).await;
+    }
+
+    #[tokio::test]
+    async fn reset_invalid_deadlines_persists() {
+        check_reset_invalid_deadlines_persists("delete-generic-queue-test", retention_job).await;
     }
 
     #[tokio::test]
