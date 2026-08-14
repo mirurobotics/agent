@@ -2,9 +2,12 @@
 use std::collections::VecDeque;
 
 // internal crates
-use crate::data_uploads::upload::{
-    errors::{QueueFullErr, UploadErr},
-    job::Job,
+use crate::data_uploads::{
+    queue::QueueJob,
+    upload::{
+        errors::{QueueFullErr, UploadErr},
+        job::Job,
+    },
 };
 use crate::filesys::state_file::SingleThreadStateFile;
 use crate::models::Patch;
@@ -15,6 +18,29 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
+
+impl QueueJob for Job {
+    type QueueFullErr = UploadErr;
+
+    const LABEL: &'static str = "upload";
+
+    /// An upload job is actionable the moment it is enqueued.
+    fn due_at(&self) -> DateTime<Utc> {
+        DateTime::<Utc>::MIN_UTC
+    }
+
+    fn file(&self) -> String {
+        self.file.to_string()
+    }
+
+    fn queue_full_err(capacity: usize, file: String) -> UploadErr {
+        UploadErr::QueueFullErr(QueueFullErr {
+            capacity,
+            file,
+            trace: trace!(),
+        })
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueEntry {

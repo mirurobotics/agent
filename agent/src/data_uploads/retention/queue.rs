@@ -2,7 +2,10 @@
 use std::collections::VecDeque;
 
 // internal crates
-use crate::data_uploads::retention::{errors::*, job::Job};
+use crate::data_uploads::{
+    queue::QueueJob,
+    retention::{errors::*, job::Job},
+};
 use crate::filesys::state_file::SingleThreadStateFile;
 use crate::models::Patch;
 use crate::trace;
@@ -12,6 +15,29 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
+
+impl QueueJob for Job {
+    type QueueFullErr = DeleteErr;
+
+    const LABEL: &'static str = "delete";
+
+    /// A retention job is due only once its TTL has elapsed.
+    fn due_at(&self) -> DateTime<Utc> {
+        Job::due_at(self)
+    }
+
+    fn file(&self) -> String {
+        self.file.to_string()
+    }
+
+    fn queue_full_err(capacity: usize, file: String) -> DeleteErr {
+        DeleteErr::QueueFullErr(QueueFullErr {
+            capacity,
+            file,
+            trace: trace!(),
+        })
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QueueEntry {
