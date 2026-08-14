@@ -173,6 +173,143 @@ mod enqueue {
         assert_eq!(queue.len(), 2);
     }
 
+    /// The bug this policy exists for: a full queue admits the newly scanned
+    /// file rather than refusing it, because the scanner offers each stable
+    /// file exactly once.
+    #[tokio::test]
+    async fn full_queue_evicts_and_admits_the_new_job() {
+        let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut queue = Queue::new(2);
+        queue
+            .enqueue(make_job_observed_at("a.log", t0), Utc::now())
+            .await;
+        queue
+            .enqueue(
+                make_job_observed_at("b.log", t0 + TimeDelta::hours(1)),
+                Utc::now(),
+            )
+            .await;
+
+        queue
+            .enqueue(
+                make_job_observed_at("c.log", t0 + TimeDelta::hours(2)),
+                Utc::now(),
+            )
+            .await;
+
+        assert_eq!(queue.len(), 2);
+        assert_eq!(
+            digests(&mut queue).await,
+            vec!["sha256:b.log".to_string(), "sha256:c.log".to_string()]
+        );
+    }
+
+    /// The primary discriminator: the entry that has burned the most attempts
+    /// goes first, even though it is the newer of the two.
+    #[tokio::test]
+    async fn evicts_the_most_failed_entry_first() {
+        let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut queue = Queue::new(2);
+        queue
+            .enqueue(make_job_observed_at("old.log", t0), Utc::now())
+            .await;
+        seed_entry(
+            &mut queue,
+            make_job_observed_at("failing.log", t0 + TimeDelta::hours(1)),
+            4,
+            None,
+        )
+        .await;
+
+        queue
+            .enqueue(
+                make_job_observed_at("new.log", t0 + TimeDelta::hours(2)),
+                Utc::now(),
+            )
+            .await;
+
+        assert_eq!(
+            digests(&mut queue).await,
+            vec!["sha256:old.log".to_string(), "sha256:new.log".to_string()]
+        );
+    }
+
+    /// The tie-break, and the case that actually fires during an outage: every
+    /// entry sits at zero attempts because network failures are exempt from
+    /// the attempt budget, so the oldest file is the one dropped.
+    #[tokio::test]
+    async fn among_equal_attempts_the_oldest_is_evicted() {
+        let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut queue = Queue::new(2);
+        queue
+            .enqueue(make_job_observed_at("oldest.log", t0), Utc::now())
+            .await;
+        queue
+            .enqueue(
+                make_job_observed_at("newer.log", t0 + TimeDelta::hours(1)),
+                Utc::now(),
+            )
+            .await;
+
+        queue
+            .enqueue(
+                make_job_observed_at("newest.log", t0 + TimeDelta::hours(2)),
+                Utc::now(),
+            )
+            .await;
+
+        assert_eq!(
+            digests(&mut queue).await,
+            vec![
+                "sha256:newer.log".to_string(),
+                "sha256:newest.log".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn eviction_survives_a_reload() {
+        let dir = dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+
+        {
+            let mut queue = Queue::from_snapshot(1, open(&path).await);
+            queue.enqueue(make_job("a.log"), Utc::now()).await;
+            queue.enqueue(make_job("b.log"), Utc::now()).await;
+        }
+
+        let mut reloaded = Queue::from_snapshot(1, open(&path).await);
+        assert_eq!(
+            digests(&mut reloaded).await,
+            vec!["sha256:b.log".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn capacity_one_keeps_only_the_newest() {
+        let mut queue = Queue::new(1);
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
+
+        queue.enqueue(make_job("b.log"), Utc::now()).await;
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(digests(&mut queue).await, vec!["sha256:b.log".to_string()]);
+    }
+
+    /// A zero capacity degenerates to one slot rather than evicting the job it
+    /// just admitted or looping forever looking for a victim — the test
+    /// completing at all is the non-spin assertion.
+    #[tokio::test]
+    async fn capacity_zero_admits_one_entry_and_does_not_spin() {
+        let mut queue = Queue::new(0);
+
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
+        queue.enqueue(make_job("b.log"), Utc::now()).await;
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(digests(&mut queue).await, vec!["sha256:b.log".to_string()]);
+    }
+
     #[tokio::test]
     async fn persist_failure_is_swallowed() {
         use std::os::unix::fs::PermissionsExt;
