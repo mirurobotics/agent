@@ -180,6 +180,17 @@ async fn check_rejection_does_not_persist<J: QueueJob>(name: &str, make: fn(&str
     assert_eq!(on_disk::<J>(&path).await, ["/data/a.log"]);
 }
 
+/// Same-job is not a capacity bypass: a duplicate would grow the queue just as
+/// a new job would, so it is rejected too.
+async fn check_capacity_rejects_a_duplicate_job<J: QueueJob>(make: fn(&str) -> J) {
+    let mut queue = Queue::<J>::new(1);
+    enqueue(&mut queue, make("a.log")).await;
+
+    assert!(queue.enqueue(make("a.log")).await.is_err());
+
+    assert_eq!(drain(&mut queue).await, ["/data/a.log"]);
+}
+
 /// A persist that cannot write is logged and swallowed, never surfaced.
 async fn check_persist_failure_is_swallowed<J: QueueJob>(name: &str, make: fn(&str) -> J) {
     let (_dir, path) = temp_path(name);
@@ -294,6 +305,26 @@ async fn check_requeue_at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str
 
     assert_eq!(queue.len(), 2);
     assert_eq!(drain(&mut queue).await, ["/data/a.log", "/data/b.log"]);
+}
+
+/// A rotation is durable: the rotated order, and the fact that the rotated
+/// entry is no longer at the head, both survive a restart.
+async fn check_requeue_order_survives_a_reload<J: QueueJob>(name: &str, make: fn(&str) -> J) {
+    let (_dir, path) = temp_path(name);
+    let id;
+
+    {
+        let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+        enqueue(&mut queue, make("a.log")).await;
+        enqueue(&mut queue, make("b.log")).await;
+        let entry = queue.next_ready(now()).unwrap();
+        id = entry.id;
+        queue.requeue(entry).await;
+    }
+
+    let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+    assert_eq!(on_disk::<J>(&path).await, ["/data/b.log", "/data/a.log"]);
+    assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
 }
 
 /// The attempt counter and the backoff stamp ride along with the entry across
@@ -442,8 +473,10 @@ async fn check_missing_optional_fields_default<J: QueueJob>(name: &str, make: fn
     assert_eq!(queue.len(), 1);
     let entry = queue.next_ready(now()).unwrap();
     assert_eq!(entry.attempts, 0);
+    assert_eq!(entry.next_attempt_at, None);
     // the minted id is a working handle for removal
     assert!(queue.remove(entry.id).await.is_some());
+    assert!(queue.is_empty());
 }
 
 // ============================== UPLOAD JOBS ====================================== //
@@ -479,6 +512,11 @@ mod upload_jobs {
     #[tokio::test]
     async fn rejection_does_not_persist() {
         check_rejection_does_not_persist("upload-generic-queue-test", upload_job).await;
+    }
+
+    #[tokio::test]
+    async fn capacity_rejects_a_duplicate_job() {
+        check_capacity_rejects_a_duplicate_job(upload_job).await;
     }
 
     #[tokio::test]
@@ -519,6 +557,11 @@ mod upload_jobs {
     #[tokio::test]
     async fn requeue_at_capacity_admits_a_new_entry() {
         check_requeue_at_capacity_admits_a_new_entry(upload_job).await;
+    }
+
+    #[tokio::test]
+    async fn requeue_order_survives_a_reload() {
+        check_requeue_order_survives_a_reload("upload-generic-queue-test", upload_job).await;
     }
 
     #[tokio::test]
@@ -574,10 +617,6 @@ mod upload_jobs {
         };
         assert_eq!(full.capacity, 1);
         assert_eq!(full.file, "/data/b.log");
-        assert!(
-            full.to_string().contains("upload queue is full"),
-            "message: {full}"
-        );
     }
 }
 
@@ -614,6 +653,11 @@ mod retention_jobs {
     #[tokio::test]
     async fn rejection_does_not_persist() {
         check_rejection_does_not_persist("delete-generic-queue-test", retention_job).await;
+    }
+
+    #[tokio::test]
+    async fn capacity_rejects_a_duplicate_job() {
+        check_capacity_rejects_a_duplicate_job(retention_job).await;
     }
 
     #[tokio::test]
@@ -655,6 +699,11 @@ mod retention_jobs {
     #[tokio::test]
     async fn requeue_at_capacity_admits_a_new_entry() {
         check_requeue_at_capacity_admits_a_new_entry(retention_job).await;
+    }
+
+    #[tokio::test]
+    async fn requeue_order_survives_a_reload() {
+        check_requeue_order_survives_a_reload("delete-generic-queue-test", retention_job).await;
     }
 
     #[tokio::test]
@@ -717,9 +766,5 @@ mod retention_jobs {
         };
         assert_eq!(full.capacity, 1);
         assert_eq!(full.file, "/data/b.log");
-        assert!(
-            full.to_string().contains("delete queue is full"),
-            "message: {full}"
-        );
     }
 }

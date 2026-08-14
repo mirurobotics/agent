@@ -1,8 +1,18 @@
+//! Delete-queue cases that are *not* shared with the upload queue.
+//!
+//! Everything the two queues have in common now lives in
+//! `agent/tests/data_uploads/queue.rs`, which exercises the one generic
+//! implementation against both production job types. What remains here is the
+//! on-disk wire pin for `delete_queue.json` — a per-worker artifact — the TTL
+//! readiness cases that only a retention job can express (`due_at` is a real
+//! deadline rather than `MIN_UTC`), the sweep's `count_ready` budget, and the
+//! mid-sweep-persist durability case the retention refactor was written for.
+
 // internal crates
 use miru_agent::data_uploads::retention::{
-    DeleteErr, DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue, QueueEntry,
+    DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
-use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -70,16 +80,6 @@ async fn on_disk(path: &File) -> Vec<String> {
 mod from_snapshot {
     use super::*;
 
-    #[tokio::test]
-    async fn empty_snapshot_loads_empty_queue() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-
-        let queue = Queue::from_snapshot(8, open(&path).await);
-
-        assert!(queue.is_empty());
-    }
-
     /// Pins the persisted wire format: entries are `{id, job}`, with the job's
     /// fields nested rather than flattened.
     #[tokio::test]
@@ -104,201 +104,10 @@ mod from_snapshot {
 
         let queue = Queue::from_snapshot(8, open(&path).await);
 
+        assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, make_job("a.log", 1000, 500));
-    }
-
-    /// An entry written without an `id` is still loadable, and the id it is
-    /// given is a working handle for removal.
-    #[tokio::test]
-    async fn entry_without_id_gets_one() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-        let snapshot = DeleteQueueSnapshot {
-            entries: vec![QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log", 1000, 0),
-                attempts: 0,
-                next_attempt_at: None,
-            }],
-        };
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        for entry in value["entries"].as_array_mut().unwrap() {
-            entry.as_object_mut().unwrap().remove("id");
-        }
-        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        // if deserialization failed, new_with_default would silently write an
-        // empty default snapshot and next_ready below would find nothing.
-        let mut queue = Queue::from_snapshot(8, open(&path).await);
-        let entry = queue.next_ready(now()).unwrap();
-        assert_eq!(entry.job.file.to_string(), "/data/a.log");
-        assert!(queue.remove(entry.id).await.is_some());
-        assert!(queue.is_empty());
-    }
-
-    /// An entry written before the attempt counter existed loads with a full
-    /// budget rather than failing to deserialize.
-    #[tokio::test]
-    async fn entry_without_attempts_defaults_to_zero() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-        let snapshot = DeleteQueueSnapshot {
-            entries: vec![QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log", 1000, 0),
-                attempts: 0,
-                next_attempt_at: None,
-            }],
-        };
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        for entry in value["entries"].as_array_mut().unwrap() {
-            entry.as_object_mut().unwrap().remove("attempts");
-        }
-        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        // if deserialization failed, new_with_default would silently write an
-        // empty default snapshot and next_ready below would find nothing.
-        let queue = Queue::from_snapshot(8, open(&path).await);
-        assert_eq!(queue.next_ready(now()).unwrap().attempts, 0);
-    }
-
-    /// An entry written before the backoff stamp existed loads as immediately
-    /// ready rather than failing to deserialize.
-    #[tokio::test]
-    async fn entry_without_next_attempt_at_defaults_to_none() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-        let snapshot = DeleteQueueSnapshot {
-            entries: vec![QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log", 1000, 0),
-                attempts: 0,
-                next_attempt_at: None,
-            }],
-        };
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        for entry in value["entries"].as_array_mut().unwrap() {
-            entry.as_object_mut().unwrap().remove("next_attempt_at");
-        }
-        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let queue = Queue::from_snapshot(8, open(&path).await);
-        assert_eq!(queue.next_ready(now()).unwrap().next_attempt_at, None);
-    }
-}
-
-mod enqueue {
-    use super::*;
-
-    #[tokio::test]
-    async fn appends_in_fifo_order() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        for name in ["a.log", "b.log", "c.log"] {
-            queue.enqueue(make_job(name, 1000, 0)).await.unwrap();
-        }
-
-        assert_eq!(
-            drain(&mut queue).await,
-            ["/data/a.log", "/data/b.log", "/data/c.log"]
-        );
-    }
-
-    /// Identity is per entry, not per job: two *identical* jobs for one path
-    /// are both queued, under distinct ids. No field of `Job` is a usable key.
-    #[tokio::test]
-    async fn duplicate_same_path_jobs_are_both_queued() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        let job = make_job("a.log", 1000, 0);
-
-        queue.enqueue(job.clone()).await.unwrap();
-        queue.enqueue(job).await.unwrap();
-
-        let first = queue.next_ready(now()).unwrap();
-        queue.remove(first.id).await.unwrap();
-        let second = queue.next_ready(now()).unwrap();
-        assert_eq!(first.job, second.job);
-        assert_ne!(first.id, second.id);
-    }
-
-    #[tokio::test]
-    async fn new_entries_start_at_zero_attempts() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-
-        assert_eq!(queue.next_ready(now()).unwrap().attempts, 0);
-    }
-
-    #[tokio::test]
-    async fn persists() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-
-        {
-            let mut queue = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-            queue.enqueue(make_job("a.log", 1000, 500)).await.unwrap();
-        }
-
-        assert_eq!(on_disk(&path).await, ["/data/a.log"]);
-    }
-
-    #[tokio::test]
-    async fn full_queue_returns_queue_full_err() {
-        let mut queue = Queue::new(1);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-
-        // a new path is rejected at capacity and the queue is unchanged.
-        let err = queue.enqueue(make_job("b.log", 1000, 0)).await.unwrap_err();
-        let DeleteErr::QueueFullErr(full) = err else {
-            panic!("expected QueueFullErr, got: {err:?}");
-        };
-        assert_eq!(full.capacity, 1);
-        assert_eq!(full.file, "/data/b.log");
-
-        // same-path is not a bypass: a duplicate also grows the queue, so it
-        // is rejected too.
-        let err = queue
-            .enqueue(make_job("a.log", 1200, 30))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, DeleteErr::QueueFullErr(_)));
-        assert_eq!(drain(&mut queue).await, ["/data/a.log"]);
-    }
-
-    #[tokio::test]
-    async fn rejection_does_not_persist() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-
-        {
-            let mut queue = Queue::from_snapshot(1, open(&path).await);
-            queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-            queue.enqueue(make_job("b.log", 1000, 0)).await.unwrap_err();
-        }
-
-        assert_eq!(on_disk(&path).await, ["/data/a.log"]);
-    }
-
-    #[tokio::test]
-    async fn persist_failure_is_swallowed() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-        let mut queue = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-
-        // make the snapshot path unwritable: a DIRECTORY now sits there.
-        files::delete(&path).await.unwrap();
-        dirs::create(&Dir::new(path.path().clone())).await.unwrap();
-
-        // the enqueue reports success despite the underlying persist error.
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-        assert_eq!(queue.len(), 1);
     }
 }
 
@@ -342,21 +151,6 @@ mod next_ready {
         queue.enqueue(make_job("a.log", 1000, 5000)).await.unwrap();
         assert!(queue.next_ready(now()).is_none());
     }
-
-    #[tokio::test]
-    async fn leaves_the_entry_on_disk_until_removed() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-        let mut queue = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-        queue.enqueue(make_job("b.log", 1000, 0)).await.unwrap();
-
-        let entry = queue.next_ready(now()).unwrap();
-        assert_eq!(on_disk(&path).await, ["/data/a.log", "/data/b.log"]);
-
-        queue.remove(entry.id).await.unwrap();
-        assert_eq!(on_disk(&path).await, ["/data/b.log"]);
-    }
 }
 
 mod count_ready {
@@ -379,138 +173,6 @@ mod count_ready {
     #[test]
     fn zero_when_empty() {
         assert_eq!(Queue::new(DEFAULT_CAPACITY).count_ready(now()), 0);
-    }
-}
-
-mod remove {
-    use super::*;
-
-    #[tokio::test]
-    async fn removes_the_entry_from_disk() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-
-        {
-            let mut queue = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-            queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-            queue.enqueue(make_job("b.log", 1000, 0)).await.unwrap();
-            let entry = queue.next_ready(now()).unwrap();
-            let removed = queue.remove(entry.id).await.unwrap();
-            assert_eq!(removed.id, entry.id);
-        }
-
-        assert_eq!(on_disk(&path).await, ["/data/b.log"]);
-    }
-
-    #[tokio::test]
-    async fn unknown_id_is_ignored() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-
-        assert!(queue.remove(Uuid::new_v4()).await.is_none());
-        assert_eq!(queue.len(), 1);
-    }
-
-    /// Two identical jobs for one path are removable independently.
-    #[tokio::test]
-    async fn removing_one_duplicate_leaves_the_other() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        let job = make_job("a.log", 1000, 0);
-        queue.enqueue(job.clone()).await.unwrap();
-        queue.enqueue(job).await.unwrap();
-
-        let entry = queue.next_ready(now()).unwrap();
-        queue.remove(entry.id).await.unwrap();
-
-        assert_eq!(queue.len(), 1);
-        assert_ne!(queue.next_ready(now()).unwrap().id, entry.id);
-    }
-}
-
-mod requeue {
-    use super::*;
-
-    #[tokio::test]
-    async fn moves_the_entry_to_the_tail() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-        queue.enqueue(make_job("b.log", 1000, 0)).await.unwrap();
-
-        // a retried entry goes behind the entries not yet visited, so a sweep
-        // budgeted over the due entries sees each of them once.
-        let entry = queue.next_ready(now()).unwrap();
-        queue.requeue(entry).await;
-
-        assert_eq!(queue.len(), 2);
-        assert_eq!(drain(&mut queue).await, ["/data/b.log", "/data/a.log"]);
-    }
-
-    /// A requeue is a rotation of an entry the queue already holds, not an
-    /// admission, so it is not capacity-gated and cannot grow the queue.
-    #[tokio::test]
-    async fn at_capacity_rotates_without_growing() {
-        let mut queue = Queue::new(1);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-
-        let entry = queue.next_ready(now()).unwrap();
-        queue.requeue(entry.clone()).await;
-
-        assert_eq!(queue.len(), 1);
-        assert_eq!(queue.next_ready(now()).unwrap().id, entry.id);
-    }
-
-    #[tokio::test]
-    async fn survives_reload() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-        let id;
-
-        {
-            let mut queue = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-            queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-            queue.enqueue(make_job("b.log", 1000, 0)).await.unwrap();
-            let entry = queue.next_ready(now()).unwrap();
-            id = entry.id;
-            queue.requeue(entry).await;
-        }
-
-        let reloaded = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-        assert_eq!(on_disk(&path).await, ["/data/b.log", "/data/a.log"]);
-        assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
-    }
-
-    /// The attempt counter rides along with the entry: a requeue carries the
-    /// caller's incremented count rather than resetting it.
-    #[tokio::test]
-    async fn preserves_attempts() {
-        let mut queue = Queue::new(DEFAULT_CAPACITY);
-        queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-
-        let mut entry = queue.next_ready(now()).unwrap();
-        entry.attempts = 3;
-        queue.requeue(entry).await;
-
-        assert_eq!(queue.next_ready(now()).unwrap().attempts, 3);
-        assert_eq!(queue.len(), 1);
-    }
-
-    /// Attempts already spent are not refunded by a restart: the counter is
-    /// part of the persisted entry.
-    #[tokio::test]
-    async fn attempts_survive_a_reload() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
-        let path = dir.file("delete_queue.json");
-
-        {
-            let mut queue = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-            queue.enqueue(make_job("a.log", 1000, 0)).await.unwrap();
-            let mut entry = queue.next_ready(now()).unwrap();
-            entry.attempts = 2;
-            queue.requeue(entry).await;
-        }
-
-        let reloaded = Queue::from_snapshot(DEFAULT_CAPACITY, open(&path).await);
-        assert_eq!(reloaded.next_ready(now()).unwrap().attempts, 2);
     }
 }
 
