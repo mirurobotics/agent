@@ -13,11 +13,6 @@ impl queue::QueueJob for Job {
 
     const LABEL: &'static str = "delete";
 
-    /// A retention job is due only once its TTL has elapsed. This delegates to
-    /// `Job`'s inherent `due_at`, which shadows this trait method at every
-    /// inherent call site — do not "simplify" it into `self.due_at()`, which
-    /// would resolve back to the inherent method only outside a generic
-    /// context and recurse inside one.
     fn due_at(&self) -> DateTime<Utc> {
         Job::due_at(self)
     }
