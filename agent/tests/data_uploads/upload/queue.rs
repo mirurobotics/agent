@@ -137,8 +137,6 @@ mod enqueue {
 
         let err = queue.enqueue(make_job("b.log")).await.unwrap_err();
 
-        // the type is the contract; the carried fields pin which job was
-        // rejected and against what capacity
         let UploadErr::QueueFullErr(e) = err else {
             panic!("expected QueueFullErr, got: {err:?}");
         };
