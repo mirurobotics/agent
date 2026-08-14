@@ -1,7 +1,6 @@
 // internal crates
-use crate::errors::Trace;
-
 pub use crate::data_uploads::queue::QueueFullErr;
+use crate::errors::Trace;
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;

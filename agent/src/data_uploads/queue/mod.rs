@@ -1,11 +1,10 @@
 pub mod errors;
 
-pub use self::errors::QueueFullErr;
-
 // standard crates
 use std::collections::VecDeque;
 
 // internal crates
+pub use self::errors::QueueFullErr;
 use crate::filesys::state_file::SingleThreadStateFile;
 use crate::models::Patch;
 
