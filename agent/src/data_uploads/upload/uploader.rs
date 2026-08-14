@@ -36,7 +36,9 @@ macro_rules! dispatch {
 #[derive(Clone, Debug)]
 pub struct UploaderOptions {
     /// Maximum number of queued jobs. A job being uploaded stays queued until
-    /// the backend confirms it, so it still counts against this.
+    /// the backend confirms it, so it still counts against this. At capacity a
+    /// new job is not refused: the queue evicts an existing entry (logged at
+    /// `error!`) and admits the new one in its place.
     pub queue_capacity: usize,
     /// Total executor attempts per job before it is dropped.
     pub attempts: u32,
@@ -90,7 +92,9 @@ impl UploaderOptions {
 // an async, actor-round-tripping is_empty would be dead weight next to len()
 #[allow(clippy::len_without_is_empty)]
 pub trait UploaderExt: Send + Sync {
-    /// Push a job at the tail of the queue.
+    /// Push a job at the tail of the queue. The job is always admitted — at
+    /// capacity the queue evicts an existing entry to make room — so the only
+    /// errors are transport failures reaching the actor.
     async fn enqueue(&self, job: Job) -> Result<(), UploadErr>;
     /// The number of queued jobs, including one being uploaded — it stays
     /// queued until the backend confirms it.
@@ -105,7 +109,7 @@ pub trait UploaderExt: Send + Sync {
 pub(crate) enum Command {
     Enqueue {
         job: Job,
-        respond_to: oneshot::Sender<Result<(), UploadErr>>,
+        respond_to: oneshot::Sender<()>,
     },
     Len {
         respond_to: oneshot::Sender<Result<usize, UploadErr>>,
@@ -339,12 +343,19 @@ where
         }
     }
 
-    /// Requeue `entry` at the tail with its attempt count preserved.
+    /// Requeue `entry` at the tail with its attempt count preserved. The queue
+    /// refuses an entry it no longer holds: it was evicted to make room for a
+    /// newer file while this attempt was in flight, and must stay evicted.
     async fn requeue(&mut self, entry: QueueEntry) {
-        let file = &entry.job.file;
+        let file = entry.job.file.clone();
         let attempts = entry.attempts;
         info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
-        self.queue.requeue(entry).await;
+        if !self.queue.requeue(entry).await {
+            warn!(
+                "upload: {file} was evicted from the queue while it was uploading; \
+                 dropping its requeue after {attempts} attempt(s)"
+            );
+        }
     }
 
     fn log_attempt(entry: &QueueEntry) {
@@ -421,8 +432,9 @@ where
                 Flow::Shutdown
             }
             Command::Enqueue { job, respond_to } => {
+                let now = (self.now_fn)();
                 dispatch!(
-                    self.queue.enqueue(job).await,
+                    self.queue.enqueue(job, now).await,
                     respond_to,
                     "Actor failed to send enqueue response"
                 );
@@ -510,7 +522,7 @@ impl UploaderExt for Uploader {
             job,
             respond_to: tx,
         })
-        .await?
+        .await
     }
 
     async fn len(&self) -> Result<usize, UploadErr> {

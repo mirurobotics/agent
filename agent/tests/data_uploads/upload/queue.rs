@@ -1,7 +1,5 @@
 // internal crates
-use miru_agent::data_uploads::upload::{
-    Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr,
-};
+use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
@@ -20,6 +18,51 @@ fn make_job(name: &str) -> Job {
         deployment_id: "dpl_1".to_string(),
         retention: None,
     }
+}
+
+/// A job whose `first_observed_at` is pinned, for the eviction tie-break.
+fn make_job_observed_at(name: &str, first_observed_at: DateTime<Utc>) -> Job {
+    Job {
+        first_observed_at,
+        ..make_job(name)
+    }
+}
+
+/// Seed an entry carrying `attempts` and `next_attempt_at`. `requeue` only
+/// moves an entry the queue already holds, so enqueue the job first and then
+/// requeue the entry the queue handed back.
+///
+/// `next_ready` only ever hands back the head, so the queue is rotated — each
+/// rotation is a `requeue`, which moves an entry to the tail verbatim — until
+/// the freshly enqueued entry surfaces. Requeuing that entry last restores the
+/// original order with the seeded entry at the tail.
+async fn seed_entry(
+    queue: &mut Queue,
+    job: Job,
+    attempts: u32,
+    next_attempt_at: Option<DateTime<Utc>>,
+) -> Uuid {
+    let digest = job.digest.clone();
+    queue.enqueue(job, Utc::now()).await;
+    for _ in 0..queue.len() {
+        let entry = queue.next_ready(DateTime::<Utc>::MAX_UTC).unwrap();
+        if entry.job.digest == digest && entry.attempts == 0 && entry.next_attempt_at.is_none() {
+            let id = entry.id;
+            assert!(
+                queue
+                    .requeue(QueueEntry {
+                        attempts,
+                        next_attempt_at,
+                        ..entry
+                    })
+                    .await,
+                "the entry just enqueued should still be queued"
+            );
+            return id;
+        }
+        assert!(queue.requeue(entry).await, "rotating a queued entry");
+    }
+    panic!("the entry just enqueued was not found in the queue");
 }
 
 /// A fresh snapshot file over `path`. Reopening the same path returns a
@@ -95,7 +138,7 @@ mod enqueue {
     async fn appends_new_job() {
         let mut queue = Queue::new(4);
 
-        queue.enqueue(make_job("a.log")).await.unwrap();
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
 
         assert_eq!(queue.len(), 1);
     }
@@ -107,8 +150,8 @@ mod enqueue {
 
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
-            queue.enqueue(make_job("a.log")).await.unwrap();
-            queue.enqueue(make_job("b.log")).await.unwrap();
+            queue.enqueue(make_job("a.log"), Utc::now()).await;
+            queue.enqueue(make_job("b.log"), Utc::now()).await;
         }
 
         let mut reloaded = Queue::from_snapshot(8, open(&path).await);
@@ -124,43 +167,147 @@ mod enqueue {
         let mut queue = Queue::new(4);
         let job = make_job("a.log");
 
-        queue.enqueue(job.clone()).await.unwrap();
-        queue.enqueue(job).await.unwrap();
+        queue.enqueue(job.clone(), Utc::now()).await;
+        queue.enqueue(job, Utc::now()).await;
 
         assert_eq!(queue.len(), 2);
     }
 
+    /// The bug this policy exists for: a full queue admits the newly scanned
+    /// file rather than refusing it, because the scanner offers each stable
+    /// file exactly once.
     #[tokio::test]
-    async fn full_queue_returns_queue_full_err() {
-        let mut queue = Queue::new(1);
-        queue.enqueue(make_job("a.log")).await.unwrap();
+    async fn full_queue_evicts_and_admits_the_new_job() {
+        let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut queue = Queue::new(2);
+        queue
+            .enqueue(make_job_observed_at("a.log", t0), Utc::now())
+            .await;
+        queue
+            .enqueue(
+                make_job_observed_at("b.log", t0 + TimeDelta::hours(1)),
+                Utc::now(),
+            )
+            .await;
 
-        let err = queue.enqueue(make_job("b.log")).await.unwrap_err();
+        queue
+            .enqueue(
+                make_job_observed_at("c.log", t0 + TimeDelta::hours(2)),
+                Utc::now(),
+            )
+            .await;
 
-        let UploadErr::QueueFullErr(e) = err else {
-            panic!("expected QueueFullErr, got: {err:?}");
-        };
-        assert_eq!(e.capacity, 1);
-        assert_eq!(e.file, "/data/b.log");
-        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(
+            digests(&mut queue).await,
+            vec!["sha256:b.log".to_string(), "sha256:c.log".to_string()]
+        );
+    }
+
+    /// The primary discriminator: the entry that has burned the most attempts
+    /// goes first, even though it is the newer of the two.
+    #[tokio::test]
+    async fn evicts_the_most_failed_entry_first() {
+        let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut queue = Queue::new(2);
+        queue
+            .enqueue(make_job_observed_at("old.log", t0), Utc::now())
+            .await;
+        seed_entry(
+            &mut queue,
+            make_job_observed_at("failing.log", t0 + TimeDelta::hours(1)),
+            4,
+            None,
+        )
+        .await;
+
+        queue
+            .enqueue(
+                make_job_observed_at("new.log", t0 + TimeDelta::hours(2)),
+                Utc::now(),
+            )
+            .await;
+
+        assert_eq!(
+            digests(&mut queue).await,
+            vec!["sha256:old.log".to_string(), "sha256:new.log".to_string()]
+        );
+    }
+
+    /// The tie-break, and the case that actually fires during an outage: every
+    /// entry sits at zero attempts because network failures are exempt from
+    /// the attempt budget, so the oldest file is the one dropped.
+    #[tokio::test]
+    async fn among_equal_attempts_the_oldest_is_evicted() {
+        let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut queue = Queue::new(2);
+        queue
+            .enqueue(make_job_observed_at("oldest.log", t0), Utc::now())
+            .await;
+        queue
+            .enqueue(
+                make_job_observed_at("newer.log", t0 + TimeDelta::hours(1)),
+                Utc::now(),
+            )
+            .await;
+
+        queue
+            .enqueue(
+                make_job_observed_at("newest.log", t0 + TimeDelta::hours(2)),
+                Utc::now(),
+            )
+            .await;
+
+        assert_eq!(
+            digests(&mut queue).await,
+            vec![
+                "sha256:newer.log".to_string(),
+                "sha256:newest.log".to_string()
+            ]
+        );
     }
 
     #[tokio::test]
-    async fn rejection_does_not_persist() {
+    async fn eviction_survives_a_reload() {
         let dir = dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
 
         {
             let mut queue = Queue::from_snapshot(1, open(&path).await);
-            queue.enqueue(make_job("a.log")).await.unwrap();
-            queue.enqueue(make_job("b.log")).await.unwrap_err();
+            queue.enqueue(make_job("a.log"), Utc::now()).await;
+            queue.enqueue(make_job("b.log"), Utc::now()).await;
         }
 
         let mut reloaded = Queue::from_snapshot(1, open(&path).await);
         assert_eq!(
             digests(&mut reloaded).await,
-            vec!["sha256:a.log".to_string()]
+            vec!["sha256:b.log".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn capacity_one_keeps_only_the_newest() {
+        let mut queue = Queue::new(1);
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
+
+        queue.enqueue(make_job("b.log"), Utc::now()).await;
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(digests(&mut queue).await, vec!["sha256:b.log".to_string()]);
+    }
+
+    /// A zero capacity degenerates to one slot rather than evicting the job it
+    /// just admitted or looping forever looking for a victim — the test
+    /// completing at all is the non-spin assertion.
+    #[tokio::test]
+    async fn capacity_zero_admits_one_entry_and_does_not_spin() {
+        let mut queue = Queue::new(0);
+
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
+        queue.enqueue(make_job("b.log"), Utc::now()).await;
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(digests(&mut queue).await, vec!["sha256:b.log".to_string()]);
     }
 
     #[tokio::test]
@@ -179,7 +326,7 @@ mod enqueue {
             .unwrap();
 
         // The enqueue reports success despite the underlying persist error.
-        queue.enqueue(make_job("a.log")).await.unwrap();
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
         assert_eq!(queue.len(), 1);
 
         // Restore permissions so the tempdir can clean itself up on drop.
@@ -197,7 +344,7 @@ mod is_empty {
         let mut queue = Queue::new(4);
         assert!(queue.is_empty());
 
-        queue.enqueue(make_job("a.log")).await.unwrap();
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
         assert!(!queue.is_empty());
     }
 }
@@ -209,16 +356,9 @@ mod requeue {
     async fn preserves_attempts_and_appends_at_tail() {
         let mut queue = Queue::new(4);
         let job_a = make_job("a.log");
-        queue.enqueue(job_a.clone()).await.unwrap();
+        queue.enqueue(job_a.clone(), Utc::now()).await;
         let requeued_job = make_job("b.log");
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: requeued_job.clone(),
-                attempts: 3,
-                next_attempt_at: None,
-            })
-            .await;
+        seed_entry(&mut queue, requeued_job.clone(), 3, None).await;
 
         let first = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(first.job, job_a);
@@ -235,14 +375,7 @@ mod requeue {
 
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job("a.log"),
-                    attempts: 5,
-                    next_attempt_at: None,
-                })
-                .await;
+            seed_entry(&mut queue, make_job("a.log"), 5, None).await;
         }
 
         let reloaded = Queue::from_snapshot(8, open(&path).await);
@@ -259,14 +392,7 @@ mod requeue {
 
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job("a.log"),
-                    attempts: 5,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
+            seed_entry(&mut queue, make_job("a.log"), 5, Some(deadline)).await;
         }
 
         let reloaded = Queue::from_snapshot(8, open(&path).await);
@@ -276,44 +402,66 @@ mod requeue {
         assert_eq!(entry.next_attempt_at, Some(deadline));
     }
 
-    #[tokio::test]
-    async fn full_queue_still_accepts_requeue() {
-        let mut queue = Queue::new(1);
-        queue.enqueue(make_job("a.log")).await.unwrap();
-
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("b.log"),
-                attempts: 2,
-                next_attempt_at: None,
-            })
-            .await;
-
-        assert_eq!(queue.len(), 2);
-        assert_eq!(
-            digests(&mut queue).await,
-            vec!["sha256:a.log".to_string(), "sha256:b.log".to_string()]
-        );
-    }
-
     /// Requeuing an entry the queue already holds moves it, rather than
     /// leaving a stale copy behind under the same id.
     #[tokio::test]
     async fn replaces_the_entry_with_the_same_id() {
         let mut queue = Queue::new(4);
-        queue.enqueue(make_job("a.log")).await.unwrap();
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
         let entry = queue.next_ready(Utc::now()).unwrap();
 
-        queue
-            .requeue(QueueEntry {
-                attempts: 1,
-                ..entry
-            })
-            .await;
+        assert!(
+            queue
+                .requeue(QueueEntry {
+                    attempts: 1,
+                    ..entry
+                })
+                .await
+        );
 
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.next_ready(Utc::now()).unwrap().attempts, 1);
+    }
+
+    /// The contract that keeps `enqueue` the only path that grows the queue:
+    /// an entry the queue no longer holds — confirmed, dropped, or evicted
+    /// while the caller held its clone — is not re-added.
+    #[tokio::test]
+    async fn requeue_of_an_absent_entry_is_a_no_op() {
+        let mut queue = Queue::new(4);
+
+        let requeued = queue
+            .requeue(QueueEntry {
+                id: Uuid::new_v4(),
+                job: make_job("a.log"),
+                attempts: 2,
+                next_attempt_at: None,
+            })
+            .await;
+
+        assert!(!requeued);
+        assert!(queue.is_empty());
+    }
+
+    /// A full queue must not block a requeue, and the requeue must not grow
+    /// the queue past capacity.
+    #[tokio::test]
+    async fn full_queue_still_accepts_a_requeue_of_a_queued_entry() {
+        let mut queue = Queue::new(1);
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
+        let entry = queue.next_ready(Utc::now()).unwrap();
+
+        assert!(
+            queue
+                .requeue(QueueEntry {
+                    attempts: 2,
+                    ..entry
+                })
+                .await
+        );
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.next_ready(Utc::now()).unwrap().attempts, 2);
     }
 }
 
@@ -326,7 +474,7 @@ mod next_ready {
         let mut jobs = Vec::new();
         for name in ["a.log", "b.log", "c.log"] {
             let job = make_job(name);
-            queue.enqueue(job.clone()).await.unwrap();
+            queue.enqueue(job.clone(), Utc::now()).await;
             jobs.push(job);
         }
 
@@ -344,16 +492,9 @@ mod next_ready {
         let mut queue = Queue::new(4);
         let now = Utc::now();
         let deadline = now + TimeDelta::hours(1);
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log"),
-                attempts: 1,
-                next_attempt_at: Some(deadline),
-            })
-            .await;
-        queue.enqueue(make_job("b.log")).await.unwrap();
-        queue.enqueue(make_job("c.log")).await.unwrap();
+        seed_entry(&mut queue, make_job("a.log"), 1, Some(deadline)).await;
+        queue.enqueue(make_job("b.log"), Utc::now()).await;
+        queue.enqueue(make_job("c.log"), Utc::now()).await;
 
         // waiting A is skipped; eligible entries still pop in FIFO order
         let b = queue.next_ready(now).unwrap();
@@ -372,14 +513,13 @@ mod next_ready {
     async fn returns_none_when_all_waiting() {
         let mut queue = Queue::new(4);
         let now = Utc::now();
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log"),
-                attempts: 1,
-                next_attempt_at: Some(now + TimeDelta::hours(1)),
-            })
-            .await;
+        seed_entry(
+            &mut queue,
+            make_job("a.log"),
+            1,
+            Some(now + TimeDelta::hours(1)),
+        )
+        .await;
 
         assert!(queue.next_ready(now).is_none());
         assert_eq!(queue.len(), 1);
@@ -392,8 +532,8 @@ mod next_ready {
 
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
-            queue.enqueue(make_job("a.log")).await.unwrap();
-            queue.enqueue(make_job("b.log")).await.unwrap();
+            queue.enqueue(make_job("a.log"), Utc::now()).await;
+            queue.enqueue(make_job("b.log"), Utc::now()).await;
             queue.next_ready(Utc::now()).unwrap();
         }
 
@@ -415,8 +555,8 @@ mod remove {
 
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
-            queue.enqueue(make_job("a.log")).await.unwrap();
-            queue.enqueue(make_job("b.log")).await.unwrap();
+            queue.enqueue(make_job("a.log"), Utc::now()).await;
+            queue.enqueue(make_job("b.log"), Utc::now()).await;
             let entry = queue.next_ready(Utc::now()).unwrap();
             let removed = queue.remove(entry.id).await.unwrap();
             assert_eq!(removed.id, entry.id);
@@ -432,7 +572,7 @@ mod remove {
     #[tokio::test]
     async fn unknown_id_is_ignored() {
         let mut queue = Queue::new(4);
-        queue.enqueue(make_job("a.log")).await.unwrap();
+        queue.enqueue(make_job("a.log"), Utc::now()).await;
 
         assert!(queue.remove(Uuid::new_v4()).await.is_none());
         assert_eq!(queue.len(), 1);
@@ -444,8 +584,8 @@ mod remove {
     async fn removing_one_duplicate_leaves_the_other() {
         let mut queue = Queue::new(4);
         let job = make_job("a.log");
-        queue.enqueue(job.clone()).await.unwrap();
-        queue.enqueue(job).await.unwrap();
+        queue.enqueue(job.clone(), Utc::now()).await;
+        queue.enqueue(job, Utc::now()).await;
 
         let entry = queue.next_ready(Utc::now()).unwrap();
         queue.remove(entry.id).await.unwrap();
@@ -469,14 +609,7 @@ mod earliest_next_attempt {
         let t1 = DateTime::from_timestamp(1_000_000_000, 0).unwrap();
         let t2 = DateTime::from_timestamp(1_500_000_000, 0).unwrap();
         for (name, deadline) in [("a.log", t2), ("b.log", t1)] {
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job(name),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
+            seed_entry(&mut queue, make_job(name), 1, Some(deadline)).await;
         }
 
         assert_eq!(queue.earliest_next_attempt(), Some(t1));
@@ -485,15 +618,14 @@ mod earliest_next_attempt {
     #[tokio::test]
     async fn none_deadline_counts_as_min_utc() {
         let mut queue = Queue::new(4);
-        queue
-            .requeue(QueueEntry {
-                id: Uuid::new_v4(),
-                job: make_job("a.log"),
-                attempts: 1,
-                next_attempt_at: Some(Utc::now() + TimeDelta::hours(1)),
-            })
-            .await;
-        queue.enqueue(make_job("b.log")).await.unwrap();
+        seed_entry(
+            &mut queue,
+            make_job("a.log"),
+            1,
+            Some(Utc::now() + TimeDelta::hours(1)),
+        )
+        .await;
+        queue.enqueue(make_job("b.log"), Utc::now()).await;
 
         assert_eq!(
             queue.earliest_next_attempt(),
@@ -513,14 +645,7 @@ mod reset_invalid_deadlines {
         let inside = horizon - TimeDelta::seconds(1);
         let beyond = horizon + TimeDelta::seconds(1);
         for (name, deadline) in [("a.log", inside), ("b.log", horizon), ("c.log", beyond)] {
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job(name),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
+            seed_entry(&mut queue, make_job(name), 1, Some(deadline)).await;
         }
 
         queue.reset_invalid_deadlines(horizon);
@@ -553,14 +678,7 @@ mod reset_invalid_deadlines {
         // the requeues persist the stale stamps; the reset deliberately does
         // not write, so the file still carries them afterwards
         for name in ["a.log", "b.log"] {
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make_job(name),
-                    attempts: 2,
-                    next_attempt_at: Some(stale),
-                })
-                .await;
+            seed_entry(&mut queue, make_job(name), 2, Some(stale)).await;
         }
 
         queue.reset_invalid_deadlines(horizon);

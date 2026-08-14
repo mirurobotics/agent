@@ -532,11 +532,11 @@ async fn shutdown_during_in_flight_upload_returns_promptly() {
     drop(release_tx);
 }
 
-/// An in-flight job keeps its slot: it stays queued until it is confirmed,
-/// so it is still counted against capacity. A requeue can therefore never
-/// push the queue past capacity the way it could when the pop freed the slot.
+/// The in-memory companion to the durability regression: an in-flight job is
+/// still a queue entry, so a new enqueue at capacity evicts it — and its
+/// requeue must not bring it back or push the queue over capacity.
 #[tokio::test]
-async fn in_flight_job_holds_its_capacity_slot() {
+async fn evicted_in_flight_job_is_not_resurrected() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
     let (release_tx, release_rx) = oneshot::channel();
     mock.push_step(MockStep::Hang(release_rx));
@@ -547,25 +547,28 @@ async fn in_flight_job_holds_its_capacity_slot() {
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
     let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
-    // A still occupies the only slot, so B is rejected rather than admitted
-    let err = timed(uploader.enqueue(make_job("b.log")))
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, UploadErr::QueueFullErr(_)),
-        "expected QueueFullErr, got: {err:?}"
-    );
+    // B is admitted in A's place rather than refused
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 1);
 
-    // A's failure requeues it in place: still one job, retried after backoff
+    // A's requeue is dropped, so once B confirms the queue is empty; a
+    // resurrected A would leave it holding one entry
     release_tx.send(scripted_err()).unwrap();
     timed(started_rx.recv()).await.unwrap();
+    timed(async {
+        while uploader.len().await.unwrap() > 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_a]);
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
 }
 
 #[tokio::test]
@@ -1030,6 +1033,18 @@ mod durability {
         mock: Arc<MockUploadExecutor>,
         snapshot: QueueSnapshotFile,
     ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
+        spawn_persisted_with_options(mock, snapshot, UploaderOptions::default())
+    }
+
+    /// [`spawn_persisted_with_test_clock`] with the options chosen by the
+    /// caller. The test clock matters: with a no-op sleep and a real
+    /// `Utc::now`, a stamped entry left waiting busy-loops the run loop and
+    /// hangs the binary instead of failing an assertion.
+    fn spawn_persisted_with_options(
+        mock: Arc<MockUploadExecutor>,
+        snapshot: QueueSnapshotFile,
+        options: UploaderOptions,
+    ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
         let clock = Arc::new(Mutex::new(Utc::now()));
         let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
         let now_clock = clock.clone();
@@ -1044,7 +1059,7 @@ mod durability {
             16,
             mock,
             MockDeleter::new(),
-            UploaderOptions::default(),
+            options,
             Some(snapshot),
             sleep_fn,
             now_fn,
@@ -1200,6 +1215,48 @@ mod durability {
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
+    }
+
+    /// The headline regression: a job evicted while it is being uploaded stays
+    /// evicted. The worker holds a clone of an entry that is still queued, so
+    /// an enqueue served mid-attempt can evict it; its requeue must then be a
+    /// no-op rather than resurrecting it and pushing the queue over capacity.
+    #[tokio::test]
+    async fn in_flight_job_evicted_by_a_new_enqueue_is_not_resurrected() {
+        let dir = dirs::temp("uploader_eviction").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::Hang(release_rx));
+        mock.push_step(MockStep::Ok);
+        let options = UploaderOptions {
+            queue_capacity: 1,
+            ..Default::default()
+        };
+        let (uploader, handle, _sleeps) =
+            spawn_persisted_with_options(mock.clone(), open(&path).await, options);
+        let job_a = make_job("a.log");
+        let job_b = make_job("b.log");
+
+        timed(uploader.enqueue(job_a.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        // A is in flight and still queued, so it is the only eviction
+        // candidate: B is admitted in its place
+        timed(uploader.enqueue(job_b.clone())).await.unwrap();
+        assert_eq!(on_disk(&path).await, vec!["sha256:b.log".to_string()]);
+        assert_eq!(timed(uploader.len()).await.unwrap(), 1);
+
+        // A's attempt fails and is requeued: the queue no longer holds it, so
+        // the requeue must be dropped
+        release_tx.send(scripted_err()).unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+        assert!(on_disk(&path).await.is_empty());
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        // exactly two attempts; a resurrected A would make this [A, B, A]
+        assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
     }
 
     #[tokio::test]

@@ -15,8 +15,11 @@ use tracing::{debug, warn};
 
 /// The upload policy over the scanner's stable-file stream: an upload-bearing
 /// rule's stable file becomes an enqueued upload [`Job`]; a retention-only
-/// rule's stable file is skipped. Enqueue failures are logged and swallowed —
-/// the sink is infallible from the scanner's perspective.
+/// rule's stable file is skipped. A full queue no longer rejects the new file:
+/// the queue evicts an existing entry and logs the loss at `error!`, so the
+/// only remaining enqueue failure here is the uploader actor being gone.
+/// Enqueue failures are logged and swallowed — the sink is infallible from the
+/// scanner's perspective.
 pub struct UploadStableFileSink {
     uploader: Arc<Uploader>,
 }
