@@ -43,6 +43,4 @@ pub type QueueEntry = queue::QueueEntry<Job>;
 
 pub type DeleteQueueSnapshot = queue::QueueSnapshot<Job>;
 
-/// The queue's persistence handle: an atomically-written JSON snapshot with an
-/// in-memory cache.
 pub type DeleteQueueSnapshotFile = queue::QueueSnapshotFile<Job>;

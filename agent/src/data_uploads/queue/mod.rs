@@ -11,8 +11,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// Everything a [`Queue`] needs to know about the job it carries. One impl per
-/// worker: `data_uploads::upload::Job` and `data_uploads::retention::Job`.
+/// Everything a [`Queue`] needs to know about the job it carries.
 pub trait QueueJob:
     Clone + std::fmt::Debug + PartialEq + Serialize + DeserializeOwned + Send + Sync + 'static
 {
@@ -29,9 +28,9 @@ pub trait QueueJob:
     /// The file this job concerns, for logs and the capacity error.
     fn file(&self) -> String;
 
-    /// Build the capacity rejection. Implementors call `crate::trace!()` inside
-    /// their own body so the recorded trace points at the worker's module
-    /// rather than at this shared code.
+    /// Build the capacity rejection. Implementors call `crate::trace!()` in
+    /// their own body so the trace records the implementor's location rather
+    /// than this shared code.
     fn queue_full_err(capacity: usize, file: String) -> Self::QueueFullErr;
 }
 
@@ -272,9 +271,9 @@ impl<J: QueueJob> Queue<J> {
     }
 }
 
-/// The queue's behavior is covered by the integration suite at
-/// `agent/tests/data_uploads/queue.rs`. Only the two `#[cfg(test)]`
-/// accessors are covered here, since they are invisible outside the crate.
+/// The queue's behavior is covered by the integration suite. Only the two
+/// `#[cfg(test)]` accessors are covered here, since they are invisible outside
+/// the crate.
 #[cfg(test)]
 mod tests {
     // internal crates

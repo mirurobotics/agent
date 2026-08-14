@@ -41,6 +41,4 @@ pub type QueueEntry = queue::QueueEntry<Job>;
 
 pub type QueueSnapshot = queue::QueueSnapshot<Job>;
 
-/// The queue's persistence handle: an atomically-written JSON snapshot with an
-/// in-memory cache. Mirrors the scanner's `ScanSnapshotFile`.
 pub type QueueSnapshotFile = queue::QueueSnapshotFile<Job>;

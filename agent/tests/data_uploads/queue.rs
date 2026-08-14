@@ -113,6 +113,34 @@ async fn check_empty_snapshot_loads_empty_queue<J: QueueJob>(name: &str) {
     assert_eq!(queue.len(), 0);
 }
 
+/// Persisted entries are loaded IN FULL even when they outnumber `capacity`:
+/// capacity gates only new enqueues, so an over-capacity backlog drains before
+/// the queue accepts more. Truncating the load would silently drop queued jobs,
+/// since the next mutation rewrites the whole snapshot.
+async fn check_from_snapshot_loads_an_over_capacity_backlog<J: QueueJob>(
+    name: &str,
+    make: fn(&str) -> J,
+) {
+    let (_dir, path) = temp_path(name);
+
+    {
+        let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+        for name in ["a.log", "b.log", "c.log"] {
+            enqueue(&mut queue, make(name)).await;
+        }
+    }
+
+    let mut queue = Queue::<J>::from_snapshot(2, open::<J>(&path).await);
+    assert_eq!(queue.len(), 3);
+    // the over-capacity backlog accepts nothing new until it drains
+    assert!(queue.enqueue(make("d.log")).await.is_err());
+
+    assert_eq!(
+        drain(&mut queue).await,
+        ["/data/a.log", "/data/b.log", "/data/c.log"]
+    );
+}
+
 async fn check_enqueue_appends_in_fifo_order<J: QueueJob>(make: fn(&str) -> J) {
     let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
     assert!(queue.is_empty());
@@ -234,11 +262,11 @@ async fn check_next_ready_skips_waiting_entries<J: QueueJob>(make: fn(&str) -> J
             next_attempt_at: Some(deadline),
         })
         .await;
-    enqueue(&mut queue, make("ready")).await;
+    enqueue(&mut queue, make("ready_1")).await;
+    enqueue(&mut queue, make("ready_2")).await;
 
-    let entry = queue.next_ready(now()).unwrap();
-    assert_eq!(entry.job.file(), "/data/ready");
-    queue.remove(entry.id).await.unwrap();
+    // skipping the ineligible head does not disturb FIFO among the remainder
+    assert_eq!(drain(&mut queue).await, ["/data/ready_1", "/data/ready_2"]);
 
     assert!(queue.next_ready(now()).is_none());
     // the deadline itself is eligible: the comparison is inclusive
@@ -304,7 +332,14 @@ async fn check_requeue_at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str
         .await;
 
     assert_eq!(queue.len(), 2);
-    assert_eq!(drain(&mut queue).await, ["/data/a.log", "/data/b.log"]);
+
+    // the appended entry lands at the tail carrying its attempt count
+    let head = queue.next_ready(now()).unwrap();
+    assert_eq!(head.job.file(), "/data/a.log");
+    queue.remove(head.id).await.unwrap();
+    let tail = queue.next_ready(now()).unwrap();
+    assert_eq!(tail.job.file(), "/data/b.log");
+    assert_eq!(tail.attempts, 2);
 }
 
 /// A rotation is durable: the rotated order, and the fact that the rotated
@@ -490,6 +525,12 @@ mod upload_jobs {
     }
 
     #[tokio::test]
+    async fn from_snapshot_loads_an_over_capacity_backlog() {
+        check_from_snapshot_loads_an_over_capacity_backlog("upload-generic-queue-test", upload_job)
+            .await;
+    }
+
+    #[tokio::test]
     async fn enqueue_appends_in_fifo_order() {
         check_enqueue_appends_in_fifo_order(upload_job).await;
     }
@@ -628,6 +669,15 @@ mod retention_jobs {
     #[tokio::test]
     async fn empty_snapshot_loads_empty_queue() {
         check_empty_snapshot_loads_empty_queue::<retention::Job>("delete-generic-queue-test").await;
+    }
+
+    #[tokio::test]
+    async fn from_snapshot_loads_an_over_capacity_backlog() {
+        check_from_snapshot_loads_an_over_capacity_backlog(
+            "delete-generic-queue-test",
+            retention_job,
+        )
+        .await;
     }
 
     #[tokio::test]
