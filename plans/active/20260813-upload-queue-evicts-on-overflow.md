@@ -26,22 +26,75 @@ Observable outcomes after the change:
 
 ## Progress
 
-- [ ] M1: Queue evicts on overflow; `enqueue` becomes infallible; `requeue` refuses absent ids; `QueueFullErr` removed; workspace compiles.
-- [ ] M2: Queue-level tests for admission, victim selection on both discriminators, persistence, and the `capacity == 0` / `capacity == 1` edges.
-- [ ] M3: Uploader-level regression tests that an evicted in-flight entry is not resurrected, in memory and on disk.
-- [ ] M4: Comparator perturbation check, coverage gate, full preflight, docs/comment sweep.
+- [x] M1: Queue evicts on overflow; `enqueue` becomes infallible; `requeue` refuses absent ids; `QueueFullErr` removed; workspace compiles. (`477267d`)
+- [x] M2: Queue-level tests for admission, victim selection on both discriminators, persistence, and the `capacity == 0` / `capacity == 1` edges. (`f0beaaa`)
+- [x] M3: Uploader-level regression tests that an evicted in-flight entry is not resurrected, in memory and on disk. (`3e1505d`)
+- [x] M4: Comparator perturbation check, coverage gate, full preflight, docs/comment sweep.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- **The plan's `seed_entry` recipe does not work as written.** It says to enqueue
+  the job and then take "the entry the queue handed back" via
+  `next_ready(DateTime::<Utc>::MAX_UTC)`. But `next_ready` only ever returns the
+  **head**, and `MAX_UTC` makes every entry eligible, so on a non-empty queue it
+  hands back an *earlier* entry rather than the one just enqueued. Narrowing the
+  probe instant does not fix it in general either: `earliest_next_attempt::returns_min_deadline`
+  seeds deadlines in the past (2001 and 2017), and `requeue::preserves_attempts_and_appends_at_tail`
+  has a prior entry with a `None` deadline. `seed_entry` is therefore implemented
+  as an order-preserving **rotation**: requeue each non-matching head (a requeue
+  moves an entry to the tail verbatim) until the freshly enqueued entry surfaces,
+  then requeue that entry with the desired `attempts` / `next_attempt_at`. After
+  `k` rotations plus the final requeue the queue is back in its original order
+  with the seeded entry at the tail.
+- **Perturbation A** (`max_by_key` -> `min_by_key`) failed **three** tests, not
+  the one the plan predicted: `evicts_the_most_failed_entry_first`,
+  `among_equal_attempts_the_oldest_is_evicted`, and
+  `full_queue_evicts_and_admits_the_new_job`. Flipping the extremum also flips
+  the (already-inverted) secondary key, so the tie-break tests move too.
+  Representative failure: `evicts_the_most_failed_entry_first` got
+  `["sha256:failing.log", "sha256:new.log"]`, expected
+  `["sha256:old.log", "sha256:new.log"]`.
+- **Perturbation B** (drop `std::cmp::Reverse`) failed exactly the two the plan
+  predicted: `among_equal_attempts_the_oldest_is_evicted` got
+  `["sha256:oldest.log", "sha256:newest.log"]` (expected
+  `["sha256:newer.log", "sha256:newest.log"]`) and
+  `full_queue_evicts_and_admits_the_new_job` got
+  `["sha256:a.log", "sha256:c.log"]` (expected `["sha256:b.log", "sha256:c.log"]`).
+- **Trap-1 perturbation (not in the plan, run anyway).** Reverting `Queue::requeue`
+  to its old unconditional `remove_impl` + `push_back` body failed both
+  resurrection tests with `recorded_calls()` = `[A, B, A]` against the expected
+  `[A, B]` — i.e. the evicted in-flight job was genuinely resurrected and
+  re-uploaded. The regression tests are not vacuous.
+- **Trap 2 verified.** `grep -rn "QueueFullErr" --include=*.rs agent/src agent/tests`
+  returns hits only under `data_uploads/retention/` (plus `tests/workers/delete.rs`
+  and `tests/mocks/deleter.rs`, which use the retention type). Zero hits anywhere
+  under `data_uploads/upload/`. `cargo test --features test data_uploads::retention`
+  is green (36 passed, 0 failed).
 
 ## Decision Log
 
-(Add entries as work proceeds. The pre-authoring decisions that shaped this plan are recorded under "Plan of Work" -> "Decisions taken during authoring"; copy any that change during implementation down here with the new rationale.)
+- **`seed_entry` is a rotation helper, not a single `next_ready`.** See Surprises;
+  the plan's recipe would have silently seeded the wrong entry in several
+  conversions. The rotation is entirely inside the test helper — no production
+  behavior depends on it.
+- **The in-memory companion asserts on the drained queue, not on a bare `len()`.**
+  Sampling `len()` right after B's attempt starts races B's own completion, so the
+  test polls until the queue is empty and then asserts `recorded_calls() == [A, B]`.
+  Under the resurrection bug A comes back, is retried, and the call log is
+  `[A, B, A]` — which is what actually fails.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Shipped exactly the plan's scope. `Queue::enqueue` is infallible and evicts one
+entry at capacity (highest `attempts`, ties by oldest `first_observed_at`, logged
+at `error!` with file, rule, digest, attempts and age); `Queue::requeue` returns
+`bool` and is a no-op for an id the queue no longer holds, leaving `enqueue` as
+the only path that grows the queue; `UploadErr::QueueFullErr` is gone and
+retention's identically-named error is untouched.
+
+Both plan perturbations plus an extra requeue-contract perturbation confirm the
+new tests fail for the right reasons. `data_uploads/upload` coverage is 97.39%
+against a 96.00% gate.
 
 ## Context and Orientation
 
