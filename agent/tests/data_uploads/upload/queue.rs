@@ -1,19 +1,50 @@
-//! The on-disk wire pin for `upload_queue.json`.
+//! The upload queue: the generic suite instantiated for `upload::Job`, plus
+//! the on-disk wire pin for `upload_queue.json`.
 //!
-//! Queue *behavior* is exercised in `agent/tests/data_uploads/queue.rs`, which
-//! drives the one generic implementation against both production job types.
-//! What cannot live there is this: the generic suite is parameterized over the
-//! job type and so cannot spell a concrete payload, but the bytes on disk are
-//! a per-worker artifact — and this file is released user data, so a shape
-//! change would wipe a real queue rather than fail.
+//! Queue *behavior* is written once in `agent/tests/data_uploads/queue.rs` and
+//! run here via `queue_suite!` against this worker's job type. What cannot live
+//! there is the wire pin below: the generic suite is parameterized over the job
+//! type and so cannot spell a concrete payload, but the bytes on disk are a
+//! per-worker artifact — and this file is released user data, so a shape change
+//! would wipe a real queue rather than fail.
 
 // internal crates
+use crate::data_uploads::queue::queue_suite;
+use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+
+/// A deterministic upload job. Upload jobs are due the moment they arrive, so
+/// every one of these is due at `queue::now()`.
+fn upload_job(name: &str) -> Job {
+    Job {
+        file: File::new(format!("/data/{name}")),
+        size: 42,
+        digest: format!("sha256:{name}"),
+        mtime: DateTime::from_timestamp(900, 0).unwrap(),
+        first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        file_rule_id: "rule_1".to_string(),
+        deployment_id: "dpl_1".to_string(),
+        retention: None,
+    }
+}
+
+queue_suite!(upload_job, "upload-generic-queue-test");
+
+/// An upload job is due the moment it arrives: `due_at` is `MIN_UTC`, so
+/// readiness is decided by `next_attempt_at` alone.
+#[test]
+fn due_at_is_min_utc() {
+    assert_eq!(
+        QueueJob::due_at(&upload_job("a.log")),
+        DateTime::<Utc>::MIN_UTC
+    );
+}
 
 fn make_job(name: &str) -> Job {
     Job {

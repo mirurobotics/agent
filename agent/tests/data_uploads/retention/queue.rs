@@ -1,21 +1,24 @@
-//! The on-disk wire pin for `delete_queue.json`.
+//! The delete queue: the generic suite instantiated for `retention::Job`, plus
+//! the on-disk wire pin for `delete_queue.json`.
 //!
-//! Queue *behavior* is exercised in `agent/tests/data_uploads/queue.rs`, which
-//! drives the one generic implementation against both production job types.
-//! What cannot live there is this: the generic suite is parameterized over the
-//! job type and so cannot spell a concrete payload, but the bytes on disk are
-//! a per-worker artifact. `SingleThreadStateFile::new_with_default` falls back
-//! to writing the default on any parse error, so a shape change would wipe a
-//! live queue rather than fail — this pin is what turns that into a red test.
+//! Queue *behavior* is written once in `agent/tests/data_uploads/queue.rs` and
+//! run here via `queue_suite!` against this worker's job type. What cannot live
+//! there is the wire pin below: the generic suite is parameterized over the job
+//! type and so cannot spell a concrete payload, but the bytes on disk are a
+//! per-worker artifact. `SingleThreadStateFile::new_with_default` falls back to
+//! writing the default on any parse error, so a shape change would wipe a live
+//! queue rather than fail — this pin is what turns that into a red test.
 
 // internal crates
+use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
+use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
 
 /// The instant the pin selects at. The pinned job's TTL has elapsed by then.
@@ -47,6 +50,36 @@ async fn open(path: &File) -> DeleteQueueSnapshotFile {
     DeleteQueueSnapshotFile::new_with_default(path.clone(), DeleteQueueSnapshot::default())
         .await
         .unwrap()
+}
+
+/// A deterministic retention job whose TTL has yet to elapse at [`now`] unless
+/// `ttl_secs` is small enough. Observed at 1000s, so a TTL of 1000s is due at
+/// exactly [`now`].
+fn retention_job_with_ttl(name: &str, ttl_secs: u64) -> Job {
+    make_job(name, 1000, ttl_secs)
+}
+
+/// A retention job with a zero TTL, so it is due at [`now`].
+fn retention_job(name: &str) -> Job {
+    retention_job_with_ttl(name, 0)
+}
+
+queue_suite!(retention_job, "delete-generic-queue-test");
+
+/// The other state of the `due_at` hook: a retention job is not ready until
+/// its TTL has elapsed, and `next_ready` / `count_ready` both honour it.
+#[tokio::test]
+async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
+    let mut queue = Queue::new(DEFAULT_CAPACITY);
+    enqueue(&mut queue, retention_job_with_ttl("waiting", 5000)).await;
+    enqueue(&mut queue, retention_job_with_ttl("due", 500)).await;
+
+    // due_at is inclusive: "due" is due at exactly `now`
+    assert_eq!(queue.count_ready(now()), 1);
+    assert_eq!(queue.next_ready(now()).unwrap().job.name(), "/data/due");
+
+    // the waiting job becomes ready once its TTL elapses
+    assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
 }
 
 mod from_snapshot {
