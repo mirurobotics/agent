@@ -6,7 +6,6 @@ use std::time::Duration;
 use crate::mocks::{deleter::MockDeleter, error::SleepController};
 use miru_agent::data_uploads::retention::errors::QueueFullErr;
 use miru_agent::data_uploads::retention::DeleteErr;
-use miru_agent::trace;
 use miru_agent::workers::delete;
 
 // external crates
@@ -16,11 +15,7 @@ pub mod run {
     use super::*;
 
     fn sweep_err() -> DeleteErr {
-        DeleteErr::QueueFullErr(QueueFullErr {
-            capacity: 0,
-            file: "mock sweep failure".to_string(),
-            trace: trace!(),
-        })
+        QueueFullErr::new("delete", 0, "mock sweep failure").into()
     }
 
     #[tokio::test]
