@@ -91,16 +91,9 @@ pub mod cases {
 
     // ----------------------------- from_snapshot --------------------------------- //
 
-    /// Loading a queue from its persisted snapshot. The concrete on-disk bytes
-    /// are pinned per worker instead (`upload/queue.rs`, `retention/queue.rs`):
-    /// the generic cases here cannot spell a payload for an unknown `J`.
     pub mod from_snapshot {
         use super::*;
 
-        /// The factory is unused: the point of the case is that a snapshot with
-        /// no entries loads as an empty queue rather than as anything else. It
-        /// is taken anyway so the group has one uniform signature, and so `J`
-        /// is inferred.
         pub async fn empty_loads_empty_queue<J: QueueJob>(tmp: &str, _make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
 
@@ -110,11 +103,6 @@ pub mod cases {
             assert_eq!(queue.len(), 0);
         }
 
-        /// Persisted entries are loaded IN FULL even when they outnumber
-        /// `capacity`: capacity gates only new enqueues, so an over-capacity
-        /// backlog drains before the queue accepts more. Truncating the load
-        /// would silently drop queued jobs, since the next mutation rewrites
-        /// the whole snapshot.
         pub async fn loads_an_over_capacity_backlog<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
 
@@ -136,9 +124,6 @@ pub mod cases {
             );
         }
 
-        /// An entry written before a field existed still loads, rather than
-        /// failing to deserialize — which `new_with_default` would turn into a
-        /// silent wipe.
         pub async fn missing_optional_fields_default<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
             let snapshot = QueueSnapshot {
@@ -173,8 +158,6 @@ pub mod cases {
 
     // -------------------------------- enqueue ------------------------------------ //
 
-    /// Admission: ordering, per-entry identity, the capacity gate, and what
-    /// each outcome writes.
     pub mod enqueue {
         use super::*;
 
@@ -207,8 +190,6 @@ pub mod cases {
             assert_eq!(on_disk::<J>(&path).await, ["/data/a.log", "/data/b.log"]);
         }
 
-        /// Identity is per entry, not per job: two identical jobs are both
-        /// queued, under distinct ids. No field of `Job` is a usable key.
         pub async fn duplicate_jobs_are_both_queued<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
             let job = make("a.log");
@@ -231,8 +212,6 @@ pub mod cases {
             assert_eq!(entry.next_attempt_at, None);
         }
 
-        /// Same-job is not a capacity bypass: a duplicate would grow the queue
-        /// just as a new job would, so it is rejected too.
         pub async fn capacity_rejects_a_duplicate_job<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(1);
             enqueue(&mut queue, make("a.log")).await;
@@ -259,8 +238,6 @@ pub mod cases {
             );
         }
 
-        /// A rejected enqueue leaves neither the queue nor the snapshot
-        /// changed.
         pub async fn rejection_does_not_persist<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
 
@@ -274,7 +251,6 @@ pub mod cases {
             assert_eq!(on_disk::<J>(&path).await, ["/data/a.log"]);
         }
 
-        /// A persist that cannot write is logged and swallowed, never surfaced.
         pub async fn persist_failure_is_swallowed<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
             let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
@@ -319,17 +295,11 @@ pub mod cases {
             );
         }
 
-        /// The factory is unused: the case is about a queue that never held a
-        /// job. It is taken anyway so the group has one uniform signature, and
-        /// so `J` is inferred.
         pub async fn is_none_when_empty<J: QueueJob>(_make: fn(&str) -> J) {
             let queue = Queue::<J>::new(DEFAULT_CAPACITY);
             assert!(queue.next_ready(now()).is_none());
         }
 
-        /// `next_ready` returns a clone and deliberately leaves the entry on
-        /// disk; `remove` is the only point at which a job leaves durable
-        /// storage.
         pub async fn leaves_the_entry_on_disk_until_removed<J: QueueJob>(
             tmp: &str,
             make: fn(&str) -> J,
@@ -350,8 +320,6 @@ pub mod cases {
 
     // --------------------------------- remove ------------------------------------ //
 
-    /// Removal is by entry id, so it is exact: it neither guesses nor
-    /// over-reaches.
     pub mod remove {
         use super::*;
 
@@ -379,13 +347,9 @@ pub mod cases {
 
     // -------------------------------- requeue ------------------------------------ //
 
-    /// Rotation: a requeue moves an entry the queue already holds to the tail,
-    /// carrying its retry state, and does so durably.
     pub mod requeue {
         use super::*;
 
-        /// A requeue is a rotation of an entry the queue already holds, not an
-        /// admission, so it is not capacity-gated and cannot grow the queue.
         pub async fn rotates_to_the_tail<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(2);
             enqueue(&mut queue, make("a.log")).await;
@@ -398,8 +362,6 @@ pub mod cases {
             assert_eq!(drain(&mut queue).await, ["/data/b.log", "/data/a.log"]);
         }
 
-        /// A requeue at capacity is admitted, and an entry the queue does not
-        /// yet hold is simply appended.
         pub async fn at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(1);
             enqueue(&mut queue, make("a.log")).await;
@@ -424,8 +386,6 @@ pub mod cases {
             assert_eq!(tail.attempts, 2);
         }
 
-        /// A rotation is durable: the rotated order, and the fact that the
-        /// rotated entry is no longer at the head, both survive a restart.
         pub async fn order_survives_a_reload<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
             let id;
@@ -444,8 +404,6 @@ pub mod cases {
             assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
         }
 
-        /// The attempt counter and the backoff stamp ride along with the entry
-        /// across a requeue and a restart.
         pub async fn attempts_and_deadline_survive_a_reload<J: QueueJob>(
             tmp: &str,
             make: fn(&str) -> J,
@@ -477,8 +435,6 @@ pub mod cases {
 
     // ------------------------------- count_ready --------------------------------- //
 
-    /// The ready count is the selection predicate applied to the whole queue,
-    /// not its length.
     pub mod count_ready {
         use super::*;
 
@@ -504,8 +460,6 @@ pub mod cases {
 
     // -------------------------- reset_invalid_deadlines -------------------------- //
 
-    /// A clock jump forward can strand entries behind an unreachable deadline;
-    /// the reset pulls those — and only those — back to the horizon.
     pub mod reset_invalid_deadlines {
         use super::*;
 
@@ -542,8 +496,6 @@ pub mod cases {
             );
         }
 
-        /// Nothing beyond the horizon means nothing moves — the early-return
-        /// path.
         pub async fn is_a_noop_when_all_inside<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
             let horizon = now() + TimeDelta::hours(24);
@@ -554,9 +506,6 @@ pub mod cases {
             assert_eq!(queue.next_ready(now()).unwrap().next_attempt_at, None);
         }
 
-        /// A reset that actually moves a deadline is durable: the pulled-back
-        /// stamp survives a restart, without waiting for a later mutation to
-        /// write it.
         pub async fn persists<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
             let horizon = now() + TimeDelta::hours(24);
@@ -583,7 +532,6 @@ pub mod cases {
 
     // --------------------------- earliest_next_attempt --------------------------- //
 
-    /// The wake-up stamp a run loop sleeps until.
     pub mod earliest_next_attempt {
         use super::*;
 
