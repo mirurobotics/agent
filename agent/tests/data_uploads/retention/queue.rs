@@ -1,14 +1,3 @@
-//! The delete queue: the generic suite instantiated for `retention::Job`, plus
-//! the on-disk wire pin for `delete_queue.json`.
-//!
-//! Queue *behavior* is written once in `agent/tests/data_uploads/queue.rs` and
-//! run here via `queue_suite!` against this worker's job type. What cannot live
-//! there is the wire pin below: the generic suite is parameterized over the job
-//! type and so cannot spell a concrete payload, but the bytes on disk are a
-//! per-worker artifact. `SingleThreadStateFile::new_with_default` falls back to
-//! writing the default on any parse error, so a shape change would wipe a live
-//! queue rather than fail — this pin is what turns that into a red test.
-
 // internal crates
 use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
 use miru_agent::data_uploads::queue::QueueJob;
@@ -82,7 +71,7 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
 }
 
-mod from_snapshot {
+mod wire {
     use super::*;
 
     /// Pins the persisted wire format: entries are `{id, job}`, with the job's

@@ -68,7 +68,7 @@ async fn open(path: &File) -> QueueSnapshotFile {
         .unwrap()
 }
 
-mod from_snapshot {
+mod wire {
     use super::*;
 
     /// Pins the persisted wire format on the read side: an entry is
