@@ -33,3 +33,23 @@ impl Clock for SystemClock {
         tokio::time::sleep(dur)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn now_reads_the_wall_clock() {
+        let before = Utc::now();
+        let read = SystemClock.now();
+        let after = Utc::now();
+        assert!(read >= before && read <= after);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sleep_advances_time_by_the_requested_duration() {
+        let start = tokio::time::Instant::now();
+        SystemClock.sleep(Duration::from_secs(90)).await;
+        assert_eq!(Duration::from_secs(90), start.elapsed());
+    }
+}
