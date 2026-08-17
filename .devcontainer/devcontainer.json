@@ -6,7 +6,16 @@
   "name": "agent",
   "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // api/regen.sh drives openapi-generator-cli through npx.
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  // Rust builds the whole dependency graph from source and linking is the
+  // memory peak, so the agent gets the largest tier; target/ dominates storage.
+  "hostRequirements": {
+    "cpus": 16,
+    "memory": "64gb",
+    "storage": "128gb"
   },
   "postCreateCommand": "cargo fetch",
   "customizations": {
