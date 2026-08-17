@@ -112,7 +112,7 @@ async fn enqueue_on_full_queue_errors_through_the_handle() {
         panic!("expected QueueFullErr, got: {err:?}");
     };
     assert_eq!(err.capacity, 1);
-    assert_eq!(err.file, src_b.file().to_string());
+    assert_eq!(err.name, src_b.file().to_string());
     assert_eq!(deleter.len().await.unwrap(), 1);
 
     deleter.shutdown().await.unwrap();

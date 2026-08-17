@@ -181,9 +181,11 @@ where
                 // every queued entry is waiting out its backoff: sleep until
                 // the earliest deadline (or a command) and re-evaluate
                 None => {
-                    self.queue.reset_invalid_deadlines(
-                        now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)),
-                    );
+                    self.queue
+                        .reset_invalid_deadlines(
+                            now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)),
+                        )
+                        .await;
                     let wait = match self.queue.earliest_next_attempt() {
                         Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
                         // unreachable: the queue is non-empty here
@@ -422,7 +424,7 @@ where
             }
             Command::Enqueue { job, respond_to } => {
                 dispatch!(
-                    self.queue.enqueue(job).await,
+                    self.queue.enqueue(job).await.map_err(Into::into),
                     respond_to,
                     "Actor failed to send enqueue response"
                 );

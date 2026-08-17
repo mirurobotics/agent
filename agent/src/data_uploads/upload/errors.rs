@@ -1,18 +1,9 @@
 // internal crates
+pub use crate::data_uploads::queue::QueueFullErr;
 use crate::errors::Trace;
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
-
-#[derive(Debug, thiserror::Error)]
-#[error("upload queue is full (capacity {capacity}); rejected job for file {file}")]
-pub struct QueueFullErr {
-    pub capacity: usize,
-    pub file: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for QueueFullErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("upload executor error: {source}")]
@@ -63,7 +54,7 @@ impl crate::errors::Error for TransferErr {}
 #[derive(Debug, thiserror::Error)]
 pub enum UploadErr {
     #[error(transparent)]
-    QueueFullErr(QueueFullErr),
+    QueueFullErr(#[from] QueueFullErr),
     #[error(transparent)]
     ExecutorErr(ExecutorErr),
     #[error(transparent)]
