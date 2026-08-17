@@ -236,8 +236,7 @@ impl AppState {
             deleter,
             upload::UploaderOptions::default(),
             snapshot_file,
-            |wait| tokio::time::sleep(wait),
-            chrono::Utc::now,
+            crate::clock::SystemClock,
         )?;
         Ok((Arc::new(uploader), handle))
     }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
+use crate::clock::Clock;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
@@ -18,7 +19,7 @@ use crate::errors::Error;
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::TimeDelta;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -131,34 +132,29 @@ enum AttemptOutcome {
     ShuttingDown,
 }
 
-pub(crate) struct Worker<ExecutorT, D, F, Fut, N>
+pub(crate) struct Worker<ExecutorT, D, C>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
-    F: Fn(Duration) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ()> + Send + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
+    C: Clock,
 {
     receiver: Receiver<Command>,
     queue: Queue,
     executor: Arc<ExecutorT>,
     deleter: Arc<D>,
     options: UploaderOptions,
-    sleep_fn: F,
-    now_fn: N,
+    clock: C,
 }
 
-impl<ExecutorT, D, F, Fut, N> Worker<ExecutorT, D, F, Fut, N>
+impl<ExecutorT, D, C> Worker<ExecutorT, D, C>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
-    F: Fn(Duration) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ()> + Send + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
+    C: Clock,
 {
     pub(crate) async fn run(mut self) {
         loop {
-            let now = (self.now_fn)();
+            let now = self.clock.now();
             match self.queue.next_ready(now) {
                 Some(entry) => {
                     if let Flow::Shutdown = self.run_attempt(entry).await {
@@ -231,7 +227,7 @@ where
             digest: job.digest.clone(),
             mtime: job.mtime,
             first_observed_at: job.first_observed_at,
-            last_observed_at: (self.now_fn)(),
+            last_observed_at: self.clock.now(),
             ttl_secs: retention.ttl_secs,
             file_rule_id: job.file_rule_id.clone(),
             deployment_id: job.deployment_id.clone(),
@@ -248,7 +244,7 @@ where
     /// attempt budget. Drop the job if it has aged past the backstop;
     /// otherwise stamp a flat cooldown and requeue at the tail.
     async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) -> Flow {
-        let age = (self.now_fn)() - entry.job.first_observed_at;
+        let age = self.clock.now() - entry.job.first_observed_at;
         if age >= self.options.max_job_age {
             Self::log_age_drop(&entry, age, &err);
             self.queue.remove(entry.id).await;
@@ -294,7 +290,7 @@ where
 
     /// Stamp `entry` eligible after `wait_secs` and append it at the tail.
     async fn requeue_after(&mut self, mut entry: QueueEntry, wait_secs: i64) {
-        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait_secs));
+        entry.next_attempt_at = Some(self.clock.now() + TimeDelta::seconds(wait_secs));
         self.requeue(entry).await;
     }
 
@@ -304,7 +300,10 @@ where
     /// immediately so a newly eligible entry is re-evaluated rather than
     /// waiting out the sleep.
     async fn idle_wait(&mut self, wait: Duration) -> Flow {
-        let sleep_fut = (self.sleep_fn)(wait);
+        // clone so the pending sleep borrows the clone, not `self` — the
+        // command arm needs `&mut self` while the sleep is still in flight
+        let clock = self.clock.clone();
+        let sleep_fut = clock.sleep(wait);
         tokio::select! {
             biased;
             cmd = self.receiver.recv() => match cmd {
@@ -449,21 +448,18 @@ pub struct Uploader {
 }
 
 impl Uploader {
-    pub fn spawn<ExecutorT, D, F, Fut, N>(
+    pub fn spawn<ExecutorT, D, C>(
         buffer_size: usize,
         executor: Arc<ExecutorT>,
         deleter: Arc<D>,
         options: UploaderOptions,
         snapshot_file: Option<QueueSnapshotFile>,
-        sleep_fn: F,
-        now_fn: N,
+        clock: C,
     ) -> Result<(Self, JoinHandle<()>), UploadErr>
     where
         ExecutorT: UploadExecutor + 'static,
         D: DeleterExt + 'static,
-        F: Fn(Duration) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-        N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
+        C: Clock,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let queue = match snapshot_file {
@@ -476,8 +472,7 @@ impl Uploader {
             executor,
             deleter,
             options,
-            sleep_fn,
-            now_fn,
+            clock,
         };
         let worker_handle = tokio::spawn(worker.run());
         Ok((Self { sender }, worker_handle))

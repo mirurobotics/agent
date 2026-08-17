@@ -5,6 +5,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::{
+    clock::{FrozenClock, TestClock},
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
@@ -64,12 +65,7 @@ fn scripted_network_err() -> Result<(), UploadErr> {
     }))
 }
 
-/// Spawn an uploader with default options and a no-op sleep.
-///
-/// Safe ONLY for tests whose script never leaves a stamped (backoff) entry
-/// waiting in the queue: a no-op sleep plus a non-advancing clock busy-loops
-/// the current-thread runtime and hangs the test binary. Use
-/// [`spawn_with_test_clock`] or [`spawn_frozen`] for anything backoff-shaped.
+/// Spawn an uploader with default options over a [`TestClock`].
 fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
     Uploader::spawn(
         16,
@@ -77,16 +73,14 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
         MockDeleter::new(),
         UploaderOptions::default(),
         None,
-        |_: Duration| async {},
-        Utc::now,
+        TestClock::new(),
     )
     .unwrap()
 }
 
-/// Spawn an uploader over a shared test clock: `sleep_fn` records each
-/// requested duration into the returned log and advances the clock by it, so
-/// backoff waits complete instantly and stamped entries become eligible
-/// deterministically.
+/// Spawn an uploader over a shared [`TestClock`]: it records each requested
+/// sleep into the returned log and advances itself by it, so backoff waits
+/// complete instantly and stamped entries become eligible deterministically.
 fn spawn_with_test_clock(
     mock: Arc<MockUploadExecutor>,
     options: UploaderOptions,
@@ -111,38 +105,26 @@ fn spawn_with_test_clock_and_deleter(
     Arc<Mutex<Vec<Duration>>>,
     Arc<Mutex<DateTime<Utc>>>,
 ) {
-    let clock = Arc::new(Mutex::new(Utc::now()));
-    let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-    let now_clock = clock.clone();
-    let now_fn = move || *now_clock.lock().unwrap();
-    let recorded = sleeps.clone();
-    let sleep_clock = clock.clone();
-    let sleep_fn = move |duration: Duration| {
-        recorded.lock().unwrap().push(duration);
-        *sleep_clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
-        async {}
-    };
-    let (uploader, handle) =
-        Uploader::spawn(16, mock, deleter, options, None, sleep_fn, now_fn).unwrap();
-    (uploader, handle, sleeps, clock)
+    let clock = TestClock::new();
+    let (sleeps, now) = (clock.sleeps(), clock.handle());
+    let (uploader, handle) = Uploader::spawn(16, mock, deleter, options, None, clock).unwrap();
+    (uploader, handle, sleeps, now)
 }
 
-/// Spawn an uploader over a clock frozen at spawn time and a sleep that never
-/// completes: stamped (backoff) entries never become eligible, so the worker
-/// parks in its idle wait until a command arrives.
+/// Spawn an uploader over a [`FrozenClock`]: stamped (backoff) entries never
+/// become eligible, so the worker parks in its idle wait until a command
+/// arrives.
 fn spawn_frozen(
     mock: Arc<MockUploadExecutor>,
     options: UploaderOptions,
 ) -> (Uploader, JoinHandle<()>) {
-    let epoch = Utc::now();
     Uploader::spawn(
         16,
         mock,
         MockDeleter::new(),
         options,
         None,
-        |_: Duration| std::future::pending::<()>(),
-        move || epoch,
+        FrozenClock::new(),
     )
     .unwrap()
 }
@@ -574,16 +556,7 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
     mock.push_step(MockStep::Err);
     // a sleep that never completes: shutdown must interrupt the idle wait
     // over the requeued entry's backoff deadline
-    let (uploader, handle) = Uploader::spawn(
-        16,
-        mock.clone(),
-        MockDeleter::new(),
-        UploaderOptions::default(),
-        None,
-        |_: Duration| std::future::pending::<()>(),
-        Utc::now,
-    )
-    .unwrap();
+    let (uploader, handle) = spawn_frozen(mock.clone(), UploaderOptions::default());
 
     timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
@@ -1018,8 +991,7 @@ mod durability {
             MockDeleter::new(),
             UploaderOptions::default(),
             Some(snapshot),
-            |_: Duration| async {},
-            Utc::now,
+            TestClock::new(),
         )
         .unwrap()
     }
@@ -1030,24 +1002,15 @@ mod durability {
         mock: Arc<MockUploadExecutor>,
         snapshot: QueueSnapshotFile,
     ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
-        let clock = Arc::new(Mutex::new(Utc::now()));
-        let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-        let now_clock = clock.clone();
-        let now_fn = move || *now_clock.lock().unwrap();
-        let recorded = sleeps.clone();
-        let sleep_fn = move |duration: Duration| {
-            recorded.lock().unwrap().push(duration);
-            *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
-            async {}
-        };
+        let clock = TestClock::new();
+        let sleeps = clock.sleeps();
         let (uploader, handle) = Uploader::spawn(
             16,
             mock,
             MockDeleter::new(),
             UploaderOptions::default(),
             Some(snapshot),
-            sleep_fn,
-            now_fn,
+            clock,
         )
         .unwrap();
         (uploader, handle, sleeps)
