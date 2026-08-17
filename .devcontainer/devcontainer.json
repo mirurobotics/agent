@@ -1,0 +1,43 @@
+// Codespaces / Dev Containers configuration.
+// Format reference: https://containers.dev/implementors/json_reference/
+// The toolchain version comes from rust-toolchain.toml; rustup installs it on
+// the first cargo invocation.
+{
+  "name": "agent",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // api/regen.sh drives openapi-generator-cli through npx.
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  // Rust builds the whole dependency graph from source and linking is the
+  // memory peak, so the agent gets the largest tier; target/ dominates storage.
+  "hostRequirements": {
+    "cpus": 16,
+    "memory": "64gb",
+    "storage": "128gb"
+  },
+  "postCreateCommand": "cargo fetch",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml",
+        "eamodio.gitlens",
+        "github.vscode-github-actions",
+        "github.vscode-pull-request-github",
+        "redhat.vscode-yaml",
+        "timonwong.shellcheck",
+        "davidanson.vscode-markdownlint"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "editor.formatOnSave": true,
+        "[rust]": {
+          "editor.defaultFormatter": "rust-lang.rust-analyzer"
+        }
+      }
+    }
+  }
+}
