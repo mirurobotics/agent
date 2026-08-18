@@ -325,3 +325,22 @@ pub mod unknown {
         assert_eq!(check_verdict("f.zst", &bytes).await, Completeness::Unknown);
     }
 }
+
+pub mod errors {
+    use miru_agent::fileformats::{self, FileFormatsErr};
+    use miru_agent::filesys::{dirs, File, FileSysErr, PathExt};
+
+    #[tokio::test]
+    async fn read_error_on_directory() {
+        // opening a directory read-only succeeds on linux, but reading it
+        // fails (EISDIR), exercising the frame-header read-error path
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let sub = dir.subdir("d.zst");
+        dirs::create(&sub).await.unwrap();
+        let file = File::new(sub.path());
+        assert!(matches!(
+            fileformats::check(&file).await.unwrap_err(),
+            FileFormatsErr::FileSysErr(FileSysErr::ReadFileErr { .. })
+        ));
+    }
+}
