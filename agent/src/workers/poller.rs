@@ -55,27 +55,6 @@ pub async fn run<F, Fut, SyncerT: SyncerExt>(
     }
 }
 
-// seconds to wait before the next scheduled sync: the later of the poll interval
-// (measured from the last sync attempt, not the current time) and the cooldown end
-async fn next_wait_secs<SyncerT: SyncerExt>(options: &Options, syncer: &SyncerT) -> i64 {
-    let last_attempted_sync_at = syncer
-        .get_last_attempted_sync_at()
-        .await
-        .unwrap_or_default()
-        .timestamp();
-    let secs_since_last_sync = Utc::now().timestamp() - last_attempted_sync_at;
-    let secs_until_next_sync = options.poll_interval_secs - secs_since_last_sync;
-
-    let secs_until_cooldown_ends = syncer
-        .get_cooldown_ends_at()
-        .await
-        .unwrap_or_default()
-        .signed_duration_since(Utc::now())
-        .num_seconds();
-
-    max(secs_until_next_sync, secs_until_cooldown_ends)
-}
-
 async fn run_impl<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
@@ -138,4 +117,25 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
             }
         }
     }
+}
+
+// seconds to wait before the next scheduled sync: the later of the poll interval
+// (measured from the last sync attempt, not the current time) and the cooldown end
+async fn next_wait_secs<SyncerT: SyncerExt>(options: &Options, syncer: &SyncerT) -> i64 {
+    let last_attempted_sync_at = syncer
+        .get_last_attempted_sync_at()
+        .await
+        .unwrap_or_default()
+        .timestamp();
+    let secs_since_last_sync = Utc::now().timestamp() - last_attempted_sync_at;
+    let secs_until_next_sync = options.poll_interval_secs - secs_since_last_sync;
+
+    let secs_until_cooldown_ends = syncer
+        .get_cooldown_ends_at()
+        .await
+        .unwrap_or_default()
+        .signed_duration_since(Utc::now())
+        .num_seconds();
+
+    max(secs_until_next_sync, secs_until_cooldown_ends)
 }
