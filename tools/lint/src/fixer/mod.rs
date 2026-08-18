@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::classifier::{Classifier, ImportGroup};
 use crate::config::Config;
 use crate::normalizer;
-use crate::parser::ImportBlock;
+use crate::parser::{ImportBlock, UseStatement};
 
 /// Given file content, its parsed import block, a classifier and config,
 /// produce the fixed file content with correctly grouped and labeled imports.
@@ -22,25 +22,43 @@ pub fn fix_file(
         return content.to_string();
     }
 
-    // Classify and bucket all use statements
+    let import_block = render_import_block(file, &uses, classifier, config);
+    splice_import_block(content, block, &import_block)
+}
+
+type Buckets<'a> = (
+    Vec<&'a UseStatement>,
+    Vec<&'a UseStatement>,
+    Vec<&'a UseStatement>,
+);
+
+/// Bucket use statements into (standard, internal, external) groups,
+/// preserving the original relative order within each group.
+fn bucket_by_group<'a>(uses: &[&'a UseStatement], classifier: &Classifier) -> Buckets<'a> {
     let mut standard = Vec::new();
     let mut internal = Vec::new();
     let mut external = Vec::new();
 
-    for stmt in &uses {
-        let group = classifier.classify(stmt);
-        match group {
+    for stmt in uses {
+        match classifier.classify(stmt) {
             ImportGroup::Standard => standard.push(*stmt),
             ImportGroup::Internal => internal.push(*stmt),
             ImportGroup::External => external.push(*stmt),
         }
     }
 
-    // Do NOT sort — preserve original relative order within each group.
-    // `cargo fmt` handles sorting via reorder_imports.
+    (standard, internal, external)
+}
 
-    // Build the new import block text
-    let mut import_block = String::new();
+/// Build the new import block text. Within-group order is preserved;
+/// sorting is left to `cargo fmt` (reorder_imports).
+fn render_import_block(
+    file: &Path,
+    uses: &[&UseStatement],
+    classifier: &Classifier,
+    config: &Config,
+) -> String {
+    let (standard, internal, external) = bucket_by_group(uses, classifier);
     let groups = [
         (
             standard
@@ -62,6 +80,7 @@ pub fn fix_file(
         ),
     ];
 
+    let mut import_block = String::new();
     let mut first_group = true;
     for (stmts, label) in groups {
         if stmts.is_empty() {
@@ -81,7 +100,12 @@ pub fn fix_file(
         }
     }
 
-    // Now splice: replace lines up to end_line with the new block
+    import_block
+}
+
+/// Replace the file's original import block lines with `import_block`,
+/// preserving everything before and after it.
+fn splice_import_block(content: &str, block: &ImportBlock, import_block: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let block_start_line_idx = block.start_line.saturating_sub(1);
     let block_end_line_idx = block.end_line.saturating_sub(1);
@@ -92,7 +116,7 @@ pub fn fix_file(
         output.push('\n');
     }
 
-    output.push_str(&import_block);
+    output.push_str(import_block);
 
     // Collect the rest of the file (everything after the import block)
     let rest_lines = if block_end_line_idx <= lines.len() {
@@ -128,7 +152,7 @@ pub fn fix_file(
     output
 }
 
-fn render_internal_group(file: &Path, uses: &[&crate::parser::UseStatement]) -> Vec<String> {
+fn render_internal_group(file: &Path, uses: &[&UseStatement]) -> Vec<String> {
     normalizer::normalize(file, uses)
         .into_iter()
         .map(|stmt| stmt.text)

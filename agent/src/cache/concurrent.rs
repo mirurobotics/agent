@@ -150,6 +150,7 @@ where
     K: ConcurrentCacheKey,
     V: ConcurrentCacheValue,
 {
+    // lint:allow(funclen) — actor dispatch table; one arm per Command variant
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {

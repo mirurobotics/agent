@@ -199,70 +199,70 @@ pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<
     dirs::create_if_absent(&file.parent()?).await?;
 
     if opts.atomic == Atomic::Yes {
-        let af = match opts.overwrite {
-            Overwrite::Allow => AtomicFile::new(file.path(), AllowOverwrite),
-            Overwrite::Deny => AtomicFile::new(file.path(), DisallowOverwrite),
-        };
-        let write_res = match opts.mode {
-            Some(m) => {
-                let mut open_opts = std::fs::OpenOptions::new();
-                open_opts.write(true).create(true).truncate(true).mode(m);
-                af.write_with_options(|f| f.write_all(buf), open_opts)
-            }
-            None => af.write(|f| f.write_all(buf)),
-        };
-        let io_err: Result<(), std::io::Error> = write_res.map_err(|e| e.into());
-        io_err.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
-                    file: file.clone(),
-                    overwrite: opts.overwrite,
-                    trace: trace!(),
-                })
-            } else {
-                FileSysErr::AtomicWriteFileErr(AtomicWriteFileErr {
-                    source: Box::new(e),
-                    file: file.clone(),
-                    trace: trace!(),
-                })
-            }
-        })?;
+        write_bytes_atomic(file, buf, opts)
     } else {
-        let mut f = match opts.overwrite {
-            Overwrite::Deny => {
-                let mut open_opts = tokio::fs::OpenOptions::new();
-                open_opts.write(true).create_new(true);
-                if let Some(m) = opts.mode {
-                    open_opts.mode(m);
-                }
-                open_opts.open(file.path()).await
-            }
-            Overwrite::Allow => {
-                let mut open_opts = tokio::fs::OpenOptions::new();
-                open_opts.write(true).create(true).truncate(true);
-                if let Some(m) = opts.mode {
-                    open_opts.mode(m);
-                }
-                open_opts.open(file.path()).await
-            }
-        }
-        .map_err(|e| map_io_err_for_create(e, file, opts.overwrite))?;
-        f.write_all(buf).await.map_err(|e| {
-            FileSysErr::WriteFileErr(WriteFileErr {
-                source: Box::new(e),
-                file: file.clone(),
-                trace: trace!(),
-            })
-        })?;
-        f.flush().await.map_err(|e| {
-            FileSysErr::WriteFileErr(WriteFileErr {
-                source: Box::new(e),
-                file: file.clone(),
-                trace: trace!(),
-            })
-        })?;
+        write_bytes_direct(file, buf, opts).await
     }
-    Ok(())
+}
+
+fn write_bytes_atomic(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(), FileSysErr> {
+    let af = match opts.overwrite {
+        Overwrite::Allow => AtomicFile::new(file.path(), AllowOverwrite),
+        Overwrite::Deny => AtomicFile::new(file.path(), DisallowOverwrite),
+    };
+    let write_res = match opts.mode {
+        Some(m) => {
+            let mut open_opts = std::fs::OpenOptions::new();
+            open_opts.write(true).create(true).truncate(true).mode(m);
+            af.write_with_options(|f| f.write_all(buf), open_opts)
+        }
+        None => af.write(|f| f.write_all(buf)),
+    };
+    let io_err: Result<(), std::io::Error> = write_res.map_err(|e| e.into());
+    io_err.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
+                file: file.clone(),
+                overwrite: opts.overwrite,
+                trace: trace!(),
+            })
+        } else {
+            FileSysErr::AtomicWriteFileErr(AtomicWriteFileErr {
+                source: Box::new(e),
+                file: file.clone(),
+                trace: trace!(),
+            })
+        }
+    })
+}
+
+async fn write_bytes_direct(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(), FileSysErr> {
+    let mut open_opts = tokio::fs::OpenOptions::new();
+    match opts.overwrite {
+        Overwrite::Deny => open_opts.write(true).create_new(true),
+        Overwrite::Allow => open_opts.write(true).create(true).truncate(true),
+    };
+    if let Some(m) = opts.mode {
+        open_opts.mode(m);
+    }
+    let mut f = open_opts
+        .open(file.path())
+        .await
+        .map_err(|e| map_io_err_for_create(e, file, opts.overwrite))?;
+    f.write_all(buf).await.map_err(|e| {
+        FileSysErr::WriteFileErr(WriteFileErr {
+            source: Box::new(e),
+            file: file.clone(),
+            trace: trace!(),
+        })
+    })?;
+    f.flush().await.map_err(|e| {
+        FileSysErr::WriteFileErr(WriteFileErr {
+            source: Box::new(e),
+            file: file.clone(),
+            trace: trace!(),
+        })
+    })
 }
 
 pub async fn write_string(file: &File, s: &str, opts: WriteOptions) -> Result<(), FileSysErr> {

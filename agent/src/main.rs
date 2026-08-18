@@ -193,13 +193,8 @@ async fn run_agent() {
     }
 
     // retrieve the settings files
-    let settings_file = layout.settings();
-    let settings = match files::read_json::<disk::Settings>(&settings_file).await {
-        Ok(settings) => settings,
-        Err(e) => {
-            error!("Unable to read settings file: {}", e);
-            return;
-        }
+    let Some(settings) = read_settings(&layout).await else {
+        return;
     };
 
     // apply the configured log level to the running subscriber
@@ -207,6 +202,27 @@ async fn run_agent() {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
 
+    // run the server
+    let options = build_app_options(settings);
+    info!("Running the server with options: {:?}", options);
+    let result = run(options, await_shutdown_signal()).await;
+    if let Err(e) = result {
+        error!("Failed to run the server: {e}");
+    }
+}
+
+async fn read_settings(layout: &disk::Layout) -> Option<disk::Settings> {
+    let settings_file = layout.settings();
+    match files::read_json::<disk::Settings>(&settings_file).await {
+        Ok(settings) => Some(settings),
+        Err(e) => {
+            error!("Unable to read settings file: {}", e);
+            None
+        }
+    }
+}
+
+fn build_app_options(settings: disk::Settings) -> AppOptions {
     let broker_address = ConnectAddress::new_or(
         settings.mqtt_broker.host,
         Protocol::SSL,
@@ -214,8 +230,7 @@ async fn run_agent() {
         ConnectAddress::default(),
     );
 
-    // run the server
-    let options = AppOptions {
+    AppOptions {
         lifecycle: LifecycleOptions {
             is_persistent: settings.is_persistent,
             ..Default::default()
@@ -229,11 +244,6 @@ async fn run_agent() {
             ..Default::default()
         },
         ..Default::default()
-    };
-    info!("Running the server with options: {:?}", options);
-    let result = run(options, await_shutdown_signal()).await;
-    if let Err(e) = result {
-        error!("Failed to run the server: {e}");
     }
 }
 

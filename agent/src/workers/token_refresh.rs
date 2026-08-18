@@ -45,50 +45,7 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
 
     loop {
         // refresh
-        let next_wait = match token_mngr.refresh_token().await {
-            Ok(_) => {
-                if err_streak > 0 {
-                    info!(
-                        "token refreshed successfully after an error streak of {err_streak} errors"
-                    );
-                } else {
-                    info!("token refreshed successfully");
-                }
-                err_streak = 0;
-                calc_refresh_wait(
-                    token_mngr,
-                    options.refresh_advance_secs,
-                    err_streak,
-                    options.backoff,
-                )
-                .await
-            }
-            Err(e) => {
-                if e.is_network_conn_err() {
-                    debug!("unable to refresh token due to a network connection error: {e:?}");
-                    calc_refresh_wait(
-                        token_mngr,
-                        options.refresh_advance_secs,
-                        // we want to try network connection errors again immediately
-                        // (even if the previous errors were not network connection
-                        // errors) so we use an error streak of 0
-                        0,
-                        options.backoff,
-                    )
-                    .await
-                } else {
-                    error!("error refreshing token (error streak: {err_streak}): {e:?}");
-                    err_streak += 1;
-                    calc_refresh_wait(
-                        token_mngr,
-                        options.refresh_advance_secs,
-                        err_streak,
-                        options.backoff,
-                    )
-                    .await
-                }
-            }
-        };
+        let next_wait = refresh_once(options, token_mngr, &mut err_streak).await;
 
         let refresh_time = Utc::now() + next_wait;
         debug!("waiting until {:?} to refresh token", refresh_time);
@@ -100,6 +57,62 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
                 return;
             }
             _ = sleep_fn(next_wait) => {},
+        }
+    }
+}
+
+/// Attempt a single token refresh, update the error streak, and return the
+/// wait until the next refresh attempt.
+async fn refresh_once<TokenManagerT: TokenManagerExt>(
+    options: &TokenRefreshWorkerOptions,
+    token_mngr: &TokenManagerT,
+    err_streak: &mut u32,
+) -> Duration {
+    match token_mngr.refresh_token().await {
+        Ok(_) => {
+            if *err_streak > 0 {
+                info!(
+                    "token refreshed successfully after an error streak of {} errors",
+                    *err_streak
+                );
+            } else {
+                info!("token refreshed successfully");
+            }
+            *err_streak = 0;
+            calc_refresh_wait(
+                token_mngr,
+                options.refresh_advance_secs,
+                *err_streak,
+                options.backoff,
+            )
+            .await
+        }
+        Err(e) if e.is_network_conn_err() => {
+            debug!("unable to refresh token due to a network connection error: {e:?}");
+            calc_refresh_wait(
+                token_mngr,
+                options.refresh_advance_secs,
+                // we want to try network connection errors again immediately
+                // (even if the previous errors were not network connection
+                // errors) so we use an error streak of 0
+                0,
+                options.backoff,
+            )
+            .await
+        }
+        Err(e) => {
+            error!(
+                "error refreshing token (error streak: {}): {e:?}",
+                *err_streak
+            );
+            *err_streak += 1;
+            calc_refresh_wait(
+                token_mngr,
+                options.refresh_advance_secs,
+                *err_streak,
+                options.backoff,
+            )
+            .await
         }
     }
 }

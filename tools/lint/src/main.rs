@@ -4,6 +4,7 @@ mod checker;
 mod classifier;
 mod config;
 mod fixer;
+mod funclen;
 mod normalizer;
 mod parser;
 

@@ -8,6 +8,7 @@ use crate::checker::check;
 use crate::classifier::Classifier;
 use crate::config::Config;
 use crate::fixer::fix_file;
+use crate::funclen;
 use crate::parser::parse;
 
 // external crates
@@ -39,6 +40,10 @@ pub struct Cli {
     /// Minimum field-asserts on the same receiver to flag (default: 4)
     #[arg(long = "assert-threshold", default_value_t = 4)]
     pub assert_threshold: usize,
+
+    /// Max non-blank, non-comment body lines per function (0 disables)
+    #[arg(long = "funclen-threshold", default_value_t = 50)]
+    pub funclen_threshold: usize,
 }
 
 pub fn run(cli: &Cli, stdout: &mut impl Write, stderr: &mut impl Write) -> i32 {
@@ -79,15 +84,19 @@ fn run_from_dir(
         Vec::new()
     };
 
+    // Run function-length checker on the same paths as import checking.
+    let funclen_violations = run_funclen_check(base_dir, cli, stdout);
+
     if cli.fix {
         let _ = writeln!(stdout, "\n{} file(s) fixed.", totals.files_fixed);
-        if !assert_violations.is_empty() {
+        // funclen has no auto-fix; violations still fail the run.
+        if !assert_violations.is_empty() || !funclen_violations.is_empty() {
             return 1;
         }
         return 0;
     }
 
-    let total_issues = totals.diagnostics + assert_violations.len();
+    let total_issues = totals.diagnostics + assert_violations.len() + funclen_violations.len();
     if total_issues > 0 {
         let _ = writeln!(stdout, "\n{} violation(s) found.", total_issues);
         return 1;
@@ -127,6 +136,50 @@ fn run_assert_check(base_dir: &Path, cli: &Cli, stdout: &mut impl Write) -> Vec<
             stdout,
             "{}:{}: {} assert_eq! calls on fields of `{}` \u{2014} consider constructing an expected struct [field-by-field-assert]",
             display_path, v.line, v.count, v.receiver
+        );
+    }
+
+    all_violations
+}
+
+fn run_funclen_check(
+    base_dir: &Path,
+    cli: &Cli,
+    stdout: &mut impl Write,
+) -> Vec<funclen::Violation> {
+    let Some(ref path) = cli.path else {
+        return Vec::new();
+    };
+    if cli.funclen_threshold == 0 {
+        return Vec::new();
+    }
+
+    let mut all_violations: Vec<funclen::Violation> = Vec::new();
+    for file_path in rust_files(base_dir, path) {
+        let source = match std::fs::read_to_string(&file_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        all_violations.extend(funclen::check_file(
+            &file_path,
+            &source,
+            cli.funclen_threshold,
+        ));
+    }
+
+    all_violations.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    for v in &all_violations {
+        let display_path = v.file.strip_prefix(&cwd).unwrap_or(&v.file).display();
+        let target = match &v.name {
+            Some(name) => format!("function `{name}`"),
+            None => "closure".to_string(),
+        };
+        let _ = writeln!(
+            stdout,
+            "{}:{}: {} is {} lines (limit {}) [funclen]",
+            display_path, v.line, target, v.count, v.limit
         );
     }
 
@@ -291,6 +344,7 @@ mod tests {
             config,
             assert_paths: Vec::new(),
             assert_threshold: 4,
+            funclen_threshold: 50,
         }
     }
 
@@ -616,6 +670,7 @@ use std::fmt::Debug;
             config: None,
             assert_paths,
             assert_threshold: 4,
+            funclen_threshold: 50,
         }
     }
 
@@ -683,6 +738,89 @@ fn test_example() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code = run(&assert_cli(vec![]), &mut stdout, &mut stderr);
+
+        assert_eq!(exit_code, 0);
+        assert!(stdout.is_empty());
+    }
+
+    fn funclen_cli(path: PathBuf, fix: bool, funclen_threshold: usize) -> Cli {
+        Cli {
+            path: Some(path),
+            fix,
+            config: None,
+            assert_paths: Vec::new(),
+            assert_threshold: 4,
+            funclen_threshold,
+        }
+    }
+
+    fn write_over_limit_fn(dir: &Path) {
+        fs::write(
+            dir.join("long.rs"),
+            "\
+// standard crates
+use std::sync::Arc;
+
+fn long() {
+    let _ = Arc::new(1);
+    let _ = Arc::new(2);
+    let _ = Arc::new(3);
+    let _ = Arc::new(4);
+}
+",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn run_funclen_check_reports_over_limit_fn() {
+        let dir = tempdir().unwrap();
+        write_over_limit_fn(dir.path());
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &funclen_cli(dir.path().to_path_buf(), false, 3),
+            &mut stdout,
+            &mut stderr,
+        );
+        let stdout = String::from_utf8(stdout).unwrap();
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.contains("function `long` is 4 lines (limit 3) [funclen]"));
+        assert!(stdout.contains("violation(s) found."));
+    }
+
+    #[test]
+    fn run_funclen_check_fails_in_fix_mode() {
+        let dir = tempdir().unwrap();
+        write_over_limit_fn(dir.path());
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &funclen_cli(dir.path().to_path_buf(), true, 3),
+            &mut stdout,
+            &mut stderr,
+        );
+        let stdout = String::from_utf8(stdout).unwrap();
+
+        assert_eq!(exit_code, 1);
+        assert!(stdout.contains("[funclen]"));
+    }
+
+    #[test]
+    fn run_funclen_check_clean_under_limit() {
+        let dir = tempdir().unwrap();
+        write_over_limit_fn(dir.path());
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run(
+            &funclen_cli(dir.path().to_path_buf(), false, 50),
+            &mut stdout,
+            &mut stderr,
+        );
 
         assert_eq!(exit_code, 0);
         assert!(stdout.is_empty());

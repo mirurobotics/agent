@@ -14,10 +14,17 @@ use crate::data_uploads::{
 use crate::deploy::{apply, fsm};
 use crate::disk;
 use crate::events;
-use crate::filesys::PathExt;
+use crate::filesys::{File, PathExt};
 use crate::http;
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
+
+type DataUploadActors = (
+    Arc<retention::Deleter>,
+    Arc<upload::Uploader>,
+    Arc<scan::Scanner>,
+    [tokio::task::JoinHandle<()>; 3],
+);
 
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -40,14 +47,7 @@ impl AppState {
         dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
-        let auth_dir = layout.auth();
-        let private_key_file = auth_dir.private_key();
-        private_key_file.assert_exists()?;
-        let public_key_file = auth_dir.public_key();
-        public_key_file.assert_exists()?;
-
-        let token_file =
-            TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
+        let (token_file, private_key_file, public_key_file) = setup_auth_files(layout).await?;
 
         // get the device id
         let device_id = disk::resolve_device_id(layout).await?;
@@ -71,55 +71,26 @@ impl AppState {
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
         // initialize the syncer
-        let (syncer, syncer_handle) = sync::Syncer::spawn(
-            64,
-            SyncerArgs {
-                storage: storage.clone(),
-                http_client: http_client.clone(),
-                token_mngr: token_mngr.clone(),
-                deploy_opts: apply::DeployOpts {
-                    retry_policy: dpl_retry_policy,
-                },
-                backoff: cooldown::Backoff {
-                    base_secs: 1,
-                    growth_factor: 2,
-                    max_secs: 12 * 60 * 60, // 12 hours
-                },
-                event_hub: event_hub.clone(),
-            },
-        )?;
+        let syncer_args = build_syncer_args(
+            storage.clone(),
+            http_client.clone(),
+            token_mngr.clone(),
+            dpl_retry_policy,
+            event_hub.clone(),
+        );
+        let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
         let syncer = Arc::new(syncer);
 
         // initialize the activity tracker
         let activity_tracker = Arc::new(activity::Tracker::new());
 
-        // initialize the deleter and uploader before the scanner: the
-        // scanner's stable-file sinks are built from their handles
-        let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
-        let (uploader, uploader_handle) = Self::init_uploader(
-            layout,
-            http_client.clone(),
-            token_mngr.clone(),
-            deleter.clone(),
-        )
-        .await?;
-
-        // initialize the scanner with the upload and retention sinks
-        let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![
-            Arc::new(upload::UploadStableFileSink::new(uploader.clone())),
-            Arc::new(retention::RetentionStableFileSink::new(deleter.clone())),
-        ];
-        let (scanner, scanner_handle) = Self::init_scanner(layout, sinks).await?;
+        // initialize the data upload pipeline (deleter, uploader, scanner)
+        let (deleter, uploader, scanner, data_upload_handles) =
+            Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         let shutdown_handle = async move {
-            let handles = vec![
-                token_mngr_handle,
-                syncer_handle,
-                event_hub_handle,
-                scanner_handle,
-                deleter_handle,
-                uploader_handle,
-            ];
+            let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
+            handles.extend(data_upload_handles);
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -137,6 +108,31 @@ impl AppState {
                 event_hub,
             },
             shutdown_handle,
+        ))
+    }
+
+    /// The deleter and uploader are initialized before the scanner: the
+    /// scanner's stable-file sinks are built from their handles.
+    async fn init_data_uploads(
+        layout: &disk::Layout,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
+    ) -> Result<DataUploadActors, server::ServerErr> {
+        let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
+        let (uploader, uploader_handle) =
+            Self::init_uploader(layout, http_client, token_mngr, deleter.clone()).await?;
+
+        let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![
+            Arc::new(upload::UploadStableFileSink::new(uploader.clone())),
+            Arc::new(retention::RetentionStableFileSink::new(deleter.clone())),
+        ];
+        let (scanner, scanner_handle) = Self::init_scanner(layout, sinks).await?;
+
+        Ok((
+            deleter,
+            uploader,
+            scanner,
+            [scanner_handle, deleter_handle, uploader_handle],
         ))
     }
 
@@ -298,5 +294,42 @@ impl AppState {
             Some(e) => Err(e),
             None => Ok(()),
         }
+    }
+}
+
+async fn setup_auth_files(
+    layout: &disk::Layout,
+) -> Result<(TokenFile, File, File), server::ServerErr> {
+    let auth_dir = layout.auth();
+    let private_key_file = auth_dir.private_key();
+    private_key_file.assert_exists()?;
+    let public_key_file = auth_dir.public_key();
+    public_key_file.assert_exists()?;
+
+    let token_file = TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
+
+    Ok((token_file, private_key_file, public_key_file))
+}
+
+fn build_syncer_args(
+    storage: Arc<disk::Storage>,
+    http_client: Arc<http::Client>,
+    token_mngr: Arc<authn::TokenManager>,
+    dpl_retry_policy: fsm::RetryPolicy,
+    event_hub: events::EventHub,
+) -> SyncerArgs<http::Client, authn::TokenManager> {
+    SyncerArgs {
+        storage,
+        http_client,
+        token_mngr,
+        deploy_opts: apply::DeployOpts {
+            retry_policy: dpl_retry_policy,
+        },
+        backoff: cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 12 * 60 * 60, // 12 hours
+        },
+        event_hub,
     }
 }
