@@ -2,9 +2,4 @@
 # Remove the ignore once the upstream dependency is updated.
 
 [advisories]
-ignore = [
-	# h2 0.3.27 via hyper 0.14 (aws-smithy-http-client, google-cloud-gax-internal);
-	# no patched 0.3.x exists. The h2 0.4.x copy is bumped to the fixed 0.4.16.
-	# Tracking: https://github.com/mirurobotics/agent/issues/220
-	"RUSTSEC-2026-0258",
-]
+ignore = []

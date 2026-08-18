@@ -7,7 +7,7 @@ include = ["src/**/*"]
 build = "build.rs"
 
 [features]
-test = ["aws-sdk-s3/test-util"]
+test = []
 
 [lints.clippy]
 new_without_default = "allow"
@@ -47,7 +47,7 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 
 [dev-dependencies]
-aws-sdk-s3 = { workspace = true, features = ["test-util"] }
+aws-sdk-s3 = { workspace = true }
 aws-smithy-http-client = { workspace = true, features = ["test-util"] }
 aws-smithy-types = { workspace = true }
 google-cloud-gax = { workspace = true }
