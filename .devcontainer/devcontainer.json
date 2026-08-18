@@ -8,7 +8,9 @@
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     // api/regen.sh drives openapi-generator-cli through npx.
-    "ghcr.io/devcontainers/features/node:1": {}
+    "ghcr.io/devcontainers/features/node:1": {},
+    // openapi-generator-cli is a Java tool; api/regen.sh fails without a JRE.
+    "ghcr.io/devcontainers/features/java:1": {}
   },
   // Rust builds the whole dependency graph from source and linking is the
   // memory peak, so the agent gets the largest tier; target/ dominates storage.
