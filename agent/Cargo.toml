@@ -7,7 +7,11 @@ include = ["src/**/*"]
 build = "build.rs"
 
 [features]
-test = ["aws-sdk-s3/test-util"]
+# Deliberately does NOT enable aws-sdk-s3/test-util: the S3 test seam
+# (Store::from_http_client) uses only stable SDK APIs, and the SDK's test-util
+# transitively enables aws-smithy-runtime/legacy-test-util -> hyper 0.14 ->
+# h2 0.3, which is unfixable for RUSTSEC-2026-0258.
+test = []
 
 [lints.clippy]
 new_without_default = "allow"
@@ -47,7 +51,7 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 
 [dev-dependencies]
-aws-sdk-s3 = { workspace = true, features = ["test-util"] }
+aws-sdk-s3 = { workspace = true }
 aws-smithy-http-client = { workspace = true, features = ["test-util"] }
 aws-smithy-types = { workspace = true }
 google-cloud-gax = { workspace = true }
