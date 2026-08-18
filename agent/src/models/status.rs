@@ -255,7 +255,7 @@ macro_rules! impl_status_enum {
         }
 
         #[cfg(test)]
-        paste::paste! {
+        pastey::paste! {
             mod [<$name:snake _backend_tests>] {
                 use super::*;
 
@@ -284,7 +284,7 @@ macro_rules! impl_status_enum {
         wires [ $($variant:ident => $wire:literal),+ $(,)? ]
     ) => {
         #[cfg(test)]
-        paste::paste! {
+        pastey::paste! {
             mod [<$name:snake _serde_tests>] {
                 use super::*;
                 use std::collections::HashSet;
