@@ -18,6 +18,14 @@ const FRAME_START_WINDOW: u64 = 18;
 /// verifiable.
 const MAX_HEADER_READS: u32 = 1024;
 
+/// Where a frame hop landed: the offset just past the frame, or a verdict
+/// that ends the walk.
+enum Hop {
+    End(u64),
+    Incomplete,
+    Unknown,
+}
+
 pub(crate) async fn check(file: &File, size: u64) -> Result<Completeness, FileFormatsErr> {
     if size == 0 {
         return Ok(Completeness::Incomplete);
@@ -34,72 +42,100 @@ pub(crate) async fn check(file: &File, size: u64) -> Result<Completeness, FileFo
             return Ok(Completeness::Incomplete);
         }
         let magic = u32_le(&header[0..4]);
-        if (SKIPPABLE_MAGIC_MIN..=SKIPPABLE_MAGIC_MAX).contains(&magic) {
-            // skippable frame: magic (4) + frame_size (4) + frame_size bytes
-            if header.len() < 8 {
-                return Ok(Completeness::Incomplete);
-            }
-            let frame_size = u32_le(&header[4..8]) as u64;
-            cursor = match cursor.checked_add(8 + frame_size) {
-                Some(c) if c <= size => c,
-                _ => return Ok(Completeness::Incomplete),
-            };
-            continue;
-        }
-        if magic != ZSTD_MAGIC {
+        let hop = if (SKIPPABLE_MAGIC_MIN..=SKIPPABLE_MAGIC_MAX).contains(&magic) {
+            skippable_frame_end(&header, cursor, size)
+        } else if magic == ZSTD_MAGIC {
+            zstd_frame_end(file, &header, cursor, size, &mut reads).await?
+        } else {
             return Ok(Completeness::Incomplete);
-        }
-        if header.len() < 5 {
-            return Ok(Completeness::Incomplete);
-        }
-        let descriptor = header[4];
-        let has_checksum = (descriptor >> 2) & 1 == 1;
-        let mut pos = match cursor.checked_add(4 + frame_header_len(descriptor)) {
-            Some(p) if p <= size => p,
-            _ => return Ok(Completeness::Incomplete),
         };
-        // hop blocks, reading only the 3-byte headers
-        loop {
-            if reads >= MAX_HEADER_READS {
-                return Ok(Completeness::Unknown);
-            }
-            reads += 1;
-            let block_header = files::read_range(file, pos, 3).await?;
-            if block_header.len() < 3 {
-                return Ok(Completeness::Incomplete);
-            }
-            let raw = (block_header[0] as u32)
-                | ((block_header[1] as u32) << 8)
-                | ((block_header[2] as u32) << 16);
-            let last_block = raw & 1 == 1;
-            let block_type = (raw >> 1) & 3;
-            let block_size = (raw >> 3) as u64;
-            let payload_len = match block_type {
-                // raw (0) / compressed (2) blocks carry block_size bytes
-                0 | 2 => block_size,
-                // an RLE block carries a single repeated byte
-                1 => 1,
-                // type 3 is reserved
-                _ => return Ok(Completeness::Incomplete),
-            };
-            pos = match pos.checked_add(3 + payload_len) {
-                Some(p) if p <= size => p,
-                _ => return Ok(Completeness::Incomplete),
-            };
-            if last_block {
-                break;
-            }
-        }
-        if has_checksum {
-            pos = match pos.checked_add(4) {
-                Some(p) if p <= size => p,
-                _ => return Ok(Completeness::Incomplete),
-            };
-        }
-        cursor = pos;
+        cursor = match hop {
+            Hop::End(end) => end,
+            Hop::Incomplete => return Ok(Completeness::Incomplete),
+            Hop::Unknown => return Ok(Completeness::Unknown),
+        };
     }
     // cursor == size: the frames tile the file exactly
     Ok(Completeness::Complete)
+}
+
+/// Skippable frame: magic (4) + frame_size (4) + frame_size payload bytes.
+fn skippable_frame_end(header: &[u8], cursor: u64, size: u64) -> Hop {
+    if header.len() < 8 {
+        return Hop::Incomplete;
+    }
+    let frame_size = u32_le(&header[4..8]) as u64;
+    match cursor.checked_add(8 + frame_size) {
+        Some(end) if end <= size => Hop::End(end),
+        _ => Hop::Incomplete,
+    }
+}
+
+/// Standard frame: hop from the frame header across blocks, reading only the
+/// 3-byte block headers, to the offset just past the frame.
+async fn zstd_frame_end(
+    file: &File,
+    header: &[u8],
+    cursor: u64,
+    size: u64,
+    reads: &mut u32,
+) -> Result<Hop, FileFormatsErr> {
+    if header.len() < 5 {
+        return Ok(Hop::Incomplete);
+    }
+    let descriptor = header[4];
+    let has_checksum = (descriptor >> 2) & 1 == 1;
+    let mut pos = match cursor.checked_add(4 + frame_header_len(descriptor)) {
+        Some(p) if p <= size => p,
+        _ => return Ok(Hop::Incomplete),
+    };
+    loop {
+        if *reads >= MAX_HEADER_READS {
+            return Ok(Hop::Unknown);
+        }
+        *reads += 1;
+        let block_header = files::read_range(file, pos, 3).await?;
+        if block_header.len() < 3 {
+            return Ok(Hop::Incomplete);
+        }
+        let (last_block, payload_len) = match block_payload(&block_header) {
+            Some(block) => block,
+            None => return Ok(Hop::Incomplete),
+        };
+        pos = match pos.checked_add(3 + payload_len) {
+            Some(p) if p <= size => p,
+            _ => return Ok(Hop::Incomplete),
+        };
+        if last_block {
+            break;
+        }
+    }
+    if has_checksum {
+        pos = match pos.checked_add(4) {
+            Some(p) if p <= size => p,
+            _ => return Ok(Hop::Incomplete),
+        };
+    }
+    Ok(Hop::End(pos))
+}
+
+/// Decode a 3-byte block header into (last_block, payload length); None for
+/// the reserved block type.
+fn block_payload(block_header: &[u8]) -> Option<(bool, u64)> {
+    let raw = (block_header[0] as u32)
+        | ((block_header[1] as u32) << 8)
+        | ((block_header[2] as u32) << 16);
+    let last_block = raw & 1 == 1;
+    let block_size = (raw >> 3) as u64;
+    let payload_len = match (raw >> 1) & 3 {
+        // raw (0) / compressed (2) blocks carry block_size bytes
+        0 | 2 => block_size,
+        // an RLE block carries a single repeated byte
+        1 => 1,
+        // type 3 is reserved
+        _ => return None,
+    };
+    Some((last_block, payload_len))
 }
 
 /// Length of the frame header past the magic: descriptor (1) + optional
