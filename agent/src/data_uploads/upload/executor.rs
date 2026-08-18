@@ -12,6 +12,7 @@ use crate::http::{self, ClientI};
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
+use secrecy::ExposeSecret;
 use tracing::info;
 
 /// The seam between the upload actor and the transfer mechanics.
@@ -60,7 +61,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         http::with_retry(|| async {
             let params = http::uploads::CreateParams {
                 payload: &payload,
-                token: &token.token,
+                token: token.token.expose_secret(),
             };
             http::uploads::create(self.http_client.as_ref(), params).await
         })
@@ -73,7 +74,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         http::with_retry(|| async {
             let params = http::uploads::ConfirmParams {
                 id,
-                token: &token.token,
+                token: token.token.expose_secret(),
             };
             http::uploads::confirm(self.http_client.as_ref(), params).await
         })

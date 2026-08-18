@@ -14,6 +14,7 @@ use miru_agent::workers::token_refresh::{
 
 // external crates
 use chrono::{TimeDelta, Utc};
+use secrecy::SecretString;
 
 pub mod run_refresh_token_worker {
     use super::*;
@@ -22,7 +23,7 @@ pub mod run_refresh_token_worker {
     async fn success() {
         // create the token manager
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = Arc::new(MockTokenManager::new(token));
@@ -85,7 +86,7 @@ pub mod run_refresh_token_worker {
         // the token to expire in 100 minutes
         let token_exp_duration = TimeDelta::minutes(100);
         token_mngr.set_token(Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now() + token_exp_duration,
         });
         sleep_ctrl.release().await;
@@ -114,7 +115,7 @@ pub mod run_refresh_token_worker {
     async fn network_error() {
         // create the token manager
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
@@ -189,7 +190,7 @@ pub mod run_refresh_token_worker {
     async fn non_network_error() {
         // create the token manager
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
@@ -264,7 +265,7 @@ pub mod run_refresh_token_worker {
     async fn error_recovery() {
         // create the token manager
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = Arc::new(MockTokenManager::new(token));
@@ -360,7 +361,7 @@ pub mod calc_refresh_wait {
     #[tokio::test]
     async fn expired_in_past() {
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now() - TimeDelta::minutes(60),
         };
         let token_mngr = MockTokenManager::new(token);
@@ -385,7 +386,7 @@ pub mod calc_refresh_wait {
     #[tokio::test]
     async fn expires_less_than_10_minutes() {
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now() + TimeDelta::minutes(9),
         };
         let token_mngr = MockTokenManager::new(token);
@@ -410,7 +411,7 @@ pub mod calc_refresh_wait {
     #[tokio::test]
     async fn expires_more_than_10_minutes() {
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now() + TimeDelta::minutes(35),
         };
         let token_mngr = MockTokenManager::new(token);

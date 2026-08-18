@@ -12,6 +12,7 @@ use crate::http::{self, ClientI};
 use crate::models;
 
 // external crates
+use secrecy::ExposeSecret;
 use tracing::{error, info, warn};
 
 pub struct Outcome {
@@ -138,7 +139,7 @@ async fn fetch_device<HTTPClientT: ClientI>(
     http_client: &HTTPClientT,
     token: &Token,
 ) -> Result<models::Device, UpgradeErr> {
-    let api_device = http::devices::get(http_client, &token.token).await?;
+    let api_device = http::devices::get(http_client, token.token.expose_secret()).await?;
     Ok((&api_device).into())
 }
 
@@ -155,7 +156,7 @@ async fn update_device<HTTPClientT: ClientI>(
             payload: &backend_api::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(version.to_string()),
             },
-            token: &token.token,
+            token: token.token.expose_secret(),
         },
     )
     .await?;

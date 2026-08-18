@@ -6,6 +6,7 @@ use miru_agent::authn::{AuthnErr, Token, TokenManagerExt};
 
 // external crates
 use chrono::Utc;
+use secrecy::SecretString;
 
 /// One-shot test stub: each call to `get_token` consumes the canned
 /// response. `http::with_retry` does not re-fetch the token between
@@ -21,7 +22,7 @@ pub struct StubTokenManager {
 impl StubTokenManager {
     pub fn ok(token: &str) -> Self {
         let t = Token {
-            token: token.to_string(),
+            token: SecretString::from(token),
             expires_at: Utc::now() + chrono::Duration::hours(1),
         };
         Self {

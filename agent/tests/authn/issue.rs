@@ -14,6 +14,7 @@ use chrono::{Duration, Utc};
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::sign::Verifier;
+use secrecy::ExposeSecret;
 use serde::ser::Error as _;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -70,7 +71,7 @@ mod issue_token {
             .await
             .unwrap();
 
-        assert_eq!(token.token, "issued-token");
+        assert_eq!(token.token.expose_secret(), "issued-token");
         assert!((token.expires_at - expires_at).num_seconds().abs() <= 1);
         assert_eq!(mock_client.call_count(Call::IssueDeviceToken), 1);
 

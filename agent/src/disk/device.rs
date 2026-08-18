@@ -13,6 +13,9 @@ use crate::filesys::{
 use crate::models::{self, device};
 use crate::trace;
 
+// external crates
+use secrecy::ExposeSecret;
+
 pub type Device = ConcurrentStateFile<models::Device, device::Updates>;
 
 pub fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
@@ -52,7 +55,7 @@ pub async fn resolve_device_id(layout: &Layout) -> Result<String, DiskErr> {
     )
     .await?;
     let token = token_file.read();
-    let jwt_err = match jwt::extract_device_id(&token.token) {
+    let jwt_err = match jwt::extract_device_id(token.token.expose_secret()) {
         Ok(device_id) => return Ok(device_id),
         Err(e) => e,
     };

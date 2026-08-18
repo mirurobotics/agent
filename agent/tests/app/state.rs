@@ -21,6 +21,7 @@ use miru_agent::sync::SyncerExt;
 
 // external crates
 use chrono::Utc;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::time::Duration;
 
 // Outer wall-clock net around join handles in each test. Purely hang
@@ -155,7 +156,7 @@ pub mod init {
         // create the token file with a token containing a device id
         let token_file = env.layout.auth().token();
         let token = Token {
-                token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY".to_string(),
+                token: SecretString::from("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NDU2MzgzMTUsInN1YiI6ImNsaV8xMjMiLCJpc3MiOiJtaXJ1IiwiYXVkIjoiY2xpZW50IiwiZXhwIjoxNzIxNTE3MDM0fQ.4ARFzYZSF_i9PjPZRJtH7HcmE_vv5tuZIpKkniua6BY"),
                 expires_at: Utc::now(),
             };
         files::write_json(&token_file, &token, WriteOptions::default())
@@ -190,7 +191,10 @@ pub mod init {
         // the token file should now have the default token
         let token_file = env.layout.auth().token();
         let token = files::read_json::<Token>(&token_file).await.unwrap();
-        assert_eq!(token.token, Token::default().token);
+        assert_eq!(
+            token.token.expose_secret(),
+            Token::default().token.expose_secret()
+        );
 
         // check last activity
         assert!(state.activity_tracker.last_touched() <= Utc::now().timestamp() as u64);
