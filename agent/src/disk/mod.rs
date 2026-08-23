@@ -16,7 +16,7 @@ pub mod setup;
 
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
-pub use self::device::{assert_activated, resolve_device_id, Device};
+pub use self::device::{activation_state, assert_activated, resolve_device_id, Activation, Device};
 pub use self::errors::{DeviceNotActivatedErr, DiskErr};
 pub use self::file_rules::{file_rules_for_deployed, file_rules_for_deployment, FileRules};
 pub use self::git_commits::GitCommits;

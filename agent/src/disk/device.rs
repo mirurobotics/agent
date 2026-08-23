@@ -11,22 +11,35 @@ use crate::trace;
 
 pub type Device = ConcurrentStateFile<models::Device, device::Updates>;
 
-pub fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Activation {
+    Activated,
+    NotActivated,
+}
+
+/// Reports whether the device has both halves of its key pair on disk.
+/// Errors only when existence cannot be determined (e.g. an unreadable auth
+/// directory), which callers must not confuse with "not activated".
+pub fn activation_state(layout: &Layout) -> Result<Activation, DiskErr> {
     let auth_dir = layout.auth();
-    if !auth_dir.private_key().exists() {
-        return Err(DiskErr::DeviceNotActivatedErr(DeviceNotActivatedErr {
-            msg: "device is not activated".to_string(),
-            trace: trace!(),
-        }));
+    if !auth_dir.private_key().try_exists()? {
+        return Ok(Activation::NotActivated);
     }
-    if !auth_dir.public_key().exists() {
-        return Err(DiskErr::DeviceNotActivatedErr(DeviceNotActivatedErr {
-            msg: "device is not activated".to_string(),
-            trace: trace!(),
-        }));
+    if !auth_dir.public_key().try_exists()? {
+        return Ok(Activation::NotActivated);
     }
 
-    Ok(())
+    Ok(Activation::Activated)
+}
+
+pub fn assert_activated(layout: &Layout) -> Result<(), DiskErr> {
+    match activation_state(layout)? {
+        Activation::Activated => Ok(()),
+        Activation::NotActivated => Err(DiskErr::DeviceNotActivatedErr(DeviceNotActivatedErr {
+            msg: "device is not activated".to_string(),
+            trace: trace!(),
+        })),
+    }
 }
 
 /// Resolve the device id from the on-disk state.
