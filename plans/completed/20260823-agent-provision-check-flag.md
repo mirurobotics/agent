@@ -25,12 +25,12 @@ The check is local, offline, read-only, needs no `MIRU_PROVISIONING_TOKEN`, and 
 
 ## Progress
 
-- [ ] Milestone 1 — fallible existence probe in `filesys`.
-- [ ] Milestone 2 — tri-state activation query in `disk`.
-- [ ] Milestone 3 — `--check` flag, exit-code mapping, `main.rs` wiring, `ARCHITECTURE.md` note.
-- [ ] Milestone 4 — read-only/offline guarantees, then preflight to CLEAN.
-
-Use timestamps when you complete steps. Split partially completed work into "done" and "remaining" as needed.
+- [x] (2026-08-23) Milestone 1 — fallible existence probe in `filesys` (`3c29598`).
+- [x] (2026-08-23) Milestone 2 — tri-state activation query in `disk` (`627445c`).
+- [x] (2026-08-23) Milestone 3 — `--check` flag, exit-code mapping, `main.rs` wiring, `ARCHITECTURE.md` note (`58b1629`).
+- [x] (2026-08-23) Milestone 4 — read-only/offline guarantees (`0c5b076`).
+- [x] (2026-08-23) Review pass; fixes in `d77a27c`.
+- [x] (2026-08-23) Draft PR #224 opened; CI green on the branch head.
 
 ## Surprises & Discoveries
 
@@ -56,13 +56,21 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Shipped as planned: `provision --check` exits 0 / 3 / 1, reusing `disk::activation_state` — the same predicate `provision`'s no-op branch now consults — so the check and the command it predicts cannot drift. 26 tests added; the four pre-existing `assert_activated` tests pass unmodified, which is what guards the one edit with blast radius beyond the feature.
+
+Three things the review caught that the plan did not anticipate:
+
+1. `PathExistenceErr`'s Display dropped its `#[source]` io error. `main.rs` prints `{e}` and nothing walks `.source()`, so the one message whose entire job is to explain *why* state could not be determined never said "Permission denied". Fixed and pinned with a Display test.
+2. `leaves_provisioned_layout_untouched` used the non-recursive `dirs::subdirs`/`dirs::files`, so it snapshotted only the top level of the layout root — blind to a stray write into `auth/`, the only directory the check touches. Replaced with a recursive walk, verified by mutation (injecting a write into `check()` fails the new test and passed the old one).
+3. `--check=true` takes the `key=value` path, falls through, and does **not** set the flag; it proceeds to a real provision and exits 1 without a token. Consistent with the spec ("a branch for inputs that contain no `=`") and inside the exit-code contract, so left as is — but worth knowing.
+
+Retrospective: writing the plan against `Path::exists()`'s error-swallowing behavior up front was what made the three-outcome contract achievable — had the check been built on `exists()` first, "unreadable auth directory" would have silently reported exit 3 and the bug would have shipped. Conversely, the plan's own Context section named the key files `private.key`/`public.key` when the layout uses `private_key.pem`/`public_key.pem`; harmless because the code goes through the accessors, but a reminder that prose in a plan is not checked by anything.
 
 ## Context and Orientation
 
 The agent is a Rust binary. Everything below is under `agent/src/` (production) and `agent/tests/` (integration tests, mirroring the `src` layout). Terms:
 
-- **Provisioned / activated** — the device has an RSA key pair on disk under the auth directory. `disk::Layout::default()` roots at `/var/lib/miru/`, so the files are `/var/lib/miru/auth/private.key` and `/var/lib/miru/auth/public.key`.
+- **Provisioned / activated** — the device has an RSA key pair on disk under the auth directory. `disk::Layout::default()` roots at `/var/lib/miru/`, so the files are `/var/lib/miru/auth/private_key.pem` and `/var/lib/miru/auth/public_key.pem`.
 - **`.covgate`** — a file in each module directory holding that module's minimum line-coverage percentage, enforced by `scripts/covgate.sh`. `agent/src/cli/.covgate` is **100**, so every new line in the CLI module needs a test. `agent/src/filesys/.covgate` is 81.69, `agent/src/disk/.covgate` is 96.79, `agent/src/provisioning/.covgate` is 96.57. No new module *directory* is created by this plan, so no new `.covgate` file is needed.
 
 Files that matter:
