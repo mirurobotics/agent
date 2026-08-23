@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{dirs, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
@@ -160,5 +160,57 @@ pub mod reports {
             .stderr_line()
             .expect("error case must explain itself");
         assert!(!stderr.is_empty());
+    }
+}
+
+pub mod read_only {
+    use super::*;
+
+    #[tokio::test]
+    async fn creates_no_directories() {
+        let (layout, _tmp) = empty_layout();
+        assert!(!layout.root().exists(), "precondition: root must not exist");
+
+        let report = check::check(&layout);
+
+        assert!(matches!(report, Report::NotProvisioned));
+        assert!(
+            !layout.root().exists(),
+            "check must not create the layout root"
+        );
+        assert!(
+            !layout.temp_dir().exists(),
+            "check must not create a temp directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn leaves_provisioned_layout_untouched() {
+        let (layout, _tmp) = fresh_layout().await;
+        let auth = layout.auth();
+        files::seed(&auth.private_key(), "private").await;
+        files::seed(&auth.public_key(), "public").await;
+
+        let root = layout.root();
+        let subdirs_before = paths(dirs::subdirs(&root).await.unwrap().iter());
+        let files_before = paths(dirs::files(&root).await.unwrap().iter());
+
+        let report = check::check(&layout);
+        assert!(matches!(report, Report::Provisioned));
+
+        assert_eq!(
+            subdirs_before,
+            paths(dirs::subdirs(&root).await.unwrap().iter())
+        );
+        assert_eq!(
+            files_before,
+            paths(dirs::files(&root).await.unwrap().iter())
+        );
+    }
+
+    fn paths<'a, T: PathExt + 'a>(entries: impl Iterator<Item = &'a T>) -> Vec<PathBuf> {
+        let mut paths: Vec<_> = entries.map(|entry| entry.path().clone()).collect();
+        paths.sort();
+        paths
     }
 }
