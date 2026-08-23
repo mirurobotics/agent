@@ -34,7 +34,7 @@ Use timestamps when you complete steps. Split partially completed work into "don
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- The implementation sandbox runs as **root**, which bypasses permission bits. All three new `0o000`-directory tests self-skip there (17 pre-existing tests in `deploy`/`sync`/`gcs` fail there for the same reason). Verified by re-running the new tests as an unprivileged user: 25/25 pass with no skips. Consequence: local `covgate.sh` reports `provisioning` at 96.46% (needs 96.57%) because check.rs's `Err(e) => Report::Undeterminable(e)` arm is unreachable as root; with those 2 regions covered it is 96.85%. `agent/src/cli` is 100% either way.
 
 ## Decision Log
 
