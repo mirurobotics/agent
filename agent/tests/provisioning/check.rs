@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, files, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, Dir, PathExt, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
@@ -192,25 +192,38 @@ pub mod read_only {
         files::seed(&auth.public_key(), "public").await;
 
         let root = layout.root();
-        let subdirs_before = paths(dirs::subdirs(&root).await.unwrap().iter());
-        let files_before = paths(dirs::files(&root).await.unwrap().iter());
+        let before = walk(&root).await;
 
         let report = check::check(&layout);
         assert!(matches!(report, Report::Provisioned));
 
+        assert_eq!(before, walk(&root).await);
         assert_eq!(
-            subdirs_before,
-            paths(dirs::subdirs(&root).await.unwrap().iter())
+            "private",
+            files::read_string(&auth.private_key()).await.unwrap()
         );
         assert_eq!(
-            files_before,
-            paths(dirs::files(&root).await.unwrap().iter())
+            "public",
+            files::read_string(&auth.public_key()).await.unwrap()
         );
     }
 
-    fn paths<'a, T: PathExt + 'a>(entries: impl Iterator<Item = &'a T>) -> Vec<PathBuf> {
-        let mut paths: Vec<_> = entries.map(|entry| entry.path().clone()).collect();
-        paths.sort();
-        paths
+    /// Every path under `dir`, recursively and sorted. The check only ever
+    /// touches the auth subdirectory, so a top-level listing would miss the
+    /// one place a stray write could land.
+    async fn walk(dir: &Dir) -> Vec<PathBuf> {
+        let mut pending = vec![dir.clone()];
+        let mut found = Vec::new();
+        while let Some(current) = pending.pop() {
+            for file in dirs::files(&current).await.unwrap() {
+                found.push(file.path().clone());
+            }
+            for subdir in dirs::subdirs(&current).await.unwrap() {
+                found.push(subdir.path().clone());
+                pending.push(subdir);
+            }
+        }
+        found.sort();
+        found
     }
 }

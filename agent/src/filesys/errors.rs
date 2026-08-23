@@ -51,7 +51,7 @@ pub struct PathDoesNotExistErr {
 impl crate::errors::Error for PathDoesNotExistErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("unable to determine whether path exists: {path}")]
+#[error("unable to determine whether path exists '{path}': {source}")]
 pub struct PathExistenceErr {
     pub path: PathBuf,
     #[source]
