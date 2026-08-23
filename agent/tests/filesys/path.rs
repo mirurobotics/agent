@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
-use miru_agent::filesys::{self, dirs, path, Atomic, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{self, dirs, files, path, Atomic, Overwrite, PathExt, WriteOptions};
 
 // external crates
 #[allow(unused_imports)]
@@ -21,6 +21,70 @@ pub mod exists {
     fn nonexistent_path() {
         let dir = filesys::Dir::new(PathBuf::from("/nonexistent/path/abc123"));
         assert!(!dir.exists());
+    }
+}
+
+pub mod try_exists {
+    use super::*;
+
+    // standard crates
+    use std::os::unix::fs::PermissionsExt;
+
+    // internal crates
+    use miru_agent::filesys::FileSysErr;
+
+    #[tokio::test]
+    async fn returns_true_for_existing_file() {
+        let dir = dirs::temp("testing").unwrap();
+        let file = dir.to_dir().file("present.txt");
+        files::seed(&file, "contents").await;
+
+        assert!(file.try_exists().unwrap());
+    }
+
+    #[tokio::test]
+    async fn returns_false_for_missing_file_in_existing_dir() {
+        let dir = dirs::temp("testing").unwrap();
+        let file = dir.to_dir().file("absent.txt");
+
+        assert!(!file.try_exists().unwrap());
+    }
+
+    #[tokio::test]
+    async fn returns_false_when_parent_dir_does_not_exist() {
+        let dir = dirs::temp("testing").unwrap();
+        let file = dir.to_dir().subdir("nope").file("absent.txt");
+
+        assert!(!file.try_exists().unwrap());
+    }
+
+    #[tokio::test]
+    async fn returns_err_when_parent_dir_is_unreadable() {
+        // root ignores permission bits, so the error cannot be provoked
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipping: running as root, permission bits are bypassed");
+            return;
+        }
+
+        let tmp = dirs::temp("testing").unwrap();
+        let locked = tmp.to_dir().subdir("locked");
+        dirs::create(&locked).await.unwrap();
+        let file = locked.file("secret.txt");
+        files::seed(&file, "contents").await;
+
+        dirs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .await
+            .unwrap();
+        let result = file.try_exists();
+        // restore before asserting so a failure cannot leak an unreadable dir
+        dirs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(result, Err(FileSysErr::PathExistenceErr(_))),
+            "expected PathExistenceErr, got {result:?}"
+        );
     }
 }
 

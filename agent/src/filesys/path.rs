@@ -6,7 +6,7 @@ use std::{
 
 // internal crates
 use crate::filesys::errors::{
-    FileSysErr, PathDoesNotExistErr, PathExistsErr, UnknownCurrentDirErr,
+    FileSysErr, PathDoesNotExistErr, PathExistenceErr, PathExistsErr, UnknownCurrentDirErr,
 };
 use crate::trace;
 
@@ -31,6 +31,19 @@ pub trait PathExt {
 
     fn exists(&self) -> bool {
         self.path().exists()
+    }
+
+    /// Unlike `exists`, which reports any I/O failure as "does not exist",
+    /// this surfaces the underlying error (e.g. an unreadable parent
+    /// directory) so callers can distinguish "absent" from "unknown".
+    fn try_exists(&self) -> Result<bool, FileSysErr> {
+        self.path().try_exists().map_err(|e| {
+            FileSysErr::PathExistenceErr(PathExistenceErr {
+                path: self.path().clone(),
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })
     }
 
     fn assert_exists(&self) -> Result<(), FileSysErr> {
