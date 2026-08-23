@@ -99,6 +99,74 @@ mod args_parse {
     }
 
     #[test]
+    fn parses_provision_check_flag_alone() {
+        let inputs = to_inputs(&["miru-agent", "provision", "--check"]);
+
+        let provision_args = Args::parse(&inputs)
+            .provision_args
+            .expect("provision args should be present");
+
+        assert!(provision_args.check);
+        assert!(provision_args.backend_host.is_none());
+        assert!(provision_args.mqtt_broker_host.is_none());
+        assert!(provision_args.device_name.is_none());
+    }
+
+    #[test]
+    fn parses_provision_check_flag_alongside_options() {
+        let inputs = to_inputs(&[
+            "miru-agent",
+            "provision",
+            "--check",
+            "--device-name=robot-1",
+            "--backend-host=https://backend.example.com",
+        ]);
+
+        let provision_args = Args::parse(&inputs)
+            .provision_args
+            .expect("provision args should be present");
+
+        assert!(provision_args.check);
+        assert_eq!(Some("robot-1"), provision_args.device_name.as_deref());
+        assert_eq!(
+            Some("https://backend.example.com"),
+            provision_args.backend_host.as_deref()
+        );
+    }
+
+    #[test]
+    fn provision_without_check_flag_leaves_check_false() {
+        let inputs = to_inputs(&["miru-agent", "provision"]);
+
+        let provision_args = Args::parse(&inputs)
+            .provision_args
+            .expect("provision args should be present");
+
+        assert!(!provision_args.check);
+    }
+
+    #[test]
+    fn ignores_unrecognized_bare_flag() {
+        let inputs = to_inputs(&["miru-agent", "provision", "--nonsense"]);
+
+        let provision_args = Args::parse(&inputs)
+            .provision_args
+            .expect("provision args should be present");
+
+        assert!(!provision_args.check);
+    }
+
+    #[test]
+    fn check_flag_without_provision_subcommand_is_ignored() {
+        let inputs = to_inputs(&["miru-agent", "--check"]);
+
+        let args = Args::parse(&inputs);
+
+        assert!(args.provision_args.is_none());
+        assert!(args.reprovision_args.is_none());
+    }
+
+    #[test]
     fn recognizes_provision_and_reprovision_independently() {
         let provision_only = to_inputs(&["miru-agent", "provision"]);
         let provision_args = Args::parse(&provision_only);

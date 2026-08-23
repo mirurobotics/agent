@@ -25,24 +25,29 @@ pub struct ProvisionArgs {
     pub backend_host: Option<String>,
     pub mqtt_broker_host: Option<String>,
     pub device_name: Option<String>,
+    pub check: bool,
 }
 
 impl ProvisionArgs {
     pub fn parse(inputs: &[String]) -> Self {
         let mut args = Self::default();
         for input in inputs.iter().skip(1) {
-            if let Some((key, value)) = input.split_once('=') {
-                let value = if value.is_empty() {
-                    None
-                } else {
-                    Some(value.to_string())
-                };
-                match key.trim_start_matches('-') {
-                    "backend-host" => args.backend_host = value,
-                    "mqtt-broker-host" => args.mqtt_broker_host = value,
-                    "device-name" => args.device_name = value,
-                    _ => {}
+            let Some((key, value)) = input.split_once('=') else {
+                if input.trim_start_matches('-') == "check" {
+                    args.check = true;
                 }
+                continue;
+            };
+            let value = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+            match key.trim_start_matches('-') {
+                "backend-host" => args.backend_host = value,
+                "mqtt-broker-host" => args.mqtt_broker_host = value,
+                "device-name" => args.device_name = value,
+                _ => {}
             }
         }
         args
