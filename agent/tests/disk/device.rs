@@ -1,3 +1,6 @@
+// standard crates
+use std::os::unix::fs::PermissionsExt;
+
 // internal crates
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
@@ -60,9 +63,6 @@ pub mod assert_activated {
 pub mod activation_state {
     use super::*;
 
-    // standard crates
-    use std::os::unix::fs::PermissionsExt;
-
     async fn fresh_layout() -> (Layout, dirs::TempDir) {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
@@ -105,12 +105,6 @@ pub mod activation_state {
 
     #[tokio::test]
     async fn errs_when_auth_dir_is_unreadable() {
-        // root ignores permission bits, so the error cannot be provoked
-        if nix::unistd::geteuid().is_root() {
-            eprintln!("skipping: running as root, permission bits are bypassed");
-            return;
-        }
-
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
         files::seed(&auth.private_key(), "private").await;

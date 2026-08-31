@@ -33,9 +33,6 @@ pub trait PathExt {
         self.path().exists()
     }
 
-    /// Unlike `exists`, which reports any I/O failure as "does not exist",
-    /// this surfaces the underlying error (e.g. an unreadable parent
-    /// directory) so callers can distinguish "absent" from "unknown".
     fn try_exists(&self) -> Result<bool, FileSysErr> {
         self.path().try_exists().map_err(|e| {
             FileSysErr::PathExistenceErr(PathExistenceErr {

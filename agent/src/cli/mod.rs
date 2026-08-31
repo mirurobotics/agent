@@ -20,7 +20,7 @@ impl Args {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ProvisionArgs {
     pub backend_host: Option<String>,
     pub mqtt_broker_host: Option<String>,

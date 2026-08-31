@@ -17,9 +17,6 @@ pub enum Activation {
     NotActivated,
 }
 
-/// Reports whether the device has both halves of its key pair on disk.
-/// Errors only when existence cannot be determined (e.g. an unreadable auth
-/// directory), which callers must not confuse with "not activated".
 pub fn activation_state(layout: &Layout) -> Result<Activation, DiskErr> {
     let auth_dir = layout.auth();
     if !auth_dir.private_key().try_exists()? {

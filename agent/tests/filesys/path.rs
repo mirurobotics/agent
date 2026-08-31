@@ -1,8 +1,11 @@
 // standard crates
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
-use miru_agent::filesys::{self, dirs, files, path, Atomic, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{
+    self, dirs, files, path, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions,
+};
 
 // external crates
 #[allow(unused_imports)]
@@ -26,12 +29,6 @@ pub mod exists {
 
 pub mod try_exists {
     use super::*;
-
-    // standard crates
-    use std::os::unix::fs::PermissionsExt;
-
-    // internal crates
-    use miru_agent::filesys::FileSysErr;
 
     #[tokio::test]
     async fn returns_true_for_existing_file() {
@@ -60,12 +57,6 @@ pub mod try_exists {
 
     #[tokio::test]
     async fn returns_err_when_parent_dir_is_unreadable() {
-        // root ignores permission bits, so the error cannot be provoked
-        if nix::unistd::geteuid().is_root() {
-            eprintln!("skipping: running as root, permission bits are bypassed");
-            return;
-        }
-
         let tmp = dirs::temp("testing").unwrap();
         let locked = tmp.to_dir().subdir("locked");
         dirs::create(&locked).await.unwrap();

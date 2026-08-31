@@ -106,10 +106,15 @@ mod args_parse {
             .provision_args
             .expect("provision args should be present");
 
-        assert!(provision_args.check);
-        assert!(provision_args.backend_host.is_none());
-        assert!(provision_args.mqtt_broker_host.is_none());
-        assert!(provision_args.device_name.is_none());
+        assert_eq!(
+            provision_args,
+            ProvisionArgs {
+                check: true,
+                backend_host: None,
+                mqtt_broker_host: None,
+                device_name: None,
+            }
+        );
     }
 
     #[test]

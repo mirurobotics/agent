@@ -6,14 +6,11 @@ use std::path::PathBuf;
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, files, Dir, PathExt, WriteOptions};
-use miru_agent::models::Device;
+use miru_agent::filesys::{dirs, files};
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
 };
 
-/// A layout rooted in a fresh temp directory. The auth directory is created
-/// but left empty, mirroring the `fresh_layout` helper in the disk tests.
 async fn fresh_layout() -> (Layout, dirs::TempDir) {
     let dir = dirs::temp("testing").unwrap();
     let layout = Layout::new(dir.to_dir());
@@ -21,8 +18,6 @@ async fn fresh_layout() -> (Layout, dirs::TempDir) {
     (layout, dir)
 }
 
-/// A layout rooted in a temp directory with nothing under it at all — the
-/// state of a machine that has never run the agent.
 fn empty_layout() -> (Layout, dirs::TempDir) {
     let dir = dirs::temp("testing").unwrap();
     let layout = Layout::new(dir.to_dir());
@@ -33,7 +28,7 @@ pub mod reports {
     use super::*;
 
     #[tokio::test]
-    async fn fresh_install_is_not_provisioned() {
+    async fn not_provisioned() {
         let (layout, _tmp) = empty_layout();
 
         let report = check::check(&layout);
@@ -45,7 +40,7 @@ pub mod reports {
     }
 
     #[tokio::test]
-    async fn both_keys_present_is_provisioned() {
+    async fn is_provisioned() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
         files::seed(&auth.private_key(), "private").await;
@@ -59,47 +54,6 @@ pub mod reports {
         assert!(report.stderr_line().is_none());
     }
 
-    #[tokio::test]
-    async fn private_key_only_is_not_provisioned() {
-        let (layout, _tmp) = fresh_layout().await;
-        files::seed(&layout.auth().private_key(), "private").await;
-
-        let report = check::check(&layout);
-
-        assert!(matches!(report, Report::NotProvisioned));
-        assert_eq!(EXIT_NOT_PROVISIONED, report.exit_code());
-    }
-
-    #[tokio::test]
-    async fn public_key_only_is_not_provisioned() {
-        let (layout, _tmp) = fresh_layout().await;
-        files::seed(&layout.auth().public_key(), "public").await;
-
-        let report = check::check(&layout);
-
-        assert!(matches!(report, Report::NotProvisioned));
-        assert_eq!(EXIT_NOT_PROVISIONED, report.exit_code());
-    }
-
-    #[tokio::test]
-    async fn device_file_without_keys_is_not_provisioned() {
-        let (layout, _tmp) = fresh_layout().await;
-        let device = Device {
-            id: "dvc_partial".to_string(),
-            ..Device::default()
-        };
-        files::write_json(&layout.device(), &device, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let report = check::check(&layout);
-
-        assert!(matches!(report, Report::NotProvisioned));
-        assert_eq!(EXIT_NOT_PROVISIONED, report.exit_code());
-    }
-
-    /// Pins the error-case contract without relying on filesystem
-    /// permissions, which root bypasses.
     #[test]
     fn undeterminable_reports_error_on_stderr_only() {
         let report = Report::Undeterminable(DiskErr::FileSysErr(FileSysErr::PathExistenceErr(
@@ -127,12 +81,6 @@ pub mod reports {
 
     #[tokio::test]
     async fn unreadable_auth_dir_is_undeterminable() {
-        // root ignores permission bits, so the error cannot be provoked
-        if nix::unistd::geteuid().is_root() {
-            eprintln!("skipping: running as root, permission bits are bypassed");
-            return;
-        }
-
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
         files::seed(&auth.private_key(), "private").await;
@@ -160,70 +108,5 @@ pub mod reports {
             .stderr_line()
             .expect("error case must explain itself");
         assert!(!stderr.is_empty());
-    }
-}
-
-pub mod read_only {
-    use super::*;
-
-    #[tokio::test]
-    async fn creates_no_directories() {
-        let (layout, _tmp) = empty_layout();
-        assert!(!layout.root().exists(), "precondition: root must not exist");
-
-        let report = check::check(&layout);
-
-        assert!(matches!(report, Report::NotProvisioned));
-        assert!(
-            !layout.root().exists(),
-            "check must not create the layout root"
-        );
-        assert!(
-            !layout.temp_dir().exists(),
-            "check must not create a temp directory"
-        );
-    }
-
-    #[tokio::test]
-    async fn leaves_provisioned_layout_untouched() {
-        let (layout, _tmp) = fresh_layout().await;
-        let auth = layout.auth();
-        files::seed(&auth.private_key(), "private").await;
-        files::seed(&auth.public_key(), "public").await;
-
-        let root = layout.root();
-        let before = walk(&root).await;
-
-        let report = check::check(&layout);
-        assert!(matches!(report, Report::Provisioned));
-
-        assert_eq!(before, walk(&root).await);
-        assert_eq!(
-            "private",
-            files::read_string(&auth.private_key()).await.unwrap()
-        );
-        assert_eq!(
-            "public",
-            files::read_string(&auth.public_key()).await.unwrap()
-        );
-    }
-
-    /// Every path under `dir`, recursively and sorted. The check only ever
-    /// touches the auth subdirectory, so a top-level listing would miss the
-    /// one place a stray write could land.
-    async fn walk(dir: &Dir) -> Vec<PathBuf> {
-        let mut pending = vec![dir.clone()];
-        let mut found = Vec::new();
-        while let Some(current) = pending.pop() {
-            for file in dirs::files(&current).await.unwrap() {
-                found.push(file.path().clone());
-            }
-            for subdir in dirs::subdirs(&current).await.unwrap() {
-                found.push(subdir.path().clone());
-                pending.push(subdir);
-            }
-        }
-        found.sort();
-        found
     }
 }

@@ -1,15 +1,8 @@
-//! Answers "is this device provisioned?" from on-disk state alone.
-//!
-//! The check is deliberately offline: [`check`] takes only a [`disk::Layout`],
-//! so no HTTP client, backend host, or provisioning token can reach it. It is
-//! also read-only — it probes for the auth key pair and creates nothing.
-//!
-//! The exit codes below are public interface. Ansible playbooks encode
-//! `rc in [0, 3]` as success, so changing them is a breaking change.
-
 // internal crates
 use crate::disk::{self, Activation, DiskErr};
 
+// The exit codes below are public interface. Ansible playbooks encode
+// `rc in [0, 3]` as success, so changing them is a breaking change.
 pub const EXIT_PROVISIONED: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
 pub const EXIT_NOT_PROVISIONED: i32 = 3;
