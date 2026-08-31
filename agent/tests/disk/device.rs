@@ -1,7 +1,12 @@
+// standard crates
+use std::os::unix::fs::PermissionsExt;
+
 // internal crates
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
-use miru_agent::disk::{assert_activated, resolve_device_id, DiskErr, Layout};
+use miru_agent::disk::{
+    activation_state, assert_activated, resolve_device_id, Activation, DiskErr, Layout,
+};
 use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::Device;
 
@@ -52,6 +57,72 @@ pub mod assert_activated {
         files::seed(&auth.public_key(), "public").await;
 
         assert_activated(&layout).unwrap();
+    }
+}
+
+pub mod activation_state {
+    use super::*;
+
+    async fn fresh_layout() -> (Layout, dirs::TempDir) {
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        dirs::create_if_absent(&layout.auth().root).await.unwrap();
+        (layout, dir)
+    }
+
+    #[tokio::test]
+    async fn not_activated_when_both_keys_missing() {
+        let (layout, _tmp) = fresh_layout().await;
+
+        assert_eq!(Activation::NotActivated, activation_state(&layout).unwrap());
+    }
+
+    #[tokio::test]
+    async fn not_activated_when_public_key_missing() {
+        let (layout, _tmp) = fresh_layout().await;
+        files::seed(&layout.auth().private_key(), "private").await;
+
+        assert_eq!(Activation::NotActivated, activation_state(&layout).unwrap());
+    }
+
+    #[tokio::test]
+    async fn not_activated_when_private_key_missing() {
+        let (layout, _tmp) = fresh_layout().await;
+        files::seed(&layout.auth().public_key(), "public").await;
+
+        assert_eq!(Activation::NotActivated, activation_state(&layout).unwrap());
+    }
+
+    #[tokio::test]
+    async fn activated_when_both_keys_present() {
+        let (layout, _tmp) = fresh_layout().await;
+        let auth = layout.auth();
+        files::seed(&auth.private_key(), "private").await;
+        files::seed(&auth.public_key(), "public").await;
+
+        assert_eq!(Activation::Activated, activation_state(&layout).unwrap());
+    }
+
+    #[tokio::test]
+    async fn errs_when_auth_dir_is_unreadable() {
+        let (layout, _tmp) = fresh_layout().await;
+        let auth = layout.auth();
+        files::seed(&auth.private_key(), "private").await;
+        files::seed(&auth.public_key(), "public").await;
+
+        dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o000))
+            .await
+            .unwrap();
+        let result = activation_state(&layout);
+        // restore before asserting so a failure cannot leak an unreadable dir
+        dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(result, Err(DiskErr::FileSysErr(_))),
+            "expected FileSysErr, got {result:?}"
+        );
     }
 }
 

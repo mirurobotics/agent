@@ -17,7 +17,7 @@ use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendHost;
 use miru_agent::privilege;
-use miru_agent::provisioning::{self, display, errors::*, provision, reprovision};
+use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
 use miru_agent::version;
 use miru_agent::workers::mqtt;
 
@@ -40,6 +40,17 @@ async fn main() {
     }
 
     if let Some(provision_args) = cli_args.provision_args {
+        if provision_args.check {
+            let report = check::check(&disk::Layout::default());
+            if let Some(line) = report.stdout_line() {
+                println!("{line}");
+            }
+            if let Some(line) = report.stderr_line() {
+                eprintln!("{line}");
+            }
+            std::process::exit(report.exit_code());
+        }
+
         let result = run_provision(provision_args).await;
         handle_provision_result(result);
         return;
