@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 if [ -n "$FROM_PKG" ]; then
     log "Installing from package on local machine: '$FROM_PKG'"
     if [ ! -f "$FROM_PKG" ]; then
@@ -12,7 +13,9 @@ if [ -n "$FROM_PKG" ]; then
     if [ "$(dpkg -f "$FROM_PKG" Architecture)" != "$DEB_ARCH" ]; then
         fatal "The provided package architecture ($(dpkg -f "$FROM_PKG" Architecture)) does not match this machine's architecture ($DEB_ARCH)."
     fi
+    # shellcheck disable=SC2034 # consumed by a later partial in the rendered script
     AGENT_DEB_PKG=$FROM_PKG
 
+    # shellcheck disable=SC2034 # consumed by a later partial in the rendered script
     VERSION=$(dpkg -f "$FROM_PKG" Version)
 fi

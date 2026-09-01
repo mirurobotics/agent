@@ -85,3 +85,9 @@ jobs:
 
       - name: Run Tests + Coverage Gate
         run: ./tools/lint/scripts/covgate.sh
+
+  surface-lint:
+    # yamllint disable rule:line-length
+    uses: mirurobotics/.github/.github/workflows/surface-lint.yml@main
+    with:
+      runs-on: ubuntu-latest

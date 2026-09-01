@@ -75,3 +75,24 @@ if ! command_exists cargo-diet && ! has_cargo_subcommand cargo-diet; then
     echo "---------------------"
     install_cargo_tool cargo-diet
 fi
+
+# Surface lint tools: yamllint, shellcheck, actionlint. These power
+# scripts/lint-surface.sh (YAML / shell / GitHub Actions linting). Each install
+# is guarded by command_exists so re-running this script is idempotent.
+if ! command_exists yamllint; then
+    echo "Installing yamllint"
+    echo "-------------------"
+    pip install --user yamllint || pipx install yamllint
+fi
+if ! command_exists shellcheck; then
+    echo "Installing shellcheck"
+    echo "---------------------"
+    # Debian/Ubuntu; adjust per platform if needed.
+    sudo apt-get install -y shellcheck
+fi
+if ! command_exists actionlint; then
+    echo "Installing actionlint"
+    echo "---------------------"
+    go install github.com/rhysd/actionlint/cmd/actionlint@latest \
+        || curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+fi

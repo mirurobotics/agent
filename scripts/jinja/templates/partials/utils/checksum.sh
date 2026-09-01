@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 verify_checksum() {
     file=$1
     expected_checksum=$2

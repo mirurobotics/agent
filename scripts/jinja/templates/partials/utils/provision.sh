@@ -1,8 +1,10 @@
+# shellcheck shell=sh
 if [ -z "$MIRU_API_KEY" ]; then
     echo "MIRU_API_KEY is not set"
     exit 1
 fi
 
+# shellcheck disable=SC2153 # DEVICE_NAME is an external environment variable
 response_body=$(curl --request POST \
   --url "$BACKEND_HOST"/v1/devices \
   --header 'Content-Type: application/json' \
@@ -72,6 +74,7 @@ response_body=$(echo "$response_body" | head -n -1)
 # Check if the request succeeded
 if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
     log "Successfully created activation token"
+    # shellcheck disable=SC2034 # consumed by a later partial in the rendered script
     MIRU_ACTIVATION_TOKEN=$(echo "$response_body" | jq -r '.token')
 else
     error "Activation token request failed (HTTP status $http_code)"
