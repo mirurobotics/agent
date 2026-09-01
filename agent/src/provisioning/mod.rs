@@ -1,3 +1,4 @@
+pub mod check;
 pub mod display;
 pub mod errors;
 

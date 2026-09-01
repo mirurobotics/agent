@@ -8,7 +8,7 @@ The agent is a Rust binary that runs on customer devices (robots). It solves one
 
 The binary has two mutually exclusive modes, selected at startup:
 
-- **Provision mode** (`--provision`): activates a new device by reading a provisioning token from the environment, registering with the backend, and writing device identity and auth files to disk.
+- **Provision mode** (`--provision`): activates a new device by reading a provisioning token from the environment, registering with the backend, and writing device identity and auth files to disk. Adding `--check` short-circuits into a local, offline, read-only probe that reports provisioning state through the exit code instead — `0` provisioned, `3` not provisioned, `1` state could not be determined (message on stderr).
 - **Agent runtime mode** (default): reads settings from disk, initializes shared state (AppState), starts background workers (MQTT subscriber, poller, token refresh), serves a local HTTP server, and waits for a shutdown signal.
 
 These modes do not share runtime state.

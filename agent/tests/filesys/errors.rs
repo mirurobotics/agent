@@ -41,6 +41,21 @@ mod display {
     }
 
     #[test]
+    fn path_existence_err() {
+        let err = FileSysErr::PathExistenceErr(PathExistenceErr {
+            path: PathBuf::from("/unreadable/path"),
+            source: Box::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            trace: miru_agent::trace!(),
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("/unreadable/path"), "message: {msg}");
+        assert!(
+            msg.contains(&std::io::Error::from(std::io::ErrorKind::PermissionDenied).to_string()),
+            "message must name the underlying cause: {msg}"
+        );
+    }
+
+    #[test]
     fn path_exists_err() {
         let err = FileSysErr::PathExistsErr(PathExistsErr {
             path: PathBuf::from("/exists/path"),

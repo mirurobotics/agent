@@ -51,6 +51,17 @@ pub struct PathDoesNotExistErr {
 impl crate::errors::Error for PathDoesNotExistErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("unable to determine whether path exists '{path}': {source}")]
+pub struct PathExistenceErr {
+    pub path: PathBuf,
+    #[source]
+    pub source: Box<std::io::Error>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for PathExistenceErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("path exists: {path}")]
 pub struct PathExistsErr {
     pub path: PathBuf,
@@ -348,6 +359,8 @@ pub enum FileSysErr {
     #[error(transparent)]
     PathDoesNotExistErr(PathDoesNotExistErr),
     #[error(transparent)]
+    PathExistenceErr(PathExistenceErr),
+    #[error(transparent)]
     PathExistsErr(PathExistsErr),
     #[error(transparent)]
     UnknownParentDirForDirErr(UnknownParentDirForDirErr),
@@ -410,6 +423,7 @@ crate::impl_error!(FileSysErr {
     InvalidFileOverwriteErr,
     UnknownFileNameErr,
     PathDoesNotExistErr,
+    PathExistenceErr,
     PathExistsErr,
     UnknownParentDirForDirErr,
     UnknownParentDirForFileErr,
