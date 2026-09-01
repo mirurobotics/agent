@@ -10,6 +10,7 @@ pub mod deploy;
 pub mod disk;
 pub mod errors;
 pub mod events;
+pub mod fileformats;
 pub mod filesys;
 pub mod gcs;
 pub mod http;

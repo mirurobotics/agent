@@ -1,5 +1,5 @@
 // standard crates
-use std::io::Write;
+use std::io::{SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::time::SystemTime;
 
@@ -19,7 +19,7 @@ use secrecy::{ExposeSecretMut, SecretBox};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use tokio::fs::File as TokioFile;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
@@ -86,6 +86,78 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
             trace: trace!(),
         })
     })?;
+    Ok(buf)
+}
+
+/// Reads up to `n` bytes from the end of `file` (fewer if the file is shorter
+/// than `n` bytes).
+pub async fn read_tail(file: &File, n: u64) -> Result<Vec<u8>, FileSysErr> {
+    let mut f = TokioFile::open(file.path())
+        .await
+        .map_err(|e| map_io_err_for_open(e, file))?;
+    let size = f.seek(SeekFrom::End(0)).await.map_err(|e| {
+        FileSysErr::ReadFileErr(ReadFileErr {
+            source: Box::new(e),
+            file: file.clone(),
+            trace: trace!(),
+        })
+    })?;
+    let start = size.saturating_sub(n);
+    read_at(&mut f, start, size - start, file).await
+}
+
+/// Reads up to `len` bytes starting at `offset` (fewer if EOF intervenes; an
+/// `offset` at or past EOF returns an empty vec).
+pub async fn read_range(file: &File, offset: u64, len: u64) -> Result<Vec<u8>, FileSysErr> {
+    let mut f = TokioFile::open(file.path())
+        .await
+        .map_err(|e| map_io_err_for_open(e, file))?;
+    let size = f.seek(SeekFrom::End(0)).await.map_err(|e| {
+        FileSysErr::ReadFileErr(ReadFileErr {
+            source: Box::new(e),
+            file: file.clone(),
+            trace: trace!(),
+        })
+    })?;
+    let end = offset.saturating_add(len).min(size);
+    let len = end.saturating_sub(offset);
+    read_at(&mut f, offset, len, file).await
+}
+
+/// Seeks to `offset` and reads `len` bytes (fewer if EOF intervenes). The
+/// caller bounds `len` by the file size, so the allocation is bounded too.
+async fn read_at(
+    f: &mut TokioFile,
+    offset: u64,
+    len: u64,
+    file: &File,
+) -> Result<Vec<u8>, FileSysErr> {
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    f.seek(SeekFrom::Start(offset)).await.map_err(|e| {
+        FileSysErr::ReadFileErr(ReadFileErr {
+            source: Box::new(e),
+            file: file.clone(),
+            trace: trace!(),
+        })
+    })?;
+    let mut buf = vec![0u8; len as usize];
+    let mut filled = 0;
+    while filled < buf.len() {
+        let n = f.read(&mut buf[filled..]).await.map_err(|e| {
+            FileSysErr::ReadFileErr(ReadFileErr {
+                source: Box::new(e),
+                file: file.clone(),
+                trace: trace!(),
+            })
+        })?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    buf.truncate(filled);
     Ok(buf)
 }
 
