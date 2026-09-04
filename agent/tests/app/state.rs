@@ -236,7 +236,7 @@ pub mod init {
     async fn scanner_degrades_when_snapshot_path_unwritable() {
         let env = TestEnv::valid().await;
         // a directory at the snapshot FILE path makes
-        // ScanSnapshotFile::new_with_default fail on both read and create
+        // ScanSnapshotFile::open fail on both read and create
         dirs::create(&Dir::new(env.layout.scanner_snapshot().path().clone()))
             .await
             .unwrap();

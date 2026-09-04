@@ -54,6 +54,16 @@ impl WriteOptions {
         mode: None,
     };
 
+    /// Overwrite existing files using atomic writes, restricting the result to
+    /// owner read/write (`0o600`). Use for secrets written to disk (e.g. the
+    /// auth token, which is a live bearer credential and doubles as the MQTT
+    /// password).
+    pub const OVERWRITE_ATOMIC_0600: Self = Self {
+        overwrite: Overwrite::Allow,
+        atomic: Atomic::Yes,
+        mode: Some(0o600),
+    };
+
     /// Overwrite existing files, non-atomic.
     pub const OVERWRITE_NONATOMIC: Self = Self {
         overwrite: Overwrite::Allow,

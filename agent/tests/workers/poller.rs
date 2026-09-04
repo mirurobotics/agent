@@ -4,7 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::{error::SleepController, syncer::MockSyncer};
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::dirs;
+use miru_agent::filesys::{dirs, state_file::Options};
 use miru_agent::models::Device;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::syncer::{CooldownEnd, State, SyncEvent, SyncFailure};
@@ -22,10 +22,16 @@ pub mod run {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let options = poller::Options::default();
         let syncer = Arc::new(MockSyncer::default());
@@ -105,10 +111,16 @@ pub mod run {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let options = poller::Options {
             poll_interval_secs: 30,
@@ -189,10 +201,16 @@ pub mod run {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
         let device_file = Arc::new(device_file);
 
         let options = poller::Options::default();
@@ -260,10 +278,16 @@ pub mod run {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let options = poller::Options::default();
         let syncer = Arc::new(MockSyncer::default());
@@ -321,10 +345,16 @@ pub mod run {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let options = poller::Options::default();
         let syncer = Arc::new(MockSyncer::default());
@@ -383,10 +413,16 @@ pub mod run {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let options = poller::Options::default();
         let syncer = Arc::new(MockSyncer::default());

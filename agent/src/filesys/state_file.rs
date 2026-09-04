@@ -24,6 +24,25 @@ macro_rules! dispatch {
     }};
 }
 
+/// Options for opening a state file.
+pub struct Options<ContentT> {
+    /// If the file is absent/unreadable, create it with this value. `None` means
+    /// the file must already exist (absent is an error).
+    pub default: Option<ContentT>,
+    /// Permission bits applied on every write. `None` leaves the umask/atomicwrites
+    /// default; `Some(0o600)` restricts secrets like the auth token.
+    pub mode: Option<u32>,
+}
+
+impl<ContentT> Default for Options<ContentT> {
+    fn default() -> Self {
+        Self {
+            default: None,
+            mode: None,
+        }
+    }
+}
+
 // ============================== SINGLE THREADED ================================== //
 #[derive(Debug)]
 pub struct SingleThreadStateFile<ContentT, PatchT>
@@ -32,6 +51,10 @@ where
 {
     pub file: File,
     state: Arc<ContentT>,
+    /// Permission bits applied on every write. `None` leaves the file at the
+    /// umask/atomicwrites default; `Some(m)` (e.g. `0o600` for secrets like the
+    /// auth token) restricts the file on both create and update.
+    mode: Option<u32>,
     _phantom: std::marker::PhantomData<PatchT>,
 }
 
@@ -39,48 +62,40 @@ impl<ContentT, PatchT> SingleThreadStateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
-    pub async fn new(file: File) -> Result<Self, FileSysErr> {
-        let state = files::read_json::<ContentT>(&file).await?;
-
-        // initialize the struct with the read data
-        let state_file = Self {
-            file,
-            state: Arc::new(state),
-            _phantom: std::marker::PhantomData,
-        };
-        Ok(state_file)
-    }
-
-    pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
-    where
-        Self: Sized,
-    {
-        let result = Self::new(file.clone()).await;
-        match result {
+    /// Open the state file described by `opts`. On a successful read the file is
+    /// loaded as-is. If the read fails and `opts.default` is set, the file is
+    /// created with that value (atomic, `opts.mode`) and reloaded; otherwise the
+    /// read error propagates. `opts.mode` is applied on every subsequent write.
+    pub async fn open(file: File, opts: Options<ContentT>) -> Result<Self, FileSysErr> {
+        match Self::load(file.clone(), opts.mode).await {
             Ok(state_file) => Ok(state_file),
-            Err(_) => Self::create(file, &default, Overwrite::Allow).await,
+            Err(read_err) => {
+                let Some(default) = opts.default else {
+                    return Err(read_err);
+                };
+                files::write_json(
+                    &file,
+                    &default,
+                    WriteOptions {
+                        overwrite: Overwrite::Allow,
+                        atomic: Atomic::Yes,
+                        mode: opts.mode,
+                    },
+                )
+                .await?;
+                Self::load(file, opts.mode).await
+            }
         }
     }
 
-    pub async fn create(
-        file: File,
-        data: &ContentT,
-        overwrite: Overwrite,
-    ) -> Result<Self, FileSysErr>
-    where
-        Self: Sized,
-    {
-        files::write_json(
-            &file,
-            data,
-            WriteOptions {
-                overwrite,
-                atomic: Atomic::Yes,
-                mode: None,
-            },
-        )
-        .await?;
-        Self::new(file).await
+    async fn load(file: File, mode: Option<u32>) -> Result<Self, FileSysErr> {
+        let state = files::read_json::<ContentT>(&file).await?;
+        Ok(Self {
+            file,
+            state: Arc::new(state),
+            mode,
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     pub fn read(&self) -> Arc<ContentT> {
@@ -88,7 +103,16 @@ where
     }
 
     pub async fn write(&mut self, data: ContentT) -> Result<(), FileSysErr> {
-        files::write_json(&self.file, &data, WriteOptions::OVERWRITE_ATOMIC).await?;
+        files::write_json(
+            &self.file,
+            &data,
+            WriteOptions {
+                overwrite: Overwrite::Allow,
+                atomic: Atomic::Yes,
+                mode: self.mode,
+            },
+        )
+        .await?;
         self.state = Arc::new(data);
         Ok(())
     }
@@ -199,24 +223,11 @@ where
     pub async fn spawn(
         buffer_size: usize,
         file: File,
+        opts: Options<ContentT>,
     ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            file: SingleThreadStateFile::new(file).await?,
-            receiver,
-        };
-        let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { sender }, worker_handle))
-    }
-
-    pub async fn spawn_with_default(
-        buffer_size: usize,
-        file: File,
-        default: ContentT,
-    ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
-        let (sender, receiver) = mpsc::channel(buffer_size);
-        let worker = Worker {
-            file: SingleThreadStateFile::new_with_default(file, default).await?,
+            file: SingleThreadStateFile::open(file, opts).await?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
