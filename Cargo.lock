@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "backend-api"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "device-api"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2666,7 +2666,7 @@ dependencies = [
 
 [[package]]
 name = "miru-agent"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "atomicwrites",
  "aws-sdk-s3",
