@@ -31,10 +31,10 @@ Post-merge, before any release ships this change, a staging soak is a release ga
 - [x] M1: activate this plan (`plans/backlog/` → `plans/active/`, `docs(plans):` commit) — 244579e (pre-existing on branch)
 - [x] M2: generate golden fixtures with the openssl CLI into `testdata/crypt/`; remove the two stale placeholder files — 769475a
 - [x] M2: add golden tests to `agent/tests/crypt/rsa.rs`; `./scripts/test.sh` green against the current openssl implementation; commit — 769475a (1635 passed, incl. 4 golden)
-- [ ] M3: Cargo edits (aws-lc-rs + pem-rfc7468 workspace deps; openssl → unix-only target dep; cargo-machete ignore)
-- [ ] M3: rewrite `agent/src/crypt/rsa.rs` on aws-lc-rs; rework `agent/src/crypt/errors.rs`
-- [ ] M3: migrate the two openssl-importing test files; add new-behavior tests (PKCS#8 write header, label dispatch)
-- [ ] M3: `./scripts/update-deps.sh`, `./scripts/lint.sh`, `./scripts/test.sh`, `./scripts/covgate.sh` all green; commit
+- [x] M3: Cargo edits (aws-lc-rs + pem-rfc7468 workspace deps; openssl → unix-only target dep; cargo-machete ignore) — 428167c
+- [x] M3: rewrite `agent/src/crypt/rsa.rs` on aws-lc-rs; rework `agent/src/crypt/errors.rs` — 428167c
+- [x] M3: migrate the two openssl-importing test files; add new-behavior tests (PKCS#8 write header, label dispatch) — 428167c
+- [x] M3: `./scripts/update-deps.sh`, `./scripts/lint.sh`, `./scripts/test.sh`, `./scripts/covgate.sh` all green; commit — 428167c (1641 passed; crypt coverage 95.95% ≥ 95.16; golden module byte-identical to M2)
 - [ ] M4: `./scripts/preflight.sh` prints "Preflight clean"; push; open draft PR
 - [ ] M4: CI green on pushed head (preflight CLEAN); final `docs(plans):` progress commit; PR may leave draft
 
@@ -42,6 +42,8 @@ Post-merge, before any release ships this change, a staging soak is a release ga
 ## Surprises & Discoveries
 
 - 2026-09-10: the activation commit (244579e) added this plan to `plans/active/` but left an untracked, older draft copy at `plans/backlog/20260910-crypt-aws-lc-rs.md`. Left untouched (untracked, never staged); flagged for manual cleanup.
+- 2026-09-10: the first cut of the golden tests used "openssl" in test identifiers, which trips the `grep -rn openssl agent/src agent/tests` acceptance gate (it is case-sensitive by design — crate paths are lowercase). Also, M2 was first committed without a fmt pass, so M3's lint fix-mode reflowed one golden helper line. Both fixed by rewriting the unpushed M2 commit (names → `*_golden_*`, prose → proper-noun "OpenSSL", fmt-normalized); the golden tests were re-run green against the openssl implementation at the rewritten commit, and the golden module is byte-identical between the M2 and M3 commits.
+- 2026-09-10: `./scripts/update-deps.sh` produced ~515 lines of unrelated upstream lockfile drift; restored per the PR 1 precedent. The only committed Cargo.lock change is the two new dependency edges (aws-lc-rs, pem-rfc7468) on miru-agent.
 
 
 ## Decision Log
@@ -59,6 +61,11 @@ All entries 2026-09-10, authoring:
 - Golden fixtures AND their tests land one commit before the migration, while the code is still openssl-backed. They must pass there (dual-format read already works; PKCS#1 v1.5 is deterministic), so the migration commit flipping the internals under unchanged, passing golden tests is the parity proof — and the PR stays bisectable.
 - `openssl` stays declared, demoted to `[target.'cfg(unix)'.dependencies]`: its `vendored` feature is what statically links OpenSSL into native-tls, used on Linux by rumqttc (production MQTT TLS) and rumqttd (dev dep). reqwest does NOT use it (already on rustls + aws-lc-rs). Since no Rust code will import openssl, cargo machete would flag it — an explicit `[package.metadata.cargo-machete]` ignore entry (the first in this workspace) plus a manifest comment handles that.
 - Staging soak is a post-merge release gate outside this PR: fresh provision + token refresh with a pre-migration PKCS#1 key on a staging device before any release ships this change. A regression here is a fleet-wide auth outage.
+
+Execution entries, 2026-09-10:
+
+- Beyond the plan's minimum tests, added label-dispatch error-path tests (`RSA PRIVATE KEY`/`PRIVATE KEY`/`PUBLIC KEY` armor around invalid DER, plus wrong-label cases for both readers) to pin the dispatch behavior and hold crypt region coverage — landed at 95.95% ≥ 95.16 with no re-baselining.
+- Kept the old `ssl_err!` macro shape as two macros: `msg_err!` (variants carrying `msg: String`) and `source_err!` (variants carrying a typed `source`), preserving the variant-name/struct-name mapping convention.
 
 
 ## Outcomes & Retrospective
