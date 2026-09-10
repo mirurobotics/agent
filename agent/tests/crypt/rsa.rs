@@ -492,6 +492,90 @@ pub mod verify {
     }
 }
 
+/// Golden-fixture parity tests. The fixtures in `testdata/crypt/` were generated
+/// once with the OpenSSL CLI (see the exec plan) and pin the on-disk formats every
+/// provisioned device depends on: PKCS#1 and PKCS#8 private-key reads, deterministic
+/// RSASSA-PKCS1-v1_5 signatures, and the SPKI fingerprint the backend uses as the
+/// JWT `kid`. They must keep passing, byte-for-byte, across any crypto-stack change.
+pub mod golden {
+    use super::*;
+    use crate::test_utils::testdata::testdata_dir;
+    use std::path::PathBuf;
+
+    fn fixture_path(name: &str) -> PathBuf {
+        testdata_dir()
+            .subdir(PathBuf::from("crypt"))
+            .path()
+            .join(name)
+    }
+
+    fn fixture_file(name: &str) -> filesys::File {
+        filesys::File::new(fixture_path(name))
+    }
+
+    fn fixture_bytes(name: &str) -> Vec<u8> {
+        std::fs::read(fixture_path(name)).unwrap_or_else(|e| panic!("read fixture {name}: {e}"))
+    }
+
+    #[tokio::test]
+    async fn sign_rs256_matches_golden_signature_for_pkcs1_and_pkcs8() {
+        let message = fixture_bytes("message.txt");
+        let expected = fixture_bytes("message.sig.rs256");
+
+        let from_pkcs1 = rsa::sign_rs256(&fixture_file("rsa2048_pkcs1.pem"), &message)
+            .await
+            .unwrap();
+        assert_eq!(from_pkcs1, expected);
+
+        // same key as PKCS#8: proves both private-key read paths load the same key
+        let from_pkcs8 = rsa::sign_rs256(&fixture_file("rsa2048_pkcs8.pem"), &message)
+            .await
+            .unwrap();
+        assert_eq!(from_pkcs8, expected);
+    }
+
+    #[tokio::test]
+    async fn sign_rs512_matches_golden_signature_for_pkcs1_and_pkcs8() {
+        let message = fixture_bytes("message.txt");
+        let expected = fixture_bytes("message.sig.rs512");
+
+        let from_pkcs1 = rsa::sign_rs512(&fixture_file("rsa2048_pkcs1.pem"), &message)
+            .await
+            .unwrap();
+        assert_eq!(from_pkcs1, expected);
+
+        // same key as PKCS#8: proves both private-key read paths load the same key
+        let from_pkcs8 = rsa::sign_rs512(&fixture_file("rsa2048_pkcs8.pem"), &message)
+            .await
+            .unwrap();
+        assert_eq!(from_pkcs8, expected);
+    }
+
+    #[tokio::test]
+    async fn verify_accepts_golden_rs256_signature_and_rejects_tampered_message() {
+        let message = fixture_bytes("message.txt");
+        let signature = fixture_bytes("message.sig.rs256");
+        let spki = fixture_file("rsa2048_spki.pem");
+
+        assert!(rsa::verify(&spki, &message, &signature).await.unwrap());
+
+        let mut tampered = message.clone();
+        tampered[0] ^= 0x01;
+        assert!(!rsa::verify(&spki, &tampered, &signature).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn fingerprint_matches_golden_spki_digest() {
+        let public_key = rsa::read_public_key(&fixture_file("rsa2048_spki.pem"))
+            .await
+            .unwrap();
+        let fingerprint = rsa::fingerprint(&public_key).unwrap();
+
+        let expected = String::from_utf8(fixture_bytes("fingerprint.txt")).unwrap();
+        assert_eq!(fingerprint, expected.trim_end());
+    }
+}
+
 pub mod sign_rs512 {
     use super::*;
     use openssl::hash::MessageDigest;
