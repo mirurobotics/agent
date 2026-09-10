@@ -27,10 +27,10 @@ Post-merge, before any release ships this change, a staging soak is a release ga
 
 ## Progress
 
-- [ ] M1: move `plans/active/20260910-unix-only-deps.md` to `plans/completed/` (own `docs(plans):` commit)
-- [ ] M1: activate this plan (`plans/backlog/` → `plans/active/`, `docs(plans):` commit)
-- [ ] M2: generate golden fixtures with the openssl CLI into `testdata/crypt/`; remove the two stale placeholder files
-- [ ] M2: add golden tests to `agent/tests/crypt/rsa.rs`; `./scripts/test.sh` green against the current openssl implementation; commit
+- [x] M1: move `plans/active/20260910-unix-only-deps.md` to `plans/completed/` (own `docs(plans):` commit) — 7244de8
+- [x] M1: activate this plan (`plans/backlog/` → `plans/active/`, `docs(plans):` commit) — 244579e (pre-existing on branch)
+- [x] M2: generate golden fixtures with the openssl CLI into `testdata/crypt/`; remove the two stale placeholder files — 769475a
+- [x] M2: add golden tests to `agent/tests/crypt/rsa.rs`; `./scripts/test.sh` green against the current openssl implementation; commit — 769475a (1635 passed, incl. 4 golden)
 - [ ] M3: Cargo edits (aws-lc-rs + pem-rfc7468 workspace deps; openssl → unix-only target dep; cargo-machete ignore)
 - [ ] M3: rewrite `agent/src/crypt/rsa.rs` on aws-lc-rs; rework `agent/src/crypt/errors.rs`
 - [ ] M3: migrate the two openssl-importing test files; add new-behavior tests (PKCS#8 write header, label dispatch)
@@ -41,7 +41,7 @@ Post-merge, before any release ships this change, a staging soak is a release ga
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-09-10: the activation commit (244579e) added this plan to `plans/active/` but left an untracked, older draft copy at `plans/backlog/20260910-crypt-aws-lc-rs.md`. Left untouched (untracked, never staged); flagged for manual cleanup.
 
 
 ## Decision Log
