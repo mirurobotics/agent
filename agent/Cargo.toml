@@ -24,7 +24,6 @@ google-cloud-storage = { workspace = true }
 google-cloud-auth = { workspace = true }
 google-cloud-gax = { workspace = true }
 http = { workspace = true }
-nix = { workspace = true }
 backend-api = { workspace = true }
 device-api = { workspace = true }
 openssl = { workspace = true }
@@ -45,6 +44,9 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
 
 [dev-dependencies]
 aws-sdk-s3 = { workspace = true }
