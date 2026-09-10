@@ -5,15 +5,13 @@ use miru_agent::authn::errors::AuthnErr;
 use miru_agent::authn::issue::{encode_part, issue_token, mint_jwt};
 use miru_agent::authn::Token;
 use miru_agent::crypt::{base64, rsa};
-use miru_agent::filesys::{self, dirs, files, Overwrite};
+use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::HTTPErr;
 
 // external crates
+use aws_lc_rs::signature::{self, UnparsedPublicKey};
 use chrono::{Duration, Utc};
-use openssl::hash::MessageDigest;
-use openssl::pkey::PKey;
-use openssl::sign::Verifier;
 use serde::ser::Error as _;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -201,19 +199,19 @@ mod mint_jwt {
         let signing_input = format!("{}.{}", parts[0], parts[1]);
         let signature = base64::decode_bytes_url_safe_no_pad(parts[2]).unwrap();
 
-        let public_key_rsa = rsa::read_public_key(&public_key_file).await.unwrap();
-        let pkey = PKey::from_rsa(public_key_rsa).unwrap();
-        let mut verifier = Verifier::new(MessageDigest::sha512(), &pkey).unwrap();
-        verifier.update(signing_input.as_bytes()).unwrap();
-        assert!(verifier.verify(&signature).unwrap());
+        // Verify RS512 against the device's SPKI public key, independent of the
+        // crypt module's own verify (which is RS256-only).
+        let public_key_pem = std::fs::read(public_key_file.path()).unwrap();
+        let (label, spki_der) = pem_rfc7468::decode_vec(&public_key_pem).unwrap();
+        assert_eq!(label, "PUBLIC KEY");
+        let public_key = UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA512, &spki_der);
+        assert!(public_key
+            .verify(signing_input.as_bytes(), &signature)
+            .is_ok());
 
         let mut tampered = signing_input.clone().into_bytes();
         tampered[0] ^= 0x01;
-        let public_key_rsa = rsa::read_public_key(&public_key_file).await.unwrap();
-        let pkey = PKey::from_rsa(public_key_rsa).unwrap();
-        let mut verifier = Verifier::new(MessageDigest::sha512(), &pkey).unwrap();
-        verifier.update(&tampered).unwrap();
-        assert!(!verifier.verify(&signature).unwrap());
+        assert!(public_key.verify(&tampered, &signature).is_err());
     }
 
     #[tokio::test]

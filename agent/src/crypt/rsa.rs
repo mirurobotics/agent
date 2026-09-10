@@ -7,16 +7,40 @@ use crate::filesys::{self, files, Atomic, Overwrite, PathExt, WriteOptions};
 use crate::trace;
 
 // external crates
-use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private, Public};
-use openssl::rsa::Rsa;
-use openssl::sha::sha256;
-use openssl::sign::{Signer, Verifier};
+use aws_lc_rs::digest;
+use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
+use aws_lc_rs::rand::SystemRandom;
+use aws_lc_rs::rsa::{KeySize, PublicKey};
+use aws_lc_rs::signature::{self, KeyPair as _, RsaKeyPair, UnparsedPublicKey};
+use pem_rfc7468::LineEnding;
 use secrecy::ExposeSecret;
 
-/// Maps an `openssl::error::ErrorStack` to a `CryptErr` variant. The variant name and
-/// inner struct name must match (e.g. `SignDataErr` maps to `CryptErr::SignDataErr(SignDataErr { .. })`).
-macro_rules! ssl_err {
+/// PEM armor label for PKCS#1 `RSAPrivateKey` — what every device provisioned
+/// before the aws-lc-rs migration has on disk. Read-only; never written anymore.
+const PKCS1_LABEL: &str = "RSA PRIVATE KEY";
+/// PEM armor label for PKCS#8 `PrivateKeyInfo` — what `gen_key_pair` writes.
+const PKCS8_LABEL: &str = "PRIVATE KEY";
+/// PEM armor label for SPKI `SubjectPublicKeyInfo` — the only public-key format
+/// read or written. The backend stores this PEM verbatim at (re)provision.
+const SPKI_LABEL: &str = "PUBLIC KEY";
+
+/// Maps a failed expression's error into a `CryptErr` variant carrying the error's
+/// Display output as `msg`. The variant name and inner struct name must match
+/// (e.g. `ReadKeyErr` maps to `CryptErr::ReadKeyErr(ReadKeyErr { .. })`).
+macro_rules! msg_err {
+    ($variant:ident, $expr:expr) => {
+        $expr.map_err(|e| {
+            CryptErr::$variant($variant {
+                msg: e.to_string(),
+                trace: trace!(),
+            })
+        })
+    };
+}
+
+/// Maps a failed expression's error into a `CryptErr` variant carrying the typed
+/// error as `source`. Same variant/struct naming contract as `msg_err!`.
+macro_rules! source_err {
     ($variant:ident, $expr:expr) => {
         $expr.map_err(|e| {
             CryptErr::$variant($variant {
@@ -25,6 +49,47 @@ macro_rules! ssl_err {
             })
         })
     };
+}
+
+/// Map a requested modulus size in bits to an aws-lc-rs `KeySize`.
+fn key_size(num_bits: u32) -> Result<KeySize, CryptErr> {
+    match num_bits {
+        2048 => Ok(KeySize::Rsa2048),
+        3072 => Ok(KeySize::Rsa3072),
+        4096 => Ok(KeySize::Rsa4096),
+        8192 => Ok(KeySize::Rsa8192),
+        _ => Err(CryptErr::GenerateRSAKeyPairErr(GenerateRSAKeyPairErr {
+            msg: format!(
+                "unsupported RSA key size: {num_bits} (supported: 2048, 3072, 4096, 8192)"
+            ),
+            trace: trace!(),
+        })),
+    }
+}
+
+/// Encode the private key as PKCS#8 PEM. The intermediate DER buffer zeroizes on
+/// drop; the returned PEM `String` is written to disk immediately by the caller.
+fn private_key_to_pem(key_pair: &RsaKeyPair) -> Result<String, CryptErr> {
+    let der = msg_err!(
+        ConvertPrivateKeyToPEMErr,
+        AsDer::<Pkcs8V1Der>::as_der(key_pair)
+    )?;
+    msg_err!(
+        ConvertPrivateKeyToPEMErr,
+        pem_rfc7468::encode_string(PKCS8_LABEL, LineEnding::LF, der.as_ref())
+    )
+}
+
+/// Encode the public key as SPKI PEM.
+fn public_key_to_pem(key_pair: &RsaKeyPair) -> Result<String, CryptErr> {
+    let der = msg_err!(
+        ConvertPublicKeyToPEMErr,
+        AsDer::<PublicKeyX509Der>::as_der(key_pair.public_key())
+    )?;
+    msg_err!(
+        ConvertPublicKeyToPEMErr,
+        pem_rfc7468::encode_string(SPKI_LABEL, LineEnding::LF, der.as_ref())
+    )
 }
 
 /// Generate an RSA key pair and write the private and public keys to the specified
@@ -45,23 +110,27 @@ pub async fn gen_key_pair(
     public_key_file: &filesys::File,
     overwrite: Overwrite,
 ) -> Result<(), CryptErr> {
+    let size = key_size(num_bits)?;
+
     // Generate the RSA key pair on a blocking thread so the 4096-bit keygen
     // (hundreds of ms of pure CPU) does not pin an async worker thread and stall
     // concurrent tasks (MQTT loop, poller, local socket server). Only the raw
-    // `Rsa::generate` moves into the closure; the `ssl_err!` mapping stays in the
-    // async body so its `trace!()`/`?` machinery runs in the async context. A
+    // `RsaKeyPair::generate` moves into the closure; the error mapping stays in
+    // the async body so its `trace!()`/`?` machinery runs in the async context. A
     // JoinError only occurs if the blocking task panics, which would have
     // propagated inline before this change too, so we let it propagate.
-    let rsa = tokio::task::spawn_blocking(move || Rsa::generate(num_bits))
+    let key_pair = tokio::task::spawn_blocking(move || RsaKeyPair::generate(size))
         .await
         .expect("rsa keygen task panicked");
-    let rsa = ssl_err!(GenerateRSAKeyPairErr, rsa)?;
+    let key_pair = msg_err!(GenerateRSAKeyPairErr, key_pair)?;
 
-    // Extract and write the private key
-    let private_key_pem = ssl_err!(ConvertPrivateKeyToPEMErr, rsa.private_key_to_pem())?;
+    // Extract and write the private key (PKCS#8; keys written before the
+    // aws-lc-rs migration are PKCS#1 and stay readable via `read_private_key`'s
+    // label dispatch)
+    let private_key_pem = private_key_to_pem(&key_pair)?;
     files::write_bytes(
         private_key_file,
-        &private_key_pem,
+        private_key_pem.as_bytes(),
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
@@ -71,10 +140,10 @@ pub async fn gen_key_pair(
     .await?;
 
     // Extract and write the public key
-    let public_key_pem = ssl_err!(ConvertPublicKeyToPEMErr, rsa.public_key_to_pem())?;
+    let public_key_pem = public_key_to_pem(&key_pair)?;
     files::write_bytes(
         public_key_file,
-        &public_key_pem,
+        public_key_pem.as_bytes(),
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
@@ -86,31 +155,75 @@ pub async fn gen_key_pair(
     Ok(())
 }
 
+/// Strip trailing ASCII whitespace before PEM-decoding: `pem_rfc7468` rejects
+/// any bytes after the END line, but PEM files commonly end with extra newlines.
+fn trim_trailing_whitespace(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map_or(0, |i| i + 1);
+    &bytes[..end]
+}
+
+/// Parse a PEM private key, dispatching on the armor label: PKCS#1 (pre-migration
+/// keys on device disks) or PKCS#8 (what `gen_key_pair` writes). This matches the
+/// dual-format acceptance of the previous OpenSSL generic reader.
+fn parse_private_key_pem(pem: &[u8]) -> Result<RsaKeyPair, CryptErr> {
+    let (label, der) = msg_err!(
+        ReadKeyErr,
+        pem_rfc7468::decode_vec(trim_trailing_whitespace(pem))
+    )?;
+    match label {
+        PKCS1_LABEL => msg_err!(ReadKeyErr, RsaKeyPair::from_der(&der)),
+        PKCS8_LABEL => msg_err!(ReadKeyErr, RsaKeyPair::from_pkcs8(&der)),
+        other => Err(CryptErr::ReadKeyErr(ReadKeyErr {
+            msg: format!("unsupported private key PEM label: {other}"),
+            trace: trace!(),
+        })),
+    }
+}
+
+/// Parse a PEM public key. SPKI armor only, matching the previous reader.
+fn parse_public_key_pem(pem: &[u8]) -> Result<PublicKey, CryptErr> {
+    let (label, der) = msg_err!(
+        ReadKeyErr,
+        pem_rfc7468::decode_vec(trim_trailing_whitespace(pem))
+    )?;
+    if label != SPKI_LABEL {
+        return Err(CryptErr::ReadKeyErr(ReadKeyErr {
+            msg: format!("unsupported public key PEM label: {label}"),
+            trace: trace!(),
+        }));
+    }
+    msg_err!(ReadKeyErr, PublicKey::from_der(&der))
+}
+
 /// Read an RSA private key from the specified file.
-pub async fn read_private_key(private_key_file: &filesys::File) -> Result<Rsa<Private>, CryptErr> {
+pub async fn read_private_key(private_key_file: &filesys::File) -> Result<RsaKeyPair, CryptErr> {
     private_key_file.assert_exists()?;
     let private_key_pem = files::read_secret_bytes(private_key_file).await?;
-    ssl_err!(
-        ReadKeyErr,
-        Rsa::private_key_from_pem(private_key_pem.expose_secret())
-    )
+    parse_private_key_pem(private_key_pem.expose_secret())
 }
 
 /// Read an RSA public key from the specified file.
-pub async fn read_public_key(public_key_file: &filesys::File) -> Result<Rsa<Public>, CryptErr> {
+pub async fn read_public_key(public_key_file: &filesys::File) -> Result<PublicKey, CryptErr> {
     public_key_file.assert_exists()?;
     let public_key_pem = files::read_secret_bytes(public_key_file).await?;
-    ssl_err!(
-        ReadKeyErr,
-        Rsa::public_key_from_pem(public_key_pem.expose_secret())
-    )
+    parse_public_key_pem(public_key_pem.expose_secret())
 }
 
 /// Canonical fingerprint of an RSA public key: lowercase hex SHA-256 over the
 /// DER-encoded SubjectPublicKeyInfo
-pub fn fingerprint(key: &Rsa<Public>) -> Result<String, CryptErr> {
-    let der = ssl_err!(ConvertPublicKeyToDERErr, key.public_key_to_der())?;
-    let digest = sha256(&der);
+pub fn fingerprint(key: &PublicKey) -> Result<String, CryptErr> {
+    // Must hash the SPKI DER (`PublicKeyX509Der`) — the fingerprint is the JWT
+    // `kid` the backend looks up devices by, so it must stay byte-stable.
+    // (`key.as_ref()` would yield PKCS#1 `RSAPublicKey` DER: a different hash.)
+    let der = source_err!(
+        ConvertPublicKeyToDERErr,
+        AsDer::<PublicKeyX509Der>::as_der(key)
+    )?;
+    let digest = digest::digest(&digest::SHA256, der.as_ref());
+    let digest = digest.as_ref();
     let mut out = String::with_capacity(digest.len() * 2);
     for b in digest {
         let _ = write!(out, "{b:02x}");
@@ -121,15 +234,18 @@ pub fn fingerprint(key: &Rsa<Public>) -> Result<String, CryptErr> {
 async fn sign(
     private_key_file: &filesys::File,
     data: &[u8],
-    digest: MessageDigest,
+    padding: &'static dyn signature::RsaEncoding,
 ) -> Result<Vec<u8>, CryptErr> {
-    let rsa_private_key = read_private_key(private_key_file).await?;
-    let private_key = ssl_err!(RSAToPKeyErr, PKey::from_rsa(rsa_private_key))?;
-
-    let mut signer = ssl_err!(SignDataErr, Signer::new(digest, &private_key))?;
-    ssl_err!(SignDataErr, signer.update(data))?;
-    let signature = ssl_err!(SignDataErr, signer.sign_to_vec())?;
-    Ok(signature)
+    let key_pair = read_private_key(private_key_file).await?;
+    // The buffer must be exactly `public_modulus_len()` bytes: `sign` panics on a
+    // wrong-sized buffer rather than returning an error. The RNG argument is
+    // required by the signature but unused (PKCS#1 v1.5 is deterministic).
+    let mut sig = vec![0u8; key_pair.public_modulus_len()];
+    source_err!(
+        SignDataErr,
+        key_pair.sign(padding, &SystemRandom::new(), data, &mut sig)
+    )?;
+    Ok(sig)
 }
 
 /// Create an RSASSA-PKCS1-v1_5 (RFC 7518 §3.2) signature using SHA-256.
@@ -137,7 +253,7 @@ pub async fn sign_rs256(
     private_key_file: &filesys::File,
     data: &[u8],
 ) -> Result<Vec<u8>, CryptErr> {
-    sign(private_key_file, data, MessageDigest::sha256()).await
+    sign(private_key_file, data, &signature::RSA_PKCS1_SHA256).await
 }
 
 /// Create an RSASSA-PKCS1-v1_5 (RFC 7518 §3.3) signature using SHA-512.
@@ -145,23 +261,21 @@ pub async fn sign_rs512(
     private_key_file: &filesys::File,
     data: &[u8],
 ) -> Result<Vec<u8>, CryptErr> {
-    sign(private_key_file, data, MessageDigest::sha512()).await
+    sign(private_key_file, data, &signature::RSA_PKCS1_SHA512).await
 }
 
-/// Verify a signature using the public key stored in the specified file
+/// Verify a signature using the public key stored in the specified file. Returns
+/// `Ok(false)` on an invalid signature; `Err` only for key/file problems.
 pub async fn verify(
     public_key_file: &filesys::File,
     data: &[u8],
-    signature: &[u8],
+    signature_bytes: &[u8],
 ) -> Result<bool, CryptErr> {
-    let rsa_public_key = read_public_key(public_key_file).await?;
-    let public_key = ssl_err!(RSAToPKeyErr, PKey::from_rsa(rsa_public_key))?;
-
-    let mut verifier = ssl_err!(
-        VerifyDataErr,
-        Verifier::new(MessageDigest::sha256(), &public_key)
+    let public_key = read_public_key(public_key_file).await?;
+    let der = source_err!(
+        ConvertPublicKeyToDERErr,
+        AsDer::<PublicKeyX509Der>::as_der(&public_key)
     )?;
-    ssl_err!(VerifyDataErr, verifier.update(data))?;
-    let is_valid = ssl_err!(VerifyDataErr, verifier.verify(signature))?;
-    Ok(is_valid)
+    let unparsed = UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256, der.as_ref());
+    Ok(unparsed.verify(data, signature_bytes).is_ok())
 }

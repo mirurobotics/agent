@@ -39,18 +39,18 @@ pub struct ConvertBytesToStringErr {
 impl crate::errors::Error for ConvertBytesToStringErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Convert private key to PEM error: {source}")]
+#[error("Convert private key to PEM error: {msg}")]
 pub struct ConvertPrivateKeyToPEMErr {
-    pub source: openssl::error::ErrorStack,
+    pub msg: String,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ConvertPrivateKeyToPEMErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Convert public key to PEM error: {source}")]
+#[error("Convert public key to PEM error: {msg}")]
 pub struct ConvertPublicKeyToPEMErr {
-    pub source: openssl::error::ErrorStack,
+    pub msg: String,
     pub trace: Box<Trace>,
 }
 
@@ -59,56 +59,38 @@ impl crate::errors::Error for ConvertPublicKeyToPEMErr {}
 #[derive(Debug, thiserror::Error)]
 #[error("Convert public key to DER error: {source}")]
 pub struct ConvertPublicKeyToDERErr {
-    pub source: openssl::error::ErrorStack,
+    pub source: aws_lc_rs::error::Unspecified,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ConvertPublicKeyToDERErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Generate RSA key pair error: {source}")]
+#[error("Generate RSA key pair error: {msg}")]
 pub struct GenerateRSAKeyPairErr {
-    pub source: openssl::error::ErrorStack,
+    pub msg: String,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for GenerateRSAKeyPairErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Read key error: {source}")]
+#[error("Read key error: {msg}")]
 pub struct ReadKeyErr {
-    pub source: openssl::error::ErrorStack,
+    pub msg: String,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ReadKeyErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("RSA to PKey error: {source}")]
-pub struct RSAToPKeyErr {
-    pub source: openssl::error::ErrorStack,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for RSAToPKeyErr {}
-
-#[derive(Debug, thiserror::Error)]
 #[error("Sign data error: {source}")]
 pub struct SignDataErr {
-    pub source: openssl::error::ErrorStack,
+    pub source: aws_lc_rs::error::Unspecified,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for SignDataErr {}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Verify data error: {source}")]
-pub struct VerifyDataErr {
-    pub source: openssl::error::ErrorStack,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for VerifyDataErr {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CryptErr {
@@ -133,11 +115,7 @@ pub enum CryptErr {
     #[error(transparent)]
     ReadKeyErr(ReadKeyErr),
     #[error(transparent)]
-    RSAToPKeyErr(RSAToPKeyErr),
-    #[error(transparent)]
     SignDataErr(SignDataErr),
-    #[error(transparent)]
-    VerifyDataErr(VerifyDataErr),
 }
 
 impl From<filesys::FileSysErr> for CryptErr {
@@ -157,7 +135,5 @@ crate::impl_error!(CryptErr {
     ConvertPublicKeyToDERErr,
     GenerateRSAKeyPairErr,
     ReadKeyErr,
-    RSAToPKeyErr,
     SignDataErr,
-    VerifyDataErr,
 });

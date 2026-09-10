@@ -207,6 +207,32 @@ pub mod gen_key_pair {
             "public key should be 640"
         );
     }
+
+    #[tokio::test]
+    async fn writes_pkcs8_private_and_spki_public_pem() {
+        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
+        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
+
+        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        // New private keys are PKCS#8 (the aws-lc-rs migration's write-format
+        // flip; pre-migration keys are PKCS#1 and remain readable). Public keys
+        // stay SPKI: the backend stores that PEM verbatim.
+        let private_pem = std::fs::read_to_string(private_key_file.path()).unwrap();
+        assert!(private_pem.starts_with("-----BEGIN PRIVATE KEY-----"));
+        let public_pem = std::fs::read_to_string(public_key_file.path()).unwrap();
+        assert!(public_pem.starts_with("-----BEGIN PUBLIC KEY-----"));
+
+        // Full round trip on the freshly written pair: read → sign → verify.
+        let data = b"pkcs8 round trip";
+        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
+        assert!(rsa::verify(&public_key_file, data, &signature)
+            .await
+            .unwrap());
+    }
 }
 
 pub mod read_private_key {
@@ -261,6 +287,41 @@ pub mod read_private_key {
         let result = rsa::read_private_key(&private_key_file).await;
         assert!(result.is_err());
     }
+
+    async fn write_pem_and_read_private_key(pem: &str) -> Result<(), CryptErr> {
+        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
+        files::write_bytes(
+            &private_key_file,
+            pem.as_bytes(),
+            WriteOptions::OVERWRITE_NONATOMIC,
+        )
+        .await
+        .unwrap();
+        rsa::read_private_key(&private_key_file).await.map(|_| ())
+    }
+
+    #[tokio::test]
+    async fn unsupported_pem_label() {
+        // Valid PEM armor, but a label the dispatch does not accept.
+        let pem = "-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n";
+        let result = write_pem_and_read_private_key(pem).await.unwrap_err();
+        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+    }
+
+    #[tokio::test]
+    async fn pkcs1_label_with_invalid_der() {
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n";
+        let result = write_pem_and_read_private_key(pem).await.unwrap_err();
+        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+    }
+
+    #[tokio::test]
+    async fn pkcs8_label_with_invalid_der() {
+        let pem = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
+        let result = write_pem_and_read_private_key(pem).await.unwrap_err();
+        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+    }
 }
 
 pub mod read_public_key {
@@ -310,6 +371,34 @@ pub mod read_public_key {
 
         let result = rsa::read_public_key(&public_key_file).await;
         assert!(result.is_err());
+    }
+
+    async fn write_pem_and_read_public_key(pem: &str) -> Result<(), CryptErr> {
+        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
+        files::write_bytes(
+            &public_key_file,
+            pem.as_bytes(),
+            WriteOptions::OVERWRITE_NONATOMIC,
+        )
+        .await
+        .unwrap();
+        rsa::read_public_key(&public_key_file).await.map(|_| ())
+    }
+
+    #[tokio::test]
+    async fn unsupported_pem_label() {
+        // SPKI armor is the only accepted public-key format.
+        let pem = "-----BEGIN RSA PUBLIC KEY-----\nAAAA\n-----END RSA PUBLIC KEY-----\n";
+        let result = write_pem_and_read_public_key(pem).await.unwrap_err();
+        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+    }
+
+    #[tokio::test]
+    async fn spki_label_with_invalid_der() {
+        let pem = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n";
+        let result = write_pem_and_read_public_key(pem).await.unwrap_err();
+        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
     }
 }
 
@@ -578,9 +667,8 @@ pub mod golden {
 
 pub mod sign_rs512 {
     use super::*;
-    use openssl::hash::MessageDigest;
-    use openssl::pkey::PKey;
-    use openssl::sign::Verifier;
+    use crate::test_utils::testdata::testdata_dir;
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn success() {
@@ -600,32 +688,18 @@ pub mod sign_rs512 {
     }
 
     #[tokio::test]
-    async fn verifies_with_sha512() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
+    async fn rs512_signature_is_not_a_valid_rs256_signature() {
+        // `verify` checks RSASSA-PKCS1-v1_5 with SHA-256, so the golden RS512
+        // signature must be rejected — sentinel that sign_rs512's digest is
+        // genuinely SHA-512, not SHA-256. (The positive RS512 proof is the
+        // byte-compare against the OpenSSL-produced golden signature above.)
+        let crypt = testdata_dir().subdir(PathBuf::from("crypt"));
+        let spki = filesys::File::new(crypt.path().join("rsa2048_spki.pem"));
+        let message = std::fs::read(crypt.path().join("message.txt")).unwrap();
+        let rs512_sig = std::fs::read(crypt.path().join("message.sig.rs512")).unwrap();
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
-
-        let data = b"jwt signing input";
-        let signature = rsa::sign_rs512(&private_key_file, data).await.unwrap();
-
-        // Verify directly via openssl with SHA-512: should be valid
-        let public_key_rsa = rsa::read_public_key(&public_key_file).await.unwrap();
-        let pkey = PKey::from_rsa(public_key_rsa).unwrap();
-        let mut verifier_512 = Verifier::new(MessageDigest::sha512(), &pkey).unwrap();
-        verifier_512.update(data).unwrap();
-        assert!(verifier_512.verify(&signature).unwrap());
-
-        // Verifying with SHA-256 should fail (sentinel that the digest is
-        // genuinely SHA-512)
-        let public_key_rsa = rsa::read_public_key(&public_key_file).await.unwrap();
-        let pkey = PKey::from_rsa(public_key_rsa).unwrap();
-        let mut verifier_256 = Verifier::new(MessageDigest::sha256(), &pkey).unwrap();
-        verifier_256.update(data).unwrap();
-        assert!(!verifier_256.verify(&signature).unwrap());
+        let is_valid = rsa::verify(&spki, &message, &rs512_sig).await.unwrap();
+        assert!(!is_valid);
     }
 
     #[tokio::test]
