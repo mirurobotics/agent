@@ -35,8 +35,8 @@ Post-merge, before any release ships this change, a staging soak is a release ga
 - [x] M3: rewrite `agent/src/crypt/rsa.rs` on aws-lc-rs; rework `agent/src/crypt/errors.rs` — 428167c
 - [x] M3: migrate the two openssl-importing test files; add new-behavior tests (PKCS#8 write header, label dispatch) — 428167c
 - [x] M3: `./scripts/update-deps.sh`, `./scripts/lint.sh`, `./scripts/test.sh`, `./scripts/covgate.sh` all green; commit — 428167c (1641 passed; crypt coverage 95.95% ≥ 95.16; golden module byte-identical to M2)
-- [ ] M4: `./scripts/preflight.sh` prints "Preflight clean"; push; open draft PR
-- [ ] M4: CI green on pushed head (preflight CLEAN); final `docs(plans):` progress commit; PR may leave draft
+- [x] M4: `./scripts/preflight.sh` prints "Preflight clean"; push; open draft PR — PR #231 (https://github.com/mirurobotics/agent/pull/231)
+- [x] M4: CI green on pushed head (preflight CLEAN); final `docs(plans):` progress commit; PR may leave draft — lint/test/tools all pass on 355371c; PR intentionally left in draft for human review
 
 
 ## Surprises & Discoveries
@@ -44,6 +44,7 @@ Post-merge, before any release ships this change, a staging soak is a release ga
 - 2026-09-10: the activation commit (244579e) added this plan to `plans/active/` but left an untracked, older draft copy at `plans/backlog/20260910-crypt-aws-lc-rs.md`. Left untouched (untracked, never staged); flagged for manual cleanup.
 - 2026-09-10: the first cut of the golden tests used "openssl" in test identifiers, which trips the `grep -rn openssl agent/src agent/tests` acceptance gate (it is case-sensitive by design — crate paths are lowercase). Also, M2 was first committed without a fmt pass, so M3's lint fix-mode reflowed one golden helper line. Both fixed by rewriting the unpushed M2 commit (names → `*_golden_*`, prose → proper-noun "OpenSSL", fmt-normalized); the golden tests were re-run green against the openssl implementation at the rewritten commit, and the golden module is byte-identical between the M2 and M3 commits.
 - 2026-09-10: `./scripts/update-deps.sh` produced ~515 lines of unrelated upstream lockfile drift; restored per the PR 1 precedent. The only committed Cargo.lock change is the two new dependency edges (aws-lc-rs, pem-rfc7468) on miru-agent.
+- 2026-09-10: a platform-side tool-permission classifier outage (flapping) blocked spawning the planned fresh-context review subagent. The refine pass was executed instead as a systematic in-context review against the plan's invariant list (fingerprint SPKI DER, label dispatch, sign buffer sizing, file modes/Overwrite semantics, verify contract, error-type remnant grep, manifest hygiene, golden byte-equality) — zero findings; CI on the draft PR is the authoritative validation.
 
 
 ## Decision Log
@@ -70,7 +71,30 @@ Execution entries, 2026-09-10:
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Completed 2026-09-10 in five commits on `refactor/crypt-aws-lc-rs` (draft PR #231):
+7244de8 (M1 plan move), 769475a (M2 fixtures + golden tests, green on the openssl
+implementation), 9df9f12 (docs), 428167c (M3 migration, golden module byte-identical
+to M2), plus this final docs commit. CI (lint, test, tools) green; local preflight
+clean; 1641 tests pass; crypt region coverage 95.95% against the 95.16 gate with no
+re-baselining.
+
+What the PR proves: byte-identical RS256/RS512 signatures and SPKI fingerprints
+across the crypto swap for both PKCS#1 and PKCS#8 private keys (golden fixtures);
+new keys write PKCS#8 + SPKI with unchanged 0o600/0o640 modes; `grep -rn openssl
+agent/src agent/tests` is empty while `cargo tree -i openssl` still resolves on
+Linux (native-tls chain for rumqttc/rumqttd intact).
+
+Retrospective notes: (1) name test identifiers for the *fixture provenance*
+("golden"), not the tool that made them — an "openssl"-bearing identifier tripped
+the code-free grep gate and forced a pre-push rewrite of M2; (2) run the fmt pass
+before committing a test-first milestone, or the migration commit picks up
+formatting churn inside frozen tests; (3) the M2→M3 golden-module byte-equality
+check (`git show <rev>:file | sed -n '/^pub mod golden/,/^}/p'` diff) is a cheap,
+strong parity attestation worth repeating in future format-migration PRs.
+
+REMINDER — release gate outside this PR (Validation #5): staging soak (fresh
+provision + token refresh on a device with a pre-migration PKCS#1 key) before any
+release ships this change. Merging the PR does not clear it.
 
 
 ## Context and Orientation
