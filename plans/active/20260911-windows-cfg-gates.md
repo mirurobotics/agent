@@ -24,8 +24,9 @@ unconditional Unix APIs (verified inventory in the roadmap plan and the
 2. `privilege/` — `nix` geteuid/getegid + passwd lookup (the `nix` dep is
    already unix-only, so the module cannot compile on Windows).
 3. `filesys/files.rs` — `std::os::unix::fs::OpenOptionsExt` `.mode()` calls.
-4. `server/serve.rs` — `tokio::net::UnixListener`, systemd `LISTEN_FDS`
-   fd-3 adoption (`FromRawFd`).
+4. `server/unix.rs` — `tokio::net::UnixListener`, systemd `LISTEN_FDS`
+   fd-3 adoption (`FromRawFd`). `routes.rs` (`Options` + `routes()`) stays
+   portable.
 
 Windows counterparts in this PR are deliberately minimal (full service
 lifecycle is PR 5, TCP transport is PR 11): ctrl-c shutdown, a warn-only
@@ -38,7 +39,7 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
 - [x] `main.rs`: cfg-split `await_shutdown_signal` (unix: SIGTERM/SIGINT/ctrl-c; windows: ctrl-c)
 - [x] `privilege/`: unix impl + tests under `cfg(unix)`; windows warn-only `verify_effective_user` stub; `Syscall` error variant unix-gated (enum stays inhabited)
 - [x] `filesys/files.rs`: gate `OpenOptionsExt` import + `.mode()` application (windows ignores `WriteOptions.mode`); delete unused `create_symlink`
-- [x] `server/serve.rs`: gate unix imports + `serve`/listener fns; `Options`/`routes` stay portable
+- [x] `server/`: split portable `routes.rs` (`Options` + `routes()`) from unix-only `unix.rs` (socket + LISTEN_FDS)
 - [x] `app/run.rs`: gate `serve` import, `init_socket_server`, `with_socket_server_handle`; windows branch warns and skips when `enable_socket_server` is set
 - [x] `agent/tests/mod.rs`: `#[cfg(unix)]` on `privilege` test module
 - [x] Windows compile validated by the CI windows-check job (local cross-check infeasible; see Surprises)
@@ -81,6 +82,10 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
   instead of keeping a unix-only wrapper. No production callers; the helper
   existed only for its own tests. Retention ELOOP fixtures keep using
   `std::os::unix::fs::symlink` directly.
+- 2026-09-11: split `server/serve.rs` into `routes.rs` (portable router +
+  `Options`) and `unix.rs` (UnixListener + systemd fd adoption). The file was
+  two responsibilities; per-item `#[cfg(unix)]` imports were the smell. TCP
+  transport (PR 11) adds a sibling module rather than more cfg in the router.
 - 2026-09-11 (gate reduction, per Ben's preference to avoid cfg where an
   abstraction can absorb the difference): removed the inline `cfg`s from the
   two `files.rs` write paths by extracting `mode_open_options`/`apply_mode`
@@ -94,7 +99,7 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
   - `privilege/`: euid/gid-vs-passwd verification has no Windows analog (SID /
     service-account model, PR 5). `whoami`-class crates return a name, not a
     verification.
-  - `server/serve.rs` UDS + systemd fd: `interprocess` could bridge
+  - `server/unix.rs` UDS + systemd fd: `interprocess` could bridge
     UDS↔named-pipe, but the roadmap rejected named pipes for localhost TCP
     (PR 11), so there is no Windows implementation yet by design.
 
@@ -106,7 +111,7 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
 
 Key call paths: `main.rs:37` calls `privilege::verify_effective_user("miru")`
 unconditionally (stays portable via the stub). `app/run.rs:139` starts the
-socket server only when `options.enable_socket_server`. `serve.rs`'s
+socket server only when `options.enable_socket_server`. `routes.rs`'s
 `Options { socket_file }` and `routes()` are referenced by tests and stay
 unconditional. `WriteOptions.mode` is set by `crypt/rsa.rs` (0o600/0o640
 key files) and honored in `filesys/files.rs` atomic + direct writers.

@@ -14,7 +14,7 @@ use crate::authn::{self, TokenManagerExt};
 use crate::data_uploads::scan;
 use crate::http;
 #[cfg(unix)]
-use crate::server::serve::serve;
+use crate::server::unix::serve;
 use crate::server::{self, errors::*};
 use crate::trace;
 use crate::workers::{

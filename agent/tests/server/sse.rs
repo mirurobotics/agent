@@ -9,7 +9,7 @@ use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
 use miru_agent::filesys::dirs;
-use miru_agent::server::{serve, State};
+use miru_agent::server::{routes, State};
 use miru_agent::sync::Syncer;
 
 // external crates
@@ -60,7 +60,7 @@ impl Fixture {
             shutdown_tx.clone(),
         ));
 
-        let app = serve::routes(state.clone());
+        let app = routes::routes(state.clone());
 
         Self {
             state,
