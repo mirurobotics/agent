@@ -1,68 +1,62 @@
-# Windows packaging (scaffolding)
+# Windows MSI packaging
 
-Windows installer + provisioning scaffolding for the Miru Agent, part of
-Milestone M3 of the Windows support effort
-(`plans/active/20260910-windows-support.md`).
+This directory contains the pinned WiX project for a validated x64 Miru Agent
+MSI. Native Windows compile CI was established in PR #234; PR #236 adds the
+package contract and the safe Windows PowerShell install and provisioning tools.
 
-**Status: authored but NOT built or validated.** These artifacts describe how the
-agent should install and provision on Windows; nothing here is exercised by CI
-yet. Do not assume the MSI builds or the ACLs/service config behave as written
-until the deferred build lane exists and a real build+install is tested on a
-Windows host.
+The current executable is console-capable but is not a Windows Service Control
+Manager executable. Accordingly, this MSI does not create, start, stop, or
+remove a `MiruAgent` service. Service lifecycle, account selection, and recovery
+configuration remain separate roadmap work.
 
-## Contents
+## Package behavior
 
-- `miru-agent.wxs` — WiX v4/v5 source for the MSI: installs `miru-agent.exe` to
-  `Program Files\Miru\Agent`, registers the `MiruAgent` Windows service
-  (auto-start, restart-on-failure), and creates `%ProgramData%\Miru` (+ `logs`)
-  with SYSTEM/Administrators-only ACLs. Upgrade/uninstall via `MajorUpgrade` +
-  `ServiceControl`.
-- `../../scripts/install/install.ps1` — download + checksum-verify + `msiexec`
-  install (parity with `install.sh`).
-- `../../scripts/install/provision.ps1` — run `miru-agent.exe provision` with
-  `MIRU_PROVISIONING_TOKEN` (parity with the modern Linux provisioning flow);
-  `-Check` mirrors `provision --check`'s exit-code contract.
+The MSI:
 
-## Parity mapping (Linux → Windows)
+- installs `miru-agent.exe` under 64-bit `Program Files\Miru\Agent`;
+- uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
+- rejects downgrades and schedules major upgrades transactionally so a failed
+  replacement can restore the previously installed package;
+- protects `%ProgramData%\Miru` and its authored `logs` child with a non-inherited,
+  inheritable DACL granting full control only to Local System and built-in
+  Administrators; and
+- leaves populated customer state under `%ProgramData%\Miru` in place during
+  maintenance, upgrades, rollback, and ordinary uninstall.
 
-| Debian/systemd | Windows/MSI |
-|---|---|
-| `miru:miru` user/group, service runs as `miru` | service runs as `LocalSystem` (first cut) |
-| `/var/lib/miru`, `/srv/miru` | `%ProgramData%\Miru` (see `agent/src/platform/mod.rs`) |
-| `/var/log/miru` | `%ProgramData%\Miru\logs` |
-| `postinst`: create dirs, `chown`, enable+start | MSI `CreateFolder` + `PermissionEx` + `ServiceControl Start=install` |
-| `miru.service` `Restart=` | `util:ServiceConfig` failure actions (restart, 5s, reset daily) |
-| `postrm`: stop/disable/remove | `ServiceControl Stop=both Remove=uninstall` |
+The UpgradeCode is part of the product's permanent identity and must never be
+changed after publication. Each package version receives a different ProductCode.
 
-## Decisions and open items
+## Build
 
-- **Service account: `LocalSystem` (first cut).** Simplest working scaffold;
-  SYSTEM already has full control of the data dir. Hardening follow-up: switch to
-  a least-privilege virtual service account (`NT SERVICE\MiruAgent`) and grant it
-  `modify` on `%ProgramData%\Miru` explicitly. Deferred so the first build is
-  minimal.
-- **`UpgradeCode` GUID is a placeholder.** Generate ONE real GUID, commit it, and
-  never change it — it is the upgrade identity. Component GUIDs are `*`.
-- **No `Miru Clients` local group.** That group exists only for the Phase 2 local
-  Device API (localhost TCP + cookie-file token) and is out of scope here.
-
-## Deferred (gated on the Windows CI lane)
-
-Not done here, intentionally — all blocked on the native-Windows build decision.
-A scratch `cargo check --target x86_64-pc-windows-msvc` on Linux fails because
-`aws-lc-sys` cannot cross-compile its bundled C there, so the Windows build (and
-therefore MSI build + signing) needs a native Windows runner. That runner
-question is being settled in the cfg-gate/CI PR (#234).
-
-- Building `miru-agent.exe` for `x86_64-pc-windows-msvc` in CI.
-- `wix build` invocation producing the MSI as a release asset (+ checksums).
-- Wiring both into `.goreleaser.yaml` (Pro `prebuilt` builder) / the release
-  workflow.
-- Authenticode signing (binary + MSI), timestamped.
-
-## Building locally (once a Windows binary exists)
+Build the real Windows executable first, then build the project with explicit
+inputs:
 
 ```powershell
-# Requires the WiX toolset: dotnet tool install --global wix
-wix build build\windows\miru-agent.wxs -d Version=0.10.3 -d BinDir=<dir-with-miru-agent.exe> -o miru-agent.msi
+cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked
+dotnet build build\windows\miru-agent.wixproj `
+    -p:Version=0.10.3 `
+    -p:BinDir=target\x86_64-pc-windows-msvc\debug `
+    -p:Configuration=Release
 ```
+
+`Version` is deliberately stricter than general SemVer. It must contain exactly
+three numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH`
+from 0 through 65535. Leading `v`, prerelease/build labels, and fourth fields are
+not accepted at the MSI build boundary. `BinDir` must contain
+`miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 5.0.2
+project; package validation is enabled and warnings fail the build.
+
+## PowerShell tools
+
+- `scripts/install/install.ps1` checks elevation and x64 execution before side
+  effects, verifies an exact SHA-256 record for downloads, rejects MSI metadata
+  outside the package contract before invoking `msiexec`, and reports exit 3010
+  distinctly when Windows requires a restart.
+- `scripts/install/provision.ps1` accepts its secret only through the process
+  environment variable `MIRU_PROVISIONING_TOKEN`, invokes the installed
+  executable directly, restores the prior environment exactly, and preserves
+  the `provision --check` exit contract.
+
+Published checksums detect accidental corruption but do not authenticate the
+publisher. Authenticode signing of the executable and MSI remains deferred,
+along with the GoReleaser/PDB release lane and artifact publication.
