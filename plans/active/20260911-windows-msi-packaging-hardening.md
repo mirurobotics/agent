@@ -51,8 +51,8 @@ After that checklist is complete and committed, post-closure push, CLEAN verific
 - Decision: Refined the authored plan to make package and boundary validation, PowerShell parsing and TLS restoration, ACL reapplication, the rollback fixture, branch review, and closure-head verification deterministic and directly executable.
   Rationale: The prior draft omitted valid MSI boundary builds and crossed TLS cases, under-specified maintenance/upgrade ACL repair, contained an unsupported rollback action and shared parser error-array bug, and allowed plan mutations after closure or readiness checks against a superseded head.
   Date/Author: 2026-09-11, Codex.
-- Decision: Keep this plan in backlog as a restartable milestone checkpoint, then make the plan-only evidence closure commit the final repository mutation and verify that closure head externally.
-  Rationale: The plan records smoke evidence and the first-CLEAN implementation SHA; the verified PR body and final task result are authoritative for `Preflight: CLEAN on <immutable closure SHA>`, so no later plan-only commit records post-closure CLEAN.
+- Decision: This plan was activated at implementation start and remains active until the final evidence closure, when it moves to completed as part of the plan-only evidence closure commit that is the final repository mutation.
+  Rationale: The active plan records milestone checkpoints, smoke evidence, and the first-CLEAN implementation SHA; the verified PR body and final task result are authoritative for `Preflight: CLEAN on <immutable closure SHA>`, so no later plan-only commit records post-closure CLEAN.
   Date/Author: 2026-09-11, Codex.
 
 ## Outcomes & Retrospective
@@ -127,7 +127,7 @@ Rewrite `build/windows/README.md` from “scaffolding” to the buildable and va
 
 Update `plans/active/20260910-windows-support.md` to record that PR #234's native Windows compile gate has merged and to describe PR #236 accurately as an x64 package plus safe PowerShell tooling, without service registration. Preserve later roadmap ownership for real service lifecycle/recovery/account handling, release build/publication, and signing. Update PR #236's body with the same scope and validation evidence after the branch is pushed.
 
-Run all repository checks, inspect `Cargo.lock` and the full diff, and push the exact head only after `git status --short` is empty. Invoke the repository's `$preflight` workflow against PR #236. If preflight finds anything, fix it, commit the fix with a focused Conventional Commit, require a clean working tree before pushing the new head, and rerun preflight. After final smoke evidence and a first CLEAN result exist on the implementation SHA, update this backlog plan with that exact SHA and evidence, then make and push a focused plan-only closure commit as the final repository mutation. Rerun preflight on that immutable closure head; record its CLEAN result in the verified PR body and final task result, never in a further plan-only commit. Do not perform final SHA comparisons, claim CLEAN in the PR body, remove draft status, or report implementation complete until preflight returns **CLEAN** and GitHub CI is green on the exact closure head.
+Run all repository checks, inspect `Cargo.lock` and the full diff, and push the exact head only after `git status --short` is empty. Invoke the repository's `$preflight` workflow against PR #236. If preflight finds anything, fix it, commit the fix with a focused Conventional Commit, require a clean working tree before pushing the new head, and rerun preflight. After final smoke evidence and a first CLEAN result exist on the implementation SHA, update this active plan with that exact SHA and evidence, then move it to `plans/completed/` and make and push a focused plan-only closure commit as the final repository mutation. Rerun preflight on that immutable closure head; record its CLEAN result in the verified PR body and final task result, never in a further plan-only commit. Do not perform final SHA comparisons, claim CLEAN in the PR body, remove draft status, or report implementation complete until preflight returns **CLEAN** and GitHub CI is green on the exact closure head.
 
 ## Concrete Steps
 
@@ -157,8 +157,8 @@ Before reviewing or committing Milestone 1, update this plan's Progress, Surpris
 
     cd /home/ben/miru/workbench5/repos/agent
     git diff --check
-    git diff -- build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
-    git add build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git diff -- build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests plans/active/20260911-windows-msi-packaging-hardening.md
+    git add build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests plans/active/20260911-windows-msi-packaging-hardening.md
     git commit -m "feat(windows): harden MSI package contract"
 
 For Milestone 2, parse both scripts with Windows PowerShell 5.1 and run the dependency-free focused harness. A secondary `pwsh` parse is useful when available, but it does not replace 5.1. From an x64 Windows PowerShell 5.1 session in `C:\src\agent`, run:
@@ -173,8 +173,8 @@ Before reviewing or committing Milestone 2, update this plan's Progress, Surpris
 
     cd /home/ben/miru/workbench5/repos/agent
     git diff --check
-    git diff -- scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
-    git add scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git diff -- scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/active/20260911-windows-msi-packaging-hardening.md
+    git add scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/active/20260911-windows-msi-packaging-hardening.md
     git commit -m "feat(windows): harden install and provision scripts"
 
 For Milestone 3, run the destructive integration script only on a disposable test machine from an elevated x64 Windows PowerShell session in `C:\src\agent`, and acknowledge that environment with `-ConfirmDisposableTestMachine`. CI must invoke the same entry point after building the real executable and MSIs. Manual production smoke continues to require its distinct `-ConfirmDisposableCleanVm` acknowledgement.
@@ -188,8 +188,8 @@ Before reviewing or committing Milestone 3, update this plan's Progress, Surpris
 
     cd /home/ben/miru/workbench5/repos/agent
     git diff --check
-    git diff -- .github/workflows/ci.yml build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
-    git add .github/workflows/ci.yml build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git diff -- .github/workflows/ci.yml build/windows/tests plans/active/20260911-windows-msi-packaging-hardening.md
+    git add .github/workflows/ci.yml build/windows/tests plans/active/20260911-windows-msi-packaging-hardening.md
     git commit -m "ci(windows): validate MSI install and upgrades"
 
 For Milestone 4, update docs and the umbrella plan, run repository-wide validation, then update this plan's Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective as applicable with the milestone's exact test evidence and decisions before reviewing or committing. Stage and commit the documentation plus this plan checkpoint before reviewing the complete committed branch.
@@ -205,8 +205,8 @@ For Milestone 4, update docs and the umbrella plan, run repository-wide validati
 Expected: tests, coverage gates, dependency refresh, lint, and the whitespace check all exit 0. `Cargo.lock` has no unexplained drift; restore no file destructively—if it changes, determine why and include only required changes.
 
     cd /home/ben/miru/workbench5/repos/agent
-    git diff -- build/windows/README.md plans/active/20260910-windows-support.md plans/backlog/20260911-windows-msi-packaging-hardening.md
-    git add build/windows/README.md plans/active/20260910-windows-support.md plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git diff -- build/windows/README.md plans/active/20260910-windows-support.md plans/active/20260911-windows-msi-packaging-hardening.md
+    git add build/windows/README.md plans/active/20260910-windows-support.md plans/active/20260911-windows-msi-packaging-hardening.md
     git commit -m "docs(windows): document validated package scope"
     git status --short
     git diff --check origin/main...HEAD
@@ -240,17 +240,18 @@ After the smoke pass, from `/home/ben/miru/workbench5/repos/agent`, update the P
 
 Keep the PR draft. Then, from the Codex task rooted at `/home/ben/miru/workbench5/repos/agent`, invoke the skill with the exact request `$preflight PR #236 on feat/windows-msi-packaging; do not stop until the exact pushed head is CLEAN.` Preflight must publish any fixes, watch GitHub Actions for the pushed head, and return `CLEAN`. If it does not, diagnose the reported CI job, make and commit a focused fix, require `git status --short` to print nothing immediately before pushing, rerun the manual smoke when the fix can affect MSI or script behavior, update the body SHA/evidence, and rerun `$preflight` against the new SHA.
 
-After the smoke evidence is final and preflight first returns CLEAN, record the exact smoke-tested and first-CLEAN implementation SHA and concise evidence in this plan's Progress and Outcomes & Retrospective. Update Surprises & Discoveries and Decision Log too if that implementation evidence produced a discovery or decision. Then review and commit only this plan; this closure commit must not include implementation or other documentation changes and must be the final repository mutation.
+After the smoke evidence is final and preflight first returns CLEAN, capture the implementation SHA before editing. Record that exact smoke-tested and first-CLEAN implementation SHA and concise evidence in this active plan's Progress and Outcomes & Retrospective. Update Surprises & Discoveries and Decision Log too if that implementation evidence produced a discovery or decision. Review the active-plan evidence edit, then move the plan to `plans/completed/`, review the staged rename and evidence diff across both paths, and commit it. The rename and evidence update together are the plan-only final repository mutation; this closure commit must not include implementation or other documentation changes.
 
     cd /home/ben/miru/workbench5/repos/agent
     TESTED_SHA=$(git rev-parse HEAD)
-    git diff -- plans/backlog/20260911-windows-msi-packaging-hardening.md
-    git add plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git diff -- plans/active/20260911-windows-msi-packaging-hardening.md
+    git mv plans/active/20260911-windows-msi-packaging-hardening.md plans/completed/20260911-windows-msi-packaging-hardening.md
+    git diff --staged -- plans/active/20260911-windows-msi-packaging-hardening.md plans/completed/20260911-windows-msi-packaging-hardening.md
     git commit -m "docs(windows): record MSI hardening validation"
     git status --short
     git push origin feat/windows-msi-packaging
 
-Expected: Progress and Outcomes & Retrospective name the full value captured in `TESTED_SHA`, distinguish manual smoke evidence from first-CLEAN implementation preflight evidence, and state that the subsequent closure commit changes only this plan. `git status --short` prints nothing immediately before the push. The plan remains at `plans/backlog/20260911-windows-msi-packaging-hardening.md`.
+Expected: Progress and Outcomes & Retrospective name the full value captured in `TESTED_SHA`, distinguish manual smoke evidence from first-CLEAN implementation preflight evidence, and state that the subsequent closure commit changes only this plan. The final commit changes only this plan and leaves it at `plans/completed/20260911-windows-msi-packaging-hardening.md`. `git status --short` prints nothing immediately before the push.
 
 The closure commit supersedes the implementation SHA for which preflight first returned CLEAN. Keep the PR draft and rerun `$preflight PR #236 on feat/windows-msi-packaging; do not stop until the exact pushed head is CLEAN.` Do not reuse the prior CLEAN result. Preflight must validate the immutable closure head without changing repository contents. Explicitly do not make a further plan-only commit merely to record post-closure CLEAN; the verified PR body and final task result are authoritative for `Preflight: CLEAN on <immutable closure SHA>`. If closure-head preflight instead finds a defect that requires a repository change, keep the PR draft, make the focused fix, rerun affected smoke and preflight validation on the new implementation head, and repeat the evidence-closure process so the eventual plan-only closure commit is again the final repository mutation.
 
