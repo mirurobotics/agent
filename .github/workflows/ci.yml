@@ -53,7 +53,9 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Install NASM (aws-lc-sys)
-        uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        run: |
+          choco install nasm -y
+          echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
       - name: Check Windows Target
         run: cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked
