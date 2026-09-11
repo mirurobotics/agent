@@ -34,18 +34,11 @@ jobs:
       - name: Run Linter
         run: LINT_FIX=0 ./scripts/lint.sh
 
-  # Run the agent test suite natively on Windows. A native runner is required
-  # because aws-lc-sys cannot cross-compile from Linux (its build script drives
-  # the host C compiler with pthread-based sources). `cargo test` type-checks
-  # lib, bin and tests for the host MSVC target, so no separate check step is
-  # needed. Coverage gates stay Linux-only. The job id is kept as
-  # `windows-check` for branch protection.
+  # Build and exercise the Windows package natively. aws-lc-sys cannot
+  # cross-compile from Linux because its build script drives the host compiler.
   windows-check:
     runs-on: windows-latest
-    timeout-minutes: 20
-    env:
-      # Full PDBs dominate MSVC link time; test diagnostics do not need them.
-      CARGO_PROFILE_DEV_DEBUG: 0
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -65,10 +58,35 @@ jobs:
           choco install nasm -y
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
-      - name: Run Windows Tests
-        env:
-          RUST_LOG: "off"
-        run: cargo test --package miru-agent --locked
+      - name: Build Windows Target
+        run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
+
+      - name: Restore pinned WiX SDK
+        run: dotnet restore build/windows/miru-agent.wixproj
+
+      - name: Parse Windows PowerShell scripts
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\parse-scripts.ps1
+
+      - name: Run focused Windows PowerShell tests
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\script-tests.ps1
+
+      - name: Validate Windows packages
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
+
+      - name: Run elevated Windows installer integration tests
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release
+
+      - name: Upload Windows installer failure logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-installer-failure-logs
+          path: build/windows/artifacts/package-tests/logs
+          if-no-files-found: ignore
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
