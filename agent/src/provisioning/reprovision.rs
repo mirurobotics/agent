@@ -25,7 +25,13 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
         // will become the device's new authentication if successful
         let private_key_file = temp_dir.file("private.key");
         let public_key_file = temp_dir.file("public.key");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await?;
 
         let device = reprovision_with_backend(http_client, &public_key_file, token).await?;
         disk::setup::bootstrap(

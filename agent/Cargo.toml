@@ -15,6 +15,7 @@ new_without_default = "allow"
 [dependencies]
 atomicwrites = { workspace = true }
 aws-sdk-s3 = { workspace = true }
+aws-lc-rs = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
@@ -26,7 +27,7 @@ google-cloud-gax = { workspace = true }
 http = { workspace = true }
 backend-api = { workspace = true }
 device-api = { workspace = true }
-openssl = { workspace = true }
+pem-rfc7468 = { workspace = true }
 reqwest = { workspace = true }
 rumqttc = { workspace = true }
 secrecy = { workspace = true }
@@ -47,6 +48,14 @@ tower-http = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
+# No Rust code imports openssl. It stays unix-only because its "vendored"
+# feature (see [workspace.dependencies]) statically links OpenSSL into
+# native-tls, which rumqttc (MQTT TLS) and rumqttd (dev dep) use on Linux.
+# cargo machete cannot see that, hence the ignored entry below.
+openssl = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["openssl"]
 
 [dev-dependencies]
 aws-sdk-s3 = { workspace = true }

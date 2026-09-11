@@ -11,9 +11,6 @@ use miru_agent::http::HTTPErr;
 
 // external crates
 use chrono::{Duration, Utc};
-use openssl::hash::MessageDigest;
-use openssl::pkey::PKey;
-use openssl::sign::Verifier;
 use serde::ser::Error as _;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -24,9 +21,14 @@ async fn generate_keys() -> (dirs::TempDir, filesys::File, filesys::File) {
     let dir = dirs::temp("authn_issue_test").unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
-    rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-        .await
-        .unwrap();
+    rsa::gen_key_pair(
+        rsa::KeySize::Rsa2048,
+        &private_key_file,
+        &public_key_file,
+        Overwrite::Allow,
+    )
+    .await
+    .unwrap();
     (dir, private_key_file, public_key_file)
 }
 
@@ -125,9 +127,14 @@ mod issue_token {
         let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         files::delete(&public_key_file).await.unwrap();
         let mock_client = MockClient::default();
 
@@ -201,19 +208,17 @@ mod mint_jwt {
         let signing_input = format!("{}.{}", parts[0], parts[1]);
         let signature = base64::decode_bytes_url_safe_no_pad(parts[2]).unwrap();
 
-        let public_key_rsa = rsa::read_public_key(&public_key_file).await.unwrap();
-        let pkey = PKey::from_rsa(public_key_rsa).unwrap();
-        let mut verifier = Verifier::new(MessageDigest::sha512(), &pkey).unwrap();
-        verifier.update(signing_input.as_bytes()).unwrap();
-        assert!(verifier.verify(&signature).unwrap());
+        assert!(
+            rsa::verify_rs512(&public_key_file, signing_input.as_bytes(), &signature,)
+                .await
+                .unwrap()
+        );
 
-        let mut tampered = signing_input.clone().into_bytes();
+        let mut tampered = signing_input.into_bytes();
         tampered[0] ^= 0x01;
-        let public_key_rsa = rsa::read_public_key(&public_key_file).await.unwrap();
-        let pkey = PKey::from_rsa(public_key_rsa).unwrap();
-        let mut verifier = Verifier::new(MessageDigest::sha512(), &pkey).unwrap();
-        verifier.update(&tampered).unwrap();
-        assert!(!verifier.verify(&signature).unwrap());
+        assert!(!rsa::verify_rs512(&public_key_file, &tampered, &signature)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -239,9 +244,14 @@ mod mint_jwt {
         let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         files::delete(&public_key_file).await.unwrap();
 
         let result = mint_jwt(&private_key_file, &public_key_file).await;
@@ -254,9 +264,14 @@ mod mint_jwt {
         let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         files::delete(&private_key_file).await.unwrap();
 
         let result = mint_jwt(&private_key_file, &public_key_file).await;

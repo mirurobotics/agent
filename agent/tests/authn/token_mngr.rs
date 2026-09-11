@@ -47,9 +47,14 @@ async fn setup_with_rsa(mock_client: MockClient) -> (dirs::TempDir, TokenManager
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
-    rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
-        .await
-        .unwrap();
+    rsa::gen_key_pair(
+        rsa::KeySize::Rsa4096,
+        &private_key_file,
+        &public_key_file,
+        Overwrite::Allow,
+    )
+    .await
+    .unwrap();
     let (token_mngr, worker_handle) = TokenManager::spawn(
         32,
         Arc::new(mock_client),

@@ -49,7 +49,13 @@ pub async fn provision<HTTPClientT: http::ClientI>(
         // the device's new authentication if the activation is successful
         let private_key_file = temp_dir.file("private.key");
         let public_key_file = temp_dir.file("public.key");
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await?;
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await?;
 
         let device =
             provision_with_backend(http_client, &public_key_file, token, device_name).await?;
