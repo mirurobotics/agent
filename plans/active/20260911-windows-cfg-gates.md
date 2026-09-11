@@ -35,21 +35,29 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
 
 ## Progress
 
-- [ ] Activate plan (`docs(plans):` commit on the branch)
-- [ ] `main.rs`: cfg-split `await_shutdown_signal` (unix: SIGTERM/SIGINT/ctrl-c; windows: ctrl-c)
-- [ ] `privilege/`: unix impl + tests under `cfg(unix)`; windows warn-only `verify_effective_user` stub; `Syscall` error variant unix-gated (enum stays inhabited)
-- [ ] `filesys/files.rs`: gate `OpenOptionsExt` import + `.mode()` application (windows ignores `WriteOptions.mode`); gate `create_symlink` unix-only
-- [ ] `server/serve.rs`: gate unix imports + `serve`/listener fns; `Options`/`routes` stay portable
-- [ ] `app/run.rs`: gate `serve` import, `init_socket_server`, `with_socket_server_handle`; windows branch warns and skips when `enable_socket_server` is set
-- [ ] `agent/tests/mod.rs`: `#[cfg(unix)]` on `privilege` test module
-- [ ] Local `cargo check --target x86_64-pc-windows-msvc -p miru-agent` green
-- [ ] CI: windows check job/step in the Lint workflow
-- [ ] `./scripts/test.sh` + `./scripts/lint.sh` green on Linux (zero behavior change)
-- [ ] Push; CI green; PR opened
+- [x] Activate plan (`docs(plans):` commit on the branch)
+- [x] `main.rs`: cfg-split `await_shutdown_signal` (unix: SIGTERM/SIGINT/ctrl-c; windows: ctrl-c)
+- [x] `privilege/`: unix impl + tests under `cfg(unix)`; windows warn-only `verify_effective_user` stub; `Syscall` error variant unix-gated (enum stays inhabited)
+- [x] `filesys/files.rs`: gate `OpenOptionsExt` import + `.mode()` application (windows ignores `WriteOptions.mode`); gate `create_symlink` unix-only
+- [x] `server/serve.rs`: gate unix imports + `serve`/listener fns; `Options`/`routes` stay portable
+- [x] `app/run.rs`: gate `serve` import, `init_socket_server`, `with_socket_server_handle`; windows branch warns and skips when `enable_socket_server` is set
+- [x] `agent/tests/mod.rs`: `#[cfg(unix)]` on `privilege` test module
+- [x] Windows compile validated by the CI windows-check job (local cross-check infeasible; see Surprises)
+- [x] CI: windows check job/step in the Lint workflow
+- [x] `./scripts/test.sh` + `./scripts/lint.sh` green on Linux (zero behavior change)
+- [x] Push; CI green; PR opened
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-09-11: aws-lc-sys cannot cross-compile x86_64-pc-windows-msvc from
+  Linux — its build script drives the host `cc` with pthread-based sources.
+  The roadmap's "cross-check on Linux runners" assumption is wrong; the CI
+  check runs natively on `windows-latest` (roadmap updated in this PR).
+- 2026-09-11: first CI attempt died with `startup_failure`: the org's
+  Actions allowlist rejected the third-party `ilammy/setup-nasm` action.
+  NASM is installed via `choco` in a plain run step instead.
+- 2026-09-11: the windows-check job passed on its first real run — the
+  cfg-gating surface matched the audit exactly, no hidden Unix-isms.
 
 ## Decision Log
 
