@@ -27,6 +27,7 @@ $script:MsiBaseName = "miru-agent"
 $script:ExpectedProductName = "Miru Agent"
 $script:ExpectedManufacturer = "Miru Robotics"
 $script:ExpectedUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
+$script:RequestTimeoutSeconds = 300
 
 function Write-InstallLog {
     param([string]$Message)
@@ -102,9 +103,9 @@ function Invoke-InstallWebRequest {
 
     return Invoke-WithTls12 {
         if ($OutFile) {
-            return Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+            return Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec $script:RequestTimeoutSeconds
         }
-        return Invoke-WebRequest -Uri $Uri -UseBasicParsing
+        return Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec $script:RequestTimeoutSeconds
     }
 }
 
@@ -238,6 +239,9 @@ function Assert-MiruMsiMetadata {
     if (-not [string]::Equals($Metadata.UpgradeCode, $script:ExpectedUpgradeCode, [StringComparison]::OrdinalIgnoreCase)) {
         throw "MSI UpgradeCode does not identify the Miru Agent."
     }
+    if ($Metadata.ProductCode -notmatch '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$') {
+        throw "MSI ProductCode is not a valid product GUID."
+    }
     if ($Metadata.Template -notmatch '(^|;)x64($|;)') {
         throw "MSI platform is not x64."
     }
@@ -249,10 +253,27 @@ function Assert-MiruMsiMetadata {
     return $packageVersion
 }
 
+function Test-MsiProductInstalled {
+    param([Parameter(Mandatory = $true)][string]$ProductCode)
+
+    $installer = $null
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $state = $installer.GetType().InvokeMember("ProductState", "GetProperty", $null, $installer, @($ProductCode))
+        return [int]$state -eq 5
+    }
+    finally {
+        if ($null -ne $installer) {
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($installer) | Out-Null
+        }
+    }
+}
+
 function Invoke-MsiInstall {
     param(
         [Parameter(Mandatory = $true)][string]$MsiPath,
-        [Parameter(Mandatory = $true)][string]$LogPath
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [Parameter(Mandatory = $true)][string]$ProductCode
     )
 
     $arguments = @(
@@ -263,6 +284,9 @@ function Invoke-MsiInstall {
         "/l*v",
         ('"{0}"' -f $LogPath)
     )
+    if (Test-MsiProductInstalled -ProductCode $ProductCode) {
+        $arguments += @("REINSTALL=ALL", "REINSTALLMODE=vomus")
+    }
     $process = Start-Process -FilePath "msiexec.exe" -Wait -PassThru -ArgumentList $arguments
     return $process.ExitCode
 }
@@ -319,7 +343,7 @@ function Invoke-InstallMain {
         Write-InstallLog "Installing Miru Agent $packageVersion"
 
         $logPath = Join-Path ([IO.Path]::GetTempPath()) "miru-agent-install-$([Guid]::NewGuid().ToString('N')).log"
-        $exitCode = Invoke-MsiInstall -MsiPath $msiPath -LogPath $logPath
+        $exitCode = Invoke-MsiInstall -MsiPath $msiPath -LogPath $logPath -ProductCode $metadata.ProductCode
         if ($exitCode -eq 0) {
             Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
             Write-InstallLog "Miru Agent installed. Provision it with provision.ps1."

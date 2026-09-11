@@ -28,15 +28,20 @@ changed after publication. Each package version receives a different ProductCode
 
 ## Build
 
-Build the real Windows executable first, then build the project with explicit
-inputs:
+Run these commands from the repository root on Windows 10 or 11 x64. The build
+requires Git, the Rust MSVC toolchain with the `x86_64-pc-windows-msvc` target,
+Visual Studio Build Tools with the C++ workload, NASM on `PATH`, and the .NET
+SDK. Installation and integration testing additionally require an elevated
+64-bit Windows PowerShell 5.1 session.
+
+Restore the pinned WiX SDK, build the real Windows executable, and exercise the
+package contract with explicit inputs:
 
 ```powershell
+Set-Location C:\src\agent
 cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked
-dotnet build build\windows\miru-agent.wixproj `
-    -p:Version=0.10.3 `
-    -p:BinDir=target\x86_64-pc-windows-msvc\debug `
-    -p:Configuration=Release
+dotnet restore build\windows\miru-agent.wixproj
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\debug -ArtifactsDirectory build\windows\artifacts\package-tests
 ```
 
 `Version` is deliberately stricter than general SemVer. It must contain exactly
@@ -46,17 +51,105 @@ not accepted at the MSI build boundary. `BinDir` must contain
 `miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 5.0.2
 project; package validation is enabled and warnings fail the build.
 
-## PowerShell tools
+## Install and provision
 
-- `scripts/install/install.ps1` checks elevation and x64 execution before side
-  effects, verifies an exact SHA-256 record for downloads, rejects MSI metadata
-  outside the package contract before invoking `msiexec`, and reports exit 3010
-  distinctly when Windows requires a restart.
-- `scripts/install/provision.ps1` accepts its secret only through the process
-  environment variable `MIRU_PROVISIONING_TOKEN`, invokes the installed
-  executable directly, restores the prior environment exactly, and preserves
-  the `provision --check` exit contract.
+Run installation from an elevated 64-bit Windows PowerShell 5.1 session. The
+current supported workflow is to install a trusted MSI built locally, optionally
+requiring its metadata version to match:
 
-Published checksums detect accidental corruption but do not authenticate the
-publisher. Authenticode signing of the executable and MSI remains deferred,
-along with the GoReleaser/PDB release lane and artifact publication.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\install.ps1 -FromMsi C:\path\to\miru-agent-1.0.0.msi -Version v1.0.0
+```
+
+An install exit code of 0 means success. Exit code 3010 also means success, but
+Windows must be restarted to complete the installation. Any other result is a
+failure; its error names the retained verbose installer log.
+
+After Windows release artifacts and their checksum manifests are published, the
+installer can download a stable release by version:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\install.ps1 -Version v1.0.0
+```
+
+For that future download workflow, the MSI is matched to an exact SHA-256
+checksum record. Checksums detect corruption but do not authenticate the
+publisher.
+
+Provision by placing the secret only in the process environment, then invoke the
+wrapper. Do not put the token on the command line:
+
+```powershell
+$tokenName = "MIRU_PROVISIONING_TOKEN"
+$processEnvironment = [Environment]::GetEnvironmentVariables([EnvironmentVariableTarget]::Process)
+$callerHadToken = $processEnvironment.Contains($tokenName)
+$callerToken = if ($callerHadToken) { [string]$processEnvironment[$tokenName] } else { $null }
+$tokenPointer = [IntPtr]::Zero
+try {
+    $secureToken = Read-Host "Provisioning token" -AsSecureString
+    $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+    $env:MIRU_PROVISIONING_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\provision.ps1
+} finally {
+    if ($tokenPointer -ne [IntPtr]::Zero) {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
+    }
+    if ($callerHadToken) {
+        [Environment]::SetEnvironmentVariable($tokenName, $callerToken, [EnvironmentVariableTarget]::Process)
+    } else {
+        [Environment]::SetEnvironmentVariable($tokenName, $null, [EnvironmentVariableTarget]::Process)
+    }
+}
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\provision.ps1 -Check
+```
+
+The provisioning wrapper invokes the installed executable directly and restores
+the prior process environment exactly. `-Check` is read-only and returns 0 when
+provisioned, 3 when not provisioned, and 1 when the state is undetermined or an
+error occurs.
+
+## Validation
+
+Run the dependency-free parser and focused script checks under Windows
+PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\parse-scripts.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\script-tests.ps1
+```
+
+From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
+integration matrix:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release
+```
+
+The matrix covers initial install, maintenance, upgrade, downgrade rejection,
+failed-upgrade rollback, uninstall, ACL repair, state retention, provisioning
+check exit 3 on a fresh install, and the absence of a `MiruAgent` service.
+Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
+state under `%ProgramData%\Miru`. Its protected DACL permits inheritable full
+control only for Local System and built-in Administrators; non-administrators
+must not read sensitive state or create children.
+
+For the production smoke pass, start from a disposable clean Windows 10 or 11
+x64 VM snapshot with no installed Miru product. Build the production 1.0.0 and
+1.1.0 packages, then run:
+
+```powershell
+Set-Location C:\src\agent
+Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsBuildNumber
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ManualProductionSmoke -ConfirmDisposableCleanVm -TranscriptPath C:\Windows\Temp\miru-msi-smoke.txt
+Get-FileHash C:\Windows\Temp\miru-msi-smoke.txt -Algorithm SHA256
+```
+
+Record the transcript hash with the validation evidence. The smoke pass must
+record any 3010 reboot result, confirm the no-service and security expectations,
+and leave the retained ProgramData sentinel for inspection. Revert the VM
+snapshot afterward rather than deleting retained customer state.
+
+Authenticode signing of the executable and MSI remains deferred, along with the
+GoReleaser/PDB release lane, artifact publication, Windows service lifecycle,
+account and recovery handling, full live-backend provisioning, and Windows
+Server certification.
