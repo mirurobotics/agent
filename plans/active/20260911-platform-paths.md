@@ -32,17 +32,19 @@ compiled and unit-tested on Linux to de-risk that gap.
 
 ## Progress
 
-- [ ] Activate plan (`docs(plans):` commit on the branch)
-- [ ] New `platform` module: per-OS path defaults, Windows logic unconditionally compiled + Linux-tested
-- [ ] `disk::Layout`: `Default` root via `platform::data_root_base()`; `root()` appends `var/lib/miru` (unix) / `Miru` (windows)
-- [ ] `logs::Options::default`: `log_dir` via `platform::log_dir()`
-- [ ] Tests: `agent/tests/platform/mod.rs` (env override, fallback, structure); existing disk/logs tests unchanged
-- [ ] `./scripts/test.sh` (or targeted cargo test + CI delegation per cache state) and `./scripts/lint.sh`
+- [x] Activate plan (`docs(plans):` commit on the branch) (72d0378)
+- [x] New `platform` module: per-OS path defaults, Windows logic unconditionally compiled + Linux-tested (bc0a530)
+- [x] `disk::Layout`: `Default` root via `platform::data_root_base()`; `root()` appends `var/lib/miru` (unix) / `Miru` (windows) (bc0a530)
+- [x] `logs::Options::default`: `log_dir` via `platform::log_dir()` (bc0a530)
+- [x] Tests: `agent/tests/platform/mod.rs` (env override, fallback, structure); existing disk/logs tests unchanged (bc0a530)
+- [x] `./scripts/test.sh` — 1639 passed, 0 failed; `./scripts/lint.sh` clean (fix-mode reformatting folded into bc0a530)
 - [ ] Push; CI green; PR opened referencing the roadmap
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-09-11: none of substance — the change landed exactly as specified.
+  Full suite + lint ran clean locally on a cold cache (~14 min build), so no
+  CI-delegation waiver was needed this time.
 
 ## Decision Log
 
