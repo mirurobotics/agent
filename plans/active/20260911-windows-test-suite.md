@@ -47,7 +47,8 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - [x] Post-review targeted queue, filesystem, path, and deleter tests green on Linux
 - [x] Push; inspect the first Windows CI test-job failure and fix its compile errors/warnings locally
 - [ ] Re-run Windows CI and iterate until green
-- [ ] PR opened; all checks green
+- [x] PR opened
+- [ ] All checks green
 
 ## Surprises & Discoveries
 
