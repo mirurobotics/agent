@@ -221,9 +221,9 @@ pub mod gen_key_pair {
         // New private keys are PKCS#8 (the aws-lc-rs migration's write-format
         // flip; pre-migration keys are PKCS#1 and remain readable). Public keys
         // stay SPKI: the backend stores that PEM verbatim.
-        let private_pem = std::fs::read_to_string(private_key_file.path()).unwrap();
+        let private_pem = files::read_string(&private_key_file).await.unwrap();
         assert!(private_pem.starts_with("-----BEGIN PRIVATE KEY-----"));
-        let public_pem = std::fs::read_to_string(public_key_file.path()).unwrap();
+        let public_pem = files::read_string(&public_key_file).await.unwrap();
         assert!(public_pem.starts_with("-----BEGIN PUBLIC KEY-----"));
 
         // Full round trip on the freshly written pair: read → sign → verify.
@@ -602,14 +602,16 @@ pub mod golden {
         filesys::File::new(fixture_path(name))
     }
 
-    fn fixture_bytes(name: &str) -> Vec<u8> {
-        std::fs::read(fixture_path(name)).unwrap_or_else(|e| panic!("read fixture {name}: {e}"))
+    async fn fixture_bytes(name: &str) -> Vec<u8> {
+        files::read_bytes(&fixture_file(name))
+            .await
+            .unwrap_or_else(|e| panic!("read fixture {name}: {e}"))
     }
 
     #[tokio::test]
     async fn sign_rs256_matches_golden_signature_for_pkcs1_and_pkcs8() {
-        let message = fixture_bytes("message.txt");
-        let expected = fixture_bytes("message.sig.rs256");
+        let message = fixture_bytes("message.txt").await;
+        let expected = fixture_bytes("message.sig.rs256").await;
 
         let from_pkcs1 = rsa::sign_rs256(&fixture_file("rsa2048_pkcs1.pem"), &message)
             .await
@@ -625,8 +627,8 @@ pub mod golden {
 
     #[tokio::test]
     async fn sign_rs512_matches_golden_signature_for_pkcs1_and_pkcs8() {
-        let message = fixture_bytes("message.txt");
-        let expected = fixture_bytes("message.sig.rs512");
+        let message = fixture_bytes("message.txt").await;
+        let expected = fixture_bytes("message.sig.rs512").await;
 
         let from_pkcs1 = rsa::sign_rs512(&fixture_file("rsa2048_pkcs1.pem"), &message)
             .await
@@ -642,8 +644,8 @@ pub mod golden {
 
     #[tokio::test]
     async fn verify_accepts_golden_rs256_signature_and_rejects_tampered_message() {
-        let message = fixture_bytes("message.txt");
-        let signature = fixture_bytes("message.sig.rs256");
+        let message = fixture_bytes("message.txt").await;
+        let signature = fixture_bytes("message.sig.rs256").await;
         let spki = fixture_file("rsa2048_spki.pem");
 
         assert!(rsa::verify(&spki, &message, &signature).await.unwrap());
@@ -660,7 +662,7 @@ pub mod golden {
             .unwrap();
         let fingerprint = rsa::fingerprint(&public_key).unwrap();
 
-        let expected = String::from_utf8(fixture_bytes("fingerprint.txt")).unwrap();
+        let expected = String::from_utf8(fixture_bytes("fingerprint.txt").await).unwrap();
         assert_eq!(fingerprint, expected.trim_end());
     }
 }
@@ -694,9 +696,11 @@ pub mod sign_rs512 {
         // genuinely SHA-512, not SHA-256. (The positive RS512 proof is the
         // byte-compare against the OpenSSL-produced golden signature above.)
         let crypt = testdata_dir().subdir(PathBuf::from("crypt"));
-        let spki = filesys::File::new(crypt.path().join("rsa2048_spki.pem"));
-        let message = std::fs::read(crypt.path().join("message.txt")).unwrap();
-        let rs512_sig = std::fs::read(crypt.path().join("message.sig.rs512")).unwrap();
+        let spki = crypt.file("rsa2048_spki.pem");
+        let message = files::read_bytes(&crypt.file("message.txt")).await.unwrap();
+        let rs512_sig = files::read_bytes(&crypt.file("message.sig.rs512"))
+            .await
+            .unwrap();
 
         let is_valid = rsa::verify(&spki, &message, &rs512_sig).await.unwrap();
         assert!(!is_valid);

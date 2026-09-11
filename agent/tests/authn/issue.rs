@@ -5,7 +5,7 @@ use miru_agent::authn::errors::AuthnErr;
 use miru_agent::authn::issue::{encode_part, issue_token, mint_jwt};
 use miru_agent::authn::Token;
 use miru_agent::crypt::{base64, rsa};
-use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt};
+use miru_agent::filesys::{self, dirs, files, Overwrite};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::HTTPErr;
 
@@ -201,7 +201,7 @@ mod mint_jwt {
 
         // Verify RS512 against the device's SPKI public key, independent of the
         // crypt module's own verify (which is RS256-only).
-        let public_key_pem = std::fs::read(public_key_file.path()).unwrap();
+        let public_key_pem = files::read_bytes(&public_key_file).await.unwrap();
         let (label, spki_der) = pem_rfc7468::decode_vec(&public_key_pem).unwrap();
         assert_eq!(label, "PUBLIC KEY");
         let public_key = UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA512, &spki_der);
