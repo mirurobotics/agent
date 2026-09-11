@@ -10,10 +10,14 @@ use crate::trace;
 use aws_lc_rs::digest;
 use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use aws_lc_rs::rand::SystemRandom;
-use aws_lc_rs::rsa::{KeySize, PublicKey};
+use aws_lc_rs::rsa::PublicKey;
 use aws_lc_rs::signature::{self, KeyPair as _, RsaKeyPair, UnparsedPublicKey};
 use pem_rfc7468::LineEnding;
 use secrecy::ExposeSecret;
+
+/// Supported RSA modulus sizes for [`gen_key_pair`], re-exported so callers name
+/// sizes in the type system instead of passing raw bit counts.
+pub use aws_lc_rs::rsa::KeySize;
 
 /// PEM armor label for PKCS#1 `RSAPrivateKey` — what every device provisioned
 /// before the aws-lc-rs migration has on disk. Read-only; never written anymore.
@@ -49,22 +53,6 @@ macro_rules! source_err {
             })
         })
     };
-}
-
-/// Map a requested modulus size in bits to an aws-lc-rs `KeySize`.
-fn key_size(num_bits: u32) -> Result<KeySize, CryptErr> {
-    match num_bits {
-        2048 => Ok(KeySize::Rsa2048),
-        3072 => Ok(KeySize::Rsa3072),
-        4096 => Ok(KeySize::Rsa4096),
-        8192 => Ok(KeySize::Rsa8192),
-        _ => Err(CryptErr::GenerateRSAKeyPairErr(GenerateRSAKeyPairErr {
-            msg: format!(
-                "unsupported RSA key size: {num_bits} (supported: 2048, 3072, 4096, 8192)"
-            ),
-            trace: trace!(),
-        })),
-    }
 }
 
 /// Encode the private key as PKCS#8 PEM. The intermediate DER buffer zeroizes on
@@ -105,13 +93,11 @@ fn public_key_to_pem(key_pair: &RsaKeyPair) -> Result<String, CryptErr> {
 /// more permissive mode and no follow-up chmod is required.
 /// https://www.redhat.com/sysadmin/linux-file-permissions-explained
 pub async fn gen_key_pair(
-    num_bits: u32,
+    size: KeySize,
     private_key_file: &filesys::File,
     public_key_file: &filesys::File,
     overwrite: Overwrite,
 ) -> Result<(), CryptErr> {
-    let size = key_size(num_bits)?;
-
     // Generate the RSA key pair on a blocking thread so the 4096-bit keygen
     // (hundreds of ms of pure CPU) does not pin an async worker thread and stall
     // concurrent tasks (MQTT loop, poller, local socket server). Only the raw

@@ -22,9 +22,14 @@ async fn generate_keys() -> (dirs::TempDir, filesys::File, filesys::File) {
     let dir = dirs::temp("authn_issue_test").unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
-    rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-        .await
-        .unwrap();
+    rsa::gen_key_pair(
+        rsa::KeySize::Rsa2048,
+        &private_key_file,
+        &public_key_file,
+        Overwrite::Allow,
+    )
+    .await
+    .unwrap();
     (dir, private_key_file, public_key_file)
 }
 
@@ -123,9 +128,14 @@ mod issue_token {
         let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         files::delete(&public_key_file).await.unwrap();
         let mock_client = MockClient::default();
 
@@ -237,9 +247,14 @@ mod mint_jwt {
         let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         files::delete(&public_key_file).await.unwrap();
 
         let result = mint_jwt(&private_key_file, &public_key_file).await;
@@ -252,9 +267,14 @@ mod mint_jwt {
         let dir = dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         files::delete(&private_key_file).await.unwrap();
 
         let result = mint_jwt(&private_key_file, &public_key_file).await;

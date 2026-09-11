@@ -30,7 +30,7 @@ async fn prepare_layout(name: &str) -> (Layout, dirs::TempDir) {
     let auth_dir = layout.auth();
     dirs::create_if_absent(&auth_dir.root).await.unwrap();
     rsa::gen_key_pair(
-        2048,
+        rsa::KeySize::Rsa2048,
         &auth_dir.private_key(),
         &auth_dir.public_key(),
         Overwrite::Allow,

@@ -15,9 +15,14 @@ pub mod fingerprint {
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let public_key = rsa::read_public_key(&public_key_file).await.unwrap();
         let fp_a = fingerprint(&public_key).unwrap();
@@ -38,12 +43,12 @@ pub mod fingerprint {
         let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
         let priv1 = filesys::File::new(crypt_dir.path().join("priv1.pem"));
         let pub1 = filesys::File::new(crypt_dir.path().join("pub1.pem"));
-        rsa::gen_key_pair(2048, &priv1, &pub1, Overwrite::Allow)
+        rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv1, &pub1, Overwrite::Allow)
             .await
             .unwrap();
         let priv2 = filesys::File::new(crypt_dir.path().join("priv2.pem"));
         let pub2 = filesys::File::new(crypt_dir.path().join("pub2.pem"));
-        rsa::gen_key_pair(2048, &priv2, &pub2, Overwrite::Allow)
+        rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv2, &pub2, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -68,8 +73,13 @@ pub mod gen_key_pair {
         files::delete(&private_key_file).await.unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        let result =
-            rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow).await;
+        let result = rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await;
         assert!(result.is_ok());
 
         assert!(private_key_file.exists());
@@ -87,8 +97,13 @@ pub mod gen_key_pair {
         files::delete(&private_key_file).await.unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        let result =
-            rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny).await;
+        let result = rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Deny,
+        )
+        .await;
         assert!(result.is_ok());
 
         assert!(private_key_file.exists());
@@ -110,9 +125,14 @@ pub mod gen_key_pair {
         files::write_bytes(&public_key_file, &[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
         assert!(public_key_file.exists());
 
         // private key file exists
@@ -125,9 +145,14 @@ pub mod gen_key_pair {
         )
         .await
         .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
-            .await
-            .unwrap_err();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Deny,
+        )
+        .await
+        .unwrap_err();
 
         assert!(private_key_file.exists());
     }
@@ -147,9 +172,14 @@ pub mod gen_key_pair {
         files::write_bytes(&public_key_file, &[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
-            .await
-            .unwrap_err();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Deny,
+        )
+        .await
+        .unwrap_err();
         files::delete(&public_key_file).await.unwrap();
 
         // private key file exists
@@ -160,25 +190,14 @@ pub mod gen_key_pair {
         )
         .await
         .unwrap();
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Deny)
-            .await
-            .unwrap_err();
-    }
-
-    #[tokio::test]
-    async fn invalid_key_size() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_path = crypt_dir.path().join("private_key.pem");
-        let public_key_path = crypt_dir.path().join("public_key.pem");
-
-        let private_key_file = filesys::File::new(private_key_path.clone());
-        let public_key_file = filesys::File::new(public_key_path.clone());
-
-        // Invalid key size
-        let result = rsa::gen_key_pair(0, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap_err();
-        assert!(matches!(result, CryptErr::GenerateRSAKeyPairErr { .. }));
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Deny,
+        )
+        .await
+        .unwrap_err();
     }
 
     #[tokio::test]
@@ -190,9 +209,14 @@ pub mod gen_key_pair {
         let private_key_file = filesys::File::new(private_key_path.clone());
         let public_key_file = filesys::File::new(public_key_path.clone());
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let private_perms = files::permissions(&private_key_file).await.unwrap();
         let public_perms = files::permissions(&public_key_file).await.unwrap();
@@ -214,9 +238,14 @@ pub mod gen_key_pair {
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         // New private keys are PKCS#8 (the aws-lc-rs migration's write-format
         // flip; pre-migration keys are PKCS#1 and remain readable). Public keys
@@ -249,9 +278,14 @@ pub mod read_private_key {
         files::delete(&private_key_file).await.unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let result = rsa::read_private_key(&private_key_file).await;
         assert!(result.is_ok());
@@ -338,9 +372,14 @@ pub mod read_public_key {
         files::delete(&private_key_file).await.unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let result = rsa::read_public_key(&public_key_file).await;
         assert!(result.is_ok());
@@ -416,9 +455,14 @@ pub mod sign_rs256 {
         files::delete(&private_key_file).await.unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let data = b"hello world";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
@@ -473,9 +517,14 @@ pub mod verify {
         files::delete(&private_key_file).await.unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        rsa::gen_key_pair(4096, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa4096,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let data = b"hello world";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
@@ -493,9 +542,14 @@ pub mod verify {
         let private_key_file = filesys::File::new(private_key_path.clone());
         let public_key_file = filesys::File::new(public_key_path.clone());
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let data = b"hello world";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
@@ -513,13 +567,13 @@ pub mod verify {
         // generate two key pairs
         let priv1 = filesys::File::new(crypt_dir.path().join("priv1.pem"));
         let pub1 = filesys::File::new(crypt_dir.path().join("pub1.pem"));
-        rsa::gen_key_pair(2048, &priv1, &pub1, Overwrite::Allow)
+        rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv1, &pub1, Overwrite::Allow)
             .await
             .unwrap();
 
         let priv2 = filesys::File::new(crypt_dir.path().join("priv2.pem"));
         let pub2 = filesys::File::new(crypt_dir.path().join("pub2.pem"));
-        rsa::gen_key_pair(2048, &priv2, &pub2, Overwrite::Allow)
+        rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv2, &pub2, Overwrite::Allow)
             .await
             .unwrap();
 
@@ -536,9 +590,14 @@ pub mod verify {
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let data = b"";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
@@ -678,9 +737,14 @@ pub mod sign_rs512 {
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
 
-        rsa::gen_key_pair(2048, &private_key_file, &public_key_file, Overwrite::Allow)
-            .await
-            .unwrap();
+        rsa::gen_key_pair(
+            rsa::KeySize::Rsa2048,
+            &private_key_file,
+            &public_key_file,
+            Overwrite::Allow,
+        )
+        .await
+        .unwrap();
 
         let data = b"hello world";
         let signature = rsa::sign_rs512(&private_key_file, data).await.unwrap();
