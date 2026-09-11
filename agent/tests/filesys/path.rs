@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
-use miru_agent::filesys::{self, dirs, path, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
+#[cfg(unix)]
+use miru_agent::filesys::FileSysErr;
+use miru_agent::filesys::{self, dirs, path, Atomic, Overwrite, PathExt, WriteOptions};
 
 // external crates
 #[allow(unused_imports)]

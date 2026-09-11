@@ -579,7 +579,9 @@ pub mod deploy_func_validation_errs {
 }
 
 pub mod deploy_func_backup_errs {
+    #[cfg(unix)]
     use super::*;
+    #[cfg(unix)]
     use miru_agent::filesys::PathExt;
 
     #[cfg(unix)]
@@ -704,7 +706,9 @@ pub mod deploy_func_backup_errs {
 }
 
 pub mod deploy_func_write_errs {
+    #[cfg(unix)]
     use super::*;
+    #[cfg(unix)]
     use miru_agent::filesys::PathExt;
 
     #[cfg(unix)]

@@ -67,6 +67,7 @@ pub mod windows_defaults {
 }
 
 pub mod dispatch {
+    #[cfg(unix)]
     use super::*;
 
     #[test]

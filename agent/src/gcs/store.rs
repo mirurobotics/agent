@@ -602,6 +602,7 @@ mod tests {
         }
 
         pub mod source_unreadable {
+            #[cfg(unix)]
             use super::*;
 
             #[cfg(unix)]

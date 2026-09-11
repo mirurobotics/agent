@@ -45,7 +45,8 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - [x] Derive behavioral path expectations from fixtures while preserving literal wire pins
 - [x] Initial pre-review Linux validation: `./scripts/test.sh` + `./scripts/lint.sh` green
 - [x] Post-review targeted queue, filesystem, path, and deleter tests green on Linux
-- [ ] Push; iterate on the Windows CI test job until green
+- [x] Push; inspect the first Windows CI test-job failure and fix its compile errors/warnings locally
+- [ ] Re-run Windows CI and iterate until green
 - [ ] PR opened; all checks green
 
 ## Surprises & Discoveries
@@ -58,6 +59,12 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - 2026-09-11: an existing directory represented as a `File` supplies a portable
   delete failure after a successful stat. It exercises retry counts, backoff,
   attempt caps, and persistence without a Unix symlink loop.
+- 2026-09-11: the first Windows CI run reached lib-test compilation and found
+  five shutdown-manager tests calling `with_socket_server_handle`, whose
+  implementation was unnecessarily Unix-gated even though it only stores a
+  Tokio join handle. Compile that helper for Unix production and all unit-test
+  builds so its platform-neutral shutdown/error tests continue to run on
+  Windows; the socket server initialization itself remains Unix-only.
 
 ## Decision Log
 
