@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v4/v5 source for the Miru Agent Windows installer (MSI).
+
+  SCAFFOLDING — authored but NOT yet built or validated. Building requires the
+  WiX toolset (`wix build`) on Windows and a compiled `miru-agent.exe` for the
+  x86_64-pc-windows-msvc target, neither of which the current Linux CI produces.
+  Wiring the build + signing into the release pipeline is a deferred follow-up
+  gated on the Windows CI lane (see build/windows/README.md).
+
+  Parity target: build/debian/{miru.service,postinst,postrm}. Where the .deb
+  install creates the miru user/group, /var/lib/miru + /var/log/miru + /srv/miru,
+  and registers a restart-on-failure systemd service, this MSI creates
+  %ProgramData%\Miru (matching agent/src/platform/mod.rs) and registers an
+  equivalent auto-start, restart-on-failure Windows service.
+
+  GUIDs below are PLACEHOLDERS — regenerate UpgradeCode once and keep it stable
+  forever (it is the identity used for upgrades); component GUIDs may be "*".
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <?define ProductName = "Miru Agent" ?>
+  <?define Manufacturer = "Miru Robotics" ?>
+  <!-- Override at build time: `wix build -d Version=0.10.3` -->
+  <?ifndef Version ?><?define Version = "0.0.0" ?><?endif ?>
+
+  <Package Name="$(var.ProductName)"
+           Manufacturer="$(var.Manufacturer)"
+           Version="$(var.Version)"
+           UpgradeCode="PUT-STABLE-GUID-HERE-0000-000000000000"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <!-- Upgrade = remove old, install new. Blocks installing an older version
+         over a newer one. Parity with postinst's stop/replace/start. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of $(var.ProductName) is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 64-bit binary under Program Files. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Miru">
+        <Directory Id="AGENTFOLDER" Name="Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- State/logs/config root: %ProgramData%\Miru. Must match
+         agent/src/platform/mod.rs windows_data_root_base()/windows_log_dir(). -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="MIRUDATA" Name="Miru">
+        <Directory Id="MIRULOGS" Name="logs" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- The service binary + its Windows service registration. -->
+    <ComponentGroup Id="AgentBinary" Directory="AGENTFOLDER">
+      <Component Id="MiruAgentExe" Guid="*">
+        <!-- SourceFile is resolved at build time; wire the built artifact path
+             via `-d BinDir=...` when the build lane exists. -->
+        <File Id="miru_agent.exe"
+              Name="miru-agent.exe"
+              Source="$(var.BinDir)\miru-agent.exe"
+              KeyPath="yes" />
+
+        <!-- Register as an auto-start service running as LocalSystem.
+             (First cut: LocalSystem. Hardening follow-up: a virtual service
+             account `NT SERVICE\MiruAgent` with least privilege — see README.) -->
+        <ServiceInstall Id="MiruAgentService"
+                        Name="MiruAgent"
+                        DisplayName="Miru Agent"
+                        Description="Keeps device configuration in sync with the Miru platform."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem"
+                        Arguments="" />
+
+        <!-- Restart-on-failure, parity with systemd Restart=. Retry with
+             backoff, reset the failure count daily. -->
+        <util:ServiceConfig ServiceName="MiruAgent"
+                            FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+
+        <!-- Start on install, stop+remove on uninstall. -->
+        <ServiceControl Id="MiruAgentControl"
+                        Name="MiruAgent"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Create %ProgramData%\Miru with restricted ACLs. Parity with postinst's
+         `chown miru:miru` + 0755: here, SYSTEM and Administrators get full
+         control; authenticated non-admin users get nothing (the agent runs as
+         LocalSystem = SYSTEM). PermissionEx REPLACES inherited ACEs on the
+         folder, so list every principal that needs access. -->
+    <ComponentGroup Id="DataDirs">
+      <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="*">
+        <CreateFolder>
+          <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+          <util:PermissionEx User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <!-- Keep the component from being pruned (no file keypath here). -->
+        <RegistryValue Root="HKLM"
+                       Key="Software\Miru\Agent"
+                       Name="DataDir"
+                       Type="string"
+                       Value="[MIRUDATA]"
+                       KeyPath="yes" />
+      </Component>
+      <Component Id="MiruLogsDir" Directory="MIRULOGS" Guid="*">
+        <CreateFolder>
+          <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+          <util:PermissionEx User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM"
+                       Key="Software\Miru\Agent"
+                       Name="LogsDir"
+                       Type="string"
+                       Value="[MIRULOGS]"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="$(var.ProductName)" Level="1">
+      <ComponentGroupRef Id="AgentBinary" />
+      <ComponentGroupRef Id="DataDirs" />
+    </Feature>
+
+  </Package>
+</Wix>
