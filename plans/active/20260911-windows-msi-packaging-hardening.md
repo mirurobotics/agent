@@ -20,18 +20,20 @@ The PowerShell installer refuses an unexpected or malformed MSI, verifies an exa
 
 ## Progress
 
-- [ ] Confirm `feat/windows-msi-packaging` contains current `origin/main` and record the starting SHA.
-- [ ] Remove every production service declaration and commit one stable UpgradeCode.
-- [ ] Add the pinned x64 WiX project, required-input checks, and stable-only MSI version validation.
-- [ ] Implement protected ProgramData ACLs, transactional upgrades, and state-preserving uninstall behavior.
+Implementation started at `8d962afbfd9ea2d01cd70f0197225cafa3cff7ad`. `git merge-base --is-ancestor origin/main 8d962afbfd9ea2d01cd70f0197225cafa3cff7ad` exits 0, verifying that the current `origin/main` is an ancestor of that implementation start.
+
+- [x] Remove every production service declaration and commit one stable UpgradeCode.
+- [x] Add the pinned x64 WiX project, required-input checks, and stable-only MSI version validation.
+- [x] Implement protected ProgramData ACLs, transactional upgrades, and state-preserving uninstall behavior.
 - [ ] Build and inspect normal and boundary-valid MSIs and reject invalid build inputs.
 - [ ] Commit Milestone 1.
-- [ ] Harden `scripts/install/install.ps1` and its tests.
-- [ ] Harden `scripts/install/provision.ps1` and its tests.
+- [x] Harden `scripts/install/install.ps1`.
+- [x] Harden `scripts/install/provision.ps1`.
 - [ ] Parse and exercise both scripts under Windows PowerShell 5.1.
 - [ ] Commit Milestone 2.
-- [ ] Add deterministic install, ACL, upgrade, rollback, and uninstall fixtures.
-- [ ] Run the native integration matrix and wire the same entry point into Windows CI.
+- [x] Add deterministic install, ACL, upgrade, rollback, and uninstall fixtures.
+- [ ] Run the native integration matrix.
+- [x] Wire the native integration entry point into Windows CI.
 - [ ] Commit Milestone 3.
 - [ ] Update Windows packaging docs and the umbrella plan, then run repository-wide validation.
 - [ ] Commit Milestone 4 and push the exact branch head from a clean working tree.
@@ -42,7 +44,7 @@ After that checklist is complete and committed, post-closure push, CLEAN verific
 
 ## Surprises & Discoveries
 
-Add short observations and supporting command or test evidence as work proceeds.
+- Source implementation was committed as `de20ad4e5e7a85ce39d9b13501a5c90de22ff772` (`feat(windows): harden MSI packaging tools`), `9f515614fa96b1f2d7bb76d12bb60ca5ad857c23` (`fix(windows): repair MSI maintenance behavior`), and `729fbdf90b3f6efbb0cb230393e7314464a9fd63` (`test(windows): validate MSI package lifecycle`). The planned milestone checkpoints were omitted, so the checked Progress items above record source inspection only, not Windows execution or current-head CI evidence.
 
 ## Decision Log
 
@@ -71,7 +73,7 @@ The current WiX command defaults to x86 unless architecture is explicit, while `
 
 An ACL is an access-control list. WiX Util's existing `PermissionEx` defaults to appending permissions, so it does not replace inherited access on a pre-existing directory. That can expose future secrets such as `auth/private_key.pem` and `token.json`. Use the core WiX MSI-5 `PermissionEx` SDDL form instead. SDDL is the string form of a Windows security descriptor. Apply a protected DACL (disabled inheritance) with inheritable full-control ACEs for only `SY` (Local System) and `BA` (built-in Administrators), for example the semantic descriptor `D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. Confirm the exact WiX syntax by compiling it; do not weaken the descriptor to silence validation. The installer must correct a deliberately permissive pre-existing tree as well as create a secure new one.
 
-`.github/workflows/ci.yml` already has a `windows-latest` job from PR #234 that installs Rust for `x86_64-pc-windows-msvc`, installs NASM, and runs `cargo check`. Extend or complement that native job for packaging. Build the real executable with `cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked`. Do not upload it as a release artifact and do not add signing. `scripts/test.sh`, `scripts/covgate.sh`, `scripts/update-deps.sh`, and `scripts/lint.sh` are the repository's local validation commands. `scripts/update-deps.sh` intentionally refreshes `Cargo.lock`; inspect and reject unrelated lockfile drift.
+`.github/workflows/ci.yml` already has a `windows-latest` job from PR #234 that installs Rust for `x86_64-pc-windows-msvc`, installs NASM, and runs `cargo check`. Extend or complement that native job for packaging. Build the real executable with `cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release`. Do not upload it as a release artifact and do not add signing. `scripts/test.sh`, `scripts/covgate.sh`, `scripts/update-deps.sh`, and `scripts/lint.sh` are the repository's local validation commands. `scripts/update-deps.sh` intentionally refreshes `Cargo.lock`; inspect and reject unrelated lockfile drift.
 
 PowerShell tests must target Windows PowerShell 5.1 first because customer machines may use it; `pwsh` can be a secondary parse/run check. Use `[System.Management.Automation.Language.Parser]` to reject syntax errors. Prefer a repository-owned, dependency-free test harness under `build/windows/tests/` so CI does not depend on whatever Pester version happens to be preinstalled. Test-only fake executables, local HTTP responses, MSI fixtures, and a deliberately failing upgrade fixture may be generated in the runner's temporary directory and must never enter the release package.
 
@@ -145,9 +147,9 @@ For Milestone 1, generate the UpgradeCode once on Windows, record it in source a
 
     Set-Location C:\src\agent
     [guid]::NewGuid().ToString().ToUpperInvariant()
-    cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked
+    cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
     dotnet restore build/windows/miru-agent.wixproj
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\debug -ArtifactsDirectory build\windows\artifacts\package-tests
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 
 Expected: the Rust build and restore succeed. The harness exits 0; leaves the valid packages exactly at `build/windows/artifacts/package-tests/v1/miru-agent-1.0.0.msi`, `build/windows/artifacts/package-tests/v2/miru-agent-1.1.0.msi`, `build/windows/artifacts/package-tests/boundaries/miru-agent-0.0.0.msi`, and `build/windows/artifacts/package-tests/boundaries/miru-agent-255.255.65535.msi`; builds, validates, and inspects all four; and reports `PASS package 1.0.0`, `PASS package 1.1.0`, `PASS ProductCodes differ`, `PASS UpgradeCode stable`, `PASS version boundaries (0.0.0, 255.255.65535)`, and `PASS invalid inputs rejected (9 cases)`. Package validation has no unsuppressed warning or ICE error. The nine expected failures are omitted `Version`, empty `Version`, omitted `BinDir`, empty `BinDir`, and versions `1.2.3-beta.1`, `1.2.3.4`, `256.0.0`, `1.256.0`, and `1.2.65536`.
 
@@ -175,12 +177,12 @@ Before reviewing or committing Milestone 2, update this plan's Progress, Surpris
     git add scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
     git commit -m "feat(windows): harden install and provision scripts"
 
-For Milestone 3, run the complete integration script from an elevated x64 Windows PowerShell session in `C:\src\agent`. CI must invoke the same entry point after building the real executable and MSIs.
+For Milestone 3, run the destructive integration script only on a disposable test machine from an elevated x64 Windows PowerShell session in `C:\src\agent`, and acknowledge that environment with `-ConfirmDisposableTestMachine`. CI must invoke the same entry point after building the real executable and MSIs. Manual production smoke continues to require its distinct `-ConfirmDisposableCleanVm` acknowledgement.
 
     Set-Location C:\src\agent
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
-Expected: the script reports PASS for initial install, pre-existing ACL correction, non-admin denial, check exit 3, same-MSI v1 maintenance ACL restoration after the permissive ACE is re-added, v1-to-v2 upgrade ACL restoration after it is re-added again, downgrade rejection, failed-v3 rollback, uninstall state retention, and absence of a `MiruAgent` service. Both repair paths leave only inheritable full-control ACEs for SYSTEM and built-in Administrators and make the reused non-admin read/create probes fail. The script exits 0 and leaves no test account or installed Miru product behind.
+Expected: the script reports PASS for initial install, pre-existing root and `logs` ACL correction, non-admin denial, check exit 3, same-MSI v1 maintenance ACL restoration after permissive ACEs are re-added, v1-to-v2 upgrade ACL restoration after they are re-added again, downgrade rejection, failed-v3 rollback, uninstall state retention, and absence of a `MiruAgent` service. Every stage retains the representative customer-owned log file and its contents. Both repair paths leave only inheritable full-control ACEs for SYSTEM and built-in Administrators on both protected directories and make the reused non-admin read/create probes fail. The script exits 0 and verifies that no test account or installed Miru product remains.
 
 Before reviewing or committing Milestone 3, update this plan's Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective as applicable with the milestone's exact test evidence and decisions. Review the workflow diff and commit Milestone 3 files plus this plan checkpoint.
 
@@ -283,7 +285,7 @@ Do not run the final command before preflight reports CLEAN for the exact closur
 
 Accept the implementation only when all of the following are true, the behavioral evidence records its exact tested implementation SHA, and the later plan-only closure head contains that evidence and has its own CLEAN preflight result recorded in the verified PR body and final task result.
 
-- Invoking `build/windows/tests/package-tests.ps1` with `-ProjectPath build\windows\miru-agent.wixproj`, `-BinDir target\x86_64-pc-windows-msvc\debug`, and `-ArtifactsDirectory build\windows\artifacts\package-tests` builds the real binary into the exact v1/v2 artifact paths, builds/validates/inspects 0.0.0 and 255.255.65535 beneath the `boundaries` child, and prints all six named PASS lines, including exactly `PASS version boundaries (0.0.0, 255.255.65535)`. Omitted or empty `Version`/`BinDir` and all five named invalid versions fail as expected. WiX/ICE validation has no unexplained warning or error.
+- Invoking `build/windows/tests/package-tests.ps1` with `-ProjectPath build\windows\miru-agent.wixproj`, `-BinDir target\x86_64-pc-windows-msvc\release`, and `-ArtifactsDirectory build\windows\artifacts\package-tests` builds the real binary into the exact v1/v2 artifact paths, builds/validates/inspects 0.0.0 and 255.255.65535 beneath the `boundaries` child, and prints all six named PASS lines, including exactly `PASS version boundaries (0.0.0, 255.255.65535)`. Omitted or empty `Version`/`BinDir` and all five named invalid versions fail as expected. WiX/ICE validation has no unexplained warning or error.
 - The normal and boundary MSIs have the required ProductName, Manufacturer, exact numeric three-part ProductVersion, x64 platform metadata, and committed UpgradeCode; the 1.0.0 and 1.1.0 ProductCodes are distinct. The production MSI contains no test rollback action, sequence entry, condition, or payload.
 - Installing through `install.ps1 -FromMsi` places the binary under 64-bit Program Files, registers one product, and creates no `MiruAgent` service. An MSI with the wrong identity, UpgradeCode, architecture, or version is rejected before `msiexec` runs.
 - A permissive pre-existing `%ProgramData%\Miru` is corrected to a protected DACL with inheritable full control for only SYSTEM and built-in Administrators. After v1 installation, the harness re-adds the permissive ACE and proves same-MSI v1 maintenance removes it; it adds the ACE again before v1-to-v2 and proves upgrade removes it. The reused real non-admin logon cannot read the representative secret or create state after either repair, and no inherited permissive ACE remains.

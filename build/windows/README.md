@@ -39,9 +39,9 @@ package contract with explicit inputs:
 
 ```powershell
 Set-Location C:\src\agent
-cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked
+cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
 dotnet restore build\windows\miru-agent.wixproj
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\debug -ArtifactsDirectory build\windows\artifacts\package-tests
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 ```
 
 `Version` is deliberately stricter than general SemVer. It must contain exactly
@@ -119,19 +119,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\scri
 ```
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
-integration matrix:
+integration matrix only on a disposable test machine. Normal integration removes
+allowlisted fixture products, changes `%ProgramData%\Miru`, and creates and
+deletes a temporary local user, so the explicit confirmation is required:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 ```
 
 The matrix covers initial install, maintenance, upgrade, downgrade rejection,
 failed-upgrade rollback, uninstall, ACL repair, state retention, provisioning
 check exit 3 on a fresh install, and the absence of a `MiruAgent` service.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
-state under `%ProgramData%\Miru`. Its protected DACL permits inheritable full
-control only for Local System and built-in Administrators; non-administrators
-must not read sensitive state or create children.
+state, including customer-owned files under `%ProgramData%\Miru\logs`. The
+root and `logs` DACLs must remain protected and permit inheritable full control
+only for Local System and built-in Administrators; non-administrators must not
+read sensitive state or create children.
 
 For the production smoke pass, start from a disposable clean Windows 10 or 11
 x64 VM snapshot with no installed Miru product. Build the production 1.0.0 and
@@ -145,8 +148,10 @@ Get-FileHash C:\Windows\Temp\miru-msi-smoke.txt -Algorithm SHA256
 ```
 
 Record the transcript hash with the validation evidence. The smoke pass must
-record any 3010 reboot result, confirm the no-service and security expectations,
-and leave the retained ProgramData sentinel for inspection. Revert the VM
+record any 3010 reboot result and stage-specific PASS lines for install,
+maintenance, upgrade, and uninstall. It confirms the no-service expectation,
+repairs deliberately permissive root and `logs` ACLs, and leaves the retained
+ProgramData sentinel and customer-owned log for inspection. Revert the VM
 snapshot afterward rather than deleting retained customer state.
 
 Authenticode signing of the executable and MSI remains deferred, along with the

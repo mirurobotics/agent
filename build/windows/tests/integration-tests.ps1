@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")][string]$Configuration = "Release",
+    [switch]$ConfirmDisposableTestMachine,
     [switch]$ManualProductionSmoke,
     [switch]$ConfirmDisposableCleanVm,
     [string]$TranscriptPath = ""
@@ -14,9 +15,12 @@ $binDir = Join-Path $repositoryRoot "target\x86_64-pc-windows-msvc\$($Configurat
 $artifactsRoot = Join-Path ([IO.Path]::GetTempPath()) ("miru-integration-tests-" + [Guid]::NewGuid().ToString("N"))
 $deterministicLogs = Join-Path $repositoryRoot "build\windows\artifacts\package-tests\logs"
 $programDataRoot = Join-Path $env:ProgramData "Miru"
+$logsRoot = Join-Path $programDataRoot "logs"
 $markerPath = Join-Path $programDataRoot "rollback-payload.txt"
 $sentinelPath = Join-Path $programDataRoot "integration-sentinel.txt"
 $secretPath = Join-Path $programDataRoot "representative-secret.txt"
+$customerLogPath = Join-Path $logsRoot "customer-owned.log"
+$customerLogContents = "customer-owned-log-retain"
 $agentPath = Join-Path ([Environment]::GetEnvironmentVariable("ProgramW6432", "Process")) "Miru\Agent\miru-agent.exe"
 $upgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
 $fixtureProducts = @(
@@ -27,8 +31,9 @@ $fixtureProducts = @(
 $testUser = "MiruMsiTestUser"
 $testPassword = "M!ru-" + [Guid]::NewGuid().ToString("N") + "-9a"
 $createdUser = $false
-$installedFixture = $false
 $failureEvidence = New-Object System.Collections.ArrayList
+$cleanupFailures = New-Object System.Collections.ArrayList
+$integrationFailure = $null
 $transcriptStarted = $false
 
 function Assert-True {
@@ -229,27 +234,45 @@ function Assert-FailingFixtureContract {
 }
 
 function Assert-ProtectedAcl {
-    $acl = Get-Acl -LiteralPath $programDataRoot
-    Assert-True $acl.AreAccessRulesProtected "ProgramData DACL inheritance is disabled"
+    param([string]$LiteralPath, [string]$Label)
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    Assert-True $acl.AreAccessRulesProtected "$Label DACL inheritance is disabled"
     $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
-    Assert-Equal 2 $explicit.Count "only two explicit ProgramData ACEs"
+    Assert-Equal 2 $explicit.Count "only two explicit $Label ACEs"
     $expectedSids = @("S-1-5-18", "S-1-5-32-544")
+    $actualSids = @()
     foreach ($rule in $explicit) {
         $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-        Assert-True ($expectedSids -contains $sid) "ACE belongs only to SYSTEM or Administrators"
+        $actualSids += $sid
         Assert-Equal "Allow" $rule.AccessControlType.ToString() "ACE type"
-        Assert-True (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl) "ACE grants full control"
-        Assert-True (($rule.InheritanceFlags -band [Security.AccessControl.InheritanceFlags]::ContainerInherit) -ne 0) "ACE inherits to containers"
-        Assert-True (($rule.InheritanceFlags -band [Security.AccessControl.InheritanceFlags]::ObjectInherit) -ne 0) "ACE inherits to files"
+        Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$rule.FileSystemRights) "ACE grants exactly full control"
+        $expectedInheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        Assert-Equal ([int]$expectedInheritance) ([int]$rule.InheritanceFlags) "ACE inherits to containers and files"
+        Assert-Equal ([int][Security.AccessControl.PropagationFlags]::None) ([int]$rule.PropagationFlags) "ACE has no propagation restriction"
     }
-    $icacls = @(& icacls.exe $programDataRoot 2>&1)
-    Assert-Equal 0 $LASTEXITCODE "icacls can inspect ProgramData"
+    Assert-Equal (($expectedSids | Sort-Object) -join "`n") (($actualSids | Sort-Object) -join "`n") "$Label ACE identities"
+    $icacls = @(& icacls.exe $LiteralPath 2>&1)
+    Assert-Equal 0 $LASTEXITCODE "icacls can inspect $Label"
     return ($icacls | Out-String)
 }
 
-function Add-PermissiveAce {
-    & icacls.exe $programDataRoot /grant ("$testUser`:(OI)(CI)F") | Out-Null
-    Assert-Equal 0 $LASTEXITCODE "permissive test ACE added"
+function Assert-ProtectedAcls {
+    Assert-ProtectedAcl -LiteralPath $programDataRoot -Label "ProgramData root" | Out-Null
+    Assert-ProtectedAcl -LiteralPath $logsRoot -Label "ProgramData logs" | Out-Null
+}
+
+function Add-PermissiveAces {
+    foreach ($path in @($programDataRoot, $logsRoot)) {
+        & icacls.exe $path /grant "*S-1-1-0:(OI)(CI)F" | Out-Null
+        Assert-Equal 0 $LASTEXITCODE "permissive Everyone ACE added to $path"
+    }
+}
+
+function Assert-CustomerStateRetained {
+    param([string]$Stage)
+    Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "$Stage keeps sentinel"
+    Assert-True (Test-Path -LiteralPath $logsRoot -PathType Container) "$Stage keeps logs directory"
+    Assert-Equal $customerLogContents ([IO.File]::ReadAllText($customerLogPath)) "$Stage keeps customer log"
 }
 
 function Invoke-NonAdminProbe {
@@ -313,6 +336,7 @@ function Invoke-ManualSmoke {
     New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
     $arpProducts = @(Get-MiruArpProducts)
     Assert-Equal 0 $arpProducts.Count "clean VM has no Miru Agent registration"
+    Assert-True (-not (Test-Path -LiteralPath $programDataRoot)) "clean VM has no pre-existing Miru ProgramData"
     Start-Transcript -LiteralPath $TranscriptPath -Force | Out-Null
     $script:transcriptStarted = $true
     Write-Host "Smoke started: $(Get-Date -Format o)"
@@ -325,23 +349,45 @@ function Invoke-ManualSmoke {
     Get-FileHash -Algorithm SHA256 -LiteralPath $v2
     Get-MsiIdentity $v1 | Format-List
     Get-MsiIdentity $v2 | Format-List
-    New-Item -ItemType Directory -Path $programDataRoot -Force | Out-Null
-    [IO.File]::WriteAllText($sentinelPath, "retain-after-smoke")
+    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
+    [IO.File]::WriteAllText($sentinelPath, "retain-me")
+    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
+    Add-PermissiveAces
     $v1Result = Invoke-InstallScript $v1 "manual-v1"
     Write-Host "Manual v1 reboot result: $v1Result"
+    Assert-CustomerStateRetained "manual install"
+    Assert-ProtectedAcls
     Assert-NoService
+    Write-Host "PASS manual v1 install repairs root/log ACLs and retains customer state"
+    Add-PermissiveAces
     Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "manual-maintenance" @(0, 3010) | Out-Null
+    Assert-CustomerStateRetained "manual maintenance"
+    Assert-ProtectedAcls
+    Write-Host "PASS manual maintenance repairs root/log ACLs and retains customer state"
+    Add-PermissiveAces
     $v2Result = Invoke-Msi @("/i", ('"{0}"' -f $v2)) "manual-upgrade" @(0, 3010)
     Write-Host "Manual v2 reboot result: $v2Result"
+    Assert-CustomerStateRetained "manual upgrade"
+    Assert-ProtectedAcls
     Assert-NoService
+    Write-Host "PASS manual upgrade repairs root/log ACLs and retains customer state"
     $installed = @(Get-RelatedProducts)
     Assert-Equal 1 $installed.Count "one production product before uninstall"
     Invoke-Msi @("/x", $installed[0]) "manual-uninstall" @(0, 3010) | Out-Null
     Assert-True (-not (Test-Path -LiteralPath $agentPath)) "production executable removed"
-    Assert-True (Test-Path -LiteralPath $sentinelPath) "manual sentinel retained for snapshot inspection"
+    Assert-CustomerStateRetained "manual uninstall"
+    Assert-ProtectedAcls
     Assert-NoService
+    Write-Host "PASS manual uninstall retains protected root/log customer state"
     Write-Host "Smoke completed: $(Get-Date -Format o)"
     Write-Host "PASS manual production smoke; sentinel intentionally retained at $sentinelPath"
+}
+
+if (-not $ManualProductionSmoke -and -not $ConfirmDisposableTestMachine) {
+    if (Test-Path -LiteralPath $programDataRoot) {
+        throw "Refusing mutation of pre-existing $programDataRoot; normal integration requires -ConfirmDisposableTestMachine."
+    }
+    throw "Normal integration is destructive and requires -ConfirmDisposableTestMachine on a disposable test machine."
 }
 
 Assert-Elevated64BitWindows
@@ -371,48 +417,50 @@ try {
     $v3 = Build-IntegrationPackage "1.2.0" $fixtureProducts[2] "fixture-v3"
     Assert-FailingFixtureContract $v3
 
-    New-Item -ItemType Directory -Path $programDataRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
     [IO.File]::WriteAllText($sentinelPath, "retain-me")
     [IO.File]::WriteAllText($secretPath, "representative-secret")
-    & icacls.exe $programDataRoot /inheritance:e /grant "*S-1-1-0:(OI)(CI)F" | Out-Null
-    Assert-Equal 0 $LASTEXITCODE "pre-existing permissive ProgramData"
+    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
+    & icacls.exe $programDataRoot /inheritance:e | Out-Null
+    Assert-Equal 0 $LASTEXITCODE "pre-existing ProgramData inheritance enabled"
+    Add-PermissiveAces
 
     & net.exe user $testUser $testPassword /add /y | Out-Null
     Assert-Equal 0 $LASTEXITCODE "temporary local user created"
     $createdUser = $true
 
     Invoke-InstallScript $v1 "fixture-v1" | Out-Null
-    $installedFixture = $true
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-Equal "fixture-v1" ([IO.File]::ReadAllText($markerPath)) "v1 rollback marker"
     Assert-OneRegistration $fixtureProducts[0]
     Assert-True (Test-ArpProductCode $fixtureProducts[0]) "v1 installer metadata registered"
-    Assert-ProtectedAcl | Out-Null
+    Assert-CustomerStateRetained "initial install"
+    Assert-ProtectedAcls
     Invoke-NonAdminProbe
     Assert-NoService
     Invoke-RealProvisionCheck
     Write-Host "PASS initial install, ACL correction, denial, check exit 3, and no service"
 
     $v1Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
-    Add-PermissiveAce
+    Add-PermissiveAces
     Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "fixture-v1-maintenance" @(0, 3010) | Out-Null
     Assert-Equal "fixture-v1" ([IO.File]::ReadAllText($markerPath)) "maintenance keeps v1 marker"
     Assert-Equal $v1Hash (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash "maintenance keeps v1 hash"
-    Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "maintenance keeps sentinel"
+    Assert-CustomerStateRetained "maintenance"
     Assert-OneRegistration $fixtureProducts[0]
-    Assert-ProtectedAcl | Out-Null
+    Assert-ProtectedAcls
     Invoke-NonAdminProbe
     Assert-NoService
     Write-Host "PASS same-MSI maintenance repairs ACL and retains v1 state"
 
-    Add-PermissiveAce
+    Add-PermissiveAces
     Invoke-Msi @("/i", ('"{0}"' -f $v2)) "fixture-v2-upgrade" @(0, 3010) | Out-Null
     Assert-OneRegistration $fixtureProducts[1]
     Assert-True (Test-ArpProductCode $fixtureProducts[1]) "v2 installer metadata registered"
     Assert-Equal "fixture-v2" ([IO.File]::ReadAllText($markerPath)) "v2 marker"
-    Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "upgrade keeps sentinel"
+    Assert-CustomerStateRetained "upgrade"
     $v2Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
-    Assert-ProtectedAcl | Out-Null
+    Assert-ProtectedAcls
     Invoke-NonAdminProbe
     Assert-NoService
     Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
@@ -427,46 +475,74 @@ try {
     Assert-OneRegistration $fixtureProducts[1]
     Assert-Equal "fixture-v2" ([IO.File]::ReadAllText($markerPath)) "rollback restores v2 marker"
     Assert-Equal $v2Hash (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash "rollback restores v2 executable"
-    Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "rollback keeps sentinel"
-    Assert-ProtectedAcl | Out-Null
+    Assert-CustomerStateRetained "rollback"
+    Assert-ProtectedAcls
     Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, and DACL"
 
     Invoke-Msi @("/x", $fixtureProducts[1]) "fixture-v2-uninstall" @(0, 3010) | Out-Null
-    $installedFixture = $false
     Assert-Equal 0 (@(Get-RelatedProducts)).Count "product registration removed"
     Assert-True (-not (Test-ArpProductCode $fixtureProducts[1])) "installer-owned registry metadata removed"
     Assert-True (-not (Test-Path -LiteralPath $agentPath)) "executable removed"
     Assert-True (-not (Test-Path -LiteralPath $markerPath)) "test marker removed"
     Assert-True (Test-Path -LiteralPath $programDataRoot -PathType Container) "ProgramData retained"
-    Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "sentinel retained"
+    Assert-CustomerStateRetained "uninstall"
     Assert-Equal "representative-secret" ([IO.File]::ReadAllText($secretPath)) "representative customer state retained"
-    Assert-True (Test-Path -LiteralPath (Join-Path $programDataRoot "logs") -PathType Container) "logs retained"
-    Assert-ProtectedAcl | Out-Null
+    Assert-ProtectedAcls
     Assert-NoService
     Write-Host "PASS uninstall removes package state and retains protected customer state"
 }
 catch {
-    Write-Host "Integration failure: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Related products: $(@(Get-RelatedProducts) -join ', ')"
-    if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
-    if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }
-    if (Test-Path -LiteralPath $markerPath) { Write-Host "Marker: $([IO.File]::ReadAllText($markerPath))" }
-    $sessionLogs = Join-Path $artifactsRoot "logs"
-    if (Test-Path -LiteralPath $sessionLogs) {
-        New-Item -ItemType Directory -Path $deterministicLogs -Force | Out-Null
-        Copy-Item -Path (Join-Path $sessionLogs "*.log") -Destination $deterministicLogs -Force -ErrorAction SilentlyContinue
+    $script:integrationFailure = $_
+    Write-Host "Integration failure: $($integrationFailure.Exception.Message)" -ForegroundColor Red
+    try {
+        Write-Host "Related products: $(@(Get-RelatedProducts) -join ', ')"
+        if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
+        if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }
+        if (Test-Path -LiteralPath $markerPath) { Write-Host "Marker: $([IO.File]::ReadAllText($markerPath))" }
+        $sessionLogs = Join-Path $artifactsRoot "logs"
+        if (Test-Path -LiteralPath $sessionLogs) {
+            New-Item -ItemType Directory -Path $deterministicLogs -Force | Out-Null
+            Copy-Item -Path (Join-Path $sessionLogs "*.log") -Destination $deterministicLogs -Force -ErrorAction SilentlyContinue
+        }
     }
-    throw
+    catch {
+        Write-Host "Failure evidence collection also failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
 }
 finally {
-    if ($installedFixture) {
+    try {
         foreach ($product in @(Get-RelatedProducts)) {
             if ($fixtureProducts -contains $product.ToUpperInvariant()) {
-                try { Invoke-Msi @("/x", $product) "cleanup-$($product.Trim('{}'))" @(0, 3010, 1605) | Out-Null } catch { }
+                Invoke-Msi @("/x", $product) "cleanup-$($product.Trim('{}'))" @(0, 3010, 1605) | Out-Null
+            }
+        }
+        foreach ($product in @(Get-RelatedProducts)) {
+            if ($fixtureProducts -contains $product.ToUpperInvariant()) {
+                [void]$cleanupFailures.Add("fixture ProductCode $($product.ToUpperInvariant()) remains installed after cleanup")
             }
         }
     }
-    if ($createdUser) { & net.exe user $testUser /delete | Out-Null }
+    catch {
+        [void]$cleanupFailures.Add("product cleanup failed: $($_.Exception.Message)")
+    }
+    if ($createdUser) {
+        $deleteOutput = @(& net.exe user $testUser /delete 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            [void]$cleanupFailures.Add("temporary user deletion failed: $($deleteOutput -join ' ')")
+        }
+        $null = & net.exe user $testUser 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            [void]$cleanupFailures.Add("temporary user $testUser still exists after deletion")
+        }
+    }
     if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
+
+if ($cleanupFailures.Count -ne 0) {
+    foreach ($cleanupFailure in $cleanupFailures) {
+        Write-Host "Cleanup failure: $cleanupFailure" -ForegroundColor Red
+    }
+}
+if ($null -ne $integrationFailure) { throw $integrationFailure }
+if ($cleanupFailures.Count -ne 0) { throw "Integration cleanup failed; see cleanup diagnostics above." }
