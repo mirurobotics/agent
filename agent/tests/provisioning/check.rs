@@ -1,12 +1,11 @@
 // standard crates
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
 
 // internal crates
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, files};
+use miru_agent::filesys::{dirs, files, PathExt};
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
 };
@@ -56,9 +55,10 @@ pub mod reports {
 
     #[test]
     fn undeterminable_reports_error_on_stderr_only() {
+        let tmp = dirs::temp("miru-auth").unwrap();
         let report = Report::Undeterminable(DiskErr::FileSysErr(FileSysErr::PathExistenceErr(
             PathExistenceErr {
-                path: PathBuf::from("/var/lib/miru/auth/private_key.pem"),
+                path: tmp.file("private_key.pem").path().clone(),
                 source: Box::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
                 trace: Box::new(Trace {
                     file: file!(),

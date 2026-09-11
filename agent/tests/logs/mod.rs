@@ -61,7 +61,13 @@ fn test_log_options_default() {
     let options = Options::default();
     assert!(options.stdout);
     assert_eq!(options.log_level, LogLevel::Info);
+    #[cfg(unix)]
     assert_eq!(options.log_dir, std::path::PathBuf::from("/var/log/miru"));
+    #[cfg(windows)]
+    assert_eq!(
+        options.log_dir,
+        miru_agent::platform::windows_log_dir(std::env::var_os("ProgramData")),
+    );
 }
 
 // ========================= variants ============================ //

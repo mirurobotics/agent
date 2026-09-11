@@ -301,13 +301,19 @@ mod tests {
     use super::*;
     use crate::filesys;
 
+    /// RAII temp dir for absolute path fixtures; absolute on every platform.
+    fn tmp_fixture() -> filesys::dirs::TempDir {
+        filesys::dirs::temp("deploy-filesys").unwrap()
+    }
+
     // ============================= map_write_err ============================= //
 
     #[test]
     fn map_write_err_maps_permission_denied_atomic_write_to_write_access_denied() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_1".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let err = FileSysErr::AtomicWriteFileErr(filesys::errors::AtomicWriteFileErr {
@@ -328,9 +334,10 @@ mod tests {
 
     #[test]
     fn map_write_err_maps_read_only_fs_atomic_write_to_write_access_denied() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_2".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let err = FileSysErr::AtomicWriteFileErr(filesys::errors::AtomicWriteFileErr {
@@ -351,9 +358,10 @@ mod tests {
 
     #[test]
     fn map_write_err_keeps_atomic_write_err_for_non_permission_kinds() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_3".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let err = FileSysErr::AtomicWriteFileErr(filesys::errors::AtomicWriteFileErr {
@@ -373,9 +381,10 @@ mod tests {
 
     #[test]
     fn map_write_err_keeps_non_atomic_filesys_errors_unchanged() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_4".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let err = FileSysErr::CreateTmpDirErr(filesys::errors::CreateTmpDirErr {
@@ -400,13 +409,14 @@ mod tests {
 
     #[test]
     fn map_snapshot_err_maps_copy_permission_denied_to_backup_access_denied() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_5".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let dest = filesys::File::new(&cfg_inst.filepath);
-        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let backup = tmp.file("miru.backup.config.json");
         let err = FileSysErr::CopyFileErr(filesys::errors::CopyFileErr {
             source: Box::new(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -431,13 +441,14 @@ mod tests {
 
     #[test]
     fn map_snapshot_err_maps_copy_read_only_fs_to_backup_access_denied() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_7".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let dest = filesys::File::new(&cfg_inst.filepath);
-        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let backup = tmp.file("miru.backup.config.json");
         let err = FileSysErr::CopyFileErr(filesys::errors::CopyFileErr {
             source: Box::new(io::Error::new(
                 io::ErrorKind::ReadOnlyFilesystem,
@@ -457,13 +468,14 @@ mod tests {
 
     #[test]
     fn map_snapshot_err_keeps_copy_err_for_non_permission_kinds() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_6".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let dest = filesys::File::new(&cfg_inst.filepath);
-        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let backup = tmp.file("miru.backup.config.json");
         let err = FileSysErr::CopyFileErr(filesys::errors::CopyFileErr {
             source: Box::new(io::Error::new(io::ErrorKind::NotFound, "missing source")),
             src_file: dest.clone(),
@@ -480,13 +492,14 @@ mod tests {
 
     #[test]
     fn map_snapshot_err_keeps_non_copy_filesys_errors_unchanged() {
+        let tmp = tmp_fixture();
         let cfg_inst = models::ConfigInstance {
             id: "cfg_8".to_string(),
-            filepath: "/tmp/config.json".to_string(),
+            filepath: tmp.file("config.json").to_string(),
             ..Default::default()
         };
         let dest = filesys::File::new(&cfg_inst.filepath);
-        let backup = filesys::File::new("/tmp/miru.backup.config.json");
+        let backup = tmp.file("miru.backup.config.json");
         let err = FileSysErr::CreateTmpDirErr(filesys::errors::CreateTmpDirErr {
             source: Box::new(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -509,7 +522,8 @@ mod tests {
 
     #[test]
     fn validate_filepath_accepts_clean_absolute_path() {
-        let f = filesys::File::new(PathBuf::from("/etc/myapp/config.json"));
+        let tmp = tmp_fixture();
+        let f = tmp.file("myapp/config.json");
         assert!(validate_filepath(&f).is_ok());
     }
 
@@ -524,7 +538,8 @@ mod tests {
 
     #[test]
     fn validate_filepath_rejects_parent_traversal() {
-        let f = filesys::File::new(PathBuf::from("/etc/myapp/../passwd"));
+        let tmp = tmp_fixture();
+        let f = filesys::File::new(tmp.path().join("myapp").join("..").join("passwd"));
         assert!(matches!(
             validate_filepath(&f),
             Err(DeployErr::PathNotAllowed(_))
