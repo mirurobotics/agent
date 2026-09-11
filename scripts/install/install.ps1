@@ -1,98 +1,350 @@
 <#
 .SYNOPSIS
-    Install the Miru Agent on Windows from a released MSI.
+    Install a stable Miru Agent release from a trusted local MSI or GitHub.
 
 .DESCRIPTION
-    Windows parity for scripts/install/install.sh. Downloads the Miru Agent MSI
-    for a given version (or the latest release), verifies its SHA-256 checksum
-    against the published checksums file, and installs it silently via msiexec.
-    MSI upgrade semantics (MajorUpgrade in miru-agent.wxs) handle replacing an
-    existing install.
-
-    SCAFFOLDING — not yet exercised end-to-end. Depends on the MSI and checksums
-    being published as release assets, which requires the deferred Windows build
-    lane (see build/windows/README.md).
+    Requires elevated 64-bit Windows PowerShell. Before msiexec is started, the
+    script verifies the package identity, UpgradeCode, x64 platform, and strict
+    three-field MSI version. Downloaded files are also checked against the exact
+    matching SHA-256 record. Checksums detect corruption; publisher authentication
+    remains deferred until the release artifacts are Authenticode-signed.
 
 .PARAMETER Version
-    Semantic version to install, e.g. "v0.10.3". Defaults to the latest release.
-
-.PARAMETER Prerelease
-    Install the latest prerelease instead of the latest stable release.
+    Stable version to install, such as "v0.10.3". A leading "v" is accepted.
 
 .PARAMETER FromMsi
-    Install from a local .msi path instead of downloading (parity with --from-pkg).
-
-.EXAMPLE
-    powershell -ExecutionPolicy Bypass -File install.ps1 -Version v0.10.3
+    Install a local MSI instead of downloading a release asset.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = "",
-    [switch]$Prerelease,
     [string]$FromMsi = ""
 )
 
 $ErrorActionPreference = "Stop"
-$GitHubRepo = "mirurobotics/agent"
-$MsiName = "miru-agent"
+$script:GitHubRepo = "mirurobotics/agent"
+$script:MsiBaseName = "miru-agent"
+$script:ExpectedProductName = "Miru Agent"
+$script:ExpectedManufacturer = "Miru Robotics"
+$script:ExpectedUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
 
-function Write-Log { param($m) Write-Host "==> $m" -ForegroundColor Green }
-function Die { param($m) Write-Host "Error: $m" -ForegroundColor Red; exit 1 }
+function Write-InstallLog {
+    param([string]$Message)
 
-# Windows x64 only for now (matches the msvc build target).
-if (-not [Environment]::Is64BitOperatingSystem) {
-    Die "The Miru Agent Windows build supports 64-bit Windows only."
+    Write-Host "==> $Message" -ForegroundColor Green
 }
 
-# Resolve the MSI: either a caller-provided local file or a downloaded release.
-if ($FromMsi) {
-    if (-not (Test-Path $FromMsi)) { Die "Provided MSI does not exist: $FromMsi" }
-    $msiPath = (Resolve-Path $FromMsi).Path
-    Write-Log "Installing from local MSI: $msiPath"
-} else {
-    # Determine the version to install.
-    if (-not $Version) {
-        Write-Log "Fetching latest $(if ($Prerelease) {'prerelease'} else {'release'}) version..."
-        $releases = Invoke-RestMethod "https://api.github.com/repos/$GitHubRepo/releases"
-        $Version = if ($Prerelease) {
-            ($releases | Where-Object { $_.prerelease } | Select-Object -First 1).tag_name
-        } else {
-            (Invoke-RestMethod "https://api.github.com/repos/$GitHubRepo/releases/latest").tag_name
+function Assert-InstallAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw "Run this installer from an elevated Administrator PowerShell session."
+    }
+}
+
+function Assert-InstallArchitecture {
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        throw "The Miru Agent supports 64-bit Windows only."
+    }
+    if (-not [Environment]::Is64BitProcess) {
+        throw "Run this installer from 64-bit PowerShell."
+    }
+}
+
+function ConvertTo-MsiVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$Value,
+        [switch]$AllowLeadingV
+    )
+
+    $candidate = $Value
+    if ($AllowLeadingV -and $candidate.StartsWith("v", [StringComparison]::Ordinal)) {
+        $candidate = $candidate.Substring(1)
+    }
+    if ($candidate -notmatch '^([0-9]+)\.([0-9]+)\.([0-9]+)$') {
+        throw "Version must be a stable MAJOR.MINOR.PATCH value within MSI bounds."
+    }
+
+    try {
+        $major = [uint32]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
+        $minor = [uint32]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture)
+        $patch = [uint32]::Parse($Matches[3], [Globalization.CultureInfo]::InvariantCulture)
+    }
+    catch {
+        throw "Version must be a stable MAJOR.MINOR.PATCH value within MSI bounds."
+    }
+
+    if ($major -gt 255 -or $minor -gt 255 -or $patch -gt 65535) {
+        throw "Version must be a stable MAJOR.MINOR.PATCH value within MSI bounds."
+    }
+    return $candidate
+}
+
+function Invoke-WithTls12 {
+    param([Parameter(Mandatory = $true)][scriptblock]$Request)
+
+    $originalProtocol = [Net.ServicePointManager]::SecurityProtocol
+    try {
+        [Net.ServicePointManager]::SecurityProtocol =
+            $originalProtocol -bor [Net.SecurityProtocolType]::Tls12
+        return & $Request
+    }
+    finally {
+        [Net.ServicePointManager]::SecurityProtocol = $originalProtocol
+    }
+}
+
+function Invoke-InstallWebRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [string]$OutFile = ""
+    )
+
+    return Invoke-WithTls12 {
+        if ($OutFile) {
+            return Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+        }
+        return Invoke-WebRequest -Uri $Uri -UseBasicParsing
+    }
+}
+
+function New-InstallTempDirectory {
+    $randomBytes = New-Object byte[] 16
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($randomBytes)
+    }
+    finally {
+        $generator.Dispose()
+    }
+
+    $directoryName = "miru-install-{0}" -f ([BitConverter]::ToString($randomBytes) -replace '-', '')
+    $directory = Join-Path ([IO.Path]::GetTempPath()) $directoryName
+    New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+    return $directory
+}
+
+function Get-ExpectedChecksum {
+    param(
+        [Parameter(Mandatory = $true)][string]$ChecksumPath,
+        [Parameter(Mandatory = $true)][string]$AssetName
+    )
+
+    $matchingDigests = @()
+    foreach ($line in [IO.File]::ReadAllLines($ChecksumPath)) {
+        if ($line -notmatch '^\s*([0-9A-Fa-f]{64})[ \t]+\*?(.+?)\s*$') {
+            continue
+        }
+        if (-not [string]::Equals($Matches[2], $AssetName, [StringComparison]::Ordinal)) {
+            continue
+        }
+        $matchingDigests += $Matches[1].ToUpperInvariant()
+    }
+
+    if ($matchingDigests.Count -ne 1) {
+        throw "Checksums must contain exactly one valid SHA-256 record for $AssetName."
+    }
+    return $matchingDigests[0]
+}
+
+function Assert-FileChecksum {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$ChecksumPath,
+        [Parameter(Mandatory = $true)][string]$AssetName
+    )
+
+    $expected = Get-ExpectedChecksum -ChecksumPath $ChecksumPath -AssetName $AssetName
+    $actual = (Get-FileHash -Algorithm SHA256 -Path $FilePath).Hash.ToUpperInvariant()
+    if (-not [string]::Equals($actual, $expected, [StringComparison]::Ordinal)) {
+        throw "Checksum verification failed for $AssetName (expected $expected, got $actual)."
+    }
+}
+
+function Get-MsiProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Database,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'"
+    $view = $Database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $Database, @($query))
+    $record = $null
+    try {
+        $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+        $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+        if ($null -eq $record) {
+            return $null
+        }
+        return $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, @(1))
+    }
+    finally {
+        if ($null -ne $record) {
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($record) | Out-Null
+        }
+        if ($null -ne $view) {
+            $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($view) | Out-Null
         }
     }
-    if (-not $Version) { Die "Could not determine the version to install." }
-    $ver = $Version.TrimStart("v")
-    Write-Log "Version to install: $ver"
+}
 
-    $downloadDir = Join-Path $env:TEMP "miru-install"
-    New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
-    $msiFile = "${MsiName}_${ver}_amd64.msi"
-    $msiPath = Join-Path $downloadDir $msiFile
-    $base = "https://github.com/$GitHubRepo/releases/download/v$ver"
+function Get-MsiMetadata {
+    param([Parameter(Mandatory = $true)][string]$Path)
 
-    Write-Log "Downloading $msiFile"
-    Invoke-WebRequest "$base/$msiFile" -OutFile $msiPath
+    $installer = $null
+    $database = $null
+    $summary = $null
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
+        $summary = $database.GetType().InvokeMember("SummaryInformation", "GetProperty", $null, $database, @(0))
+        $template = $summary.GetType().InvokeMember("Property", "GetProperty", $null, $summary, @(7))
 
-    # Verify SHA-256 against the published checksums file (parity with install.sh).
-    $checksumsPath = Join-Path $downloadDir "checksums.txt"
-    Invoke-WebRequest "$base/agent_${ver}_checksums.txt" -OutFile $checksumsPath
-    $expected = (Select-String -Path $checksumsPath -Pattern ([regex]::Escape($msiFile)) |
-        Select-Object -First 1).Line -split '\s+' | Select-Object -First 1
-    if (-not $expected) { Die "No checksum found for $msiFile" }
-    $actual = (Get-FileHash -Algorithm SHA256 -Path $msiPath).Hash
-    if ($actual -ne $expected.ToUpper()) {
-        Die "Checksum verification failed for $msiFile (expected $expected, got $actual)"
+        return [pscustomobject]@{
+            ProductName = Get-MsiProperty -Database $database -Name "ProductName"
+            Manufacturer = Get-MsiProperty -Database $database -Name "Manufacturer"
+            ProductVersion = Get-MsiProperty -Database $database -Name "ProductVersion"
+            ProductCode = Get-MsiProperty -Database $database -Name "ProductCode"
+            UpgradeCode = Get-MsiProperty -Database $database -Name "UpgradeCode"
+            Template = $template
+        }
     }
-    Write-Log "Checksum verified"
+    finally {
+        if ($null -ne $summary) {
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($summary) | Out-Null
+        }
+        if ($null -ne $database) {
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($database) | Out-Null
+        }
+        if ($null -ne $installer) {
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($installer) | Out-Null
+        }
+    }
 }
 
-# Silent install. msiexec exit 3010 = success, reboot required.
-Write-Log "Installing the Miru Agent (msiexec)"
-$logFile = Join-Path $env:TEMP "miru-agent-install.log"
-$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-    "/i", "`"$msiPath`"", "/qn", "/norestart", "/l*v", "`"$logFile`""
-)
-if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
-    Die "msiexec failed with exit code $($p.ExitCode). See $logFile"
+function Assert-MiruMsiMetadata {
+    param(
+        [Parameter(Mandatory = $true)]$Metadata,
+        [string]$ExpectedVersion = ""
+    )
+
+    if (-not [string]::Equals($Metadata.ProductName, $script:ExpectedProductName, [StringComparison]::Ordinal)) {
+        throw "MSI ProductName is not '$script:ExpectedProductName'."
+    }
+    if (-not [string]::Equals($Metadata.Manufacturer, $script:ExpectedManufacturer, [StringComparison]::Ordinal)) {
+        throw "MSI Manufacturer is not '$script:ExpectedManufacturer'."
+    }
+    if (-not [string]::Equals($Metadata.UpgradeCode, $script:ExpectedUpgradeCode, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "MSI UpgradeCode does not identify the Miru Agent."
+    }
+    if ($Metadata.Template -notmatch '(^|;)x64($|;)') {
+        throw "MSI platform is not x64."
+    }
+
+    $packageVersion = ConvertTo-MsiVersion -Value $Metadata.ProductVersion
+    if ($ExpectedVersion -and -not [string]::Equals($packageVersion, $ExpectedVersion, [StringComparison]::Ordinal)) {
+        throw "MSI version $packageVersion does not match requested version $ExpectedVersion."
+    }
+    return $packageVersion
 }
-Write-Log "Miru Agent installed. Provision it with provision.ps1."
+
+function Invoke-MsiInstall {
+    param(
+        [Parameter(Mandatory = $true)][string]$MsiPath,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+
+    $arguments = @(
+        "/i",
+        ('"{0}"' -f $MsiPath),
+        "/qn",
+        "/norestart",
+        "/l*v",
+        ('"{0}"' -f $LogPath)
+    )
+    $process = Start-Process -FilePath "msiexec.exe" -Wait -PassThru -ArgumentList $arguments
+    return $process.ExitCode
+}
+
+function Get-LatestStableVersion {
+    $response = Invoke-InstallWebRequest -Uri "https://api.github.com/repos/$script:GitHubRepo/releases/latest"
+    $release = $response.Content | ConvertFrom-Json
+    return ConvertTo-MsiVersion -Value $release.tag_name -AllowLeadingV
+}
+
+function Invoke-InstallMain {
+    param(
+        [string]$RequestedVersion = "",
+        [string]$LocalMsi = ""
+    )
+
+    Assert-InstallAdministrator
+    Assert-InstallArchitecture
+
+    $normalizedVersion = ""
+    if ($RequestedVersion) {
+        $normalizedVersion = ConvertTo-MsiVersion -Value $RequestedVersion -AllowLeadingV
+    }
+
+    $downloadDirectory = $null
+    try {
+        if ($LocalMsi) {
+            if (-not (Test-Path -LiteralPath $LocalMsi -PathType Leaf)) {
+                throw "Provided MSI does not exist: $LocalMsi"
+            }
+            $msiPath = (Resolve-Path -LiteralPath $LocalMsi).Path
+        }
+        else {
+            if (-not $normalizedVersion) {
+                Write-InstallLog "Fetching the latest stable release version"
+                $normalizedVersion = Get-LatestStableVersion
+            }
+
+            $downloadDirectory = New-InstallTempDirectory
+            $assetName = "${script:MsiBaseName}_${normalizedVersion}_amd64.msi"
+            $msiPath = Join-Path $downloadDirectory $assetName
+            $checksumsPath = Join-Path $downloadDirectory "checksums.txt"
+            $releaseBase = "https://github.com/$script:GitHubRepo/releases/download/v$normalizedVersion"
+
+            Write-InstallLog "Downloading $assetName"
+            Invoke-InstallWebRequest -Uri "$releaseBase/$assetName" -OutFile $msiPath | Out-Null
+            Invoke-InstallWebRequest -Uri "$releaseBase/agent_${normalizedVersion}_checksums.txt" -OutFile $checksumsPath | Out-Null
+            Assert-FileChecksum -FilePath $msiPath -ChecksumPath $checksumsPath -AssetName $assetName
+            Write-InstallLog "Checksum verified"
+        }
+
+        $metadata = Get-MsiMetadata -Path $msiPath
+        $packageVersion = Assert-MiruMsiMetadata -Metadata $metadata -ExpectedVersion $normalizedVersion
+        Write-InstallLog "Installing Miru Agent $packageVersion"
+
+        $logPath = Join-Path ([IO.Path]::GetTempPath()) "miru-agent-install-$([Guid]::NewGuid().ToString('N')).log"
+        $exitCode = Invoke-MsiInstall -MsiPath $msiPath -LogPath $logPath
+        if ($exitCode -eq 0) {
+            Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+            Write-InstallLog "Miru Agent installed. Provision it with provision.ps1."
+            return 0
+        }
+        if ($exitCode -eq 3010) {
+            Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+            Write-InstallLog "Miru Agent installed; Windows must be restarted to complete the installation."
+            return 3010
+        }
+        throw "msiexec failed with exit code $exitCode. The verbose log was retained at $logPath"
+    }
+    finally {
+        if ($downloadDirectory -and (Test-Path -LiteralPath $downloadDirectory)) {
+            Remove-Item -LiteralPath $downloadDirectory -Recurse -Force
+        }
+    }
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        exit (Invoke-InstallMain -RequestedVersion $Version -LocalMsi $FromMsi)
+    }
+    catch {
+        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}

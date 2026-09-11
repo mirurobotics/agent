@@ -1,22 +1,12 @@
 <#
 .SYNOPSIS
-    Provision (activate) an installed Miru Agent on Windows.
+    Provision an installed Miru Agent, or inspect its provisioning state.
 
 .DESCRIPTION
-    Windows parity for the modern provisioning flow (frontend emits
-    `MIRU_PROVISIONING_TOKEN=... miru-agent provision` on Linux; the pre-0.9
-    scripts/install/provision.sh API-key flow is deprecated). Runs the installed
-    agent's `provision` subcommand with the provisioning token supplied via the
-    MIRU_PROVISIONING_TOKEN environment variable, stopping and restarting the
-    service around it.
-
-    Must run elevated — provisioning writes device identity + keys under
-    %ProgramData%\Miru, and the service runs as LocalSystem.
-
-    SCAFFOLDING — not yet exercised end-to-end (depends on the MSI install).
-
-.PARAMETER Token
-    The provisioning token. Falls back to $env:MIRU_PROVISIONING_TOKEN.
+    Normal provisioning reads its secret only from the process-level
+    MIRU_PROVISIONING_TOKEN environment variable and never places it on the
+    command line. The script invokes the installed console executable directly;
+    Windows service registration and lifecycle are intentionally deferred.
 
 .PARAMETER BackendHost
     Backend API URL. Defaults to the production host.
@@ -25,59 +15,134 @@
     MQTT broker host. Defaults to the production broker.
 
 .PARAMETER Check
-    Run `provision --check` (read-only probe) and exit with the agent's own
-    status code: 0 provisioned, 3 not provisioned, 1 undetermined. Preserves the
-    exit-code contract from `miru-agent provision --check`.
-
-.EXAMPLE
-    $env:MIRU_PROVISIONING_TOKEN = "mpt_..."
-    powershell -ExecutionPolicy Bypass -File provision.ps1 -BackendHost https://api.mirurobotics.com
+    Run the read-only `provision --check` probe. Returns 0 when provisioned, 3
+    when not provisioned, and 1 when state cannot be determined.
 #>
 [CmdletBinding()]
 param(
-    [string]$Token = $env:MIRU_PROVISIONING_TOKEN,
     [string]$BackendHost = "https://api.mirurobotics.com",
     [string]$MqttBrokerHost = "mqtt.mirurobotics.com",
     [switch]$Check
 )
 
 $ErrorActionPreference = "Stop"
-$ServiceName = "MiruAgent"
-$AgentExe = Join-Path ${env:ProgramFiles} "Miru\Agent\miru-agent.exe"
 
-function Write-Log { param($m) Write-Host "==> $m" -ForegroundColor Green }
-function Die { param($m) Write-Host "Error: $m" -ForegroundColor Red; exit 1 }
+function Write-ProvisionLog {
+    param([string]$Message)
 
-if (-not (Test-Path $AgentExe)) {
-    Die "Miru Agent is not installed at $AgentExe. Run install.ps1 first."
+    Write-Host "==> $Message" -ForegroundColor Green
 }
 
-# Read-only probe: mirror `provision --check` and propagate its exit code.
-if ($Check) {
-    & $AgentExe provision --check
-    exit $LASTEXITCODE
+function Get-MiruAgentExecutable {
+    $programFiles64 = [Environment]::GetEnvironmentVariable("ProgramW6432", "Process")
+    if (-not $programFiles64) {
+        $programFiles64 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    }
+    return Join-Path $programFiles64 "Miru\Agent\miru-agent.exe"
 }
 
-if (-not $Token) {
-    Die "No provisioning token. Pass -Token or set MIRU_PROVISIONING_TOKEN."
+function Assert-ProvisionAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw "Run provisioning from an elevated Administrator PowerShell session."
+    }
 }
 
-# Stop the service so provisioning owns the state directory exclusively.
-if ((Get-Service -Name $ServiceName -ErrorAction SilentlyContinue).Status -eq "Running") {
-    Write-Log "Stopping the Miru Agent service"
-    Stop-Service -Name $ServiceName
+function Assert-ProvisionArchitecture {
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        throw "The Miru Agent supports 64-bit Windows only."
+    }
+    if (-not [Environment]::Is64BitProcess) {
+        throw "Run provisioning from 64-bit PowerShell."
+    }
 }
 
-# Always restart the service on the way out, success or failure.
-try {
-    Write-Log "Provisioning the Miru Agent..."
-    $env:MIRU_PROVISIONING_TOKEN = $Token
-    & $AgentExe provision --backend-host=$BackendHost --mqtt-broker-host=$MqttBrokerHost
-    if ($LASTEXITCODE -ne 0) { Die "Provisioning failed (exit $LASTEXITCODE)" }
-    Write-Log "Provisioned successfully."
+function Invoke-MiruAgentProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentPath,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    & $AgentPath @Arguments | ForEach-Object { Write-Host $_ }
+    return $LASTEXITCODE
 }
-finally {
-    $env:MIRU_PROVISIONING_TOKEN = $null
-    Write-Log "Starting the Miru Agent service"
-    Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
+
+function Invoke-ProvisionCheck {
+    param([Parameter(Mandatory = $true)][string]$AgentPath)
+
+    $exitCode = Invoke-MiruAgentProcess -AgentPath $AgentPath -Arguments @("provision", "--check")
+    if ($exitCode -eq 0 -or $exitCode -eq 3) {
+        return $exitCode
+    }
+    return 1
+}
+
+function Invoke-AgentProvision {
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentPath,
+        [Parameter(Mandatory = $true)][string]$Backend,
+        [Parameter(Mandatory = $true)][string]$MqttBroker
+    )
+
+    $tokenName = "MIRU_PROVISIONING_TOKEN"
+    $hadToken = Test-Path -LiteralPath "Env:$tokenName"
+    $originalToken = [Environment]::GetEnvironmentVariable($tokenName, "Process")
+    if ([string]::IsNullOrWhiteSpace($originalToken)) {
+        throw "Set MIRU_PROVISIONING_TOKEN to a non-empty provisioning token."
+    }
+
+    try {
+        [Environment]::SetEnvironmentVariable($tokenName, $originalToken, "Process")
+        Write-ProvisionLog "Provisioning the Miru Agent"
+        $arguments = @(
+            "provision",
+            "--backend-host=$Backend",
+            "--mqtt-broker-host=$MqttBroker"
+        )
+        $exitCode = Invoke-MiruAgentProcess -AgentPath $AgentPath -Arguments $arguments
+        if ($exitCode -ne 0) {
+            throw "Provisioning failed with exit code $exitCode."
+        }
+        Write-ProvisionLog "Provisioned successfully."
+        return 0
+    }
+    finally {
+        if ($hadToken) {
+            [Environment]::SetEnvironmentVariable($tokenName, $originalToken, "Process")
+        }
+        else {
+            [Environment]::SetEnvironmentVariable($tokenName, $null, "Process")
+        }
+    }
+}
+
+function Invoke-ProvisionMain {
+    param(
+        [string]$Backend,
+        [string]$MqttBroker,
+        [bool]$CheckOnly
+    )
+
+    $agentPath = Get-MiruAgentExecutable
+    if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf)) {
+        throw "Miru Agent is not installed at $agentPath. Run install.ps1 first."
+    }
+    if ($CheckOnly) {
+        return Invoke-ProvisionCheck -AgentPath $agentPath
+    }
+
+    Assert-ProvisionAdministrator
+    Assert-ProvisionArchitecture
+    return Invoke-AgentProvision -AgentPath $agentPath -Backend $Backend -MqttBroker $MqttBroker
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        exit (Invoke-ProvisionMain -Backend $BackendHost -MqttBroker $MqttBrokerHost -CheckOnly $Check.IsPresent)
+    }
+    catch {
+        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
 }
