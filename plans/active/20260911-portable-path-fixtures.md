@@ -92,7 +92,7 @@ topics, S3/GCS object keys — `/` is the correct separator; untouched.
 - [x] `agent/tests/logs/mod.rs`: per-OS default expectation (unix literal pinned)
 - [x] `agent/tests/app/state.rs`, `agent/tests/provisioning/check.rs`: temp_dir-based fixtures
 - [x] `./scripts/test.sh` (all green) and `./scripts/lint.sh` clean
-- [ ] Push; CI green; PR opened
+- [x] Push; CI green (lint/test/tools pass); PR opened as #233
 
 ## Surprises & Discoveries
 
