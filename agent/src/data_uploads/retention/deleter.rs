@@ -694,15 +694,15 @@ mod tests {
             assert!(deleter.queue.is_empty());
         }
 
-        // ENOTDIR: the recorded path's parent is a file, so the stat fails.
+        // An embedded NUL makes metadata fail with InvalidInput on every
+        // platform, rather than a platform-dependent flavor of NotFound.
         // The failure is counted like any other, not specially classified.
         #[tokio::test]
         async fn stat_failure_counts_an_attempt() {
-            let parent = temp_file(b"not a dir").await;
-            let child = File::new(parent.file().path().join("child"));
+            let invalid = File::new("invalid\0path");
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            deleter.enqueue(wedged_job(child)).await.unwrap();
+            deleter.enqueue(wedged_job(invalid)).await.unwrap();
 
             deleter.sweep().await.unwrap();
 

@@ -65,6 +65,10 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   Tokio join handle. Compile that helper for Unix production and all unit-test
   builds so its platform-neutral shutdown/error tests continue to run on
   Windows; the socket server initialization itself remains Unix-only.
+- 2026-09-11: the second Windows CI run (34655051306) compiled and ran all 346
+  lib tests; 345 passed. `stat_failure_counts_an_attempt` was the sole failure
+  because Windows maps metadata of a child beneath a file to `NotFound`, so the
+  deleter correctly classified that fixture as already gone instead of retryable.
 
 ## Decision Log
 
@@ -82,6 +86,11 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - 2026-09-11: keep literal `/data/...` JSON in queue wire tests. Build the
   whole-job expected `File` by deserializing that literal, while deriving all
   behavioral queue names through their job factories.
+- 2026-09-11: replace the stat-classification canary's child-beneath-a-file
+  fixture with a path containing an embedded NUL. Rust rejects that path as
+  invalid input before filesystem lookup on Unix and Windows, deterministically
+  exercising the existing non-`NotFound` metadata-error branch without a
+  production seam or behavior change.
 
 ## Outcomes & Retrospective
 
@@ -124,16 +133,13 @@ Compiles + passes on Windows (verified reasoning, left unchanged): `app/run.rs`
 `/tmp/miru.sock` fixtures (stored, never bound on Windows — bind is cfg-skipped),
 `deploy/errors.rs` `/etc/app/config.json` (a `String` field, not a `Path`).
 
-Runtime-uncertain (the narrow stat-classification CANARY — left ungated
-deliberately):
-`src/.../deleter.rs::stat_failure_counts_an_attempt` induces a retryable stat
-failure via ENOTDIR (`stat` of a child-of-a-file) using portable APIs. On Unix
-that is `FileMetadataErr` → `SweepOutcome::Failed`. On Windows it depends on
-whether `metadata(file\child)` returns `NotADirectory` (→ Failed, passes) or
-`PathNotFound` (→ NotFound → `AlreadyGone`, fails). This isolated classification
-check is unverifiable without a Windows runtime and intentionally rides the
-first Windows CI run; it does not block the portable unlink-failure fixture used
-by the broader retry/backoff/persistence coverage.
+Resolved after the second Windows run: the narrow stat-classification canary
+confirmed that Windows maps `metadata(file\child)` to `NotFound`, unlike Unix's
+ENOTDIR. `src/.../deleter.rs::stat_failure_counts_an_attempt` now uses an
+embedded-NUL path, which produces a portable invalid-input metadata error and
+therefore continues to pin the counted-retry branch. The broader retry,
+backoff, attempt-cap, and persistence coverage continues to use the portable
+existing-directory-as-`File` fixture.
 
 ## Plan of Work / Concrete Steps
 
