@@ -2669,6 +2669,7 @@ name = "miru-agent"
 version = "0.10.2"
 dependencies = [
  "atomicwrites",
+ "aws-lc-rs",
  "aws-sdk-s3",
  "aws-smithy-http-client",
  "aws-smithy-types",
@@ -2690,6 +2691,7 @@ dependencies = [
  "nix",
  "openssl",
  "pastey",
+ "pem-rfc7468",
  "reqwest",
  "rumqttc",
  "rumqttd",
