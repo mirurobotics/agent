@@ -13,7 +13,9 @@ use crate::app::{
 use crate::authn::{self, TokenManagerExt};
 use crate::data_uploads::scan;
 use crate::http;
-use crate::server::{self, errors::*, serve::serve};
+#[cfg(unix)]
+use crate::server::unix::serve;
+use crate::server::{self, errors::*};
 use crate::trace;
 use crate::workers::{
     mqtt, poller, sync_scan_bridge,
@@ -137,6 +139,7 @@ async fn init_optional_services(
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
     if options.enable_socket_server {
+        #[cfg(unix)]
         init_socket_server(
             options,
             app_state.clone(),
@@ -145,6 +148,12 @@ async fn init_optional_services(
             shutdown_tx.subscribe(),
         )
         .await?;
+        // The local device API is served over a unix socket; the Windows
+        // transport (localhost TCP + token) is a later roadmap phase.
+        #[cfg(windows)]
+        tracing::warn!(
+            "the local device API server is not supported on windows; ignoring enable_socket_server"
+        );
     }
 
     if options.enable_poller {
@@ -407,6 +416,7 @@ async fn init_delete_worker(
     Ok(())
 }
 
+#[cfg(unix)]
 async fn init_socket_server(
     options: &AppOptions,
     app_state: Arc<AppState>,
@@ -515,6 +525,7 @@ impl ShutdownManager {
         Ok(())
     }
 
+    #[cfg(unix)]
     pub fn with_socket_server_handle(
         &mut self,
         socket_server_handle: JoinHandle<Result<(), ServerErr>>,

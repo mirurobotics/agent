@@ -22,6 +22,7 @@ use miru_agent::version;
 use miru_agent::workers::mqtt;
 
 // external crates
+#[cfg(unix)]
 use tokio::signal::unix::signal;
 use tracing::{error, info};
 
@@ -267,6 +268,15 @@ async fn get_bootstrap_backend_host() -> BackendHost {
     disk::Backend::default().host
 }
 
+#[cfg(windows)]
+async fn await_shutdown_signal() {
+    // Service-control integration (SERVICE_CONTROL_STOP) lands with the
+    // Windows service lifecycle; ctrl-c covers console runs until then.
+    let _ = tokio::signal::ctrl_c().await;
+    info!("received ctrl-c, shutting down...");
+}
+
+#[cfg(unix)]
 async fn await_shutdown_signal() {
     let mut sigterm = signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
     let mut sigint = signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();

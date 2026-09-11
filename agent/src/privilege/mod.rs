@@ -1,16 +1,29 @@
 // internal crates
 pub mod errors;
 pub use self::errors::PrivilegeErr;
+#[cfg(unix)]
 use crate::trace;
 
 // external crates
+#[cfg(unix)]
 use nix::errno::Errno;
+#[cfg(unix)]
 use nix::unistd::{Gid, Uid, User};
+
+/// Windows stub: effective-user verification is a Unix concept (the `miru`
+/// passwd user created by the .deb). On Windows the service account and NTFS
+/// ACLs configured by the installer own this concern; warn and continue.
+#[cfg(windows)]
+pub fn verify_effective_user(_name: &str) -> Result<(), PrivilegeErr> {
+    tracing::warn!("effective-user verification is not supported on windows; skipping");
+    Ok(())
+}
 
 /// Verify that the current effective user matches `name`. Returns
 /// `Ok(())` on match. Returns `WrongUser` if euid or egid does not match,
 /// `UserNotFound` if `name` has no passwd entry, or `Syscall` if the
 /// passwd lookup itself fails.
+#[cfg(unix)]
 pub fn verify_effective_user(name: &str) -> Result<(), PrivilegeErr> {
     let user = lookup_user(name)?;
     let euid = nix::unistd::geteuid();
@@ -21,6 +34,7 @@ pub fn verify_effective_user(name: &str) -> Result<(), PrivilegeErr> {
     verify(euid, egid, &user, name, argv0)
 }
 
+#[cfg(unix)]
 fn lookup_user(name: &str) -> Result<User, PrivilegeErr> {
     let not_found = || PrivilegeErr::UserNotFound {
         name: name.to_string(),
@@ -40,6 +54,7 @@ fn lookup_user(name: &str) -> Result<User, PrivilegeErr> {
     }
 }
 
+#[cfg(unix)]
 fn verify(
     euid: Uid,
     egid: Gid,
@@ -61,7 +76,7 @@ fn verify(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     // standard crates
     use std::ffi::CString;

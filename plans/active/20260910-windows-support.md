@@ -90,8 +90,9 @@ regression is a fleet-wide auth outage, so it gets the staging soak before relea
 **PR 3 — cfg-gates + Windows compile check in CI.** Gate `tokio::signal::unix`,
 `privilege` (Windows: warn-only stub), `.mode()` calls, and the unix-socket server path
 behind `cfg(unix)`; add minimal Windows counterparts (ctrl handlers; no-op modes). Add
-`cargo check --target x86_64-pc-windows-msvc` to the Lint workflow — it cross-compiles
-on the existing Linux runners and prevents Unix-ism regressions from day one.
+`cargo check --target x86_64-pc-windows-msvc` to CI — runs natively on a
+`windows-latest` runner (aws-lc-sys cannot cross-compile from Linux; verified
+2026-09-11) and prevents Unix-ism regressions from day one.
 
 **PR 4 — platform paths.** Per-OS defaults: `disk::Layout` root
 (`/var/lib/miru` ↔ `C:\ProgramData\Miru`), `logs::Options`

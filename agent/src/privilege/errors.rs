@@ -2,6 +2,7 @@
 use crate::errors::Trace;
 
 // external crates
+#[cfg(unix)]
 use nix::errno::Errno;
 
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +25,7 @@ pub enum PrivilegeErr {
         trace: Box<Trace>,
     },
 
+    #[cfg(unix)]
     #[error("syscall '{call}' failed: errno={errno}")]
     Syscall {
         call: &'static str,

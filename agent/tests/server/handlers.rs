@@ -65,7 +65,7 @@ pub mod routes {
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
     };
-    use miru_agent::server::{serve, State};
+    use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
 
     use crate::mocks::http_client::{self as mock, MockClient};
@@ -122,7 +122,7 @@ pub mod routes {
                 shutdown_tx,
             ));
 
-            let app = serve::routes(state.clone());
+            let app = routes::routes(state.clone());
 
             Self {
                 state,
