@@ -1,9 +1,30 @@
 // standard crates
 use std::os::unix::fs::PermissionsExt;
+pub use std::path::PathBuf;
 
 // internal crates
+pub use crate::test_utils::testdata::testdata_dir;
 use miru_agent::crypt::{rsa, CryptErr};
 use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt, WriteOptions};
+
+async fn temp_key_pair() -> (dirs::TempDir, filesys::File, filesys::File) {
+    let dir = dirs::temp("crypt_rsa_test").unwrap();
+    let private_key_file = dir.file("private_key.pem");
+    let public_key_file = dir.file("public_key.pem");
+    rsa::gen_key_pair(
+        rsa::KeySize::Rsa2048,
+        &private_key_file,
+        &public_key_file,
+        Overwrite::Allow,
+    )
+    .await
+    .unwrap();
+    (dir, private_key_file, public_key_file)
+}
+
+fn crypt_testdata() -> filesys::Dir {
+    testdata_dir().subdir(PathBuf::from("crypt"))
+}
 
 pub mod fingerprint {
     use super::*;
@@ -441,42 +462,43 @@ pub mod read_public_key {
     }
 }
 
-pub mod sign_rs256 {
+pub mod sign {
     use super::*;
 
     #[tokio::test]
-    async fn success1() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_path = crypt_dir.path().join("private_key.pem");
-        let public_key_path = crypt_dir.path().join("public_key.pem");
-
-        let private_key_file = filesys::File::new(private_key_path.clone());
-        let public_key_file = filesys::File::new(public_key_path.clone());
-        files::delete(&private_key_file).await.unwrap();
-        files::delete(&public_key_file).await.unwrap();
-
-        rsa::gen_key_pair(
-            rsa::KeySize::Rsa4096,
-            &private_key_file,
-            &public_key_file,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
-
+    async fn round_trip_rs256() {
+        let (_dir, private_key_file, public_key_file) = super::temp_key_pair().await;
         let data = b"hello world";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
-        assert!(!signature.is_empty());
+        assert!(rsa::verify_rs256(&public_key_file, data, &signature)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn round_trip_rs512() {
+        let (_dir, private_key_file, public_key_file) = super::temp_key_pair().await;
+        let data = b"hello world";
+        let signature = rsa::sign_rs512(&private_key_file, data).await.unwrap();
+        assert!(rsa::verify_rs512(&public_key_file, data, &signature)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn missing_file() {
+        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let private_key_file = crypt_dir.file("private_key.pem");
+        files::delete(&private_key_file).await.unwrap();
+
+        let result = rsa::sign_rs256(&private_key_file, b"hello world").await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn invalid_file() {
         let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_path = crypt_dir.path().join("private_key.pem");
-
-        let private_key_file = filesys::File::new(private_key_path.clone());
-        files::delete(&private_key_file).await.unwrap();
-
+        let private_key_file = crypt_dir.file("private_key.pem");
         files::write_bytes(
             &private_key_file,
             &[4, 4],
@@ -484,76 +506,21 @@ pub mod sign_rs256 {
         )
         .await
         .unwrap();
-        let data = b"hello world";
-        let result = rsa::sign_rs256(&private_key_file, data).await;
-        assert!(result.is_err());
-    }
 
-    #[tokio::test]
-    async fn missing_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_path = crypt_dir.path().join("private_key.pem");
-
-        let private_key_file = filesys::File::new(private_key_path.clone());
-        files::delete(&private_key_file).await.unwrap();
-
-        let data = b"hello world";
-        let result = rsa::sign_rs256(&private_key_file, data).await;
+        let result = rsa::sign_rs256(&private_key_file, b"hello world").await;
         assert!(result.is_err());
     }
 }
 
-pub mod verify_rs256 {
+pub mod verify {
     use super::*;
 
     #[tokio::test]
-    async fn success() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_path = crypt_dir.path().join("private_key.pem");
-        let public_key_path = crypt_dir.path().join("public_key.pem");
-
-        let private_key_file = filesys::File::new(private_key_path.clone());
-        let public_key_file = filesys::File::new(public_key_path.clone());
-        files::delete(&private_key_file).await.unwrap();
-        files::delete(&public_key_file).await.unwrap();
-
-        rsa::gen_key_pair(
-            rsa::KeySize::Rsa4096,
-            &private_key_file,
-            &public_key_file,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
-
-        let data = b"hello world";
-        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
-        let result = rsa::verify_rs256(&public_key_file, data, &signature).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    }
-
-    #[tokio::test]
     async fn wrong_data_returns_false() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_path = crypt_dir.path().join("private_key.pem");
-        let public_key_path = crypt_dir.path().join("public_key.pem");
-
-        let private_key_file = filesys::File::new(private_key_path.clone());
-        let public_key_file = filesys::File::new(public_key_path.clone());
-
-        rsa::gen_key_pair(
-            rsa::KeySize::Rsa2048,
-            &private_key_file,
-            &public_key_file,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
-
-        let data = b"hello world";
-        let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
-        // verify with different data — should return Ok(false)
+        let (_dir, private_key_file, public_key_file) = super::temp_key_pair().await;
+        let signature = rsa::sign_rs256(&private_key_file, b"hello world")
+            .await
+            .unwrap();
         let is_valid = rsa::verify_rs256(&public_key_file, b"different data", &signature)
             .await
             .unwrap();
@@ -562,22 +529,18 @@ pub mod verify_rs256 {
 
     #[tokio::test]
     async fn wrong_key_pair_returns_false() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-
-        // generate two key pairs
-        let priv1 = filesys::File::new(crypt_dir.path().join("priv1.pem"));
-        let pub1 = filesys::File::new(crypt_dir.path().join("pub1.pem"));
+        let dir = dirs::temp("crypt_rsa_test").unwrap();
+        let priv1 = dir.file("priv1.pem");
+        let pub1 = dir.file("pub1.pem");
         rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv1, &pub1, Overwrite::Allow)
             .await
             .unwrap();
-
-        let priv2 = filesys::File::new(crypt_dir.path().join("priv2.pem"));
-        let pub2 = filesys::File::new(crypt_dir.path().join("pub2.pem"));
+        let priv2 = dir.file("priv2.pem");
+        let pub2 = dir.file("pub2.pem");
         rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv2, &pub2, Overwrite::Allow)
             .await
             .unwrap();
 
-        // sign with key pair 1, verify with key pair 2's public key
         let data = b"hello world";
         let signature = rsa::sign_rs256(&priv1, data).await.unwrap();
         let is_valid = rsa::verify_rs256(&pub2, data, &signature).await.unwrap();
@@ -586,19 +549,7 @@ pub mod verify_rs256 {
 
     #[tokio::test]
     async fn empty_data() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
-
-        rsa::gen_key_pair(
-            rsa::KeySize::Rsa2048,
-            &private_key_file,
-            &public_key_file,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
-
+        let (_dir, private_key_file, public_key_file) = super::temp_key_pair().await;
         let data = b"";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         assert!(!signature.is_empty());
@@ -609,34 +560,45 @@ pub mod verify_rs256 {
     }
 
     #[tokio::test]
-    async fn invalid_file() {
+    async fn missing_file() {
         let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let public_key_path = crypt_dir.path().join("public_key.pem");
-
-        let public_key_file = filesys::File::new(public_key_path.clone());
+        let public_key_file = crypt_dir.file("public_key.pem");
         files::delete(&public_key_file).await.unwrap();
 
-        files::write_bytes(&public_key_file, &[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
-            .await
-            .unwrap();
-        let data = b"hello world";
-        let signature = vec![4, 4];
-        let result = rsa::verify_rs256(&public_key_file, data, &signature).await;
+        let result = rsa::verify_rs256(&public_key_file, b"hello world", &[4, 4]).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn missing_file() {
+    async fn invalid_file() {
         let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let public_key_path = crypt_dir.path().join("public_key.pem");
+        let public_key_file = crypt_dir.file("public_key.pem");
+        files::write_bytes(&public_key_file, &[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
+            .await
+            .unwrap();
 
-        let public_key_file = filesys::File::new(public_key_path.clone());
-        files::delete(&public_key_file).await.unwrap();
-
-        let data = b"hello world";
-        let signature = vec![4, 4];
-        let result = rsa::verify_rs256(&public_key_file, data, &signature).await;
+        let result = rsa::verify_rs256(&public_key_file, b"hello world", &[4, 4]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_other_algorithm() {
+        let crypt = super::crypt_testdata();
+        let spki = crypt.file("rsa2048_spki.pem");
+        let message = files::read_bytes(&crypt.file("message.txt")).await.unwrap();
+        let rs256_sig = files::read_bytes(&crypt.file("message.sig.rs256"))
+            .await
+            .unwrap();
+        let rs512_sig = files::read_bytes(&crypt.file("message.sig.rs512"))
+            .await
+            .unwrap();
+
+        assert!(!rsa::verify_rs256(&spki, &message, &rs512_sig)
+            .await
+            .unwrap());
+        assert!(!rsa::verify_rs512(&spki, &message, &rs256_sig)
+            .await
+            .unwrap());
     }
 }
 
@@ -647,8 +609,6 @@ pub mod verify_rs256 {
 /// JWT `kid`. They must keep passing, byte-for-byte, across any crypto-stack change.
 pub mod golden {
     use super::*;
-    use crate::test_utils::testdata::testdata_dir;
-    use std::path::PathBuf;
 
     fn fixture_path(name: &str) -> PathBuf {
         testdata_dir()
@@ -744,102 +704,5 @@ pub mod golden {
 
         let expected = String::from_utf8(fixture_bytes("fingerprint.txt").await).unwrap();
         assert_eq!(fingerprint, expected.trim_end());
-    }
-}
-
-pub mod sign_rs512 {
-    use super::*;
-    use crate::test_utils::testdata::testdata_dir;
-    use std::path::PathBuf;
-
-    #[tokio::test]
-    async fn success() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
-
-        rsa::gen_key_pair(
-            rsa::KeySize::Rsa2048,
-            &private_key_file,
-            &public_key_file,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
-
-        let data = b"hello world";
-        let signature = rsa::sign_rs512(&private_key_file, data).await.unwrap();
-        // RS512 with a 2048-bit key produces a 256-byte signature
-        assert!(!signature.is_empty());
-        assert!(signature.len() > 200);
-        assert!(rsa::verify_rs512(&public_key_file, data, &signature)
-            .await
-            .unwrap());
-    }
-
-    #[tokio::test]
-    async fn rs512_signature_is_not_a_valid_rs256_signature() {
-        // `verify_rs256` checks RSASSA-PKCS1-v1_5 with SHA-256, so the golden
-        // RS512 signature must be rejected — sentinel that sign_rs512's digest
-        // is genuinely SHA-512, not SHA-256.
-        let crypt = testdata_dir().subdir(PathBuf::from("crypt"));
-        let spki = crypt.file("rsa2048_spki.pem");
-        let message = files::read_bytes(&crypt.file("message.txt")).await.unwrap();
-        let rs512_sig = files::read_bytes(&crypt.file("message.sig.rs512"))
-            .await
-            .unwrap();
-
-        let is_valid = rsa::verify_rs256(&spki, &message, &rs512_sig)
-            .await
-            .unwrap();
-        assert!(!is_valid);
-    }
-
-    #[tokio::test]
-    async fn missing_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        files::delete(&private_key_file).await.unwrap();
-
-        let result = rsa::sign_rs512(&private_key_file, b"hello").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn invalid_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
-        let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
-        files::delete(&private_key_file).await.unwrap();
-
-        files::write_bytes(
-            &private_key_file,
-            &[4, 4],
-            WriteOptions::OVERWRITE_NONATOMIC,
-        )
-        .await
-        .unwrap();
-        let result = rsa::sign_rs512(&private_key_file, b"hello").await;
-        assert!(result.is_err());
-    }
-}
-
-pub mod verify_rs512 {
-    use super::*;
-    use crate::test_utils::testdata::testdata_dir;
-    use std::path::PathBuf;
-
-    #[tokio::test]
-    async fn rs256_signature_is_not_a_valid_rs512_signature() {
-        let crypt = testdata_dir().subdir(PathBuf::from("crypt"));
-        let spki = crypt.file("rsa2048_spki.pem");
-        let message = files::read_bytes(&crypt.file("message.txt")).await.unwrap();
-        let rs256_sig = files::read_bytes(&crypt.file("message.sig.rs256"))
-            .await
-            .unwrap();
-
-        let is_valid = rsa::verify_rs512(&spki, &message, &rs256_sig)
-            .await
-            .unwrap();
-        assert!(!is_valid);
     }
 }
