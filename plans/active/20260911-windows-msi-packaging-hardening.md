@@ -20,7 +20,7 @@ The PowerShell installer refuses an unexpected or malformed MSI, verifies an exa
 
 ## Progress
 
-Implementation started at `8d962afbfd9ea2d01cd70f0197225cafa3cff7ad`. `git merge-base --is-ancestor origin/main 8d962afbfd9ea2d01cd70f0197225cafa3cff7ad` exits 0, verifying that the current `origin/main` is an ancestor of that implementation start.
+Implementation started at `92cb9254fe4ee14e455d5041dc07d1b94da2be04`. `git merge-base --is-ancestor origin/main 92cb9254fe4ee14e455d5041dc07d1b94da2be04` exits 0, verifying that the current `origin/main` is an ancestor of that implementation start.
 
 - [x] Remove every production service declaration and commit one stable UpgradeCode.
 - [x] Add the pinned x64 WiX project, required-input checks, and stable-only MSI version validation.
@@ -44,7 +44,7 @@ After that checklist is complete and committed, post-closure push, CLEAN verific
 
 ## Surprises & Discoveries
 
-- Source implementation was committed as `de20ad4e5e7a85ce39d9b13501a5c90de22ff772` (`feat(windows): harden MSI packaging tools`), `9f515614fa96b1f2d7bb76d12bb60ca5ad857c23` (`fix(windows): repair MSI maintenance behavior`), and `729fbdf90b3f6efbb0cb230393e7314464a9fd63` (`test(windows): validate MSI package lifecycle`). The planned milestone checkpoints were omitted, so the checked Progress items above record source inspection only, not Windows execution or current-head CI evidence.
+- Source implementation was committed as `bcc152ec168b46734cac13929c6f03eb96cfda6f` (`feat(windows): harden MSI packaging tools`), `d276bebf7e8d9929f3955670fb14fe83403f200e` (`fix(windows): repair MSI maintenance behavior`), and `1ac94f73a7672538e38ff4fb3874f9b02b04c696` (`test(windows): validate MSI package lifecycle`). The planned milestone checkpoints were omitted, so the checked Progress items above record source inspection only, not Windows execution or current-head CI evidence.
 
 ## Decision Log
 
