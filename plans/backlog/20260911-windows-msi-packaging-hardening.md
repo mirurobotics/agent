@@ -8,7 +8,7 @@ This ExecPlan is a living document. Keep Progress, Surprises & Discoveries, Deci
 |---|---|---|
 | `mirurobotics/agent` | read-write | Harden PR #236's WiX MSI and PowerShell tools, add native Windows validation, and correct the agent Windows roadmap. |
 
-This plan lives in `plans/backlog/` in the agent repository because every implementation and validation change belongs to that repository. The workbench and other Miru repositories are out of scope and must not be modified. The base branch is `main`; implementation continues the draft branch `feat/windows-msi-packaging` and PR #236.
+This plan lives in `plans/backlog/` in the agent repository because every implementation and validation change belongs to that repository. Keep it there throughout implementation and closure; do not prescribe a lifecycle directory move as part of this work. The workbench and other Miru repositories are out of scope and must not be modified. The base branch is `main`; implementation continues the draft branch `feat/windows-msi-packaging` and PR #236.
 
 This work deliberately does not add Windows Service Control Manager integration, service install/start/stop/recovery behavior, a release or GoReleaser build lane, artifact publication, PDB handling, or Authenticode signing. Those are separate roadmap changes. In particular, do not make the current console-capable executable pretend to be a Windows service.
 
@@ -24,7 +24,7 @@ The PowerShell installer refuses an unexpected or malformed MSI, verifies an exa
 - [ ] Remove every production service declaration and commit one stable UpgradeCode.
 - [ ] Add the pinned x64 WiX project, required-input checks, and stable-only MSI version validation.
 - [ ] Implement protected ProgramData ACLs, transactional upgrades, and state-preserving uninstall behavior.
-- [ ] Build and inspect valid MSIs and reject invalid build inputs.
+- [ ] Build and inspect normal and boundary-valid MSIs and reject invalid build inputs.
 - [ ] Commit Milestone 1.
 - [ ] Harden `scripts/install/install.ps1` and its tests.
 - [ ] Harden `scripts/install/provision.ps1` and its tests.
@@ -34,9 +34,11 @@ The PowerShell installer refuses an unexpected or malformed MSI, verifies an exa
 - [ ] Run the native integration matrix and wire the same entry point into Windows CI.
 - [ ] Commit Milestone 3.
 - [ ] Update Windows packaging docs and the umbrella plan, then run repository-wide validation.
-- [ ] Commit Milestone 4 and push the exact branch head.
+- [ ] Commit Milestone 4 and push the exact branch head from a clean working tree.
 - [ ] Run the clean Windows 10/11 VM smoke pass on that pushed commit and update PR #236's body with the evidence.
-- [ ] Run preflight until it reports CLEAN for the pushed SHA; only then undraft or report completion.
+- [ ] Run preflight until it reports CLEAN, then prepare Progress and Outcomes & Retrospective with the smoke-tested and first-CLEAN implementation SHA and evidence for the focused plan-only closure commit, which is the final repository mutation.
+
+After that checklist is complete and committed, post-closure push, CLEAN verification, exact SHA/check comparison, PR-body update, and undrafting are external closure actions. Record them only in the verified PR body and final task result, not by another plan edit or checklist update.
 
 ## Surprises & Discoveries
 
@@ -44,7 +46,12 @@ Add short observations and supporting command or test evidence as work proceeds.
 
 ## Decision Log
 
-Add dated implementation decisions here as they are made. Record any revision to this plan and its reason.
+- Decision: Refined the authored plan to make package and boundary validation, PowerShell parsing and TLS restoration, ACL reapplication, the rollback fixture, branch review, and closure-head verification deterministic and directly executable.
+  Rationale: The prior draft omitted valid MSI boundary builds and crossed TLS cases, under-specified maintenance/upgrade ACL repair, contained an unsupported rollback action and shared parser error-array bug, and allowed plan mutations after closure or readiness checks against a superseded head.
+  Date/Author: 2026-09-11, Codex.
+- Decision: Keep this plan in backlog as a restartable milestone checkpoint, then make the plan-only evidence closure commit the final repository mutation and verify that closure head externally.
+  Rationale: The plan records smoke evidence and the first-CLEAN implementation SHA; the verified PR body and final task result are authoritative for `Preflight: CLEAN on <immutable closure SHA>`, so no later plan-only commit records post-closure CLEAN.
+  Date/Author: 2026-09-11, Codex.
 
 ## Outcomes & Retrospective
 
@@ -76,7 +83,9 @@ In `build/windows/miru-agent.wxs`, replace the placeholder UpgradeCode with a ne
 
 Replace appended Util permissions with core WiX `PermissionEx` using a protected, inheritable SYSTEM-and-Administrators-only DACL on `%ProgramData%\Miru` and every separately authored sensitive child directory. Ensure a repair or upgrade reapplies the descriptor to a pre-existing tree. No generic users, authenticated users, current user, or inherited parent ACE may retain access.
 
-Add `build/windows/miru-agent.wixproj` using `WixToolset.Sdk` version 5.0.2. Make x64, warnings-as-errors, MSI/ICE validation, and required `Version` and `BinDir` inputs explicit. Add a small version-validation build target or equivalent source-generation check that accepts only stable numeric three-part versions within Windows Installer bounds. Use the SemVer string only for release-facing display or asset names; do not silently strip a `v`, prerelease label, build label, or fourth field at the MSI boundary. Add package metadata inspection to the Windows test harness so it verifies ProductName, Manufacturer, ProductVersion, UpgradeCode, ProductCode changes between versions, and x64 Summary Information.
+Add `build/windows/miru-agent.wixproj` using `WixToolset.Sdk` version 5.0.2. Make x64, warnings-as-errors, MSI/ICE validation, and required `Version` and `BinDir` inputs explicit. Add a small version-validation build target or equivalent source-generation check that accepts only stable numeric three-part versions within Windows Installer bounds. Use the SemVer string only for release-facing display or asset names; do not silently strip a `v`, prerelease label, build label, or fourth field at the MSI boundary.
+
+Create `build/windows/tests/package-tests.ps1` as the single package-contract harness with required `-ProjectPath`, `-BinDir`, and `-ArtifactsDirectory` parameters. It may delete and recreate only its deterministic `v1`, `v2`, `boundaries`, `invalid`, and `logs` children below the supplied artifacts directory. It builds versions 1.0.0 and 1.1.0, copies the results to `build/windows/artifacts/package-tests/v1/miru-agent-1.0.0.msi` and `build/windows/artifacts/package-tests/v2/miru-agent-1.1.0.msi`, runs MSI/ICE validation, and inspects both packages for ProductName, Manufacturer, ProductVersion, UpgradeCode, ProductCode, and x64 Summary Information. It must assert that the two ProductCodes differ and their UpgradeCode is identical. It also builds, validates, and inspects the expected-success boundary packages at `build/windows/artifacts/package-tests/boundaries/miru-agent-0.0.0.msi` and `build/windows/artifacts/package-tests/boundaries/miru-agent-255.255.65535.msi`, and emits exactly `PASS version boundaries (0.0.0, 255.255.65535)`. Finally, it invokes expected-failure builds for omitted and empty `Version`, omitted and empty `BinDir`, `1.2.3-beta.1`, `1.2.3.4`, `256.0.0`, `1.256.0`, and `1.2.65536`, failing the harness if any invalid build succeeds or lacks the expected input/version diagnostic.
 
 Build at least two valid versions and invalid-version cases on Windows. Run WiX's MSI/ICE validation with warnings as errors where possible; if a platform ICE produces a documented false positive, narrowly suppress that ICE in the project and explain the evidence in `build/windows/README.md`, never suppress all validation.
 
@@ -86,7 +95,7 @@ Refactor `scripts/install/install.ps1` into small functions that can be exercise
 
 Remove the `-Prerelease` switch because this PR intentionally does not support prerelease MSIs. Continue accepting a leading `v` in stable release input for download naming, but validate the resulting value against the strict MSI version contract rather than stripping any other suffix.
 
-For downloads, create a cryptographically unique directory below the system temporary directory. Clean it in `finally` on success or handled failure. Parse the checksum file as records: exactly one line must contain exactly 64 hexadecimal digest characters and the exact MSI filename, with normal checksum-file whitespace/optional binary marker syntax but no substring filename matches. Reject zero matches, duplicate matches, malformed digests, and case variants of the filename; compare normalized digests with an invariant ordinal comparison. Document that checksums detect corruption but do not authenticate the publisher because Authenticode signing is deferred.
+For downloads, create a cryptographically unique directory below the system temporary directory. Clean it in `finally` on success or handled failure. Parse the checksum file as records: exactly one line must contain exactly 64 hexadecimal digest characters and the exact MSI filename, with normal checksum-file whitespace/optional binary marker syntax but no substring filename matches. Reject zero matches, duplicate matches, malformed digests, and case variants of the filename; compare normalized digests with an invariant ordinal comparison. Exercise TLS compatibility with four focused cases: TLS 1.2 initially absent and initially present, each crossed with an injected successful request and an injected throwing request. Every case must restore the exact original `[System.Net.ServicePointManager]::SecurityProtocol` value, and the test harness must restore its own original value in an outer `finally`. Document that checksums detect corruption but do not authenticate the publisher because Authenticode signing is deferred.
 
 Before invoking `msiexec`, query the MSI through the Windows Installer API. Require Miru's exact ProductName and Manufacturer, the committed UpgradeCode, x64 platform metadata, and a valid three-part MSI ProductVersion. If `-Version` accompanies `-FromMsi`, require an exact version match after only the explicitly documented leading `v` normalization at the release-input boundary; otherwise report the metadata version being installed. Reject an unknown MSI before any state change. Invoke `msiexec` with an argument array that preserves paths containing spaces. Exit 0 for success, clearly report and propagate 3010 for success requiring reboot, and retain a verbose log only for installation failure. The error must name the retained log path.
 
@@ -94,17 +103,19 @@ In `scripts/install/provision.ps1`, remove the public `-Token` parameter. Normal
 
 Keep `-Check` a direct read-only probe. It must return the executable's exact 0 (provisioned), 3 (not provisioned), or 1 (undetermined/error) status without translating 3 into a generic failure, and must preserve useful non-secret output. Add dependency-free script tests for elevation failing before side effects, 32-bit rejection, exact checksum parsing, local MSI metadata rejection, temp cleanup, 3010 handling, argument quoting, `-Check` passthrough, absence of token arguments/output, environment restoration on success and failure, and direct invocation without service operations. Use injectable functions or test-only command shims rather than weakening production checks.
 
+Add `build/windows/tests/parse-scripts.ps1` in this milestone. It parses `scripts/install/install.ps1` and `scripts/install/provision.ps1` separately, with a distinct token array and error array for each call to `[System.Management.Automation.Language.Parser]::ParseFile`. It aggregates errors only after both parses, includes the source path in every diagnostic, prints both source paths and the aggregate error count, and exits 1 when that count is nonzero. Keeping the arrays separate prevents the second parse from overwriting or obscuring errors from the first.
+
 ### Milestone 3: native Windows integration
 
 Add an integration script and a test-only WiX fragment under `build/windows/tests/`, and wire the script into `.github/workflows/ci.yml` on `windows-latest`. Reuse PR #234's Rust target and NASM setup, restore the pinned WiX SDK, build the actual x64 executable, and build MSI versions 1.0.0, 1.1.0, and a test-only 1.2.0 package whose deferred test action fails after replacement has begun. Give these fixtures a fixed allowlist of three test ProductCodes. Before doing anything, the harness must refuse to run if it finds an installed Miru product whose ProductCode is not on that allowlist. This makes cleanup deterministic on an ephemeral runner while the packages retain the production UpgradeCode and metadata needed to test the real upgrade relationship. Never run automated cleanup against an arbitrary workstation or customer machine.
 
-Make the v3 failure executable and isolated: compile a test-only WiX fragment that defines a type-19 error custom action named `FailUpgradeForTest`, schedules it after `InstallFiles` and before `InstallFinalize`, and conditions it on a test-only public property such as `FAIL_UPGRADE_FOR_TEST=1`. Include that fragment only in integration packages; the production project build must prove it is absent. Invoke the v3 MSI with that property so failure happens after the old product has entered the transaction and replacement files have been processed. Do not use file locking or an early launch-condition failure, because neither reliably proves rollback.
+Make the v3 failure executable and isolated: compile a test-only WiX fragment that defines a Type 34 executable custom action named `FailUpgradeForTest`. Its executable is `[SystemFolder]cmd.exe`, its arguments are `/d /c exit /b 1`, and it uses `Execute=deferred`, `Return=check`, and `Impersonate=no`. Schedule it after `InstallFiles` and before `InstallFinalize`, conditioned on `FAIL_UPGRADE_FOR_TEST=1`. Include the fragment only in integration packages, and make package inspection prove the production MSI contains no `FailUpgradeForTest` custom action, sequence row, or `FAIL_UPGRADE_FOR_TEST` condition. Invoke the v3 MSI with that property so failure happens after the old product has entered the transaction and replacement files have been processed. Do not use file locking or an early launch-condition failure, because neither reliably proves rollback.
 
-On the elevated Windows runner, first create a permissive pre-existing `%ProgramData%\Miru` tree with a sentinel and a representative secret file. Install v1 through `scripts/install/install.ps1 -FromMsi`. Assert the executable path and file version/metadata, x64 MSI and installed-product metadata, the stable UpgradeCode, exactly one Add/Remove Programs product, and no `MiruAgent` service. Check the effective DACL with Windows security APIs and `icacls`; create a temporary local non-admin account and run read/create probes under that identity to prove it cannot read the representative secret or create a child. Also prove SYSTEM and Administrators have inheritable full control and the permissive pre-existing ACE was removed.
+On the elevated Windows runner, first create a permissive pre-existing `%ProgramData%\Miru` tree with a sentinel and a representative secret file. Add a test-only `%ProgramData%\Miru\rollback-payload.txt` component whose deterministic contents are `fixture-v1`, `fixture-v2`, and `fixture-v3` in the three integration MSIs; it must not enter the production package. Install v1 through `scripts/install/install.ps1 -FromMsi`. Assert the executable exists and record its SHA-256 hash, assert `rollback-payload.txt` contains `fixture-v1`, and verify x64 MSI and installed-product metadata, the stable UpgradeCode, exactly one Add/Remove Programs product, and no `MiruAgent` service. Do not claim a Windows executable file-version resource unless the build actually provides one. Check the effective DACL with Windows security APIs and `icacls`; create a temporary local non-admin account and run read/create probes under that identity to prove it cannot read the representative secret or create a child. Also prove SYSTEM and Administrators have inheritable full control and the permissive pre-existing ACE was removed. Deliberately add the same permissive test ACE again, run same-MSI v1 maintenance, and reuse the account and probes to prove maintenance restores the protected SYSTEM/Administrators-only DACL and denies the non-admin. Add the ACE a third time immediately before the v1-to-v2 upgrade and leave it in place for that upgrade to repair.
 
 Run `scripts/install/provision.ps1 -Check` before provisioning. Expect exit 3 and the agent's not-provisioned output. A real successful provision requires a backend and remains a staging/manual test, but use a fake executable in the focused tests to prove argument and token handling without exposing the token.
 
-Upgrade v1 to v2 and assert the sentinel survives, v2 is installed, only one product is registered, and the ACL remains protected. Attempt v1 over v2 and expect the configured downgrade message with v2 intact. Re-run the v2 MSI and assert maintenance succeeds without duplicate products or state loss. Attempt the deliberately failing v3 test package and assert a nonzero MSI result, then prove v2's executable/product registration and the sentinel were restored. Finally uninstall v2 and assert the executable, product registration, and installer-owned registry metadata are gone while `%ProgramData%\Miru`, its sentinel, and protected ACL remain. Retain verbose MSI logs as CI artifacts only when a packaging test fails. Always delete the temporary local user and test-generated files in `finally`.
+Upgrade v1 to v2 and reuse the account and probes to prove the upgrade removes the newly added permissive ACE, restores only the protected SYSTEM/Administrators permissions, and denies non-admin read/create access. Assert the sentinel survives, `rollback-payload.txt` contains `fixture-v2`, the executable exists with the captured v2 SHA-256 hash, and only one product is registered. Attempt v1 over v2 and expect the configured downgrade message with the v2 payload and executable hash intact. Attempt the deliberately failing v3 test package and assert a nonzero MSI result, then prove the v2 executable hash, product registration, sentinel, and `fixture-v2` payload were restored rather than `fixture-v3` remaining. Finally uninstall v2 and assert the executable, product registration, installer-owned registry metadata, and test-only `rollback-payload.txt` are gone while `%ProgramData%\Miru`, its sentinel, and protected ACL remain. Retain verbose MSI logs as CI artifacts only when a packaging test fails. Always delete the temporary local user and any leftover test marker safely in `finally` after retention assertions.
 
 Add a `-ManualProductionSmoke` mode to the integration script and document a clean Windows 10 or 11 x64 VM smoke pass in `build/windows/README.md`. This mode refuses to run unless the operator confirms the machine is a disposable clean snapshot with no installed Miru product; records Windows product name, version, build number, MSI hashes and versions, timestamps, and every assertion in a transcript path supplied by the operator; uses the production package identity and `%ProgramData%\Miru`; and covers install, maintenance, upgrade, uninstall, and reboot handling when 3010 is returned. It must repeat the no-service assertion and leave the retained ProgramData sentinel for human inspection before the VM snapshot is discarded. Full provisioning, service behavior, release download/publication, signing, and Windows Server certification remain outside this PR.
 
@@ -114,7 +125,7 @@ Rewrite `build/windows/README.md` from “scaffolding” to the buildable and va
 
 Update `plans/active/20260910-windows-support.md` to record that PR #234's native Windows compile gate has merged and to describe PR #236 accurately as an x64 package plus safe PowerShell tooling, without service registration. Preserve later roadmap ownership for real service lifecycle/recovery/account handling, release build/publication, and signing. Update PR #236's body with the same scope and validation evidence after the branch is pushed.
 
-Run all repository checks, inspect `Cargo.lock` and the full diff, push the exact head, and invoke the repository's `$preflight` workflow against PR #236. If preflight finds anything, fix it, commit the fix with a focused Conventional Commit, push the new head, and rerun preflight. Do not remove draft status and do not report implementation complete until preflight returns **CLEAN** for the current pushed SHA and GitHub CI is green on that same SHA.
+Run all repository checks, inspect `Cargo.lock` and the full diff, and push the exact head only after `git status --short` is empty. Invoke the repository's `$preflight` workflow against PR #236. If preflight finds anything, fix it, commit the fix with a focused Conventional Commit, require a clean working tree before pushing the new head, and rerun preflight. After final smoke evidence and a first CLEAN result exist on the implementation SHA, update this backlog plan with that exact SHA and evidence, then make and push a focused plan-only closure commit as the final repository mutation. Rerun preflight on that immutable closure head; record its CLEAN result in the verified PR body and final task result, never in a further plan-only commit. Do not perform final SHA comparisons, claim CLEAN in the PR body, remove draft status, or report implementation complete until preflight returns **CLEAN** and GitHub CI is green on the exact closure head.
 
 ## Concrete Steps
 
@@ -136,33 +147,32 @@ For Milestone 1, generate the UpgradeCode once on Windows, record it in source a
     [guid]::NewGuid().ToString().ToUpperInvariant()
     cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked
     dotnet restore build/windows/miru-agent.wixproj
-    dotnet build build/windows/miru-agent.wixproj -c Release -p:Platform=x64 -p:Version=1.0.0 -p:BinDir="$PWD/target/x86_64-pc-windows-msvc/debug" -warnaserror
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -MsiPath build\windows\bin\x64\Release\miru-agent.msi -ExpectedVersion 1.0.0
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\debug -ArtifactsDirectory build\windows\artifacts\package-tests
 
-Expected: the Rust build and WiX build succeed; package validation reports no unsuppressed warnings or ICE errors; metadata tests report x64, version 1.0.0, and the committed UpgradeCode. Builds omitting either property, and builds using `1.2.3-beta.1`, `1.2.3.4`, `256.0.0`, `1.256.0`, or `1.2.65536`, must fail with a clear version/input error. Adjust output paths in the test invocation to the actual deterministic project output path and document it.
+Expected: the Rust build and restore succeed. The harness exits 0; leaves the valid packages exactly at `build/windows/artifacts/package-tests/v1/miru-agent-1.0.0.msi`, `build/windows/artifacts/package-tests/v2/miru-agent-1.1.0.msi`, `build/windows/artifacts/package-tests/boundaries/miru-agent-0.0.0.msi`, and `build/windows/artifacts/package-tests/boundaries/miru-agent-255.255.65535.msi`; builds, validates, and inspects all four; and reports `PASS package 1.0.0`, `PASS package 1.1.0`, `PASS ProductCodes differ`, `PASS UpgradeCode stable`, `PASS version boundaries (0.0.0, 255.255.65535)`, and `PASS invalid inputs rejected (9 cases)`. Package validation has no unsuppressed warning or ICE error. The nine expected failures are omitted `Version`, empty `Version`, omitted `BinDir`, empty `BinDir`, and versions `1.2.3-beta.1`, `1.2.3.4`, `256.0.0`, `1.256.0`, and `1.2.65536`.
 
-Review and commit only Milestone 1 files.
+Before reviewing or committing Milestone 1, update this plan's Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective as applicable with the milestone's exact test evidence and decisions. Review and commit only Milestone 1 files plus this plan checkpoint.
 
     cd /home/ben/miru/workbench5/repos/agent
     git diff --check
-    git diff -- build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests
-    git add build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests
+    git diff -- build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git add build/windows/miru-agent.wxs build/windows/miru-agent.wixproj build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
     git commit -m "feat(windows): harden MSI package contract"
 
 For Milestone 2, parse both scripts with Windows PowerShell 5.1 and run the dependency-free focused harness. A secondary `pwsh` parse is useful when available, but it does not replace 5.1. From an x64 Windows PowerShell 5.1 session in `C:\src\agent`, run:
 
     Set-Location C:\src\agent
-    powershell.exe -NoProfile -Command "$e=$null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/install/install.ps1'),[ref]$null,[ref]$e) > $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/install/provision.ps1'),[ref]$null,[ref]$e) > $null; if ($e.Count) { $e | Format-List; exit 1 }"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\parse-scripts.ps1
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\script-tests.ps1
 
-Expected: parsing exits 0 with no errors and the harness reports every checksum, metadata, elevation, cleanup, reboot, check-exit, environment, argument, and secret-hygiene case passed. A canary token must not appear in captured process arguments, stdout, stderr, or retained logs.
+Expected: the parser names `scripts/install/install.ps1` and `scripts/install/provision.ps1`, reports `Aggregate parse errors: 0`, and exits 0. The focused harness reports every checksum, metadata, elevation, cleanup, reboot, check-exit, environment, argument, and secret-hygiene case passed, including the exact line `PASS TLS 1.2 protocol restoration (4 cases)`. Those four cases cross TLS 1.2 initially absent/present with an injected successful/throwing request, assert the exact original protocol value after each call, and use an outer `finally` to restore the harness's own original value. A canary token must not appear in captured process arguments, stdout, stderr, or retained logs.
 
-Review and commit only Milestone 2 files.
+Before reviewing or committing Milestone 2, update this plan's Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective as applicable with the milestone's exact test evidence and decisions. Review and commit only Milestone 2 files plus this plan checkpoint.
 
     cd /home/ben/miru/workbench5/repos/agent
     git diff --check
-    git diff -- scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests
-    git add scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests
+    git diff -- scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git add scripts/install/install.ps1 scripts/install/provision.ps1 build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
     git commit -m "feat(windows): harden install and provision scripts"
 
 For Milestone 3, run the complete integration script from an elevated x64 Windows PowerShell session in `C:\src\agent`. CI must invoke the same entry point after building the real executable and MSIs.
@@ -170,17 +180,17 @@ For Milestone 3, run the complete integration script from an elevated x64 Window
     Set-Location C:\src\agent
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release
 
-Expected: the script reports PASS for initial install, pre-existing ACL correction, non-admin denial, check exit 3, v1-to-v2 upgrade, downgrade rejection, same-MSI maintenance, failed-v3 rollback, uninstall state retention, and absence of a `MiruAgent` service. It exits 0 and leaves no test account or installed Miru product behind.
+Expected: the script reports PASS for initial install, pre-existing ACL correction, non-admin denial, check exit 3, same-MSI v1 maintenance ACL restoration after the permissive ACE is re-added, v1-to-v2 upgrade ACL restoration after it is re-added again, downgrade rejection, failed-v3 rollback, uninstall state retention, and absence of a `MiruAgent` service. Both repair paths leave only inheritable full-control ACEs for SYSTEM and built-in Administrators and make the reused non-admin read/create probes fail. The script exits 0 and leaves no test account or installed Miru product behind.
 
-Review the workflow diff and commit Milestone 3.
+Before reviewing or committing Milestone 3, update this plan's Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective as applicable with the milestone's exact test evidence and decisions. Review the workflow diff and commit Milestone 3 files plus this plan checkpoint.
 
     cd /home/ben/miru/workbench5/repos/agent
     git diff --check
-    git diff -- .github/workflows/ci.yml build/windows/tests
-    git add .github/workflows/ci.yml build/windows/tests
+    git diff -- .github/workflows/ci.yml build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git add .github/workflows/ci.yml build/windows/tests plans/backlog/20260911-windows-msi-packaging-hardening.md
     git commit -m "ci(windows): validate MSI install and upgrades"
 
-For Milestone 4, update docs and the umbrella plan, then run repository-wide validation in the required order.
+For Milestone 4, update docs and the umbrella plan, run repository-wide validation, then update this plan's Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective as applicable with the milestone's exact test evidence and decisions before reviewing or committing. Stage and commit the documentation plus this plan checkpoint before reviewing the complete committed branch.
 
     cd /home/ben/miru/workbench5/repos/agent
     ./scripts/test.sh
@@ -189,19 +199,24 @@ For Milestone 4, update docs and the umbrella plan, then run repository-wide val
     git diff -- Cargo.lock
     ./scripts/lint.sh
     git diff --check
-    git status --short
 
-Expected: tests, coverage gates, dependency refresh, and lint all exit 0. `Cargo.lock` has no unexplained drift; restore no file destructively—if it changes, determine why and include only required changes. Review the entire branch against current main and confirm no service, release-upload, GoReleaser/PDB, or signing implementation slipped in.
+Expected: tests, coverage gates, dependency refresh, lint, and the whitespace check all exit 0. `Cargo.lock` has no unexplained drift; restore no file destructively—if it changes, determine why and include only required changes.
 
     cd /home/ben/miru/workbench5/repos/agent
+    git diff -- build/windows/README.md plans/active/20260910-windows-support.md plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git add build/windows/README.md plans/active/20260910-windows-support.md plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git commit -m "docs(windows): document validated package scope"
+    git status --short
+    git diff --check origin/main...HEAD
     git diff --stat origin/main...HEAD
     git diff origin/main...HEAD
-    git add build/windows/README.md plans/active/20260910-windows-support.md
-    git commit -m "docs(windows): document validated package scope"
 
-Push the completed branch without force and verify that GitHub sees the exact local SHA.
+Expected: `git status --short` prints nothing and `git diff --check origin/main...HEAD` exits 0. The displayed stat and full diff contain all four milestone commits and their package, script, integration/CI, and documentation changes. Confirm from that displayed diff that no service, release-upload, GoReleaser/PDB, or signing implementation slipped in before pushing.
+
+Push the completed branch without force and verify that GitHub sees the exact local SHA. Immediately before every push in this plan—including preflight fixes and the later plan-only closure commit—run `git status --short` and require it to print nothing; never push from a dirty working tree.
 
     cd /home/ben/miru/workbench5/repos/agent
+    git status --short
     git push origin feat/windows-msi-packaging
     git rev-parse HEAD
     git ls-remote origin refs/heads/feat/windows-msi-packaging
@@ -221,36 +236,74 @@ After the smoke pass, from `/home/ben/miru/workbench5/repos/agent`, update the P
     cd /home/ben/miru/workbench5/repos/agent
     gh pr edit 236 --body $'## Summary\n- Build and validate a pinned WiX 5.0.2 x64 MSI for the console-capable Miru Agent.\n- Protect retained ProgramData state and prove maintenance, upgrade, downgrade rejection, rollback, and uninstall behavior.\n- Harden Windows PowerShell 5.1 install/provision tooling without putting provisioning secrets on command lines.\n\n## Scope boundaries\nThis PR does not install or control a Windows service. Service lifecycle/account/recovery, the GoReleaser/PDB release lane and artifact publication, and Authenticode signing remain in later roadmap PRs.\n\n## Validation\nBranch head: [FULL_SHA]\n[LOCAL_WINDOWS_AND_VM_TEST_SUMMARY]\nPreflight: pending; this PR remains draft until CLEAN.'
 
-Keep the PR draft. Then, from the Codex task rooted at `/home/ben/miru/workbench5/repos/agent`, invoke the skill with the exact request `$preflight PR #236 on feat/windows-msi-packaging; do not stop until the exact pushed head is CLEAN.` Preflight must publish any fixes, watch GitHub Actions for the pushed head, and return `CLEAN`. If it does not, diagnose the reported CI job, make and commit a focused fix, push, rerun the manual smoke when the fix can affect MSI or script behavior, update the body SHA/evidence, and rerun `$preflight` against the new SHA. Only after CLEAN may the PR leave draft:
+Keep the PR draft. Then, from the Codex task rooted at `/home/ben/miru/workbench5/repos/agent`, invoke the skill with the exact request `$preflight PR #236 on feat/windows-msi-packaging; do not stop until the exact pushed head is CLEAN.` Preflight must publish any fixes, watch GitHub Actions for the pushed head, and return `CLEAN`. If it does not, diagnose the reported CI job, make and commit a focused fix, require `git status --short` to print nothing immediately before pushing, rerun the manual smoke when the fix can affect MSI or script behavior, update the body SHA/evidence, and rerun `$preflight` against the new SHA.
+
+After the smoke evidence is final and preflight first returns CLEAN, record the exact smoke-tested and first-CLEAN implementation SHA and concise evidence in this plan's Progress and Outcomes & Retrospective. Update Surprises & Discoveries and Decision Log too if that implementation evidence produced a discovery or decision. Then review and commit only this plan; this closure commit must not include implementation or other documentation changes and must be the final repository mutation.
+
+    cd /home/ben/miru/workbench5/repos/agent
+    TESTED_SHA=$(git rev-parse HEAD)
+    git diff -- plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git add plans/backlog/20260911-windows-msi-packaging-hardening.md
+    git commit -m "docs(windows): record MSI hardening validation"
+    git status --short
+    git push origin feat/windows-msi-packaging
+
+Expected: Progress and Outcomes & Retrospective name the full value captured in `TESTED_SHA`, distinguish manual smoke evidence from first-CLEAN implementation preflight evidence, and state that the subsequent closure commit changes only this plan. `git status --short` prints nothing immediately before the push. The plan remains at `plans/backlog/20260911-windows-msi-packaging-hardening.md`.
+
+The closure commit supersedes the implementation SHA for which preflight first returned CLEAN. Keep the PR draft and rerun `$preflight PR #236 on feat/windows-msi-packaging; do not stop until the exact pushed head is CLEAN.` Do not reuse the prior CLEAN result. Preflight must validate the immutable closure head without changing repository contents. Explicitly do not make a further plan-only commit merely to record post-closure CLEAN; the verified PR body and final task result are authoritative for `Preflight: CLEAN on <immutable closure SHA>`. If closure-head preflight instead finds a defect that requires a repository change, keep the PR draft, make the focused fix, rerun affected smoke and preflight validation on the new implementation head, and repeat the evidence-closure process so the eventual plan-only closure commit is again the final repository mutation.
+
+Only after preflight returns CLEAN for that closure head, and immediately before updating the body or changing draft state, capture and compare the final local head, remote feature ref, and PR head, and display the PR check rollup:
+
+    cd /home/ben/miru/workbench5/repos/agent
+    FINAL_SHA=$(git rev-parse HEAD)
+    REMOTE_SHA=$(git ls-remote origin refs/heads/feat/windows-msi-packaging | cut -f1)
+    PR_HEAD_SHA=$(gh pr view 236 --json headRefOid --jq .headRefOid)
+    test "$FINAL_SHA" = "$REMOTE_SHA"
+    test "$FINAL_SHA" = "$PR_HEAD_SHA"
+    gh pr view 236 --json headRefOid,statusCheckRollup,isDraft,url
+    gh pr checks 236 --required
+
+Expected: both comparisons exit 0, `headRefOid` equals the full value in `FINAL_SHA`, every required entry in `statusCheckRollup` is successful, `gh pr checks 236 --required` exits 0, and `isDraft` is still true. If any SHA differs or any required check is pending, failing, cancelled, or missing, do not undraft; push or wait/fix as appropriate and rerun preflight for the resulting exact head.
+
+Update the PR body a second time, preserving the Summary, Scope boundaries, and observed smoke evidence already recorded, but replace its validation footer with the final SHA and the exact line `Preflight: CLEAN on [FULL_SHA]`. Re-run the two SHA comparisons if editing the body reveals any head change, then verify the body, head, draft status, and checks together:
+
+    cd /home/ben/miru/workbench5/repos/agent
+    gh pr edit 236 --body $'## Summary\n- Build and validate a pinned WiX 5.0.2 x64 MSI for the console-capable Miru Agent.\n- Protect retained ProgramData state and prove maintenance, upgrade, downgrade rejection, rollback, and uninstall behavior.\n- Harden Windows PowerShell 5.1 install/provision tooling without putting provisioning secrets on command lines.\n\n## Scope boundaries\nThis PR does not install or control a Windows service. Service lifecycle/account/recovery, the GoReleaser/PDB release lane and artifact publication, and Authenticode signing remain in later roadmap PRs.\n\n## Validation\nBranch head: [FULL_SHA]\n[LOCAL_WINDOWS_AND_VM_TEST_SUMMARY]\nPreflight: CLEAN on [FULL_SHA]'
+    gh pr view 236 --json body,headRefOid,statusCheckRollup,isDraft,url
+    gh pr checks 236 --required
+
+Replace both `[FULL_SHA]` values with `FINAL_SHA` and retain the previously observed non-secret `[LOCAL_WINDOWS_AND_VM_TEST_SUMMARY]`; do not substitute an abbreviated SHA. Expected: the body preserves all three sections and smoke evidence, both SHA lines contain the exact full head, `headRefOid` is the same SHA, all required checks remain green, and `isDraft` remains true. Only then may the PR leave draft:
 
     cd /home/ben/miru/workbench5/repos/agent
     gh pr ready 236
 
-Do not run the final command before the CLEAN result. The task is not complete merely because local commands and the manual smoke pass.
+Do not run the final command before preflight reports CLEAN for the exact closure head. The PR stays draft and the task remains incomplete merely because local commands, the manual smoke pass, or preflight on an earlier SHA succeeded.
 
 ## Validation and Acceptance
 
-Accept the implementation only when all of the following are true on the same pushed commit.
+Accept the implementation only when all of the following are true, the behavioral evidence records its exact tested implementation SHA, and the later plan-only closure head contains that evidence and has its own CLEAN preflight result recorded in the verified PR body and final task result.
 
-- A pinned WiX 5.0.2 project builds the real `x86_64-pc-windows-msvc` binary into an x64 MSI when and only when valid `Version` and `BinDir` inputs are supplied. WiX/ICE validation has no unexplained warning or error.
-- The MSI's ProductName, Manufacturer, stable UpgradeCode, numeric three-part ProductVersion, x64 platform metadata, and ProductCode behavior match the documented contract. Stable versions within MSI bounds work; prerelease/build labels, fourth fields, and out-of-range parts fail before packaging.
+- Invoking `build/windows/tests/package-tests.ps1` with `-ProjectPath build\windows\miru-agent.wixproj`, `-BinDir target\x86_64-pc-windows-msvc\debug`, and `-ArtifactsDirectory build\windows\artifacts\package-tests` builds the real binary into the exact v1/v2 artifact paths, builds/validates/inspects 0.0.0 and 255.255.65535 beneath the `boundaries` child, and prints all six named PASS lines, including exactly `PASS version boundaries (0.0.0, 255.255.65535)`. Omitted or empty `Version`/`BinDir` and all five named invalid versions fail as expected. WiX/ICE validation has no unexplained warning or error.
+- The normal and boundary MSIs have the required ProductName, Manufacturer, exact numeric three-part ProductVersion, x64 platform metadata, and committed UpgradeCode; the 1.0.0 and 1.1.0 ProductCodes are distinct. The production MSI contains no test rollback action, sequence entry, condition, or payload.
 - Installing through `install.ps1 -FromMsi` places the binary under 64-bit Program Files, registers one product, and creates no `MiruAgent` service. An MSI with the wrong identity, UpgradeCode, architecture, or version is rejected before `msiexec` runs.
-- A permissive pre-existing `%ProgramData%\Miru` is corrected to a protected DACL with inheritable full control for only SYSTEM and built-in Administrators. A real non-admin logon cannot read the representative secret or create state. No inherited permissive ACE remains.
-- Download checksum tests accept exactly one valid 64-hex record for the exact asset filename and reject substring, duplicate, missing, malformed, and wrong-digest cases. Temporary data is cleaned, Windows PowerShell 5.1 uses TLS 1.2 compatibly, failure logs are retained only on failure, and exit 3010 is visibly and programmatically distinct from exit 0.
+- A permissive pre-existing `%ProgramData%\Miru` is corrected to a protected DACL with inheritable full control for only SYSTEM and built-in Administrators. After v1 installation, the harness re-adds the permissive ACE and proves same-MSI v1 maintenance removes it; it adds the ACE again before v1-to-v2 and proves upgrade removes it. The reused real non-admin logon cannot read the representative secret or create state after either repair, and no inherited permissive ACE remains.
+- Download checksum tests accept exactly one valid 64-hex record for the exact asset filename and reject substring, duplicate, missing, malformed, and wrong-digest cases. Temporary data is cleaned; Windows PowerShell 5.1 reports `PASS TLS 1.2 protocol restoration (4 cases)` after crossing TLS 1.2 initially absent/present with injected success/throwing requests and restoring the exact original protocol value in every case; the harness restores its own original value in an outer `finally`; failure logs are retained only on failure; and exit 3010 is visibly and programmatically distinct from exit 0.
 - `provision.ps1` has no token parameter, never exposes the canary token in arguments or output, restores the prior environment exactly on success and failure, invokes the executable directly, and performs no service operations. `-Check` returns exactly 0, 3, or 1 from controlled fake cases and returns 3 with not-provisioned output against a fresh real install.
-- The elevated integration test proves install v1, same-MSI maintenance, upgrade v1 to v2, v1 downgrade rejection with v2 intact, failed v3 rollback to v2, and uninstall. The ProgramData sentinel and protected ACL survive every transition; the executable, product registration, and installer-owned registry metadata disappear on final uninstall. MSI logs are uploaded only for failed CI runs, and test cleanup removes the temporary user and installed test product.
+- Windows PowerShell 5.1 runs `build/windows/tests/parse-scripts.ps1`, names both installer scripts, reports `Aggregate parse errors: 0`, and exits 0; any parse error from either independently parsed source is path-qualified and exits 1.
+- The elevated integration test proves install v1, permissive-ACE repair during same-MSI v1 maintenance, permissive-ACE repair during upgrade v1 to v2, v1 downgrade rejection with v2 intact, failed v3 rollback to v2, and uninstall. The rollback marker reads `fixture-v1` after initial install and v1 maintenance, `fixture-v2` after upgrade, returns to `fixture-v2` after the failing v3 deferred Type 34 action, and is removed on uninstall. The recorded v2 executable SHA-256 hash is restored after rollback. The ProgramData sentinel and protected ACL survive every transition; the executable, product registration, and installer-owned registry metadata disappear on final uninstall. MSI logs are uploaded only for failed CI runs, and test cleanup removes the temporary user, installed test product, and any leftover test marker.
 - `build/windows/README.md`, `plans/active/20260910-windows-support.md`, and PR #236's body say the same thing: PR #234 resolved native compile CI; PR #236 supplies a validated x64 package and safe PowerShell tooling; Windows service lifecycle/account/recovery, release/GoReleaser/PDB work, artifact publication, and Authenticode signing remain deferred.
 - From `/home/ben/miru/workbench5/repos/agent`, `./scripts/test.sh`, `./scripts/covgate.sh`, `./scripts/update-deps.sh`, and `./scripts/lint.sh` all succeed, `git diff --check` is clean, and no unintended `Cargo.lock` drift remains.
-- Most importantly, `$preflight` reports **CLEAN** for PR #236's exact pushed branch head. CLEAN explicitly means every required GitHub CI check is green on the SHA returned by both `git rev-parse HEAD` and `gh pr view 236 --json headRefOid`. Until this is true, PR #236 must remain draft and the implementation task must not be reported complete.
+- Progress and Outcomes & Retrospective record the full implementation SHA exercised by the final Windows smoke pass and first CLEAN preflight, along with the exact evidence, in a focused plan-only closure commit that is the final repository mutation. `$preflight` is then rerun and reports **CLEAN** for the immutable closure head; a CLEAN result for the superseded implementation SHA is not sufficient, and no further plan-only commit is made merely to record post-closure CLEAN.
+- Most importantly, immediately before undrafting, the full SHA from `git rev-parse HEAD`, `git ls-remote origin refs/heads/feat/windows-msi-packaging`, and `gh pr view 236 --json headRefOid,statusCheckRollup` is identical; every required check is green on that closure head; and the verified PR body preserves summary, scope boundaries, and smoke evidence while recording the closure SHA in both `Branch head: [FULL_SHA]` and `Preflight: CLEAN on [FULL_SHA]`. Until all of this is true, PR #236 must remain draft and the implementation task must not be reported complete.
 
 The clean Windows 10 or 11 VM pass is recorded in the transcript and PR evidence with OS build, MSI hashes and versions, reboot result, and install/maintenance/upgrade/uninstall observations. Successful live provisioning may remain a staging/manual follow-up because it requires a backend token; the fake-executable security tests and real `-Check` test are mandatory here.
 
 ## Idempotence and Recovery
 
-WiX and Rust builds, parsers, focused tests, repository checks, metadata inspection, and CI runs are safe to repeat. Use unique temporary directories and an account with a test-specific name. Integration setup begins by enumerating installed products with the production UpgradeCode: it may remove only ProductCodes in the three-value fixture allowlist and must abort on every other match. It may remove only the specifically named temporary local test user. It must never remove customer state or an arbitrary Miru installation. Cleanup belongs in `finally`, while failed MSI logs are copied to a known artifact directory before temporary files are removed. The manual production smoke runs only on a disposable clean snapshot and recovers by reverting that snapshot.
+WiX and Rust builds, parsers, focused tests, repository checks, metadata inspection, and CI runs are safe to repeat. `build/windows/tests/package-tests.ps1` recreates only the `v1`, `v2`, `boundaries`, `invalid`, and `logs` children of the supplied deterministic `build/windows/artifacts/package-tests` directory; retain those children and their logs when diagnosing a normal or boundary-package failure, then rerun the same command to regenerate them. The focused script harness always restores its original `ServicePointManager.SecurityProtocol` in an outer `finally`, including when an injected request throws. Use unique temporary directories elsewhere and an account with a test-specific name. Integration setup begins by enumerating installed products with the production UpgradeCode: it may remove only ProductCodes in the three-value fixture allowlist and must abort on every other match. It may remove only the specifically named temporary local test user. It must never remove customer state or an arbitrary Miru installation. Cleanup belongs in `finally`, while failed MSI logs are copied to the deterministic artifacts `logs` directory before temporary files are removed. The manual production smoke runs only on a disposable clean snapshot and recovers by reverting that snapshot.
 
 Generate the production UpgradeCode exactly once. If it changes before any MSI has shipped, update source, tests, and documentation together and record the reason in Decision Log. After publication it is immutable. Commit the three fixture ProductCodes beside the integration harness and keep them stable across normal reruns. If a ProductCode must change, update its allowlist entry in the same commit and first clean any package built with the old code on the disposable runner or revert its VM snapshot; never leave an unidentifiable test install behind. Never change the production UpgradeCode to make a broken upgrade test pass.
 
-If a normal integration assertion fails after installation, collect product metadata, service absence/presence, `icacls` output, and the verbose MSI log before uninstalling only an allowlisted ProductCode. If the rollback test leaves v3 installed, treat that as a product bug: clean up only the allowlisted v3 ProductCode, correct upgrade scheduling or the fixture, and rerun from v1. Do not mask the failure by weakening assertions.
+If a normal integration assertion fails after installation—including either deliberate permissive-ACE repair assertion—collect product metadata, service absence/presence, `icacls` output, the reused non-admin probe results, the rollback marker contents, executable SHA-256 hash, and the verbose MSI log before uninstalling only an allowlisted ProductCode. If the rollback test leaves v3 installed, treat that as a product bug: clean up only the allowlisted v3 ProductCode, remove only the test-created `%ProgramData%\Miru\rollback-payload.txt` after capturing evidence, correct upgrade scheduling or the fixture, and rerun from v1. Do not mask the failure by weakening assertions.
 
-The four milestone commits provide rollback points. Use `git revert <commit>` for a published bad milestone; do not rewrite or force-push the shared feature branch. If current `main` advances, merge `origin/main` and rerun the entire native matrix. If preflight fails, fix the underlying issue and rerun it on the new pushed SHA; a prior green run never applies to a newer commit. Ordinary MSI uninstall intentionally preserves `%ProgramData%\Miru`; test cleanup may remove only test-created sentinel data after all retention assertions pass.
+The four milestone commits provide rollback points. Use `git revert <commit>` for a published bad milestone; do not rewrite or force-push the shared feature branch. If current `main` advances, merge `origin/main` and rerun the entire native matrix. Before closure, if preflight fails, fix the underlying issue and rerun it on the new pushed SHA; a prior green run never applies to a newer commit. After closure, do not mutate the plan merely to record CLEAN. If closure-head preflight requires a repository fix, keep the PR draft, apply and validate the fix, then repeat the implementation-evidence and closure sequence so the eventual plan-only closure is the final mutation. Ordinary MSI uninstall intentionally preserves `%ProgramData%\Miru`; test cleanup may remove only test-created sentinel data after all retention assertions pass.
