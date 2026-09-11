@@ -68,6 +68,18 @@ Execution entries, 2026-09-10:
 - Beyond the plan's minimum tests, added label-dispatch error-path tests (`RSA PRIVATE KEY`/`PRIVATE KEY`/`PUBLIC KEY` armor around invalid DER, plus wrong-label cases for both readers) to pin the dispatch behavior and hold crypt region coverage — landed at 95.95% ≥ 95.16 with no re-baselining.
 - Kept the old `ssl_err!` macro shape as two macros: `msg_err!` (variants carrying `msg: String`) and `source_err!` (variants carrying a typed `source`), preserving the variant-name/struct-name mapping convention.
 
+Post-review entries, 2026-09-10:
+
+- REVERSED the `num_bits: u32` decision on review feedback (Ben): `gen_key_pair` now
+  takes `KeySize` directly (`pub use aws_lc_rs::rsa::KeySize` from `crypt::rsa`), the
+  private `key_size()` mapping fn is deleted, and all callers name
+  `rsa::KeySize::Rsa2048/Rsa4096`. Invalid sizes are unrepresentable, so the
+  `invalid_key_size` test (bits=0) is deleted with it. Coverage re-verified: all
+  covgates pass without re-baselining.
+- Review feedback also replaced every `std::fs` read in crypt/authn tests with
+  `filesys` module reads (`files::read_bytes`/`read_string`, `Dir::file`) — repo
+  convention applies to test code too.
+
 
 ## Outcomes & Retrospective
 
