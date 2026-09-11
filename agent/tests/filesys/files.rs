@@ -1077,13 +1077,11 @@ pub mod append_bytes {
 pub mod set_permissions {
     use super::*;
 
-    // uses Unix mode bits (from_mode); no Windows analog
-    #[cfg(unix)]
     #[tokio::test]
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
-        let permissions = std::fs::Permissions::from_mode(0o644);
+        let permissions = std::fs::metadata(dir.path()).unwrap().permissions();
 
         // Should fail because file doesn't exist
         assert!(matches!(

@@ -14,14 +14,14 @@ windows cfg-gates #234). This is **PR 6** of the Windows-support roadmap
 
 ## Purpose / Big Picture
 
-#234's `windows-check` job compiles lib + bin for
-`x86_64-pc-windows-msvc` but never compiles or runs the **test crate**. This
-PR makes `cargo test --features test` compile and pass on Windows, and adds a
-CI step that runs it — turning up **runtime** Unix assumptions (path
+Before this branch, #234's `windows-check` job compiled lib + bin for
+`x86_64-pc-windows-msvc` but did not compile or run the **test crate**. This
+work makes `cargo test --features test` compile and pass on Windows, and adds
+a CI step that runs it — turning up **runtime** Unix assumptions (path
 separators in assertions, permission-mode checks, symlink behavior,
 delete-while-open) that a compile check cannot catch, and gating the
-Unix-only-API test code (`PermissionsExt`, `std::os::unix::fs::symlink`) that
-would otherwise fail to compile on Windows.
+Unix-only-API test code (`PermissionsExt`) that would otherwise fail to compile
+on Windows.
 
 Coverage gates stay Linux-only (they need `cargo-llvm-cov` and the
 `.covgate` thresholds are tuned on Linux); the Windows job runs tests
@@ -40,15 +40,24 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 
 - [x] Activate plan (`docs(plans):` commit on the branch)
 - [x] CI: add a `cargo test --features test` step to the windows job (RUST_LOG=off; no coverage)
-- [x] Gate/fix won't-compile-on-windows test code (from audit)
-- [x] Gate/fix compiles-but-fails-at-runtime test code (from audit)
-- [x] Linux: `./scripts/test.sh` + `./scripts/lint.sh` green (zero behavior change on Linux)
+- [x] Gate genuinely Unix-only test code (from audit)
+- [x] Replace portable scenarios' Unix-only fixtures with cross-platform fixtures
+- [x] Derive behavioral path expectations from fixtures while preserving literal wire pins
+- [x] Initial pre-review Linux validation: `./scripts/test.sh` + `./scripts/lint.sh` green
+- [x] Post-review targeted queue, filesystem, path, and deleter tests green on Linux
 - [ ] Push; iterate on the Windows CI test job until green
 - [ ] PR opened; all checks green
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds — especially runtime failures the audit missed.)
+- 2026-09-11: `File::new` normalizes separators for the host, so behavioral
+  queue and error-display expectations must come from their constructed
+  fixtures. Raw persisted JSON is different: it intentionally pins `/data/...`
+  and its expected `File` must be deserialized from that same literal wire
+  value so the comparison tests preservation rather than host normalization.
+- 2026-09-11: an existing directory represented as a `File` supplies a portable
+  delete failure after a successful stat. It exercises retry counts, backoff,
+  attempt caps, and persistence without a Unix symlink loop.
 
 ## Decision Log
 
@@ -57,12 +66,15 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   any branch-protection required-check keyed on that name, and one
   `windows-latest` runner (a 2x-cost GitHub-hosted runner) doing check-then-test
   is cheaper than two. Rename deferred until required-checks are confirmed.
-- 2026-09-11 (authoring): Unix-API tests (permission modes, symlink loops)
-  are gated with `#[cfg(unix)]` rather than reimplemented for Windows — they
-  assert Unix-specific behavior (mode bits, ELOOP) that has no Windows
-  meaning. Windows equivalents (ACLs) are the installer's concern (PR 8), not
-  the agent's test suite. This matches #234's decision to ignore mode bits on
-  Windows.
+- 2026-09-11: tests that specifically assert Unix mode bits, permission-denied
+  behavior induced by Unix modes, Unix absolute-path semantics, or other Unix
+  APIs remain gated with `#[cfg(unix)]`. Tests of cross-platform error behavior remain
+  enabled: the `set_permissions` missing-target cases borrow permissions from
+  an existing directory, and deleter retry/backoff/persistence cases use an
+  existing directory represented as a `File`.
+- 2026-09-11: keep literal `/data/...` JSON in queue wire tests. Build the
+  whole-job expected `File` by deserializing that literal, while deriving all
+  behavioral queue names through their job factories.
 
 ## Outcomes & Retrospective
 
@@ -72,18 +84,30 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 
 From the exhaustive test-tree audit (2026-09-11). Fixed in this PR:
 
-Won't-compile-on-Windows (unconditional `use std::os::unix::fs::PermissionsExt;`
-imports + ungated mode/symlink bodies):
+Genuinely Unix-only code remains gated (Unix API imports and tests that assert
+mode bits, Unix permission denial, Unix absolute-path semantics, or Unix-only
+integrations):
 - `tests/{disk/device, provisioning/check, crypt/rsa, filesys/dirs,
   filesys/files, filesys/path, deploy/filesys, gcs/mod}.rs` — import gated
-  `#[cfg(unix)]`; each ungated `from_mode`/`.mode()` test or helper gated.
+  `#[cfg(unix)]`; `from_mode`/`.mode()` tests and helpers gated where their
+  semantics are Unix-specific.
 - `tests/deploy/filesys.rs` — `read_only`/`writeable` perm fixtures + their 7
   permission-denied tests gated (Windows ignores the readonly attribute for
   child creation, so the denial can't reproduce).
-- `tests/data_uploads/retention/deleter.rs` + in-crate
-  `src/data_uploads/retention/deleter.rs` test module — `symlink_loop`
-  fixture + its caller tests gated; the integration `wedged_job` helper gated
-  (unused on Windows once its only caller is gated).
+
+Portable scenarios remain enabled on Windows:
+- `tests/filesys/{dirs,files}.rs` missing-target `set_permissions` tests use
+  permissions cloned from an existing directory rather than Unix mode bits.
+- `tests/data_uploads/retention/deleter.rs` and the in-crate deleter test module
+  use an existing directory represented as a `File` for retry count, attempt
+  cap, backoff, and persistence coverage. Removing a directory through the file
+  unlink path fails portably after stat succeeds.
+- Generic queue behavioral paths come from each supplied job factory; retention
+  TTL behavior does likewise. Literal JSON remains unchanged in both queue wire
+  pins, and expected `File` values are deserialized from the literal.
+- Filesystem error-display tests derive expected strings from their `PathBuf`,
+  `File`, and `Dir` fixtures. The home-directory test compares directly with
+  `PathBuf::from(env::var("HOME").unwrap())` without changing the environment.
 
 Already gated (no action): `tests/mod.rs` `privilege` module, `deploy/apply.rs`
 perm tests, the existing `#[cfg(unix)]` mode-test bodies in `filesys/{dirs,
@@ -93,15 +117,16 @@ Compiles + passes on Windows (verified reasoning, left unchanged): `app/run.rs`
 `/tmp/miru.sock` fixtures (stored, never bound on Windows — bind is cfg-skipped),
 `deploy/errors.rs` `/etc/app/config.json` (a `String` field, not a `Path`).
 
-Runtime-uncertain (the CANARY — left ungated deliberately):
+Runtime-uncertain (the narrow stat-classification CANARY — left ungated
+deliberately):
 `src/.../deleter.rs::stat_failure_counts_an_attempt` induces a retryable stat
 failure via ENOTDIR (`stat` of a child-of-a-file) using portable APIs. On Unix
 that is `FileMetadataErr` → `SweepOutcome::Failed`. On Windows it depends on
 whether `metadata(file\child)` returns `NotADirectory` (→ Failed, passes) or
-`PathNotFound` (→ NotFound → `AlreadyGone`, fails). Unverifiable without a
-Windows runtime, so it rides the first Windows CI run: if it fails, gate it
-(and the symlink tests stay gated). If it passes, a follow-up could convert the
-gated symlink tests to this cross-platform ENOTDIR wedge and drop those gates.
+`PathNotFound` (→ NotFound → `AlreadyGone`, fails). This isolated classification
+check is unverifiable without a Windows runtime and intentionally rides the
+first Windows CI run; it does not block the portable unlink-failure fixture used
+by the broader retry/backoff/persistence coverage.
 
 ## Plan of Work / Concrete Steps
 
@@ -113,23 +138,27 @@ gated symlink tests to this cross-platform ENOTDIR wedge and drop those gates.
            RUST_LOG: "off"
          run: cargo test --package miru-agent --features test --locked
 
-2. Gate won't-compile items behind `#[cfg(unix)]` (imports, whole test fns,
-   or test modules as appropriate). Where a test exercises a cross-platform
-   behavior via a Unix-only mechanism, keep the Unix path gated and add a
-   Windows-appropriate variant only if the behavior is meaningful there.
-3. Fix runtime-divergent assertions (path-string comparisons already handled
-   in #233; re-verify none remain in the audited set).
-4. Linux validation loop (`./scripts/test.sh`, `./scripts/lint.sh`).
+2. Gate genuinely Unix-specific assertions and APIs behind `#[cfg(unix)]`.
+   Keep platform-neutral behavior enabled with portable fixtures: permissions
+   copied from existing metadata and an existing directory used as an
+   undeletable `File`.
+3. Make runtime path assertions platform-native by deriving queue names and
+   displayed error paths from fixtures. Preserve literal JSON in wire pins and
+   deserialize the expected `File` from that wire literal.
+4. Validate changed tests on Linux, then rely on the native Windows CI job for
+   Windows runtime behavior.
 5. Push; read the Windows CI test job logs; fix residuals; repeat until green.
 
 ## Validation and Acceptance
 
 1. `cargo test --features test` compiles and passes on `windows-latest` (CI).
-2. Linux behavior byte-identical: full suite + lint green; no Linux test
-   removed or weakened (gated tests still run on Linux).
-3. CI enforces the Windows test run on every PR.
+2. Linux behavior remains covered: Unix-only tests still run on Linux, while
+   portable replacements exercise the same cross-platform error paths.
+3. Behavioral path assertions accept native separators without weakening queue
+   ordering/error semantics; literal persisted JSON remains pinned exactly.
+4. CI enforces the Windows test run on every PR.
 
 ## Idempotence and Recovery
 
-Test-only + CI edits on a feature branch; revert = delete branch. No
-production code, wire, or packaging changes.
+Test-only modules, plan text, and CI edits on a feature branch; revert = delete
+branch. No production behavior, wire format, or packaging changes.

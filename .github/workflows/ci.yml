@@ -34,10 +34,9 @@ jobs:
       - name: Run Linter
         run: LINT_FIX=0 ./scripts/lint.sh
 
-  # Compile check for the Windows target. Runs natively on a Windows runner:
+  # Compile-check the Windows target and run the agent tests natively on Windows:
   # aws-lc-sys cannot cross-compile from Linux (its build script drives the
-  # host C compiler with pthread-based sources). Checks lib + bin only; the
-  # test crate's Windows portability is tracked separately in the roadmap.
+  # host C compiler with pthread-based sources).
   windows-check:
     runs-on: windows-latest
     timeout-minutes: 20

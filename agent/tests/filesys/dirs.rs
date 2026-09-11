@@ -76,7 +76,7 @@ pub mod new_home_dir {
     fn success() {
         let dir = dirs::home().unwrap();
         assert!(dir.exists());
-        assert!(dir.path().to_str().unwrap().contains("home"));
+        assert_eq!(dir.path(), &PathBuf::from(env::var("HOME").unwrap()));
     }
 }
 
@@ -787,13 +787,11 @@ mod move_to {
 pub mod set_permissions {
     use super::*;
 
-    // uses Unix mode bits (from_mode); no Windows analog
-    #[cfg(unix)]
     #[tokio::test]
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();
         let target = dir.subdir("nonexistent-dir");
-        let permissions = std::fs::Permissions::from_mode(0o755);
+        let permissions = std::fs::metadata(dir.path()).unwrap().permissions();
 
         assert!(matches!(
             dirs::set_permissions(&target, permissions)

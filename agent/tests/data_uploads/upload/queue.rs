@@ -79,7 +79,8 @@ mod wire {
     /// wipe a live user's queue instead of erroring — this test is the guard.
     ///
     /// `make_job` stamps a fresh `Utc::now()`, so the expected job is spelled
-    /// out here to match the literal JSON exactly.
+    /// out here to match the literal JSON exactly. Deserializing the expected
+    /// file preserves the wire value's separators on every platform.
     #[tokio::test]
     async fn raw_json_snapshot_loads() {
         let dir = test_dirs::temp("upload_queue_test").unwrap();
@@ -106,10 +107,11 @@ mod wire {
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
+        let expected_file = serde_json::from_str::<File>(r#""/data/a.log""#).unwrap();
         assert_eq!(
             entry.job,
             Job {
-                file: File::new("/data/a.log".to_string()),
+                file: expected_file,
                 size: 42,
                 digest: "sha256:a.log".to_string(),
                 mtime: DateTime::from_timestamp(900, 0).unwrap(),

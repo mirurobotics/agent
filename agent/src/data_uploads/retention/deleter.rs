@@ -480,18 +480,6 @@ mod tests {
             .unwrap()
     }
 
-    /// Two symlinks pointing at each other. `stat` and `open` on either fail
-    /// with ELOOP. Built with `std::os::unix::fs::symlink` so the targets can
-    /// be dangling (a loop) rather than existing files.
-    #[cfg(unix)]
-    fn symlink_loop(dir: &Dir) -> File {
-        let a = dir.file("loop-a");
-        let b = dir.file("loop-b");
-        std::os::unix::fs::symlink(b.path(), a.path()).unwrap();
-        std::os::unix::fs::symlink(a.path(), b.path()).unwrap();
-        a
-    }
-
     /// A `Job` for a path whose stat cannot succeed. The recorded
     /// size/digest/mtime are never compared: the sweep fails at the stat step
     /// before any identity check runs. `make_job` is unusable here — its
@@ -505,6 +493,27 @@ mod tests {
             mtime: DateTime::from_timestamp(1000, 0).unwrap(),
             first_observed_at: at,
             last_observed_at: at,
+            ttl_secs: 0,
+            file_rule_id: "rule_1".to_string(),
+            deployment_id: "dpl_1".to_string(),
+        }
+    }
+
+    /// A `Job` whose identity matches an existing directory represented as a
+    /// file. Stat succeeds, but unlinking it as a file fails on every platform.
+    async fn undeletable_directory_job(dir: &Dir, observed_secs: i64) -> Job {
+        let target = dir.subdir("undeletable");
+        dirs::create(&target).await.unwrap();
+        let file = File::new(target.path().clone());
+        let metadata = files::metadata(&file).await.unwrap();
+        let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
+        Job {
+            file,
+            size: metadata.len(),
+            digest: "sha256:unused".to_string(),
+            mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
+            first_observed_at: observed_at,
+            last_observed_at: observed_at,
             ttl_secs: 0,
             file_rule_id: "rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
@@ -910,14 +919,13 @@ mod tests {
             assert!(matches!(outcome, Some(SweepOutcome::AlreadyGone)));
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn counted_failure_increments_attempts() {
             let dir = test_dirs::temp("delete-attempts-counted").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -929,7 +937,6 @@ mod tests {
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn attempt_cap_drops_job() {
             let dir = test_dirs::temp("delete-attempts-cap").unwrap();
@@ -941,7 +948,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -954,7 +961,6 @@ mod tests {
             assert!(deleter.queue.is_empty());
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn default_attempts_is_ten() {
             assert_eq!(DeleterArgs::default().attempts, 10);
@@ -963,7 +969,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -1029,14 +1035,13 @@ mod tests {
             })
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn failure_defers_the_next_attempt() {
             let dir = test_dirs::temp("delete-backoff-defer").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -1059,14 +1064,13 @@ mod tests {
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn the_delay_grows_and_caps() {
             let dir = test_dirs::temp("delete-backoff-growth").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -1084,7 +1088,6 @@ mod tests {
             }
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn next_attempt_at_survives_a_reload() {
             let dir = test_dirs::temp("delete-backoff-reload").unwrap();
@@ -1092,7 +1095,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, Some(&state_path)).await;
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1109,14 +1112,13 @@ mod tests {
         /// The sweep's loop budget comes from `count_ready` and its pops from
         /// `next_ready`; a deferred entry must be invisible to both or the two
         /// desynchronize.
-        #[cfg(unix)]
         #[tokio::test]
         async fn count_ready_and_next_ready_agree_about_a_deferred_entry() {
             let dir = test_dirs::temp("delete-backoff-agree").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1134,7 +1136,6 @@ mod tests {
     mod persistence {
         use super::*;
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn attempts_survive_a_restart() {
             let dir = test_dirs::temp("delete-attempts-restart").unwrap();
@@ -1147,7 +1148,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1168,7 +1169,6 @@ mod tests {
             assert!(restored.queue.is_empty());
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn dropped_entry_is_absent_from_the_persisted_snapshot() {
             let dir = test_dirs::temp("delete-attempts-drop-persist").unwrap();
@@ -1181,7 +1181,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(wedged_job(symlink_loop(&dir)))
+                .enqueue(undeletable_directory_job(&dir, 1000).await)
                 .await
                 .unwrap();
 

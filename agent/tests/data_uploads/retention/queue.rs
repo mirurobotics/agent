@@ -66,7 +66,10 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
 
     // due_at is inclusive: "due" is due at exactly `now`
     assert_eq!(queue.count_ready(now()), 1);
-    assert_eq!(queue.next_ready(now()).unwrap().job.name(), "/data/due");
+    assert_eq!(
+        queue.next_ready(now()).unwrap().job.name(),
+        retention_job_with_ttl("due", 500).name()
+    );
 
     // the waiting job becomes ready once its TTL elapses
     assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
@@ -102,6 +105,21 @@ mod wire {
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(entry.job, make_job("a.log", 1000, 500));
+        let expected_file = serde_json::from_str::<File>(r#""/data/a.log""#).unwrap();
+        let observed_at = DateTime::from_timestamp(1000, 0).unwrap();
+        assert_eq!(
+            entry.job,
+            Job {
+                file: expected_file,
+                size: 42,
+                digest: "sha256:a.log".to_string(),
+                mtime: DateTime::from_timestamp(900, 0).unwrap(),
+                first_observed_at: observed_at,
+                last_observed_at: observed_at,
+                ttl_secs: 500,
+                file_rule_id: "file_rule_1".to_string(),
+                deployment_id: "dpl_1".to_string(),
+            }
+        );
     }
 }

@@ -70,6 +70,10 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
         .collect()
 }
 
+fn names<J: QueueJob>(make: fn(&str) -> J, names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| make(name).name()).collect()
+}
+
 fn temp_path(name: &str) -> (test_dirs::TempDir, File) {
     let dir = test_dirs::temp(name).unwrap();
     let path = dir.file("queue.json");
@@ -121,7 +125,7 @@ pub mod cases {
 
             assert_eq!(
                 drain(&mut queue).await,
-                ["/data/a.log", "/data/b.log", "/data/c.log"]
+                names(make, &["a.log", "b.log", "c.log"])
             );
         }
 
@@ -173,7 +177,7 @@ pub mod cases {
 
             assert_eq!(
                 drain(&mut queue).await,
-                ["/data/a.log", "/data/b.log", "/data/c.log"]
+                names(make, &["a.log", "b.log", "c.log"])
             );
         }
 
@@ -188,7 +192,7 @@ pub mod cases {
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
             assert_eq!(reloaded.len(), 2);
-            assert_eq!(on_disk::<J>(&path).await, ["/data/a.log", "/data/b.log"]);
+            assert_eq!(on_disk::<J>(&path).await, names(make, &["a.log", "b.log"]));
         }
 
         pub async fn duplicate_jobs_are_both_queued<J: QueueJob>(make: fn(&str) -> J) {
@@ -219,22 +223,25 @@ pub mod cases {
 
             assert!(queue.enqueue(make("a.log")).await.is_err());
 
-            assert_eq!(drain(&mut queue).await, ["/data/a.log"]);
+            assert_eq!(drain(&mut queue).await, names(make, &["a.log"]));
         }
 
         pub async fn full_queue_rejects_with_queue_full_err<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(1);
             enqueue(&mut queue, make("a.log")).await;
 
-            let err = queue.enqueue(make("b.log")).await.unwrap_err();
+            let rejected = make("b.log");
+            let rejected_name = rejected.name();
+            let err = queue.enqueue(rejected).await.unwrap_err();
             assert_eq!(err.label, J::LABEL);
             assert_eq!(err.capacity, 1);
-            assert_eq!(err.name, "/data/b.log");
+            assert_eq!(err.name, rejected_name);
             assert_eq!(
                 err.to_string(),
                 format!(
-                    "{} queue is full (capacity 1); rejected job for file /data/b.log",
-                    J::LABEL
+                    "{} queue is full (capacity 1); rejected job for file {}",
+                    J::LABEL,
+                    rejected_name
                 )
             );
         }
@@ -249,7 +256,7 @@ pub mod cases {
                 assert_eq!(queue.len(), 1);
             }
 
-            assert_eq!(on_disk::<J>(&path).await, ["/data/a.log"]);
+            assert_eq!(on_disk::<J>(&path).await, names(make, &["a.log"]));
         }
 
         pub async fn persist_failure_is_swallowed<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
@@ -286,13 +293,16 @@ pub mod cases {
             enqueue(&mut queue, make("ready_2")).await;
 
             // skipping the ineligible head does not disturb FIFO among the remainder
-            assert_eq!(drain(&mut queue).await, ["/data/ready_1", "/data/ready_2"]);
+            assert_eq!(
+                drain(&mut queue).await,
+                names(make, &["ready_1", "ready_2"])
+            );
 
             assert!(queue.next_ready(now()).is_none());
             // the deadline itself is eligible: the comparison is inclusive
             assert_eq!(
                 queue.next_ready(deadline).unwrap().job.name(),
-                "/data/waiting"
+                make("waiting").name()
             );
         }
 
@@ -311,11 +321,11 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            assert_eq!(on_disk::<J>(&path).await, ["/data/a.log", "/data/b.log"]);
+            assert_eq!(on_disk::<J>(&path).await, names(make, &["a.log", "b.log"]));
 
             let removed = queue.remove(entry.id).await.unwrap();
             assert_eq!(removed.id, entry.id);
-            assert_eq!(on_disk::<J>(&path).await, ["/data/b.log"]);
+            assert_eq!(on_disk::<J>(&path).await, names(make, &["b.log"]));
         }
     }
 
@@ -360,7 +370,7 @@ pub mod cases {
             queue.requeue(entry).await;
             assert_eq!(queue.len(), 2);
 
-            assert_eq!(drain(&mut queue).await, ["/data/b.log", "/data/a.log"]);
+            assert_eq!(drain(&mut queue).await, names(make, &["b.log", "a.log"]));
         }
 
         pub async fn at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str) -> J) {
@@ -380,10 +390,10 @@ pub mod cases {
 
             // the appended entry lands at the tail carrying its attempt count
             let head = queue.next_ready(now()).unwrap();
-            assert_eq!(head.job.name(), "/data/a.log");
+            assert_eq!(head.job.name(), make("a.log").name());
             queue.remove(head.id).await.unwrap();
             let tail = queue.next_ready(now()).unwrap();
-            assert_eq!(tail.job.name(), "/data/b.log");
+            assert_eq!(tail.job.name(), make("b.log").name());
             assert_eq!(tail.attempts, 2);
         }
 
@@ -401,7 +411,7 @@ pub mod cases {
             }
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
-            assert_eq!(on_disk::<J>(&path).await, ["/data/b.log", "/data/a.log"]);
+            assert_eq!(on_disk::<J>(&path).await, names(make, &["b.log", "a.log"]));
             assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
         }
 
@@ -490,9 +500,9 @@ pub mod cases {
             assert_eq!(
                 drained,
                 vec![
-                    ("/data/a.log".to_string(), Some(inside)),
-                    ("/data/b.log".to_string(), Some(horizon)),
-                    ("/data/c.log".to_string(), Some(horizon)),
+                    (make("a.log").name(), Some(inside)),
+                    (make("b.log").name(), Some(horizon)),
+                    (make("c.log").name(), Some(horizon)),
                 ]
             );
         }
@@ -592,7 +602,7 @@ pub mod cases {
 
             // the worker selects `a` and holds it: this is the in-flight state.
             let in_flight = queue.next_ready(now()).unwrap();
-            assert_eq!(in_flight.job.name(), "/data/a.log");
+            assert_eq!(in_flight.job.name(), make("a.log").name());
 
             // an enqueue serviced mid-flight. Its persist is the write a `select!`
             // driven run loop would perform while `a` is still being worked.
@@ -600,12 +610,12 @@ pub mod cases {
 
             assert_eq!(
                 on_disk::<J>(&path).await,
-                ["/data/a.log", "/data/b.log", "/data/c.log"]
+                names(make, &["a.log", "b.log", "c.log"])
             );
 
             // `a` leaves disk only when the worker resolves it.
             queue.remove(in_flight.id).await.unwrap();
-            assert_eq!(on_disk::<J>(&path).await, ["/data/b.log", "/data/c.log"]);
+            assert_eq!(on_disk::<J>(&path).await, names(make, &["b.log", "c.log"]));
         }
     }
 }

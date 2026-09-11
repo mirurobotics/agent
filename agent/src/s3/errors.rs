@@ -383,13 +383,15 @@ mod tests {
             // A failure writing bytes to the local destination is a terminal
             // local I/O error, never a network condition.
             let err = std::io::Error::other("no space left on device");
-            let mapped = map_body_io_err("get_object", &object(), &File::new("/data/out.bin"), err);
+            let file = File::new("/data/out.bin");
+            let file_path = file.to_string();
+            let mapped = map_body_io_err("get_object", &object(), &file, err);
             assert!(matches!(mapped, S3Err::LocalIoErr(_)));
             assert!(!mapped.is_network_conn_err());
             assert_eq!(mapped.http_status().as_u16(), 500);
             let msg = mapped.to_string();
             assert!(msg.contains("s3://bucket/key"));
-            assert!(msg.contains("/data/out.bin"));
+            assert!(msg.contains(&file_path));
             assert!(msg.contains("no space left on device"));
         }
 
@@ -398,13 +400,14 @@ mod tests {
             // A failure opening the local source file for streaming is also a
             // terminal local I/O error.
             let err = ByteStreamError::from(std::io::Error::other("permission denied"));
-            let mapped =
-                map_bytestream_err("put_object", &object(), &File::new("/data/in.bin"), &err);
+            let file = File::new("/data/in.bin");
+            let file_path = file.to_string();
+            let mapped = map_bytestream_err("put_object", &object(), &file, &err);
             assert!(matches!(mapped, S3Err::LocalIoErr(_)));
             assert!(!mapped.is_network_conn_err());
             let msg = mapped.to_string();
             assert!(msg.contains("s3://bucket/key"));
-            assert!(msg.contains("/data/in.bin"));
+            assert!(msg.contains(&file_path));
         }
 
         #[test]

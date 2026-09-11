@@ -118,8 +118,9 @@ pub mod abs_path {
         assert_eq!(&dir.abs_path().unwrap(), expected_dir.path());
     }
 
+    #[cfg(unix)]
     #[test]
-    fn abs_paths_dont_change() {
+    fn unix_abs_paths_dont_change() {
         let tests = vec![
             ("/", "/"),
             ("/another/one", "/another/one"),
@@ -129,6 +130,18 @@ pub mod abs_path {
         for test in tests {
             let dir = filesys::Dir::new(PathBuf::from(test.0));
             assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_abs_paths_dont_change() {
+        let current_dir = dirs::current().unwrap();
+        let root = current_dir.path().ancestors().last().unwrap();
+
+        for expected in [root.to_path_buf(), root.join("another").join("one")] {
+            let dir = filesys::Dir::new(expected.clone());
+            assert_eq!(dir.abs_path().unwrap(), expected);
         }
     }
 
@@ -147,22 +160,56 @@ pub mod abs_path {
             .into_owned();
 
         let tests = vec![
+            (".//", &current_dir_path),
+            ("..//", &parent_dir_path),
+            ("././/./", &current_dir_path),
+            ("path//to///thing", &rel_path_to_thing_path),
+        ];
+
+        for test in tests {
+            let dir = filesys::Dir::new(PathBuf::from(test.0));
+            assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replace_multiple_slashes_in_unix_abs_paths() {
+        let tests = vec![
             ("/", "/"),
             ("//", "/"),
             ("///", "/"),
-            (".//", &current_dir_path),
             ("//..", "/"),
-            ("..//", &parent_dir_path),
             ("/..//", "/"),
             ("/.//./", "/"),
-            ("././/./", &current_dir_path),
-            ("path//to///thing", &rel_path_to_thing_path),
             ("/path//to///thing", "/path/to/thing"),
         ];
 
         for test in tests {
             let dir = filesys::Dir::new(PathBuf::from(test.0));
             assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_windows_abs_paths() {
+        let current_dir = dirs::current().unwrap();
+        let root = current_dir.path().ancestors().last().unwrap();
+        let root_str = root.to_string_lossy();
+        let tests = vec![
+            (format!(r"{root_str}\\"), root.to_path_buf()),
+            (format!(r"{root_str}.\\.\"), root.to_path_buf()),
+            (
+                format!(r"{root_str}path\\to\.\thing\..\file"),
+                root.join("path").join("to").join("file"),
+            ),
+            (format!(r"{root_str}..\\..\path"), root.join("path")),
+        ];
+
+        for (input, expected) in tests {
+            let dir = filesys::Dir::new(PathBuf::from(input));
+            assert_eq!(dir.abs_path().unwrap(), expected);
         }
     }
 
@@ -182,13 +229,24 @@ pub mod abs_path {
             .into_owned();
 
         let tests = vec![
-            ("/./", "/"),
             ("./", &current_dir_path),
             ("./test", &rel_test_path),
             ("./test/./path", &rel_test_path_path),
-            ("/test/./path/", "/test/path"),
             ("test/path/.", &rel_test_path_path),
         ];
+
+        for test in tests {
+            assert_eq!(
+                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
+                PathBuf::from(test.1)
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn eliminate_current_dir_in_unix_abs_paths() {
+        let tests = vec![("/./", "/"), ("/test/./path/", "/test/path")];
 
         for test in tests {
             assert_eq!(
@@ -239,16 +297,11 @@ pub mod abs_path {
             .into_owned();
 
         let tests = vec![
-            ("/..", "/"),
-            ("/../test", "/test"),
             ("test/..", &current_dir_path),
             ("test/path/..", &rel_test_path),
             ("test/../path", &rel_path_path),
-            ("/test/../path", "/path"),
             ("test/path/../../", &current_dir_path),
             ("test/path/../../..", &parent_dir_path),
-            ("/test/path/../../..", "/"),
-            ("/test/path/../../../..", "/"),
             ("test/path/../../../..", &grandparent_dir_path),
             ("test/path/../../another/path", &rel_another_path_path),
             ("test/path/../../another/path/..", &rel_another_path),
@@ -256,6 +309,25 @@ pub mod abs_path {
             ("../test/", &rel_parent_test_path),
             ("../test/path", &rel_parent_test_path_path),
             ("../test/..", &parent_dir_path),
+        ];
+
+        for test in tests {
+            assert_eq!(
+                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
+                PathBuf::from(test.1)
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn eliminate_parent_dir_in_unix_abs_paths() {
+        let tests = vec![
+            ("/..", "/"),
+            ("/../test", "/test"),
+            ("/test/../path", "/path"),
+            ("/test/path/../../..", "/"),
+            ("/test/path/../../../..", "/"),
         ];
 
         for test in tests {

@@ -35,31 +35,19 @@ async fn make_job(file: &File) -> Job {
     }
 }
 
-/// Two symlinks pointing at each other. `stat` and `open` on either fail with
-/// ELOOP, which classifies as a counted retry rather than a terminal failure.
-/// Built with `std::os::unix::fs::symlink` so the targets can be dangling (a
-/// loop) rather than existing files.
-#[cfg(unix)]
-fn symlink_loop(dir: &Dir) -> File {
-    let a = dir.file("loop-a");
-    let b = dir.file("loop-b");
-    std::os::unix::fs::symlink(b.path(), a.path()).unwrap();
-    std::os::unix::fs::symlink(a.path(), b.path()).unwrap();
-    a
-}
-
-/// A `Job` for a path whose stat cannot succeed. The recorded size/digest/mtime
-/// are never compared: the sweep fails at the stat step before any identity
-/// check runs, so `make_job` — which stats the file in setup — is unusable.
-// only used by the unix-gated symlink-loop test below
-#[cfg(unix)]
-fn wedged_job(file: File) -> Job {
+/// A `Job` whose identity matches an existing directory represented as a file.
+/// Stat succeeds, but unlinking it as a file fails on every platform.
+async fn undeletable_directory_job(dir: &Dir) -> Job {
     let now = Utc::now();
+    let target = dir.subdir("undeletable");
+    dirs::create(&target).await.unwrap();
+    let file = File::new(target.path().clone());
+    let metadata = files::metadata(&file).await.unwrap();
     Job {
         file,
-        size: 0,
+        size: metadata.len(),
         digest: "sha256:unused".to_string(),
-        mtime: now,
+        mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
         first_observed_at: now,
         last_observed_at: now,
         ttl_secs: 0,
@@ -142,7 +130,6 @@ async fn enqueue_after_shutdown_errors() {
 // single-threaded deleter: a job whose sweep keeps failing is given up on and
 // leaves the queue. `sweep()` awaits the worker's response, so each sweep has
 // completed before the following `len()` is asked for.
-#[cfg(unix)]
 #[tokio::test]
 async fn wedged_job_is_given_up_on_through_the_actor() {
     let dir = test_dirs::temp("delete-actor-wedged").unwrap();
@@ -163,7 +150,7 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
     .unwrap();
 
     deleter
-        .enqueue(wedged_job(symlink_loop(&dir)))
+        .enqueue(undeletable_directory_job(&dir).await)
         .await
         .unwrap();
     assert_eq!(deleter.len().await.unwrap(), 1);
