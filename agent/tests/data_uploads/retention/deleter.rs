@@ -36,8 +36,8 @@ async fn make_job(file: &File) -> Job {
 
 /// Two symlinks pointing at each other. `stat` and `open` on either fail with
 /// ELOOP, which classifies as a counted retry rather than a terminal failure.
-/// Built with `std::os::unix::fs::symlink` rather than `files::create_symlink`
-/// because the latter asserts the target exists.
+/// Built with `std::os::unix::fs::symlink` so the targets can be dangling (a
+/// loop) rather than existing files.
 fn symlink_loop(dir: &Dir) -> File {
     let a = dir.file("loop-a");
     let b = dir.file("loop-b");

@@ -23,8 +23,7 @@ unconditional Unix APIs (verified inventory in the roadmap plan and the
 1. `main.rs` — `tokio::signal::unix` SIGTERM/SIGINT.
 2. `privilege/` — `nix` geteuid/getegid + passwd lookup (the `nix` dep is
    already unix-only, so the module cannot compile on Windows).
-3. `filesys/files.rs` — `std::os::unix::fs::OpenOptionsExt` `.mode()` calls
-   and `tokio::fs::symlink` (Unix-only signature).
+3. `filesys/files.rs` — `std::os::unix::fs::OpenOptionsExt` `.mode()` calls.
 4. `server/serve.rs` — `tokio::net::UnixListener`, systemd `LISTEN_FDS`
    fd-3 adoption (`FromRawFd`).
 
@@ -38,7 +37,7 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
 - [x] Activate plan (`docs(plans):` commit on the branch)
 - [x] `main.rs`: cfg-split `await_shutdown_signal` (unix: SIGTERM/SIGINT/ctrl-c; windows: ctrl-c)
 - [x] `privilege/`: unix impl + tests under `cfg(unix)`; windows warn-only `verify_effective_user` stub; `Syscall` error variant unix-gated (enum stays inhabited)
-- [x] `filesys/files.rs`: gate `OpenOptionsExt` import + `.mode()` application (windows ignores `WriteOptions.mode`); gate `create_symlink` unix-only
+- [x] `filesys/files.rs`: gate `OpenOptionsExt` import + `.mode()` application (windows ignores `WriteOptions.mode`); delete unused `create_symlink`
 - [x] `server/serve.rs`: gate unix imports + `serve`/listener fns; `Options`/`routes` stay portable
 - [x] `app/run.rs`: gate `serve` import, `init_socket_server`, `with_socket_server_handle`; windows branch warns and skips when `enable_socket_server` is set
 - [x] `agent/tests/mod.rs`: `#[cfg(unix)]` on `privilege` test module
@@ -78,6 +77,10 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
 - 2026-09-11 (authoring): CI runs the Windows check as `cargo check` (lib +
   bin) only — `--all-targets` would compile the test crate, whose Unix-API
   gating is PR 6's scope.
+- 2026-09-11: deleted unused `files::create_symlink` and `CreateSymlinkErr`
+  instead of keeping a unix-only wrapper. No production callers; the helper
+  existed only for its own tests. Retention ELOOP fixtures keep using
+  `std::os::unix::fs::symlink` directly.
 
 ## Outcomes & Retrospective
 

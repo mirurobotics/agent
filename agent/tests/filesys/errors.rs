@@ -211,20 +211,6 @@ mod display {
     }
 
     #[test]
-    fn create_symlink_err() {
-        let io_err = std::io::Error::other("symlink failed");
-        let err = FileSysErr::CreateSymlinkErr(CreateSymlinkErr {
-            source: Box::new(io_err),
-            file: filesys::File::new("/src"),
-            link: filesys::File::new("/link"),
-            trace: miru_agent::trace!(),
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("/src"), "message: {msg}");
-        assert!(msg.contains("/link"), "message: {msg}");
-    }
-
-    #[test]
     fn file_metadata_err() {
         let io_err = std::io::Error::other("stat failed");
         let err = FileSysErr::FileMetadataErr(FileMetadataErr {

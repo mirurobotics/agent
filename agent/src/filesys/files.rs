@@ -443,47 +443,6 @@ pub async fn set_permissions(
     Ok(())
 }
 
-// Unix-only: Windows splits symlinks into file/dir variants and gates
-// creation behind a privilege; no production caller needs them there.
-#[cfg(unix)]
-pub async fn create_symlink(
-    file: &File,
-    link: &File,
-    overwrite: Overwrite,
-) -> Result<(), FileSysErr> {
-    // TOCTOU note: symlink() doesn't verify the source exists, so this
-    // semantic check cannot be made atomic. Kept as an intentional guard.
-    file.assert_exists()?;
-
-    match overwrite {
-        Overwrite::Allow => {
-            delete(link).await?;
-        }
-        Overwrite::Deny => { /* let symlink() fail with AlreadyExists below */ }
-    }
-
-    // create symlink
-    tokio::fs::symlink(file.path(), link.path())
-        .await
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
-                    file: link.clone(),
-                    overwrite,
-                    trace: trace!(),
-                })
-            } else {
-                FileSysErr::CreateSymlinkErr(CreateSymlinkErr {
-                    source: Box::new(e),
-                    file: file.clone(),
-                    link: link.clone(),
-                    trace: trace!(),
-                })
-            }
-        })?;
-    Ok(())
-}
-
 /// Returns the regular files matching a shell-style glob `pattern`.
 ///
 /// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].

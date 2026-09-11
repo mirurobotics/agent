@@ -479,8 +479,8 @@ mod tests {
     }
 
     /// Two symlinks pointing at each other. `stat` and `open` on either fail
-    /// with ELOOP. Built with `std::os::unix::fs::symlink` rather than
-    /// `files::create_symlink` because the latter asserts the target exists.
+    /// with ELOOP. Built with `std::os::unix::fs::symlink` so the targets can
+    /// be dangling (a loop) rather than existing files.
     fn symlink_loop(dir: &Dir) -> File {
         let a = dir.file("loop-a");
         let b = dir.file("loop-b");

@@ -148,17 +148,6 @@ pub struct CreateDirErr {
 impl crate::errors::Error for CreateDirErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to create symlink '{link}' aliasing to file '{file}': {source}")]
-pub struct CreateSymlinkErr {
-    pub source: Box<std::io::Error>,
-    pub file: File,
-    pub link: File,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for CreateSymlinkErr {}
-
-#[derive(Debug, thiserror::Error)]
 #[error("failed to create temporary directory: {source}")]
 pub struct CreateTmpDirErr {
     pub source: Box<std::io::Error>,
@@ -373,8 +362,6 @@ pub enum FileSysErr {
     #[error(transparent)]
     CreateDirErr(CreateDirErr),
     #[error(transparent)]
-    CreateSymlinkErr(CreateSymlinkErr),
-    #[error(transparent)]
     CreateTmpDirErr(CreateTmpDirErr),
     #[error(transparent)]
     CreateTmpFileErr(CreateTmpFileErr),
@@ -430,7 +417,6 @@ crate::impl_error!(FileSysErr {
     AtomicWriteFileErr,
     ConvertUTF8Err,
     CreateDirErr,
-    CreateSymlinkErr,
     CreateTmpDirErr,
     CreateTmpFileErr,
     DeleteDirErr,
