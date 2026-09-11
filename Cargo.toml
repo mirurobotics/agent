@@ -26,9 +26,6 @@ atomicwrites = "0.4.4"
 aws-sdk-s3 = { version = "1.137", default-features = false, features = ["behavior-version-latest", "rt-tokio", "sigv4a", "http-1x", "default-https-client"] }
 aws-smithy-http-client = { version = "1.1", default-features = false }
 aws-smithy-types = { version = "1.5", default-features = false }
-# Agent RSA crypto (crypt module). Already compiled into every build as the
-# rustls crypto provider, so this adds no new crypto stack. Default features
-# are required: `aws-lc-sys` is the mandatory backend.
 aws-lc-rs = "1.18.0"
 axum = { version = "0.8.3" }
 base64 = "0.22.1"
@@ -44,9 +41,8 @@ google-cloud-gax = { version = "1.11.0" }
 google-cloud-storage = { version = "1.15.0" }
 http = "1"
 nix = { version = "0.31.2", default-features = false, features = ["user"] }
-# RFC 7468-canonical PEM encode/decode (64-col, LF) with label discrimination,
-# byte-compatible with what openssl reads and writes. `std` implies `alloc`
-# (needed for decode_vec/encode_string) and makes its error a std::error::Error.
+# `std` implies `alloc` (needed for decode_vec/encode_string) and makes its error a
+# std::error::Error.
 pem-rfc7468 = { version = "0.7.0", features = ["std"] }
 reqwest = { version = "0.13.1", features = ["query"] }
 backend-api = { path = "libs/backend-api" }

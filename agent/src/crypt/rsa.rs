@@ -127,16 +127,6 @@ pub async fn gen_key_pair(
     Ok(())
 }
 
-/// Strip trailing ASCII whitespace before PEM-decoding: `pem_rfc7468` rejects
-/// any bytes after the END line, but PEM files commonly end with extra newlines.
-fn trim_trailing_whitespace(bytes: &[u8]) -> &[u8] {
-    let end = bytes
-        .iter()
-        .rposition(|b| !b.is_ascii_whitespace())
-        .map_or(0, |i| i + 1);
-    &bytes[..end]
-}
-
 /// Parse a PEM private key, dispatching on the armor label: PKCS#1 (pre-migration
 /// keys on device disks) or PKCS#8 (what `gen_key_pair` writes). This matches the
 /// dual-format acceptance of the previous OpenSSL generic reader.
@@ -163,6 +153,16 @@ fn parse_private_key_pem(pem: &[u8]) -> Result<RsaKeyPair, CryptErr> {
             trace: trace!(),
         })
     })
+}
+
+/// Strip trailing ASCII whitespace before PEM-decoding: `pem_rfc7468` rejects
+/// any bytes after the END line, but PEM files commonly end with extra newlines.
+fn trim_trailing_whitespace(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map_or(0, |i| i + 1);
+    &bytes[..end]
 }
 
 /// Parse a PEM public key. SPKI armor only, matching the previous reader.
