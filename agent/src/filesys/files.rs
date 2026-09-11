@@ -347,7 +347,7 @@ async fn open_destination_for_sync(dst: &File) -> Result<TokioFile, FileSysErr> 
             .await
             .map_err(|e| {
                 FileSysErr::WriteFileErr(WriteFileErr {
-                    source: Box::new(e),
+                    source: Box::new(e.into()),
                     file: dst.clone(),
                     trace: trace!(),
                 })
