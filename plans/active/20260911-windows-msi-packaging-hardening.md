@@ -8,7 +8,7 @@ This ExecPlan is a living document. Keep Progress, Surprises & Discoveries, Deci
 |---|---|---|
 | `mirurobotics/agent` | read-write | Harden PR #236's WiX MSI and PowerShell tools, add native Windows validation, and correct the agent Windows roadmap. |
 
-This plan lives in `plans/backlog/` in the agent repository because every implementation and validation change belongs to that repository. Keep it there throughout implementation and closure; do not prescribe a lifecycle directory move as part of this work. The workbench and other Miru repositories are out of scope and must not be modified. The base branch is `main`; implementation continues the draft branch `feat/windows-msi-packaging` and PR #236.
+This plan follows the repository lifecycle from `plans/backlog/` to `plans/active/` during implementation and `plans/completed/` at closure. The workbench and other Miru repositories are out of scope and must not be modified. The base branch is `main`; implementation continues the draft branch `feat/windows-msi-packaging` and PR #236.
 
 This work deliberately does not add Windows Service Control Manager integration, service install/start/stop/recovery behavior, a release or GoReleaser build lane, artifact publication, PDB handling, or Authenticode signing. Those are separate roadmap changes. In particular, do not make the current console-capable executable pretend to be a Windows service.
 
