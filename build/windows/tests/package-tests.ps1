@@ -168,7 +168,12 @@ function Assert-ProductionTables {
         Assert-Equal 1 (@($directories | Where-Object { $_[0] -eq "MIRULOGS" -and $_[1] -eq "MIRUDATA" -and $_[2] -eq "logs" })).Count "logs directory"
 
         $permissions = @(Get-MsiRows $handle.Database "SELECT ``LockObject``, ``Table``, ``SDDLText`` FROM ``MsiLockPermissionsEx``" 3)
-        Assert-Equal 2 (@($permissions | Where-Object { $_[2] -eq $expectedSddl })).Count "exact protected SDDL rows"
+        $expectedPermissions = @(
+            "MIRUDATA|CreateFolder|$expectedSddl",
+            "MIRULOGS|CreateFolder|$expectedSddl"
+        ) | Sort-Object
+        $actualPermissions = @($permissions | ForEach-Object { "{0}|{1}|{2}" -f $_[0], $_[1], $_[2] } | Sort-Object)
+        Assert-Equal ($expectedPermissions -join "`n") ($actualPermissions -join "`n") "exact protected permission rows"
 
         $actions = @()
         if (Test-MsiTable $handle.Database "CustomAction") {

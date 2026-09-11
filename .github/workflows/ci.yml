@@ -75,7 +75,7 @@ jobs:
 
       - name: Run elevated Windows installer integration tests
         shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
       - name: Upload Windows installer failure logs
         if: failure()

@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $installScript = Join-Path $repositoryRoot "scripts\install\install.ps1"
 $provisionScript = Join-Path $repositoryRoot "scripts\install\provision.ps1"
+$integrationScript = Join-Path $repositoryRoot "build\windows\tests\integration-tests.ps1"
 $harnessTls = [Net.ServicePointManager]::SecurityProtocol
 $tokenName = "MIRU_PROVISIONING_TOKEN"
 $harnessHadToken = Test-Path -LiteralPath "Env:$tokenName"
@@ -66,7 +67,51 @@ function Set-TestFunction {
     Set-Item -Path "function:script:$Name" -Value $Body
 }
 
+function Get-UnconfirmedIntegrationState {
+    $fixtureProducts = @(
+        "{B7AFDD4E-E6DB-4ED9-8C34-F318A04486B1}",
+        "{3CE73709-ECE4-48A5-B7E7-1AC13C5EF30A}",
+        "{4E72A894-00B5-433B-A445-C2CFD7FCF432}"
+    )
+    $uninstallRoots = @(
+        "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "Registry::HKEY_LOCAL_MACHINE\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    $registrations = @()
+    foreach ($root in $uninstallRoots) {
+        foreach ($product in $fixtureProducts) {
+            $path = Join-Path $root $product
+            $registrations += "$path=$(Test-Path -LiteralPath $path)"
+        }
+    }
+    $testUser = @(Get-CimInstance -ClassName Win32_UserAccount -Filter "LocalAccount = TRUE AND Name = 'MiruMsiTestUser'" -ErrorAction Stop).Count -ne 0
+    $programData = Test-Path -LiteralPath (Join-Path $env:ProgramData "Miru")
+    $integrationTempDirectories = @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter "miru-integration-tests-*" -ErrorAction Stop |
+        ForEach-Object { $_.FullName } | Sort-Object)
+    return @(
+        "registrations=$($registrations -join '|')",
+        "testUser=$testUser",
+        "programData=$programData",
+        "tempDirectories=$($integrationTempDirectories -join '|')"
+    ) -join "`n"
+}
+
 try {
+    $integrationRefusalRoot = New-HarnessDirectory
+    $integrationStdout = Join-Path $integrationRefusalRoot "stdout.txt"
+    $integrationStderr = Join-Path $integrationRefusalRoot "stderr.txt"
+    $stateBeforeRefusal = Get-UnconfirmedIntegrationState
+    $integrationProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f $integrationScript)
+    ) -RedirectStandardOutput $integrationStdout -RedirectStandardError $integrationStderr -Wait -PassThru
+    $integrationOutput = [IO.File]::ReadAllText($integrationStdout) + [IO.File]::ReadAllText($integrationStderr)
+    $stateAfterRefusal = Get-UnconfirmedIntegrationState
+    Assert-True ($integrationProcess.ExitCode -ne 0) "unconfirmed integration exits nonzero"
+    Assert-True ($integrationOutput -match 'requires -ConfirmDisposableTestMachine') "unconfirmed integration reports its explicit confirmation requirement"
+    Assert-True ($integrationOutput -notmatch 'elevated Administrator session is required') "unconfirmed integration refuses before elevation"
+    Assert-Equal $stateBeforeRefusal $stateAfterRefusal "unconfirmed integration external state"
+    Write-Host "PASS unconfirmed integration refuses without side effects"
+
     . $installScript
     $installArchitectureDefinition = ${function:Assert-InstallArchitecture}.ToString()
 
@@ -170,6 +215,8 @@ try {
         Assert-Equal $digest (Get-ExpectedChecksum -ChecksumPath $checksumPath -AssetName $assetName) "valid checksum syntax"
         Assert-FileChecksum -FilePath $assetPath -ChecksumPath $checksumPath -AssetName $assetName
     }
+    [IO.File]::WriteAllText($checksumPath, "$digest  $assetName`nnot-a-digest  $assetName")
+    Assert-Throws { Get-ExpectedChecksum -ChecksumPath $checksumPath -AssetName $assetName } "valid and malformed exact records rejected as duplicates"
     $invalidChecksumFiles = @(
         "",
         "$digest  prefix-$assetName",

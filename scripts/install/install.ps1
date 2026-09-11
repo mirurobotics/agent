@@ -131,21 +131,24 @@ function Get-ExpectedChecksum {
         [Parameter(Mandatory = $true)][string]$AssetName
     )
 
-    $matchingDigests = @()
+    $matchingRecords = @()
     foreach ($line in [IO.File]::ReadAllLines($ChecksumPath)) {
-        if ($line -notmatch '^\s*([0-9A-Fa-f]{64})[ \t]+\*?(.+?)\s*$') {
+        if ($line -notmatch '^\s*(\S+)[ \t]+\*?(.+?)\s*$') {
             continue
         }
         if (-not [string]::Equals($Matches[2], $AssetName, [StringComparison]::Ordinal)) {
             continue
         }
-        $matchingDigests += $Matches[1].ToUpperInvariant()
+        $matchingRecords += $Matches[1]
     }
 
-    if ($matchingDigests.Count -ne 1) {
-        throw "Checksums must contain exactly one valid SHA-256 record for $AssetName."
+    if ($matchingRecords.Count -ne 1) {
+        throw "Checksums must contain exactly one record for $AssetName."
     }
-    return $matchingDigests[0]
+    if ($matchingRecords[0] -notmatch '^[0-9A-Fa-f]{64}$') {
+        throw "The checksum record for $AssetName must contain exactly 64 hexadecimal characters."
+    }
+    return $matchingRecords[0].ToUpperInvariant()
 }
 
 function Assert-FileChecksum {
