@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::models::status::impl_status_enum;
+use crate::platform;
 
 // external crates
 use serde::Serialize;
@@ -52,7 +53,7 @@ impl Default for Options {
         Self {
             stdout: true,
             log_level: LogLevel::Info,
-            log_dir: PathBuf::from("/var/log/miru"),
+            log_dir: platform::log_dir(),
         }
     }
 }
