@@ -340,21 +340,21 @@ pub mod read_private_key {
         // Valid PEM armor, but a label the dispatch does not accept.
         let pem = "-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n";
         let result = write_pem_and_read_private_key(pem).await.unwrap_err();
-        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+        assert!(matches!(result, CryptErr::UnsupportedPEMLabelErr(_)));
     }
 
     #[tokio::test]
     async fn pkcs1_label_with_invalid_der() {
         let pem = "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n";
         let result = write_pem_and_read_private_key(pem).await.unwrap_err();
-        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+        assert!(matches!(result, CryptErr::ParsePrivateKeyErr(_)));
     }
 
     #[tokio::test]
     async fn pkcs8_label_with_invalid_der() {
         let pem = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
         let result = write_pem_and_read_private_key(pem).await.unwrap_err();
-        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+        assert!(matches!(result, CryptErr::ParsePrivateKeyErr(_)));
     }
 }
 
@@ -430,14 +430,14 @@ pub mod read_public_key {
         // SPKI armor is the only accepted public-key format.
         let pem = "-----BEGIN RSA PUBLIC KEY-----\nAAAA\n-----END RSA PUBLIC KEY-----\n";
         let result = write_pem_and_read_public_key(pem).await.unwrap_err();
-        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+        assert!(matches!(result, CryptErr::UnsupportedPEMLabelErr(_)));
     }
 
     #[tokio::test]
     async fn spki_label_with_invalid_der() {
         let pem = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n";
         let result = write_pem_and_read_public_key(pem).await.unwrap_err();
-        assert!(matches!(result, CryptErr::ReadKeyErr(_)));
+        assert!(matches!(result, CryptErr::ParsePublicKeyErr(_)));
     }
 }
 

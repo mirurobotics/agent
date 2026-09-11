@@ -79,6 +79,20 @@ Post-review entries, 2026-09-10:
 - Review feedback also replaced every `std::fs` read in crypt/authn tests with
   `filesys` module reads (`files::read_bytes`/`read_string`, `Dir::file`) — repo
   convention applies to test code too.
+- REVERSED the error-macro decision on review feedback (Ben): the `msg_err!`/
+  `source_err!` macros (renamed `map_err_display!`/`map_err_source!` in review) are
+  deleted in favor of the filesys errors pattern — one specific struct per failure
+  mode with typed sources, constructed inline. `ReadKeyErr` split into `DecodePEMErr`
+  (pem_rfc7468::Error), `UnsupportedPEMLabelErr` (label), `ParsePrivateKeyErr` /
+  `ParsePublicKeyErr` (KeyRejected); `ConvertPrivateKeyToDERErr` added (Unspecified);
+  the PEM/generate variants retyped from `msg: String` to typed sources. Tests assert
+  the specific variants.
+- crypt covgate re-baselined 95.16 → 91.3 (measured, floored) with this change. The
+  macros were pooling llvm-cov attribution (all expansions credit the macro
+  definition), which overstated coverage; inline closures expose ~7 error-construction
+  paths on practically-infallible operations (DER/PEM encode, keygen, sign) that
+  cannot be triggered through the public API. Same tradeoff filesys itself carries
+  (84.28% measured against its 81.69 gate).
 
 
 ## Outcomes & Retrospective

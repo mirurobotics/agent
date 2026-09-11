@@ -39,18 +39,27 @@ pub struct ConvertBytesToStringErr {
 impl crate::errors::Error for ConvertBytesToStringErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Convert private key to PEM error: {msg}")]
+#[error("Convert private key to DER error: {source}")]
+pub struct ConvertPrivateKeyToDERErr {
+    pub source: aws_lc_rs::error::Unspecified,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ConvertPrivateKeyToDERErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Convert private key to PEM error: {source}")]
 pub struct ConvertPrivateKeyToPEMErr {
-    pub msg: String,
+    pub source: pem_rfc7468::Error,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for ConvertPrivateKeyToPEMErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Convert public key to PEM error: {msg}")]
+#[error("Convert public key to PEM error: {source}")]
 pub struct ConvertPublicKeyToPEMErr {
-    pub msg: String,
+    pub source: pem_rfc7468::Error,
     pub trace: Box<Trace>,
 }
 
@@ -66,22 +75,49 @@ pub struct ConvertPublicKeyToDERErr {
 impl crate::errors::Error for ConvertPublicKeyToDERErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Generate RSA key pair error: {msg}")]
+#[error("Generate RSA key pair error: {source}")]
 pub struct GenerateRSAKeyPairErr {
-    pub msg: String,
+    pub source: aws_lc_rs::error::Unspecified,
     pub trace: Box<Trace>,
 }
 
 impl crate::errors::Error for GenerateRSAKeyPairErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("Read key error: {msg}")]
-pub struct ReadKeyErr {
-    pub msg: String,
+#[error("Decode PEM error: {source}")]
+pub struct DecodePEMErr {
+    pub source: pem_rfc7468::Error,
     pub trace: Box<Trace>,
 }
 
-impl crate::errors::Error for ReadKeyErr {}
+impl crate::errors::Error for DecodePEMErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Unsupported PEM label: {label}")]
+pub struct UnsupportedPEMLabelErr {
+    pub label: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for UnsupportedPEMLabelErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Parse private key error: {source}")]
+pub struct ParsePrivateKeyErr {
+    pub source: aws_lc_rs::error::KeyRejected,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ParsePrivateKeyErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Parse public key error: {source}")]
+pub struct ParsePublicKeyErr {
+    pub source: aws_lc_rs::error::KeyRejected,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ParsePublicKeyErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("Sign data error: {source}")]
@@ -105,6 +141,8 @@ pub enum CryptErr {
     #[error(transparent)]
     ConvertBytesToStringErr(ConvertBytesToStringErr),
     #[error(transparent)]
+    ConvertPrivateKeyToDERErr(ConvertPrivateKeyToDERErr),
+    #[error(transparent)]
     ConvertPrivateKeyToPEMErr(ConvertPrivateKeyToPEMErr),
     #[error(transparent)]
     ConvertPublicKeyToPEMErr(ConvertPublicKeyToPEMErr),
@@ -113,7 +151,13 @@ pub enum CryptErr {
     #[error(transparent)]
     GenerateRSAKeyPairErr(GenerateRSAKeyPairErr),
     #[error(transparent)]
-    ReadKeyErr(ReadKeyErr),
+    DecodePEMErr(DecodePEMErr),
+    #[error(transparent)]
+    UnsupportedPEMLabelErr(UnsupportedPEMLabelErr),
+    #[error(transparent)]
+    ParsePrivateKeyErr(ParsePrivateKeyErr),
+    #[error(transparent)]
+    ParsePublicKeyErr(ParsePublicKeyErr),
     #[error(transparent)]
     SignDataErr(SignDataErr),
 }
@@ -130,10 +174,14 @@ crate::impl_error!(CryptErr {
     FileSysErr,
     Base64DecodeErr,
     ConvertBytesToStringErr,
+    ConvertPrivateKeyToDERErr,
     ConvertPrivateKeyToPEMErr,
     ConvertPublicKeyToPEMErr,
     ConvertPublicKeyToDERErr,
     GenerateRSAKeyPairErr,
-    ReadKeyErr,
+    DecodePEMErr,
+    UnsupportedPEMLabelErr,
+    ParsePrivateKeyErr,
+    ParsePublicKeyErr,
     SignDataErr,
 });

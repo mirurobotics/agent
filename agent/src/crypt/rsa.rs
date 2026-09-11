@@ -28,56 +28,37 @@ const PKCS8_LABEL: &str = "PRIVATE KEY";
 /// read or written. The backend stores this PEM verbatim at (re)provision.
 const SPKI_LABEL: &str = "PUBLIC KEY";
 
-/// Maps a failed expression's error into a `CryptErr` variant carrying the error's
-/// Display output as `msg`. The variant name and inner struct name must match
-/// (e.g. `ReadKeyErr` maps to `CryptErr::ReadKeyErr(ReadKeyErr { .. })`).
-macro_rules! msg_err {
-    ($variant:ident, $expr:expr) => {
-        $expr.map_err(|e| {
-            CryptErr::$variant($variant {
-                msg: e.to_string(),
-                trace: trace!(),
-            })
-        })
-    };
-}
-
-/// Maps a failed expression's error into a `CryptErr` variant carrying the typed
-/// error as `source`. Same variant/struct naming contract as `msg_err!`.
-macro_rules! source_err {
-    ($variant:ident, $expr:expr) => {
-        $expr.map_err(|e| {
-            CryptErr::$variant($variant {
-                source: e,
-                trace: trace!(),
-            })
-        })
-    };
-}
-
 /// Encode the private key as PKCS#8 PEM. The intermediate DER buffer zeroizes on
 /// drop; the returned PEM `String` is written to disk immediately by the caller.
 fn private_key_to_pem(key_pair: &RsaKeyPair) -> Result<String, CryptErr> {
-    let der = msg_err!(
-        ConvertPrivateKeyToPEMErr,
-        AsDer::<Pkcs8V1Der>::as_der(key_pair)
-    )?;
-    msg_err!(
-        ConvertPrivateKeyToPEMErr,
-        pem_rfc7468::encode_string(PKCS8_LABEL, LineEnding::LF, der.as_ref())
-    )
+    let der = AsDer::<Pkcs8V1Der>::as_der(key_pair).map_err(|e| {
+        CryptErr::ConvertPrivateKeyToDERErr(ConvertPrivateKeyToDERErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    pem_rfc7468::encode_string(PKCS8_LABEL, LineEnding::LF, der.as_ref()).map_err(|e| {
+        CryptErr::ConvertPrivateKeyToPEMErr(ConvertPrivateKeyToPEMErr {
+            source: e,
+            trace: trace!(),
+        })
+    })
 }
 
 /// Encode the public key as SPKI PEM.
 fn public_key_to_pem(key_pair: &RsaKeyPair) -> Result<String, CryptErr> {
-    let der = msg_err!(
-        ConvertPublicKeyToPEMErr,
-        AsDer::<PublicKeyX509Der>::as_der(key_pair.public_key())
-    )?;
-    msg_err!(
-        ConvertPublicKeyToPEMErr,
-        pem_rfc7468::encode_string(SPKI_LABEL, LineEnding::LF, der.as_ref())
-    )
+    let der = AsDer::<PublicKeyX509Der>::as_der(key_pair.public_key()).map_err(|e| {
+        CryptErr::ConvertPublicKeyToDERErr(ConvertPublicKeyToDERErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    pem_rfc7468::encode_string(SPKI_LABEL, LineEnding::LF, der.as_ref()).map_err(|e| {
+        CryptErr::ConvertPublicKeyToPEMErr(ConvertPublicKeyToPEMErr {
+            source: e,
+            trace: trace!(),
+        })
+    })
 }
 
 /// Generate an RSA key pair and write the private and public keys to the specified
@@ -108,7 +89,12 @@ pub async fn gen_key_pair(
     let key_pair = tokio::task::spawn_blocking(move || RsaKeyPair::generate(size))
         .await
         .expect("rsa keygen task panicked");
-    let key_pair = msg_err!(GenerateRSAKeyPairErr, key_pair)?;
+    let key_pair = key_pair.map_err(|e| {
+        CryptErr::GenerateRSAKeyPairErr(GenerateRSAKeyPairErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
 
     // Extract and write the private key (PKCS#8; keys written before the
     // aws-lc-rs migration are PKCS#1 and stay readable via `read_private_key`'s
@@ -155,33 +141,50 @@ fn trim_trailing_whitespace(bytes: &[u8]) -> &[u8] {
 /// keys on device disks) or PKCS#8 (what `gen_key_pair` writes). This matches the
 /// dual-format acceptance of the previous OpenSSL generic reader.
 fn parse_private_key_pem(pem: &[u8]) -> Result<RsaKeyPair, CryptErr> {
-    let (label, der) = msg_err!(
-        ReadKeyErr,
-        pem_rfc7468::decode_vec(trim_trailing_whitespace(pem))
-    )?;
-    match label {
-        PKCS1_LABEL => msg_err!(ReadKeyErr, RsaKeyPair::from_der(&der)),
-        PKCS8_LABEL => msg_err!(ReadKeyErr, RsaKeyPair::from_pkcs8(&der)),
-        other => Err(CryptErr::ReadKeyErr(ReadKeyErr {
-            msg: format!("unsupported private key PEM label: {other}"),
+    let (label, der) = pem_rfc7468::decode_vec(trim_trailing_whitespace(pem)).map_err(|e| {
+        CryptErr::DecodePEMErr(DecodePEMErr {
+            source: e,
             trace: trace!(),
-        })),
-    }
+        })
+    })?;
+    let parse = match label {
+        PKCS1_LABEL => RsaKeyPair::from_der(&der),
+        PKCS8_LABEL => RsaKeyPair::from_pkcs8(&der),
+        other => {
+            return Err(CryptErr::UnsupportedPEMLabelErr(UnsupportedPEMLabelErr {
+                label: other.to_string(),
+                trace: trace!(),
+            }))
+        }
+    };
+    parse.map_err(|e| {
+        CryptErr::ParsePrivateKeyErr(ParsePrivateKeyErr {
+            source: e,
+            trace: trace!(),
+        })
+    })
 }
 
 /// Parse a PEM public key. SPKI armor only, matching the previous reader.
 fn parse_public_key_pem(pem: &[u8]) -> Result<PublicKey, CryptErr> {
-    let (label, der) = msg_err!(
-        ReadKeyErr,
-        pem_rfc7468::decode_vec(trim_trailing_whitespace(pem))
-    )?;
+    let (label, der) = pem_rfc7468::decode_vec(trim_trailing_whitespace(pem)).map_err(|e| {
+        CryptErr::DecodePEMErr(DecodePEMErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
     if label != SPKI_LABEL {
-        return Err(CryptErr::ReadKeyErr(ReadKeyErr {
-            msg: format!("unsupported public key PEM label: {label}"),
+        return Err(CryptErr::UnsupportedPEMLabelErr(UnsupportedPEMLabelErr {
+            label: label.to_string(),
             trace: trace!(),
         }));
     }
-    msg_err!(ReadKeyErr, PublicKey::from_der(&der))
+    PublicKey::from_der(&der).map_err(|e| {
+        CryptErr::ParsePublicKeyErr(ParsePublicKeyErr {
+            source: e,
+            trace: trace!(),
+        })
+    })
 }
 
 /// Read an RSA private key from the specified file.
@@ -204,10 +207,12 @@ pub fn fingerprint(key: &PublicKey) -> Result<String, CryptErr> {
     // Must hash the SPKI DER (`PublicKeyX509Der`) — the fingerprint is the JWT
     // `kid` the backend looks up devices by, so it must stay byte-stable.
     // (`key.as_ref()` would yield PKCS#1 `RSAPublicKey` DER: a different hash.)
-    let der = source_err!(
-        ConvertPublicKeyToDERErr,
-        AsDer::<PublicKeyX509Der>::as_der(key)
-    )?;
+    let der = AsDer::<PublicKeyX509Der>::as_der(key).map_err(|e| {
+        CryptErr::ConvertPublicKeyToDERErr(ConvertPublicKeyToDERErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
     let digest = digest::digest(&digest::SHA256, der.as_ref());
     let digest = digest.as_ref();
     let mut out = String::with_capacity(digest.len() * 2);
@@ -227,10 +232,14 @@ async fn sign(
     // wrong-sized buffer rather than returning an error. The RNG argument is
     // required by the signature but unused (PKCS#1 v1.5 is deterministic).
     let mut sig = vec![0u8; key_pair.public_modulus_len()];
-    source_err!(
-        SignDataErr,
-        key_pair.sign(padding, &SystemRandom::new(), data, &mut sig)
-    )?;
+    key_pair
+        .sign(padding, &SystemRandom::new(), data, &mut sig)
+        .map_err(|e| {
+            CryptErr::SignDataErr(SignDataErr {
+                source: e,
+                trace: trace!(),
+            })
+        })?;
     Ok(sig)
 }
 
@@ -258,10 +267,12 @@ pub async fn verify(
     signature_bytes: &[u8],
 ) -> Result<bool, CryptErr> {
     let public_key = read_public_key(public_key_file).await?;
-    let der = source_err!(
-        ConvertPublicKeyToDERErr,
-        AsDer::<PublicKeyX509Der>::as_der(&public_key)
-    )?;
+    let der = AsDer::<PublicKeyX509Der>::as_der(&public_key).map_err(|e| {
+        CryptErr::ConvertPublicKeyToDERErr(ConvertPublicKeyToDERErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
     let unparsed = UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256, der.as_ref());
     Ok(unparsed.verify(data, signature_bytes).is_ok())
 }
