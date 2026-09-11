@@ -1,5 +1,6 @@
 // internal crates
 use crate::filesys;
+use crate::platform;
 
 #[derive(Clone, Debug)]
 pub struct Layout {
@@ -12,10 +13,18 @@ impl Layout {
     }
 
     pub fn root(&self) -> filesys::Dir {
-        self.filesystem_root
-            .subdir("var")
-            .subdir("lib")
-            .subdir("miru")
+        #[cfg(unix)]
+        {
+            self.filesystem_root
+                .subdir("var")
+                .subdir("lib")
+                .subdir("miru")
+        }
+        #[cfg(windows)]
+        {
+            // filesystem_root defaults to %ProgramData% (platform module)
+            self.filesystem_root.subdir("Miru")
+        }
     }
 
     pub fn temp_dir(&self) -> filesys::Dir {
@@ -93,7 +102,7 @@ impl Layout {
 
 impl Default for Layout {
     fn default() -> Self {
-        Self::new(filesys::Dir::new("/"))
+        Self::new(filesys::Dir::new(platform::data_root_base()))
     }
 }
 
