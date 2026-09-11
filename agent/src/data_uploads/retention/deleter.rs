@@ -483,6 +483,7 @@ mod tests {
     /// Two symlinks pointing at each other. `stat` and `open` on either fail
     /// with ELOOP. Built with `std::os::unix::fs::symlink` so the targets can
     /// be dangling (a loop) rather than existing files.
+    #[cfg(unix)]
     fn symlink_loop(dir: &Dir) -> File {
         let a = dir.file("loop-a");
         let b = dir.file("loop-b");
@@ -909,6 +910,7 @@ mod tests {
             assert!(matches!(outcome, Some(SweepOutcome::AlreadyGone)));
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn counted_failure_increments_attempts() {
             let dir = test_dirs::temp("delete-attempts-counted").unwrap();
@@ -927,6 +929,7 @@ mod tests {
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn attempt_cap_drops_job() {
             let dir = test_dirs::temp("delete-attempts-cap").unwrap();
@@ -951,6 +954,7 @@ mod tests {
             assert!(deleter.queue.is_empty());
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn default_attempts_is_ten() {
             assert_eq!(DeleterArgs::default().attempts, 10);
@@ -1025,6 +1029,7 @@ mod tests {
             })
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn failure_defers_the_next_attempt() {
             let dir = test_dirs::temp("delete-backoff-defer").unwrap();
@@ -1054,6 +1059,7 @@ mod tests {
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn the_delay_grows_and_caps() {
             let dir = test_dirs::temp("delete-backoff-growth").unwrap();
@@ -1078,6 +1084,7 @@ mod tests {
             }
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn next_attempt_at_survives_a_reload() {
             let dir = test_dirs::temp("delete-backoff-reload").unwrap();
@@ -1102,6 +1109,7 @@ mod tests {
         /// The sweep's loop budget comes from `count_ready` and its pops from
         /// `next_ready`; a deferred entry must be invisible to both or the two
         /// desynchronize.
+        #[cfg(unix)]
         #[tokio::test]
         async fn count_ready_and_next_ready_agree_about_a_deferred_entry() {
             let dir = test_dirs::temp("delete-backoff-agree").unwrap();
@@ -1126,6 +1134,7 @@ mod tests {
     mod persistence {
         use super::*;
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn attempts_survive_a_restart() {
             let dir = test_dirs::temp("delete-attempts-restart").unwrap();
@@ -1159,6 +1168,7 @@ mod tests {
             assert!(restored.queue.is_empty());
         }
 
+        #[cfg(unix)]
         #[tokio::test]
         async fn dropped_entry_is_absent_from_the_persisted_snapshot() {
             let dir = test_dirs::temp("delete-attempts-drop-persist").unwrap();

@@ -269,6 +269,7 @@ impl Store {
 mod tests {
     // standard crates
     use std::collections::HashMap;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::sync::{Arc, Mutex};
 

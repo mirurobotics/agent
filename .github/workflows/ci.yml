@@ -60,6 +60,11 @@ jobs:
       - name: Check Windows Target
         run: cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked
 
+      - name: Run Windows Tests
+        env:
+          RUST_LOG: "off"
+        run: cargo test --package miru-agent --features test --locked
+
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20

@@ -1,4 +1,5 @@
 // standard crates
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -112,10 +113,14 @@ impl Fixture {
     }
 }
 
+// Unix permission fixtures for the permission-denied deploy tests below; no
+// Windows analog (Windows ignores the readonly attribute for child creation).
+#[cfg(unix)]
 fn read_only() -> std::fs::Permissions {
     std::fs::Permissions::from_mode(0o555)
 }
 
+#[cfg(unix)]
 fn writeable() -> std::fs::Permissions {
     std::fs::Permissions::from_mode(0o755)
 }
@@ -577,6 +582,7 @@ pub mod deploy_func_backup_errs {
     use super::*;
     use miru_agent::filesys::PathExt;
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn copy_file_for_backup_permission_denied() {
         let f = Fixture::new().await;
@@ -625,6 +631,7 @@ pub mod deploy_func_backup_errs {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn copy_backups_failure_retains_original_files() {
         let f = Fixture::new().await;
@@ -700,6 +707,7 @@ pub mod deploy_func_write_errs {
     use super::*;
     use miru_agent::filesys::PathExt;
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn write_file_permission_denied() {
         let f = Fixture::new().await;
@@ -734,6 +742,7 @@ pub mod deploy_func_write_errs {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn write_files_restores_existing_files_on_mid_failure() {
         let f = Fixture::new().await;
@@ -801,6 +810,7 @@ pub mod deploy_func_write_errs {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn write_files_deletes_new_files_on_mid_failure() {
         let f = Fixture::new().await;
@@ -865,6 +875,7 @@ pub mod deploy_func_write_errs {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn write_files_rolls_back_mixed_existed_and_did_not_exist_in_same_call() {
         let f = Fixture::new().await;
@@ -1033,6 +1044,7 @@ pub mod remove_func_success {
         f.remove(&dpl, &[]).await.unwrap();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn delete_error_is_propagated() {
         let f = Fixture::new().await;

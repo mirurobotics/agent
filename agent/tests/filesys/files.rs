@@ -1,5 +1,6 @@
 // standard crates
 use std::future::Future;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -698,6 +699,8 @@ pub mod write_bytes {
         }
     }
 
+    // asserts Unix mode bits are applied; no Windows analog
+    #[cfg(unix)]
     #[tokio::test]
     async fn honors_mode_atomic() {
         let dir = test_dirs::temp("testing").unwrap();
@@ -717,6 +720,8 @@ pub mod write_bytes {
         assert_eq!(perms.mode() & 0o777, 0o600);
     }
 
+    // asserts Unix mode bits are applied; no Windows analog
+    #[cfg(unix)]
     #[tokio::test]
     async fn honors_mode_non_atomic() {
         let dir = test_dirs::temp("testing").unwrap();
@@ -1072,6 +1077,8 @@ pub mod append_bytes {
 pub mod set_permissions {
     use super::*;
 
+    // uses Unix mode bits (from_mode); no Windows analog
+    #[cfg(unix)]
     #[tokio::test]
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();

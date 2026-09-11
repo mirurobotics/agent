@@ -1,4 +1,5 @@
 // standard crates
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
@@ -786,6 +787,8 @@ mod move_to {
 pub mod set_permissions {
     use super::*;
 
+    // uses Unix mode bits (from_mode); no Windows analog
+    #[cfg(unix)]
     #[tokio::test]
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();
