@@ -13,18 +13,7 @@ impl Layout {
     }
 
     pub fn root(&self) -> filesys::Dir {
-        #[cfg(unix)]
-        {
-            self.filesystem_root
-                .subdir("var")
-                .subdir("lib")
-                .subdir("miru")
-        }
-        #[cfg(windows)]
-        {
-            // filesystem_root defaults to %ProgramData% (platform module)
-            self.filesystem_root.subdir("Miru")
-        }
+        self.filesystem_root.subdir(platform::data_root_suffix())
     }
 
     pub fn temp_dir(&self) -> filesys::Dir {

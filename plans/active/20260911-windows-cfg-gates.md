@@ -81,6 +81,22 @@ and no local API server (Phase 1 runs `enable_socket_server: false`).
   instead of keeping a unix-only wrapper. No production callers; the helper
   existed only for its own tests. Retention ELOOP fixtures keep using
   `std::os::unix::fs::symlink` directly.
+- 2026-09-11 (gate reduction, per Ben's preference to avoid cfg where an
+  abstraction can absorb the difference): removed the inline `cfg`s from the
+  two `files.rs` write paths by extracting `mode_open_options`/`apply_mode`
+  helpers (gate isolated to their two arms; call sites are platform-agnostic),
+  and moved the `layout::root()` suffix (`var/lib/miru` vs `Miru`) into
+  `platform::data_root_suffix()` so `layout.rs` is now cfg-free.
+  Three gates were assessed as irreducible and left in place — no library
+  bridges the underlying *concept*, only the API:
+  - shutdown signals (`main.rs`): SIGTERM has no Windows equivalent (service
+    control lands in PR 5); `tokio::signal::ctrl_c` is already the shared arm.
+  - `privilege/`: euid/gid-vs-passwd verification has no Windows analog (SID /
+    service-account model, PR 5). `whoami`-class crates return a name, not a
+    verification.
+  - `server/serve.rs` UDS + systemd fd: `interprocess` could bridge
+    UDS↔named-pipe, but the roadmap rejected named pipes for localhost TCP
+    (PR 11), so there is no Windows implementation yet by design.
 
 ## Outcomes & Retrospective
 

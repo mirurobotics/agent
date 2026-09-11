@@ -1,7 +1,5 @@
 // standard crates
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 use std::time::SystemTime;
 
 // internal crates
@@ -195,6 +193,43 @@ pub async fn append_bytes(
     Ok(())
 }
 
+// File mode bits are a Unix concept: on Windows they carry no meaning and
+// permissions are governed by NTFS ACLs inherited from the parent directory
+// (set up by the installer). These two helpers localize that platform
+// difference so the write paths stay platform-agnostic.
+
+/// A preconfigured [`std::fs::OpenOptions`] carrying `mode` for creation-time
+/// permissions, or `None` when no mode was requested (always `None` on
+/// Windows). Used by the atomic write path.
+#[cfg(unix)]
+fn mode_open_options(mode: Option<u32>) -> Option<std::fs::OpenOptions> {
+    use std::os::unix::fs::OpenOptionsExt;
+    mode.map(|m| {
+        let mut open_opts = std::fs::OpenOptions::new();
+        open_opts.write(true).create(true).truncate(true).mode(m);
+        open_opts
+    })
+}
+
+#[cfg(windows)]
+fn mode_open_options(_mode: Option<u32>) -> Option<std::fs::OpenOptions> {
+    None
+}
+
+/// Apply creation-time `mode` bits to `open_opts`; a no-op on Windows. Used by
+/// the non-atomic write path.
+#[cfg(unix)]
+fn apply_mode(open_opts: &mut tokio::fs::OpenOptions, mode: Option<u32>) {
+    // tokio's OpenOptions exposes `mode` as an inherent method under cfg(unix);
+    // no OpenOptionsExt import needed here (unlike std::fs::OpenOptions above).
+    if let Some(m) = mode {
+        open_opts.mode(m);
+    }
+}
+
+#[cfg(windows)]
+fn apply_mode(_open_opts: &mut tokio::fs::OpenOptions, _mode: Option<u32>) {}
+
 pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(), FileSysErr> {
     // ensure parent directory exists
     dirs::create_if_absent(&file.parent()?).await?;
@@ -211,19 +246,10 @@ fn write_bytes_atomic(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(),
         Overwrite::Allow => AtomicFile::new(file.path(), AllowOverwrite),
         Overwrite::Deny => AtomicFile::new(file.path(), DisallowOverwrite),
     };
-    // mode bits are Unix permissions; on Windows they are ignored (NTFS
-    // ACLs inherited from the parent directory own this concern)
-    #[cfg(unix)]
-    let write_res = match opts.mode {
-        Some(m) => {
-            let mut open_opts = std::fs::OpenOptions::new();
-            open_opts.write(true).create(true).truncate(true).mode(m);
-            af.write_with_options(|f| f.write_all(buf), open_opts)
-        }
+    let write_res = match mode_open_options(opts.mode) {
+        Some(open_opts) => af.write_with_options(|f| f.write_all(buf), open_opts),
         None => af.write(|f| f.write_all(buf)),
     };
-    #[cfg(windows)]
-    let write_res = af.write(|f| f.write_all(buf));
     let io_err: Result<(), std::io::Error> = write_res.map_err(|e| e.into());
     io_err.map_err(|e| {
         if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -248,10 +274,7 @@ async fn write_bytes_direct(file: &File, buf: &[u8], opts: WriteOptions) -> Resu
         Overwrite::Deny => open_opts.write(true).create_new(true),
         Overwrite::Allow => open_opts.write(true).create(true).truncate(true),
     };
-    #[cfg(unix)]
-    if let Some(m) = opts.mode {
-        open_opts.mode(m);
-    }
+    apply_mode(&mut open_opts, opts.mode);
     let mut f = open_opts
         .open(file.path())
         .await

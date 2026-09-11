@@ -26,6 +26,19 @@ pub fn unix_data_root_base() -> PathBuf {
     PathBuf::from("/")
 }
 
+/// Path segments appended to [`data_root_base`] to form the agent's data root:
+/// `var/lib/miru` on Unix, `Miru` on Windows (under `%ProgramData%`).
+pub fn data_root_suffix() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("var").join("lib").join("miru")
+    }
+    #[cfg(windows)]
+    {
+        PathBuf::from("Miru")
+    }
+}
+
 /// `program_data` is the value of the `ProgramData` environment variable;
 /// `C:\ProgramData` when unset.
 pub fn windows_data_root_base(program_data: Option<OsString>) -> PathBuf {
