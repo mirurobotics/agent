@@ -13,8 +13,8 @@ pub mod display {
 
     #[test]
     fn absolute_path() {
-        let dir = filesys::Dir::new(PathBuf::from("/tmp").join("test-dir"));
-        assert_eq!(dir.path(), &PathBuf::from("/tmp").join("test-dir"));
+        let dir = filesys::Dir::new(std::env::temp_dir().join("test-dir"));
+        assert_eq!(dir.path(), &std::env::temp_dir().join("test-dir"));
     }
 
     #[test]

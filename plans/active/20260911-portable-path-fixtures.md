@@ -84,14 +84,14 @@ topics, S3/GCS object keys — `/` is the correct separator; untouched.
 
 ## Progress
 
-- [ ] Activate plan (`docs(plans):` commit on the branch)
-- [ ] `agent/src/deploy/filesys.rs`: temp_dir-based fixtures + portable validate_filepath paths
-- [ ] `agent/tests/deploy/filesys.rs`: portable traversal fixture
-- [ ] `agent/tests/filesys/{file,dir}.rs`: portable display/is_absolute fixtures
-- [ ] `agent/tests/disk/layout.rs`: per-OS `expected_root()` helper; all assertions derived
-- [ ] `agent/tests/logs/mod.rs`: per-OS default expectation
-- [ ] `agent/tests/app/state.rs`, `agent/tests/provisioning/check.rs`: temp_dir-based fixtures
-- [ ] `./scripts/test.sh` and `./scripts/lint.sh` clean
+- [x] Activate plan (`docs(plans):` commit on the branch)
+- [x] `agent/src/deploy/filesys.rs`: temp_dir-based fixtures + portable validate_filepath paths
+- [x] `agent/tests/deploy/filesys.rs`: portable traversal fixture
+- [x] `agent/tests/filesys/{file,dir}.rs`: portable display/is_absolute fixtures
+- [x] `agent/tests/disk/layout.rs`: per-OS `expected_root()` helper; all assertions derived; unix root pinned byte-for-byte in `root_dir`
+- [x] `agent/tests/logs/mod.rs`: per-OS default expectation (unix literal pinned)
+- [x] `agent/tests/app/state.rs`, `agent/tests/provisioning/check.rs`: temp_dir-based fixtures
+- [x] `./scripts/test.sh` (all green) and `./scripts/lint.sh` clean
 - [ ] Push; CI green; PR opened
 
 ## Surprises & Discoveries

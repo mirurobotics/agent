@@ -1,6 +1,5 @@
 // standard crates
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -319,7 +318,7 @@ pub mod shutdown {
         let _ = logs::init(logs::Options {
             stdout: true,
             log_level: logs::LogLevel::Info,
-            log_dir: PathBuf::from("/tmp/miru"),
+            log_dir: std::env::temp_dir().join("miru"),
         });
 
         let env = TestEnv::valid().await;

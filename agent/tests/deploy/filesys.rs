@@ -1104,7 +1104,12 @@ pub mod remove_func_errs {
     async fn rejects_parent_traversal_filepath() {
         let f = Fixture::new().await;
         let ci = ConfigInstance {
-            filepath: "/etc/myapp/../passwd".to_string(),
+            filepath: std::env::temp_dir()
+                .join("myapp")
+                .join("..")
+                .join("passwd")
+                .display()
+                .to_string(),
             ..Default::default()
         };
         f.seed_cfg_inst(&ci, "{}".to_string()).await;
