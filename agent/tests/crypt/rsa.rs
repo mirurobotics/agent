@@ -258,7 +258,7 @@ pub mod gen_key_pair {
         // Full round trip on the freshly written pair: read → sign → verify.
         let data = b"pkcs8 round trip";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
-        assert!(rsa::verify(&public_key_file, data, &signature)
+        assert!(rsa::verify_rs256(&public_key_file, data, &signature)
             .await
             .unwrap());
     }
@@ -503,7 +503,7 @@ pub mod sign_rs256 {
     }
 }
 
-pub mod verify {
+pub mod verify_rs256 {
     use super::*;
 
     #[tokio::test]
@@ -528,7 +528,7 @@ pub mod verify {
 
         let data = b"hello world";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
-        let result = rsa::verify(&public_key_file, data, &signature).await;
+        let result = rsa::verify_rs256(&public_key_file, data, &signature).await;
         assert!(result.is_ok());
         assert!(result.unwrap());
     }
@@ -554,7 +554,7 @@ pub mod verify {
         let data = b"hello world";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         // verify with different data — should return Ok(false)
-        let is_valid = rsa::verify(&public_key_file, b"different data", &signature)
+        let is_valid = rsa::verify_rs256(&public_key_file, b"different data", &signature)
             .await
             .unwrap();
         assert!(!is_valid);
@@ -580,7 +580,7 @@ pub mod verify {
         // sign with key pair 1, verify with key pair 2's public key
         let data = b"hello world";
         let signature = rsa::sign_rs256(&priv1, data).await.unwrap();
-        let is_valid = rsa::verify(&pub2, data, &signature).await.unwrap();
+        let is_valid = rsa::verify_rs256(&pub2, data, &signature).await.unwrap();
         assert!(!is_valid);
     }
 
@@ -602,7 +602,7 @@ pub mod verify {
         let data = b"";
         let signature = rsa::sign_rs256(&private_key_file, data).await.unwrap();
         assert!(!signature.is_empty());
-        let is_valid = rsa::verify(&public_key_file, data, &signature)
+        let is_valid = rsa::verify_rs256(&public_key_file, data, &signature)
             .await
             .unwrap();
         assert!(is_valid);
@@ -621,7 +621,7 @@ pub mod verify {
             .unwrap();
         let data = b"hello world";
         let signature = vec![4, 4];
-        let result = rsa::verify(&public_key_file, data, &signature).await;
+        let result = rsa::verify_rs256(&public_key_file, data, &signature).await;
         assert!(result.is_err());
     }
 
@@ -635,7 +635,7 @@ pub mod verify {
 
         let data = b"hello world";
         let signature = vec![4, 4];
-        let result = rsa::verify(&public_key_file, data, &signature).await;
+        let result = rsa::verify_rs256(&public_key_file, data, &signature).await;
         assert!(result.is_err());
     }
 }
@@ -702,16 +702,37 @@ pub mod golden {
     }
 
     #[tokio::test]
-    async fn verify_accepts_golden_rs256_signature_and_rejects_tampered_message() {
+    async fn verify_rs256_accepts_golden_signature_and_rejects_tampered_message() {
         let message = fixture_bytes("message.txt").await;
         let signature = fixture_bytes("message.sig.rs256").await;
         let spki = fixture_file("rsa2048_spki.pem");
 
-        assert!(rsa::verify(&spki, &message, &signature).await.unwrap());
+        assert!(rsa::verify_rs256(&spki, &message, &signature)
+            .await
+            .unwrap());
 
         let mut tampered = message.clone();
         tampered[0] ^= 0x01;
-        assert!(!rsa::verify(&spki, &tampered, &signature).await.unwrap());
+        assert!(!rsa::verify_rs256(&spki, &tampered, &signature)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn verify_rs512_accepts_golden_signature_and_rejects_tampered_message() {
+        let message = fixture_bytes("message.txt").await;
+        let signature = fixture_bytes("message.sig.rs512").await;
+        let spki = fixture_file("rsa2048_spki.pem");
+
+        assert!(rsa::verify_rs512(&spki, &message, &signature)
+            .await
+            .unwrap());
+
+        let mut tampered = message.clone();
+        tampered[0] ^= 0x01;
+        assert!(!rsa::verify_rs512(&spki, &tampered, &signature)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -751,14 +772,16 @@ pub mod sign_rs512 {
         // RS512 with a 2048-bit key produces a 256-byte signature
         assert!(!signature.is_empty());
         assert!(signature.len() > 200);
+        assert!(rsa::verify_rs512(&public_key_file, data, &signature)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
     async fn rs512_signature_is_not_a_valid_rs256_signature() {
-        // `verify` checks RSASSA-PKCS1-v1_5 with SHA-256, so the golden RS512
-        // signature must be rejected — sentinel that sign_rs512's digest is
-        // genuinely SHA-512, not SHA-256. (The positive RS512 proof is the
-        // byte-compare against the OpenSSL-produced golden signature above.)
+        // `verify_rs256` checks RSASSA-PKCS1-v1_5 with SHA-256, so the golden
+        // RS512 signature must be rejected — sentinel that sign_rs512's digest
+        // is genuinely SHA-512, not SHA-256.
         let crypt = testdata_dir().subdir(PathBuf::from("crypt"));
         let spki = crypt.file("rsa2048_spki.pem");
         let message = files::read_bytes(&crypt.file("message.txt")).await.unwrap();
@@ -766,7 +789,9 @@ pub mod sign_rs512 {
             .await
             .unwrap();
 
-        let is_valid = rsa::verify(&spki, &message, &rs512_sig).await.unwrap();
+        let is_valid = rsa::verify_rs256(&spki, &message, &rs512_sig)
+            .await
+            .unwrap();
         assert!(!is_valid);
     }
 
@@ -795,5 +820,26 @@ pub mod sign_rs512 {
         .unwrap();
         let result = rsa::sign_rs512(&private_key_file, b"hello").await;
         assert!(result.is_err());
+    }
+}
+
+pub mod verify_rs512 {
+    use super::*;
+    use crate::test_utils::testdata::testdata_dir;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn rs256_signature_is_not_a_valid_rs512_signature() {
+        let crypt = testdata_dir().subdir(PathBuf::from("crypt"));
+        let spki = crypt.file("rsa2048_spki.pem");
+        let message = files::read_bytes(&crypt.file("message.txt")).await.unwrap();
+        let rs256_sig = files::read_bytes(&crypt.file("message.sig.rs256"))
+            .await
+            .unwrap();
+
+        let is_valid = rsa::verify_rs512(&spki, &message, &rs256_sig)
+            .await
+            .unwrap();
+        assert!(!is_valid);
     }
 }
