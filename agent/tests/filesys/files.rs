@@ -226,6 +226,40 @@ pub mod copy_to {
     }
 
     #[tokio::test]
+    async fn copy_readonly_source_with_sync_yes() {
+        let dir = dirs::temp("testing").unwrap();
+        let src = dir.file("src-file");
+        files::write_string(&src, "synced", WriteOptions::default())
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+
+        let original_permissions = files::permissions(&src).await.unwrap();
+        let mut readonly_permissions = original_permissions.clone();
+        readonly_permissions.set_readonly(true);
+        files::set_permissions(&src, readonly_permissions)
+            .await
+            .unwrap();
+
+        let result = files::copy_to(&src, &dest, CopyOptions::default()).await;
+        let dest_contents = files::read_string(&dest).await;
+        let dest_permissions = files::permissions(&dest).await;
+
+        files::set_permissions(&src, original_permissions.clone())
+            .await
+            .unwrap();
+        if dest.exists() {
+            files::set_permissions(&dest, original_permissions)
+                .await
+                .unwrap();
+        }
+
+        result.unwrap();
+        assert_eq!(dest_contents.unwrap(), "synced");
+        assert!(dest_permissions.unwrap().readonly());
+    }
+
+    #[tokio::test]
     async fn copy_with_sync_no() {
         let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");

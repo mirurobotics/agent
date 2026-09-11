@@ -303,7 +303,23 @@ pub mod mock_err {
 
 pub mod reqwest_err_to_http_client_err_fn {
     use super::*;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    async fn respond_once(listener: tokio::net::TcpListener, response: &'static [u8]) {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        {
+            let mut reader = BufReader::new(&mut socket);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+        }
+        socket.write_all(response).await.unwrap();
+        socket.shutdown().await.unwrap();
+    }
 
     #[tokio::test]
     async fn connection_error_maps_to_connection() {
@@ -355,13 +371,10 @@ pub mod reqwest_err_to_http_client_err_fn {
     async fn decode_error_maps_to_decode_body() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\nnot json!!!")
-                .await
-                .unwrap();
-        });
+        tokio::spawn(respond_once(
+            listener,
+            b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\nnot json!!!",
+        ));
 
         let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
         let err = resp.json::<serde_json::Value>().await.unwrap_err();
@@ -378,13 +391,10 @@ pub mod reqwest_err_to_http_client_err_fn {
     async fn status_error_maps_to_other() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            socket
-                .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n")
-                .await
-                .unwrap();
-        });
+        tokio::spawn(respond_once(
+            listener,
+            b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n",
+        ));
 
         let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
         let err = resp.error_for_status().unwrap_err();

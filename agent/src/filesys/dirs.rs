@@ -20,7 +20,12 @@ use crate::trace;
 use tracing::{debug, error, info, warn};
 
 pub fn home() -> Result<Dir, FileSysErr> {
-    let home_dir = std::env::var("HOME")
+    #[cfg(not(windows))]
+    const HOME_ENV: &str = "HOME";
+    #[cfg(windows)]
+    const HOME_ENV: &str = "USERPROFILE";
+
+    let home_dir = std::env::var(HOME_ENV)
         .map_err(|e| {
             FileSysErr::UnknownHomeDirErr(UnknownHomeDirErr {
                 source: Box::new(e),

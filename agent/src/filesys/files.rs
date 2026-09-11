@@ -319,9 +319,7 @@ pub async fn copy_to(file: &File, dst: &File, opts: CopyOptions) -> Result<(), F
         })?;
 
     if opts.sync == crate::filesys::Sync::Yes {
-        let f = TokioFile::open(dst.path())
-            .await
-            .map_err(|e| map_io_err_for_open(e, dst))?;
+        let f = open_destination_for_sync(dst).await?;
         f.sync_data().await.map_err(|e| {
             FileSysErr::WriteFileErr(WriteFileErr {
                 source: Box::new(e),
@@ -332,6 +330,65 @@ pub async fn copy_to(file: &File, dst: &File, opts: CopyOptions) -> Result<(), F
     }
 
     Ok(())
+}
+
+#[cfg(not(windows))]
+async fn open_destination_for_sync(dst: &File) -> Result<TokioFile, FileSysErr> {
+    TokioFile::open(dst.path())
+        .await
+        .map_err(|e| map_io_err_for_open(e, dst))
+}
+
+#[cfg(windows)]
+async fn open_destination_for_sync(dst: &File) -> Result<TokioFile, FileSysErr> {
+    let dst_for_open = dst.clone();
+    let file =
+        tokio::task::spawn_blocking(move || open_windows_destination_for_sync(&dst_for_open))
+            .await
+            .map_err(|e| {
+                FileSysErr::WriteFileErr(WriteFileErr {
+                    source: Box::new(e),
+                    file: dst.clone(),
+                    trace: trace!(),
+                })
+            })??;
+    Ok(TokioFile::from_std(file))
+}
+
+#[cfg(windows)]
+fn open_windows_destination_for_sync(dst: &File) -> Result<std::fs::File, FileSysErr> {
+    let permissions = std::fs::metadata(dst.path())
+        .map_err(|e| map_io_err_for_open(e, dst))?
+        .permissions();
+    if !permissions.readonly() {
+        return std::fs::OpenOptions::new()
+            .write(true)
+            .open(dst.path())
+            .map_err(|e| map_io_err_for_open(e, dst));
+    }
+
+    let mut writable = permissions.clone();
+    writable.set_readonly(false);
+    std::fs::set_permissions(dst.path(), writable).map_err(|e| {
+        FileSysErr::WriteFileErr(WriteFileErr {
+            source: Box::new(e),
+            file: dst.clone(),
+            trace: trace!(),
+        })
+    })?;
+
+    let open_result = std::fs::OpenOptions::new().write(true).open(dst.path());
+    let restore_result = std::fs::set_permissions(dst.path(), permissions);
+
+    if let Err(e) = restore_result {
+        return Err(FileSysErr::WriteFileErr(WriteFileErr {
+            source: Box::new(e),
+            file: dst.clone(),
+            trace: trace!(),
+        }));
+    }
+
+    open_result.map_err(|e| map_io_err_for_open(e, dst))
 }
 
 /// Rename this file to a new file.

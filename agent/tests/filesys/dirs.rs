@@ -75,8 +75,13 @@ pub mod new_home_dir {
     #[test]
     fn success() {
         let dir = dirs::home().unwrap();
+        #[cfg(not(windows))]
+        let expected = env::var("HOME").unwrap();
+        #[cfg(windows)]
+        let expected = env::var("USERPROFILE").unwrap();
+
         assert!(dir.exists());
-        assert_eq!(dir.path(), &PathBuf::from(env::var("HOME").unwrap()));
+        assert_eq!(dir.path(), &PathBuf::from(expected));
     }
 }
 
