@@ -38,7 +38,7 @@ compiled and unit-tested on Linux to de-risk that gap.
 - [x] `logs::Options::default`: `log_dir` via `platform::log_dir()` (bc0a530)
 - [x] Tests: `agent/tests/platform/mod.rs` (env override, fallback, structure); existing disk/logs tests unchanged (bc0a530)
 - [x] `./scripts/test.sh` — 1639 passed, 0 failed; `./scripts/lint.sh` clean (fix-mode reformatting folded into bc0a530)
-- [ ] Push; CI green; PR opened referencing the roadmap
+- [x] Push; CI green (lint/test/tools pass); PR opened as #232
 
 ## Surprises & Discoveries
 
