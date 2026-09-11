@@ -62,12 +62,12 @@ pub mod storage_layout {
 
     #[test]
     fn root_dir_custom_filesystem_root() {
-        let base = std::env::temp_dir().join("custom");
-        let layout = Layout::new(filesys::Dir::new(base.clone()));
+        let tmp = filesys::dirs::temp("custom-root").unwrap();
+        let layout = Layout::new(tmp.to_dir());
         let dir = layout.root();
         assert_eq!(
             dir.to_string(),
-            expected_root_under(&base).display().to_string()
+            expected_root_under(tmp.path()).display().to_string()
         );
     }
 

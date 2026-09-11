@@ -315,10 +315,11 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn success_device_online() {
+        let log_tmp = dirs::temp("miru-logs").unwrap();
         let _ = logs::init(logs::Options {
             stdout: true,
             log_level: logs::LogLevel::Info,
-            log_dir: std::env::temp_dir().join("miru"),
+            log_dir: log_tmp.path().clone(),
         });
 
         let env = TestEnv::valid().await;

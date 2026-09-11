@@ -13,8 +13,9 @@ pub mod display {
 
     #[test]
     fn absolute_path() {
-        let file = filesys::File::new(std::env::temp_dir().join("test-file.txt"));
-        assert_eq!(file.path(), &std::env::temp_dir().join("test-file.txt"));
+        let tmp = filesys::dirs::temp("file-display").unwrap();
+        let file = tmp.file("test-file.txt");
+        assert_eq!(file.path(), &tmp.path().join("test-file.txt"));
     }
 
     #[test]
@@ -66,7 +67,8 @@ pub mod is_absolute {
 
     #[test]
     fn returns_true_for_absolute_path() {
-        let f = filesys::File::new(std::env::temp_dir().join("foo.json"));
+        let tmp = filesys::dirs::temp("file-abs").unwrap();
+        let f = tmp.file("foo.json");
         assert!(f.is_absolute());
     }
 

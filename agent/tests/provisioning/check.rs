@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, files};
+use miru_agent::filesys::{dirs, files, PathExt};
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
 };
@@ -55,11 +55,10 @@ pub mod reports {
 
     #[test]
     fn undeterminable_reports_error_on_stderr_only() {
+        let tmp = dirs::temp("miru-auth").unwrap();
         let report = Report::Undeterminable(DiskErr::FileSysErr(FileSysErr::PathExistenceErr(
             PathExistenceErr {
-                path: std::env::temp_dir()
-                    .join("miru-auth")
-                    .join("private_key.pem"),
+                path: tmp.file("private_key.pem").path().clone(),
                 source: Box::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
                 trace: Box::new(Trace {
                     file: file!(),

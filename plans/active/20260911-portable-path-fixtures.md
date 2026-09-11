@@ -109,6 +109,12 @@ topics, S3/GCS object keys — `/` is the correct separator; untouched.
   `std::env::temp_dir()` rather than a cfg-based literal helper — absolute on
   every platform, no cfg surface in tests, and consistent with the repo's
   existing `filesys::dirs::temp` fixture idiom.
+- 2026-09-11 (review): superseded — per Ben's preference, all fixtures use
+  the repo's `filesys::dirs::temp()` RAII helper uniformly (one greppable
+  idiom), including path-only fixtures, at the cost of a real mkdir/rmdir
+  per fixture. `tests/app/state.rs` binds the guard for the log dir; the
+  global tracing worker writing to an unlinked dir after test end is
+  harmless on the Unix runners that execute this test today.
 - 2026-09-11 (authoring): `agent/tests/disk/layout.rs` keeps pinning the Unix
   literals byte-for-byte under `cfg(unix)` (the layout is a compatibility
   contract, not an implementation detail); the `cfg(windows)` expectation is

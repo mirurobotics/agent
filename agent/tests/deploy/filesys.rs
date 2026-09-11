@@ -1103,8 +1103,10 @@ pub mod remove_func_errs {
     #[tokio::test]
     async fn rejects_parent_traversal_filepath() {
         let f = Fixture::new().await;
+        let tmp = dirs::temp("deploy-traversal").unwrap();
         let ci = ConfigInstance {
-            filepath: std::env::temp_dir()
+            filepath: tmp
+                .path()
                 .join("myapp")
                 .join("..")
                 .join("passwd")

@@ -13,8 +13,9 @@ pub mod display {
 
     #[test]
     fn absolute_path() {
-        let dir = filesys::Dir::new(std::env::temp_dir().join("test-dir"));
-        assert_eq!(dir.path(), &std::env::temp_dir().join("test-dir"));
+        let tmp = filesys::dirs::temp("dir-display").unwrap();
+        let dir = tmp.subdir("test-dir");
+        assert_eq!(dir.path(), &tmp.path().join("test-dir"));
     }
 
     #[test]
