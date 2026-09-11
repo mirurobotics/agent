@@ -179,7 +179,7 @@ try {
     $requestRecords = New-Object System.Collections.ArrayList
     Set-TestFunction "Invoke-WebRequest" {
         param($Uri, $OutFile, [switch]$UseBasicParsing, $TimeoutSec)
-        [void]$requestRecords.Add(@{ Uri = $Uri; OutFile = $OutFile; Basic = $UseBasicParsing.IsPresent; Timeout = $TimeoutSec })
+        [void]$requestRecords.Add(@{ Uri = $Uri; OutFile = $OutFile; HasOutFile = $PSBoundParameters.ContainsKey("OutFile"); Basic = $UseBasicParsing.IsPresent; Timeout = $TimeoutSec })
         return [pscustomobject]@{ Content = "{}" }
     }
     Invoke-InstallWebRequest -Uri "https://example.invalid/latest" | Out-Null
@@ -189,7 +189,8 @@ try {
         Assert-True $record.Basic "UseBasicParsing supplied"
         Assert-Equal 300 $record.Timeout "request timeout"
     }
-    Assert-Equal "" $requestRecords[0].OutFile "response request has no output file"
+    Assert-True (-not $requestRecords[0].HasOutFile) "response request has no output file"
+    Assert-True $requestRecords[1].HasOutFile "download request has an output file"
     Assert-Equal "C:\path with spaces\file" $requestRecords[1].OutFile "download output path"
     Write-Host "PASS web request compatibility arguments"
 
