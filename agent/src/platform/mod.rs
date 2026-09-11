@@ -22,6 +22,16 @@ pub fn data_root_base() -> PathBuf {
     }
 }
 
+pub fn unix_data_root_base() -> PathBuf {
+    PathBuf::from("/")
+}
+
+/// `program_data` is the value of the `ProgramData` environment variable;
+/// `C:\ProgramData` when unset.
+pub fn windows_data_root_base(program_data: Option<OsString>) -> PathBuf {
+    PathBuf::from(program_data.unwrap_or_else(|| OsString::from(r"C:\ProgramData")))
+}
+
 /// Default directory for agent log files.
 pub fn log_dir() -> PathBuf {
     #[cfg(unix)]
@@ -34,18 +44,8 @@ pub fn log_dir() -> PathBuf {
     }
 }
 
-pub fn unix_data_root_base() -> PathBuf {
-    PathBuf::from("/")
-}
-
 pub fn unix_log_dir() -> PathBuf {
     PathBuf::from("/var/log/miru")
-}
-
-/// `program_data` is the value of the `ProgramData` environment variable;
-/// `C:\ProgramData` when unset.
-pub fn windows_data_root_base(program_data: Option<OsString>) -> PathBuf {
-    PathBuf::from(program_data.unwrap_or_else(|| OsString::from(r"C:\ProgramData")))
 }
 
 pub fn windows_log_dir(program_data: Option<OsString>) -> PathBuf {
