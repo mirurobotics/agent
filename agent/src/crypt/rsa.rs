@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 // internal crates
 use crate::crypt::errors::*;
-use crate::filesys::{self, files, Atomic, Overwrite, PathExt, WriteOptions};
+use crate::filesys::{self, files, Atomic, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -118,7 +118,6 @@ fn public_key_to_pem(key_pair: &RsaKeyPair) -> Result<String, CryptErr> {
 
 /// Read an RSA private key from the specified file.
 pub async fn read_private_key(private_key_file: &filesys::File) -> Result<RsaKeyPair, CryptErr> {
-    private_key_file.assert_exists()?;
     let private_key_pem = files::read_secret_bytes(private_key_file).await?;
     parse_private_key_pem(private_key_pem.expose_secret())
 }
@@ -128,15 +127,15 @@ pub async fn read_private_key(private_key_file: &filesys::File) -> Result<RsaKey
 /// dual-format acceptance of the previous OpenSSL generic reader.
 fn parse_private_key_pem(pem: &[u8]) -> Result<RsaKeyPair, CryptErr> {
     let (label, der) = decode_pem(pem)?;
+    private_key_from_der(label, &der)
+}
+
+/// PKCS#1 (`RSA PRIVATE KEY`) or PKCS#8 (`PRIVATE KEY`).
+fn private_key_from_der(label: &str, der: &[u8]) -> Result<RsaKeyPair, CryptErr> {
     let parse = match label {
-        PKCS1_LABEL => RsaKeyPair::from_der(&der),
-        PKCS8_LABEL => RsaKeyPair::from_pkcs8(&der),
-        other => {
-            return Err(CryptErr::UnsupportedPEMLabelErr(UnsupportedPEMLabelErr {
-                label: other.to_string(),
-                trace: trace!(),
-            }))
-        }
+        PKCS1_LABEL => RsaKeyPair::from_der(der),
+        PKCS8_LABEL => RsaKeyPair::from_pkcs8(der),
+        other => return Err(unsupported_pem_label(other)),
     };
     parse.map_err(|e| {
         CryptErr::ParsePrivateKeyErr(ParsePrivateKeyErr {
@@ -148,12 +147,11 @@ fn parse_private_key_pem(pem: &[u8]) -> Result<RsaKeyPair, CryptErr> {
 
 /// Read an RSA public key from the specified file.
 pub async fn read_public_key(public_key_file: &filesys::File) -> Result<PublicKey, CryptErr> {
-    public_key_file.assert_exists()?;
     let public_key_pem = files::read_bytes(public_key_file).await?;
     parse_public_key_pem(&public_key_pem)
 }
 
-/// Parse a PEM public key. SPKI armor only, matching the previous reader.
+/// Parse a PEM public key. SPKI armor only.
 fn parse_public_key_pem(pem: &[u8]) -> Result<PublicKey, CryptErr> {
     public_key_from_spki_der(&decode_spki_pem(pem)?)
 }
@@ -249,7 +247,6 @@ async fn verify(
     signature_bytes: &[u8],
     alg: &'static dyn signature::VerificationAlgorithm,
 ) -> Result<bool, CryptErr> {
-    public_key_file.assert_exists()?;
     let pem = files::read_bytes(public_key_file).await?;
     let der = decode_spki_pem(&pem)?;
     // Reject unparseable keys as Err (key problem), not Ok(false) (bad signature).
@@ -280,26 +277,34 @@ fn public_key_from_spki_der(der: &[u8]) -> Result<PublicKey, CryptErr> {
 fn decode_spki_pem(pem: &[u8]) -> Result<Vec<u8>, CryptErr> {
     let (label, der) = decode_pem(pem)?;
     if label != SPKI_LABEL {
-        return Err(CryptErr::UnsupportedPEMLabelErr(UnsupportedPEMLabelErr {
-            label: label.to_string(),
-            trace: trace!(),
-        }));
+        return Err(unsupported_pem_label(label));
     }
     Ok(der)
+}
+
+fn unsupported_pem_label(label: &str) -> CryptErr {
+    CryptErr::UnsupportedPEMLabelErr(UnsupportedPEMLabelErr {
+        label: label.to_string(),
+        trace: trace!(),
+    })
 }
 
 /// Decode PEM to `(label, der)`, trimming trailing ASCII whitespace first:
 /// `pem_rfc7468` rejects any bytes after the END line, but PEM files commonly
 /// end with extra newlines.
 fn decode_pem(pem: &[u8]) -> Result<(&str, Vec<u8>), CryptErr> {
-    let end = pem
-        .iter()
-        .rposition(|b| !b.is_ascii_whitespace())
-        .map_or(0, |i| i + 1);
-    pem_rfc7468::decode_vec(&pem[..end]).map_err(|e| {
+    pem_rfc7468::decode_vec(trim_trailing_whitespace(pem)).map_err(|e| {
         CryptErr::DecodePEMErr(DecodePEMErr {
             source: e,
             trace: trace!(),
         })
     })
+}
+
+fn trim_trailing_whitespace(bytes: &[u8]) -> &[u8] {
+    let end = bytes
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace())
+        .map_or(0, |i| i + 1);
+    &bytes[..end]
 }
