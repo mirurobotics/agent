@@ -43,6 +43,8 @@ pub enum Sync {
 pub struct WriteOptions {
     pub overwrite: Overwrite,
     pub atomic: Atomic,
+    /// Unix permission bits for created files; ignored on Windows (NTFS
+    /// ACLs inherited from the parent directory own this concern).
     pub mode: Option<u32>,
 }
 

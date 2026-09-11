@@ -1,18 +1,20 @@
 // standard crates
+#[cfg(unix)]
+use std::env;
+#[cfg(unix)]
 use std::future::Future;
+#[cfg(unix)]
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::sync::Arc;
-use std::{
-    env,
-    os::unix::io::{FromRawFd, RawFd},
-};
 
 // internal crates
-use crate::filesys::{self, files, PathExt};
-use crate::server::{
-    errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr},
-    handlers,
-    state::State,
-};
+use crate::filesys;
+#[cfg(unix)]
+use crate::filesys::{files, PathExt};
+#[cfg(unix)]
+use crate::server::errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr};
+use crate::server::{handlers, state::State};
+#[cfg(unix)]
 use crate::trace;
 
 // external crates
@@ -20,13 +22,18 @@ use axum::{
     routing::{get, post},
     Router,
 };
+#[cfg(unix)]
 use tokio::net::UnixListener;
+#[cfg(unix)]
 use tokio::task::JoinHandle;
+#[cfg(unix)]
 use tower::ServiceBuilder;
+#[cfg(unix)]
 use tower_http::{
     trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
     LatencyUnit,
 };
+#[cfg(unix)]
 use tracing::Level;
 
 #[derive(Debug)]
@@ -97,6 +104,7 @@ pub fn routes(state: Arc<State>) -> Router {
         .with_state(state)
 }
 
+#[cfg(unix)]
 pub(crate) async fn serve(
     options: &Options,
     state: Arc<State>,
@@ -152,6 +160,7 @@ pub(crate) async fn serve(
     Ok(server_handle)
 }
 
+#[cfg(unix)]
 async fn acquire_unix_socket_listener(
     socket_file: &filesys::File,
     fallback: impl Future<Output = Result<UnixListener, ServerErr>>,
@@ -195,6 +204,7 @@ async fn acquire_unix_socket_listener(
     Ok(listener)
 }
 
+#[cfg(unix)]
 async fn create_unix_socket_listener(
     socket_file: &filesys::File,
 ) -> Result<UnixListener, ServerErr> {

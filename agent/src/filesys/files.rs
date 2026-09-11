@@ -1,5 +1,6 @@
 // standard crates
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::time::SystemTime;
 
@@ -210,6 +211,9 @@ fn write_bytes_atomic(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(),
         Overwrite::Allow => AtomicFile::new(file.path(), AllowOverwrite),
         Overwrite::Deny => AtomicFile::new(file.path(), DisallowOverwrite),
     };
+    // mode bits are Unix permissions; on Windows they are ignored (NTFS
+    // ACLs inherited from the parent directory own this concern)
+    #[cfg(unix)]
     let write_res = match opts.mode {
         Some(m) => {
             let mut open_opts = std::fs::OpenOptions::new();
@@ -218,6 +222,8 @@ fn write_bytes_atomic(file: &File, buf: &[u8], opts: WriteOptions) -> Result<(),
         }
         None => af.write(|f| f.write_all(buf)),
     };
+    #[cfg(windows)]
+    let write_res = af.write(|f| f.write_all(buf));
     let io_err: Result<(), std::io::Error> = write_res.map_err(|e| e.into());
     io_err.map_err(|e| {
         if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -242,6 +248,7 @@ async fn write_bytes_direct(file: &File, buf: &[u8], opts: WriteOptions) -> Resu
         Overwrite::Deny => open_opts.write(true).create_new(true),
         Overwrite::Allow => open_opts.write(true).create(true).truncate(true),
     };
+    #[cfg(unix)]
     if let Some(m) = opts.mode {
         open_opts.mode(m);
     }
@@ -436,6 +443,9 @@ pub async fn set_permissions(
     Ok(())
 }
 
+// Unix-only: Windows splits symlinks into file/dir variants and gates
+// creation behind a privilege; no production caller needs them there.
+#[cfg(unix)]
 pub async fn create_symlink(
     file: &File,
     link: &File,

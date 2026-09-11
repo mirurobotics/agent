@@ -19,6 +19,7 @@ pub mod models;
 pub mod mqtt;
 pub mod network;
 pub mod platform;
+#[cfg(unix)]
 pub mod privilege;
 pub mod provisioning;
 pub mod s3;
