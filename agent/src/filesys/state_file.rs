@@ -51,9 +51,7 @@ where
 {
     pub file: File,
     state: Arc<ContentT>,
-    /// Permission bits applied on every write. `None` leaves the file at the
-    /// umask/atomicwrites default; `Some(m)` (e.g. `0o600` for secrets like the
-    /// auth token) restricts the file on both create and update.
+    /// Permission bits applied on every write
     mode: Option<u32>,
     _phantom: std::marker::PhantomData<PatchT>,
 }
@@ -62,33 +60,29 @@ impl<ContentT, PatchT> SingleThreadStateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
-    /// Load the state file described by `opts`. On a successful read the file is
-    /// used as-is. If the read fails and `opts.default` is set, the file is
-    /// created with that value (atomic, `opts.mode`) and reloaded; otherwise the
-    /// read error propagates. `opts.mode` is applied on every subsequent write.
+    /// Load the state file described by `opts`. On a successful read the file is used
+    /// as-is. If the read fails and `opts.default` is set, the file is created with
+    /// that value (atomic, `opts.mode`) and reloaded. `opts.mode` is applied on every
+    /// subsequent write.
     pub async fn load(file: File, opts: Options<ContentT>) -> Result<Self, FileSysErr> {
-        match Self::from_disk(file.clone(), opts.mode).await {
+        match Self::read_disk(file.clone(), opts.mode).await {
             Ok(state_file) => Ok(state_file),
             Err(read_err) => {
                 let Some(default) = opts.default else {
                     return Err(read_err);
                 };
-                files::write_json(
-                    &file,
-                    &default,
-                    WriteOptions {
-                        overwrite: Overwrite::Allow,
-                        atomic: Atomic::Yes,
-                        mode: opts.mode,
-                    },
-                )
-                .await?;
-                Self::from_disk(file, opts.mode).await
+                let write_opts = WriteOptions {
+                    overwrite: Overwrite::Allow,
+                    atomic: Atomic::Yes,
+                    mode: opts.mode,
+                };
+                files::write_json(&file, &default, write_opts).await?;
+                Self::read_disk(file, opts.mode).await
             }
         }
     }
 
-    async fn from_disk(file: File, mode: Option<u32>) -> Result<Self, FileSysErr> {
+    async fn read_disk(file: File, mode: Option<u32>) -> Result<Self, FileSysErr> {
         let state = files::read_json::<ContentT>(&file).await?;
         Ok(Self {
             file,
@@ -103,16 +97,12 @@ where
     }
 
     pub async fn write(&mut self, data: ContentT) -> Result<(), FileSysErr> {
-        files::write_json(
-            &self.file,
-            &data,
-            WriteOptions {
-                overwrite: Overwrite::Allow,
-                atomic: Atomic::Yes,
-                mode: self.mode,
-            },
-        )
-        .await?;
+        let write_opts = WriteOptions {
+            overwrite: Overwrite::Allow,
+            atomic: Atomic::Yes,
+            mode: self.mode,
+        };
+        files::write_json(&self.file, &data, write_opts).await?;
         self.state = Arc::new(data);
         Ok(())
     }

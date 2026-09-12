@@ -724,15 +724,11 @@ mod tests {
     }
 
     async fn state_file(file: &File) -> ScanSnapshotFile {
-        ScanSnapshotFile::load(
-            file.clone(),
-            Options {
-                default: Some(ScannerSnapshot::default()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
+        let opts = Options {
+            default: Some(ScannerSnapshot::default()),
+            ..Default::default()
+        };
+        ScanSnapshotFile::load(file.clone(), opts).await.unwrap()
     }
 
     async fn spawn_persisted(clock: &Clock, file: &File) -> Scanner {

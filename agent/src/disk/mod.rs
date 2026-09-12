@@ -233,20 +233,17 @@ async fn init_device_storage(
     layout: &StorLayout,
     device_id: String,
 ) -> Result<(Arc<DeviceStorage>, JoinHandle<()>), StorErr> {
-    let (device_storage, device_storage_handle) = DeviceStorage::spawn(
-        64,
-        layout.device(),
-        Options {
-            default: Some(models::Device {
-                id: device_id.clone(),
-                activated: true,
-                status: models::DeviceStatus::Offline,
-                ..models::Device::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await?;
+    let opts = Options {
+        default: Some(models::Device {
+            id: device_id.clone(),
+            activated: true,
+            status: models::DeviceStatus::Offline,
+            ..models::Device::default()
+        }),
+        ..Default::default()
+    };
+    let (device_storage, device_storage_handle) =
+        DeviceStorage::spawn(64, layout.device(), opts).await?;
 
     device_storage
         .patch(models::device::Updates {

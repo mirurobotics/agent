@@ -316,14 +316,11 @@ async fn setup_auth_files(
     public_key_file.assert_exists()?;
 
     // 0o600: the token is a live bearer credential (and the MQTT password).
-    let token_file = TokenFile::load(
-        auth_dir.token(),
-        state_file::Options {
-            default: Some(authn::Token::default()),
-            mode: Some(0o600),
-        },
-    )
-    .await?;
+    let opts = state_file::Options {
+        default: Some(authn::Token::default()),
+        mode: Some(0o600),
+    };
+    let token_file = TokenFile::load(auth_dir.token(), opts).await?;
 
     Ok((token_file, private_key_file, public_key_file))
 }

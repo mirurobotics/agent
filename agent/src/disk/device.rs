@@ -53,14 +53,11 @@ pub async fn resolve_device_id(layout: &Layout) -> Result<String, DiskErr> {
 
     // attempt to get the device id from the existing token on file (0o600: the
     // token is a live bearer credential and doubles as the MQTT password).
-    let token_file = TokenFile::load(
-        layout.auth().token(),
-        Options {
-            default: Some(crate::authn::Token::default()),
-            mode: Some(0o600),
-        },
-    )
-    .await?;
+    let opts = Options {
+        default: Some(crate::authn::Token::default()),
+        mode: Some(0o600),
+    };
+    let token_file = TokenFile::load(layout.auth().token(), opts).await?;
     let token = token_file.read();
     let jwt_err = match jwt::extract_device_id(&token.token) {
         Ok(device_id) => return Ok(device_id),

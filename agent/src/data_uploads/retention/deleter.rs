@@ -473,15 +473,13 @@ mod tests {
 
     /// A persistence handle for the snapshot at `file`.
     async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
-        DeleteQueueSnapshotFile::load(
-            file.clone(),
-            Options {
-                default: Some(DeleteQueueSnapshot::default()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
+        let opts = Options {
+            default: Some(DeleteQueueSnapshot::default()),
+            ..Default::default()
+        };
+        DeleteQueueSnapshotFile::load(file.clone(), opts)
+            .await
+            .unwrap()
     }
 
     /// Two symlinks pointing at each other. `stat` and `open` on either fail
