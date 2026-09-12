@@ -396,6 +396,25 @@ pub mod reset {
         assert!(layout.events_dir().exists());
     }
 
+    // token.json holds a live bearer credential (and the MQTT password), so the
+    // real create path must restrict it to owner read/write.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn token_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        write_existing_keys(&layout).await;
+
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+            .await
+            .unwrap();
+
+        let perms = files::permissions(&layout.auth().token()).await.unwrap();
+        assert_eq!(0o600, perms.mode() & 0o777, "token.json should be 0o600");
+    }
+
     #[tokio::test]
     async fn wipes_resources_subtree() {
         let dir = dirs::temp("testing").unwrap();

@@ -4,6 +4,7 @@ use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
+use miru_agent::filesys::state_file::Options;
 use miru_agent::filesys::{dirs, files, File, WriteOptions};
 
 // external crates
@@ -33,10 +34,14 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
     }
 }
 
-/// A fresh snapshot handle over `path`. Reopening the same path returns a
+/// A fresh snapshot handle over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
-async fn open(path: &File) -> DeleteQueueSnapshotFile {
-    DeleteQueueSnapshotFile::new_with_default(path.clone(), DeleteQueueSnapshot::default())
+async fn load(path: &File) -> DeleteQueueSnapshotFile {
+    let opts = Options {
+        default: Some(DeleteQueueSnapshot::default()),
+        ..Default::default()
+    };
+    DeleteQueueSnapshotFile::load(path.clone(), opts)
         .await
         .unwrap()
 }
@@ -96,7 +101,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, load(&path).await);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();

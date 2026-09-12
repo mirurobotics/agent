@@ -1,6 +1,6 @@
 // internal crates
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::{dirs, files};
+use miru_agent::filesys::{dirs, files, state_file::Options};
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::services::device as dvc_svc;
 use miru_agent::services::ServiceErr;
@@ -16,10 +16,16 @@ pub mod errors {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
         device_file.shutdown().await.unwrap();
 
         let result = dvc_svc::get(&device_file).await;
@@ -35,10 +41,16 @@ pub mod success {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         files::delete(&layout.device()).await.unwrap();
 
@@ -51,10 +63,16 @@ pub mod success {
         let dir = dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), Device::default())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(Device::default()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let result = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(result, Device::default());
@@ -76,10 +94,16 @@ pub mod success {
             last_disconnected_at: DateTime::<Utc>::UNIX_EPOCH,
         };
 
-        let (device_file, _) =
-            disk::Device::spawn_with_default(64, layout.device(), custom_device.clone())
-                .await
-                .unwrap();
+        let (device_file, _) = disk::Device::spawn(
+            64,
+            layout.device(),
+            Options {
+                default: Some(custom_device.clone()),
+                mode: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let result = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(result, custom_device);

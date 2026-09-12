@@ -18,6 +18,7 @@
 use miru_agent::data_uploads::queue::{
     Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
+use miru_agent::filesys::state_file::Options;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 
 // external crates
@@ -32,10 +33,14 @@ pub fn now() -> DateTime<Utc> {
     DateTime::from_timestamp(2000, 0).unwrap()
 }
 
-/// A fresh snapshot handle over `path`. Reopening the same path returns a
+/// A fresh snapshot handle over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
-async fn open<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
-    QueueSnapshotFile::<J>::new_with_default(path.clone(), QueueSnapshot::<J>::default())
+async fn load<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
+    let opts = Options {
+        default: Some(QueueSnapshot::<J>::default()),
+        ..Default::default()
+    };
+    QueueSnapshotFile::<J>::load(path.clone(), opts)
         .await
         .unwrap()
 }
@@ -60,7 +65,7 @@ async fn drain<J: QueueJob>(queue: &mut Queue<J>) -> Vec<String> {
 /// The paths persisted at `path`, in queue order. Non-destructive: it reads
 /// the snapshot through a fresh handle rather than draining a queue.
 async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
-    open::<J>(path)
+    load::<J>(path)
         .await
         .read()
         .entries
@@ -97,7 +102,7 @@ pub mod cases {
         pub async fn empty_loads_empty_queue<J: QueueJob>(tmp: &str, _make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
 
-            let queue = Queue::<J>::from_snapshot(8, open::<J>(&path).await);
+            let queue = Queue::<J>::from_snapshot(8, load::<J>(&path).await);
 
             assert!(queue.is_empty());
             assert_eq!(queue.len(), 0);
@@ -107,13 +112,13 @@ pub mod cases {
             let (_dir, path) = temp_path(tmp);
 
             {
-                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
                 for name in ["a.log", "b.log", "c.log"] {
                     enqueue(&mut queue, make(name)).await;
                 }
             }
 
-            let mut queue = Queue::<J>::from_snapshot(2, open::<J>(&path).await);
+            let mut queue = Queue::<J>::from_snapshot(2, load::<J>(&path).await);
             assert_eq!(queue.len(), 3);
             // the over-capacity backlog accepts nothing new until it drains
             assert!(queue.enqueue(make("d.log")).await.is_err());
@@ -145,7 +150,7 @@ pub mod cases {
                 .await
                 .unwrap();
 
-            let mut queue = Queue::<J>::from_snapshot(8, open::<J>(&path).await);
+            let mut queue = Queue::<J>::from_snapshot(8, load::<J>(&path).await);
             assert_eq!(queue.len(), 1);
             let entry = queue.next_ready(now()).unwrap();
             assert_eq!(entry.attempts, 0);
@@ -180,12 +185,12 @@ pub mod cases {
             let (_dir, path) = temp_path(tmp);
 
             {
-                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
                 enqueue(&mut queue, make("a.log")).await;
                 enqueue(&mut queue, make("b.log")).await;
             }
 
-            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
             assert_eq!(reloaded.len(), 2);
             assert_eq!(on_disk::<J>(&path).await, ["/data/a.log", "/data/b.log"]);
         }
@@ -242,7 +247,7 @@ pub mod cases {
             let (_dir, path) = temp_path(tmp);
 
             {
-                let mut queue = Queue::<J>::from_snapshot(1, open::<J>(&path).await);
+                let mut queue = Queue::<J>::from_snapshot(1, load::<J>(&path).await);
                 enqueue(&mut queue, make("a.log")).await;
                 assert!(queue.enqueue(make("b.log")).await.is_err());
                 assert_eq!(queue.len(), 1);
@@ -253,7 +258,7 @@ pub mod cases {
 
         pub async fn persist_failure_is_swallowed<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
-            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
 
             // make the snapshot path unwritable: a DIRECTORY now sits there.
             files::delete(&path).await.unwrap();
@@ -305,7 +310,7 @@ pub mod cases {
             make: fn(&str) -> J,
         ) {
             let (_dir, path) = temp_path(tmp);
-            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
             enqueue(&mut queue, make("a.log")).await;
             enqueue(&mut queue, make("b.log")).await;
 
@@ -391,7 +396,7 @@ pub mod cases {
             let id;
 
             {
-                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
                 enqueue(&mut queue, make("a.log")).await;
                 enqueue(&mut queue, make("b.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
@@ -399,7 +404,7 @@ pub mod cases {
                 queue.requeue(entry).await;
             }
 
-            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
             assert_eq!(on_disk::<J>(&path).await, ["/data/b.log", "/data/a.log"]);
             assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
         }
@@ -412,7 +417,7 @@ pub mod cases {
             let deadline = now() + TimeDelta::hours(1);
 
             {
-                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
                 enqueue(&mut queue, make("a.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
                 queue
@@ -425,7 +430,7 @@ pub mod cases {
                 assert_eq!(queue.len(), 1);
             }
 
-            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
             assert!(reloaded.next_ready(now()).is_none());
             let entry = reloaded.next_ready(deadline).unwrap();
             assert_eq!(entry.attempts, 5);
@@ -512,7 +517,7 @@ pub mod cases {
             let beyond = horizon + TimeDelta::seconds(1);
 
             {
-                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
                 queue
                     .requeue(QueueEntry {
                         id: Uuid::new_v4(),
@@ -524,7 +529,7 @@ pub mod cases {
                 queue.reset_invalid_deadlines(horizon).await;
             }
 
-            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
             let entry = reloaded.next_ready(horizon).unwrap();
             assert_eq!(entry.next_attempt_at, Some(horizon));
         }
@@ -585,7 +590,7 @@ pub mod cases {
             make: fn(&str) -> J,
         ) {
             let (_dir, path) = temp_path(tmp);
-            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, load::<J>(&path).await);
             enqueue(&mut queue, make("a.log")).await;
             enqueue(&mut queue, make("b.log")).await;
 
