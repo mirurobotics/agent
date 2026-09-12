@@ -17,15 +17,11 @@ use tokio::task::JoinHandle;
 /// Setup a TokenManager with a dummy private key (for tests that don't reach RSA signing).
 async fn setup(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHandle<()>) {
     let dir = dirs::temp("testing").unwrap();
-    let token_file = TokenFile::load(
-        dir.file("token.json"),
-        Options {
-            default: Some(Token::default()),
-            mode: None,
-        },
-    )
-    .await
-    .unwrap();
+    let opts = Options {
+        default: Some(Token::default()),
+        mode: None,
+    };
+    let token_file = TokenFile::load(dir.file("token.json"), opts).await.unwrap();
     let private_key_file = dir.file("private_key.pem");
     files::write_string(&private_key_file, "private_key", WriteOptions::default())
         .await
@@ -48,15 +44,11 @@ async fn setup(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHan
 /// Setup a TokenManager with a real RSA key pair (for tests that exercise token refresh/signing).
 async fn setup_with_rsa(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHandle<()>) {
     let dir = dirs::temp("testing").unwrap();
-    let token_file = TokenFile::load(
-        dir.file("token.json"),
-        Options {
-            default: Some(Token::default()),
-            mode: None,
-        },
-    )
-    .await
-    .unwrap();
+    let opts = Options {
+        default: Some(Token::default()),
+        mode: None,
+    };
+    let token_file = TokenFile::load(dir.file("token.json"), opts).await.unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
     rsa::gen_key_pair(
@@ -84,15 +76,11 @@ pub mod spawn {
     #[tokio::test]
     async fn token_file_does_not_exist() {
         let dir = dirs::temp("testing").unwrap();
-        let token_file = TokenFile::load(
-            dir.file("token.json"),
-            Options {
-                default: Some(Token::default()),
-                mode: None,
-            },
-        )
-        .await
-        .unwrap();
+        let opts = Options {
+            default: Some(Token::default()),
+            mode: None,
+        };
+        let token_file = TokenFile::load(dir.file("token.json"), opts).await.unwrap();
         files::delete(&token_file.file).await.unwrap();
         let private_key_file = dir.file("private_key.pem");
         files::write_string(&private_key_file, "private_key", WriteOptions::default())
@@ -118,15 +106,11 @@ pub mod spawn {
     #[tokio::test]
     async fn private_key_file_does_not_exist() {
         let dir = dirs::temp("testing").unwrap();
-        let token_file = TokenFile::load(
-            dir.file("token.json"),
-            Options {
-                default: Some(Token::default()),
-                mode: None,
-            },
-        )
-        .await
-        .unwrap();
+        let opts = Options {
+            default: Some(Token::default()),
+            mode: None,
+        };
+        let token_file = TokenFile::load(dir.file("token.json"), opts).await.unwrap();
         let public_key_file = dir.file("public_key.pem");
         files::write_string(&public_key_file, "public_key", WriteOptions::default())
             .await
@@ -147,15 +131,11 @@ pub mod spawn {
     #[tokio::test]
     async fn public_key_file_does_not_exist() {
         let dir = dirs::temp("testing").unwrap();
-        let token_file = TokenFile::load(
-            dir.file("token.json"),
-            Options {
-                default: Some(Token::default()),
-                mode: None,
-            },
-        )
-        .await
-        .unwrap();
+        let opts = Options {
+            default: Some(Token::default()),
+            mode: None,
+        };
+        let token_file = TokenFile::load(dir.file("token.json"), opts).await.unwrap();
         let private_key_file = dir.file("private_key.pem");
         files::write_string(&private_key_file, "private_key", WriteOptions::default())
             .await

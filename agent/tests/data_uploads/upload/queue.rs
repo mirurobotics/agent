@@ -64,15 +64,11 @@ fn make_job(name: &str) -> Job {
 /// A fresh snapshot file over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
 async fn load(path: &File) -> QueueSnapshotFile {
-    QueueSnapshotFile::load(
-        path.clone(),
-        Options {
-            default: Some(QueueSnapshot::default()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap()
+    let opts = Options {
+        default: Some(QueueSnapshot::default()),
+        ..Default::default()
+    };
+    QueueSnapshotFile::load(path.clone(), opts).await.unwrap()
 }
 
 mod wire {

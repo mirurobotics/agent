@@ -36,15 +36,13 @@ pub fn now() -> DateTime<Utc> {
 /// A fresh snapshot handle over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
 async fn load<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
-    QueueSnapshotFile::<J>::load(
-        path.clone(),
-        Options {
-            default: Some(QueueSnapshot::<J>::default()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap()
+    let opts = Options {
+        default: Some(QueueSnapshot::<J>::default()),
+        ..Default::default()
+    };
+    QueueSnapshotFile::<J>::load(path.clone(), opts)
+        .await
+        .unwrap()
 }
 
 /// `enqueue` without requiring the error to be `Debug`.

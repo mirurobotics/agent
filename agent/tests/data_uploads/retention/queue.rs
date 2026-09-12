@@ -37,15 +37,13 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
 /// A fresh snapshot handle over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
 async fn load(path: &File) -> DeleteQueueSnapshotFile {
-    DeleteQueueSnapshotFile::load(
-        path.clone(),
-        Options {
-            default: Some(DeleteQueueSnapshot::default()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap()
+    let opts = Options {
+        default: Some(DeleteQueueSnapshot::default()),
+        ..Default::default()
+    };
+    DeleteQueueSnapshotFile::load(path.clone(), opts)
+        .await
+        .unwrap()
 }
 
 /// A deterministic retention job whose TTL has yet to elapse at [`now`] unless

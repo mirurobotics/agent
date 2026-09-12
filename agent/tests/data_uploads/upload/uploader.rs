@@ -1004,15 +1004,11 @@ mod durability {
     /// A queue persisted to `path`, so a test can inspect what is on disk
     /// while an attempt is still running.
     async fn load(path: &File) -> QueueSnapshotFile {
-        QueueSnapshotFile::load(
-            path.clone(),
-            Options {
-                default: Some(QueueSnapshot::default()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
+        let opts = Options {
+            default: Some(QueueSnapshot::default()),
+            ..Default::default()
+        };
+        QueueSnapshotFile::load(path.clone(), opts).await.unwrap()
     }
 
     fn spawn_persisted(
