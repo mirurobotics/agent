@@ -192,7 +192,9 @@ function Assert-ProductionTables {
         $upgradeRows = @(Get-MsiRows $handle.Database "SELECT ``UpgradeCode``, ``VersionMin``, ``VersionMax``, ``Attributes``, ``ActionProperty`` FROM ``Upgrade``" 5)
         Assert-True ($upgradeRows.Count -ge 2) "upgrade and downgrade rows exist"
         $launchConditions = @(Get-MsiRows $handle.Database "SELECT ``Condition``, ``Description`` FROM ``LaunchCondition``" 2)
-        Assert-Equal 1 (@($launchConditions | Where-Object { $_[0] -match 'WIX_DOWNGRADE_DETECTED' })).Count "downgrade launch condition"
+        $downgradeConditions = @($launchConditions | Where-Object { $_[0] -match 'WIX_DOWNGRADE_DETECTED' })
+        Assert-Equal 1 $downgradeConditions.Count "downgrade launch condition"
+        Assert-Equal "A newer version of Miru Agent is already installed." $downgradeConditions[0][1] "downgrade launch condition description"
         Assert-True (-not (Test-MsiTable $handle.Database "ServiceInstall")) "no service installation table"
         Assert-True (-not (Test-MsiTable $handle.Database "ServiceControl")) "no service control table"
         $files = @(Get-MsiRows $handle.Database "SELECT ``FileName`` FROM ``File``" 1)
