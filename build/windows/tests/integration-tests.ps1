@@ -465,7 +465,7 @@ try {
     Assert-NoService
     Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
 
-    Invoke-Msi @("/i", ('"{0}"' -f $v1)) "fixture-downgrade" @(1638) | Out-Null
+    Invoke-Msi @("/i", ('"{0}"' -f $v1)) "fixture-downgrade" @(1603) | Out-Null
     Assert-OneRegistration $fixtureProducts[1]
     Assert-Equal "fixture-v2" ([IO.File]::ReadAllText($markerPath)) "downgrade leaves v2 marker"
     Assert-Equal $v2Hash (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash "downgrade leaves v2 executable"
