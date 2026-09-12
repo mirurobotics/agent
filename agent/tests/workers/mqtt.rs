@@ -17,6 +17,7 @@ use miru_agent::workers::mqtt::{self, handle_error, handle_event, handle_syncer_
 // external crates
 use chrono::Utc;
 use rumqttc::{ConnAck, ConnectReturnCode, Event, Incoming, Publish, QoS};
+use secrecy::SecretString;
 
 pub mod handle_syncer_event {
     use super::*;
@@ -502,7 +503,7 @@ pub mod handle_mqtt_error {
         .unwrap();
 
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
@@ -567,7 +568,7 @@ pub mod handle_mqtt_error {
         .unwrap();
 
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
@@ -635,7 +636,7 @@ pub mod handle_mqtt_error {
         .unwrap();
 
         let token = Token {
-            token: "token".to_string(),
+            token: SecretString::from("token"),
             expires_at: Utc::now(),
         };
         let token_mngr = MockTokenManager::new(token);
