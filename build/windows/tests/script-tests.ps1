@@ -57,7 +57,7 @@ function Set-ProcessEnvironment {
 }
 
 function Assert-TokenState {
-    param([bool]$ExpectedExists, [AllowNull()][string]$ExpectedValue, [string]$Message)
+    param([bool]$ExpectedExists, [AllowNull()][object]$ExpectedValue, [string]$Message)
     Assert-Equal $ExpectedExists (Test-Path -LiteralPath "Env:$tokenName") "$Message existence"
     Assert-Equal $ExpectedValue ([Environment]::GetEnvironmentVariable($tokenName, "Process")) "$Message value"
 }
@@ -354,14 +354,24 @@ try {
     Set-TestFunction "Assert-ProvisionArchitecture" { throw "check must bypass architecture" }
     $checkHadToken = Test-Path -LiteralPath "Env:$tokenName"
     $checkToken = [Environment]::GetEnvironmentVariable($tokenName, "Process")
+    $checkCalls = New-Object System.Collections.ArrayList
     foreach ($case in @(@{ Native = 0; Expected = 0 }, @{ Native = 3; Expected = 3 }, @{ Native = 7; Expected = 1 })) {
         $nativeResult = $case.Native
-        Set-TestFunction "Invoke-MiruAgentProcess" { param($AgentPath, $Arguments); Write-Host "probe-output-$nativeResult"; return $nativeResult }
+        Set-TestFunction "Invoke-MiruAgentProcess" {
+            param($AgentPath, $Arguments)
+            [void]$checkCalls.Add(@{ Agent = $AgentPath; Arguments = @($Arguments) })
+            Write-Host "probe-output-$nativeResult"
+            return $nativeResult
+        }
         $captured = @(& { $script:checkResult = Invoke-ProvisionMain -Backend "b" -MqttBroker "m" -CheckOnly $true } *>&1)
         Assert-Equal $case.Expected $script:checkResult "check exit mapping $nativeResult"
         Assert-True (($captured | Out-String).Contains("probe-output-$nativeResult")) "check output preserved"
+        $checkCall = $checkCalls[$checkCalls.Count - 1]
+        Assert-Equal $fakeAgent $checkCall.Agent "check executable path"
+        Assert-Sequence @("provision", "--check") $checkCall.Arguments "check arguments"
         Assert-TokenState $checkHadToken $checkToken "check bypasses token state"
     }
+    Assert-Equal 3 $checkCalls.Count "check invocation count"
     Write-Host "PASS provision check bypass and exit mapping"
 
     # Invoke-AgentProvision: exact non-secret args and exact token restoration for
