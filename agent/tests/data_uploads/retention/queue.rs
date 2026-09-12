@@ -34,10 +34,10 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
     }
 }
 
-/// A fresh snapshot handle over `path`. Reopening the same path returns a
+/// A fresh snapshot handle over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
-async fn open(path: &File) -> DeleteQueueSnapshotFile {
-    DeleteQueueSnapshotFile::open(
+async fn load(path: &File) -> DeleteQueueSnapshotFile {
+    DeleteQueueSnapshotFile::load(
         path.clone(),
         Options {
             default: Some(DeleteQueueSnapshot::default()),
@@ -103,7 +103,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, load(&path).await);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();

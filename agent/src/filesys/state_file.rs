@@ -24,7 +24,7 @@ macro_rules! dispatch {
     }};
 }
 
-/// Options for opening a state file.
+/// Options for loading a state file.
 pub struct Options<ContentT> {
     /// If the file is absent/unreadable, create it with this value. `None` means
     /// the file must already exist (absent is an error).
@@ -62,12 +62,12 @@ impl<ContentT, PatchT> SingleThreadStateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
-    /// Open the state file described by `opts`. On a successful read the file is
-    /// loaded as-is. If the read fails and `opts.default` is set, the file is
+    /// Load the state file described by `opts`. On a successful read the file is
+    /// used as-is. If the read fails and `opts.default` is set, the file is
     /// created with that value (atomic, `opts.mode`) and reloaded; otherwise the
     /// read error propagates. `opts.mode` is applied on every subsequent write.
-    pub async fn open(file: File, opts: Options<ContentT>) -> Result<Self, FileSysErr> {
-        match Self::load(file.clone(), opts.mode).await {
+    pub async fn load(file: File, opts: Options<ContentT>) -> Result<Self, FileSysErr> {
+        match Self::from_disk(file.clone(), opts.mode).await {
             Ok(state_file) => Ok(state_file),
             Err(read_err) => {
                 let Some(default) = opts.default else {
@@ -83,12 +83,12 @@ where
                     },
                 )
                 .await?;
-                Self::load(file, opts.mode).await
+                Self::from_disk(file, opts.mode).await
             }
         }
     }
 
-    async fn load(file: File, mode: Option<u32>) -> Result<Self, FileSysErr> {
+    async fn from_disk(file: File, mode: Option<u32>) -> Result<Self, FileSysErr> {
         let state = files::read_json::<ContentT>(&file).await?;
         Ok(Self {
             file,
@@ -227,7 +227,7 @@ where
     ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            file: SingleThreadStateFile::open(file, opts).await?,
+            file: SingleThreadStateFile::load(file, opts).await?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());

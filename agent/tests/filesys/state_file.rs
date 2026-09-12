@@ -22,14 +22,14 @@ fn opts_default() -> Options<Token> {
     }
 }
 
-pub mod open_read_only {
+pub mod load_read_only {
     use super::*;
 
     #[tokio::test]
     async fn doesnt_exist() {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
-        let result = SingleThreadTokenFile::open(file, Options::default()).await;
+        let result = SingleThreadTokenFile::load(file, Options::default()).await;
         assert!(matches!(result, Err(FileSysErr::PathDoesNotExistErr(_))));
     }
 
@@ -44,7 +44,7 @@ pub mod open_read_only {
             .unwrap();
 
         // ensure the contents is correct
-        let result = SingleThreadTokenFile::open(file, Options::default()).await;
+        let result = SingleThreadTokenFile::load(file, Options::default()).await;
         assert!(matches!(result, Err(FileSysErr::ParseJSONErr(_))));
     }
 
@@ -63,14 +63,14 @@ pub mod open_read_only {
             .unwrap();
 
         // ensure the contents is correct
-        let state_file = SingleThreadTokenFile::open(file, Options::default())
+        let state_file = SingleThreadTokenFile::load(file, Options::default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &token);
     }
 }
 
-pub mod open_with_default {
+pub mod load_with_default {
     use super::*;
 
     #[tokio::test]
@@ -78,7 +78,7 @@ pub mod open_with_default {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let state_file = SingleThreadTokenFile::open(file.clone(), opts_default())
+        let state_file = SingleThreadTokenFile::load(file.clone(), opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
@@ -97,16 +97,16 @@ pub mod open_with_default {
             .await
             .unwrap();
 
-        let state_file = SingleThreadTokenFile::open(file.clone(), opts_default())
+        let state_file = SingleThreadTokenFile::load(file.clone(), opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // reopening read-only now succeeds because the file holds valid JSON
-        let reopened = SingleThreadTokenFile::open(file, Options::default())
+        let reloaded = SingleThreadTokenFile::load(file, Options::default())
             .await
             .unwrap();
-        assert_eq!(reopened.read().as_ref(), &Token::default());
+        assert_eq!(reloaded.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -124,7 +124,7 @@ pub mod open_with_default {
             .unwrap();
 
         // an existing readable file is loaded as-is; the default is ignored
-        let state_file = SingleThreadTokenFile::open(file, opts_default())
+        let state_file = SingleThreadTokenFile::load(file, opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &token);
@@ -143,7 +143,7 @@ pub mod open_with_default {
 
         // `blocker` is a file, so its "child" has no real parent directory
         let file = dir.file("blocker/child.json");
-        let result = SingleThreadTokenFile::open(file, opts_default()).await;
+        let result = SingleThreadTokenFile::load(file, opts_default()).await;
         assert!(result.is_err());
     }
 }
@@ -156,7 +156,7 @@ pub mod read {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let state_file = SingleThreadTokenFile::open(file, opts_default())
+        let state_file = SingleThreadTokenFile::load(file, opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
@@ -168,7 +168,7 @@ pub mod read {
         let file = dir.file("test-file");
 
         // create the file
-        let state_file = SingleThreadTokenFile::open(file.clone(), opts_default())
+        let state_file = SingleThreadTokenFile::load(file.clone(), opts_default())
             .await
             .unwrap();
 
@@ -190,7 +190,7 @@ pub mod write {
         let file = dir.file("test-file");
 
         // create the file
-        let mut state_file = SingleThreadTokenFile::open(file, opts_default())
+        let mut state_file = SingleThreadTokenFile::load(file, opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
@@ -210,7 +210,7 @@ pub mod write {
         let file = dir.file("test-file");
 
         // create the file
-        let mut state_file = SingleThreadTokenFile::open(file.clone(), opts_default())
+        let mut state_file = SingleThreadTokenFile::load(file.clone(), opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
@@ -237,7 +237,7 @@ pub mod patch {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let mut state_file = SingleThreadTokenFile::open(file, opts_default())
+        let mut state_file = SingleThreadTokenFile::load(file, opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
@@ -264,7 +264,7 @@ pub mod patch {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        let mut state_file = SingleThreadTokenFile::open(
+        let mut state_file = SingleThreadTokenFile::load(
             file.clone(),
             Options {
                 default: Some(token.clone()),
@@ -291,7 +291,7 @@ pub mod patch {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let mut state_file = SingleThreadTokenFile::open(file.clone(), opts_default())
+        let mut state_file = SingleThreadTokenFile::load(file.clone(), opts_default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
@@ -327,9 +327,9 @@ pub mod mode {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("token.json");
 
-        // create path: file does not exist yet, so `open` writes the default at
+        // create path: file does not exist yet, so `load` writes the default at
         // 0o600
-        let mut state_file = SingleThreadTokenFile::open(
+        let mut state_file = SingleThreadTokenFile::load(
             file.clone(),
             Options {
                 default: Some(Token::default()),
@@ -358,7 +358,7 @@ pub mod mode {
         let dir = dirs::temp("testing").unwrap();
         let file = dir.file("state.json");
 
-        SingleThreadTokenFile::open(file.clone(), opts_default())
+        SingleThreadTokenFile::load(file.clone(), opts_default())
             .await
             .unwrap();
         let perms = files::permissions(&file).await.unwrap();

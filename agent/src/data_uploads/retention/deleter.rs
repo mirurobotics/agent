@@ -473,7 +473,7 @@ mod tests {
 
     /// A persistence handle for the snapshot at `file`.
     async fn snapshot_file(file: &File) -> DeleteQueueSnapshotFile {
-        DeleteQueueSnapshotFile::open(
+        DeleteQueueSnapshotFile::load(
             file.clone(),
             Options {
                 default: Some(DeleteQueueSnapshot::default()),

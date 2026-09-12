@@ -33,7 +33,7 @@ pub async fn create_token_manager(
     dir: &filesys::Dir,
     http_client: Arc<MockClient>,
 ) -> (TokenManager, JoinHandle<()>) {
-    let token_file = TokenFile::open(
+    let token_file = TokenFile::load(
         dir.file("token.json"),
         Options {
             default: Some(Token::default()),

@@ -724,7 +724,7 @@ mod tests {
     }
 
     async fn state_file(file: &File) -> ScanSnapshotFile {
-        ScanSnapshotFile::open(
+        ScanSnapshotFile::load(
             file.clone(),
             Options {
                 default: Some(ScannerSnapshot::default()),

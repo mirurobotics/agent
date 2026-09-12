@@ -61,10 +61,10 @@ fn make_job(name: &str) -> Job {
     }
 }
 
-/// A fresh snapshot file over `path`. Reopening the same path returns a
+/// A fresh snapshot file over `path`. Reloading the same path returns a
 /// handle whose in-memory cache reflects what was previously persisted.
-async fn open(path: &File) -> QueueSnapshotFile {
-    QueueSnapshotFile::open(
+async fn load(path: &File) -> QueueSnapshotFile {
+    QueueSnapshotFile::load(
         path.clone(),
         Options {
             default: Some(QueueSnapshot::default()),
@@ -80,7 +80,7 @@ mod wire {
 
     /// Pins the persisted wire format on the read side: an entry is
     /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
-    /// rather than flattened. `SingleThreadStateFile::open`
+    /// rather than flattened. `SingleThreadStateFile::load`
     /// silently overwrites a snapshot it cannot parse, so a shape change would
     /// wipe a live user's queue instead of erroring — this test is the guard.
     ///
@@ -107,7 +107,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, load(&path).await);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(Utc::now()).unwrap();
@@ -138,7 +138,7 @@ mod wire {
         let path = dir.to_dir().file("upload_queue.json");
 
         {
-            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            let mut queue = Queue::from_snapshot(8, load(&path).await);
             queue.enqueue(make_job("a.log")).await.unwrap();
         }
 
@@ -197,7 +197,7 @@ mod wire {
 
         // if deserialization failed, open would silently write an
         // empty default snapshot and the pop below would find nothing
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, load(&path).await);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);

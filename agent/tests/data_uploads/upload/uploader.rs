@@ -1003,8 +1003,8 @@ mod durability {
 
     /// A queue persisted to `path`, so a test can inspect what is on disk
     /// while an attempt is still running.
-    async fn open(path: &File) -> QueueSnapshotFile {
-        QueueSnapshotFile::open(
+    async fn load(path: &File) -> QueueSnapshotFile {
+        QueueSnapshotFile::load(
             path.clone(),
             Options {
                 default: Some(QueueSnapshot::default()),
@@ -1064,7 +1064,7 @@ mod durability {
     /// before a clock step would look.
     async fn seed(path: &File, deadline: DateTime<Utc>) -> Job {
         let job = make_job("stranded.log");
-        let mut snapshot = open(path).await;
+        let mut snapshot = load(path).await;
         snapshot
             .patch(QueueSnapshot {
                 entries: vec![QueueEntry {
@@ -1081,7 +1081,7 @@ mod durability {
 
     /// The digests currently on disk, read through a fresh handle.
     async fn on_disk(path: &File) -> Vec<String> {
-        open(path)
+        load(path)
             .await
             .read()
             .entries
@@ -1112,7 +1112,7 @@ mod durability {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::Hang(release_rx));
-        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        let (uploader, handle) = spawn_persisted(mock.clone(), load(&path).await);
 
         timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
@@ -1131,7 +1131,7 @@ mod durability {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::Hang(release_rx));
-        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        let (uploader, handle) = spawn_persisted(mock.clone(), load(&path).await);
 
         timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
@@ -1151,7 +1151,7 @@ mod durability {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::Hang(release_rx));
-        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        let (uploader, handle) = spawn_persisted(mock.clone(), load(&path).await);
 
         timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
@@ -1171,7 +1171,7 @@ mod durability {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::Hang(release_rx));
-        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        let (uploader, handle) = spawn_persisted(mock.clone(), load(&path).await);
         timed(uploader.enqueue(job.clone())).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
         timed(uploader.shutdown()).await.unwrap();
@@ -1180,7 +1180,7 @@ mod durability {
         // a second process over the same snapshot file picks the job back up
         let (mock2, mut started2_rx) = MockUploadExecutor::new();
         mock2.push_step(MockStep::Ok);
-        let (uploader2, handle2) = spawn_persisted(mock2.clone(), open(&path).await);
+        let (uploader2, handle2) = spawn_persisted(mock2.clone(), load(&path).await);
         timed(started2_rx.recv()).await.unwrap();
         await_drained(&uploader2).await;
 
@@ -1197,7 +1197,7 @@ mod durability {
         let path = dir.to_dir().file("upload_queue.json");
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::TerminalErr);
-        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        let (uploader, handle) = spawn_persisted(mock.clone(), load(&path).await);
 
         timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
@@ -1220,7 +1220,7 @@ mod durability {
         mock.push_step(MockStep::Ok);
 
         let (uploader, handle, sleeps) =
-            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
+            spawn_persisted_with_test_clock(mock.clone(), load(&path).await);
 
         // the worker waits one maximum backoff, not 48 hours, and then uploads
         timed(started_rx.recv()).await.unwrap();
@@ -1245,7 +1245,7 @@ mod durability {
         mock.push_step(MockStep::Ok);
 
         let (uploader, handle, sleeps) =
-            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
+            spawn_persisted_with_test_clock(mock.clone(), load(&path).await);
 
         timed(started_rx.recv()).await.unwrap();
         let waited = sleeps.lock().unwrap().first().copied().unwrap();

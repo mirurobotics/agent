@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 /// Setup a TokenManager with a dummy private key (for tests that don't reach RSA signing).
 async fn setup(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHandle<()>) {
     let dir = dirs::temp("testing").unwrap();
-    let token_file = TokenFile::open(
+    let token_file = TokenFile::load(
         dir.file("token.json"),
         Options {
             default: Some(Token::default()),
@@ -48,7 +48,7 @@ async fn setup(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHan
 /// Setup a TokenManager with a real RSA key pair (for tests that exercise token refresh/signing).
 async fn setup_with_rsa(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHandle<()>) {
     let dir = dirs::temp("testing").unwrap();
-    let token_file = TokenFile::open(
+    let token_file = TokenFile::load(
         dir.file("token.json"),
         Options {
             default: Some(Token::default()),
@@ -84,7 +84,7 @@ pub mod spawn {
     #[tokio::test]
     async fn token_file_does_not_exist() {
         let dir = dirs::temp("testing").unwrap();
-        let token_file = TokenFile::open(
+        let token_file = TokenFile::load(
             dir.file("token.json"),
             Options {
                 default: Some(Token::default()),
@@ -118,7 +118,7 @@ pub mod spawn {
     #[tokio::test]
     async fn private_key_file_does_not_exist() {
         let dir = dirs::temp("testing").unwrap();
-        let token_file = TokenFile::open(
+        let token_file = TokenFile::load(
             dir.file("token.json"),
             Options {
                 default: Some(Token::default()),
@@ -147,7 +147,7 @@ pub mod spawn {
     #[tokio::test]
     async fn public_key_file_does_not_exist() {
         let dir = dirs::temp("testing").unwrap();
-        let token_file = TokenFile::open(
+        let token_file = TokenFile::load(
             dir.file("token.json"),
             Options {
                 default: Some(Token::default()),

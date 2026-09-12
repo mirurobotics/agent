@@ -144,7 +144,7 @@ impl AppState {
         layout: &disk::Layout,
         sinks: Vec<Arc<dyn scan::StableFileSink>>,
     ) -> Result<(Arc<scan::Scanner>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match ScanSnapshotFile::open(
+        let snapshot_file = match ScanSnapshotFile::load(
             layout.scanner_snapshot(),
             state_file::Options {
                 default: Some(Default::default()),
@@ -178,7 +178,7 @@ impl AppState {
     async fn init_deleter(
         layout: &disk::Layout,
     ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match retention::DeleteQueueSnapshotFile::open(
+        let snapshot_file = match retention::DeleteQueueSnapshotFile::load(
             layout.delete_queue(),
             state_file::Options {
                 default: Some(Default::default()),
@@ -216,7 +216,7 @@ impl AppState {
         token_mngr: Arc<authn::TokenManager>,
         deleter: Arc<retention::Deleter>,
     ) -> Result<(Arc<upload::Uploader>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match upload::QueueSnapshotFile::open(
+        let snapshot_file = match upload::QueueSnapshotFile::load(
             layout.upload_queue(),
             state_file::Options {
                 default: Some(Default::default()),
@@ -316,7 +316,7 @@ async fn setup_auth_files(
     public_key_file.assert_exists()?;
 
     // 0o600: the token is a live bearer credential (and the MQTT password).
-    let token_file = TokenFile::open(
+    let token_file = TokenFile::load(
         auth_dir.token(),
         state_file::Options {
             default: Some(authn::Token::default()),
