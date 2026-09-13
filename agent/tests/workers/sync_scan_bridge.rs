@@ -4,10 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::{
-    mocks::{scanner::MockScanner, syncer::MockSyncer},
-    test_utils::filesys::dirs as test_dirs,
-};
+use crate::mocks::{scanner::MockScanner, syncer::MockSyncer};
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::scan::ScanErr;
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::Overwrite;

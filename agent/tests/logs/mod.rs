@@ -4,10 +4,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::{
-    errors::harnesses::{assert_error, Expected},
-    test_utils::filesys::dirs as test_dirs,
-};
+use crate::errors::harnesses::{assert_error, Expected};
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::errors::{Code, HTTPCode};
 use miru_agent::filesys::PathExt;
 use miru_agent::logs::{self, LogLevel, LogsErr, Options};

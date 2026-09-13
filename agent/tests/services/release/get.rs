@@ -1,8 +1,6 @@
 // internal crates
-use crate::{
-    mocks::backend::{PanicBackend, StubBackend},
-    test_utils::filesys::dirs as test_dirs,
-};
+use crate::mocks::backend::{PanicBackend, StubBackend};
+use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::disk::Releases;

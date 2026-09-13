@@ -2,7 +2,7 @@
 
 #[path = "../errors/harnesses.rs"]
 pub mod error_harnesses;
-#[path = "filesys.rs"]
+#[path = "filesys/mod.rs"]
 pub mod filesys;
 #[path = "../mocks/http_client.rs"]
 pub mod http_client;

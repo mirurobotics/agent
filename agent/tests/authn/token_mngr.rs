@@ -2,7 +2,8 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::{mocks::http_client::MockClient, test_utils::filesys::dirs as test_dirs};
+use crate::mocks::http_client::MockClient;
+use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::TokenResponse;
 use miru_agent::authn::{token_mngr::TokenFile, AuthnErr, Token, TokenManager, TokenManagerExt};
 use miru_agent::crypt::rsa;

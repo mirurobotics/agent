@@ -4,13 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::{
-    mocks::{
-        deleter::{MockDeleter, MockStep as DeleterStep},
-        upload_executor::{MockStep, MockUploadExecutor},
-    },
-    test_utils::filesys::dirs as test_dirs,
+use crate::mocks::{
+    deleter::{MockDeleter, MockStep as DeleterStep},
+    upload_executor::{MockStep, MockUploadExecutor},
 };
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{

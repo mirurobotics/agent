@@ -2,17 +2,15 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::{
-    mocks::{
-        http_client::{Call, MockClient},
-        object_transfer::MockObjectTransfer,
-        stub_token_manager::StubTokenManager,
-        upload_executor::{MockStep, MockUploadExecutor},
-    },
-    test_utils::upload::{
-        destination, make_job, pending_response, response_metadata, response_with_status,
-        s3_credentials, token_manager,
-    },
+use crate::mocks::{
+    http_client::{Call, MockClient},
+    object_transfer::MockObjectTransfer,
+    stub_token_manager::StubTokenManager,
+    upload_executor::{MockStep, MockUploadExecutor},
+};
+use crate::test_utils::upload::{
+    destination, make_job, pending_response, response_metadata, response_with_status,
+    s3_credentials, token_manager,
 };
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus, UploadWithCredentials};
 use miru_agent::authn::errors::MockError as AuthnMockError;

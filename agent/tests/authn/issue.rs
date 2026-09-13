@@ -1,8 +1,6 @@
 // internal crates
-use crate::{
-    mocks::http_client::{Call, MockClient},
-    test_utils::filesys::dirs as test_dirs,
-};
+use crate::mocks::http_client::{Call, MockClient};
+use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::TokenResponse;
 use miru_agent::authn::errors::AuthnErr;
 use miru_agent::authn::issue::{encode_part, issue_token, mint_jwt};
