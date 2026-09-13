@@ -380,8 +380,8 @@ if ($ManualProductionSmoke) {
 }
 
 $initialRelated = @(Assert-InstalledAllowlistSafe)
-$null = & net.exe user $testUser 2>$null
-if ($LASTEXITCODE -eq 0) {
+$existingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
+if ($null -ne $existingUser) {
     throw "Refusing mutation: the named integration account $testUser already exists."
 }
 New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
