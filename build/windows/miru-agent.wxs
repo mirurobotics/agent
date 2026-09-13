@@ -60,6 +60,13 @@
     <Feature Id="Main" Title="$(ProductName)" Level="1">
       <ComponentGroupRef Id="AgentBinary" />
       <ComponentGroupRef Id="DataDirs" />
+      <?ifdef IntegrationFixture ?>
+      <ComponentGroupRef Id="IntegrationFixturePayload" />
+      <?endif ?>
     </Feature>
+
+    <?ifdef IntegrationFixture ?>
+    <CustomActionRef Id="FailUpgradeForTest" />
+    <?endif ?>
   </Package>
 </Wix>

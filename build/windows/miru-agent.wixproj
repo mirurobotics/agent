@@ -10,6 +10,7 @@
     <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
     <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
     <DefineConstants Condition="'$(FixturePayloadPath)' != ''">$(DefineConstants);FixturePayloadPath=$(FixturePayloadPath)</DefineConstants>
+    <DefineConstants Condition="'$(TestWixSource)' != ''">$(DefineConstants);IntegrationFixture=1</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
