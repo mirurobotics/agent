@@ -265,7 +265,7 @@ function Assert-ProtectedAcls {
 
 function Add-PermissiveAces {
     foreach ($path in @($programDataRoot, $logsRoot)) {
-        & icacls.exe $path /grant "*S-1-1-0:(OI)(CI)F" | Out-Null
+        & icacls.exe $path /grant "*S-1-1-0:F" | Out-Null
         Assert-Equal 0 $LASTEXITCODE "permissive Everyone ACE added to $path"
     }
 }
@@ -400,7 +400,6 @@ try {
 
     New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
     [IO.File]::WriteAllText($sentinelPath, "retain-me")
-    [IO.File]::WriteAllText($secretPath, "representative-secret")
     [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
     & icacls.exe $programDataRoot /inheritance:e | Out-Null
     Assert-Equal 0 $LASTEXITCODE "pre-existing ProgramData inheritance enabled"
@@ -417,6 +416,9 @@ try {
     Assert-True (Test-ArpProductCode $fixtureProducts[0]) "v1 installer metadata registered"
     Assert-CustomerStateRetained "initial install"
     Assert-ProtectedAcls
+    # Provisioning state is created after installation and must inherit the
+    # protected ProgramData descriptor.
+    [IO.File]::WriteAllText($secretPath, "representative-secret")
     Invoke-NonAdminProbe
     Assert-NoService
     Invoke-DirectProvisionCheck
