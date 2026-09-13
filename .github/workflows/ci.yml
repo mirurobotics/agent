@@ -84,11 +84,8 @@ jobs:
       - name: Check Linux Production Build
         run: cargo check --package miru-agent --locked
 
-      - name: Run Tests, Coverage Gates, and HTML Report
-        run: |
-          env -u RUST_LOG ./scripts/covgate.sh
-          env -u RUST_LOG ./scripts/coverage.sh --report-only
-          test -f target/coverage/html/index.html
+      - name: Run Tests and Coverage Gates
+        run: env -u RUST_LOG ./scripts/covgate.sh
 
   tools:
     runs-on: blacksmith-4vcpu-ubuntu-2404
