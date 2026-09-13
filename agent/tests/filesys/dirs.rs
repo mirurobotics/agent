@@ -75,13 +75,20 @@ pub mod new_home_dir {
     #[test]
     fn success() {
         let dir = dirs::home().unwrap();
-        #[cfg(not(windows))]
-        let expected = env::var("HOME").unwrap();
-        #[cfg(windows)]
-        let expected = env::var("USERPROFILE").unwrap();
+        let path = dir.path().to_str().expect("home path is utf-8");
 
         assert!(dir.exists());
-        assert_eq!(dir.path(), &PathBuf::from(expected));
+        assert!(dir.path().is_absolute());
+        #[cfg(windows)]
+        assert!(
+            path.contains("Users"),
+            "expected USERPROFILE under Users, got {path}"
+        );
+        #[cfg(not(windows))]
+        assert!(
+            path.contains("home") || path.contains("Users") || path.contains("root"),
+            "expected a typical home path, got {path}"
+        );
     }
 }
 

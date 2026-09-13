@@ -501,7 +501,7 @@ mod tests {
 
     /// A `Job` whose identity matches an existing directory represented as a
     /// file. Stat succeeds, but unlinking it as a file fails on every platform.
-    async fn undeletable_directory_job(dir: &Dir, observed_secs: i64) -> Job {
+    async fn undeletable_dir_job(dir: &Dir, observed_secs: i64) -> Job {
         let target = dir.subdir("undeletable");
         dirs::create(&target).await.unwrap();
         let file = File::new(target.path().clone());
@@ -925,7 +925,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -948,7 +948,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -969,7 +969,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -1041,7 +1041,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -1070,7 +1070,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
 
@@ -1095,7 +1095,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, Some(&state_path)).await;
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1118,7 +1118,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1148,7 +1148,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1181,7 +1181,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(undeletable_directory_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, 1000).await)
                 .await
                 .unwrap();
 

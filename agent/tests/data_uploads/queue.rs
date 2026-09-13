@@ -70,8 +70,11 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
         .collect()
 }
 
-fn names<J: QueueJob>(make: fn(&str) -> J, names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| make(name).name()).collect()
+/// [`QueueJob::name`] for each stem after it goes through `make`. Expected
+/// values must take this path so they match host path normalization
+/// (`File::new("/data/a.log")` Displays as `\data\a.log` on Windows).
+fn job_names<J: QueueJob>(make: fn(&str) -> J, stems: &[&str]) -> Vec<String> {
+    stems.iter().map(|stem| make(stem).name()).collect()
 }
 
 fn temp_path(name: &str) -> (test_dirs::TempDir, File) {
@@ -125,7 +128,7 @@ pub mod cases {
 
             assert_eq!(
                 drain(&mut queue).await,
-                names(make, &["a.log", "b.log", "c.log"])
+                job_names(make, &["a.log", "b.log", "c.log"])
             );
         }
 
@@ -177,7 +180,7 @@ pub mod cases {
 
             assert_eq!(
                 drain(&mut queue).await,
-                names(make, &["a.log", "b.log", "c.log"])
+                job_names(make, &["a.log", "b.log", "c.log"])
             );
         }
 
@@ -192,7 +195,7 @@ pub mod cases {
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
             assert_eq!(reloaded.len(), 2);
-            assert_eq!(on_disk::<J>(&path).await, names(make, &["a.log", "b.log"]));
+            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["a.log", "b.log"]));
         }
 
         pub async fn duplicate_jobs_are_both_queued<J: QueueJob>(make: fn(&str) -> J) {
@@ -223,7 +226,7 @@ pub mod cases {
 
             assert!(queue.enqueue(make("a.log")).await.is_err());
 
-            assert_eq!(drain(&mut queue).await, names(make, &["a.log"]));
+            assert_eq!(drain(&mut queue).await, job_names(make, &["a.log"]));
         }
 
         pub async fn full_queue_rejects_with_queue_full_err<J: QueueJob>(make: fn(&str) -> J) {
@@ -256,7 +259,7 @@ pub mod cases {
                 assert_eq!(queue.len(), 1);
             }
 
-            assert_eq!(on_disk::<J>(&path).await, names(make, &["a.log"]));
+            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["a.log"]));
         }
 
         pub async fn persist_failure_is_swallowed<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
@@ -295,7 +298,7 @@ pub mod cases {
             // skipping the ineligible head does not disturb FIFO among the remainder
             assert_eq!(
                 drain(&mut queue).await,
-                names(make, &["ready_1", "ready_2"])
+                job_names(make, &["ready_1", "ready_2"])
             );
 
             assert!(queue.next_ready(now()).is_none());
@@ -321,11 +324,11 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            assert_eq!(on_disk::<J>(&path).await, names(make, &["a.log", "b.log"]));
+            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["a.log", "b.log"]));
 
             let removed = queue.remove(entry.id).await.unwrap();
             assert_eq!(removed.id, entry.id);
-            assert_eq!(on_disk::<J>(&path).await, names(make, &["b.log"]));
+            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["b.log"]));
         }
     }
 
@@ -370,7 +373,7 @@ pub mod cases {
             queue.requeue(entry).await;
             assert_eq!(queue.len(), 2);
 
-            assert_eq!(drain(&mut queue).await, names(make, &["b.log", "a.log"]));
+            assert_eq!(drain(&mut queue).await, job_names(make, &["b.log", "a.log"]));
         }
 
         pub async fn at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str) -> J) {
@@ -411,7 +414,7 @@ pub mod cases {
             }
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
-            assert_eq!(on_disk::<J>(&path).await, names(make, &["b.log", "a.log"]));
+            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["b.log", "a.log"]));
             assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
         }
 
@@ -610,12 +613,12 @@ pub mod cases {
 
             assert_eq!(
                 on_disk::<J>(&path).await,
-                names(make, &["a.log", "b.log", "c.log"])
+                job_names(make, &["a.log", "b.log", "c.log"])
             );
 
             // `a` leaves disk only when the worker resolves it.
             queue.remove(in_flight.id).await.unwrap();
-            assert_eq!(on_disk::<J>(&path).await, names(make, &["b.log", "c.log"]));
+            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["b.log", "c.log"]));
         }
     }
 }

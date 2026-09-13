@@ -37,7 +37,7 @@ async fn make_job(file: &File) -> Job {
 
 /// A `Job` whose identity matches an existing directory represented as a file.
 /// Stat succeeds, but unlinking it as a file fails on every platform.
-async fn undeletable_directory_job(dir: &Dir) -> Job {
+async fn undeletable_dir_job(dir: &Dir) -> Job {
     let now = Utc::now();
     let target = dir.subdir("undeletable");
     dirs::create(&target).await.unwrap();
@@ -150,7 +150,7 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
     .unwrap();
 
     deleter
-        .enqueue(undeletable_directory_job(&dir).await)
+        .enqueue(undeletable_dir_job(&dir).await)
         .await
         .unwrap();
     assert_eq!(deleter.len().await.unwrap(), 1);
