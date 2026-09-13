@@ -102,8 +102,7 @@ function Build-IntegrationPackage {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $payload = Join-Path $output "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, $Marker, [Text.Encoding]::ASCII)
-    $constants = "Version=$Version;BinDir=$binDir;ProductCode=$ProductCode;FixturePayloadPath=$payload"
-    & dotnet build $projectPath --no-restore --configuration Release "-p:Platform=x64" "-p:Version=$Version" "-p:BinDir=$binDir" "-p:ProductCode=$ProductCode" "-p:TestWixSource=$fixtureSource" "-p:DefineConstants=$constants" "-p:OutputPath=$output\" "-p:IntermediateOutputPath=$output\obj\" | Out-Host
+    & dotnet build $projectPath --no-restore --configuration Release "-p:Platform=x64" "-p:Version=$Version" "-p:BinDir=$binDir" "-p:ProductCode=$ProductCode" "-p:TestWixSource=$fixtureSource" "-p:FixturePayloadPath=$payload" "-p:OutputPath=$output\" "-p:IntermediateOutputPath=$output\obj\" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "integration package build failed for $Version" }
     $package = Get-ChildItem -LiteralPath $output -Filter "*.msi" -Recurse -File | Where-Object { $_.FullName -notmatch '\\obj\\' } | Select-Object -First 1
     if ($null -eq $package) { throw "integration package missing for $Version" }
