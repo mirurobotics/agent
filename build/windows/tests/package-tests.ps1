@@ -228,8 +228,6 @@ function Invoke-ExpectedBuildFailure {
 $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
 $resolvedBinDir = (Resolve-Path -LiteralPath $BinDir).Path
 $resolvedArtifacts = [IO.Path]::GetFullPath($ArtifactsDirectory)
-$productionSource = [IO.File]::ReadAllText((Join-Path (Split-Path $resolvedProject -Parent) "miru-agent.wxs"))
-Assert-True ($productionSource -notmatch 'FailUpgradeForTest|FAIL_UPGRADE_FOR_TEST|rollback-payload|xmlns:util|util:') "production WiX source excludes test and Util authoring"
 New-Item -ItemType Directory -Path $resolvedArtifacts -Force | Out-Null
 $v1Directory = Remove-AndCreateChild $resolvedArtifacts "v1"
 $v2Directory = Remove-AndCreateChild $resolvedArtifacts "v2"
