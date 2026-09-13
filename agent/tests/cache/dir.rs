@@ -4,8 +4,7 @@ use std::path::PathBuf;
 // internal crates
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
-use crate::tests::test_utils::filesys::dirs as test_dirs;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::cache::{DirCache, SingleThreadDirCache};
 use miru_agent::filesys::{files, Overwrite, PathExt, WriteOptions};
 

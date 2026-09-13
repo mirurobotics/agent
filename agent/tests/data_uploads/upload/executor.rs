@@ -3,14 +3,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // internal crates
-use crate::tests::mocks::{
-    http_client::{Call, MockClient},
-    object_transfer::MockObjectTransfer,
-    stub_token_manager::StubTokenManager,
-    token_manager::MockTokenManager,
-    upload_executor::{MockStep, MockUploadExecutor},
+use crate::tests::{
+    mocks::{
+        http_client::{Call, MockClient},
+        object_transfer::MockObjectTransfer,
+        stub_token_manager::StubTokenManager,
+        token_manager::MockTokenManager,
+        upload_executor::{MockStep, MockUploadExecutor},
+    },
+    test_utils::filesys::files as test_files,
 };
-use crate::tests::test_utils::filesys::files as test_files;
 use backend_api::models::{
     CreateUploadRequest, Upload, UploadCredentials, UploadDestination, UploadSource, UploadStatus,
     UploadWithCredentials,

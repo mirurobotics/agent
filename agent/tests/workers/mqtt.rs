@@ -1,8 +1,8 @@
 // internal crates
-use crate::tests::mocks::{
-    mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager,
+use crate::tests::{
+    mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager},
+    test_utils::filesys::dirs as test_dirs,
 };
-use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::authn::Token;
 use miru_agent::disk::{self, Layout};
 use miru_agent::models::{Device, DeviceStatus};

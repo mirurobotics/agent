@@ -2,8 +2,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};

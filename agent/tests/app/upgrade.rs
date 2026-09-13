@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 // internal crates
-use crate::tests::mocks::http_client::{Call, MockClient};
-use crate::tests::test_utils::filesys::dirs as test_dirs;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::{
+    mocks::http_client::{Call, MockClient},
+    test_utils::filesys::{dirs as test_dirs, files as test_files},
+};
 use backend_api::models as backend_client;
 use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;

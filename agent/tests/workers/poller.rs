@@ -2,8 +2,10 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::tests::mocks::{error::SleepController, syncer::MockSyncer};
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::{
+    mocks::{error::SleepController, syncer::MockSyncer},
+    test_utils::filesys::dirs as test_dirs,
+};
 use miru_agent::disk::{self, Layout};
 use miru_agent::models::Device;
 use miru_agent::sync::errors::MockErr as SyncMockErr;

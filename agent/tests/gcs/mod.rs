@@ -4,9 +4,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::tests::mocks::http_client::run_server;
-use crate::tests::test_utils::filesys::dirs as test_dirs;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::{
+    mocks::http_client::run_server,
+    test_utils::filesys::{dirs as test_dirs, files as test_files},
+};
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;

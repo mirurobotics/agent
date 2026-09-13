@@ -2,8 +2,10 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::tests::errors::harnesses::{assert_error, Expected};
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::{
+    errors::harnesses::{assert_error, Expected},
+    test_utils::filesys::files as test_files,
+};
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;

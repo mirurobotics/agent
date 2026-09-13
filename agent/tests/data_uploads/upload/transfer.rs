@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::tests::mocks::http_client::run_server;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::{mocks::http_client::run_server, test_utils::filesys::files as test_files};
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 use miru_agent::data_uploads::upload::errors::TransferErr;
 use miru_agent::data_uploads::upload::transfer::s3_config;

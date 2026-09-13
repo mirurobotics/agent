@@ -3,10 +3,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::tests::mocks::http_client::{Call, MockClient};
-use crate::tests::sync::helpers::*;
-use crate::tests::test_utils::filesys::dirs as test_dirs;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::tests::{
+    mocks::http_client::{Call, MockClient},
+    sync::helpers::*,
+    test_utils::filesys::{dirs as test_dirs, files as test_files},
+};
 use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
