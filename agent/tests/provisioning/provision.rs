@@ -2,7 +2,7 @@
 use super::shared::{
     mock_failing_provision, mock_ok_provision, validate_storage, Env, StorageSnapshot, DEVICE_ID,
 };
-use crate::tests::{mocks::http_client as mock, test_utils::filesys::files as test_files};
+use crate::{mocks::http_client as mock, test_utils::filesys::files as test_files};
 use miru_agent::filesys::{dirs, files, PathExt};
 use miru_agent::provisioning::{errors::*, provision};
 

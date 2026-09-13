@@ -15,7 +15,7 @@
 //! and the macro.
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::queue::{
     Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
@@ -633,13 +633,13 @@ macro_rules! queue_suite_emit {
                 $(
                     #[tokio::test]
                     async fn $disk() {
-                        $crate::tests::data_uploads::queue::cases::$group::$disk($tmp, $make).await;
+                        $crate::data_uploads::queue::cases::$group::$disk($tmp, $make).await;
                     }
                 )*
                 $(
                     #[tokio::test]
                     async fn $mem() {
-                        $crate::tests::data_uploads::queue::cases::$group::$mem($make).await;
+                        $crate::data_uploads::queue::cases::$group::$mem($make).await;
                     }
                 )*
             }
@@ -655,7 +655,7 @@ pub(crate) use queue_suite_emit;
 /// worker's own test file.
 macro_rules! queue_suite {
     ($make:expr, $tmp:literal) => {
-        $crate::tests::data_uploads::queue::queue_suite_emit! {
+        $crate::data_uploads::queue::queue_suite_emit! {
             $make, $tmp,
             from_snapshot {
                 disk: [

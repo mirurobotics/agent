@@ -2,9 +2,9 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::tests::{
-    errors::harnesses::{assert_error, Expected},
-    test_utils::filesys::files as test_files,
+use crate::test_utils::{
+    error_harnesses::{assert_error, Expected},
+    filesys::files as test_files,
 };
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::file::File;
@@ -306,7 +306,7 @@ pub mod put {
     /// `PutObject` path; larger-than-`PART_SIZE` files take the multipart path.
     pub mod routing {
         use super::*;
-        use crate::tests::s3::multipart::{
+        use crate::s3::tests::multipart::{
             complete_req, complete_resp, complete_shape, create_req, create_resp, create_shape,
             upload_part_req, upload_part_resp, upload_part_shape,
         };

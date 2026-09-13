@@ -3,8 +3,8 @@ use std::os::unix::fs::PermissionsExt;
 pub use std::path::PathBuf;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
-pub use crate::tests::test_utils::testdata::testdata_dir;
+use crate::test_utils::filesys::dirs as test_dirs;
+pub use crate::test_utils::testdata::testdata_dir;
 use miru_agent::crypt::{rsa, CryptErr};
 use miru_agent::filesys::{self, files, Overwrite, PathExt, WriteOptions};
 

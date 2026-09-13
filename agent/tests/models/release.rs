@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 // harness
-use crate::tests::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
 
 // ─── fixture ─────────────────────────────────────────────────────────────────
 

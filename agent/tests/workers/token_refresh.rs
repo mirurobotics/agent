@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::tests::mocks::{
+use crate::mocks::{
     error::SleepController,
     token_manager::{MockTokenManager, TokenManagerCall},
 };

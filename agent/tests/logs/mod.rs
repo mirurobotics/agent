@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::tests::{
+use crate::{
     errors::harnesses::{assert_error, Expected},
     test_utils::filesys::dirs as test_dirs,
 };

@@ -34,7 +34,7 @@ mod tests {
     // internal crates
     use crate::disk::{self, Layout};
     use crate::models::{Deployment, DplActivity};
-    use crate::tests::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::dirs as test_dirs;
 
     // =============================== TEST HELPERS ================================= //
 

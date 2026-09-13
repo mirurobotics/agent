@@ -300,8 +300,8 @@ mod tests {
     // internal crates
     use super::*;
     use crate::filesys;
-    use crate::tests::test_utils::filesys::dirs as test_dirs;
-    use crate::tests::test_utils::filesys::files as test_files;
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::files as test_files;
 
     /// RAII temp dir for absolute path fixtures; absolute on every platform.
     fn tmp_fixture() -> test_dirs::TempDir {

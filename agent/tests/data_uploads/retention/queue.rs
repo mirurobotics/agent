@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::{
+use crate::{
     data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY},
     test_utils::filesys::dirs as test_dirs,
 };

@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::{mocks::http_client::MockClient, test_utils::filesys::dirs as test_dirs};
+use crate::{mocks::http_client::MockClient, test_utils::filesys::dirs as test_dirs};
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};

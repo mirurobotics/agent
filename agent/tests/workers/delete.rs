@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::tests::mocks::{deleter::MockDeleter, error::SleepController};
+use crate::mocks::{deleter::MockDeleter, error::SleepController};
 use miru_agent::data_uploads::retention::errors::QueueFullErr;
 use miru_agent::data_uploads::retention::DeleteErr;
 use miru_agent::workers::delete;

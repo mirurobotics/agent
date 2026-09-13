@@ -356,7 +356,7 @@ fn move_dir_err(src_dir: Dir, dest_dir: Dir, e: std::io::Error) -> FileSysErr {
 mod tests {
     // internal crates
     use super::*;
-    use crate::tests::test_utils::filesys::dirs::temp;
+    use crate::test_utils::filesys::dirs::temp;
 
     // ================================ temp ================================= //
 

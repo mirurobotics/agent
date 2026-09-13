@@ -692,7 +692,7 @@ mod tests {
     use crate::disk::{Capacities, Layout};
     use crate::filesys::{files, WriteOptions};
     use crate::models::Device;
-    use crate::tests::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::dirs as test_dirs;
 
     fn new_shutdown_manager() -> ShutdownManager {
         let (shutdown_tx, _) = broadcast::channel(1);

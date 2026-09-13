@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 // internal crates
-use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::disk::Layout;
 use miru_agent::filesys::dirs;

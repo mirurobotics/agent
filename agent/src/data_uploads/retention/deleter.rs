@@ -392,8 +392,8 @@ mod tests {
     use crate::data_uploads::retention::job::Job;
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-    use crate::tests::test_utils::filesys::dirs as test_dirs;
-    use crate::tests::test_utils::filesys::files as test_files;
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::files as test_files;
 
     // external crates
     use chrono::{DateTime, Utc};

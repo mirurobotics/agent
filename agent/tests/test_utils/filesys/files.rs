@@ -1,15 +1,15 @@
 // internal crates
-use crate::filesys::{
+use miru_agent::filesys::{
     errors::{CreateTmpFileErr, FileSysErr},
     files::write_string,
     File, WriteOptions,
 };
-use crate::trace;
+use miru_agent::trace;
 
 /// RAII temp file for TESTS. Owns a `tempfile::NamedTempFile` (Drop deletes the
 /// file) plus our `File` handle; the file lives exactly as long as this value.
 #[derive(Debug)]
-pub(crate) struct TempFile {
+pub struct TempFile {
     _guard: tempfile::NamedTempFile,
     file: File,
 }
@@ -20,7 +20,7 @@ impl TempFile {
     }
 
     /// Owned `File` to move into a longer-lived owner; valid only while `self` lives.
-    pub(crate) fn to_file(&self) -> File {
+    pub fn to_file(&self) -> File {
         self.file.clone()
     }
 }

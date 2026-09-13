@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::{
         deleter::{MockDeleter, MockStep as DeleterStep},
         upload_executor::{MockStep, MockUploadExecutor},

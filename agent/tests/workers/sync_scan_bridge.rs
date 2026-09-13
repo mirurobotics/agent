@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::{scanner::MockScanner, syncer::MockSyncer},
     test_utils::filesys::dirs as test_dirs,
 };

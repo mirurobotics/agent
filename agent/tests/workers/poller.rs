@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::{error::SleepController, syncer::MockSyncer},
     test_utils::filesys::dirs as test_dirs,
 };

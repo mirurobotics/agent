@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;

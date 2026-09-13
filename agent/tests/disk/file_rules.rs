@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
 

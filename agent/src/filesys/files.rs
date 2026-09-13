@@ -504,7 +504,7 @@ fn map_io_err_for_create(e: std::io::Error, file: &File, overwrite: Overwrite) -
 mod tests {
     // internal crates
     use super::*;
-    use crate::tests::test_utils::filesys::files::temp;
+    use crate::test_utils::filesys::files::temp;
 
     // ================================ temp ================================= //
 

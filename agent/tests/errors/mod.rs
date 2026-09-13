@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 // internal crates
-use crate::tests::errors::harnesses::{assert_error, Expected};
+use crate::errors::harnesses::{assert_error, Expected};
 use miru_agent::errors::{self, Code, HTTPCode};
 use miru_agent::http::errors::{MockErr, RequestFailed};
 use miru_agent::http::request;

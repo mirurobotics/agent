@@ -15,7 +15,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn size() {
-                $crate::tests::cache::single_thread::size::size_impl($spawn_cache).await;
+                $crate::cache::single_thread::size::size_impl($spawn_cache).await;
             }
         }
 
@@ -24,7 +24,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn entry_map() {
-                $crate::tests::cache::single_thread::entry_map::entry_map_impl($spawn_cache).await;
+                $crate::cache::single_thread::entry_map::entry_map_impl($spawn_cache).await;
             }
         }
 
@@ -33,7 +33,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn value_map() {
-                $crate::tests::cache::single_thread::value_map::value_map_impl($spawn_cache).await;
+                $crate::cache::single_thread::value_map::value_map_impl($spawn_cache).await;
             }
         }
 
@@ -42,7 +42,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn entries() {
-                $crate::tests::cache::single_thread::entries::entries_impl($spawn_cache).await;
+                $crate::cache::single_thread::entries::entries_impl($spawn_cache).await;
             }
         }
 
@@ -51,7 +51,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn values() {
-                $crate::tests::cache::single_thread::values::values_impl($spawn_cache).await;
+                $crate::cache::single_thread::values::values_impl($spawn_cache).await;
             }
         }
 
@@ -60,12 +60,12 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::single_thread::read_entry_optional::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::single_thread::read_entry_optional::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::single_thread::read_entry_optional::exists_impl($spawn_cache).await;
+                $crate::cache::single_thread::read_entry_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -74,12 +74,12 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::single_thread::read_entry::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::single_thread::read_entry::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::single_thread::read_entry::exists_impl($spawn_cache).await;
+                $crate::cache::single_thread::read_entry::exists_impl($spawn_cache).await;
             }
         }
 
@@ -88,12 +88,12 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::single_thread::read_optional::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::single_thread::read_optional::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::single_thread::read_optional::exists_impl($spawn_cache).await;
+                $crate::cache::single_thread::read_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -102,12 +102,12 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::single_thread::read::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::single_thread::read::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::single_thread::read::exists_impl($spawn_cache).await;
+                $crate::cache::single_thread::read::exists_impl($spawn_cache).await;
             }
         }
 
@@ -116,27 +116,27 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_false() {
-                $crate::tests::cache::single_thread::write::doesnt_exist_overwrite_false_impl($spawn_cache).await;
+                $crate::cache::single_thread::write::doesnt_exist_overwrite_false_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_true() {
-                $crate::tests::cache::single_thread::write::doesnt_exist_overwrite_true_impl($spawn_cache).await;
+                $crate::cache::single_thread::write::doesnt_exist_overwrite_true_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_false() {
-                $crate::tests::cache::single_thread::write::exists_overwrite_false_impl($spawn_cache).await;
+                $crate::cache::single_thread::write::exists_overwrite_false_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_true() {
-                $crate::tests::cache::single_thread::write::exists_overwrite_true_impl($spawn_cache).await;
+                $crate::cache::single_thread::write::exists_overwrite_true_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn trigger_prune() {
-                $crate::tests::cache::single_thread::write::trigger_prune_impl($spawn_cache_with_capacity).await;
+                $crate::cache::single_thread::write::trigger_prune_impl($spawn_cache_with_capacity).await;
             }
         }
 
@@ -145,12 +145,12 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn inserts_when_absent() {
-                $crate::tests::cache::single_thread::write_if_absent::inserts_when_absent_impl($spawn_cache).await;
+                $crate::cache::single_thread::write_if_absent::inserts_when_absent_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn noop_when_present() {
-                $crate::tests::cache::single_thread::write_if_absent::noop_when_present_impl($spawn_cache).await;
+                $crate::cache::single_thread::write_if_absent::noop_when_present_impl($spawn_cache).await;
             }
         }
 
@@ -159,12 +159,12 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::single_thread::delete::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::single_thread::delete::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::single_thread::delete::exists_impl($spawn_cache).await;
+                $crate::cache::single_thread::delete::exists_impl($spawn_cache).await;
             }
         }
 
@@ -173,17 +173,17 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn empty_cache() {
-                $crate::tests::cache::single_thread::prune::empty_cache_impl($spawn_cache_with_capacity).await;
+                $crate::cache::single_thread::prune::empty_cache_impl($spawn_cache_with_capacity).await;
             }
 
             #[tokio::test]
             async fn cache_equal_to_max_size() {
-                $crate::tests::cache::single_thread::prune::cache_equal_to_max_size_impl($spawn_cache_with_capacity).await;
+                $crate::cache::single_thread::prune::cache_equal_to_max_size_impl($spawn_cache_with_capacity).await;
             }
 
             #[tokio::test]
             async fn remove_oldest_entries() {
-                $crate::tests::cache::single_thread::prune::remove_oldest_entries_impl($spawn_cache_with_capacity).await;
+                $crate::cache::single_thread::prune::remove_oldest_entries_impl($spawn_cache_with_capacity).await;
             }
         }
 
@@ -192,7 +192,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn find_entries_where() {
-                $crate::tests::cache::single_thread::find_entries_where::find_entries_where_impl($spawn_cache).await;
+                $crate::cache::single_thread::find_entries_where::find_entries_where_impl($spawn_cache).await;
             }
         }
 
@@ -201,7 +201,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn find_where() {
-                $crate::tests::cache::single_thread::find_where::find_where_impl($spawn_cache).await;
+                $crate::cache::single_thread::find_where::find_where_impl($spawn_cache).await;
             }
         }
 
@@ -210,7 +210,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry_optional() {
-                $crate::tests::cache::single_thread::find_one_entry_optional::find_one_entry_optional_impl($spawn_cache).await;
+                $crate::cache::single_thread::find_one_entry_optional::find_one_entry_optional_impl($spawn_cache).await;
             }
         }
 
@@ -219,7 +219,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn find_one_optional() {
-                $crate::tests::cache::single_thread::find_one_optional::find_one_optional_impl($spawn_cache).await;
+                $crate::cache::single_thread::find_one_optional::find_one_optional_impl($spawn_cache).await;
             }
         }
 
@@ -228,7 +228,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry() {
-                $crate::tests::cache::single_thread::find_one_entry::find_one_entry_impl($spawn_cache).await;
+                $crate::cache::single_thread::find_one_entry::find_one_entry_impl($spawn_cache).await;
             }
         }
 
@@ -237,7 +237,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn find_one() {
-                $crate::tests::cache::single_thread::find_one::find_one_impl($spawn_cache).await;
+                $crate::cache::single_thread::find_one::find_one_impl($spawn_cache).await;
             }
         }
 
@@ -246,7 +246,7 @@ macro_rules! single_thread_cache_tests {
 
             #[tokio::test]
             async fn get_dirty_entries() {
-                $crate::tests::cache::single_thread::get_dirty_entries::get_dirty_entries_impl($spawn_cache).await;
+                $crate::cache::single_thread::get_dirty_entries::get_dirty_entries_impl($spawn_cache).await;
             }
         }
     }
@@ -260,7 +260,7 @@ pub mod size {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -312,7 +312,7 @@ pub mod entry_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -357,7 +357,7 @@ pub mod value_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -396,7 +396,7 @@ pub mod entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -438,7 +438,7 @@ pub mod values {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -478,7 +478,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -497,7 +497,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -544,7 +544,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -565,7 +565,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -612,7 +612,7 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -629,7 +629,7 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -663,7 +663,7 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -681,7 +681,7 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -716,7 +716,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -749,7 +749,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -782,7 +782,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -811,7 +811,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -850,7 +850,7 @@ pub mod write {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -889,7 +889,7 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -913,7 +913,7 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -950,7 +950,7 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -966,7 +966,7 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -999,7 +999,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1014,7 +1014,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1048,7 +1048,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1092,7 +1092,7 @@ pub mod find_entries_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1147,7 +1147,7 @@ pub mod find_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1194,7 +1194,7 @@ pub mod find_one_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1249,7 +1249,7 @@ pub mod find_one_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1305,7 +1305,7 @@ pub mod find_one_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1359,7 +1359,7 @@ pub mod find_one {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,
@@ -1414,7 +1414,7 @@ pub mod get_dirty_entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 SingleThreadCacheT,
             ),
         >,

@@ -19,7 +19,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_shutdown() {
-                $crate::tests::cache::concurrent::shutdown::shutdown_impl($spawn_cache).await;
+                $crate::cache::concurrent::shutdown::shutdown_impl($spawn_cache).await;
             }
         }
 
@@ -28,7 +28,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_size() {
-                $crate::tests::cache::concurrent::size::size_impl($spawn_cache).await;
+                $crate::cache::concurrent::size::size_impl($spawn_cache).await;
             }
         }
 
@@ -37,7 +37,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_entry_map() {
-                $crate::tests::cache::concurrent::entry_map::entry_map_impl($spawn_cache).await;
+                $crate::cache::concurrent::entry_map::entry_map_impl($spawn_cache).await;
             }
         }
 
@@ -46,7 +46,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_value_map() {
-                $crate::tests::cache::concurrent::value_map::value_map_impl($spawn_cache).await;
+                $crate::cache::concurrent::value_map::value_map_impl($spawn_cache).await;
             }
         }
 
@@ -55,7 +55,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_entries() {
-                $crate::tests::cache::concurrent::entries::entries_impl($spawn_cache).await;
+                $crate::cache::concurrent::entries::entries_impl($spawn_cache).await;
             }
         }
 
@@ -64,7 +64,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_values() {
-                $crate::tests::cache::concurrent::values::values_impl($spawn_cache).await;
+                $crate::cache::concurrent::values::values_impl($spawn_cache).await;
             }
         }
 
@@ -73,13 +73,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::concurrent::read_entry_optional::doesnt_exist_impl($spawn_cache)
+                $crate::cache::concurrent::read_entry_optional::doesnt_exist_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::concurrent::read_entry_optional::exists_impl($spawn_cache).await;
+                $crate::cache::concurrent::read_entry_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -88,12 +88,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::concurrent::read_entry::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::concurrent::read_entry::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::concurrent::read_entry::exists_impl($spawn_cache).await;
+                $crate::cache::concurrent::read_entry::exists_impl($spawn_cache).await;
             }
         }
 
@@ -102,12 +102,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::concurrent::read_optional::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::concurrent::read_optional::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::concurrent::read_optional::exists_impl($spawn_cache).await;
+                $crate::cache::concurrent::read_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -116,12 +116,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::concurrent::read::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::concurrent::read::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::concurrent::read::exists_impl($spawn_cache).await;
+                $crate::cache::concurrent::read::exists_impl($spawn_cache).await;
             }
         }
 
@@ -130,29 +130,29 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_false() {
-                $crate::tests::cache::concurrent::write::doesnt_exist_overwrite_false_impl($spawn_cache)
+                $crate::cache::concurrent::write::doesnt_exist_overwrite_false_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_true() {
-                $crate::tests::cache::concurrent::write::doesnt_exist_overwrite_true_impl($spawn_cache)
+                $crate::cache::concurrent::write::doesnt_exist_overwrite_true_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_false() {
-                $crate::tests::cache::concurrent::write::exists_overwrite_false_impl($spawn_cache).await;
+                $crate::cache::concurrent::write::exists_overwrite_false_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_true() {
-                $crate::tests::cache::concurrent::write::exists_overwrite_true_impl($spawn_cache).await;
+                $crate::cache::concurrent::write::exists_overwrite_true_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn trigger_prune() {
-                $crate::tests::cache::concurrent::write::trigger_prune_impl($spawn_cache_with_capacity)
+                $crate::cache::concurrent::write::trigger_prune_impl($spawn_cache_with_capacity)
                     .await;
             }
         }
@@ -162,13 +162,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn inserts_when_absent() {
-                $crate::tests::cache::concurrent::write_if_absent::inserts_when_absent_impl($spawn_cache)
+                $crate::cache::concurrent::write_if_absent::inserts_when_absent_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn noop_when_present() {
-                $crate::tests::cache::concurrent::write_if_absent::noop_when_present_impl($spawn_cache)
+                $crate::cache::concurrent::write_if_absent::noop_when_present_impl($spawn_cache)
                     .await;
             }
         }
@@ -178,12 +178,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::tests::cache::concurrent::delete::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::concurrent::delete::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::tests::cache::concurrent::delete::exists_impl($spawn_cache).await;
+                $crate::cache::concurrent::delete::exists_impl($spawn_cache).await;
             }
         }
 
@@ -192,13 +192,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn empty_cache() {
-                $crate::tests::cache::concurrent::prune::empty_cache_impl($spawn_cache_with_capacity)
+                $crate::cache::concurrent::prune::empty_cache_impl($spawn_cache_with_capacity)
                     .await;
             }
 
             #[tokio::test]
             async fn cache_equal_to_max_size() {
-                $crate::tests::cache::concurrent::prune::cache_equal_to_max_size_impl(
+                $crate::cache::concurrent::prune::cache_equal_to_max_size_impl(
                     $spawn_cache_with_capacity,
                 )
                 .await;
@@ -206,7 +206,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn remove_oldest_entries() {
-                $crate::tests::cache::concurrent::prune::remove_oldest_entries_impl(
+                $crate::cache::concurrent::prune::remove_oldest_entries_impl(
                     $spawn_cache_with_capacity,
                 )
                 .await;
@@ -218,7 +218,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_entries_where() {
-                $crate::tests::cache::concurrent::find_entries_where::find_entries_where_impl(
+                $crate::cache::concurrent::find_entries_where::find_entries_where_impl(
                     $spawn_cache,
                 )
                 .await;
@@ -230,7 +230,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_where() {
-                $crate::tests::cache::concurrent::find_where::find_where_impl($spawn_cache).await;
+                $crate::cache::concurrent::find_where::find_where_impl($spawn_cache).await;
             }
         }
 
@@ -239,7 +239,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry_optional() {
-                $crate::tests::cache::concurrent::find_one_entry_optional::find_one_entry_optional_impl(
+                $crate::cache::concurrent::find_one_entry_optional::find_one_entry_optional_impl(
                     $spawn_cache,
                 )
                 .await;
@@ -251,7 +251,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_optional() {
-                $crate::tests::cache::concurrent::find_one_optional::find_one_optional_impl($spawn_cache)
+                $crate::cache::concurrent::find_one_optional::find_one_optional_impl($spawn_cache)
                     .await;
             }
         }
@@ -261,7 +261,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry() {
-                $crate::tests::cache::concurrent::find_one_entry::find_one_entry_impl($spawn_cache).await;
+                $crate::cache::concurrent::find_one_entry::find_one_entry_impl($spawn_cache).await;
             }
         }
 
@@ -270,7 +270,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one() {
-                $crate::tests::cache::concurrent::find_one::find_one_impl($spawn_cache).await;
+                $crate::cache::concurrent::find_one::find_one_impl($spawn_cache).await;
             }
         }
 
@@ -279,7 +279,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn get_dirty_entries() {
-                $crate::tests::cache::concurrent::get_dirty_entries::get_dirty_entries_impl($spawn_cache)
+                $crate::cache::concurrent::get_dirty_entries::get_dirty_entries_impl($spawn_cache)
                     .await;
             }
         }
@@ -294,7 +294,7 @@ pub mod shutdown {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -315,7 +315,7 @@ pub mod size {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -370,7 +370,7 @@ pub mod entry_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -416,7 +416,7 @@ pub mod value_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -456,7 +456,7 @@ pub mod entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -499,7 +499,7 @@ pub mod values {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -540,7 +540,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -560,7 +560,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -612,7 +612,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -634,7 +634,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -682,7 +682,7 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -700,7 +700,7 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -735,7 +735,7 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -754,7 +754,7 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -791,7 +791,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -825,7 +825,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -859,7 +859,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -889,7 +889,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -929,7 +929,7 @@ pub mod write {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -969,7 +969,7 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -994,7 +994,7 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1032,7 +1032,7 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1049,7 +1049,7 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1079,7 +1079,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1095,7 +1095,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1130,7 +1130,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1175,7 +1175,7 @@ pub mod find_entries_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1231,7 +1231,7 @@ pub mod find_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1280,7 +1280,7 @@ pub mod find_one_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1336,7 +1336,7 @@ pub mod find_one_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1394,7 +1394,7 @@ pub mod find_one_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1449,7 +1449,7 @@ pub mod find_one {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1506,7 +1506,7 @@ pub mod get_dirty_entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                crate::tests::test_utils::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),

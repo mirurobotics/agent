@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager},
     test_utils::filesys::dirs as test_dirs,
 };

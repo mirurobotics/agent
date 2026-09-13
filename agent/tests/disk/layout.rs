@@ -62,7 +62,7 @@ pub mod storage_layout {
 
     #[test]
     fn root_dir_custom_filesystem_root() {
-        let tmp = crate::tests::test_utils::filesys::dirs::temp("custom-root").unwrap();
+        let tmp = crate::test_utils::filesys::dirs::temp("custom-root").unwrap();
         let layout = Layout::new(tmp.to_dir());
         let dir = layout.root();
         assert_eq!(

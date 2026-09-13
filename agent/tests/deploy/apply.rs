@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;

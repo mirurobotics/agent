@@ -74,14 +74,6 @@ impl SleepController {
         }
     }
 
-    pub fn get_attempted_sleeps(&self) -> Vec<Duration> {
-        self.attempted_sleeps.lock().unwrap().clone()
-    }
-
-    pub fn get_completed_sleeps(&self) -> Vec<Duration> {
-        self.completed_sleeps.lock().unwrap().clone()
-    }
-
     pub fn get_last_attempted_sleep(&self) -> Option<Duration> {
         self.attempted_sleeps.lock().unwrap().last().copied()
     }

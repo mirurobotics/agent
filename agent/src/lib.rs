@@ -30,3 +30,7 @@ pub mod workers;
 
 #[cfg(test)]
 extern crate self as miru_agent;
+
+#[cfg(test)]
+#[path = "../tests/test_utils/unit.rs"]
+pub mod test_utils;

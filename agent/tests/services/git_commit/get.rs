@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::backend::{PanicBackend, StubBackend},
     test_utils::filesys::dirs as test_dirs,
 };

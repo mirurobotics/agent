@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
 use miru_agent::data_uploads::retention::DeleterExt;
@@ -224,7 +224,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // the scanner actor is spawned and its snapshot file is seeded on disk
-        state.scanner.get_rules().await.unwrap();
+        state.scanner.scan().await.unwrap();
         assert!(env.layout.scanner_snapshot().exists());
 
         // clean up the spawned actors so they don't leak
@@ -244,7 +244,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the scanner runs without persistence
-        state.scanner.get_rules().await.unwrap();
+        state.scanner.scan().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;

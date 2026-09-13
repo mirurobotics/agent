@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::errors::harnesses::{assert_error, Expected};
+use crate::errors::harnesses::{assert_error, Expected};
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
 use miru_agent::errors::Code;

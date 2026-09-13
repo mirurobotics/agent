@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{
     self, files, Atomic, CopyOptions, FileSysErr, Overwrite, PathExt, WriteOptions,
 };

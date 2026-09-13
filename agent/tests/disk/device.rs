@@ -2,7 +2,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
-use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{

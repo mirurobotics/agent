@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::authn;
 use miru_agent::disk::{self, Layout, Settings};
 use miru_agent::filesys::{self, dirs, files, PathExt, WriteOptions};

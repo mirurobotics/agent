@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::events::errors::EventsErr;
 use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED};
 use miru_agent::events::store::{EventStore, DEFAULT_MAX_RETAINED};

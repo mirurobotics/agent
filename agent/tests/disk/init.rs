@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::cache::CacheEntry;
 use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::filesys::{files, WriteOptions};

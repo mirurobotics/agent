@@ -1,9 +1,9 @@
 // internal crates
-use crate::filesys::{
+use miru_agent::filesys::{
     errors::{CreateTmpDirErr, FileSysErr},
     Dir,
 };
-use crate::trace;
+use miru_agent::trace;
 
 /// RAII temp directory for TESTS. Owns a `tempfile::TempDir` (Drop deletes the
 /// dir) plus our `Dir` handle; the directory lives exactly as long as this value.
@@ -32,7 +32,7 @@ impl std::ops::Deref for TempDir {
 }
 
 /// Auto-cleaning temp dir for tests. Sync; keeps `prefix` for parity with
-/// [`crate::filesys::dirs::create_temp`]. The returned [`TempDir`] deletes the
+/// [`miru_agent::filesys::dirs::create_temp`]. The returned [`TempDir`] deletes the
 /// directory on drop, so bind it to a named variable that lives as long as needed.
 pub(crate) fn temp(prefix: &str) -> Result<TempDir, FileSysErr> {
     let guard = tempfile::Builder::new()

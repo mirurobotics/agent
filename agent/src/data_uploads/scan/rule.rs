@@ -330,8 +330,8 @@ mod tests {
     use crate::data_uploads::scan::state::{Candidate, Config, Observation, RuleState, StableFile};
     use crate::filesys::{dirs, Dir, PathExt, WriteOptions};
     use crate::models::{Deployment, FileRule, FileRuleSource, FileRuleUpload};
-    use crate::tests::test_utils::filesys::dirs as test_dirs;
-    use crate::tests::test_utils::filesys::dirs::TempDir;
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::dirs::TempDir;
 
     // external crates
     use std::time::SystemTime;

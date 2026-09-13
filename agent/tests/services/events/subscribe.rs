@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
 use miru_agent::services::events as events_svc;

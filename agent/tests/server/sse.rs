@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::http_client::MockClient,
-    sync::syncer::{create_storage, create_token_manager},
     test_utils::filesys::dirs as test_dirs,
+    test_utils::sync::{create_storage, create_token_manager},
 };
 use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};

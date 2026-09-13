@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::cooldown;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
 use miru_agent::filesys::{files, Dir, File, PathExt, WriteOptions};

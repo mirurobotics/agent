@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::disk::{
     self, CfgInstContent, CfgInsts, Deployments, FileRules, GitCommits, Releases,
@@ -15,8 +15,8 @@ use miru_agent::sync::deployments::{sync, SyncArgs};
 use miru_agent::sync::SyncErr;
 
 // test crates
-use crate::tests::mocks::http_client::{Call, CapturedRequest, MockClient};
-use crate::tests::sync::helpers::*;
+use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
+use crate::sync::helpers::*;
 use backend_api::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus as BackendActivityStatus,
     DeploymentErrorStatus as BackendErrorStatus, DeploymentTargetStatus as BackendTargetStatus,

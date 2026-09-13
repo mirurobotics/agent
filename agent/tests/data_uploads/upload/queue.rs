@@ -9,8 +9,8 @@
 //! would wipe a real queue rather than fail.
 
 // internal crates
-use crate::tests::data_uploads::queue::queue_suite;
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::data_uploads::queue::queue_suite;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};

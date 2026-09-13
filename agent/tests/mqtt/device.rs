@@ -4,7 +4,7 @@ use miru_agent::mqtt::errors::MockErr;
 use miru_agent::mqtt::MQTTError;
 
 // test helpers
-use crate::tests::mocks::mqtt_client::{MockCall, MockClient};
+use crate::mocks::mqtt_client::{MockCall, MockClient};
 
 // external crates
 use rumqttc::QoS;

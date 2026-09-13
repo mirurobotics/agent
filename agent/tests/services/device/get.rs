@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::files;
 use miru_agent::models::{Device, DeviceStatus};

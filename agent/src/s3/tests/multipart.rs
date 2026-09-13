@@ -5,7 +5,7 @@
 
 // internal crates
 use super::*;
-use crate::tests::test_utils::filesys::files as test_files;
+use crate::test_utils::filesys::files as test_files;
 use miru_agent::s3::Source;
 
 pub(crate) const UPLOAD_ID: &str = "test-upload-id";

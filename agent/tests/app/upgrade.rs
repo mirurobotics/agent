@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 // internal crates
-use crate::tests::{
+use crate::{
     mocks::http_client::{Call, MockClient},
     test_utils::filesys::{dirs as test_dirs, files as test_files},
 };

@@ -456,8 +456,8 @@ mod tests {
     use crate::data_uploads::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
-    use crate::tests::test_utils::filesys::dirs as test_dirs;
-    use crate::tests::test_utils::filesys::files as test_files;
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::files as test_files;
 
     // external crates
     use chrono::{DateTime, Utc};

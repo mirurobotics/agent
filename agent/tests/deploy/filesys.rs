@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 // internal crates
-use crate::tests::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::deploy::filesys::{deploy, remove, BACKUP_FILE_PREFIX};
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;

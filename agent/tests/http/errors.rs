@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::errors::harnesses::{assert_error, Expected};
+use crate::errors::harnesses::{assert_error, Expected};
 use backend_api::models::{Error as ApiError, ErrorResponse};
 use miru_agent::errors::{Code, Error};
 use miru_agent::http::errors::{

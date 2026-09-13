@@ -1,5 +1,5 @@
 // internal crates
-use crate::tests::mocks::deleter::{MockDeleter, MockStep};
+use crate::mocks::deleter::{MockDeleter, MockStep};
 use miru_agent::data_uploads::retention::{Job, RetentionStableFileSink};
 use miru_agent::data_uploads::scan::{scanner::StableFile, StableFileSink};
 use miru_agent::filesys::File;

@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
 // internal crates
-use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{self, dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 // external crates
