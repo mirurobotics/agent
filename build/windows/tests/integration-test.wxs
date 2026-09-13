@@ -18,9 +18,7 @@
     <FeatureRef Id="Main">
       <ComponentGroupRef Id="IntegrationFixturePayload" />
     </FeatureRef>
-  </Fragment>
 
-  <Fragment>
     <CustomAction Id="FailUpgradeForTest"
                   Directory="SystemFolder"
                   ExeCommand="[SystemFolder]cmd.exe /d /c exit /b 1"

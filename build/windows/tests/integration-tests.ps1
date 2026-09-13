@@ -212,6 +212,8 @@ function Assert-FailingFixtureContract {
     try {
         $installer = New-Object -ComObject WindowsInstaller.Installer
         $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
+        $tables = @(Get-MsiQueryRows $database "SELECT ``Name`` FROM ``_Tables``" 1)
+        Assert-Equal 1 (@($tables | Where-Object { $_[0] -eq "CustomAction" })).Count "fixture custom action table"
         $actions = @(Get-MsiQueryRows $database "SELECT ``Action``, ``Type``, ``Source``, ``Target`` FROM ``CustomAction``" 4)
         $action = @($actions | Where-Object { $_[0] -eq "FailUpgradeForTest" })
         Assert-Equal 1 $action.Count "one failing fixture custom action"
