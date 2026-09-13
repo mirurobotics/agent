@@ -77,8 +77,8 @@ the logging targets isolate initialization in separate processes. Integration
 fixture imports use direct paths such as `crate::test_utils::...`.
 
 Tests needing private state live in owner-local `#[cfg(test)]` modules under
-`agent/src/`: `s3/tests/`, `gcs/tests/`, `sync/syncer/tests/`, and the upload
-`transfer/tests/` and `executor/tests/` directories. Existing inline unit tests
+`agent/src/`: `s3/tests/`, `gcs/tests/`, `sync/syncer/tests/`, and inline at the end
+of the upload `transfer.rs` and `executor.rs` files. Other inline unit tests
 remain beside their owners. Unit tests include only the shared fixtures they
 need; the library does not mount the integration suite.
 
@@ -104,7 +104,7 @@ execution. Both reports exclude owner-local `tests/` directories under
 Use `scripts/update-deps.sh` to refresh `Cargo.lock` before linting. Then run `scripts/lint.sh` for a full local lint pass. It runs: the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy.
 
 In CI, the Lint workflow runs:
-- The custom linter checks imports in `agent/src/` and `agent/tests/`, function length, and field-by-field assertions (4+ `assert_eq!` on fields of the same variable in a test function). Assertion checks cover the integration tree and the five owner-local unit-test directories listed above. Production functions and closures are limited to 50 non-blank, non-comment body lines (test code exempt); suppress with `// lint:allow(funclen)` on the `fn` line or the line immediately above. Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
+- The custom linter checks imports in `agent/src/` and `agent/tests/`, function length, and field-by-field assertions (4+ `assert_eq!` on fields of the same variable in a test function). Assertion checks cover the integration tree and the owner-local unit-test modules listed above. Production functions and closures are limited to 50 non-blank, non-comment body lines (test code exempt); suppress with `// lint:allow(funclen)` on the `fn` line or the line immediately above. Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
 - `cargo fmt -p miru-agent -- --check`
 - `cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings`
 - `cargo machete`
