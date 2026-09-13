@@ -4,11 +4,13 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::mocks::http_client::run_server;
+use crate::tests::mocks::http_client::run_server;
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::errors::{Code, Error};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::gcs::errors::{
     BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
 };
@@ -28,6 +30,12 @@ use google_cloud_storage as gcs;
 
 const BUCKET: &str = "test-bucket";
 
+fn test_credentials() -> Credentials {
+    Credentials {
+        access_token: "test-token".to_string(),
+    }
+}
+
 /// Builds an [`Object`] in the test bucket for the given key, keeping call sites
 /// terse.
 fn obj(key: &str) -> Object {
@@ -39,8 +47,8 @@ fn obj(key: &str) -> Object {
 
 /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so the
 /// file is not deleted until the test drops it).
-async fn temp_file_with(bytes: &[u8]) -> files::TempFile {
-    let tf = files::temp("gcs-test").unwrap();
+async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
+    let tf = test_files::temp("gcs-test").unwrap();
     files::write_bytes(tf.file(), bytes, WriteOptions::OVERWRITE_NONATOMIC)
         .await
         .unwrap();
@@ -181,7 +189,7 @@ fn http_router(rec: HttpRecorder) -> Router {
 /// Builds a `Store` pointed at a freshly started HTTP mock server.
 async fn http_store(rec: HttpRecorder) -> Store {
     let server = run_server(http_router(rec)).await;
-    Store::from_endpoint(Credentials::default(), server.base_url)
+    Store::from_endpoint(test_credentials(), server.base_url)
         .await
         .unwrap()
 }
@@ -361,7 +369,7 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_body = payload.clone();
             let store = http_store(rec.clone()).await;
-            let dest = files::temp("gcs-dest").unwrap();
+            let dest = test_files::temp("gcs-dest").unwrap();
 
             store
                 .get(&obj("blobs/data.bin"), dest.file())
@@ -386,7 +394,7 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_body = payload.clone();
             let store = http_store(rec).await;
-            let dest = files::temp("gcs-dest").unwrap();
+            let dest = test_files::temp("gcs-dest").unwrap();
             files::write_bytes(
                 dest.file(),
                 b"OLD-STALE-CONTENT",
@@ -408,7 +416,7 @@ pub mod get {
             // The recorder's default body is zero bytes.
             let rec = HttpRecorder::default();
             let store = http_store(rec).await;
-            let dest = files::temp("gcs-dest").unwrap();
+            let dest = test_files::temp("gcs-dest").unwrap();
 
             store
                 .get(&obj("blobs/empty.bin"), dest.file())
@@ -431,7 +439,7 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_truncate = true;
             let store = http_store(rec.clone()).await;
-            let dest = files::temp("gcs-dest").unwrap();
+            let dest = test_files::temp("gcs-dest").unwrap();
 
             let err = store
                 .get(&obj("blobs/data.bin"), dest.file())
@@ -470,7 +478,7 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_body = b"body".to_vec();
             let store = http_store(rec).await;
-            let tmp = dirs::temp("gcs-dest").unwrap();
+            let tmp = test_dirs::temp("gcs-dest").unwrap();
             let dest = File::new(tmp.path().join("no-such-dir").join("out.bin"));
 
             let err = store.get(&obj("blobs/data.bin"), &dest).await.unwrap_err();
@@ -488,7 +496,7 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_status = Some(StatusCode::NOT_FOUND);
             let store = http_store(rec).await;
-            let dest = files::temp("gcs-dest").unwrap();
+            let dest = test_files::temp("gcs-dest").unwrap();
 
             let err = store
                 .get(&obj("missing.txt"), dest.file())
@@ -508,7 +516,7 @@ pub mod get {
             let rec = HttpRecorder::default();
             rec.inner.lock().unwrap().download_status = Some(StatusCode::FORBIDDEN);
             let store = http_store(rec).await;
-            let dest = files::temp("gcs-dest").unwrap();
+            let dest = test_files::temp("gcs-dest").unwrap();
 
             let err = store
                 .get(&obj("denied.txt"), dest.file())
@@ -584,13 +592,9 @@ mockall::mock! {
 /// Builds a `Store` whose control client is the given mock. The data client is
 /// pointed at an unused loopback endpoint (never called by delete/exists).
 async fn control_store(mock: MockStorageControl) -> Store {
-    Store::from_stub(
-        mock,
-        Credentials::default(),
-        "http://127.0.0.1:0".to_string(),
-    )
-    .await
-    .unwrap()
+    Store::from_stub(mock, test_credentials(), "http://127.0.0.1:0".to_string())
+        .await
+        .unwrap()
 }
 
 fn not_found_err() -> GaxError {

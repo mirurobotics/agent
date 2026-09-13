@@ -2,9 +2,10 @@
 use std::collections::HashMap;
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::cache::CacheEntry;
 use miru_agent::disk::{Capacities, Layout, Storage};
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::models::Deployment;
 
 // external crates
@@ -42,7 +43,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_attempts() {
-        let dir = dirs::temp("reset_attempts").unwrap();
+        let dir = test_dirs::temp("reset_attempts").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         let dpl = Deployment {
@@ -68,7 +69,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn resets_deployment_with_active_cooldown() {
-        let dir = dirs::temp("reset_cooldown").unwrap();
+        let dir = test_dirs::temp("reset_cooldown").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         let mut dpl = Deployment {
@@ -94,7 +95,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn skips_clean_deployments() {
-        let dir = dirs::temp("reset_skip_clean").unwrap();
+        let dir = test_dirs::temp("reset_skip_clean").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         let clean = Deployment {
@@ -142,7 +143,7 @@ pub mod reset_retry_state_on_init {
 
     #[tokio::test]
     async fn preserves_dirty_flag_on_reset() {
-        let dir = dirs::temp("reset_preserves_dirty").unwrap();
+        let dir = test_dirs::temp("reset_preserves_dirty").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         let mut pending = Deployment {

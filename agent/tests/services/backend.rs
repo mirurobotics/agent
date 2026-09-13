@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
-use crate::mocks::{
+use crate::tests::mocks::{
     http_client::{Call, CapturedRequest, MockClient},
     stub_token_manager::StubTokenManager,
 };

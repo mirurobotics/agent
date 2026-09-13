@@ -3,14 +3,16 @@
 //! upload_part → complete, aborting the upload on failure). Size-based routing
 //! in [`Store::put`] lives under [`super::put::routing`].
 
+// internal crates
 use super::*;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::s3::Source;
 
 pub(crate) const UPLOAD_ID: &str = "test-upload-id";
 
 /// Builds a `Source` from a temp file, reading its length off disk with the
 /// crate's own `files::size`.
-async fn source_of(tf: &files::TempFile) -> Source {
+async fn source_of(tf: &test_files::TempFile) -> Source {
     let file = tf.to_file();
     let size = files::size(&file).await.unwrap();
     Source { file, size }
@@ -471,7 +473,7 @@ pub mod resume {
 
     /// A two-part source file (8 MiB + 1 KiB ⇒ parts `(1, 0, 8 MiB)` and
     /// `(2, 8 MiB, 1 KiB)`).
-    async fn two_part_file() -> files::TempFile {
+    async fn two_part_file() -> test_files::TempFile {
         const PART_SIZE: u64 = 8 * 1024 * 1024;
         let bytes = vec![7u8; (PART_SIZE + 1024) as usize];
         temp_file_with(&bytes).await

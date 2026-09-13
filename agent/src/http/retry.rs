@@ -5,20 +5,18 @@ const MAX_RETRIES: u32 = 2; // up to 3 total attempts
 
 /// Computes the retry delay with jitter, using subsecond nanos to avoid
 /// adding a rand dependency. Not cryptographic, just enough to spread retries.
-#[cfg(not(feature = "test"))]
 fn retry_delay_ms() -> u64 {
-    const BASE_MS: u64 = 500;
-    const JITTER_MS: u64 = 500; // delay = base + [0, jitter)
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .subsec_nanos() as u64;
-    BASE_MS + (nanos % JITTER_MS)
+    retry_delay_from_nanos(nanos)
 }
 
-#[cfg(feature = "test")]
-fn retry_delay_ms() -> u64 {
-    0
+fn retry_delay_from_nanos(nanos: u64) -> u64 {
+    const BASE_MS: u64 = 500;
+    const JITTER_MS: u64 = 500; // delay = base + [0, jitter)
+    BASE_MS + (nanos % JITTER_MS)
 }
 
 /// Retries an async operation up to 3 times on network connection errors.

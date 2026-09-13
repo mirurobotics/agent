@@ -61,15 +61,16 @@ pub mod routes {
     use device_api::models as openapi;
     use miru_agent::activity;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
-    use miru_agent::filesys::{dirs, Overwrite};
+    use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
     };
     use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
 
-    use crate::mocks::http_client::{self as mock, MockClient};
-    use crate::sync::syncer::{create_storage, create_token_manager};
+    use crate::tests::mocks::http_client::{self as mock, MockClient};
+    use crate::tests::sync::syncer::{create_storage, create_token_manager};
+    use crate::tests::test_utils::filesys::dirs as test_dirs;
 
     use chrono::{DateTime, TimeZone, Utc};
     use tokio::sync::{broadcast, mpsc};
@@ -81,13 +82,13 @@ pub mod routes {
     struct Fixture {
         state: Arc<State>,
         app: Router,
-        _dir: dirs::TempDir,
+        _dir: test_dirs::TempDir,
         _backend: mock::Server,
     }
 
     impl Fixture {
         async fn new(name: &str) -> Self {
-            let dir = dirs::temp(name).unwrap();
+            let dir = test_dirs::temp(name).unwrap();
             let storage = Arc::new(create_storage(dir.dir()).await);
             let http_client = Arc::new(MockClient::default());
             let (token_mngr, _handle) = create_token_manager(dir.dir(), http_client.clone()).await;

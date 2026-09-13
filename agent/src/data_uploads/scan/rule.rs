@@ -60,7 +60,7 @@ impl RuleScanner {
         self.state.rule()
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     pub(crate) fn ledger_count(&self) -> usize {
         self.state.ledger_count()
     }
@@ -328,8 +328,10 @@ mod tests {
 
     // internal crates
     use crate::data_uploads::scan::state::{Candidate, Config, Observation, RuleState, StableFile};
-    use crate::filesys::{dirs, dirs::TempDir, Dir, PathExt, WriteOptions};
+    use crate::filesys::{dirs, Dir, PathExt, WriteOptions};
     use crate::models::{Deployment, FileRule, FileRuleSource, FileRuleUpload};
+    use crate::tests::test_utils::filesys::dirs as test_dirs;
+    use crate::tests::test_utils::filesys::dirs::TempDir;
 
     // external crates
     use std::time::SystemTime;
@@ -528,7 +530,7 @@ mod tests {
     }
 
     async fn case(name: &str, window: i64) -> Case {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = write(&dir, name, b"aaaa").await;
         let state = RuleState::new(config("d", "r1", &glob_for(&dir), window));
         let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -567,7 +569,7 @@ mod tests {
 
         #[tokio::test]
         async fn new_snapshots_present_file_as_preexisting() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "a.mcap", b"aaaa").await;
             let cfg = config("d", "r1", &glob_for(&dir), 10);
             let mut scanner = RuleScanner::new(cfg.clone(), ts(1000), Options::default())
@@ -590,7 +592,7 @@ mod tests {
 
         #[tokio::test]
         async fn late_file_survives_deployment_refresh() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
             let late_file = write(&dir, "late.mcap", b"aaaa").await;
@@ -606,7 +608,7 @@ mod tests {
         // Observations made after a deployment refresh stamp the new deployment id.
         #[tokio::test]
         async fn subsequent_observations_carry_new_deployment() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
             scanner.set_deployment(deployment("d2"));
 
@@ -621,7 +623,7 @@ mod tests {
         // A tracked candidate stays tracked across a deployment refresh.
         #[tokio::test]
         async fn preserves_candidates() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let candidate_file = write(&dir, "pre.mcap", b"aaaa").await;
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
@@ -642,7 +644,7 @@ mod tests {
         // A preexisting file whose metadata is unchanged is never promoted.
         #[tokio::test]
         async fn unchanged_preexisting_not_promoted() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             write(&dir, "pre.mcap", b"aaaa").await;
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
@@ -653,7 +655,7 @@ mod tests {
         // A preexisting file whose size changed is promoted to a candidate.
         #[tokio::test]
         async fn changed_preexisting_promoted() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "pre.mcap", b"aaaa").await;
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
@@ -665,7 +667,7 @@ mod tests {
         // A file that appears after scanner creation is discovered as a candidate.
         #[tokio::test]
         async fn new_file_adds_to_candidates() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let cfg = config("d", "r1", &glob_for(&dir), 0);
             let mut scanner = RuleScanner::new(cfg.clone(), ts(1000), Options::default())
                 .await
@@ -690,7 +692,7 @@ mod tests {
         // An already-tracked candidate is not re-added on a second discover pass.
         #[tokio::test]
         async fn tracked_candidate_not_readded() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "pre.mcap", b"aaaa").await;
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
 
@@ -706,7 +708,7 @@ mod tests {
         // at discovery (already reported, untouched).
         #[tokio::test]
         async fn discovery_skips_latest_ledger_entry() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "led.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -980,7 +982,7 @@ mod tests {
         // A stable candidate produces a StableFile with the expected payload.
         #[tokio::test]
         async fn stable_payload_fields() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "e.mcap", b"aaaa").await;
             let state = RuleState::new(config("dpl-1", "r1", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
@@ -1093,7 +1095,7 @@ mod tests {
         // re-discovered or re-emitted on later ticks; its ledger stays length 1.
         #[tokio::test]
         async fn static_reported_file_goes_quiet_across_ticks() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             write(&dir, "static.mcap", b"aaaa").await;
             // window 0 so the appearing file is immediately stable, but note it is
             // preexisting at creation — create the scanner first, then the file.
@@ -1199,7 +1201,7 @@ mod tests {
         // a per-file failure aborted the whole loop.
         #[tokio::test]
         async fn vanished_candidate_does_not_abort_others() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let gone = write(&dir, "gone.mcap", b"aaaa").await;
             let live = write(&dir, "live.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 10));
@@ -1242,7 +1244,7 @@ mod tests {
         // when the suite runs as root.
         #[tokio::test]
         async fn erroring_candidate_is_skipped_without_aborting_siblings() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let good = write(&dir, "good.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
             let good_obs = observation(&state, good.clone(), ts(1000)).await;
@@ -1280,7 +1282,7 @@ mod tests {
         // — so the two timestamps diverge here.
         #[tokio::test]
         async fn stable_file_takes_identity_from_first_observation() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "id.mcap", b"aaaa").await;
 
             // first observation
@@ -1318,7 +1320,7 @@ mod tests {
         // rule() exposes the active rule carried in the scanner's state.
         #[tokio::test]
         async fn rule_exposes_active_rule() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let glob = glob_for(&dir);
             let scanner = scanner_new(&dir, 7, ts(1000)).await;
             assert_eq!(scanner.rule().id, "r1");
@@ -1330,7 +1332,7 @@ mod tests {
         // changed file is promoted into the candidate set.
         #[tokio::test]
         async fn has_candidates_reflects_candidate_set() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = write(&dir, "pre.mcap", b"aaaa").await;
             let mut scanner = scanner_new(&dir, 0, ts(1000)).await;
             assert!(!scanner.has_candidates());
@@ -1349,7 +1351,7 @@ mod tests {
         // Two distinct stable files yield a ledger count of two.
         #[tokio::test]
         async fn ledger_count_two_distinct() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let f1 = write(&dir, "one.mcap", b"aaaa").await;
             let f2 = write(&dir, "two.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 10));
@@ -1389,7 +1391,7 @@ mod tests {
         // re-promote the (already reported, unchanged) live files.
         #[tokio::test]
         async fn discovery_prunes_stale_entries_at_threshold() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let live_a = write(&dir, "a.mcap", b"aaaa").await;
             let live_b = write(&dir, "b.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
@@ -1418,7 +1420,7 @@ mod tests {
         // stay as reviewable audit history.
         #[tokio::test]
         async fn discovery_below_threshold_keeps_stale_entries() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let live = write(&dir, "a.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
             let obs = observation(&state, live.clone(), ts(1000)).await;
@@ -1442,7 +1444,7 @@ mod tests {
         // purpose.
         #[tokio::test]
         async fn discovery_prunes_existing_but_unmatched_file() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let unmatched = write(&dir, "keep.txt", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
             seed_ledger(

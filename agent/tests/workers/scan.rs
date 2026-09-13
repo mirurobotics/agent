@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::{error::SleepController, scanner::MockScanner};
+use crate::tests::mocks::{error::SleepController, scanner::MockScanner};
 use miru_agent::data_uploads::scan::errors::InternalError;
 use miru_agent::data_uploads::scan::ScanErr;
 use miru_agent::trace;

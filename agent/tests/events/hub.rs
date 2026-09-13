@@ -1,7 +1,7 @@
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::{EventArgs, DEPLOYMENT_DEPLOYED};
-use miru_agent::filesys::dirs;
 
 // external crates
 use chrono::Utc;
@@ -14,8 +14,8 @@ fn make_event(event_type: &str) -> EventArgs {
     }
 }
 
-async fn make_hub(name: &str) -> (dirs::TempDir, EventHub) {
-    let dir = dirs::temp(name).unwrap();
+async fn make_hub(name: &str) -> (test_dirs::TempDir, EventHub) {
+    let dir = test_dirs::temp(name).unwrap();
     let log_file = dir.file("events.jsonl");
     let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default())
         .await
@@ -237,7 +237,7 @@ mod persistence {
 
     #[tokio::test]
     async fn events_survive_hub_restart() {
-        let dir = dirs::temp("hub_persist").unwrap();
+        let dir = test_dirs::temp("hub_persist").unwrap();
         let log_file = dir.file("events.jsonl");
 
         // first hub: publish events

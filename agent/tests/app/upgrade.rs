@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
 // internal crates
-use crate::mocks::http_client::{Call, MockClient};
+use crate::tests::mocks::http_client::{Call, MockClient};
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use backend_api::models as backend_client;
 use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
@@ -22,8 +24,8 @@ use chrono::{Duration, Utc};
 /// `auth/`, and pre-populate `device.json` with a known device id so that
 /// `resolve_device_id` and the JWT-signing path inside `reconcile` both work
 /// without contacting a real backend.
-async fn prepare_layout(name: &str) -> (Layout, dirs::TempDir) {
-    let dir = dirs::temp(name).unwrap();
+async fn prepare_layout(name: &str) -> (Layout, test_dirs::TempDir) {
+    let dir = test_dirs::temp(name).unwrap();
     let layout = Layout::new(dir.to_dir());
 
     // generate a real RSA keypair under auth/
@@ -437,7 +439,7 @@ mod reconcile_impl {
     async fn falls_back_to_defaults_when_settings_corrupt() {
         let (layout, _tmp) = prepare_layout("reconcile_impl_settings_corrupt").await;
 
-        files::seed(&layout.settings(), "not-json").await;
+        test_files::seed(&layout.settings(), "not-json").await;
 
         let mock = make_mock_client(backend_device("dvc_sc1", "corrupt"));
         reconcile_impl(mock.as_ref(), &layout, "v1.0.0")

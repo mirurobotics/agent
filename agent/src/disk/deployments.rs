@@ -33,13 +33,13 @@ pub async fn find_deployed(
 mod tests {
     // internal crates
     use crate::disk::{self, Layout};
-    use crate::filesys;
     use crate::models::{Deployment, DplActivity};
+    use crate::tests::test_utils::filesys::dirs as test_dirs;
 
     // =============================== TEST HELPERS ================================= //
 
-    async fn deployments() -> (filesys::dirs::TempDir, disk::Deployments) {
-        let dir = filesys::dirs::temp("testing").unwrap();
+    async fn deployments() -> (test_dirs::TempDir, disk::Deployments) {
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let (deployments, _) = disk::Deployments::spawn(64, layout.deployments(), 1000)
             .await

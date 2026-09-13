@@ -1,5 +1,5 @@
 // internal crates
-use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
+use crate::tests::mocks::http_client::{Call, CapturedRequest, MockClient};
 use miru_agent::http::config_instances::{self, GetContentParams};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::HTTPErr;

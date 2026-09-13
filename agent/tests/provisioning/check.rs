@@ -2,23 +2,25 @@
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, files, PathExt};
+use miru_agent::filesys::{dirs, PathExt};
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
 };
 
-async fn fresh_layout() -> (Layout, dirs::TempDir) {
-    let dir = dirs::temp("testing").unwrap();
+async fn fresh_layout() -> (Layout, test_dirs::TempDir) {
+    let dir = test_dirs::temp("testing").unwrap();
     let layout = Layout::new(dir.to_dir());
     dirs::create_if_absent(&layout.auth().root).await.unwrap();
     (layout, dir)
 }
 
-fn empty_layout() -> (Layout, dirs::TempDir) {
-    let dir = dirs::temp("testing").unwrap();
+fn empty_layout() -> (Layout, test_dirs::TempDir) {
+    let dir = test_dirs::temp("testing").unwrap();
     let layout = Layout::new(dir.to_dir());
     (layout, dir)
 }
@@ -42,8 +44,8 @@ pub mod reports {
     async fn is_provisioned() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
-        files::seed(&auth.private_key(), "private").await;
-        files::seed(&auth.public_key(), "public").await;
+        test_files::seed(&auth.private_key(), "private").await;
+        test_files::seed(&auth.public_key(), "public").await;
 
         let report = check::check(&layout);
 
@@ -55,7 +57,7 @@ pub mod reports {
 
     #[test]
     fn undeterminable_reports_error_on_stderr_only() {
-        let tmp = dirs::temp("miru-auth").unwrap();
+        let tmp = test_dirs::temp("miru-auth").unwrap();
         let report = Report::Undeterminable(DiskErr::FileSysErr(FileSysErr::PathExistenceErr(
             PathExistenceErr {
                 path: tmp.file("private_key.pem").path().clone(),
@@ -83,8 +85,8 @@ pub mod reports {
     async fn unreadable_auth_dir_is_undeterminable() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
-        files::seed(&auth.private_key(), "private").await;
-        files::seed(&auth.public_key(), "public").await;
+        test_files::seed(&auth.private_key(), "private").await;
+        test_files::seed(&auth.public_key(), "public").await;
 
         dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o000))
             .await

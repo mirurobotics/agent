@@ -15,6 +15,7 @@
 //! and the macro.
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::queue::{
     Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
@@ -69,8 +70,8 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
         .collect()
 }
 
-fn temp_path(name: &str) -> (dirs::TempDir, File) {
-    let dir = dirs::temp(name).unwrap();
+fn temp_path(name: &str) -> (test_dirs::TempDir, File) {
+    let dir = test_dirs::temp(name).unwrap();
     let path = dir.file("queue.json");
     (dir, path)
 }
@@ -632,13 +633,13 @@ macro_rules! queue_suite_emit {
                 $(
                     #[tokio::test]
                     async fn $disk() {
-                        $crate::data_uploads::queue::cases::$group::$disk($tmp, $make).await;
+                        $crate::tests::data_uploads::queue::cases::$group::$disk($tmp, $make).await;
                     }
                 )*
                 $(
                     #[tokio::test]
                     async fn $mem() {
-                        $crate::data_uploads::queue::cases::$group::$mem($make).await;
+                        $crate::tests::data_uploads::queue::cases::$group::$mem($make).await;
                     }
                 )*
             }
@@ -654,7 +655,7 @@ pub(crate) use queue_suite_emit;
 /// worker's own test file.
 macro_rules! queue_suite {
     ($make:expr, $tmp:literal) => {
-        $crate::data_uploads::queue::queue_suite_emit! {
+        $crate::tests::data_uploads::queue::queue_suite_emit! {
             $make, $tmp,
             from_snapshot {
                 disk: [

@@ -1,5 +1,5 @@
 // internal crates
-use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
+use crate::tests::mocks::http_client::{Call, CapturedRequest, MockClient};
 use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, UploadWithCredentials};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::uploads::{self, ConfirmParams, CreateParams, VendCredentialsParams};

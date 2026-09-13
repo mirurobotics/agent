@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::{
+use crate::tests::mocks::{
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
@@ -15,7 +16,7 @@ use miru_agent::data_uploads::upload::{
     UploaderOptions,
 };
 use miru_agent::errors::Error;
-use miru_agent::filesys::{dirs, File};
+use miru_agent::filesys::File;
 use miru_agent::models::FileRuleRetention;
 
 // external crates
@@ -1100,7 +1101,7 @@ mod durability {
     /// mid-transfer leaves it to be retried rather than losing it.
     #[tokio::test]
     async fn job_stays_on_disk_during_attempt() {
-        let dir = dirs::temp("uploader_durability").unwrap();
+        let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (release_tx, release_rx) = oneshot::channel();
@@ -1119,7 +1120,7 @@ mod durability {
 
     #[tokio::test]
     async fn confirmed_job_leaves_disk() {
-        let dir = dirs::temp("uploader_durability").unwrap();
+        let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (release_tx, release_rx) = oneshot::channel();
@@ -1139,7 +1140,7 @@ mod durability {
 
     #[tokio::test]
     async fn shutdown_mid_attempt_leaves_job_queued() {
-        let dir = dirs::temp("uploader_durability").unwrap();
+        let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
@@ -1157,7 +1158,7 @@ mod durability {
 
     #[tokio::test]
     async fn restart_resumes_the_interrupted_job() {
-        let dir = dirs::temp("uploader_durability").unwrap();
+        let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let job = make_job("a.log");
 
@@ -1186,7 +1187,7 @@ mod durability {
 
     #[tokio::test]
     async fn terminal_failure_removes_job_from_disk() {
-        let dir = dirs::temp("uploader_durability").unwrap();
+        let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::TerminalErr);
@@ -1204,7 +1205,7 @@ mod durability {
 
     #[tokio::test]
     async fn a_deadline_past_the_max_backoff_is_pulled_back_before_sleeping() {
-        let dir = dirs::temp("uploader_stranded").unwrap();
+        let dir = test_dirs::temp("uploader_stranded").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         // 48h out: unreachable under the default 1h maximum backoff, so only a
         // clock step could have produced it
@@ -1229,7 +1230,7 @@ mod durability {
 
     #[tokio::test]
     async fn a_deadline_inside_the_max_backoff_is_left_alone() {
-        let dir = dirs::temp("uploader_backoff_kept").unwrap();
+        let dir = test_dirs::temp("uploader_backoff_kept").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         // an ordinary backoff stamp: the worker must honor it rather than
         // treating every future deadline as a clock anomaly

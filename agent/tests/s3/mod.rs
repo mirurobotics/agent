@@ -2,7 +2,8 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::errors::harnesses::{assert_error, Expected};
+use crate::tests::errors::harnesses::{assert_error, Expected};
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::file::File;
 use miru_agent::filesys::path::PathExt;
@@ -15,6 +16,14 @@ use aws_smithy_types::body::SdkBody;
 
 const REGION: &str = "us-east-1";
 const BUCKET: &str = "test-bucket";
+
+fn test_credentials() -> Credentials {
+    Credentials {
+        access_key_id: "access-key".to_string(),
+        secret_access_key: "secret-key".to_string(),
+        session_token: "session-token".to_string(),
+    }
+}
 
 // Headers that vary per request (signing, timestamps, user agent) and must be
 // excluded from request matching.
@@ -53,7 +62,7 @@ fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
     let replay = StaticReplayClient::new(events);
     let cfg = Config {
         region: REGION.to_string(),
-        creds: Credentials::default(),
+        creds: test_credentials(),
     };
     let store = Store::from_http_client(replay.clone(), cfg);
     (store, replay)
@@ -61,8 +70,8 @@ fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
 
 /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
 /// the file is not deleted until the test drops it).
-async fn temp_file_with(bytes: &[u8]) -> files::TempFile {
-    let tf = files::temp("s3-test").unwrap();
+async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
+    let tf = test_files::temp("s3-test").unwrap();
     files::write_bytes(tf.file(), bytes, WriteOptions::OVERWRITE_NONATOMIC)
         .await
         .unwrap();
@@ -286,7 +295,7 @@ pub mod put {
     /// `PutObject` path; larger-than-`PART_SIZE` files take the multipart path.
     pub mod routing {
         use super::*;
-        use crate::s3::multipart::{
+        use crate::tests::s3::multipart::{
             complete_req, complete_resp, complete_shape, create_req, create_resp, create_shape,
             upload_part_req, upload_part_resp, upload_part_shape,
         };
@@ -402,7 +411,7 @@ pub mod get {
         async fn get_streams_body_to_file() {
             let key = "blobs/data.bin";
             let payload = b"\x00\x01\x02binary-body\xff".to_vec();
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             let (store, replay) = store_expecting(
                 req("GET", "blobs/data.bin?x-id=GetObject"),
                 resp(200, &payload),
@@ -420,7 +429,7 @@ pub mod get {
             // Pre-write stale content that is LONGER than the new payload, so an
             // accidental append (or a failure to truncate) would leave trailing
             // bytes and be caught by the exact-equality assertion below.
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             files::write_bytes(
                 dest.file(),
                 b"OLD-STALE-CONTENT",
@@ -444,7 +453,7 @@ pub mod get {
         async fn get_empty_object_writes_empty_file() {
             let key = "blobs/empty.bin";
             // An empty object body is a success: a 0-byte file is written.
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             let (store, replay) =
                 store_expecting(req("GET", "blobs/empty.bin?x-id=GetObject"), resp(200, &[]));
 
@@ -495,7 +504,7 @@ pub mod get {
         #[tokio::test]
         async fn get_truncated_body_maps_to_connection_err() {
             let key = "blobs/truncated.bin";
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             let (store, _replay) = store_expecting(
                 req("GET", "blobs/truncated.bin?x-id=GetObject"),
                 truncated_resp(),
@@ -517,7 +526,7 @@ pub mod get {
         #[tokio::test]
         async fn get_missing_maps_to_not_found() {
             let key = "missing.txt";
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             let (store, _replay) = store_expecting(
                 req("GET", "missing.txt?x-id=GetObject"),
                 resp_xml(404, NO_SUCH_KEY_XML),
@@ -538,7 +547,7 @@ pub mod get {
 
         #[tokio::test]
         async fn get_403_maps_to_request_failed() {
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             let (store, _replay) = store_expecting(
                 req("GET", "denied.txt?x-id=GetObject"),
                 access_denied_resp(),
@@ -561,7 +570,7 @@ pub mod get {
             // With no replay events, the connector fails to dispatch the request,
             // which the SDK surfaces as `SdkError::DispatchFailure` — the mapper's
             // network-connection path.
-            let dest = files::temp("s3-dest").unwrap();
+            let dest = test_files::temp("s3-dest").unwrap();
             let (store, _replay) = store_with(vec![]);
 
             let err = store.get(&obj("any.txt"), dest.file()).await.unwrap_err();

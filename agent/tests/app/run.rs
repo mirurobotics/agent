@@ -2,10 +2,11 @@
 use std::path::PathBuf;
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, dirs, files, WriteOptions};
+use miru_agent::filesys::{self, files, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::Options;
 
@@ -55,7 +56,7 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
 
 #[tokio::test]
 async fn invalid_app_state_initialization() {
-    let dir = dirs::temp("testing").unwrap();
+    let dir = test_dirs::temp("testing").unwrap();
     let options = AppOptions {
         storage: StorageOptions {
             layout: Layout::new(dir.to_dir()),
@@ -77,7 +78,7 @@ async fn invalid_app_state_initialization() {
 #[serial]
 #[tokio::test]
 async fn max_runtime_reached() {
-    let dir = dirs::temp("testing").unwrap();
+    let dir = test_dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         storage: StorageOptions {
@@ -113,7 +114,7 @@ async fn max_runtime_reached() {
 #[serial]
 #[tokio::test]
 async fn is_persistent() {
-    let dir = dirs::temp("testing").unwrap();
+    let dir = test_dirs::temp("testing").unwrap();
     let max_runtime = Duration::from_millis(100);
     prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
@@ -150,7 +151,7 @@ async fn is_persistent() {
 #[serial]
 #[tokio::test]
 async fn idle_timeout_reached() {
-    let dir = dirs::temp("testing").unwrap();
+    let dir = test_dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         storage: StorageOptions {
@@ -186,7 +187,7 @@ async fn idle_timeout_reached() {
 #[serial]
 #[tokio::test]
 async fn shutdown_signal_received() {
-    let dir = dirs::temp("testing").unwrap();
+    let dir = test_dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
     let options = AppOptions {
         lifecycle: LifecycleOptions {

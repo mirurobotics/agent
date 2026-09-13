@@ -3,25 +3,39 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
 use miru_agent::errors::Error;
-use miru_agent::http::errors::MockErr;
-use miru_agent::http::{with_retry, HTTPErr};
+use miru_agent::http::with_retry;
 
-fn network_err() -> HTTPErr {
-    HTTPErr::MockErr(MockErr {
-        is_network_conn_err: true,
-    })
+// external crates
+use thiserror::Error as ThisError;
+
+#[derive(Debug, ThisError)]
+#[error("retry test error (network connection: {is_network_conn_err})")]
+struct RetryErr {
+    is_network_conn_err: bool,
 }
 
-fn app_err() -> HTTPErr {
-    HTTPErr::MockErr(MockErr {
+impl Error for RetryErr {
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
+    }
+}
+
+fn network_err() -> RetryErr {
+    RetryErr {
+        is_network_conn_err: true,
+    }
+}
+
+fn app_err() -> RetryErr {
+    RetryErr {
         is_network_conn_err: false,
-    })
+    }
 }
 
 #[tokio::test]
 async fn success_on_first_attempt() {
     let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
+    let result: Result<&str, RetryErr> = with_retry(|| {
         calls.fetch_add(1, Ordering::SeqCst);
         async { Ok("ok") }
     })
@@ -34,7 +48,7 @@ async fn success_on_first_attempt() {
 #[tokio::test]
 async fn retries_on_network_error_then_succeeds() {
     let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
+    let result: Result<&str, RetryErr> = with_retry(|| {
         let n = calls.fetch_add(1, Ordering::SeqCst);
         async move {
             if n < 2 {
@@ -53,7 +67,7 @@ async fn retries_on_network_error_then_succeeds() {
 #[tokio::test]
 async fn no_retry_on_app_error() {
     let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
+    let result: Result<&str, RetryErr> = with_retry(|| {
         calls.fetch_add(1, Ordering::SeqCst);
         async { Err(app_err()) }
     })
@@ -71,7 +85,7 @@ async fn no_retry_on_app_error() {
 #[tokio::test]
 async fn exhausts_retries_on_persistent_network_error() {
     let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
+    let result: Result<&str, RetryErr> = with_retry(|| {
         calls.fetch_add(1, Ordering::SeqCst);
         async { Err(network_err()) }
     })
@@ -89,7 +103,7 @@ async fn exhausts_retries_on_persistent_network_error() {
 #[tokio::test]
 async fn network_error_then_app_error_stops_immediately() {
     let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
+    let result: Result<&str, RetryErr> = with_retry(|| {
         let n = calls.fetch_add(1, Ordering::SeqCst);
         async move {
             if n == 0 {
@@ -113,7 +127,7 @@ async fn network_error_then_app_error_stops_immediately() {
 #[tokio::test]
 async fn recovers_on_last_attempt() {
     let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
+    let result: Result<&str, RetryErr> = with_retry(|| {
         let n = calls.fetch_add(1, Ordering::SeqCst);
         async move {
             if n < 2 {

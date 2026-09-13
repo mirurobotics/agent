@@ -10,7 +10,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+use crate::tests::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
 
 // ─── model tests ───────────────────────────────────────────────────────────
 

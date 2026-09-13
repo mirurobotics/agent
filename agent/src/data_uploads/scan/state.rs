@@ -37,7 +37,7 @@ impl RuleState {
         &self.cfg.rule
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     pub(crate) fn ledger_count(&self) -> usize {
         self.ledger.len()
     }

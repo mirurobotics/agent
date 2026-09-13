@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // internal crates
-use crate::mocks::{
+use crate::tests::mocks::{
     http_client::{Call, MockClient},
     object_transfer::MockObjectTransfer,
     stub_token_manager::StubTokenManager,
     token_manager::MockTokenManager,
     upload_executor::{MockStep, MockUploadExecutor},
 };
+use crate::tests::test_utils::filesys::files as test_files;
 use backend_api::models::{
     CreateUploadRequest, Upload, UploadCredentials, UploadDestination, UploadSource, UploadStatus,
     UploadWithCredentials,
@@ -353,7 +354,7 @@ async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
     )]);
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Ok(pending_response()));
-    let src = files::temp("upload-executor-test").unwrap();
+    let src = test_files::temp("upload-executor-test").unwrap();
     files::write_bytes(
         src.file(),
         b"hello world",

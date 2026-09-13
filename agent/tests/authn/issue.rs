@@ -1,11 +1,12 @@
 // internal crates
-use crate::mocks::http_client::{Call, MockClient};
+use crate::tests::mocks::http_client::{Call, MockClient};
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::TokenResponse;
 use miru_agent::authn::errors::AuthnErr;
 use miru_agent::authn::issue::{encode_part, issue_token, mint_jwt};
 use miru_agent::authn::Token;
 use miru_agent::crypt::{base64, rsa};
-use miru_agent::filesys::{self, dirs, files, Overwrite};
+use miru_agent::filesys::{self, files, Overwrite};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::HTTPErr;
 
@@ -17,8 +18,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// Generate a real RSA key pair in a temp dir and return the file handles.
-async fn generate_keys() -> (dirs::TempDir, filesys::File, filesys::File) {
-    let dir = dirs::temp("authn_issue_test").unwrap();
+async fn generate_keys() -> (test_dirs::TempDir, filesys::File, filesys::File) {
+    let dir = test_dirs::temp("authn_issue_test").unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
     rsa::gen_key_pair(
@@ -124,7 +125,7 @@ mod issue_token {
 
     #[tokio::test]
     async fn bubbles_filesys_err_when_public_key_missing() {
-        let dir = dirs::temp("authn_issue_test").unwrap();
+        let dir = test_dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
         rsa::gen_key_pair(
@@ -241,7 +242,7 @@ mod mint_jwt {
 
     #[tokio::test]
     async fn returns_err_when_public_key_file_is_missing() {
-        let dir = dirs::temp("authn_issue_test").unwrap();
+        let dir = test_dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
         rsa::gen_key_pair(
@@ -261,7 +262,7 @@ mod mint_jwt {
 
     #[tokio::test]
     async fn returns_err_when_private_key_file_is_missing() {
-        let dir = dirs::temp("authn_issue_test").unwrap();
+        let dir = test_dirs::temp("authn_issue_test").unwrap();
         let private_key_file = dir.file("private_key.pem");
         let public_key_file = dir.file("public_key.pem");
         rsa::gen_key_pair(

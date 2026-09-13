@@ -44,8 +44,8 @@ mod tests {
 
     // internal crates
     use crate::disk::{self, Layout};
-    use crate::filesys;
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, Release};
+    use crate::tests::test_utils::filesys::dirs as test_dirs;
 
     // =============================== TEST HELPERS ================================= //
 
@@ -67,7 +67,7 @@ mod tests {
     }
 
     struct Stores {
-        _dir: filesys::dirs::TempDir,
+        _dir: test_dirs::TempDir,
         deployments: disk::Deployments,
         releases: disk::Releases,
         file_rules: disk::FileRules,
@@ -75,7 +75,7 @@ mod tests {
 
     impl Stores {
         async fn new() -> Self {
-            let dir = filesys::dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let layout = Layout::new(dir.to_dir());
             let (deployments, _) = disk::Deployments::spawn(64, layout.deployments(), 1000)
                 .await

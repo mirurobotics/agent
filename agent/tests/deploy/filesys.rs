@@ -3,6 +3,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::deploy::filesys::{deploy, remove, BACKUP_FILE_PREFIX};
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
@@ -15,12 +17,12 @@ use serde_json::json;
 struct Fixture {
     cfg_inst_meta: disk::CfgInsts,
     cfg_inst_content: disk::CfgInstContent,
-    pub(super) temp_dir: dirs::TempDir,
+    pub(super) temp_dir: test_dirs::TempDir,
 }
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = dirs::temp("deploy-filesys-test").unwrap();
+        let temp_dir = test_dirs::temp("deploy-filesys-test").unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
         let (cfg_inst_meta, _) =
@@ -319,11 +321,11 @@ pub mod deploy_func_success {
 
         // Pre-populate a.json with old content
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
-        files::seed(&filesys::File::new(&a_path), "old_a").await;
+        test_files::seed(&filesys::File::new(&a_path), "old_a").await;
 
         // Simulate a stale backup left by a prior interrupted deploy
         let stale_backup = f.temp_dir.path().join("miru.backup.a.json");
-        files::seed(&filesys::File::new(&stale_backup), "stale_backup").await;
+        test_files::seed(&filesys::File::new(&stale_backup), "stale_backup").await;
         assert!(stale_backup.exists());
 
         let a_cfg = ConfigInstance {
@@ -584,7 +586,7 @@ pub mod deploy_func_backup_errs {
         let locked_dir = f.temp_dir.subdir("locked");
         dirs::create(&locked_dir).await.unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
-        files::seed(&filesys::File::new(&c_path), "old").await;
+        test_files::seed(&filesys::File::new(&c_path), "old").await;
 
         // now lock the parent directory so snapshot_destination's sibling
         // backup copy cannot succeed
@@ -631,15 +633,15 @@ pub mod deploy_func_backup_errs {
         // Pre-populate a.json and b.json in writable temp_dir root
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
         let b_path = f.temp_dir.path().join("b.json").display().to_string();
-        files::seed(&filesys::File::new(&a_path), "old_a").await;
-        files::seed(&filesys::File::new(&b_path), "old_b").await;
+        test_files::seed(&filesys::File::new(&a_path), "old_a").await;
+        test_files::seed(&filesys::File::new(&b_path), "old_b").await;
 
         // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
         // backup copy cannot create miru.backup.c.json (EACCES)
         let locked_dir = f.temp_dir.subdir("locked");
         dirs::create(&locked_dir).await.unwrap();
         let c_path = locked_dir.file("c.json").path().display().to_string();
-        files::seed(&filesys::File::new(&c_path), "old_c").await;
+        test_files::seed(&filesys::File::new(&c_path), "old_c").await;
         dirs::set_permissions(&locked_dir, read_only())
             .await
             .unwrap();
@@ -740,8 +742,8 @@ pub mod deploy_func_write_errs {
         // pre-seed two files with old content via filesys::File::write_string
         let a_path = f.temp_dir.file("a.json").path().display().to_string();
         let b_path = f.temp_dir.file("b.json").path().display().to_string();
-        files::seed(&filesys::File::new(&a_path), "old_a").await;
-        files::seed(&filesys::File::new(&b_path), "old_b").await;
+        test_files::seed(&filesys::File::new(&a_path), "old_a").await;
+        test_files::seed(&filesys::File::new(&b_path), "old_b").await;
 
         // create locked subdir
         let locked_dir = f.temp_dir.subdir("locked");
@@ -870,7 +872,7 @@ pub mod deploy_func_write_errs {
 
         // Existed: pre-populate a.json with "old_a"
         let a_path = f.temp_dir.file("a.json").path().display().to_string();
-        files::seed(&filesys::File::new(&a_path), "old_a").await;
+        test_files::seed(&filesys::File::new(&a_path), "old_a").await;
 
         // DidNotExist: fresh path b.json
         let b_path = f.temp_dir.file("b.json").path().display().to_string();
@@ -1103,7 +1105,7 @@ pub mod remove_func_errs {
     #[tokio::test]
     async fn rejects_parent_traversal_filepath() {
         let f = Fixture::new().await;
-        let tmp = dirs::temp("deploy-traversal").unwrap();
+        let tmp = test_dirs::temp("deploy-traversal").unwrap();
         let ci = ConfigInstance {
             filepath: tmp
                 .path()
@@ -1143,7 +1145,7 @@ pub mod remove_func_errs {
         // Create the good file up front. If validation happened in-loop rather
         // than as a pre-pass, this file would be removed before the bad path is
         // discovered.
-        files::seed(&filesys::File::new(&good_path), "on_disk_before_remove").await;
+        test_files::seed(&filesys::File::new(&good_path), "on_disk_before_remove").await;
 
         let deployment = f.new_removing(&[good_cfg, bad_cfg]);
         let result = f.remove(&deployment, &[]).await;

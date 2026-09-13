@@ -1,7 +1,9 @@
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::cooldown;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
-use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+use miru_agent::filesys::{files, Dir, File, PathExt, WriteOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -9,8 +11,8 @@ use tokio::task::JoinHandle;
 
 /// A real on-disk temp file holding `contents`; the returned guard deletes it
 /// on drop.
-async fn temp_file(contents: &[u8]) -> files::TempFile {
-    let tmp = files::temp("delete-actor-test").unwrap();
+async fn temp_file(contents: &[u8]) -> test_files::TempFile {
+    let tmp = test_files::temp("delete-actor-test").unwrap();
     files::write_bytes(tmp.file(), contents, WriteOptions::OVERWRITE_NONATOMIC)
         .await
         .unwrap();
@@ -140,7 +142,7 @@ async fn enqueue_after_shutdown_errors() {
 // completed before the following `len()` is asked for.
 #[tokio::test]
 async fn wedged_job_is_given_up_on_through_the_actor() {
-    let dir = dirs::temp("delete-actor-wedged").unwrap();
+    let dir = test_dirs::temp("delete-actor-wedged").unwrap();
     let (deleter, handle) = Deleter::spawn(
         16,
         DeleterArgs {

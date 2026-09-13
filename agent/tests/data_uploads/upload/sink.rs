@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::{deleter::MockDeleter, upload_executor::MockUploadExecutor};
+use crate::tests::mocks::{deleter::MockDeleter, upload_executor::MockUploadExecutor};
 use miru_agent::data_uploads::scan::{scanner::StableFile, StableFileSink};
 use miru_agent::data_uploads::upload::{
     Job, UploadStableFileSink, Uploader, UploaderExt, UploaderOptions,

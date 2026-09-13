@@ -4,10 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::{scanner::MockScanner, syncer::MockSyncer};
+use crate::tests::mocks::{scanner::MockScanner, syncer::MockSyncer};
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::scan::ScanErr;
 use miru_agent::disk::{self, Layout};
-use miru_agent::filesys::{dirs, Overwrite};
+use miru_agent::filesys::Overwrite;
 use miru_agent::models::{Deployment, DplActivity, FileRule, FileRuleSource, Release};
 use miru_agent::sync::syncer::SyncEvent;
 use miru_agent::workers::sync_scan_bridge;
@@ -22,7 +23,7 @@ use tokio::task::JoinHandle;
 /// dir, seeded via `write_if_absent` — the same pattern as the
 /// `disk/file_rules.rs` inline tests.
 struct Stores {
-    _dir: dirs::TempDir,
+    _dir: test_dirs::TempDir,
     deployments: Arc<disk::Deployments>,
     releases: Arc<disk::Releases>,
     file_rules: Arc<disk::FileRules>,
@@ -30,7 +31,7 @@ struct Stores {
 
 impl Stores {
     async fn new() -> Self {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let (deployments, _) = disk::Deployments::spawn(64, layout.deployments(), 1000)
             .await

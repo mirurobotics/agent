@@ -139,7 +139,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
         Ok(self.state.clone())
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     fn set_sync_state(&mut self, state: State) {
         self.state = state;
     }
@@ -271,7 +271,7 @@ pub enum Command {
     GetSyncState {
         respond_to: oneshot::Sender<Result<State, SyncErr>>,
     },
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     SetSyncState {
         state: State,
         respond_to: oneshot::Sender<Result<(), SyncErr>>,
@@ -315,7 +315,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
                         "Actor failed to send state response"
                     );
                 }
-                #[cfg(feature = "test")]
+                #[cfg(test)]
                 Command::SetSyncState { state, respond_to } => {
                     self.syncer.set_sync_state(state);
                     if let Err(e) = respond_to.send(Ok(())) {
@@ -390,8 +390,8 @@ impl Syncer {
         })
     }
 
-    #[cfg(feature = "test")]
-    pub async fn set_sync_state(&self, state: State) -> Result<(), SyncErr> {
+    #[cfg(test)]
+    pub(crate) async fn set_sync_state(&self, state: State) -> Result<(), SyncErr> {
         self.send_command(|tx| Command::SetSyncState {
             state,
             respond_to: tx,

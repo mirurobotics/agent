@@ -392,6 +392,8 @@ mod tests {
     use crate::data_uploads::retention::job::Job;
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+    use crate::tests::test_utils::filesys::dirs as test_dirs;
+    use crate::tests::test_utils::filesys::files as test_files;
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -427,8 +429,8 @@ mod tests {
 
     /// A real on-disk temp file holding `contents`; the returned guard deletes
     /// it on drop.
-    async fn temp_file(contents: &[u8]) -> files::TempFile {
-        let tmp = files::temp("delete-sweep-test").unwrap();
+    async fn temp_file(contents: &[u8]) -> test_files::TempFile {
+        let tmp = test_files::temp("delete-sweep-test").unwrap();
         files::write_bytes(tmp.file(), contents, WriteOptions::OVERWRITE_NONATOMIC)
             .await
             .unwrap();
@@ -526,7 +528,7 @@ mod tests {
 
         #[tokio::test]
         async fn persists_to_disk() {
-            let dir = dirs::temp("delete-enqueue-persist").unwrap();
+            let dir = test_dirs::temp("delete-enqueue-persist").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
@@ -572,7 +574,7 @@ mod tests {
 
         #[tokio::test]
         async fn persist_failure_is_swallowed() {
-            let dir = dirs::temp("delete-enqueue-persist-fail").unwrap();
+            let dir = test_dirs::temp("delete-enqueue-persist-fail").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
@@ -761,7 +763,7 @@ mod tests {
         // the pass must count an attempt and keep going, not panic.
         #[tokio::test]
         async fn hash_failure_counts_an_attempt() {
-            let dir = dirs::temp("delete-hash-eisdir").unwrap();
+            let dir = test_dirs::temp("delete-hash-eisdir").unwrap();
             let target = File::new(dir.path().clone());
             let metadata = files::metadata(&target).await.unwrap();
             let clock = Clock::new(1000);
@@ -806,7 +808,7 @@ mod tests {
         // directories, so files::delete fails at the unlink step.
         #[tokio::test]
         async fn unlink_failure_counts_an_attempt() {
-            let dir = dirs::temp("delete-eisdir").unwrap();
+            let dir = test_dirs::temp("delete-eisdir").unwrap();
             let target = File::new(dir.path().clone());
             let metadata = files::metadata(&target).await.unwrap();
             let clock = Clock::new(1000);
@@ -832,7 +834,7 @@ mod tests {
 
         #[tokio::test]
         async fn each_drop_is_persisted_before_the_next_job() {
-            let dir = dirs::temp("delete-sweep-persist").unwrap();
+            let dir = test_dirs::temp("delete-sweep-persist").unwrap();
             let state_path = dir.file("delete_queue.json");
             let due = temp_file(b"aaaa").await;
             let waiting = temp_file(b"bbbb").await;
@@ -869,7 +871,7 @@ mod tests {
         // behind it resolves and rewrites the snapshot.
         #[tokio::test]
         async fn not_due_entries_are_left_untouched() {
-            let dir = dirs::temp("delete-sweep-not-due").unwrap();
+            let dir = test_dirs::temp("delete-sweep-not-due").unwrap();
             let state_path = dir.file("delete_queue.json");
             let waiting_a = temp_file(b"aaaa").await;
             let waiting_b = temp_file(b"bbbb").await;
@@ -909,7 +911,7 @@ mod tests {
 
         #[tokio::test]
         async fn counted_failure_increments_attempts() {
-            let dir = dirs::temp("delete-attempts-counted").unwrap();
+            let dir = test_dirs::temp("delete-attempts-counted").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
@@ -927,7 +929,7 @@ mod tests {
 
         #[tokio::test]
         async fn attempt_cap_drops_job() {
-            let dir = dirs::temp("delete-attempts-cap").unwrap();
+            let dir = test_dirs::temp("delete-attempts-cap").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {
                 now_fn: Arc::new(clock.now_fn()),
@@ -953,7 +955,7 @@ mod tests {
         async fn default_attempts_is_ten() {
             assert_eq!(DeleterArgs::default().attempts, 10);
 
-            let dir = dirs::temp("delete-attempts-default").unwrap();
+            let dir = test_dirs::temp("delete-attempts-default").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
@@ -969,7 +971,7 @@ mod tests {
 
         #[tokio::test]
         async fn successful_delete_clears_the_entry() {
-            let dir = dirs::temp("delete-success-clears").unwrap();
+            let dir = test_dirs::temp("delete-success-clears").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
@@ -1025,7 +1027,7 @@ mod tests {
 
         #[tokio::test]
         async fn failure_defers_the_next_attempt() {
-            let dir = dirs::temp("delete-backoff-defer").unwrap();
+            let dir = test_dirs::temp("delete-backoff-defer").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
@@ -1054,7 +1056,7 @@ mod tests {
 
         #[tokio::test]
         async fn the_delay_grows_and_caps() {
-            let dir = dirs::temp("delete-backoff-growth").unwrap();
+            let dir = test_dirs::temp("delete-backoff-growth").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
@@ -1078,7 +1080,7 @@ mod tests {
 
         #[tokio::test]
         async fn next_attempt_at_survives_a_reload() {
-            let dir = dirs::temp("delete-backoff-reload").unwrap();
+            let dir = test_dirs::temp("delete-backoff-reload").unwrap();
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, Some(&state_path)).await;
@@ -1102,7 +1104,7 @@ mod tests {
         /// desynchronize.
         #[tokio::test]
         async fn count_ready_and_next_ready_agree_about_a_deferred_entry() {
-            let dir = dirs::temp("delete-backoff-agree").unwrap();
+            let dir = test_dirs::temp("delete-backoff-agree").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
@@ -1126,7 +1128,7 @@ mod tests {
 
         #[tokio::test]
         async fn attempts_survive_a_restart() {
-            let dir = dirs::temp("delete-attempts-restart").unwrap();
+            let dir = test_dirs::temp("delete-attempts-restart").unwrap();
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {
@@ -1159,7 +1161,7 @@ mod tests {
 
         #[tokio::test]
         async fn dropped_entry_is_absent_from_the_persisted_snapshot() {
-            let dir = dirs::temp("delete-attempts-drop-persist").unwrap();
+            let dir = test_dirs::temp("delete-attempts-drop-persist").unwrap();
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = SingleThreadDeleter::new(DeleterArgs {

@@ -37,18 +37,13 @@ pub trait ObjectTransfer: Send + Sync {
 
 /// Production [`ObjectTransfer`] that drives the native cloud SDKs: an AWS S3
 /// single-part/multipart put for the `s3` scheme, and a GCS put (the SDK picks
-/// simple vs resumable) with the vended OAuth2 bearer token for `gcs`. Under
-/// the `test` feature the store construction can be overridden — an injected
-/// S3 HTTP client or a local GCS endpoint — so tests drive the full transfer
-/// path offline; `Default` leaves both unset for the production behavior.
+/// simple vs resumable) with the vended OAuth2 bearer token for `gcs`. Optional
+/// transport settings feed the same store builders as the default HTTPS
+/// transport and cloud endpoints.
 #[derive(Default)]
 pub struct SdkTransfer {
-    /// Test-only: injected in place of the default HTTPS connector, so the
-    /// full transfer path runs against a replayed S3 exchange offline.
-    #[cfg(feature = "test")]
     s3_http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
-    /// Test-only: points the GCS data client at a local mock server.
-    #[cfg(feature = "test")]
+    s3_force_path_style: bool,
     gcs_endpoint: Option<String>,
 }
 
@@ -56,10 +51,13 @@ impl SdkTransfer {
     /// Test-only constructor that injects a caller-provided HTTP client (e.g. a
     /// `StaticReplayClient`) into the S3 store in place of the default HTTPS
     /// connector, so tests serve canned responses without touching the network.
-    #[cfg(feature = "test")]
-    pub fn with_s3_http_client(http_client: impl aws_sdk_s3::config::HttpClient + 'static) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_s3_http_client(
+        http_client: impl aws_sdk_s3::config::HttpClient + 'static,
+    ) -> Self {
         Self {
             s3_http_client: Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
+            s3_force_path_style: true,
             gcs_endpoint: None,
         }
     }
@@ -67,10 +65,11 @@ impl SdkTransfer {
     /// Test-only constructor that points the GCS store at a local mock server
     /// instead of the real GCS endpoint, so tests serve canned responses
     /// without touching the network.
-    #[cfg(feature = "test")]
-    pub fn with_gcs_endpoint(endpoint: String) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_gcs_endpoint(endpoint: String) -> Self {
         Self {
             s3_http_client: None,
+            s3_force_path_style: false,
             gcs_endpoint: Some(endpoint),
         }
     }
@@ -129,22 +128,14 @@ impl SdkTransfer {
             .map_err(classified_executor_err)
     }
 
-    /// Builds the S3 store, honoring the test-only HTTP client override.
+    /// Builds the S3 store with this transfer's transport settings.
     fn s3_store(&self, cfg: s3::Config) -> s3::Store {
-        #[cfg(feature = "test")]
-        if let Some(http_client) = &self.s3_http_client {
-            return s3::Store::from_http_client(http_client.clone(), cfg);
-        }
-        s3::Store::new(cfg)
+        s3::Store::build(cfg, self.s3_http_client.clone(), self.s3_force_path_style)
     }
 
-    /// Builds the GCS store, honoring the test-only endpoint override.
+    /// Builds the GCS store with this transfer's endpoint settings.
     async fn gcs_store(&self, creds: gcs::Credentials) -> Result<gcs::Store, gcs::GcsErr> {
-        #[cfg(feature = "test")]
-        if let Some(endpoint) = &self.gcs_endpoint {
-            return gcs::Store::from_endpoint(creds, endpoint.clone()).await;
-        }
-        gcs::Store::new(creds).await
+        gcs::Store::build(creds, self.gcs_endpoint.clone(), None).await
     }
 }
 

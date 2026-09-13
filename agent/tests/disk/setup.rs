@@ -1,4 +1,6 @@
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::authn;
 use miru_agent::disk::{self, Layout, Settings};
 use miru_agent::filesys::{self, dirs, files, PathExt, WriteOptions};
@@ -52,16 +54,16 @@ pub mod bootstrap {
     async fn create_temp_key_files(layout: &Layout) -> (filesys::File, filesys::File) {
         let temp_dir = layout.temp_dir();
         let private_key_file = temp_dir.file("private_key.pem");
-        files::seed(&private_key_file, "test").await;
+        test_files::seed(&private_key_file, "test").await;
         let public_key_file = temp_dir.file("public_key.pem");
-        files::seed(&public_key_file, "test").await;
+        test_files::seed(&public_key_file, "test").await;
 
         (private_key_file, public_key_file)
     }
 
     #[tokio::test]
     async fn src_public_key_file_doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
@@ -85,7 +87,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn src_private_key_file_doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
@@ -109,7 +111,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn clean_install() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
@@ -135,7 +137,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn device_file_already_exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
@@ -171,7 +173,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn auth_directory_already_exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         // create the public / private key files
@@ -201,7 +203,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn private_key_file_already_exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         // create the public / private key files
@@ -227,7 +229,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn public_key_file_already_exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         // create the public / private key files
@@ -253,7 +255,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn storage_directory_already_exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
@@ -263,7 +265,7 @@ pub mod bootstrap {
         // create the storage directory
         let resources_dir = layout.resources();
         let subfile = resources_dir.file("test");
-        files::seed(&subfile, "test").await;
+        test_files::seed(&subfile, "test").await;
         assert!(subfile.exists());
 
         // setup the storage
@@ -288,7 +290,7 @@ pub mod bootstrap {
 
     #[tokio::test]
     async fn events_directory_already_exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let settings = Settings::default();
 
@@ -298,7 +300,7 @@ pub mod bootstrap {
         // create the events directory with a stale log file
         let events_dir = layout.events_dir();
         let subfile = events_dir.file("events.jsonl");
-        files::seed(&subfile, "{\"id\":1}\n").await;
+        test_files::seed(&subfile, "{\"id\":1}\n").await;
         assert!(subfile.exists());
 
         // setup the storage
@@ -331,8 +333,8 @@ pub mod reset {
     async fn write_existing_keys(layout: &Layout) {
         let auth_dir = layout.auth();
         dirs::create_if_absent(&auth_dir.root).await.unwrap();
-        files::seed(&auth_dir.private_key(), PRIVATE_KEY_CONTENTS).await;
-        files::seed(&auth_dir.public_key(), PUBLIC_KEY_CONTENTS).await;
+        test_files::seed(&auth_dir.private_key(), PRIVATE_KEY_CONTENTS).await;
+        test_files::seed(&auth_dir.public_key(), PUBLIC_KEY_CONTENTS).await;
     }
 
     async fn assert_keys_preserved(layout: &Layout) {
@@ -364,12 +366,12 @@ pub mod reset {
 
     #[tokio::test]
     async fn preserves_keys_and_writes_marker() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-write a stale device file with arbitrary content
-        files::seed(&layout.device(), "{\"some\":\"stale\"}").await;
+        test_files::seed(&layout.device(), "{\"some\":\"stale\"}").await;
 
         let device = Device::default();
         let settings = Settings::default();
@@ -398,13 +400,13 @@ pub mod reset {
 
     #[tokio::test]
     async fn wipes_resources_subtree() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-create something under resources/config_instances/contents/
         let stale = layout.config_instance_content().file("stale.json");
-        files::seed(&stale, "{}").await;
+        test_files::seed(&stale, "{}").await;
         assert!(stale.exists());
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
@@ -417,13 +419,13 @@ pub mod reset {
 
     #[tokio::test]
     async fn wipes_events_subtree() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 
         // pre-create something under events/
         let stale = layout.events_dir().file("events.jsonl");
-        files::seed(&stale, "{}").await;
+        test_files::seed(&stale, "{}").await;
         assert!(stale.exists());
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
@@ -437,7 +439,7 @@ pub mod reset {
 
     #[tokio::test]
     async fn no_prior_state() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v0.1.0")
@@ -454,7 +456,7 @@ pub mod reset {
 
     #[tokio::test]
     async fn overwrites_existing_marker() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         write_existing_keys(&layout).await;
 

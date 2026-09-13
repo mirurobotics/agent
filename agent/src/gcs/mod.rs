@@ -35,15 +35,6 @@ pub struct Credentials {
     pub access_token: String,
 }
 
-#[cfg(feature = "test")]
-impl Default for Credentials {
-    fn default() -> Self {
-        Self {
-            access_token: "test-token".to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Object {
     pub bucket: String,
@@ -115,8 +106,11 @@ impl Store {
     /// Test-only seam pointing the HTTP data client at `endpoint` (a local mock
     /// server) while building a real gRPC control client. Used by the put/get
     /// data-path tests; the control client is never called by those ops.
-    #[cfg(feature = "test")]
-    pub async fn from_endpoint(creds: Credentials, endpoint: String) -> Result<Self, GcsErr> {
+    #[cfg(test)]
+    pub(crate) async fn from_endpoint(
+        creds: Credentials,
+        endpoint: String,
+    ) -> Result<Self, GcsErr> {
         Self::build(creds, Some(endpoint), None).await
     }
 
@@ -124,15 +118,19 @@ impl Store {
     /// delete/exists ops while pointing the HTTP data client at `endpoint`.
     /// Both transports are covered by a single seam: the gRPC control stub for
     /// the metadata path and the endpoint override for the HTTP data path.
-    #[cfg(feature = "test")]
-    pub async fn from_stub<T>(stub: T, creds: Credentials, endpoint: String) -> Result<Self, GcsErr>
+    #[cfg(test)]
+    pub(crate) async fn from_stub<T>(
+        stub: T,
+        creds: Credentials,
+        endpoint: String,
+    ) -> Result<Self, GcsErr>
     where
         T: google_cloud_storage::stub::StorageControl + 'static,
     {
         Self::build(creds, Some(endpoint), Some(StorageControl::from_stub(stub))).await
     }
 
-    async fn build(
+    pub(crate) async fn build(
         creds: Credentials,
         endpoint: Option<String>,
         control_override: Option<StorageControl>,

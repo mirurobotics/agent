@@ -2,20 +2,25 @@
 // test cannot collide with subscribers installed by other integration tests.
 
 // internal crates
-use miru_agent::filesys::{dirs, PathExt};
 use miru_agent::logs::{self, LogLevel, Options};
 
 #[tokio::test]
 async fn test_reload_level_no_op_when_env_filter_locked() {
-    // scripts/test.sh sets RUST_LOG=off process-wide, so init's env-filter
-    // branch is taken and reload_level is a no-op. The contract we assert
-    // here is that env_filter_locked() reports the lock; emission semantics
-    // are exercised by test_reload_level_changes_filter in tests/logs/mod.rs.
-    let dir = dirs::temp("miru_test_logs_locked").unwrap();
+    // SAFETY: this is the only test in this binary, and environment setup
+    // precedes subscriber initialization and any work that may observe it.
+    unsafe {
+        std::env::set_var("RUST_LOG", "off");
+    }
+    // The contract here is that env_filter_locked() reports the lock;
+    // emission semantics are exercised in tests/logs/mod.rs.
+    let dir = tempfile::Builder::new()
+        .prefix("miru_test_logs_locked")
+        .tempdir()
+        .unwrap();
     let options = Options {
         stdout: false,
         log_level: LogLevel::Info,
-        log_dir: dir.path().clone(),
+        log_dir: dir.path().to_path_buf(),
     };
     let guard = logs::init(options).expect("init should succeed");
     assert!(

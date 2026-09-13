@@ -1,5 +1,5 @@
 // internal crates
-use crate::errors::harnesses::{assert_error, Expected};
+use crate::tests::errors::harnesses::{assert_error, Expected};
 use miru_agent::errors::Code;
 use miru_agent::events::errors::*;
 

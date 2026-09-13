@@ -34,17 +34,6 @@ pub struct Credentials {
     pub session_token: String,
 }
 
-#[cfg(feature = "test")]
-impl Default for Credentials {
-    fn default() -> Self {
-        Self {
-            access_key_id: "access-key".to_string(),
-            secret_access_key: "secret-key".to_string(),
-            session_token: "session-token".to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Object {
     pub bucket: String,
@@ -65,6 +54,14 @@ impl Store {
     /// Builds a client from caller-supplied temporary credentials. No network
     /// I/O happens here; the first request is made lazily on the first call.
     pub fn new(cfg: Config) -> Self {
+        Self::build(cfg, None, false)
+    }
+
+    pub(crate) fn build(
+        cfg: Config,
+        http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
+        force_path_style: bool,
+    ) -> Self {
         let s3creds = AwsCredentials::new(
             cfg.creds.access_key_id,
             cfg.creds.secret_access_key,
@@ -72,38 +69,33 @@ impl Store {
             None,
             "miru-agent",
         );
-        let s3cfg = aws_sdk_s3::config::Config::builder()
+        let mut builder = aws_sdk_s3::config::Config::builder()
             .behavior_version(BehaviorVersion::latest())
             .region(Region::new(cfg.region))
             .credentials_provider(s3creds)
-            .build();
+            .force_path_style(force_path_style);
+        if let Some(http_client) = http_client {
+            builder = builder.http_client(http_client);
+        }
         Self {
-            client: Client::from_conf(s3cfg),
+            client: Client::from_conf(builder.build()),
         }
     }
 
     /// Test-only constructor that injects a caller-provided HTTP client (e.g. a
     /// `StaticReplayClient`) in place of the default HTTPS connector, so tests
-    /// serve canned responses without touching the network. Credentials are
-    /// static dummies since no real signing endpoint is contacted.
-    #[cfg(feature = "test")]
-    pub fn from_http_client(
+    /// serve canned responses without touching the network. Requests use the
+    /// supplied credentials and path-style URLs for deterministic replay paths.
+    #[cfg(test)]
+    pub(crate) fn from_http_client(
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
         cfg: Config,
     ) -> Self {
-        let s3creds = AwsCredentials::new("test-access-key", "test-secret-key", None, None, "test");
-        let s3cfg = aws_sdk_s3::config::Config::builder()
-            .behavior_version(BehaviorVersion::latest())
-            .region(Region::new(cfg.region))
-            .credentials_provider(s3creds)
-            // Path-style URLs (`/<bucket>/<key>`) make the replayed request URIs
-            // deterministic and readable, so tests can assert on the exact path.
-            .force_path_style(true)
-            .http_client(http_client)
-            .build();
-        Self {
-            client: Client::from_conf(s3cfg),
-        }
+        Self::build(
+            cfg,
+            Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
+            true,
+        )
     }
 
     /// Creates or overwrites an object by streaming a file off disk.

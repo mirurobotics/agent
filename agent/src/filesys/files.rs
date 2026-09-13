@@ -22,56 +22,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
-/// RAII temp file for TESTS. Owns a `tempfile::NamedTempFile` (Drop deletes the
-/// file) plus our `File` handle; the file lives exactly as long as this value.
-#[cfg(feature = "test")]
-#[derive(Debug)]
-pub struct TempFile {
-    _guard: tempfile::NamedTempFile,
-    file: File,
-}
-
-#[cfg(feature = "test")]
-impl TempFile {
-    pub fn file(&self) -> &File {
-        &self.file
-    }
-
-    /// Owned `File` to move into a longer-lived owner; valid only while `self` lives.
-    pub fn to_file(&self) -> File {
-        self.file.clone()
-    }
-}
-
-#[cfg(feature = "test")]
-impl std::ops::Deref for TempFile {
-    type Target = File;
-    fn deref(&self) -> &File {
-        &self.file
-    }
-}
-
-/// Auto-cleaning temp file for tests. Sync; keeps `prefix` for parity with
-/// [`crate::filesys::dirs::temp`]. The returned [`TempFile`] deletes the file on
-/// drop, so bind it to a named variable that lives as long as the file is needed.
-#[cfg(feature = "test")]
-pub fn temp(prefix: &str) -> Result<TempFile, FileSysErr> {
-    let guard = tempfile::Builder::new()
-        .prefix(prefix)
-        .tempfile()
-        .map_err(|e| {
-            FileSysErr::CreateTmpFileErr(CreateTmpFileErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?;
-    let file = File::new(guard.path().to_path_buf());
-    Ok(TempFile {
-        _guard: guard,
-        file,
-    })
-}
-
 pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     // read file
     let mut f = TokioFile::open(file.path())
@@ -297,17 +247,6 @@ async fn write_bytes_direct(file: &File, buf: &[u8], opts: WriteOptions) -> Resu
 
 pub async fn write_string(file: &File, s: &str, opts: WriteOptions) -> Result<(), FileSysErr> {
     write_bytes(file, s.as_bytes(), opts).await
-}
-
-/// Test-only convenience: atomically (over)write `contents` to `file`, panicking
-/// on error. Collapses the common `write_string(f, s, OVERWRITE_ATOMIC).await
-/// .unwrap()` seed pattern to a single line. For non-default write options, call
-/// [`write_string`] directly.
-#[cfg(feature = "test")]
-pub async fn seed(file: &File, contents: &str) {
-    write_string(file, contents, WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
 }
 
 pub async fn write_json<T: serde::Serialize>(
@@ -561,10 +500,11 @@ fn map_io_err_for_create(e: std::io::Error, file: &File, overwrite: Overwrite) -
     }
 }
 
-#[cfg(all(test, feature = "test"))]
+#[cfg(test)]
 mod tests {
     // internal crates
     use super::*;
+    use crate::tests::test_utils::filesys::files::temp;
 
     // ================================ temp ================================= //
 

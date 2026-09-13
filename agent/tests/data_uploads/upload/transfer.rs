@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use crate::mocks::http_client::run_server;
+use crate::tests::mocks::http_client::run_server;
+use crate::tests::test_utils::filesys::files as test_files;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 use miru_agent::data_uploads::upload::errors::TransferErr;
 use miru_agent::data_uploads::upload::transfer::s3_config;
@@ -76,8 +77,8 @@ fn credentials(scheme: &str, s3: Value, gcs: Value) -> UploadCredentials {
 
 /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
 /// the file is not deleted until the test drops it).
-async fn temp_file_with(bytes: &[u8]) -> files::TempFile {
-    let tf = files::temp("upload-transfer-test").unwrap();
+async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
+    let tf = test_files::temp("upload-transfer-test").unwrap();
     files::write_bytes(tf.file(), bytes, WriteOptions::OVERWRITE_NONATOMIC)
         .await
         .unwrap();

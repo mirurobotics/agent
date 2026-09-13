@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
-use miru_agent::filesys::dirs;
 use miru_agent::services::events as events_svc;
 
 // external crates
@@ -20,8 +20,8 @@ fn make_event(event_type: &str) -> EventArgs {
     }
 }
 
-async fn make_hub(name: &str) -> (dirs::TempDir, EventHub) {
-    let dir = dirs::temp(name).unwrap();
+async fn make_hub(name: &str) -> (test_dirs::TempDir, EventHub) {
+    let dir = test_dirs::temp(name).unwrap();
     let log_file = dir.file("events.jsonl");
     let (hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default())
         .await
@@ -29,8 +29,8 @@ async fn make_hub(name: &str) -> (dirs::TempDir, EventHub) {
     (dir, hub)
 }
 
-async fn make_hub_w_retained(name: &str, max_retained: usize) -> (dirs::TempDir, EventHub) {
-    let dir = dirs::temp(name).unwrap();
+async fn make_hub_w_retained(name: &str, max_retained: usize) -> (test_dirs::TempDir, EventHub) {
+    let dir = test_dirs::temp(name).unwrap();
     let log_file = dir.file("events.jsonl");
     let opts = SpawnOptions {
         max_retained,
@@ -268,7 +268,7 @@ mod error {
 
     #[tokio::test]
     async fn broadcast_lag_terminates_stream() {
-        let dir = dirs::temp("svc_sub_lag").unwrap();
+        let dir = test_dirs::temp("svc_sub_lag").unwrap();
         let log_file = dir.file("events.jsonl");
         let opts = SpawnOptions {
             broadcast_capacity: 2,

@@ -27,3 +27,10 @@ pub mod sync;
 pub mod telemetry;
 pub mod version;
 pub mod workers;
+
+#[cfg(test)]
+extern crate self as miru_agent;
+
+#[cfg(test)]
+#[path = "../tests/mod.rs"]
+mod tests;

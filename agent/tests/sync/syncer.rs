@@ -3,8 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::http_client::{Call, MockClient};
-use crate::sync::helpers::*;
+use crate::tests::mocks::http_client::{Call, MockClient};
+use crate::tests::sync::helpers::*;
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager, TokenManagerExt};
 use miru_agent::cooldown;
@@ -15,7 +17,7 @@ use miru_agent::disk::{
 };
 use miru_agent::errors::*;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, dirs, files, Overwrite};
+use miru_agent::filesys::{self, Overwrite};
 use miru_agent::http;
 use miru_agent::http::errors::{HTTPErr, MockErr};
 use miru_agent::models::{Device, DplActivity, DplErrStatus, DplTarget};
@@ -37,9 +39,9 @@ pub async fn create_token_manager(
         .await
         .unwrap();
     let private_key_file = dir.file("private_key.pem");
-    files::seed(&private_key_file, "private_key").await;
+    test_files::seed(&private_key_file, "private_key").await;
     let public_key_file = dir.file("public_key.pem");
-    files::seed(&public_key_file, "public_key").await;
+    test_files::seed(&public_key_file, "public_key").await;
 
     TokenManager::spawn(
         32,
@@ -102,7 +104,7 @@ pub fn spawn(
 // ========================= FIXTURE ========================= //
 
 struct Fixture {
-    _dir: dirs::TempDir,
+    _dir: test_dirs::TempDir,
     http_client: Arc<MockClient>,
     storage: Arc<Storage>,
     syncer: Syncer,
@@ -124,7 +126,7 @@ impl Fixture {
     }
 
     async fn new_with_backoff(name: &str, backoff: cooldown::Backoff) -> Self {
-        let dir = dirs::temp(name).unwrap();
+        let dir = test_dirs::temp(name).unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(dir.dir(), auth_client.clone()).await;
         let token_mngr = Arc::new(token_mngr);
@@ -163,9 +165,7 @@ impl Fixture {
 
     /// Reset cooldown so the next sync() won't be rejected.
     async fn reset_cooldown(&self) {
-        #[cfg(feature = "test")]
         let state = self.syncer.get_sync_state().await.unwrap();
-        #[cfg(feature = "test")]
         self.syncer
             .set_sync_state(State {
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -218,7 +218,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn shutdown() {
-        let dir = dirs::temp("spawn").unwrap();
+        let dir = test_dirs::temp("spawn").unwrap();
         let auth_client = Arc::new(MockClient::default());
         let (token_mngr, _) = create_token_manager(dir.dir(), auth_client.clone()).await;
 
@@ -261,7 +261,6 @@ pub mod is_in_cooldown {
     async fn true_when_in_cooldown() {
         let f = Fixture::new("syncer_ext_cooldown_true").await;
 
-        #[cfg(feature = "test")]
         f.syncer
             .set_sync_state(State {
                 cooldown_ends_at: Utc::now() + TimeDelta::seconds(60),
@@ -289,7 +288,6 @@ pub mod get_cooldown_ends_at {
         let f = Fixture::new("syncer_ext_cooldown_ends").await;
         let target = Utc::now() + TimeDelta::seconds(120);
 
-        #[cfg(feature = "test")]
         f.syncer
             .set_sync_state(State {
                 cooldown_ends_at: target,
@@ -405,7 +403,6 @@ pub mod sync_failure {
         let f = Fixture::new("sync_in_cooldown_error").await;
 
         // set the syncer state to be in cooldown
-        #[cfg(feature = "test")]
         f.syncer
             .set_sync_state(State {
                 last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
@@ -480,7 +477,6 @@ pub mod sync_failure {
             assert!(f.syncer.is_in_cooldown().await.unwrap());
 
             // reset the syncer state
-            #[cfg(feature = "test")]
             f.syncer
                 .set_sync_state(State {
                     cooldown_ends_at: before,
@@ -531,7 +527,6 @@ pub mod sync_failure {
             assert!(f.syncer.is_in_cooldown().await.unwrap());
 
             // reset the syncer state
-            #[cfg(feature = "test")]
             f.syncer
                 .set_sync_state(State {
                     cooldown_ends_at: before,
@@ -581,7 +576,6 @@ pub mod sync_failure {
             assert!(f.syncer.is_in_cooldown().await.unwrap());
 
             // reset the syncer state
-            #[cfg(feature = "test")]
             f.syncer
                 .set_sync_state(State {
                     cooldown_ends_at: before,
@@ -623,7 +617,6 @@ pub mod sync_failure {
             assert!(f.syncer.is_in_cooldown().await.unwrap());
 
             // reset the syncer state
-            #[cfg(feature = "test")]
             f.syncer
                 .set_sync_state(State {
                     cooldown_ends_at: before,
@@ -658,7 +651,6 @@ pub mod sync_failure {
             assert!(f.syncer.is_in_cooldown().await.unwrap());
 
             // reset the syncer state
-            #[cfg(feature = "test")]
             f.syncer
                 .set_sync_state(State {
                     cooldown_ends_at: before,
@@ -720,7 +712,6 @@ pub mod sync_if_not_in_cooldown {
     async fn skips_when_in_cooldown() {
         let f = Fixture::new("sync_if_not_in_cooldown_skip").await;
 
-        #[cfg(feature = "test")]
         f.syncer
             .set_sync_state(State {
                 cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),

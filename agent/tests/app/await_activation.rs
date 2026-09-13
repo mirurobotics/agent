@@ -4,16 +4,18 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{dirs, files};
+use miru_agent::filesys::dirs;
 
 // (none — stdlib + tokio macros)
 
 // ============================ TEST HARNESS ============================ //
 
-async fn fresh_layout(name: &str) -> (Layout, dirs::TempDir) {
-    let dir = dirs::temp(name).unwrap();
+async fn fresh_layout(name: &str) -> (Layout, test_dirs::TempDir) {
+    let dir = test_dirs::temp(name).unwrap();
     let layout = Layout::new(dir.to_dir());
     dirs::create_if_absent(&layout.auth().root).await.unwrap();
     (layout, dir)
@@ -21,8 +23,8 @@ async fn fresh_layout(name: &str) -> (Layout, dirs::TempDir) {
 
 async fn write_keys(layout: &Layout) {
     let auth = layout.auth();
-    files::seed(&auth.private_key(), "private").await;
-    files::seed(&auth.public_key(), "public").await;
+    test_files::seed(&auth.private_key(), "private").await;
+    test_files::seed(&auth.public_key(), "public").await;
 }
 
 // ============================ TESTS ============================ //
@@ -72,8 +74,8 @@ async fn activates_after_n_cycles() {
         async move {
             if n + 1 == activate_after {
                 let auth = layout.auth();
-                files::seed(&auth.private_key(), "private").await;
-                files::seed(&auth.public_key(), "public").await;
+                test_files::seed(&auth.private_key(), "private").await;
+                test_files::seed(&auth.public_key(), "public").await;
             }
         }
     };

@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
-use crate::mocks::http_client::{Call, CapturedRequest, MockClient};
+use crate::tests::mocks::http_client::{Call, CapturedRequest, MockClient};
 use backend_api::models::{
     Deployment as BackendDeployment, DeploymentActivityStatus, DeploymentList,
     UpdateDeploymentRequest,

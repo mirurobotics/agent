@@ -179,7 +179,7 @@ macro_rules! serde_tests {
     ($type:ty) => {
         mod harness {
             use super::*;
-            use crate::models::harnesses::*;
+            use crate::tests::models::harnesses::*;
 
             #[test]
             fn roundtrip() {

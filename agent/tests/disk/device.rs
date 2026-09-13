@@ -2,6 +2,8 @@
 use std::os::unix::fs::PermissionsExt;
 
 // internal crates
+use crate::tests::test_utils::filesys::dirs as test_dirs;
+use crate::tests::test_utils::filesys::files as test_files;
 use miru_agent::authn::Token;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{
@@ -16,8 +18,8 @@ use chrono::{Duration, Utc};
 pub mod assert_activated {
     use super::*;
 
-    async fn fresh_layout() -> (Layout, dirs::TempDir) {
-        let dir = dirs::temp("testing").unwrap();
+    async fn fresh_layout() -> (Layout, test_dirs::TempDir) {
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         dirs::create_if_absent(&layout.auth().root).await.unwrap();
         (layout, dir)
@@ -34,7 +36,7 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_private_key_missing() {
         let (layout, _tmp) = fresh_layout().await;
-        files::seed(&layout.auth().public_key(), "public").await;
+        test_files::seed(&layout.auth().public_key(), "public").await;
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -43,7 +45,7 @@ pub mod assert_activated {
     #[tokio::test]
     async fn returns_err_when_public_key_missing() {
         let (layout, _tmp) = fresh_layout().await;
-        files::seed(&layout.auth().private_key(), "private").await;
+        test_files::seed(&layout.auth().private_key(), "private").await;
 
         let result = assert_activated(&layout).unwrap_err();
         assert!(matches!(result, DiskErr::DeviceNotActivatedErr(_)));
@@ -53,8 +55,8 @@ pub mod assert_activated {
     async fn returns_ok_when_both_keys_present() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
-        files::seed(&auth.private_key(), "private").await;
-        files::seed(&auth.public_key(), "public").await;
+        test_files::seed(&auth.private_key(), "private").await;
+        test_files::seed(&auth.public_key(), "public").await;
 
         assert_activated(&layout).unwrap();
     }
@@ -63,8 +65,8 @@ pub mod assert_activated {
 pub mod activation_state {
     use super::*;
 
-    async fn fresh_layout() -> (Layout, dirs::TempDir) {
-        let dir = dirs::temp("testing").unwrap();
+    async fn fresh_layout() -> (Layout, test_dirs::TempDir) {
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         dirs::create_if_absent(&layout.auth().root).await.unwrap();
         (layout, dir)
@@ -80,7 +82,7 @@ pub mod activation_state {
     #[tokio::test]
     async fn not_activated_when_public_key_missing() {
         let (layout, _tmp) = fresh_layout().await;
-        files::seed(&layout.auth().private_key(), "private").await;
+        test_files::seed(&layout.auth().private_key(), "private").await;
 
         assert_eq!(Activation::NotActivated, activation_state(&layout).unwrap());
     }
@@ -88,7 +90,7 @@ pub mod activation_state {
     #[tokio::test]
     async fn not_activated_when_private_key_missing() {
         let (layout, _tmp) = fresh_layout().await;
-        files::seed(&layout.auth().public_key(), "public").await;
+        test_files::seed(&layout.auth().public_key(), "public").await;
 
         assert_eq!(Activation::NotActivated, activation_state(&layout).unwrap());
     }
@@ -97,8 +99,8 @@ pub mod activation_state {
     async fn activated_when_both_keys_present() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
-        files::seed(&auth.private_key(), "private").await;
-        files::seed(&auth.public_key(), "public").await;
+        test_files::seed(&auth.private_key(), "private").await;
+        test_files::seed(&auth.public_key(), "public").await;
 
         assert_eq!(Activation::Activated, activation_state(&layout).unwrap());
     }
@@ -107,8 +109,8 @@ pub mod activation_state {
     async fn errs_when_auth_dir_is_unreadable() {
         let (layout, _tmp) = fresh_layout().await;
         let auth = layout.auth();
-        files::seed(&auth.private_key(), "private").await;
-        files::seed(&auth.public_key(), "public").await;
+        test_files::seed(&auth.private_key(), "private").await;
+        test_files::seed(&auth.public_key(), "public").await;
 
         dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o000))
             .await
@@ -146,7 +148,7 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn returns_id_from_device_file_when_valid() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         let device = Device {
@@ -163,7 +165,7 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn falls_back_to_token_jwt_when_device_file_missing() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         // no device.json — write a token.json containing a JWT with the
@@ -184,7 +186,7 @@ pub mod resolve_device_id {
 
     #[tokio::test]
     async fn returns_resolve_err_when_no_sources_yield_id() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
 
         // empty layout: no device.json, no token.json
