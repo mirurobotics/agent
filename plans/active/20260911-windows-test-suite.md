@@ -23,6 +23,10 @@ delete-while-open) that a compile check cannot catch, and gating the
 Unix-only-API test code (`PermissionsExt`) that would otherwise fail to compile
 on Windows.
 
+The scope also includes production fixes discovered by the Windows tests:
+home-directory lookup uses `USERPROFILE` on Windows and `HOME` elsewhere, and
+Windows copies with `Sync::Yes` open a writable destination handle for syncing.
+
 Coverage gates stay Linux-only (they need `cargo-llvm-cov` and the
 `.covgate` thresholds are tuned on Linux); the Windows job runs tests
 without coverage.
@@ -46,9 +50,9 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - [x] Initial pre-review Linux validation: `./scripts/test.sh` + `./scripts/lint.sh` green
 - [x] Post-review targeted queue, filesystem, path, and deleter tests green on Linux
 - [x] Push; inspect the first Windows CI test-job failure and fix its compile errors/warnings locally
-- [ ] Re-run Windows CI and iterate until green
+- [x] Re-run Windows CI and iterate until green (2026-09-11, commit `57361317124296750ad8175be10669686eb5f6f0`)
 - [x] PR opened
-- [ ] All checks green
+- [ ] Fresh CI validation of the 2026-09-13 review fixes; all checks green
 
 ## Surprises & Discoveries
 
@@ -92,10 +96,19 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   invalid input before filesystem lookup on Unix and Windows, deterministically
   exercising the existing non-`NotFound` metadata-error branch without a
   production seam or behavior change.
+- 2026-09-13 (review): Windows synced copies of readonly files temporarily
+  clear the destination's readonly attribute, open a writable handle, then
+  restore the original permissions before syncing. The clear/open/restore
+  sequence is synchronous within a blocking task; restoration is attempted
+  even when opening fails, and restoration errors propagate as `WriteFileErr`.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Windows test execution, portable fixtures and assertions, and the production
+home-lookup and synced-copy fixes are implemented. CI was green on 2026-09-11
+at `57361317124296750ad8175be10669686eb5f6f0`
+([run 34658026631](https://github.com/mirurobotics/agent/actions/runs/34658026631)).
+Fresh CI validation of the 2026-09-13 review fixes is pending.
 
 ## Audit inventory
 
@@ -124,7 +137,9 @@ Portable scenarios remain enabled on Windows:
   pins, and expected `File` values are deserialized from the literal.
 - Filesystem error-display tests derive expected strings from their `PathBuf`,
   `File`, and `Dir` fixtures. The home-directory test compares directly with
-  `PathBuf::from(env::var("HOME").unwrap())` without changing the environment.
+  `USERPROFILE` on Windows or `HOME` elsewhere, without changing the environment.
+- Windows synced-copy coverage includes a readonly source and verifies the
+  copied contents and preserved destination readonly attribute.
 
 Already gated (no action): `tests/mod.rs` `privilege` module, `deploy/apply.rs`
 perm tests, the existing `#[cfg(unix)]` mode-test bodies in `filesys/{dirs,
@@ -171,8 +186,14 @@ existing-directory-as-`File` fixture.
 3. Behavioral path assertions accept native separators without weakening queue
    ordering/error semantics; literal persisted JSON remains pinned exactly.
 4. CI enforces the Windows test run on every PR.
+5. Home-directory lookup matches `USERPROFILE` on Windows and `HOME` elsewhere.
+6. A Windows copy with `Sync::Yes` succeeds for a readonly source and preserves
+   the destination's readonly attribute.
 
 ## Idempotence and Recovery
 
-Test-only modules, plan text, and CI edits on a feature branch; revert = delete
-branch. No production behavior, wire format, or packaging changes.
+Revert the relevant commits to undo the production, test, plan, and CI changes;
+deleting the feature branch does not undo merged changes. Wire format and
+packaging are unchanged. Copy or sync failure can leave a copied destination.
+If restoring permissions fails, the operation reports `WriteFileErr` and the
+destination's readonly attribute may remain cleared.
