@@ -212,11 +212,12 @@ function Assert-FailingFixtureContract {
     try {
         $installer = New-Object -ComObject WindowsInstaller.Installer
         $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
-        $action = @(Get-MsiQueryRows $database "SELECT ``Type``, ``Source``, ``Target`` FROM ``CustomAction`` WHERE ``Action``='FailUpgradeForTest'" 3)
+        $actions = @(Get-MsiQueryRows $database "SELECT ``Action``, ``Type``, ``Source``, ``Target`` FROM ``CustomAction``" 4)
+        $action = @($actions | Where-Object { $_[0] -eq "FailUpgradeForTest" })
         Assert-Equal 1 $action.Count "one failing fixture custom action"
-        Assert-Equal 3106 ([int]$action[0][0]) "deferred no-impersonate checked Type 34 action"
-        Assert-Equal "SystemFolder" $action[0][1] "failing action SystemFolder source"
-        Assert-Equal "[SystemFolder]cmd.exe /d /c exit /b 1" $action[0][2] "isolated cmd failure command"
+        Assert-Equal 3106 ([int]$action[0][1]) "deferred no-impersonate checked Type 34 action"
+        Assert-Equal "SystemFolder" $action[0][2] "failing action SystemFolder source"
+        Assert-Equal "[SystemFolder]cmd.exe /d /c exit /b 1" $action[0][3] "isolated cmd failure command"
         $sequence = @(Get-MsiQueryRows $database "SELECT ``Action``, ``Condition``, ``Sequence`` FROM ``InstallExecuteSequence``" 3)
         $fixtureRow = @($sequence | Where-Object { $_[0] -eq "FailUpgradeForTest" })
         Assert-Equal 1 $fixtureRow.Count "one failing action sequence row"
@@ -403,8 +404,8 @@ try {
     Assert-Equal 0 $LASTEXITCODE "pre-existing ProgramData inheritance enabled"
     Add-PermissiveAces
 
-    & net.exe user $testUser $testPassword /add /y | Out-Null
-    Assert-Equal 0 $LASTEXITCODE "temporary local user created"
+    $secureTestPassword = ConvertTo-SecureString $testPassword -AsPlainText -Force
+    New-LocalUser -Name $testUser -Password $secureTestPassword | Out-Null
     $createdUser = $true
 
     Invoke-Msi @("/i", ('"{0}"' -f $v1)) "fixture-v1" @(0, 3010) | Out-Null
@@ -504,12 +505,14 @@ finally {
         [void]$cleanupFailures.Add("product cleanup failed: $($_.Exception.Message)")
     }
     if ($createdUser) {
-        $deleteOutput = @(& net.exe user $testUser /delete 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            [void]$cleanupFailures.Add("temporary user deletion failed: $($deleteOutput -join ' ')")
+        try {
+            Remove-LocalUser -Name $testUser -ErrorAction Stop
         }
-        $null = & net.exe user $testUser 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        catch {
+            [void]$cleanupFailures.Add("temporary user deletion failed: $($_.Exception.Message)")
+        }
+        $remainingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
+        if ($null -ne $remainingUser) {
             [void]$cleanupFailures.Add("temporary user $testUser still exists after deletion")
         }
     }
