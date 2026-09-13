@@ -49,9 +49,7 @@ function Invoke-DotNetBuild {
     )
     if ($ProductCode) { $arguments += "-p:ProductCode=$ProductCode" }
     if ($TestWixSource) { $arguments += "-p:TestWixSource=$TestWixSource" }
-    if ($FixturePayloadPath) {
-        $arguments += "-p:DefineConstants=Version=$Version;BinDir=$script:resolvedBinDir;ProductCode=$ProductCode;FixturePayloadPath=$FixturePayloadPath"
-    }
+    if ($FixturePayloadPath) { $arguments += "-p:FixturePayloadPath=$FixturePayloadPath" }
     & dotnet @arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for version $Version" }
     $msi = Get-ChildItem -LiteralPath $OutputDirectory -Filter "*.msi" -File -Recurse |

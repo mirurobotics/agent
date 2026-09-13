@@ -9,6 +9,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
     <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
+    <DefineConstants Condition="'$(FixturePayloadPath)' != ''">$(DefineConstants);FixturePayloadPath=$(FixturePayloadPath)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -41,5 +42,7 @@
            Text="BinDir does not exist: $(BinDir)" />
     <Error Condition="'$(BinDir)' != '' and !Exists('$(BinDir)\miru-agent.exe')"
            Text="BinDir must contain miru-agent.exe: $(BinDir)" />
+    <Error Condition="'$(TestWixSource)' != '' and '$(FixturePayloadPath)' == ''"
+           Text="FixturePayloadPath is required when TestWixSource is set." />
   </Target>
 </Project>
