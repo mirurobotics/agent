@@ -8,7 +8,7 @@ use miru_agent::trace;
 /// RAII temp directory for TESTS. Owns a `tempfile::TempDir` (Drop deletes the
 /// dir) plus our `Dir` handle; the directory lives exactly as long as this value.
 #[derive(Debug)]
-pub(crate) struct TempDir {
+pub struct TempDir {
     _guard: tempfile::TempDir,
     dir: Dir,
 }
