@@ -13,7 +13,6 @@
 #   CARGO_FEATURES     — optional Cargo feature flags
 #   CARGO_TEST_ARGS    — e.g. "-- --test-threads=1"
 #   RUST_LOG_OVERRIDE  — e.g. "off"
-#   COV_IGNORE_FILENAME_REGEX — optional source filename exclusion regex
 set -e
 
 cd "$CRATE_DIR"
@@ -46,13 +45,9 @@ echo "Running tests with coverage instrumentation..."
 echo ""
 
 # Run cargo-llvm-cov once, capture JSON output
-set --
-if [ -n "${COV_IGNORE_FILENAME_REGEX:-}" ]; then
-    set -- --ignore-filename-regex "$COV_IGNORE_FILENAME_REGEX"
-fi
 set +e
 # shellcheck disable=SC2086
-COV_JSON=$(cargo llvm-cov --json "$@" $CARGO_PKG $CARGO_FEATURES $CARGO_TEST_ARGS)
+COV_JSON=$(cargo llvm-cov --json $CARGO_PKG $CARGO_FEATURES $CARGO_TEST_ARGS)
 TEST_EXIT=$?
 set -e
 

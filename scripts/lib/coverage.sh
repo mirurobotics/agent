@@ -9,7 +9,6 @@
 #   CARGO_FEATURES     — optional Cargo feature flags
 #   CARGO_TEST_ARGS    — e.g. "-- --test-threads=1"
 #   RUST_LOG_OVERRIDE  — e.g. "off"
-#   COV_IGNORE_FILENAME_REGEX — optional source filename exclusion regex
 #
 # Usage: coverage.sh [--report-only]
 # Report-only mode uses previously recorded coverage without running tests.
@@ -42,9 +41,6 @@ if "$report_only"; then
 fi
 # shellcheck disable=SC2086
 set -- "$@" --html --output-dir target/coverage $CARGO_PKG $CARGO_FEATURES
-if [ -n "${COV_IGNORE_FILENAME_REGEX:-}" ]; then
-    set -- "$@" --ignore-filename-regex "$COV_IGNORE_FILENAME_REGEX"
-fi
 if ! "$report_only"; then
     # shellcheck disable=SC2086
     set -- "$@" $CARGO_TEST_ARGS
