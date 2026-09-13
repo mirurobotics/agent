@@ -62,7 +62,7 @@ jobs:
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,9 +77,6 @@ jobs:
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@21eb0b6228fa6252dafdd9c82e7516ad2328c775 # cargo-llvm-cov
-
-      - name: Install Coverage Gate Tools
-        run: sudo apt-get install -y jq
 
       - name: Check Linux Production Build
         run: cargo check --package miru-agent --locked
