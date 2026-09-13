@@ -2,7 +2,7 @@
 
 This directory contains the pinned WiX project for a validated x64 Miru Agent
 MSI. Native Windows compile CI was established in PR #234; PR #236 adds the
-package contract and the safe Windows PowerShell install and provisioning tools.
+package contract and direct Windows Installer lifecycle validation.
 
 The current executable is console-capable but is not a Windows Service Control
 Manager executable. Accordingly, this MSI does not create, start, stop, or
@@ -54,69 +54,50 @@ project; package validation is enabled and warnings fail the build.
 ## Install and provision
 
 Run installation from an elevated 64-bit Windows PowerShell 5.1 session. The
-current supported workflow is to install a trusted MSI built locally, optionally
-requiring its metadata version to match:
+current package is built and tested locally; publishing release artifacts and a
+WinGet manifest remains follow-up work. Install a trusted MSI directly with
+Windows Installer:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\install.ps1 -FromMsi C:\path\to\miru-agent-1.0.0.msi -Version v1.0.0
+$msi = "C:\path\to\miru-agent-1.0.0.msi"
+$log = Join-Path $env:TEMP "miru-agent-install.log"
+$arguments = @("/i", ('"{0}"' -f $msi), "/qn", "/norestart", "/l*v", ('"{0}"' -f $log))
+$process = Start-Process -FilePath "msiexec.exe" -ArgumentList $arguments -Wait -PassThru
+if (@(0, 3010) -notcontains $process.ExitCode) {
+    throw "Installation failed with exit code $($process.ExitCode); see $log"
+}
 ```
 
 An install exit code of 0 means success. Exit code 3010 also means success, but
 Windows must be restarted to complete the installation. Any other result is a
-failure; its error names the retained verbose installer log.
-
-After Windows release artifacts and their checksum manifests are published, the
-installer can download a stable release by version:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\install.ps1 -Version v1.0.0
-```
-
-For that future download workflow, the MSI is matched to an exact SHA-256
-checksum record. Checksums detect corruption but do not authenticate the
-publisher.
+failure; inspect the verbose log. Published packages must be Authenticode-signed
+before customer distribution.
 
 Provision by placing the secret only in the process environment, then invoke the
-wrapper. Do not put the token on the command line:
+installed executable directly. Do not put the token on the command line:
 
 ```powershell
-$tokenName = "MIRU_PROVISIONING_TOKEN"
-$processEnvironment = [Environment]::GetEnvironmentVariables([EnvironmentVariableTarget]::Process)
-$callerHadToken = $processEnvironment.Contains($tokenName)
-$callerToken = if ($callerHadToken) { [string]$processEnvironment[$tokenName] } else { $null }
+$agent = Join-Path $env:ProgramW6432 "Miru\Agent\miru-agent.exe"
 $tokenPointer = [IntPtr]::Zero
 try {
     $secureToken = Read-Host "Provisioning token" -AsSecureString
     $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
     $env:MIRU_PROVISIONING_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\provision.ps1
+    & $agent provision
+    if ($LASTEXITCODE -ne 0) { throw "Provisioning failed with exit code $LASTEXITCODE" }
 } finally {
     if ($tokenPointer -ne [IntPtr]::Zero) {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
     }
-    if ($callerHadToken) {
-        [Environment]::SetEnvironmentVariable($tokenName, $callerToken, [EnvironmentVariableTarget]::Process)
-    } else {
-        [Environment]::SetEnvironmentVariable($tokenName, $null, [EnvironmentVariableTarget]::Process)
-    }
+    Remove-Item Env:MIRU_PROVISIONING_TOKEN -ErrorAction SilentlyContinue
 }
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install\provision.ps1 -Check
+& $agent provision --check
 ```
 
-The provisioning wrapper invokes the installed executable directly and restores
-the prior process environment exactly. `-Check` is read-only and returns 0 when
-provisioned, 3 when not provisioned, and 1 when the state is undetermined or an
-error occurs.
+`provision --check` is read-only and returns 0 when provisioned, 3 when not
+provisioned, and 1 when the state is undetermined or an error occurs.
 
 ## Validation
-
-Run the dependency-free parser and focused script checks under Windows
-PowerShell 5.1:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\parse-scripts.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\script-tests.ps1
-```
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
 integration matrix only on a disposable test machine. Normal integration removes
@@ -127,9 +108,10 @@ deletes a temporary local user, so the explicit confirmation is required:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 ```
 
-The matrix covers initial install, maintenance, upgrade, downgrade rejection,
-failed-upgrade rollback, uninstall, ACL repair, state retention, provisioning
-check exit 3 on a fresh install, and the absence of a `MiruAgent` service.
+The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
+failed-upgrade rollback, uninstall, ACL repair, state retention, direct binary
+provisioning check exit 3 on a fresh install, and the absence of a `MiruAgent`
+service.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru\logs`. The
 root and `logs` DACLs must remain protected and permit inheritable full control
@@ -155,6 +137,6 @@ ProgramData sentinel and customer-owned log for inspection. Revert the VM
 snapshot afterward rather than deleting retained customer state.
 
 Authenticode signing of the executable and MSI remains deferred, along with the
-GoReleaser/PDB release lane, artifact publication, Windows service lifecycle,
-account and recovery handling, full live-backend provisioning, and Windows
-Server certification.
+GoReleaser/PDB release lane, artifact and WinGet publication, Windows service
+lifecycle, account and recovery handling, full live-backend provisioning, and
+Windows Server certification.

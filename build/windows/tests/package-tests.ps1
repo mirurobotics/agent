@@ -52,7 +52,7 @@ function Invoke-DotNetBuild {
     if ($FixturePayloadPath) {
         $arguments += "-p:DefineConstants=Version=$Version;BinDir=$script:resolvedBinDir;ProductCode=$ProductCode;FixturePayloadPath=$FixturePayloadPath"
     }
-    & dotnet @arguments
+    & dotnet @arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for version $Version" }
     $msi = Get-ChildItem -LiteralPath $OutputDirectory -Filter "*.msi" -File -Recurse |
         Where-Object { $_.FullName -notmatch '\\obj\\' } |
@@ -237,7 +237,6 @@ $v1Directory = Remove-AndCreateChild $resolvedArtifacts "v1"
 $v2Directory = Remove-AndCreateChild $resolvedArtifacts "v2"
 $boundariesDirectory = Remove-AndCreateChild $resolvedArtifacts "boundaries"
 $invalidDirectory = Remove-AndCreateChild $resolvedArtifacts "invalid"
-$logsDirectory = Remove-AndCreateChild $resolvedArtifacts "logs"
 
 $v1Built = Invoke-DotNetBuild -Version "1.0.0" -OutputDirectory $v1Directory
 $v1Path = Join-Path $v1Directory "miru-agent-1.0.0.msi"
@@ -258,33 +257,16 @@ Write-Host "PASS ProductCodes differ"
 Assert-Equal $v1.UpgradeCode $v2.UpgradeCode "normal UpgradeCode remains stable"
 Write-Host "PASS UpgradeCode stable"
 
-$boundaryPaths = @{}
 foreach ($version in @("0.0.0", "255.255.65535")) {
     $directory = Join-Path $boundariesDirectory $version
     New-Item -ItemType Directory -Path $directory | Out-Null
     $built = Invoke-DotNetBuild -Version $version -OutputDirectory $directory
     $destination = Join-Path $boundariesDirectory "miru-agent-$version.msi"
     Copy-Item -LiteralPath $built -Destination $destination -Force
-    $boundaryPaths[$version] = $destination
     Assert-Package $destination $version | Out-Null
     Assert-ProductionTables $destination
 }
 Write-Host "PASS version boundaries (0.0.0, 255.255.65535)"
-
-# Exercise the production installer's Windows Installer COM reader against real
-# packages, in addition to the focused harness's synthetic metadata matrix.
-$projectDirectory = Split-Path $resolvedProject -Parent
-$repositoryRoot = Split-Path (Split-Path $projectDirectory -Parent) -Parent
-. (Join-Path $repositoryRoot "scripts\install\install.ps1")
-foreach ($realPackage in @(
-    @{ Path = $v1Path; Version = "1.0.0" },
-    @{ Path = $v2Path; Version = "1.1.0" },
-    @{ Path = $boundaryPaths["0.0.0"]; Version = "0.0.0" },
-    @{ Path = $boundaryPaths["255.255.65535"]; Version = "255.255.65535" }
-)) {
-    $installerMetadata = Get-MsiMetadata -Path $realPackage.Path
-    Assert-Equal $realPackage.Version (Assert-MiruMsiMetadata -Metadata $installerMetadata -ExpectedVersion $realPackage.Version) "production metadata reader $($realPackage.Version)"
-}
 
 $common = @("-p:BinDir=$resolvedBinDir", "-p:Platform=x64")
 Invoke-ExpectedBuildFailure "omitted-version" $common "Version is required"
