@@ -42,31 +42,42 @@ jobs:
     name: windows-scope
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
+      contents: read
       pull-requests: read
     outputs:
-      windows_compile: ${{ github.event_name != 'pull_request' || steps.filter.outputs.windows_compile == 'true' }}
-      windows_package: ${{ github.event_name != 'pull_request' || steps.filter.outputs.windows_package == 'true' }}
+      windows_compile: ${{ steps.scope.outputs.windows_compile }}
+      windows_package: ${{ steps.scope.outputs.windows_package }}
     steps:
-      - name: Classify pull request changes
-        if: github.event_name == 'pull_request'
-        id: filter
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+      - name: Classify changes
+        id: scope
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
-          filters: |
-            windows_compile:
-              - '.cargo/**'
-              - 'Cargo.lock'
-              - 'Cargo.toml'
-              - 'rust-toolchain.toml'
-              - 'agent/**'
-              - 'libs/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/release.yml'
-              - 'build/windows/**'
-            windows_package:
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/release.yml'
-              - 'build/windows/**'
+          script: |
+            if (context.eventName !== 'pull_request') {
+              core.setOutput('windows_compile', true)
+              core.setOutput('windows_package', true)
+              return
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            })
+            const paths = files.map(({ filename }) => filename)
+            const workflowFiles = new Set([
+              '.github/workflows/ci.yml',
+              '.github/workflows/release.yml',
+            ])
+            const isPackageInput = (path) =>
+              workflowFiles.has(path) || path.startsWith('build/windows/')
+            const isCompileInput = (path) =>
+              isPackageInput(path) ||
+              ['Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml'].includes(path) ||
+              ['.cargo/', 'agent/', 'libs/'].some((prefix) => path.startsWith(prefix))
+
+            core.setOutput('windows_compile', paths.some(isCompileInput))
+            core.setOutput('windows_package', paths.some(isPackageInput))
 
   # Compile Windows-affecting pull requests and run the complete MSI lifecycle
   # for package changes, protected branches, and release workflow calls.
