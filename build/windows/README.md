@@ -19,7 +19,8 @@ The MSI:
   replacement can restore the previously installed package;
 - protects `%ProgramData%\Miru` and its authored `logs` child with a non-inherited,
   inheritable DACL granting full control only to Local System and built-in
-  Administrators; and
+  Administrators, so state created after installation inherits that protection;
+  and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
   maintenance, upgrades, rollback, and ordinary uninstall.
 
@@ -116,7 +117,7 @@ Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru\logs`. The
 root and `logs` DACLs must remain protected and permit inheritable full control
 only for Local System and built-in Administrators; non-administrators must not
-read sensitive state or create children.
+read sensitive state created after installation or create children.
 
 For the production smoke pass, start from a disposable clean Windows 10 or 11
 x64 VM snapshot with no installed Miru product. Build the production 1.0.0 and
