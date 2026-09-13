@@ -31,9 +31,12 @@ use tokio::sync::broadcast;
 
 All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `agent/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `agent/src/errors/`).
 
-### Feature flags
+### Test visibility
 
-`#[cfg(feature = "test")]` gates test-only code (mock implementations, state setters). Never use this flag in production code paths.
+Use ordinary `#[cfg(test)]` for additive test inspection and state setup, with
+private or `pub(crate)` visibility. Put reusable fixtures in
+`agent/tests/test_utils/`. Production algorithms and client construction must
+use the same code in normal and test builds; tests control dependencies and time.
 
 ### Enum conventions
 
@@ -57,16 +60,21 @@ Pick the enum facility by what the enum needs to do:
 
 ## Testing
 
-Always use `scripts/test.sh`:
+Ordinary Cargo tests and the logging-suppressed wrapper are supported:
 
 ```bash
+cargo test
+cargo test --package miru-agent
 ./scripts/test.sh
-# Runs: RUST_LOG=off cargo test --features test
+# Wrapper runs: RUST_LOG=off cargo test --package miru-agent
 ```
 
-The `--features test` flag is required — many test helpers and mocks are behind
-`#[cfg(feature = "test")]`. Without it, tests will fail with misleading errors
-(missing test helpers).
+No custom feature or preconfigured `RUST_LOG` is required. `agent/tests/mod.rs`
+is mounted as the private `tests` module in the library's unit-test build.
+Test-harness imports use `crate::tests::...`; production APIs retain their usual
+paths. The explicit `http_retry`, `logs_init_smoke`, and `logs_init_locked`
+integration targets exercise public APIs from an ordinary library build, with
+logging initialization isolated in separate processes.
 
 Tests run in parallel by default. Tests that bind shared OS resources (e.g.,
 `/tmp/miru.sock`) are annotated with `#[serial]` from the `serial_test` crate,

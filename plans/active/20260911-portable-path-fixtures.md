@@ -132,8 +132,8 @@ Windows requires a drive/UNC prefix — `/etc/foo.json` is relative there.
 `deploy::filesys::validate_filepath` (absolute + no `..`) is exercised by
 unit tests in `agent/src/deploy/filesys.rs` and integration tests in
 `agent/tests/deploy/filesys.rs`. `disk::Layout::root()` is per-OS since
-#232. Repo conventions: import ordering, `./scripts/test.sh`
-(`--features test` required), `./scripts/lint.sh`, funclen ≤ 50.
+#232. Repo conventions: import ordering, ordinary `cargo test` or
+`./scripts/test.sh`, `./scripts/lint.sh`, funclen ≤ 50.
 
 ## Plan of Work / Concrete Steps
 

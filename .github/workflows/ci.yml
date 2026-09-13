@@ -62,7 +62,8 @@ jobs:
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    # Ordinary test runs and both coverage entry points share cached builds.
+    timeout-minutes: 45
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,8 +79,30 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@21eb0b6228fa6252dafdd9c82e7516ad2328c775 # cargo-llvm-cov
 
-      - name: Run Tests and Coverage
-        run: ./scripts/covgate.sh
+      - name: Install Coverage Gate Tools
+        run: sudo apt-get install -y jq
+
+      - name: Check Linux Production Build
+        run: cargo check --package miru-agent --locked
+
+      - name: Run Ordinary Cargo Tests
+        run: |
+          env -u RUST_LOG cargo test
+          env -u RUST_LOG cargo test --package miru-agent
+          env -u RUST_LOG ./scripts/test.sh
+
+      - name: Record Test Inventory
+        run: |
+          env -u RUST_LOG cargo test --package miru-agent --lib -- --list
+          env -u RUST_LOG cargo test --package miru-agent --test http_retry -- --list
+          env -u RUST_LOG cargo test --package miru-agent --test logs_init_smoke -- --list
+          env -u RUST_LOG cargo test --package miru-agent --test logs_init_locked -- --list
+
+      - name: Run Coverage Wrappers
+        run: |
+          env -u RUST_LOG ./scripts/coverage.sh
+          test -f target/coverage/html/index.html
+          env -u RUST_LOG ./scripts/covgate.sh
 
   tools:
     runs-on: blacksmith-4vcpu-ubuntu-2404

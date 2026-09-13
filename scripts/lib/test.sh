@@ -6,7 +6,7 @@
 #
 # Optional env:
 #   CARGO_PKG          — e.g. "--package miru-agent" (empty = default crate)
-#   CARGO_FEATURES     — e.g. "--features test"      (empty = no extra features)
+#   CARGO_FEATURES     — optional Cargo feature flags      (empty = no extra features)
 #   CARGO_TEST_ARGS    — e.g. "-- --test-threads=1"  (empty = no extra args)
 #   RUST_LOG_OVERRIDE  — e.g. "off"                  (empty = inherit RUST_LOG)
 set -e
