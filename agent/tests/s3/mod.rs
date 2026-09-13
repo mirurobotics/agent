@@ -191,6 +191,15 @@ pub mod put {
                 requests[0].uri().to_string(),
                 uri("artifacts/hello.txt?x-id=PutObject")
             );
+            assert!(requests[0]
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .contains("Credential=access-key/"));
+            assert_eq!(
+                Some("session-token"),
+                requests[0].headers().get("x-amz-security-token")
+            );
         }
 
         #[tokio::test]

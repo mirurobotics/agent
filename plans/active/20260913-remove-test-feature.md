@@ -24,7 +24,7 @@ Developers can run ordinary `cargo test` and `cargo test --package miru-agent` s
 
 
 - [x] Capture baseline evidence and migrate the private-helper suite and fixtures.
-- [x] Unify retry and cloud construction, then remove the Cargo feature (source implementation complete; regression additions and CI verification pending).
+- [x] Unify retry and cloud construction, remove the Cargo feature, and add focused timing/arithmetic and signing regressions (CI verification pending).
 - [x] Update wrappers, CI, and operative documentation (execution evidence pending).
 - [ ] Complete inventory comparison, refinement, and preflight on the pushed final commit.
 
@@ -33,6 +33,7 @@ Developers can run ordinary `cargo test` and `cargo test --package miru-agent` s
 
 - 2026-09-13: The successful base CI run is [34647851771](https://github.com/mirurobotics/agent/actions/runs/34647851771), at unchanged `origin/main` SHA `a0e7afb33fd8964539e9e309f0c83943b14c5033`. The jobs logs API supplied the complete execution inventory for test job `103422810288` when `gh run view --log` returned empty output. Evidence is retained locally in `/tmp/agent-test-feature-evidence.HAKWKx/baseline.json` and `baseline-test.log` in that directory: 354 library tests, 1,640 `mod` integration tests, and one case in each logging target, totaling 1,996 with no ignored cases or duplicates.
 - 2026-09-13: Both filesystem guard tests can stay in their original source-inline modules by importing the relocated support functions. Their target and names remain unchanged; the six retry cases alone leave the broad suite for the `http_retry` integration target.
+- 2026-09-13: Advancing paused Tokio time does not guarantee that an expired sleep completes on its first subsequent poll. The isolated retry target uses bounded runnable rescheduling and non-idling polls, checking that the clock stays frozen while ready timer work is processed before each timing assertion.
 
 ## Decision Log
 
@@ -40,11 +41,14 @@ Developers can run ordinary `cargo test` and `cargo test --package miru-agent` s
 - 2026-09-13: Keep test fixtures beneath the private library `tests` module and make the new filesystem guard types and helpers crate-private. Existing production imports retain their API paths through the test-only self alias; suite and macro harness references explicitly use `crate::tests` or `$crate::tests`.
 - 2026-09-13: Use one ordinary S3 builder with caller credentials, optional HTTP transport, and a path-style setting. Default store and transfer construction keep the normal HTTPS connector, endpoint resolution, and `force_path_style = false`; replay constructors set transport and path style as data. GCS transfer construction calls its existing shared builder with an optional endpoint, retaining token validation, retry limits, and timeouts.
 - 2026-09-13: Retain both logging integration processes and configure `RUST_LOG` inside each before subscriber work. Increase the Linux test-job timeout from 20 to 45 minutes because that job now executes both ordinary Cargo invocations, the test wrapper, and both coverage entry points while reusing cached builds.
+- 2026-09-13: Strengthen the existing six public retry cases with paused time only in their separate executable. Check both retry windows at 499/1,000 and 1,499/2,000 ms, immediate success/application failures without elapsed time, and the mixed network/application stop at 1,000 ms. Add only one inline table-driven arithmetic case. Assert delimiter-qualified signing credentials (`Credential=access-key/` and `Credential=AKIA_TEST/`) plus exact session tokens in existing S3 replay cases, preserving the replay header exclusions and all existing fixture, logging, scanner/sync, S3, and GCS coverage.
 
 ## Outcomes & Retrospective
 
 
-The source, fixture, wrapper, CI, and operative documentation changes are prepared. File-focused rustfmt parsing/formatting, shell syntax checks, and `git diff --check` pass. A static preservation check across changed Rust files found 2,606 assertion macro invocations and 1,339 test attributes both before and after this source-only migration; this is an editing safeguard, not a replacement for the runtime inventory comparison. No new regression cases have been added in this step. The dedicated test workers still need to add the retry timing/arithmetic and S3 signing regressions, followed by refinement and full CI validation. No heavy local validation, threshold changes, generated-library edits, commits, or pushes were performed during the source implementation step. This plan remains active until the final acceptance conditions are met.
+The source, fixture, wrapper, CI, and operative documentation changes are prepared. File-focused rustfmt parsing/formatting, shell syntax checks, and `git diff --check` passed during the source implementation step. Its static preservation check across changed Rust files found 2,606 assertion macro invocations and 1,339 test attributes both before and after that source-only migration; this is an editing safeguard, not a replacement for the runtime inventory comparison.
+
+The test implementation strengthens the six existing retry cases and two existing S3 replay cases and adds the inline `http::retry::tests::retry_delay_from_nanos_respects_jitter_boundaries` case. Expected equivalent-Linux inventory is 1,989 library cases (`354 + 1,640 - 6 + 1`), six `http_retry` cases, and one case in each logging target: 1,997 total. File-scoped `rustfmt --check --edition 2021 --config skip_children=true` passed for the four edited Rust files, and `git diff --check` passed. Static inspection confirmed all six retry names remain and the `.covgate` diff is empty. These are expected counts; runtime inventory, coverage, refinement, and full CI validation remain pending. No local compilation/full tests, threshold changes, generated-library edits, commits, or pushes were performed during the test implementation step. This plan remains active until the final acceptance conditions are met.
 
 ## Context and Orientation
 

@@ -252,6 +252,15 @@ async fn s3_transfer_puts_object_to_bucket_name_and_key() {
         requests[0].headers().get("x-amz-meta-device_id"),
         Some("dvc_1")
     );
+    assert!(requests[0]
+        .headers()
+        .get("authorization")
+        .unwrap()
+        .contains("Credential=AKIA_TEST/"));
+    assert_eq!(
+        Some("session"),
+        requests[0].headers().get("x-amz-security-token")
+    );
 }
 
 #[tokio::test]
@@ -275,9 +284,9 @@ async fn s3_put_failure_maps_to_executor_err() {
 
 #[tokio::test]
 async fn s3_default_store_fails_offline_on_missing_file() {
-    // No override: the production `s3::Store::new` arm runs. It does no I/O at
-    // construction and `put` stats the file before dispatching any request, so
-    // a missing local file fails fast offline.
+    // Default settings use the shared S3 builder without a transport override.
+    // Construction does no I/O and `put` stats the file before dispatching any
+    // request, so a missing local file fails fast offline.
     let creds = credentials("s3", s3_credentials_json(), Value::Null);
     let missing = File::new("/nonexistent/definitely/not/here.log");
 
@@ -386,10 +395,10 @@ async fn gcs_put_failure_maps_to_executor_err() {
 
 #[tokio::test]
 async fn gcs_default_store_fails_offline_on_missing_file() {
-    // No override and a valid token: the production `gcs::Store::new` arm
+    // Default settings and a valid token use the shared GCS builder, which
     // builds successfully offline (the invalid-token test covers its build
-    // error path) and `put` stats the file before dispatching any request, so
-    // a missing local file fails fast offline.
+    // error path). `put` stats the file before dispatching any request, so a
+    // missing local file fails fast offline.
     let creds = credentials("gcs", Value::Null, gcs_credentials_json("valid-token"));
     let missing = File::new("/nonexistent/definitely/not/here.log");
 

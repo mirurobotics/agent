@@ -43,3 +43,20 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::retry_delay_from_nanos;
+
+    #[test]
+    fn retry_delay_from_nanos_respects_jitter_boundaries() {
+        for (nanos, expected_ms) in [(0, 500), (499, 999), (500, 500)] {
+            assert_eq!(
+                expected_ms,
+                retry_delay_from_nanos(nanos),
+                "subsecond nanoseconds: {nanos}"
+            );
+        }
+    }
+}
