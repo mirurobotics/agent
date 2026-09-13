@@ -100,6 +100,13 @@ provisioned, and 1 when the state is undetermined or an error occurs.
 
 ## Validation
 
+Pull requests that change Rust or Windows build inputs run a native Windows
+compile check. Pull requests that change this directory or the CI/release
+workflows run the complete package and installer lifecycle matrix below. The
+complete matrix also runs after pushes to `main` and `release/*`, and when the
+release workflow calls CI for a tag; documentation-only pull requests do not
+allocate a Windows runner. Superseded pull-request CI runs are cancelled.
+
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
 integration matrix only on a disposable test machine. Normal integration removes
 allowlisted fixture products, changes `%ProgramData%\Miru`, and creates and

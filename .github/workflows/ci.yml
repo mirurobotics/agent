@@ -7,6 +7,10 @@ on:
     branches: [main, "release/*"]
   workflow_call:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -34,9 +38,42 @@ jobs:
       - name: Run Linter
         run: LINT_FIX=0 ./scripts/lint.sh
 
-  # Build and exercise the Windows package natively. aws-lc-sys cannot
-  # cross-compile from Linux because its build script drives the host compiler.
+  windows_scope:
+    name: windows-scope
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      pull-requests: read
+    outputs:
+      windows_compile: ${{ github.event_name != 'pull_request' || steps.filter.outputs.windows_compile == 'true' }}
+      windows_package: ${{ github.event_name != 'pull_request' || steps.filter.outputs.windows_package == 'true' }}
+    steps:
+      - name: Classify pull request changes
+        if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        with:
+          filters: |
+            windows_compile:
+              - '.cargo/**'
+              - 'Cargo.lock'
+              - 'Cargo.toml'
+              - 'rust-toolchain.toml'
+              - 'agent/**'
+              - 'libs/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+              - 'build/windows/**'
+            windows_package:
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+              - 'build/windows/**'
+
+  # Compile Windows-affecting pull requests and run the complete MSI lifecycle
+  # for package changes, protected branches, and release workflow calls.
+  # aws-lc-sys requires a native Windows host compiler.
   windows-check:
+    needs: windows_scope
+    if: needs.windows_scope.outputs.windows_compile == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -58,22 +95,30 @@ jobs:
           choco install nasm -y
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
+      - name: Check Windows Target
+        if: needs.windows_scope.outputs.windows_package != 'true'
+        run: cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked
+
       - name: Build Windows Target
+        if: needs.windows_scope.outputs.windows_package == 'true'
         run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
 
       - name: Restore pinned WiX SDK
+        if: needs.windows_scope.outputs.windows_package == 'true'
         run: dotnet restore build/windows/miru-agent.wixproj
 
       - name: Validate Windows packages
+        if: needs.windows_scope.outputs.windows_package == 'true'
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 
       - name: Run elevated Windows installer integration tests
+        if: needs.windows_scope.outputs.windows_package == 'true'
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
       - name: Upload Windows installer failure logs
-        if: failure()
+        if: failure() && needs.windows_scope.outputs.windows_package == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-installer-failure-logs
