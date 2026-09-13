@@ -6,7 +6,7 @@ use miru_agent::authn::{AuthnErr, Token, TokenManagerExt};
 
 type RefreshTokenFn = Box<dyn Fn() -> Result<(), AuthnErr> + Send + Sync>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TokenManagerCall {
     GetToken,
     RefreshToken,
