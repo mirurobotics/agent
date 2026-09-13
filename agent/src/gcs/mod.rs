@@ -330,6 +330,8 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    mod store;
+
     use super::*;
 
     fn provider() -> StaticTokenCredentials {

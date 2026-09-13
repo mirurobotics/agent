@@ -92,7 +92,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
-- **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment. The private library test module mounts `agent/tests/mod.rs` and uses `#[cfg(test)]` helpers; explicit `http_retry` and logging integration targets exercise an ordinary library build. Tests sharing fixed resources such as `/tmp/miru.sock` use `#[serial]`; other tests run in parallel.
+- **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment. Cargo discovers the integration suite in `agent/tests/mod.rs` and the logging targets; `http_retry` is explicitly configured. Tests needing private access live in owner-local `#[cfg(test)]` modules and share only needed fixtures. Tests sharing fixed resources such as `/tmp/miru.sock` use `#[serial]`; other tests run in parallel.
 - **The agent has no direct database.** All persistence is file-based via `storage::Layout`. The backend owns the database.
 
 ## Cross-Cutting Concerns

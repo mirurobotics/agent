@@ -19,6 +19,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
+#[cfg(test)]
+mod tests;
+
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
         let result = $op;

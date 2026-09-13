@@ -69,12 +69,18 @@ cargo test --package miru-agent
 # Wrapper runs: RUST_LOG=off cargo test --package miru-agent
 ```
 
-No custom feature or preconfigured `RUST_LOG` is required. `agent/tests/mod.rs`
-is mounted as the private `tests` module in the library's unit-test build.
-Test-harness imports use `crate::tests::...`; production APIs retain their usual
-paths. The explicit `http_retry`, `logs_init_smoke`, and `logs_init_locked`
-integration targets exercise public APIs from an ordinary library build, with
-logging initialization isolated in separate processes.
+No custom feature or preconfigured `RUST_LOG` is required. Cargo discovers the
+integration suite in `agent/tests/mod.rs` and the separate `logs_init_smoke` and
+`logs_init_locked` targets. The explicit `http_retry` target lives at
+`agent/tests/http/retry.rs`. Each integration target uses the ordinary library;
+the logging targets isolate initialization in separate processes. Integration
+fixture imports use direct paths such as `crate::test_utils::...`.
+
+Tests needing private state live in owner-local `#[cfg(test)]` modules under
+`agent/src/`: `s3/tests/`, `gcs/tests/`, `sync/syncer/tests/`, and the upload
+`transfer/tests/` and `executor/tests/` directories. Existing inline unit tests
+remain beside their owners. Unit tests include only the shared fixtures they
+need; the library does not mount the integration suite.
 
 Tests run in parallel by default. Tests that bind shared OS resources (e.g.,
 `/tmp/miru.sock`) are annotated with `#[serial]` from the `serial_test` crate,
@@ -82,18 +88,23 @@ which serializes them relative to each other while leaving all other tests
 parallel. When adding a test that uses a fixed path or other global state, add
 `#[serial]` to that test function.
 
-Test files in `agent/tests/` mirror the `agent/src/` module structure.
+Integration test files in `agent/tests/` mirror the `agent/src/` module structure.
 
 ### Coverage gates
 
 Each module has a `.covgate` file with a minimum coverage percentage. Run `scripts/covgate.sh` to enforce. When adding or modifying code, verify coverage still passes.
+
+`./scripts/coverage.sh` runs tests and generates HTML. After `./scripts/covgate.sh`,
+use `./scripts/coverage.sh --report-only` to generate HTML from the same recorded
+execution. Both reports exclude owner-local `tests/` directories under
+`agent/src/` from coverage, preserving the production coverage thresholds.
 
 ## Linting
 
 Use `scripts/update-deps.sh` to refresh `Cargo.lock` before linting. Then run `scripts/lint.sh` for a full local lint pass. It runs: the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy.
 
 In CI, the Lint workflow runs:
-- `cargo run --manifest-path tools/lint/Cargo.toml -- --path agent/src --config .lint-imports.toml --assert-paths agent/tests` — runs import linting, function-length linting, and field-by-field assert detection (4+ `assert_eq!` on fields of the same variable in a test function). Production functions and closures are limited to 50 non-blank, non-comment body lines (test code exempt); suppress with `// lint:allow(funclen)` on the `fn` line or the line immediately above. Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
+- The custom linter checks imports in `agent/src/` and `agent/tests/`, function length, and field-by-field assertions (4+ `assert_eq!` on fields of the same variable in a test function). Assertion checks cover the integration tree and the five owner-local unit-test directories listed above. Production functions and closures are limited to 50 non-blank, non-comment body lines (test code exempt); suppress with `// lint:allow(funclen)` on the `fn` line or the line immediately above. Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
 - `cargo fmt -p miru-agent -- --check`
 - `cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings`
 - `cargo machete`
@@ -109,7 +120,7 @@ In CI, the Lint workflow runs:
 
 1. Create `agent/src/<module>/mod.rs` (and `errors.rs` if needed).
 2. Add `pub mod <module>;` to `agent/src/lib.rs`.
-3. Create matching test file at `agent/tests/<module>/mod.rs`.
+3. Add public-behavior tests under `agent/tests/<module>/mod.rs` and declare the module in `agent/tests/mod.rs`; place tests needing private access in a local `#[cfg(test)]` module.
 4. Add a `.covgate` file in the new module directory with the minimum coverage threshold.
 
 ### Adding or changing an API endpoint

@@ -9,7 +9,20 @@
 #   CARGO_FEATURES     — optional Cargo feature flags
 #   CARGO_TEST_ARGS    — e.g. "-- --test-threads=1"
 #   RUST_LOG_OVERRIDE  — e.g. "off"
+#   COV_IGNORE_FILENAME_REGEX — optional source filename exclusion regex
+#
+# Usage: coverage.sh [--report-only]
+# Report-only mode uses previously recorded coverage without running tests.
 set -e
+
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--report-only" ]; }; then
+    echo "Usage: $0 [--report-only]" >&2
+    exit 2
+fi
+report_only=false
+if [ "${1:-}" = "--report-only" ]; then
+    report_only=true
+fi
 
 cd "$CRATE_DIR"
 
@@ -23,11 +36,20 @@ if [ -n "$RUST_LOG_OVERRIDE" ]; then
 fi
 
 echo "Generating HTML coverage report..."
+set -- cargo llvm-cov
+if "$report_only"; then
+    set -- "$@" report
+fi
 # shellcheck disable=SC2086
-cargo llvm-cov --html --output-dir target/coverage \
-    $CARGO_PKG \
-    $CARGO_FEATURES \
-    $CARGO_TEST_ARGS
+set -- "$@" --html --output-dir target/coverage $CARGO_PKG $CARGO_FEATURES
+if [ -n "${COV_IGNORE_FILENAME_REGEX:-}" ]; then
+    set -- "$@" --ignore-filename-regex "$COV_IGNORE_FILENAME_REGEX"
+fi
+if ! "$report_only"; then
+    # shellcheck disable=SC2086
+    set -- "$@" $CARGO_TEST_ARGS
+fi
+"$@"
 
 echo ""
 echo "Report: target/coverage/html/index.html"

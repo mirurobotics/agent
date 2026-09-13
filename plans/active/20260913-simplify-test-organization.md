@@ -17,17 +17,23 @@ Ordinary Cargo commands should discover conventional integration tests while tes
 ## Progress
 
 
-- [ ] Populate milestone progress during implementation.
+- [x] 2026-09-13: Prepare milestone 1 source and CI infrastructure: restore Cargo discovery, remove the whole-suite library mount, declare the five pending unit-test destinations, share the optional coverage exclusion between JSON and HTML, add report-only HTML, simplify agent CI, extend assertion lint scope, and update current layout documentation.
+- [x] 2026-09-13: Source-stage static checks passed: individual `sh -n` checks for all five changed shell scripts and `git diff --check`. Diff review confirms no test files, `.covgate` thresholds, dependencies, generated libraries, or production function bodies changed.
+- [ ] Milestone 2: Resolve fixture-only mounting, relocate the 101 private cases, extract shared sync fixtures, migrate integration and inline fixture imports, and simplify retry assertions. Source preparation intentionally points at pending files; neither stage is independently ready to push.
+- [ ] Milestone 3: Complete fresh reviews and exact-head CI/delivery validation; no build, test, lint, or coverage validation has run during source preparation.
 
 ## Surprises & Discoveries
 
 
-Add entries with evidence as work proceeds.
+- 2026-09-13: Shared filesystem fixtures and other test helpers already import production APIs through `miru_agent`. The two-line `#[cfg(test)] extern crate self as miru_agent` alias can preserve those imports for both compilation contexts without mounting any test suites; precise fixture inclusions remain for test analysis.
+- 2026-09-13: The existing GCS inline `tests` module owns four credential-provider cases. Adding its `mod store;` declaration preserves their identities while reserving `gcs::tests::store::` for the 27 relocated cases.
 
 ## Decision Log
 
 
-Add dated decisions and reasons as work proceeds.
+- 2026-09-13: Retain the existing test-only self alias provisionally as the smallest compatibility adapter for shared fixture imports; remove the entire `../tests/mod.rs` library mount. Defer fixture declarations and all import changes to the test stage so it can select only used leaves and avoid an unused mock tree.
+- 2026-09-13: Use optional `COV_IGNORE_FILENAME_REGEX` in both shared coverage scripts, defaulting empty when unset. Both agent wrappers set `/agent/src/(.*/)?tests/`; CI invokes the wrappers without repeating the regex. No additional fixture filename exclusion is needed by source preparation; reassess executable fixture files after migration.
+- 2026-09-13: Report-only mode invokes `cargo llvm-cov report`, retains package and feature selection plus the identical coverage exclusion, and omits test-harness arguments. Ordinary coverage still runs tests. CI now executes the gate once followed by report-only HTML and an index check, with a 30-minute timeout; Linux/Windows production checks and the tools job are unchanged.
 
 ## Outcomes & Retrospective
 

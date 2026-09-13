@@ -14,6 +14,9 @@ use tokio::io::AsyncWriteExt;
 pub mod errors;
 pub mod multipart;
 
+#[cfg(test)]
+mod tests;
+
 use errors::ObjectNotFoundErr;
 pub use errors::S3Err;
 pub use multipart::Source;

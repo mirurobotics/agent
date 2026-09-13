@@ -5,15 +5,6 @@ edition = { workspace = true }
 rust-version = { workspace = true }
 include = ["src/**/*"]
 build = "build.rs"
-autotests = false
-
-[[test]]
-name = "logs_init_smoke"
-path = "tests/logs_init_smoke.rs"
-
-[[test]]
-name = "logs_init_locked"
-path = "tests/logs_init_locked.rs"
 
 [[test]]
 name = "http_retry"

@@ -15,6 +15,9 @@ use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestinat
 // external crates
 use tracing::info;
 
+#[cfg(test)]
+mod tests;
+
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
 /// destination, transfer the file's bytes to the object store. Kept separate

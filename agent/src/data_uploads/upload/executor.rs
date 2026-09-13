@@ -14,6 +14,9 @@ use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentia
 // external crates
 use tracing::info;
 
+#[cfg(test)]
+mod tests;
+
 /// The seam between the upload actor and the transfer mechanics.
 ///
 /// The production executor fetches short-lived downscoped cloud credentials from the
