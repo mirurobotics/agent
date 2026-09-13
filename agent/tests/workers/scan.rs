@@ -142,6 +142,11 @@ pub mod run {
         // fire the shutdown; the worker completes without scanning again
         shutdown_tx.send(()).unwrap();
         handle.await.unwrap();
+        assert_eq!(
+            sleep_ctrl.get_attempted_sleeps(),
+            [Duration::from_secs(options.scan_interval_secs as u64)]
+        );
+        assert!(sleep_ctrl.get_completed_sleeps().is_empty());
         assert_eq!(scanner.num_scan_calls(), calls_before_shutdown);
     }
 }

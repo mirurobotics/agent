@@ -32,10 +32,6 @@ impl MockObjectTransfer {
         Self::default()
     }
 
-    pub fn push_ok(&self) {
-        self.script.lock().unwrap().push_back(Ok(()));
-    }
-
     pub fn push_err(&self) {
         self.script
             .lock()
