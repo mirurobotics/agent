@@ -100,12 +100,12 @@ behind `cfg(unix)`; add minimal Windows counterparts (ctrl handlers; no-op modes
 (`/var/log/miru` ↔ `C:\ProgramData\Miru\logs`), resolved via `%ProgramData%` rather
 than a hardcoded `C:`. `Layout` stays parameterized by `filesystem_root` for tests.
 
-**PR 5 — Windows MSI and PowerShell tools (PR #236).** Build and validate a pinned
-WiX x64 MSI for the current console-capable executable. Install under 64-bit Program
-Files, protect retained ProgramData state, prove transactional upgrades and rollback,
-and provide Windows PowerShell 5.1-safe installation and provisioning wrappers. This
-package intentionally creates no Windows service. Authenticode, release artifact
-publication, and the GoReleaser/PDB lane remain deferred.
+**PR 5 — Windows MSI foundation (PR #236).** Build and validate a pinned WiX x64
+MSI for the current console-capable executable. Install under 64-bit Program Files,
+protect retained ProgramData state, and prove direct Windows Installer maintenance,
+transactional upgrades, rollback, and uninstall behavior. This package intentionally
+creates no Windows service. Customer distribution, Authenticode, release artifact
+publication, WinGet, and the GoReleaser/PDB lane remain deferred.
 
 **PR 6 — Windows service lifecycle.** `windows-service` crate: service entry point,
 `SERVICE_CONTROL_STOP`/`SHUTDOWN` wired into the existing shutdown broadcast channel
@@ -131,7 +131,8 @@ directory permissions only when the local device API is implemented.
 **PR 10 — Authenticode signing.** Sign binary + MSI in the release pipeline
 (osslsigncode from the Linux pipeline, or signtool on the Windows runner), RFC 3161
 timestamped. Cert procurement is tracked in the workbench plan (long lead — started
-independently).
+independently). Publish the signed MSI through GitHub Releases, then submit and
+maintain its WinGet manifest.
 
 ### Phase 2 — local device API (gated on customer need)
 

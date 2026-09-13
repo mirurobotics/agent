@@ -61,14 +61,6 @@ jobs:
       - name: Restore pinned WiX SDK
         run: dotnet restore build/windows/miru-agent.wixproj
 
-      - name: Parse Windows PowerShell scripts
-        shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\parse-scripts.ps1
-
-      - name: Run focused Windows PowerShell tests
-        shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\script-tests.ps1
-
       - name: Validate Windows packages
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests

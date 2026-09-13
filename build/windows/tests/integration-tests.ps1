@@ -103,7 +103,7 @@ function Build-IntegrationPackage {
     $payload = Join-Path $output "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, $Marker, [Text.Encoding]::ASCII)
     $constants = "Version=$Version;BinDir=$binDir;ProductCode=$ProductCode;FixturePayloadPath=$payload"
-    & dotnet build $projectPath --no-restore --configuration Release "-p:Platform=x64" "-p:Version=$Version" "-p:BinDir=$binDir" "-p:ProductCode=$ProductCode" "-p:TestWixSource=$fixtureSource" "-p:DefineConstants=$constants" "-p:OutputPath=$output\" "-p:IntermediateOutputPath=$output\obj\"
+    & dotnet build $projectPath --no-restore --configuration Release "-p:Platform=x64" "-p:Version=$Version" "-p:BinDir=$binDir" "-p:ProductCode=$ProductCode" "-p:TestWixSource=$fixtureSource" "-p:DefineConstants=$constants" "-p:OutputPath=$output\" "-p:IntermediateOutputPath=$output\obj\" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "integration package build failed for $Version" }
     $package = Get-ChildItem -LiteralPath $output -Filter "*.msi" -Recurse -File | Where-Object { $_.FullName -notmatch '\\obj\\' } | Select-Object -First 1
     if ($null -eq $package) { throw "integration package missing for $Version" }
@@ -298,34 +298,13 @@ try { [IO.File]::WriteAllText('$($createPath.Replace("'", "''"))', 'bad'); `$cre
     Assert-True (-not (Test-Path -LiteralPath $createPath)) "non-admin child was not created"
 }
 
-function Invoke-RealProvisionCheck {
+function Invoke-DirectProvisionCheck {
     $stdout = Join-Path $artifactsRoot "provision-check.stdout.txt"
     $stderr = Join-Path $artifactsRoot "provision-check.stderr.txt"
-    $script = Join-Path $repositoryRoot "scripts\install\provision.ps1"
-    $process = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f $script), "-Check") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+    $process = Start-Process -FilePath $agentPath -ArgumentList @("provision", "--check") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
     Assert-Equal 3 $process.ExitCode "fresh install provision check"
     $output = ([IO.File]::ReadAllText($stdout) + [IO.File]::ReadAllText($stderr))
     Assert-True (-not [string]::IsNullOrWhiteSpace($output)) "provision check preserves useful output"
-}
-
-function Invoke-InstallScript {
-    param([string]$Msi, [string]$Name)
-    $script = Join-Path $repositoryRoot "scripts\install\install.ps1"
-    $stdout = Join-Path $artifactsRoot "$Name.stdout.txt"
-    $stderr = Join-Path $artifactsRoot "$Name.stderr.txt"
-    $process = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f $script), "-FromMsi", ('"{0}"' -f $Msi)) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
-    if (@(0, 3010) -notcontains $process.ExitCode) {
-        $failureOutput = [IO.File]::ReadAllText($stdout) + [IO.File]::ReadAllText($stderr)
-        if ($failureOutput -match 'retained at ([^\r\n]+)') {
-            $retainedLog = $Matches[1].Trim()
-            if (Test-Path -LiteralPath $retainedLog -PathType Leaf) {
-                New-Item -ItemType Directory -Path $deterministicLogs -Force | Out-Null
-                Copy-Item -LiteralPath $retainedLog -Destination (Join-Path $deterministicLogs "$Name.log") -Force
-            }
-        }
-    }
-    Assert-True (@(0, 3010) -contains $process.ExitCode) "install.ps1 succeeds"
-    return $process.ExitCode
 }
 
 function Invoke-ManualSmoke {
@@ -353,7 +332,7 @@ function Invoke-ManualSmoke {
     [IO.File]::WriteAllText($sentinelPath, "retain-me")
     [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
     Add-PermissiveAces
-    $v1Result = Invoke-InstallScript $v1 "manual-v1"
+    $v1Result = Invoke-Msi @("/i", ('"{0}"' -f $v1)) "manual-v1" @(0, 3010)
     Write-Host "Manual v1 reboot result: $v1Result"
     Assert-CustomerStateRetained "manual install"
     Assert-ProtectedAcls
@@ -429,7 +408,7 @@ try {
     Assert-Equal 0 $LASTEXITCODE "temporary local user created"
     $createdUser = $true
 
-    Invoke-InstallScript $v1 "fixture-v1" | Out-Null
+    Invoke-Msi @("/i", ('"{0}"' -f $v1)) "fixture-v1" @(0, 3010) | Out-Null
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-Equal "fixture-v1" ([IO.File]::ReadAllText($markerPath)) "v1 rollback marker"
     Assert-OneRegistration $fixtureProducts[0]
@@ -438,8 +417,8 @@ try {
     Assert-ProtectedAcls
     Invoke-NonAdminProbe
     Assert-NoService
-    Invoke-RealProvisionCheck
-    Write-Host "PASS initial install, ACL correction, denial, check exit 3, and no service"
+    Invoke-DirectProvisionCheck
+    Write-Host "PASS initial install, ACL correction, denial, direct provision check exit 3, and no service"
 
     $v1Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
     Add-PermissiveAces
