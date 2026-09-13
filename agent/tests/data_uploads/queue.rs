@@ -195,7 +195,10 @@ pub mod cases {
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
             assert_eq!(reloaded.len(), 2);
-            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["a.log", "b.log"]));
+            assert_eq!(
+                on_disk::<J>(&path).await,
+                job_names(make, &["a.log", "b.log"])
+            );
         }
 
         pub async fn duplicate_jobs_are_both_queued<J: QueueJob>(make: fn(&str) -> J) {
@@ -324,7 +327,10 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["a.log", "b.log"]));
+            assert_eq!(
+                on_disk::<J>(&path).await,
+                job_names(make, &["a.log", "b.log"])
+            );
 
             let removed = queue.remove(entry.id).await.unwrap();
             assert_eq!(removed.id, entry.id);
@@ -373,7 +379,10 @@ pub mod cases {
             queue.requeue(entry).await;
             assert_eq!(queue.len(), 2);
 
-            assert_eq!(drain(&mut queue).await, job_names(make, &["b.log", "a.log"]));
+            assert_eq!(
+                drain(&mut queue).await,
+                job_names(make, &["b.log", "a.log"])
+            );
         }
 
         pub async fn at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str) -> J) {
@@ -414,7 +423,10 @@ pub mod cases {
             }
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
-            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["b.log", "a.log"]));
+            assert_eq!(
+                on_disk::<J>(&path).await,
+                job_names(make, &["b.log", "a.log"])
+            );
             assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
         }
 
@@ -618,7 +630,10 @@ pub mod cases {
 
             // `a` leaves disk only when the worker resolves it.
             queue.remove(in_flight.id).await.unwrap();
-            assert_eq!(on_disk::<J>(&path).await, job_names(make, &["b.log", "c.log"]));
+            assert_eq!(
+                on_disk::<J>(&path).await,
+                job_names(make, &["b.log", "c.log"])
+            );
         }
     }
 }
