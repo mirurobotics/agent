@@ -432,6 +432,7 @@ mod tests {
         let actual = map_snapshot_err(&cfg_inst, &dest, &backup, err);
         match actual {
             DeployErr::BackupAccessDenied(e) => {
+                // lint:allow(field-by-field-assert) — source is io::Error (no PartialEq), so a struct compare is impossible.
                 assert_eq!(e.cfg_inst_id, cfg_inst.id);
                 assert_eq!(e.filepath, cfg_inst.filepath);
                 assert_eq!(e.backup_filepath, backup.path().display().to_string());

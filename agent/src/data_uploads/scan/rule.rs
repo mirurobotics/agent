@@ -1297,6 +1297,7 @@ mod tests {
             let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
             assert_eq!(emitted.len(), 1);
             let sf = &emitted[0];
+            // lint:allow(field-by-field-assert) — digest and mtime_aliases are scanner-derived; identity fields are the subject.
 
             // identity from the FIRST observation, not d2, rule2.
             assert_eq!(sf.deployment_id, "d1");
