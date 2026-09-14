@@ -46,9 +46,8 @@ async fn success_on_first_attempt() {
 
     assert_eq!("ok", result.unwrap());
     let attempts = attempts.into_inner();
-    assert_eq!(1, attempts.len());
-    assert_eq!(start, attempts[0]);
-    assert_eq!(attempts[0], Instant::now());
+    assert_eq!(vec![start], attempts);
+    assert_eq!(start, Instant::now());
 }
 
 #[tokio::test(start_paused = true)]
@@ -92,9 +91,8 @@ async fn no_retry_on_app_error() {
     assert!(result.is_err());
     assert!(!result.unwrap_err().is_network_conn_err());
     let attempts = attempts.into_inner();
-    assert_eq!(1, attempts.len());
-    assert_eq!(start, attempts[0]);
-    assert_eq!(attempts[0], Instant::now());
+    assert_eq!(vec![start], attempts);
+    assert_eq!(start, Instant::now());
 }
 
 #[tokio::test(start_paused = true)]
