@@ -8,8 +8,7 @@ use crate::mocks::{
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use crate::test_utils::filesys::dirs as test_dirs;
-use crate::test_utils::upload::make_job;
+use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
