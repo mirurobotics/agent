@@ -50,8 +50,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\pack
 three numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH`
 from 0 through 65535. Leading `v`, prerelease/build labels, and fourth fields are
 not accepted at the MSI build boundary. `BinDir` must contain
-`miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 5.0.2
+`miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 7.0.0
 project; package validation is enabled and warnings fail the build.
+
+The project sets `AcceptEula=wix7` for noninteractive builds under the
+[WiX maintenance-fee agreement](https://docs.firegiant.com/wix/osmf/).
+Any applicable maintenance fee must be covered separately; this setting does
+not purchase a subscription.
 
 ## Install and provision
 
