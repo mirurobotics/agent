@@ -20,27 +20,12 @@ function Get-UniqueNode {
 }
 
 $functions = @($sourceAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))
-foreach ($name in @("Assert-True", "Assert-Equal", "Invoke-Msi", "Complete-IntegrationRun", "Assert-CustomerStateRetained", "New-RepresentativeSecrets", "Invoke-ManualSmoke")) {
+foreach ($name in @("Assert-True", "Assert-Equal", "Invoke-Msi", "Complete-IntegrationRun", "Assert-CustomerStateRetained", "New-RepresentativeSecrets", "Invoke-ManualSmoke", "Invoke-ManualRun", "Invoke-IntegrationRun")) {
     $definition = Get-UniqueNode @($functions | Where-Object { $_.Name -eq $name }) $name
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 
 $statements = @($sourceAst.EndBlock.Statements)
-$manual = Get-UniqueNode @($statements | Where-Object {
-    $_ -is [Management.Automation.Language.IfStatementAst] -and
-    $_.Clauses.Count -eq 1 -and $_.Clauses[0].Item1.Extent.Text -eq '$ManualProductionSmoke'
-}) "manual branch"
-$manualStatements = @($manual.Clauses[0].Item2.Statements)
-Assert-Test ($manualStatements[-1] -is [Management.Automation.Language.ExitStatementAst]) "manual branch ends with exit"
-# The wrapper is real production code; omit only exit so the test process survives.
-$manualWrapper = [scriptblock]::Create((@($manualStatements | Select-Object -SkipLast 1 | ForEach-Object { $_.Extent.Text }) -join "`n"))
-$integration = Get-UniqueNode @($statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] }) "integration try"
-$completion = Get-UniqueNode @($statements | Where-Object { $_.Extent.Text -eq 'Complete-IntegrationRun $integrationFailure' }) "integration completion"
-$integrationWrapper = [scriptblock]::Create(
-    'try { Invoke-TestOperation }' + "`n" +
-    (@($integration.CatchClauses | ForEach-Object { $_.Extent.Text }) -join "`n") + "`nfinally " +
-    $integration.Finally.Extent.Text + "`n" + $completion.Extent.Text
-)
 $sessionAssignment = Get-UniqueNode @($statements | Where-Object {
     $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$sessionLogs'
 }) "session log assignment"
@@ -307,7 +292,7 @@ try {
             $script:cleanupFault = $scenario.Fault
             if ($scenario.Primary) { $script:exitCodes["primary"] = 1603 }
             $failure = $null
-            try { . $manualWrapper } catch { $failure = $_ }
+            try { Invoke-ManualRun } catch { $failure = $_ }
             Assert-Failure $failure ($scenario.Primary -or $scenario.Fault -ne "") $scenario.Primary
             Assert-Test ($script:processCalls.Count -eq 1) "manual operation generated a verbose log"
             Assert-Test ($script:cleanupAttempts -contains "transcript" -and $script:cleanupAttempts -contains "artifacts") "manual cleanup attempts continue"
@@ -328,12 +313,13 @@ try {
         @{ Primary = $true; CleanupMsi = $false; Diagnostics = $false; Fault = "artifacts" }
     )) {
         Invoke-Case "integration cleanup primary=$($scenario.Primary) MSI=$($scenario.CleanupMsi) diagnostics=$($scenario.Diagnostics) fault=$($scenario.Fault)" {
+            function Invoke-IntegrationLifecycle { Invoke-TestOperation }
             $script:cleanupFault = $scenario.Fault
             $script:diagnosticsFail = $scenario.Diagnostics
             if ($scenario.Primary) { $script:exitCodes["primary"] = 1603 }
             if ($scenario.CleanupMsi) { $script:exitCodes["cleanup-$($fixtureProducts[0].Trim('{}'))"] = 1603 }
             $failure = $null
-            try { . $integrationWrapper } catch { $failure = $_ }
+            try { Invoke-IntegrationRun } catch { $failure = $_ }
             Assert-Failure $failure ($scenario.Primary -or $scenario.CleanupMsi -or $scenario.Fault -ne "") $scenario.Primary
             Assert-Test ($script:processCalls.Count -eq 2) "primary and allowlisted cleanup MSI both ran"
             Assert-Test ($script:relatedProducts -contains $foreignProduct) "foreign product retained"

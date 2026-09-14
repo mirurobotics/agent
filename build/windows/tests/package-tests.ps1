@@ -217,13 +217,16 @@ function Assert-Package {
 }
 
 function Invoke-ExpectedBuildFailure {
-    param([string]$Name, [string[]]$Properties, [string]$ExpectedDiagnostic)
+    param([string]$Name, [string[]]$Properties, [string]$ExpectedErrorCode)
     $outputPath = Join-Path $script:invalidDirectory $Name
     New-Item -ItemType Directory -Path $outputPath | Out-Null
     $arguments = @("build", $script:resolvedProject, "--no-restore", "--configuration", "Release", "-p:OutputPath=$outputPath\") + $Properties
     $output = @(& dotnet @arguments 2>&1)
-    Assert-True ($LASTEXITCODE -ne 0) "$Name build fails"
-    Assert-True (($output | Out-String).Contains($ExpectedDiagnostic)) "$Name expected diagnostic"
+    $exitCode = $LASTEXITCODE
+    $outputText = $output | Out-String
+    Assert-True ($exitCode -ne 0) "$Name build fails`n$outputText"
+    Assert-True ($outputText -match "\b$([regex]::Escape($ExpectedErrorCode))\b") "$Name expected error code $ExpectedErrorCode`n$outputText"
+    Assert-Equal 0 (@(Get-ChildItem -LiteralPath $outputPath -Filter "*.msi" -File -Recurse)).Count "$Name produces no MSI`n$outputText"
 }
 
 $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
@@ -266,17 +269,24 @@ foreach ($version in @("0.0.0", "255.255.65535")) {
 Write-Host "PASS version boundaries (0.0.0, 255.255.65535)"
 
 $common = @("-p:BinDir=$resolvedBinDir", "-p:Platform=x64")
-Invoke-ExpectedBuildFailure "omitted-version" $common "Version is required"
-Invoke-ExpectedBuildFailure "empty-version" ($common + "-p:Version=") "Version is required"
-Invoke-ExpectedBuildFailure "omitted-bindir" @("-p:Version=1.2.3", "-p:Platform=x64") "BinDir is required"
-Invoke-ExpectedBuildFailure "empty-bindir" @("-p:Version=1.2.3", "-p:BinDir=", "-p:Platform=x64") "BinDir is required"
-foreach ($invalidVersion in @("1.2.3-beta.1", "1.2.3.4", "256.0.0", "1.256.0", "1.2.65536")) {
-    Invoke-ExpectedBuildFailure ("version-" + $invalidVersion.Replace(".", "-").Replace("+", "-") ) ($common + "-p:Version=$invalidVersion") "Version"
+Invoke-ExpectedBuildFailure "omitted-version" $common "MIRUMSI1001"
+Invoke-ExpectedBuildFailure "empty-version" ($common + "-p:Version=") "MIRUMSI1001"
+Invoke-ExpectedBuildFailure "omitted-bindir" @("-p:Version=1.2.3", "-p:Platform=x64") "MIRUMSI1003"
+Invoke-ExpectedBuildFailure "empty-bindir" @("-p:Version=1.2.3", "-p:BinDir=", "-p:Platform=x64") "MIRUMSI1003"
+foreach ($case in @(
+    @("1.2.3-beta.1", "MIRUMSI1002"),
+    @("1.2.3.4", "MIRUMSI1002"),
+    @("256.0.0", "MIRUMSI1004"),
+    @("1.256.0", "MIRUMSI1005"),
+    @("1.2.65536", "MIRUMSI1006")
+)) {
+    $invalidVersion, $expectedErrorCode = $case
+    Invoke-ExpectedBuildFailure ("version-" + $invalidVersion.Replace(".", "-").Replace("+", "-") ) ($common + "-p:Version=$invalidVersion") $expectedErrorCode
 }
 Write-Host "PASS invalid inputs rejected (9 cases)"
 
 $missingDirectory = Join-Path $invalidDirectory "does-not-exist"
-Invoke-ExpectedBuildFailure "nonexistent-bindir" @("-p:Version=1.2.3", "-p:BinDir=$missingDirectory", "-p:Platform=x64") "BinDir does not exist"
+Invoke-ExpectedBuildFailure "nonexistent-bindir" @("-p:Version=1.2.3", "-p:BinDir=$missingDirectory", "-p:Platform=x64") "MIRUMSI1007"
 $emptyBin = Join-Path $invalidDirectory "missing-executable"
 New-Item -ItemType Directory -Path $emptyBin | Out-Null
-Invoke-ExpectedBuildFailure "missing-executable-bindir" @("-p:Version=1.2.3", "-p:BinDir=$emptyBin", "-p:Platform=x64") "BinDir must contain miru-agent.exe"
+Invoke-ExpectedBuildFailure "missing-executable-bindir" @("-p:Version=1.2.3", "-p:BinDir=$emptyBin", "-p:Platform=x64") "MIRUMSI1008"

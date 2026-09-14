@@ -161,22 +161,10 @@ function Get-MsiIdentity {
         $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
         $values = @{}
         foreach ($name in @("ProductName", "ProductVersion", "ProductCode", "UpgradeCode")) {
-            $view = $null
-            $record = $null
-            try {
-                $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$name'"
-                $view = $database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $database, @($query))
-                $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
-                $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
-                $values[$name] = $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, @(1))
-            }
-            finally {
-                if ($null -ne $record) { [Runtime.InteropServices.Marshal]::ReleaseComObject($record) | Out-Null }
-                if ($null -ne $view) {
-                    $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
-                    [Runtime.InteropServices.Marshal]::ReleaseComObject($view) | Out-Null
-                }
-            }
+            $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$name'"
+            $rows = @(Get-MsiQueryRows $database $query 1)
+            Assert-Equal 1 $rows.Count "one MSI identity property $name"
+            $values[$name] = $rows[0][0]
         }
         return [pscustomobject]$values
     }
@@ -489,15 +477,7 @@ function Invoke-ManualSmoke {
     Write-Host "PASS manual production smoke; sentinel intentionally retained at $sentinelPath"
 }
 
-if (-not $ManualProductionSmoke -and -not $ConfirmDisposableTestMachine) {
-    if (Test-Path -LiteralPath $programDataRoot) {
-        throw "Refusing mutation of pre-existing $programDataRoot; normal integration requires -ConfirmDisposableTestMachine."
-    }
-    throw "Normal integration is destructive and requires -ConfirmDisposableTestMachine on a disposable test machine."
-}
-
-Assert-Elevated64BitWindows
-if ($ManualProductionSmoke) {
+function Invoke-ManualRun {
     try { Invoke-ManualSmoke }
     catch { $script:integrationFailure = $_ }
     finally {
@@ -515,16 +495,9 @@ if ($ManualProductionSmoke) {
         }
     }
     Complete-IntegrationRun $integrationFailure
-    exit 0
 }
 
-$initialRelated = @(Assert-InstalledAllowlistSafe)
-$existingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
-if ($null -ne $existingUser) {
-    throw "Refusing mutation: the named integration account $testUser already exists."
-}
-New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
-try {
+function Invoke-IntegrationLifecycle {
     foreach ($product in $initialRelated) {
         Invoke-Msi @("/x", $product) "preclean-$($product.Trim('{}'))" @(0, 3010, 1605) | Out-Null
     }
@@ -537,8 +510,8 @@ try {
 
     $secureTestPassword = ConvertTo-SecureString $testPassword -AsPlainText -Force
     New-LocalUser -Name $testUser -Password $secureTestPassword | Out-Null
-    $createdUser = $true
-    $testUserSid = (Get-LocalUser -Name $testUser).SID.Value
+    $script:createdUser = $true
+    $script:testUserSid = (Get-LocalUser -Name $testUser).SID.Value
     New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
     [IO.File]::WriteAllText($sentinelPath, "retain-me")
     [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
@@ -609,64 +582,89 @@ try {
     Assert-NoService
     Write-Host "PASS uninstall removes package state and retains protected customer state"
 }
-catch {
-    $script:integrationFailure = $_
-    Write-Host "Integration failure: $($integrationFailure.Exception.Message)" -ForegroundColor Red
-    try {
-        Write-Host "Related products: $(@(Get-RelatedProducts) -join ', ')"
-        if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
-        if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }
-        if (Test-Path -LiteralPath $markerPath) { Write-Host "Marker: $([IO.File]::ReadAllText($markerPath))" }
-    }
+
+function Invoke-IntegrationRun {
+    try { Invoke-IntegrationLifecycle }
     catch {
-        Write-Host "Failure evidence collection also failed: $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
-finally {
-    try {
-        foreach ($product in @(Get-RelatedProducts)) {
-            if ($fixtureProducts -contains $product.ToUpperInvariant()) {
-                Invoke-Msi @("/x", $product) "cleanup-$($product.Trim('{}'))" @(0, 3010, 1605) | Out-Null
-            }
-        }
-        foreach ($product in @(Get-RelatedProducts)) {
-            if ($fixtureProducts -contains $product.ToUpperInvariant()) {
-                [void]$cleanupFailures.Add("fixture ProductCode $($product.ToUpperInvariant()) remains installed after cleanup")
-            }
-        }
-    }
-    catch {
-        [void]$cleanupFailures.Add("product cleanup failed: $($_.Exception.Message)")
-    }
-    if ($createdUser) {
+        $script:integrationFailure = $_
+        Write-Host "Integration failure: $($integrationFailure.Exception.Message)" -ForegroundColor Red
         try {
-            Remove-LocalUser -Name $testUser -ErrorAction Stop
+            Write-Host "Related products: $(@(Get-RelatedProducts) -join ', ')"
+            if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
+            if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }
+            if (Test-Path -LiteralPath $markerPath) { Write-Host "Marker: $([IO.File]::ReadAllText($markerPath))" }
         }
         catch {
-            [void]$cleanupFailures.Add("temporary user deletion failed: $($_.Exception.Message)")
+            Write-Host "Failure evidence collection also failed: $($_.Exception.Message)" -ForegroundColor Red
         }
+    }
+    finally {
         try {
-            $remainingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
-            if ($null -ne $remainingUser) {
-                [void]$cleanupFailures.Add("temporary user $testUser still exists after deletion")
+            foreach ($product in @(Get-RelatedProducts)) {
+                if ($fixtureProducts -contains $product.ToUpperInvariant()) {
+                    Invoke-Msi @("/x", $product) "cleanup-$($product.Trim('{}'))" @(0, 3010, 1605) | Out-Null
+                }
+            }
+            foreach ($product in @(Get-RelatedProducts)) {
+                if ($fixtureProducts -contains $product.ToUpperInvariant()) {
+                    [void]$cleanupFailures.Add("fixture ProductCode $($product.ToUpperInvariant()) remains installed after cleanup")
+                }
             }
         }
         catch {
-            [void]$cleanupFailures.Add("temporary user deletion verification failed: $($_.Exception.Message)")
+            [void]$cleanupFailures.Add("product cleanup failed: $($_.Exception.Message)")
+        }
+        if ($createdUser) {
+            try {
+                Remove-LocalUser -Name $testUser -ErrorAction Stop
+            }
+            catch {
+                [void]$cleanupFailures.Add("temporary user deletion failed: $($_.Exception.Message)")
+            }
+            try {
+                $remainingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
+                if ($null -ne $remainingUser) {
+                    [void]$cleanupFailures.Add("temporary user $testUser still exists after deletion")
+                }
+            }
+            catch {
+                [void]$cleanupFailures.Add("temporary user deletion verification failed: $($_.Exception.Message)")
+            }
+        }
+        try {
+            if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force -ErrorAction Stop }
+        }
+        catch {
+            [void]$cleanupFailures.Add("fixture marker deletion failed: $($_.Exception.Message)")
+        }
+        try {
+            if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
+        }
+        catch {
+            [void]$cleanupFailures.Add("temporary artifact deletion failed: $($_.Exception.Message)")
         }
     }
-    try {
-        if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force -ErrorAction Stop }
-    }
-    catch {
-        [void]$cleanupFailures.Add("fixture marker deletion failed: $($_.Exception.Message)")
-    }
-    try {
-        if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
-    }
-    catch {
-        [void]$cleanupFailures.Add("temporary artifact deletion failed: $($_.Exception.Message)")
-    }
+
+    Complete-IntegrationRun $integrationFailure
 }
 
-Complete-IntegrationRun $integrationFailure
+if (-not $ManualProductionSmoke -and -not $ConfirmDisposableTestMachine) {
+    if (Test-Path -LiteralPath $programDataRoot) {
+        throw "Refusing mutation of pre-existing $programDataRoot; normal integration requires -ConfirmDisposableTestMachine."
+    }
+    throw "Normal integration is destructive and requires -ConfirmDisposableTestMachine on a disposable test machine."
+}
+
+Assert-Elevated64BitWindows
+if ($ManualProductionSmoke) {
+    Invoke-ManualRun
+    exit 0
+}
+
+$initialRelated = @(Assert-InstalledAllowlistSafe)
+$existingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
+if ($null -ne $existingUser) {
+    throw "Refusing mutation: the named integration account $testUser already exists."
+}
+New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
+Invoke-IntegrationRun
