@@ -206,7 +206,7 @@ function Assert-Package {
     param([string]$Path, [string]$Version)
     $metadata = Get-MsiContract -Path $Path
     Assert-Equal "Miru Agent" $metadata.ProductName "ProductName"
-    Assert-Equal "Miru Robotics" $metadata.Manufacturer "Manufacturer"
+    Assert-Equal "Miru" $metadata.Manufacturer "Manufacturer"
     Assert-Equal $Version $metadata.ProductVersion "ProductVersion"
     Assert-Equal $expectedUpgradeCode $metadata.UpgradeCode "UpgradeCode"
     Assert-True ($metadata.ProductCode -match '^\{[0-9A-Fa-f-]{36}\}$') "ProductCode"

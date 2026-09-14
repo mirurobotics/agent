@@ -53,6 +53,7 @@
            Code="MIRUMSI1008"
            Text="BinDir must contain miru-agent.exe: $(BinDir)" />
     <Error Condition="'$(TestWixSource)' != '' and '$(FixturePayloadPath)' == ''"
+           Code="MIRUMSI1009"
            Text="FixturePayloadPath is required when TestWixSource is set." />
   </Target>
 </Project>
