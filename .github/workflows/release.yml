@@ -9,6 +9,7 @@ permissions:
   checks: write
   contents: write
   packages: write
+  pull-requests: read
 
 jobs:
 
