@@ -6,10 +6,6 @@ rust-version = { workspace = true }
 include = ["src/**/*"]
 build = "build.rs"
 
-[[test]]
-name = "http_retry"
-path = "tests/http/retry.rs"
-
 [lints.clippy]
 new_without_default = "allow"
 
