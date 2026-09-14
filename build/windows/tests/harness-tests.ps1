@@ -155,6 +155,8 @@ function Invoke-Case {
     New-Item -ItemType Directory -Path $script:artifactsRoot -Force | Out-Null
     [IO.File]::WriteAllText($script:markerPath, "fixture-marker")
     Register-HarnessMocks
+    # Per-case mocks are defined unscoped inside the body: dynamic scoping lets lib functions called from the body
+    # resolve them, and they die with the body scope instead of leaking into later cases.
     & $Body
     Microsoft.PowerShell.Utility\Write-Host "PASS harness $Name"
 }
@@ -204,18 +206,18 @@ try {
 
     foreach ($rebootStage in @("none", "install", "maintenance", "upgrade", "uninstall", "failed-maintenance")) {
         Invoke-Case "manual stage results $rebootStage" {
-            function script:Assert-InstalledAllowlistSafe { param([switch]$RequireClean) }
-            function script:Get-MiruArpProducts { }
-            function script:Start-Transcript { param([string]$LiteralPath, [switch]$Force) }
-            function script:Get-ComputerInfo { [pscustomobject]@{ WindowsProductName = "Harness"; WindowsVersion = "test"; OsBuildNumber = "0" } }
-            function script:Get-MsiIdentity { param([string]$Path) [pscustomobject]@{ ProductName = "Harness" } }
-            function script:Add-PermissiveAces {
+            function Assert-InstalledAllowlistSafe { param([switch]$RequireClean) }
+            function Get-MiruArpProducts { }
+            function Start-Transcript { param([string]$LiteralPath, [switch]$Force) }
+            function Get-ComputerInfo { [pscustomobject]@{ WindowsProductName = "Harness"; WindowsVersion = "test"; OsBuildNumber = "0" } }
+            function Get-MsiIdentity { param([string]$Path) [pscustomobject]@{ ProductName = "Harness" } }
+            function Add-PermissiveAces {
                 foreach ($path in $script:protectedRoots) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
             }
-            function script:Assert-ProtectedAcls {
+            function Assert-ProtectedAcls {
                 foreach ($path in $script:protectedRoots) { Assert-Test (Test-Path -LiteralPath $path -PathType Container) "protected directory still exists" }
             }
-            function script:Get-Acl {
+            function Get-Acl {
                 param([string]$LiteralPath)
                 Assert-Test (Test-Path -LiteralPath $LiteralPath -PathType Leaf) "ACL probe targets a real representative file"
                 Assert-Test ($script:protectedRoots -contains [IO.Path]::GetDirectoryName($LiteralPath)) "ACL probe stays inside sandbox directories"
@@ -231,8 +233,8 @@ try {
                 }
                 return [pscustomobject]@{ AreAccessRulesProtected = $false; Access = @($rules) }
             }
-            function script:Assert-NoService { }
-            function script:Get-RelatedProducts { return @($fixtureProducts[0]) }
+            function Assert-NoService { }
+            function Get-RelatedProducts { return @($fixtureProducts[0]) }
             $ConfirmDisposableCleanVm = $true
             $TranscriptPath = Join-Path $script:caseRoot "transcript.txt"
             foreach ($version in @("1.0.0", "1.1.0")) {
@@ -272,7 +274,7 @@ try {
         @{ Primary = $true; Fault = "transcript" }
     )) {
         Invoke-Case "manual cleanup primary=$($scenario.Primary) fault=$($scenario.Fault)" {
-            function script:Invoke-ManualSmoke { Invoke-TestOperation }
+            function Invoke-ManualSmoke { Invoke-TestOperation }
             $script:cleanupFault = $scenario.Fault
             if ($scenario.Primary) { $script:exitCodes["primary"] = 1603 }
             $failure = $null
@@ -297,7 +299,7 @@ try {
         @{ Primary = $true; CleanupMsi = $false; Diagnostics = $false; Fault = "artifacts" }
     )) {
         Invoke-Case "integration cleanup primary=$($scenario.Primary) MSI=$($scenario.CleanupMsi) diagnostics=$($scenario.Diagnostics) fault=$($scenario.Fault)" {
-            function script:Invoke-IntegrationLifecycle { Invoke-TestOperation }
+            function Invoke-IntegrationLifecycle { Invoke-TestOperation }
             $script:cleanupFault = $scenario.Fault
             $script:diagnosticsFail = $scenario.Diagnostics
             if ($scenario.Primary) { $script:exitCodes["primary"] = 1603 }
