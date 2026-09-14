@@ -21,8 +21,8 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 
 
 - [x] Record the full-PR review and critique decisions.
-- [ ] Correct accepted defects, add regression coverage, and refine the full PR.
-- [ ] Reach preflight CLEAN with green CI on the pushed source head.
+- [x] Correct accepted defects, add regression coverage, and refine the full PR.
+- [x] Reach preflight CLEAN with green CI on the pushed source head.
 - [ ] Complete the plan, push delivery changes, and verify CI on the final head.
 
 ## Surprises & Discoveries
@@ -30,10 +30,10 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 
 - Baseline inspection confirmed local `5ec1198` contains only three task-owned plan commits after remote PR head `942952fc`; the merge base is `a0e7afb3` and `origin/main` is `3f20eb0`. The PR remains draft.
 - Executing the actual workflow classifier reproduced `false/false` for both a package input and a Rust input renamed into `archive/`. Directly relevant inputs and non-PR events select the expected lanes.
-- The full review identified an additional ownership gap: a standard user owning a pre-existing data directory retains implicit `WRITE_DAC` when only its DACL is replaced. Native regression coverage will verify ownership repair and denial of permission changes.
+- The full review identified an additional ownership gap: a standard user owning a pre-existing data directory retains implicit `WRITE_DAC` when only its DACL is replaced. Native regression coverage now verifies ownership repair and denial of permission changes.
 - The second full-PR review traced provisioning through pre-existing `auth` and `tmp` directories. Their protected child ACLs survive ancestor repair, so these credential parents also require explicit installer protection.
 - Final review found that manual smoke left `auth` and `tmp` empty while requiring them after uninstall. Empty component directories may be removed legitimately; the smoke now seeds representative retained contents in all four directories.
-- Source-preflight round 1, run `34793237223` at `ecfa773f67a6d32786cd0008e7f33087f80077d5`, passed Linux checks, Windows release build, harness scenarios, and package contracts, then failed the native probe's positive control after initial install. Its replacement descriptor used the default `AccessControlSections.All`, which also requests an audit ACL update unavailable to the standard account. The repair limits each regrant to `Access`, creates a fresh descriptor per attempt because successful persistence clears modification flags, and reports positive read/create/regrant outcomes separately. Native lifecycle acceptance remains pending source-preflight round 2.
+- Source-preflight round 1, run `34793237223` at `ecfa773f67a6d32786cd0008e7f33087f80077d5`, passed Linux checks, Windows release build, harness scenarios, and package contracts, then failed the native probe's positive control after initial install. Its replacement descriptor used the default `AccessControlSections.All`, which also requests an audit ACL update unavailable to the standard account. The repair limits each regrant to `Access`, creates a fresh descriptor per attempt because successful persistence clears modification flags, and reports positive read/create/regrant outcomes separately. Round 2 passed the complete native lifecycle with that correction.
 
 ## Decision Log
 
@@ -42,14 +42,19 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - Planned regressions execute the production classifier for ordinary, renamed, irrelevant, and non-PR inputs; verify caller/callee permissions without a release tag; exercise durable logs and primary/cleanup error precedence with injected failures; inject 3010 at all four manual stages; and verify ownership and nonadministrator denial across native install, repair, and upgrade.
 - Log files will be written directly outside temporary build output so cleanup and auxiliary diagnostics cannot delete the only failure evidence. Local validation remains lightweight; complete Linux and native Windows validation runs in CI.
 - Source refinement accepts `R236-007`: author `auth` and `tmp` with stable new directory-component identities and the same SYSTEM ownership/protected descriptor, retaining contents and extending native hostile-directory coverage. `R236-006` is explicitly skipped after review and critique: classifier rejection fails the workflow; branch protection excluding Windows checks predates this PR and requires a separate policy decision.
-- Source refinement completed three full-PR review passes: five initial findings, one additional credential-directory finding, and no findings at `97a1b38`. Six accepted defects are corrected; the separate test phase will validate all six before publication.
+- Source refinement completed three full-PR review passes: five initial findings, one additional credential-directory finding, and no findings at pre-rebase `97a1b38`. The subsequent test phase covers all six corrections.
 - Final review/critique accepts `R236-008`, the seventh finding: populate all four manual-smoke directories after the first install. The harness executes the actual representative-file and retention helpers, checks every directory's real sandbox contents before mocked uninstall and afterward, and retains all zero/3010/failure scenarios.
 - After adjusted test planning, the platform repeatedly rejected fresh agent allocation because completed agents occupied the four available slots and no retirement API was exposed. The parent coordinator informed the user and continued with available agents and separate file ownership/review/critique/fix roles. Those later stages are not represented as fresh-context runs.
+- The CI-driven probe correction received an independent full-PR review with no findings before source-preflight round 2. All seven accepted review findings and the corrected probe are now validated; the separate final delivery check remains mandatory.
 
 ## Outcomes & Retrospective
 
 
-Regression updates are prepared: exact four-directory MSI contracts; native hostile ownership and protected-ACL repair with fresh-file denial/retention probes; 28 injected PowerShell harness scenarios; and 38 workflow classifier/permission cases. The workflow cases and scoped syntax/diff checks passed locally. PowerShell harness, native installer lifecycle, and full Linux checks remain pending CI; no interactive production smoke or tag release is claimed.
+Source preflight is **CLEAN**, using 2 of 3 source-CI rounds. [Run 34793980015](https://github.com/mirurobotics/agent/actions/runs/34793980015) completed successfully on pushed source head `9b5d0e8ed9a8ca71edb5443e0a73a0145f13da61`; `lint`, `test`, `tools`, `windows-scope`, and `windows-check` all passed. Local and remote source heads agreed when this evidence was recorded.
+
+The passing run includes 38 workflow classifier/permission cases, 28 injected PowerShell harness cases, the Windows release build, and production MSI table checks for both versions, distinct ProductCodes and stable UpgradeCode, version bounds `0.0.0` and `255.255.65535`, and nine invalid-version/input cases. Native checks passed initial install with ownership/ACL repair and nonadministrator denial, direct provision-check exit 3, maintenance, upgrade with one registered product, rejected downgrade, transactional rollback of registration/hash/marker/sentinel/DACL, and uninstall retaining protected customer state. The four-directory ownership, credential-parent, manual-retention, failure-log, reboot-result, rename, and release-permission regressions are covered by this combined evidence.
+
+No accepted finding or source-CI failure remains unresolved. Interactive production smoke and an actual tag release were not run; their relevant harness and permission contracts were tested. The parent must still commit the evidence, complete and move this plan, push the completion commit, and verify its separate final delivery CI run. Final delivery SHA and run evidence follow that completion commit and are not claimed here.
 
 ## Context and Orientation
 
