@@ -14,6 +14,7 @@ $fixtureSource = Join-Path $PSScriptRoot "integration-test.wxs"
 $binDir = Join-Path $repositoryRoot "target\x86_64-pc-windows-msvc\$($Configuration.ToLowerInvariant())"
 $artifactsRoot = Join-Path ([IO.Path]::GetTempPath()) ("miru-integration-tests-" + [Guid]::NewGuid().ToString("N"))
 $deterministicLogs = Join-Path $repositoryRoot "build\windows\artifacts\package-tests\logs"
+$sessionLogs = Join-Path $deterministicLogs ([Guid]::NewGuid().ToString("N"))
 $programDataRoot = Join-Path $env:ProgramData "Miru"
 $logsRoot = Join-Path $programDataRoot "logs"
 $markerPath = Join-Path $programDataRoot "rollback-payload.txt"
@@ -84,16 +85,25 @@ function Assert-InstalledAllowlistSafe {
 
 function Invoke-Msi {
     param([string[]]$Arguments, [string]$Name, [int[]]$AllowedExitCodes)
-    $sessionLogs = Join-Path $artifactsRoot "logs"
     New-Item -ItemType Directory -Path $sessionLogs -Force | Out-Null
     $logPath = Join-Path $sessionLogs "$Name.log"
     $fullArguments = @($Arguments) + @("/qn", "/norestart", "/l*v", ('"{0}"' -f $logPath))
+    Write-Host "MSI log ($Name): $logPath"
     $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $fullArguments -Wait -PassThru
     if ($AllowedExitCodes -notcontains $process.ExitCode) {
         [void]$failureEvidence.Add($logPath)
         throw "msiexec $Name returned $($process.ExitCode); log: $logPath"
     }
     return $process.ExitCode
+}
+
+function Complete-IntegrationRun {
+    param([Management.Automation.ErrorRecord]$PrimaryFailure)
+    foreach ($cleanupFailure in $cleanupFailures) {
+        Write-Host "Cleanup failure: $cleanupFailure" -ForegroundColor Red
+    }
+    if ($null -ne $PrimaryFailure) { throw $PrimaryFailure }
+    if ($cleanupFailures.Count -ne 0) { throw "Integration cleanup failed; see cleanup diagnostics above." }
 }
 
 function Build-IntegrationPackage {
@@ -334,27 +344,29 @@ function Invoke-ManualSmoke {
     [IO.File]::WriteAllText($sentinelPath, "retain-me")
     [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
     Add-PermissiveAces
-    $v1Result = Invoke-Msi @("/i", ('"{0}"' -f $v1)) "manual-v1" @(0, 3010)
-    Write-Host "Manual v1 reboot result: $v1Result"
+    $installResult = Invoke-Msi @("/i", ('"{0}"' -f $v1)) "manual-install" @(0, 3010)
+    Write-Host "Manual install reboot result: $installResult"
     Assert-CustomerStateRetained "manual install"
     Assert-ProtectedAcls
     Assert-NoService
     Write-Host "PASS manual v1 install repairs root/log ACLs and retains customer state"
     Add-PermissiveAces
-    Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "manual-maintenance" @(0, 3010) | Out-Null
+    $maintenanceResult = Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "manual-maintenance" @(0, 3010)
+    Write-Host "Manual maintenance reboot result: $maintenanceResult"
     Assert-CustomerStateRetained "manual maintenance"
     Assert-ProtectedAcls
     Write-Host "PASS manual maintenance repairs root/log ACLs and retains customer state"
     Add-PermissiveAces
-    $v2Result = Invoke-Msi @("/i", ('"{0}"' -f $v2)) "manual-upgrade" @(0, 3010)
-    Write-Host "Manual v2 reboot result: $v2Result"
+    $upgradeResult = Invoke-Msi @("/i", ('"{0}"' -f $v2)) "manual-upgrade" @(0, 3010)
+    Write-Host "Manual upgrade reboot result: $upgradeResult"
     Assert-CustomerStateRetained "manual upgrade"
     Assert-ProtectedAcls
     Assert-NoService
     Write-Host "PASS manual upgrade repairs root/log ACLs and retains customer state"
     $installed = @(Get-RelatedProducts)
     Assert-Equal 1 $installed.Count "one production product before uninstall"
-    Invoke-Msi @("/x", $installed[0]) "manual-uninstall" @(0, 3010) | Out-Null
+    $uninstallResult = Invoke-Msi @("/x", $installed[0]) "manual-uninstall" @(0, 3010)
+    Write-Host "Manual uninstall reboot result: $uninstallResult"
     Assert-True (-not (Test-Path -LiteralPath $agentPath)) "production executable removed"
     Assert-CustomerStateRetained "manual uninstall"
     Assert-ProtectedAcls
@@ -374,10 +386,22 @@ if (-not $ManualProductionSmoke -and -not $ConfirmDisposableTestMachine) {
 Assert-Elevated64BitWindows
 if ($ManualProductionSmoke) {
     try { Invoke-ManualSmoke }
+    catch { $script:integrationFailure = $_ }
     finally {
-        if ($transcriptStarted) { Stop-Transcript | Out-Null }
-        if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force }
+        try {
+            if ($transcriptStarted) { Stop-Transcript | Out-Null }
+        }
+        catch {
+            [void]$cleanupFailures.Add("transcript stop failed: $($_.Exception.Message)")
+        }
+        try {
+            if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
+        }
+        catch {
+            [void]$cleanupFailures.Add("temporary artifact deletion failed: $($_.Exception.Message)")
+        }
     }
+    Complete-IntegrationRun $integrationFailure
     exit 0
 }
 
@@ -482,11 +506,6 @@ catch {
         if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
         if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }
         if (Test-Path -LiteralPath $markerPath) { Write-Host "Marker: $([IO.File]::ReadAllText($markerPath))" }
-        $sessionLogs = Join-Path $artifactsRoot "logs"
-        if (Test-Path -LiteralPath $sessionLogs) {
-            New-Item -ItemType Directory -Path $deterministicLogs -Force | Out-Null
-            Copy-Item -Path (Join-Path $sessionLogs "*.log") -Destination $deterministicLogs -Force -ErrorAction SilentlyContinue
-        }
     }
     catch {
         Write-Host "Failure evidence collection also failed: $($_.Exception.Message)" -ForegroundColor Red
@@ -515,19 +534,28 @@ finally {
         catch {
             [void]$cleanupFailures.Add("temporary user deletion failed: $($_.Exception.Message)")
         }
-        $remainingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
-        if ($null -ne $remainingUser) {
-            [void]$cleanupFailures.Add("temporary user $testUser still exists after deletion")
+        try {
+            $remainingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue
+            if ($null -ne $remainingUser) {
+                [void]$cleanupFailures.Add("temporary user $testUser still exists after deletion")
+            }
+        }
+        catch {
+            [void]$cleanupFailures.Add("temporary user deletion verification failed: $($_.Exception.Message)")
         }
     }
-    if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue }
-    if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction SilentlyContinue }
-}
-
-if ($cleanupFailures.Count -ne 0) {
-    foreach ($cleanupFailure in $cleanupFailures) {
-        Write-Host "Cleanup failure: $cleanupFailure" -ForegroundColor Red
+    try {
+        if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force -ErrorAction Stop }
+    }
+    catch {
+        [void]$cleanupFailures.Add("fixture marker deletion failed: $($_.Exception.Message)")
+    }
+    try {
+        if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
+    }
+    catch {
+        [void]$cleanupFailures.Add("temporary artifact deletion failed: $($_.Exception.Message)")
     }
 }
-if ($null -ne $integrationFailure) { throw $integrationFailure }
-if ($cleanupFailures.Count -ne 0) { throw "Integration cleanup failed; see cleanup diagnostics above." }
+
+Complete-IntegrationRun $integrationFailure
