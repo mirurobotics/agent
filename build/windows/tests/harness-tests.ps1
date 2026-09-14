@@ -1,105 +1,86 @@
+#Requires -Version 5.1
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = "Stop"
-$sourcePath = Join-Path $PSScriptRoot "integration-tests.ps1"
-$tokens = $null
-$parseErrors = $null
-$sourceAst = [Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors.Count -ne 0) { throw "Integration script must parse before testing its harness." }
+Set-StrictMode -Version Latest
+Import-Module -Force -Name (Join-Path $PSScriptRoot "MsiTest.psm1")
+. (Join-Path $PSScriptRoot "integration-lib.ps1")
+
+$fixtureProducts = @($MsiFixtureProductCodes)
+$foreignProduct = "{11111111-1111-1111-1111-111111111111}"
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ("miru-harness-tests-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $testRoot | Out-Null
+$caseCount = 0
 
 function Assert-Test {
     param([bool]$Condition, [string]$Label)
     if (-not $Condition) { throw "HARNESS ASSERT: $Label" }
 }
 
-function Get-UniqueNode {
-    param([object[]]$Nodes, [string]$Label)
-    Assert-Test ($Nodes.Count -eq 1) "one production $Label"
-    return $Nodes[0]
-}
-
-$functions = @($sourceAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))
-foreach ($name in @("Assert-True", "Assert-Equal", "Invoke-Msi", "Complete-IntegrationRun", "Assert-CustomerStateRetained", "New-RepresentativeSecrets", "Invoke-ManualSmoke", "Invoke-ManualRun", "Invoke-IntegrationRun")) {
-    $definition = Get-UniqueNode @($functions | Where-Object { $_.Name -eq $name }) $name
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
-
-$statements = @($sourceAst.EndBlock.Statements)
-$sessionAssignment = Get-UniqueNode @($statements | Where-Object {
-    $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$sessionLogs'
-}) "session log assignment"
-$sessionExpression = [scriptblock]::Create($sessionAssignment.Right.Extent.Text)
-$productsAssignment = Get-UniqueNode @($statements | Where-Object {
-    $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$fixtureProducts'
-}) "fixture allowlist"
-$fixtureProducts = @(& ([scriptblock]::Create($productsAssignment.Right.Extent.Text)))
-$foreignProduct = "{11111111-1111-1111-1111-111111111111}"
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ("miru-harness-tests-" + [Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $testRoot | Out-Null
-$caseCount = 0
-
-function Write-Host {
-    param([object]$Object, [ConsoleColor]$ForegroundColor)
-    [void]$script:hostLines.Add([string]$Object)
-}
-
-function Start-Process {
-    [CmdletBinding()]
-    param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru)
-    Assert-Test ($FilePath -eq "msiexec.exe" -and $Wait -and $PassThru) "only mocked synchronous MSI processes"
-    $logIndex = [Array]::IndexOf($ArgumentList, "/l*v")
-    Assert-Test ($logIndex -ge 0) "MSI verbose logging requested"
-    $path = $ArgumentList[$logIndex + 1].Trim('"')
-    $name = [IO.Path]::GetFileNameWithoutExtension($path)
-    Assert-Test ($script:hostLines -contains "MSI log ($name): $path") "log location reported before MSI starts"
-    if ($name -eq "manual-uninstall") { Assert-RepresentativeContents }
-    $contents = "$name/$($script:processCalls.Count)/$([Guid]::NewGuid())"
-    [IO.File]::WriteAllText($path, $contents)
-    $code = 0
-    if ($script:exitCodes.ContainsKey($name)) { $code = $script:exitCodes[$name] }
-    [void]$script:processCalls.Add([pscustomobject]@{ Name = $name; Path = $path; Contents = $contents; Arguments = $ArgumentList })
-    if ($ArgumentList[0] -eq "/x") {
-        Assert-Test ($fixtureProducts -contains $ArgumentList[1]) "cleanup never uninstalls a foreign product"
-        if (@(0, 3010, 1605) -contains $code) { [void]$script:relatedProducts.Remove($ArgumentList[1]) }
+function Register-HarnessMocks {
+    function script:Write-Host {
+        param([object]$Object, [ConsoleColor]$ForegroundColor)
+        [void]$script:hostLines.Add([string]$Object)
     }
-    return [pscustomobject]@{ ExitCode = $code }
-}
 
-function Get-RelatedProducts {
-    $script:relatedReads++
-    if ($script:diagnosticsFail -and $script:relatedReads -eq 1) { throw [InvalidOperationException]::new("injected diagnostics failure") }
-    return @($script:relatedProducts)
-}
+    function script:Start-Process {
+        [CmdletBinding()]
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru)
+        Assert-Test ($FilePath -eq "msiexec.exe" -and $Wait -and $PassThru) "only mocked synchronous MSI processes"
+        $logIndex = [Array]::IndexOf($ArgumentList, "/l*v")
+        Assert-Test ($logIndex -ge 0) "MSI verbose logging requested"
+        $path = $ArgumentList[$logIndex + 1].Trim('"')
+        $name = [IO.Path]::GetFileNameWithoutExtension($path)
+        Assert-Test ($script:hostLines -contains "MSI log ($name): $path") "log location reported before MSI starts"
+        if ($name -eq "manual-uninstall") { Assert-RepresentativeContents }
+        $contents = "$name/$($script:processCalls.Count)/$([Guid]::NewGuid())"
+        [IO.File]::WriteAllText($path, $contents)
+        $code = 0
+        if ($script:exitCodes.ContainsKey($name)) { $code = $script:exitCodes[$name] }
+        [void]$script:processCalls.Add([pscustomobject]@{ Name = $name; Path = $path; Contents = $contents; Arguments = $ArgumentList })
+        if ($ArgumentList[0] -eq "/x") {
+            Assert-Test ($fixtureProducts -contains $ArgumentList[1]) "cleanup never uninstalls a foreign product"
+            if (@(0, 3010, 1605) -contains $code) { [void]$script:relatedProducts.Remove($ArgumentList[1]) }
+        }
+        return [pscustomobject]@{ ExitCode = $code }
+    }
 
-function Remove-LocalUser {
-    [CmdletBinding()]
-    param([string]$Name)
-    [void]$script:cleanupAttempts.Add("user")
-    if ($script:cleanupFault -eq "user") { throw [InvalidOperationException]::new("injected user removal failure") }
-    $script:userExists = $false
-}
+    function script:Get-RelatedProducts {
+        $script:relatedReads++
+        if ($script:diagnosticsFail -and $script:relatedReads -eq 1) { throw [InvalidOperationException]::new("injected diagnostics failure") }
+        return @($script:relatedProducts)
+    }
 
-function Get-LocalUser {
-    [CmdletBinding()]
-    param([string]$Name)
-    [void]$script:cleanupAttempts.Add("verify-user")
-    if ($script:cleanupFault -eq "verify-user") { throw [InvalidOperationException]::new("injected user verification failure") }
-    if ($script:userExists) { return [pscustomobject]@{ Name = $Name } }
-}
+    function script:Remove-LocalUser {
+        [CmdletBinding()]
+        param([string]$Name)
+        [void]$script:cleanupAttempts.Add("user")
+        if ($script:cleanupFault -eq "user") { throw [InvalidOperationException]::new("injected user removal failure") }
+        $script:userExists = $false
+    }
 
-function Remove-Item {
-    [CmdletBinding()]
-    param([string]$LiteralPath, [switch]$Recurse, [switch]$Force)
-    $label = if ($LiteralPath -eq $script:artifactsRoot) { "artifacts" } else { "marker" }
-    [void]$script:cleanupAttempts.Add($label)
-    if ($script:cleanupFault -eq $label) { throw [IO.IOException]::new("injected removal failure") }
-    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Recurse:$Recurse -Force:$Force
-}
+    function script:Get-LocalUser {
+        [CmdletBinding()]
+        param([string]$Name)
+        [void]$script:cleanupAttempts.Add("verify-user")
+        if ($script:cleanupFault -eq "verify-user") { throw [InvalidOperationException]::new("injected user verification failure") }
+        if ($script:userExists) { return [pscustomobject]@{ Name = $Name } }
+    }
 
-function Stop-Transcript {
-    [void]$script:cleanupAttempts.Add("transcript")
-    if ($script:cleanupFault -eq "transcript") { throw [InvalidOperationException]::new("injected transcript failure") }
+    function script:Remove-Item {
+        [CmdletBinding()]
+        param([string]$LiteralPath, [switch]$Recurse, [switch]$Force)
+        $label = if ($LiteralPath -eq $script:artifactsRoot) { "artifacts" } else { "marker" }
+        [void]$script:cleanupAttempts.Add($label)
+        if ($script:cleanupFault -eq $label) { throw [IO.IOException]::new("injected removal failure") }
+        Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Recurse:$Recurse -Force:$Force
+    }
+
+    function script:Stop-Transcript {
+        [void]$script:cleanupAttempts.Add("transcript")
+        if ($script:cleanupFault -eq "transcript") { throw [InvalidOperationException]::new("injected transcript failure") }
+    }
 }
 
 function Invoke-TestOperation {
@@ -143,7 +124,7 @@ function Invoke-Case {
     $script:repositoryRoot = Join-Path $script:caseRoot "repository"
     $script:artifactsRoot = Join-Path $script:caseRoot "temporary-build"
     $script:deterministicLogs = Join-Path $script:repositoryRoot "build\windows\artifacts\package-tests\logs"
-    $script:sessionLogs = & $sessionExpression
+    $script:sessionLogs = New-MsiSessionLogDirectory $script:deterministicLogs
     $script:programDataRoot = Join-Path $script:caseRoot "data"
     $script:logsRoot = Join-Path $script:programDataRoot "logs"
     $script:protectedRoots = @($script:programDataRoot, $script:logsRoot, (Join-Path $script:programDataRoot "auth"), (Join-Path $script:programDataRoot "tmp"))
@@ -173,6 +154,7 @@ function Invoke-Case {
     [void]$script:relatedProducts.Add($foreignProduct)
     New-Item -ItemType Directory -Path $script:artifactsRoot -Force | Out-Null
     [IO.File]::WriteAllText($script:markerPath, "fixture-marker")
+    Register-HarnessMocks
     & $Body
     Microsoft.PowerShell.Utility\Write-Host "PASS harness $Name"
 }
@@ -196,7 +178,7 @@ try {
 
     Invoke-Case "unique persistent sessions" {
         Invoke-Msi @("/i", "fixture.msi") "same-name" @(0) | Out-Null
-        $script:sessionLogs = & $sessionExpression
+        $script:sessionLogs = New-MsiSessionLogDirectory $script:deterministicLogs
         Invoke-Msi @("/i", "fixture.msi") "same-name" @(0) | Out-Null
         Assert-Test ($script:processCalls[0].Path -ne $script:processCalls[1].Path) "sessions do not overwrite identical operation names"
         Remove-Item -LiteralPath $script:artifactsRoot -Recurse -Force
@@ -222,33 +204,35 @@ try {
 
     foreach ($rebootStage in @("none", "install", "maintenance", "upgrade", "uninstall", "failed-maintenance")) {
         Invoke-Case "manual stage results $rebootStage" {
-            function Assert-InstalledAllowlistSafe { param([switch]$RequireClean) }
-            function Get-MiruArpProducts { }
-            function Start-Transcript { param([string]$LiteralPath, [switch]$Force) }
-            function Get-ComputerInfo { [pscustomobject]@{ WindowsProductName = "Harness"; WindowsVersion = "test"; OsBuildNumber = "0" } }
-            function Get-MsiIdentity { param([string]$Path) [pscustomobject]@{ ProductName = "Harness" } }
-            function Add-PermissiveAces {
+            function script:Assert-InstalledAllowlistSafe { param([switch]$RequireClean) }
+            function script:Get-MiruArpProducts { }
+            function script:Start-Transcript { param([string]$LiteralPath, [switch]$Force) }
+            function script:Get-ComputerInfo { [pscustomobject]@{ WindowsProductName = "Harness"; WindowsVersion = "test"; OsBuildNumber = "0" } }
+            function script:Get-MsiIdentity { param([string]$Path) [pscustomobject]@{ ProductName = "Harness" } }
+            function script:Add-PermissiveAces {
                 foreach ($path in $script:protectedRoots) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
             }
-            function Assert-ProtectedAcls {
+            function script:Assert-ProtectedAcls {
                 foreach ($path in $script:protectedRoots) { Assert-Test (Test-Path -LiteralPath $path -PathType Container) "protected directory still exists" }
             }
-            function Get-Acl {
+            function script:Get-Acl {
                 param([string]$LiteralPath)
                 Assert-Test (Test-Path -LiteralPath $LiteralPath -PathType Leaf) "ACL probe targets a real representative file"
                 Assert-Test ($script:protectedRoots -contains [IO.Path]::GetDirectoryName($LiteralPath)) "ACL probe stays inside sandbox directories"
                 $rules = @("S-1-5-18", "S-1-5-32-544") | ForEach-Object {
+                    $identity = New-Object psobject -Property @{ Value = $_ }
+                    Add-Member -InputObject $identity -MemberType ScriptMethod -Name Translate -Value { param($type) $this }
                     [pscustomobject]@{
                         IsInherited = $true
                         AccessControlType = [Security.AccessControl.AccessControlType]::Allow
                         FileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl
-                        IdentityReference = [Security.Principal.SecurityIdentifier]::new($_)
+                        IdentityReference = $identity
                     }
                 }
                 return [pscustomobject]@{ AreAccessRulesProtected = $false; Access = @($rules) }
             }
-            function Assert-NoService { }
-            function Get-RelatedProducts { return @($fixtureProducts[0]) }
+            function script:Assert-NoService { }
+            function script:Get-RelatedProducts { return @($fixtureProducts[0]) }
             $ConfirmDisposableCleanVm = $true
             $TranscriptPath = Join-Path $script:caseRoot "transcript.txt"
             foreach ($version in @("1.0.0", "1.1.0")) {
@@ -288,7 +272,7 @@ try {
         @{ Primary = $true; Fault = "transcript" }
     )) {
         Invoke-Case "manual cleanup primary=$($scenario.Primary) fault=$($scenario.Fault)" {
-            function Invoke-ManualSmoke { Invoke-TestOperation }
+            function script:Invoke-ManualSmoke { Invoke-TestOperation }
             $script:cleanupFault = $scenario.Fault
             if ($scenario.Primary) { $script:exitCodes["primary"] = 1603 }
             $failure = $null
@@ -313,7 +297,7 @@ try {
         @{ Primary = $true; CleanupMsi = $false; Diagnostics = $false; Fault = "artifacts" }
     )) {
         Invoke-Case "integration cleanup primary=$($scenario.Primary) MSI=$($scenario.CleanupMsi) diagnostics=$($scenario.Diagnostics) fault=$($scenario.Fault)" {
-            function Invoke-IntegrationLifecycle { Invoke-TestOperation }
+            function script:Invoke-IntegrationLifecycle { Invoke-TestOperation }
             $script:cleanupFault = $scenario.Fault
             $script:diagnosticsFail = $scenario.Diagnostics
             if ($scenario.Primary) { $script:exitCodes["primary"] = 1603 }
