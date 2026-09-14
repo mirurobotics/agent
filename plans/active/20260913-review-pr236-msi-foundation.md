@@ -31,6 +31,7 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - Baseline inspection confirmed local `5ec1198` contains only three task-owned plan commits after remote PR head `942952fc`; the merge base is `a0e7afb3` and `origin/main` is `3f20eb0`. The PR remains draft.
 - Executing the actual workflow classifier reproduced `false/false` for both a package input and a Rust input renamed into `archive/`. Directly relevant inputs and non-PR events select the expected lanes.
 - The full review identified an additional ownership gap: a standard user owning a pre-existing data directory retains implicit `WRITE_DAC` when only its DACL is replaced. Native regression coverage will verify ownership repair and denial of permission changes.
+- The second full-PR review traced provisioning through pre-existing `auth` and `tmp` directories. Their protected child ACLs survive ancestor repair, so these credential parents also require explicit installer protection.
 
 ## Decision Log
 
@@ -38,6 +39,7 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - 2026-09-13, implementation review/critique: accept all five initial findings; none skipped. `R236-001` fixes the reusable release caller's missing `pull-requests: read` permission; `R236-002` secures ownership of both authored data directories; `R236-003` includes rename source paths in classification; `R236-004` retains MSI logs and original failures across cleanup; `R236-005` reports maintenance/uninstall reboot results. Preserve UpgradeCode, component identities, fixture allowlists, retained contents, and workflow triggers.
 - Planned regressions execute the production classifier for ordinary, renamed, irrelevant, and non-PR inputs; verify caller/callee permissions without a release tag; exercise durable logs and primary/cleanup error precedence with injected failures; inject 3010 at all four manual stages; and verify ownership and nonadministrator denial across native install, repair, and upgrade.
 - Log files will be written directly outside temporary build output so cleanup and auxiliary diagnostics cannot delete the only failure evidence. Local validation remains lightweight; complete Linux and native Windows validation runs in CI.
+- Source refinement accepts `R236-007`: author `auth` and `tmp` with stable new directory-component identities and the same SYSTEM ownership/protected descriptor, retaining contents and extending native hostile-directory coverage. `R236-006` is explicitly skipped after review and critique: classifier rejection fails the workflow; branch protection excluding Windows checks predates this PR and requires a separate policy decision.
 
 ## Outcomes & Retrospective
 
