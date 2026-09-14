@@ -28,6 +28,8 @@
     <StandardDirectory Id="CommonAppDataFolder">
       <Directory Id="MIRUDATA" Name="Miru">
         <Directory Id="MIRULOGS" Name="logs" />
+        <Directory Id="MIRUAUTH" Name="auth" />
+        <Directory Id="MIRUTMP" Name="tmp" />
       </Directory>
     </StandardDirectory>
 
@@ -51,6 +53,16 @@
         </CreateFolder>
       </Component>
       <Component Id="MiruLogsDir" Directory="MIRULOGS" Guid="C3AF8332-28E8-4707-8430-780C553D86EC" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruAuthDir" Directory="MIRUAUTH" Guid="A2AE361A-41E6-427A-AF4C-ACCEE7F451F9" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruTmpDir" Directory="MIRUTMP" Guid="D654A9BF-2860-44FA-8FFB-A8E36986197B" Bitness="always64" KeyPath="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
         </CreateFolder>
