@@ -1291,25 +1291,16 @@ mod tests {
 
             // swap config to deployment d2, rule rule2.
             let mut s2 = RuleState::new(config("d2", "rule2", &glob_for(&dir), 0));
+            let expected = stable_from_obs(&first_obs, HASH_AAAA, ts(1000), ts(1010));
             track(&mut s2, &file, first_obs);
             let mut scanner = RuleScanner::from_state(s2, Options::default());
 
             let emitted = scanner.evaluate_candidates(ts(1010)).await.unwrap();
-            assert_eq!(emitted.len(), 1);
-            let sf = &emitted[0];
-            // lint:allow(field-by-field-assert) — digest and mtime_aliases are scanner-derived; identity fields are the subject.
 
-            // identity from the FIRST observation, not d2, rule2.
-            assert_eq!(sf.deployment_id, "d1");
-            assert_eq!(sf.file_rule_id, "rule1");
-            // first_observed_at is the discovery ts; last_observed_at is the eval ts
-            assert_eq!(sf.first_observed_at, ts(1000));
-            assert_eq!(sf.last_observed_at, ts(1010));
-
-            // sanity: size + mtime match the on-disk file (the LAST observation).
-            let meta = files::metadata(&file).await.unwrap();
-            assert_eq!(sf.size, meta.len());
-            assert_eq!(sf.mtime, DateTime::<Utc>::from(meta.modified().unwrap()));
+            // identity (deployment_id, file_rule_id, first_observed_at) comes
+            // from the FIRST observation, not d2 / rule2; last_observed_at is
+            // the eval ts. size / mtime / digest follow first_obs.
+            assert_eq!(emitted, vec![expected]);
         }
     }
 
