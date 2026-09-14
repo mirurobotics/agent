@@ -356,7 +356,7 @@ mod tests {
 
     /// Wires a `Store` to a replay client expecting exactly one request/response
     /// exchange — the shape of nearly every test here.
-    fn store_expecting(
+    pub(super) fn store_expecting(
         request: http::Request<SdkBody>,
         response: http::Response<SdkBody>,
     ) -> (Store, StaticReplayClient) {
@@ -505,13 +505,17 @@ mod tests {
                     .await
                     .unwrap_err();
 
-                assert!(matches!(err, S3Err::RequestFailedErr(_)));
+                let S3Err::RequestFailedErr(inner) = &err else {
+                    panic!("expected RequestFailedErr, got {err:?}");
+                };
+                assert_eq!(
+                    (inner.operation.as_str(), inner.status, &inner.object),
+                    ("put_object", Some(403), &obj("denied.txt"))
+                );
                 assert_error(
                     &err,
                     Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
                 );
-                // Exercise the RequestFailedErr Display impl (status + operation).
-                assert!(err.to_string().contains("put_object"));
             }
         }
 
@@ -532,115 +536,6 @@ mod tests {
                     .unwrap_err();
 
                 assert!(matches!(err, S3Err::FileSysErr(_)));
-            }
-        }
-
-        /// Size-based routing in [`Store::put`]: small files take the single
-        /// `PutObject` path; larger-than-`PART_SIZE` files take the multipart path.
-        pub mod routing {
-            use super::*;
-            use crate::s3::multipart::tests::{
-                complete_req, complete_resp, complete_shape, create_req, create_resp, create_shape,
-                upload_part_req, upload_part_resp, upload_part_shape,
-            };
-
-            #[tokio::test]
-            async fn small_file_routes_to_single_put() {
-                // A body well under PART_SIZE must take the single-part branch:
-                // exactly one PutObject, no multipart calls.
-                let src = temp_file_with(b"tiny").await;
-                let (store, replay) =
-                    store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
-
-                store
-                    .put(src.to_file(), &obj("small.bin"), &HashMap::new())
-                    .await
-                    .unwrap();
-
-                assert_eq!(
-                    actual_shapes(&replay),
-                    vec![shape("PUT", "small.bin?x-id=PutObject")]
-                );
-            }
-
-            #[tokio::test]
-            async fn large_file_routes_to_multipart() {
-                // The crate constant is private; re-declare it locally to size a
-                // fixture just past the routing threshold. 8 MiB + 1 KiB => 2 parts
-                // (8 MiB, 1 KiB).
-                const PART_SIZE: u64 = 8 * 1024 * 1024;
-                // Recognizable byte pattern so each part's body can be checked against its slice.
-                let big: Vec<u8> = (0..(PART_SIZE + 1024)).map(|i| i as u8).collect();
-                let src = temp_file_with(&big).await;
-
-                let (store, replay) = store_with(vec![
-                    ReplayEvent::new(create_req(), create_resp()),
-                    ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
-                    ReplayEvent::new(upload_part_req(2), upload_part_resp("\"etag-part-2\"")),
-                    ReplayEvent::new(complete_req(), complete_resp()),
-                ]);
-
-                store
-                    .put(src.to_file(), &obj("big.bin"), &HashMap::new())
-                    .await
-                    .unwrap();
-
-                assert_eq!(
-                    actual_shapes(&replay),
-                    vec![
-                        create_shape(),
-                        upload_part_shape(1),
-                        upload_part_shape(2),
-                        complete_shape(),
-                    ]
-                );
-
-                // The CompleteMultipartUpload manifest is a small in-memory XML body,
-                // so its bytes are readable off the recorded request. Assert it lists
-                // both parts in order with their matching etags.
-                let requests = replay.actual_requests().collect::<Vec<_>>();
-                let complete_body = requests
-                    .last()
-                    .expect("a complete request was recorded")
-                    .body()
-                    .bytes()
-                    .expect("the complete manifest is an in-memory body");
-                let manifest = std::str::from_utf8(complete_body).expect("manifest is UTF-8");
-
-                let part1 = manifest
-                    .find("<PartNumber>1</PartNumber>")
-                    .expect("manifest lists part 1");
-                let part2 = manifest
-                    .find("<PartNumber>2</PartNumber>")
-                    .expect("manifest lists part 2");
-                assert!(part1 < part2, "parts must appear in ascending order");
-                assert!(
-                    manifest.contains("etag-part-1"),
-                    "manifest carries part 1's etag"
-                );
-                assert!(
-                    manifest.contains("etag-part-2"),
-                    "manifest carries part 2's etag"
-                );
-
-                // Parts are sent as in-memory buffers, so their exact bytes are recorded:
-                // each part must carry its own file slice (right offset and length).
-                assert!(
-                    requests[1]
-                        .body()
-                        .bytes()
-                        .expect("part 1 body is in-memory")
-                        == &big[..PART_SIZE as usize],
-                    "part 1 must be the first PART_SIZE bytes of the source"
-                );
-                assert!(
-                    requests[2]
-                        .body()
-                        .bytes()
-                        .expect("part 2 body is in-memory")
-                        == &big[PART_SIZE as usize..],
-                    "part 2 must be the remaining bytes of the source"
-                );
             }
         }
     }

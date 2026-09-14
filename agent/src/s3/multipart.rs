@@ -329,15 +329,15 @@ impl Store {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+mod tests {
     // standard crates
     use std::collections::HashMap;
 
     // internal crates
     use super::*;
     use crate::s3::tests::{
-        access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_with,
-        temp_file_with, uri, BUCKET,
+        access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
+        store_with, temp_file_with, uri, BUCKET,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
@@ -423,7 +423,7 @@ pub(super) mod tests {
         assert_eq!(total_len, size); // full coverage, no gap/overlap.
     }
 
-    pub(crate) const UPLOAD_ID: &str = "test-upload-id";
+    const UPLOAD_ID: &str = "test-upload-id";
 
     /// Builds a `Source` from a temp file, reading its length off disk with the
     /// crate's own `files::size`.
@@ -433,7 +433,7 @@ pub(super) mod tests {
         Source { file, size }
     }
 
-    pub(crate) fn create_resp() -> http::Response<SdkBody> {
+    fn create_resp() -> http::Response<SdkBody> {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <InitiateMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId></InitiateMultipartUploadResult>"#
@@ -441,7 +441,7 @@ pub(super) mod tests {
         resp_xml(200, &xml)
     }
 
-    pub(crate) fn upload_part_resp(etag: &str) -> http::Response<SdkBody> {
+    fn upload_part_resp(etag: &str) -> http::Response<SdkBody> {
         http::Response::builder()
             .status(200)
             .header("ETag", etag)
@@ -449,7 +449,7 @@ pub(super) mod tests {
             .unwrap()
     }
 
-    pub(crate) fn complete_resp() -> http::Response<SdkBody> {
+    fn complete_resp() -> http::Response<SdkBody> {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Location>https://s3.amazonaws.com/{BUCKET}/big.bin</Location><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><ETag>"final-etag"</ETag></CompleteMultipartUploadResult>"#
@@ -457,7 +457,7 @@ pub(super) mod tests {
         resp_xml(200, &xml)
     }
 
-    pub(crate) fn create_req() -> http::Request<SdkBody> {
+    fn create_req() -> http::Request<SdkBody> {
         http::Request::builder()
             .method("POST")
             .uri(uri("big.bin?uploads"))
@@ -465,7 +465,7 @@ pub(super) mod tests {
             .unwrap()
     }
 
-    pub(crate) fn upload_part_req(number: i32) -> http::Request<SdkBody> {
+    fn upload_part_req(number: i32) -> http::Request<SdkBody> {
         http::Request::builder()
             .method("PUT")
             .uri(uri(&format!(
@@ -475,7 +475,7 @@ pub(super) mod tests {
             .unwrap()
     }
 
-    pub(crate) fn complete_req() -> http::Request<SdkBody> {
+    fn complete_req() -> http::Request<SdkBody> {
         http::Request::builder()
             .method("POST")
             .uri(uri(&format!("big.bin?uploadId={UPLOAD_ID}")))
@@ -496,18 +496,18 @@ pub(super) mod tests {
     // Expected wire shapes for the multipart sequence. These match what the SDK
     // actually emits (create/complete omit the `x-id=...` query param that the
     // ReplayEvent fixtures include for matching).
-    pub(crate) fn create_shape() -> (String, String) {
+    fn create_shape() -> (String, String) {
         shape("POST", "big.bin?uploads")
     }
 
-    pub(crate) fn upload_part_shape(number: i32) -> (String, String) {
+    fn upload_part_shape(number: i32) -> (String, String) {
         shape(
             "PUT",
             &format!("big.bin?x-id=UploadPart&partNumber={number}&uploadId={UPLOAD_ID}"),
         )
     }
 
-    pub(crate) fn complete_shape() -> (String, String) {
+    fn complete_shape() -> (String, String) {
         shape("POST", &format!("big.bin?uploadId={UPLOAD_ID}"))
     }
 
@@ -1103,6 +1103,111 @@ pub(super) mod tests {
 
             // Both landed parts listed in ascending order.
             assert_complete_manifest(&replay, &[(1, "landed-1"), (2, "landed-2")]);
+        }
+    }
+
+    /// Size-based routing in [`Store::put`]: small files take the single
+    /// `PutObject` path; larger-than-`PART_SIZE` files take the multipart path.
+    mod routing {
+        use super::*;
+
+        #[tokio::test]
+        async fn small_file_routes_to_single_put() {
+            // A body well under PART_SIZE must take the single-part branch:
+            // exactly one PutObject, no multipart calls.
+            let src = temp_file_with(b"tiny").await;
+            let (store, replay) =
+                store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
+
+            store
+                .put(src.to_file(), &obj("small.bin"), &HashMap::new())
+                .await
+                .unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![shape("PUT", "small.bin?x-id=PutObject")]
+            );
+        }
+
+        #[tokio::test]
+        async fn large_file_routes_to_multipart() {
+            // The crate constant is private; re-declare it locally to size a
+            // fixture just past the routing threshold. 8 MiB + 1 KiB => 2 parts
+            // (8 MiB, 1 KiB).
+            const PART_SIZE: u64 = 8 * 1024 * 1024;
+            // Recognizable byte pattern so each part's body can be checked against its slice.
+            let big: Vec<u8> = (0..(PART_SIZE + 1024)).map(|i| i as u8).collect();
+            let src = temp_file_with(&big).await;
+
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
+                ReplayEvent::new(upload_part_req(2), upload_part_resp("\"etag-part-2\"")),
+                ReplayEvent::new(complete_req(), complete_resp()),
+            ]);
+
+            store
+                .put(src.to_file(), &obj("big.bin"), &HashMap::new())
+                .await
+                .unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![
+                    create_shape(),
+                    upload_part_shape(1),
+                    upload_part_shape(2),
+                    complete_shape(),
+                ]
+            );
+
+            // The CompleteMultipartUpload manifest is a small in-memory XML body,
+            // so its bytes are readable off the recorded request. Assert it lists
+            // both parts in order with their matching etags.
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let complete_body = requests
+                .last()
+                .expect("a complete request was recorded")
+                .body()
+                .bytes()
+                .expect("the complete manifest is an in-memory body");
+            let manifest = std::str::from_utf8(complete_body).expect("manifest is UTF-8");
+
+            let part1 = manifest
+                .find("<PartNumber>1</PartNumber>")
+                .expect("manifest lists part 1");
+            let part2 = manifest
+                .find("<PartNumber>2</PartNumber>")
+                .expect("manifest lists part 2");
+            assert!(part1 < part2, "parts must appear in ascending order");
+            assert!(
+                manifest.contains("etag-part-1"),
+                "manifest carries part 1's etag"
+            );
+            assert!(
+                manifest.contains("etag-part-2"),
+                "manifest carries part 2's etag"
+            );
+
+            // Parts are sent as in-memory buffers, so their exact bytes are recorded:
+            // each part must carry its own file slice (right offset and length).
+            assert!(
+                requests[1]
+                    .body()
+                    .bytes()
+                    .expect("part 1 body is in-memory")
+                    == &big[..PART_SIZE as usize],
+                "part 1 must be the first PART_SIZE bytes of the source"
+            );
+            assert!(
+                requests[2]
+                    .body()
+                    .bytes()
+                    .expect("part 2 body is in-memory")
+                    == &big[PART_SIZE as usize..],
+                "part 2 must be the remaining bytes of the source"
+            );
         }
     }
 }

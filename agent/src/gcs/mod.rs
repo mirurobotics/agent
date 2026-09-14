@@ -1118,7 +1118,7 @@ mod tests {
                 assert!(matches!(err.code(), Code::ResourceNotFound));
                 assert_eq!(err.http_status().as_u16(), 404);
                 assert!(!err.is_network_conn_err());
-                assert!(err.to_string().contains("object not found"));
+                assert_eq!(err.to_string(), "object not found: gs://test-bucket/k");
             }
 
             #[test]
@@ -1130,7 +1130,10 @@ mod tests {
                 });
                 assert!(err.is_network_conn_err());
                 assert!(matches!(err.code(), Code::InternalServerError));
-                assert!(err.to_string().contains("connection error"));
+                assert_eq!(
+                    err.to_string(),
+                    "connection error for object 'gs://test-bucket/k': boom"
+                );
             }
 
             #[test]
@@ -1146,10 +1149,10 @@ mod tests {
                 assert_eq!(err.http_status().as_u16(), 500);
                 assert!(!err.is_network_conn_err());
                 // Display with no status hits the fallback formatting.
-                let msg = err.to_string();
-                assert!(msg.contains("gs://test-bucket/key"));
-                assert!(msg.contains("unknown"));
-                assert!(msg.contains("get_object"));
+                assert_eq!(
+                    err.to_string(),
+                    "GCS get_object request for object 'gs://test-bucket/key' failed with status unknown: nope"
+                );
             }
 
             #[test]
@@ -1160,7 +1163,7 @@ mod tests {
                 });
                 assert!(matches!(err.code(), Code::InternalServerError));
                 assert_eq!(err.http_status().as_u16(), 500);
-                assert!(err.to_string().contains("failed to build GCS client"));
+                assert_eq!(err.to_string(), "failed to build GCS client: bad token");
             }
 
             #[test]
@@ -1174,9 +1177,10 @@ mod tests {
                 assert!(matches!(err.code(), Code::InternalServerError));
                 assert_eq!(err.http_status().as_u16(), 500);
                 assert!(!err.is_network_conn_err());
-                let msg = err.to_string();
-                assert!(msg.contains("gs://test-bucket/key"));
-                assert!(msg.contains("no such file or directory"));
+                assert_eq!(
+                    err.to_string(),
+                    "local I/O error during get_object for object 'gs://test-bucket/key': no such file or directory"
+                );
             }
         }
     }
