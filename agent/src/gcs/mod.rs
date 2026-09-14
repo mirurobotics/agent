@@ -330,7 +330,37 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    // standard crates
+    use std::collections::HashMap;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Arc, Mutex};
+
+    // internal crates
     use super::*;
+    use crate::test_utils::{
+        filesys::{dirs as test_dirs, files as test_files},
+        http_client::run_server,
+    };
+    use miru_agent::errors::{Code, Error};
+    use miru_agent::filesys::file::File;
+    use miru_agent::filesys::path::PathExt;
+    use miru_agent::filesys::{files, WriteOptions};
+    use miru_agent::gcs::errors::{
+        BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
+    };
+    use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
+
+    // external crates
+    use axum::body::Bytes;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::IntoResponse;
+    use axum::routing::{get, post};
+    use axum::Router;
+    use google_cloud_gax::error::rpc::{Code as GaxCode, Status};
+    use google_cloud_gax::error::Error as GaxError;
+    use google_cloud_gax::response::Response as GaxResponse;
+    use google_cloud_storage as gcs;
 
     fn provider() -> StaticTokenCredentials {
         let mut header_value = HeaderValue::from_static("Bearer abc123");
@@ -386,36 +416,7 @@ mod tests {
     }
 
     mod store {
-        // standard crates
-        use std::collections::HashMap;
-        use std::os::unix::fs::PermissionsExt;
-        use std::sync::{Arc, Mutex};
-
-        // internal crates
-        use crate::test_utils::{
-            filesys::{dirs as test_dirs, files as test_files},
-            http_client::run_server,
-        };
-        use miru_agent::errors::{Code, Error};
-        use miru_agent::filesys::file::File;
-        use miru_agent::filesys::path::PathExt;
-        use miru_agent::filesys::{files, WriteOptions};
-        use miru_agent::gcs::errors::{
-            BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
-        };
-        use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
-
-        // external crates
-        use axum::body::Bytes;
-        use axum::extract::State;
-        use axum::http::{HeaderMap, StatusCode};
-        use axum::response::IntoResponse;
-        use axum::routing::{get, post};
-        use axum::Router;
-        use google_cloud_gax::error::rpc::{Code as GaxCode, Status};
-        use google_cloud_gax::error::Error as GaxError;
-        use google_cloud_gax::response::Response as GaxResponse;
-        use google_cloud_storage as gcs;
+        use super::*;
 
         const BUCKET: &str = "test-bucket";
 
