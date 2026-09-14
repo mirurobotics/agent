@@ -91,6 +91,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Validate Windows installer test harness
+        if: needs.windows_scope.outputs.windows_package == 'true'
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\harness-tests.ps1
+
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
@@ -160,6 +165,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate Windows workflow contracts
+        run: node --test build/windows/tests/workflow-tests.test.mjs
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
