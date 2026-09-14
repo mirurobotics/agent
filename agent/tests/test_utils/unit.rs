@@ -1,4 +1,10 @@
-//! Shared fixtures needed by owner-local unit tests.
+//! Unit-test fixture subset mounted by `agent/src/lib.rs` as `crate::test_utils`.
+//!
+//! Every file reached from here is also compiled inside the integration crate
+//! (`agent/tests/mod.rs`) under a different parent module. Fixture sources must
+//! therefore name the library as `miru_agent::` and reach sibling fixtures only
+//! through `super::` within `test_utils/` — never `crate::mocks::…` or
+//! `crate::sync::…`, which resolve differently in the two trees.
 
 #[path = "../errors/harnesses.rs"]
 pub mod error_harnesses;

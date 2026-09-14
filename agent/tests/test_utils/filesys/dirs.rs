@@ -5,7 +5,7 @@ use miru_agent::filesys::{
 };
 use miru_agent::trace;
 
-/// RAII temp directory for TESTS. Owns a `tempfile::TempDir` (Drop deletes the
+/// RAII temp directory. Owns a `tempfile::TempDir` (Drop deletes the
 /// dir) plus our `Dir` handle; the directory lives exactly as long as this value.
 #[derive(Debug)]
 pub struct TempDir {
@@ -31,7 +31,7 @@ impl std::ops::Deref for TempDir {
     }
 }
 
-/// Auto-cleaning temp dir for tests. Sync; keeps `prefix` for parity with
+/// Auto-cleaning temp dir. Sync; keeps `prefix` for parity with
 /// [`miru_agent::filesys::dirs::create_temp`]. The returned [`TempDir`] deletes the
 /// directory on drop, so bind it to a named variable that lives as long as needed.
 pub(crate) fn temp(prefix: &str) -> Result<TempDir, FileSysErr> {

@@ -54,11 +54,9 @@ Ordinary Cargo tests require no custom features or logging environment. The
 wrapper runs `RUST_LOG=off cargo test --package miru-agent` to suppress log output.
 
 The main suite in `agent/tests/mod.rs` is an external integration target that
-exercises the ordinary library's public APIs. Cases needing private access live
-in owner-local `#[cfg(test)]` modules under `agent/src/`. The separate `http_retry`
-target tests retries; `logs_init_smoke` and `logs_init_locked` isolate logging
-initialization. Tests run in parallel; `#[serial]` coordinates tests sharing fixed
-resources such as `/tmp/miru.sock`.
+exercises the ordinary library's public APIs; cases needing private access live
+in inline `#[cfg(test)]` modules under `agent/src/`. See `AGENTS.md` § Testing
+for target layout, fixture rules, and `#[serial]` conventions.
 
 ### Coverage gates
 

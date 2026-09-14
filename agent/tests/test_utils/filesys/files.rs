@@ -6,7 +6,7 @@ use miru_agent::filesys::{
 };
 use miru_agent::trace;
 
-/// RAII temp file for TESTS. Owns a `tempfile::NamedTempFile` (Drop deletes the
+/// RAII temp file. Owns a `tempfile::NamedTempFile` (Drop deletes the
 /// file) plus our `File` handle; the file lives exactly as long as this value.
 #[derive(Debug)]
 pub struct TempFile {
@@ -32,7 +32,7 @@ impl std::ops::Deref for TempFile {
     }
 }
 
-/// Auto-cleaning temp file for tests. Sync; keeps `prefix` for parity with
+/// Auto-cleaning temp file. Sync; keeps `prefix` for parity with
 /// [`super::dirs::temp`]. The returned [`TempFile`] deletes the file on
 /// drop, so bind it to a named variable that lives as long as the file is needed.
 pub(crate) fn temp(prefix: &str) -> Result<TempFile, FileSysErr> {
@@ -52,7 +52,7 @@ pub(crate) fn temp(prefix: &str) -> Result<TempFile, FileSysErr> {
     })
 }
 
-/// Test-only convenience: atomically (over)write `contents` to `file`, panicking
+/// Atomically (over)write `contents` to `file`, panicking
 /// on error. Collapses the common `write_string(f, s, OVERWRITE_ATOMIC).await
 /// .unwrap()` seed pattern to a single line. For non-default write options, call
 /// [`write_string`] directly.
