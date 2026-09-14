@@ -128,7 +128,7 @@ function Get-MsiIdentity {
         $values = @{}
         foreach ($name in @("ProductName", "ProductVersion", "ProductCode", "UpgradeCode")) {
             $value = Get-MsiPropertyValue $handle.Database $name
-            Assert-True ($null -ne $value) "one MSI identity property $name"
+            Assert-True ($null -ne $value) "MSI identity property $name present"
             $values[$name] = $value
         }
         return [pscustomobject]$values
