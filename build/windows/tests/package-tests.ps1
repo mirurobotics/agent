@@ -7,9 +7,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $expectedUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
-$expectedDataComponent = "{D0542DF7-5B61-4F09-938B-57F05C1B5458}"
-$expectedLogsComponent = "{C3AF8332-28E8-4707-8430-780C553D86EC}"
-$expectedSddl = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+$expectedDirectories = @(
+    @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru"),
+    @("MiruLogsDir", "{C3AF8332-28E8-4707-8430-780C553D86EC}", "MIRULOGS", "MIRUDATA", "logs"),
+    @("MiruAuthDir", "{A2AE361A-41E6-427A-AF4C-ACCEE7F451F9}", "MIRUAUTH", "MIRUDATA", "auth"),
+    @("MiruTmpDir", "{D654A9BF-2860-44FA-8FFB-A8E36986197B}", "MIRUTMP", "MIRUDATA", "tmp")
+)
+$expectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -145,31 +149,28 @@ function Assert-ProductionTables {
     $handle = Open-MsiDatabase -Path $Path
     try {
         $components = @(Get-MsiRows $handle.Database "SELECT ``Component``, ``ComponentId``, ``Directory_``, ``Attributes``, ``KeyPath`` FROM ``Component``" 5)
-        foreach ($guid in @($expectedDataComponent, $expectedLogsComponent)) {
-            $retained = @($components | Where-Object { [string]::Equals($_[1], $guid, [StringComparison]::OrdinalIgnoreCase) })
-            Assert-Equal 1 $retained.Count "retained component $guid"
-            Assert-True (([int]$retained[0][3] -band 256) -ne 0) "retained component $guid is 64-bit"
-            Assert-True ([string]::IsNullOrEmpty($retained[0][4])) "retained component $guid has a directory key path"
+        $directories = @(Get-MsiRows $handle.Database "SELECT ``Directory``, ``Directory_Parent``, ``DefaultDir`` FROM ``Directory``" 3)
+        $folders = @(Get-MsiRows $handle.Database "SELECT ``Directory_``, ``Component_`` FROM ``CreateFolder``" 2)
+        foreach ($expected in $expectedDirectories) {
+            $name, $guid, $directory, $parent, $leaf = $expected
+            $retained = @($components | Where-Object { $_[0] -eq $name })
+            Assert-Equal 1 $retained.Count "retained component $name"
+            Assert-Equal $guid $retained[0][1].ToUpperInvariant() "$name stable component identity"
+            Assert-Equal $directory $retained[0][2] "$name component directory"
+            Assert-True (([int]$retained[0][3] -band 256) -ne 0) "$name is 64-bit"
+            Assert-True ([string]::IsNullOrEmpty($retained[0][4])) "$name has a directory key path"
+            Assert-Equal 1 (@($directories | Where-Object { $_[0] -eq $directory -and $_[1] -eq $parent -and $_[2] -eq $leaf })).Count "$name directory hierarchy"
+            Assert-Equal 1 (@($folders | Where-Object { $_[0] -eq $directory -and $_[1] -eq $name })).Count "$name CreateFolder mapping"
         }
         $binary = @($components | Where-Object { $_[0] -eq "MiruAgentExe" })
         Assert-Equal 1 $binary.Count "binary component"
         Assert-True (([int]$binary[0][3] -band 256) -ne 0) "binary component is 64-bit"
         Assert-Equal "AGENTFOLDER" $binary[0][2] "binary component directory"
         Assert-Equal "miru_agent.exe" $binary[0][4] "binary component file key path"
-        $data = @($components | Where-Object { $_[0] -eq "MiruDataDir" })
-        $logs = @($components | Where-Object { $_[0] -eq "MiruLogsDir" })
-        Assert-Equal "MIRUDATA" $data[0][2] "data component directory"
-        Assert-Equal "MIRULOGS" $logs[0][2] "logs component directory"
-
-        $directories = @(Get-MsiRows $handle.Database "SELECT ``Directory``, ``Directory_Parent``, ``DefaultDir`` FROM ``Directory``" 3)
         Assert-Equal 1 (@($directories | Where-Object { $_[0] -eq "INSTALLFOLDER" -and $_[1] -eq "ProgramFiles64Folder" -and $_[2] -eq "Miru" })).Count "64-bit install directory"
-        Assert-Equal 1 (@($directories | Where-Object { $_[0] -eq "MIRULOGS" -and $_[1] -eq "MIRUDATA" -and $_[2] -eq "logs" })).Count "logs directory"
 
         $permissions = @(Get-MsiRows $handle.Database "SELECT ``LockObject``, ``Table``, ``SDDLText`` FROM ``MsiLockPermissionsEx``" 3)
-        $expectedPermissions = @(
-            "MIRUDATA|CreateFolder|$expectedSddl",
-            "MIRULOGS|CreateFolder|$expectedSddl"
-        ) | Sort-Object
+        $expectedPermissions = @($expectedDirectories | ForEach-Object { "$($_[2])|CreateFolder|$expectedSddl" } | Sort-Object)
         $actualPermissions = @($permissions | ForEach-Object { "{0}|{1}|{2}" -f $_[0], $_[1], $_[2] } | Sort-Object)
         Assert-Equal ($expectedPermissions -join "`n") ($actualPermissions -join "`n") "exact protected permission rows"
 

@@ -40,6 +40,7 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - Planned regressions execute the production classifier for ordinary, renamed, irrelevant, and non-PR inputs; verify caller/callee permissions without a release tag; exercise durable logs and primary/cleanup error precedence with injected failures; inject 3010 at all four manual stages; and verify ownership and nonadministrator denial across native install, repair, and upgrade.
 - Log files will be written directly outside temporary build output so cleanup and auxiliary diagnostics cannot delete the only failure evidence. Local validation remains lightweight; complete Linux and native Windows validation runs in CI.
 - Source refinement accepts `R236-007`: author `auth` and `tmp` with stable new directory-component identities and the same SYSTEM ownership/protected descriptor, retaining contents and extending native hostile-directory coverage. `R236-006` is explicitly skipped after review and critique: classifier rejection fails the workflow; branch protection excluding Windows checks predates this PR and requires a separate policy decision.
+- Source refinement completed three full-PR review passes: five initial findings, one additional credential-directory finding, and no findings at `97a1b38`. Six accepted defects are corrected; the separate test phase will validate all six before publication.
 
 ## Outcomes & Retrospective
 

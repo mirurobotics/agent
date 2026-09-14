@@ -17,9 +17,10 @@ $deterministicLogs = Join-Path $repositoryRoot "build\windows\artifacts\package-
 $sessionLogs = Join-Path $deterministicLogs ([Guid]::NewGuid().ToString("N"))
 $programDataRoot = Join-Path $env:ProgramData "Miru"
 $logsRoot = Join-Path $programDataRoot "logs"
+$protectedRoots = @($programDataRoot, $logsRoot, (Join-Path $programDataRoot "auth"), (Join-Path $programDataRoot "tmp"))
+$representativeFiles = New-Object System.Collections.ArrayList
 $markerPath = Join-Path $programDataRoot "rollback-payload.txt"
 $sentinelPath = Join-Path $programDataRoot "integration-sentinel.txt"
-$secretPath = Join-Path $programDataRoot "representative-secret.txt"
 $customerLogPath = Join-Path $logsRoot "customer-owned.log"
 $customerLogContents = "customer-owned-log-retain"
 $agentPath = Join-Path ([Environment]::GetEnvironmentVariable("ProgramW6432", "Process")) "Miru\Agent\miru-agent.exe"
@@ -248,7 +249,9 @@ function Assert-FailingFixtureContract {
 function Assert-ProtectedAcl {
     param([string]$LiteralPath, [string]$Label)
     $acl = Get-Acl -LiteralPath $LiteralPath
+    Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$Label owner is SYSTEM"
     Assert-True $acl.AreAccessRulesProtected "$Label DACL inheritance is disabled"
+    Assert-Equal 2 @($acl.Access).Count "only two total $Label ACEs"
     $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
     Assert-Equal 2 $explicit.Count "only two explicit $Label ACEs"
     $expectedSids = @("S-1-5-18", "S-1-5-32-544")
@@ -269,14 +272,32 @@ function Assert-ProtectedAcl {
 }
 
 function Assert-ProtectedAcls {
-    Assert-ProtectedAcl -LiteralPath $programDataRoot -Label "ProgramData root" | Out-Null
-    Assert-ProtectedAcl -LiteralPath $logsRoot -Label "ProgramData logs" | Out-Null
+    foreach ($path in $protectedRoots) {
+        Assert-ProtectedAcl -LiteralPath $path -Label $path | Out-Null
+    }
 }
 
 function Add-PermissiveAces {
-    foreach ($path in @($programDataRoot, $logsRoot)) {
-        & icacls.exe $path /grant "*S-1-1-0:F" | Out-Null
-        Assert-Equal 0 $LASTEXITCODE "permissive Everyone ACE added to $path"
+    param([string]$OwnerSid = "")
+    foreach ($path in $protectedRoots) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        $permissive = New-Object Security.AccessControl.DirectorySecurity
+        $permissive.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+        Set-Acl -LiteralPath $path -AclObject $permissive
+        if ($OwnerSid) {
+            & icacls.exe $path /setowner "*$OwnerSid" | Out-Null
+            Assert-Equal 0 $LASTEXITCODE "hostile owner assigned to $path"
+        }
+        $acl = Get-Acl -LiteralPath $path
+        Assert-True $acl.AreAccessRulesProtected "$path hostile DACL is protected"
+        $everyone = @($acl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq "S-1-1-0" })
+        Assert-Equal 1 $everyone.Count "$path has one permissive Everyone ACE"
+        Assert-Equal "Allow" $everyone[0].AccessControlType.ToString() "$path permits Everyone"
+        Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$everyone[0].FileSystemRights) "$path grants full control"
+        Assert-Equal 3 ([int]$everyone[0].InheritanceFlags) "$path permissive ACE inherits to files and directories"
+        Assert-Equal 0 ([int]$everyone[0].PropagationFlags) "$path permissive ACE has no propagation restriction"
+        Assert-True (-not $everyone[0].IsInherited) "$path permissive ACE is explicit"
+        if ($OwnerSid) { Assert-Equal $OwnerSid $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$path hostile owner verified" }
     }
 }
 
@@ -285,29 +306,110 @@ function Assert-CustomerStateRetained {
     Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "$Stage keeps sentinel"
     Assert-True (Test-Path -LiteralPath $logsRoot -PathType Container) "$Stage keeps logs directory"
     Assert-Equal $customerLogContents ([IO.File]::ReadAllText($customerLogPath)) "$Stage keeps customer log"
+    foreach ($file in $representativeFiles) {
+        Assert-Equal $file.Contents ([IO.File]::ReadAllText($file.Path)) "$Stage keeps $($file.Path)"
+    }
+}
+
+function New-RepresentativeSecrets {
+    param([string]$Stage)
+    foreach ($path in $protectedRoots) {
+        $file = [pscustomobject]@{
+            Parent = $path
+            Path = Join-Path $path ("representative-$Stage-" + [Guid]::NewGuid().ToString("N") + ".txt")
+            Contents = "representative-$Stage-" + [Guid]::NewGuid().ToString("N")
+            CreatePath = Join-Path $path ("non-admin-" + [Guid]::NewGuid().ToString("N") + ".txt")
+        }
+        [IO.File]::WriteAllText($file.Path, $file.Contents)
+        Assert-True (Test-Path -LiteralPath $file.Path -PathType Leaf) "representative read target exists"
+        Assert-True (-not (Test-Path -LiteralPath $file.CreatePath)) "representative create target is absent"
+        $acl = Get-Acl -LiteralPath $file.Path
+        Assert-True (-not $acl.AreAccessRulesProtected) "$($file.Path) inherits its DACL"
+        Assert-Equal 2 @($acl.Access).Count "$($file.Path) has only trusted inherited ACEs"
+        $sids = @($acl.Access | ForEach-Object {
+            Assert-True $_.IsInherited "representative file ACE is inherited"
+            Assert-Equal "Allow" $_.AccessControlType.ToString() "representative file allow ACE"
+            Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$_.FileSystemRights) "representative file full control"
+            $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        })
+        Assert-Equal "S-1-5-18,S-1-5-32-544" (($sids | Sort-Object) -join ",") "representative file trusted identities"
+        [void]$representativeFiles.Add($file)
+        $file
+    }
 }
 
 function Invoke-NonAdminProbe {
-    $probeRoot = Join-Path $artifactsRoot "probe"
+    param([string]$Stage)
+    $files = @(New-RepresentativeSecrets -Stage $Stage)
+    $probeRoot = Join-Path $artifactsRoot ("probe-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
     & icacls.exe $probeRoot /grant ("$testUser`:(OI)(CI)F") | Out-Null
+    Assert-Equal 0 $LASTEXITCODE "non-admin probe directory permissions"
     $scriptPath = Join-Path $probeRoot "probe.ps1"
-    $resultPath = Join-Path $probeRoot "result.txt"
-    $createPath = Join-Path $programDataRoot "non-admin-created.txt"
-    $probe = @"
-`$read = `$false
-`$create = `$false
-try { [IO.File]::ReadAllText('$($secretPath.Replace("'", "''"))') | Out-Null; `$read = `$true } catch { }
-try { [IO.File]::WriteAllText('$($createPath.Replace("'", "''"))', 'bad'); `$create = `$true } catch { }
-[IO.File]::WriteAllText('$($resultPath.Replace("'", "''"))', "`$read,`$create")
-"@
+    $manifestPath = Join-Path $probeRoot "manifest.json"
+    $resultPath = Join-Path $probeRoot "result.json"
+    $manifest = @{ Files = $files; ProbeRoot = $probeRoot; ControlPath = (Join-Path $probeRoot "control.txt") }
+    [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 4))
+    $probe = @'
+param([string]$ManifestPath, [string]$ResultPath)
+$ErrorActionPreference = "Stop"
+function Get-AccessOutcome {
+    param([scriptblock]$Action)
+    try { & $Action | Out-Null; return "Allowed" }
+    catch {
+        $cause = $_.Exception.GetBaseException()
+        if ($cause -is [UnauthorizedAccessException] -or ($cause -is [ComponentModel.Win32Exception] -and $cause.NativeErrorCode -eq 5)) {
+            return "AccessDenied"
+        }
+        throw
+    }
+}
+$manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($identity)
+$replacement = New-Object Security.AccessControl.DirectorySecurity
+$replacement.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;WD)")
+$control = Get-AccessOutcome {
+    [IO.File]::WriteAllText($manifest.ControlPath, "probe-control")
+    if ([IO.File]::ReadAllText($manifest.ControlPath) -ne "probe-control") { throw "Probe control mismatch" }
+    [IO.Directory]::SetAccessControl($manifest.ProbeRoot, $replacement)
+}
+$results = @($manifest.Files | ForEach-Object {
+    $file = $_
+    [pscustomobject]@{
+        Path = $file.Path
+        Read = Get-AccessOutcome { [IO.File]::ReadAllText($file.Path) }
+        Create = Get-AccessOutcome { [IO.File]::WriteAllText($file.CreatePath, "unexpected") }
+        Regrant = Get-AccessOutcome { [IO.Directory]::SetAccessControl($file.Parent, $replacement) }
+    }
+})
+@{
+    Sid = $identity.User.Value
+    Administrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    Control = $control
+    Results = $results
+} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ResultPath
+'@
     [IO.File]::WriteAllText($scriptPath, $probe)
     $securePassword = ConvertTo-SecureString $testPassword -AsPlainText -Force
     $credential = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$testUser", $securePassword)
-    $process = Start-Process -FilePath "powershell.exe" -Credential $credential -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f $scriptPath)) -Wait -PassThru
+    $process = Start-Process -FilePath "powershell.exe" -Credential $credential -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f $scriptPath), ('"{0}"' -f $manifestPath), ('"{0}"' -f $resultPath)) -Wait -PassThru
     Assert-Equal 0 $process.ExitCode "non-admin probe process"
-    Assert-Equal "False,False" ([IO.File]::ReadAllText($resultPath)) "non-admin read/create denial"
-    Assert-True (-not (Test-Path -LiteralPath $createPath)) "non-admin child was not created"
+    $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    Assert-Equal $testUserSid $result.Sid "probe runs as the temporary account"
+    Assert-Equal $false $result.Administrator "probe account is not an administrator"
+    Assert-Equal "Allowed" $result.Control "probe control read/write/regrant succeeds"
+    Assert-Equal $files.Count @($result.Results).Count "one result per protected directory"
+    foreach ($file in $files) {
+        $entry = @($result.Results | Where-Object { $_.Path -eq $file.Path })
+        Assert-Equal 1 $entry.Count "one result for $($file.Path)"
+        foreach ($operation in @("Read", "Create", "Regrant")) {
+            Assert-Equal "AccessDenied" $entry[0].$operation "$Stage $operation denied for $($file.Parent)"
+        }
+        Assert-True (-not (Test-Path -LiteralPath $file.CreatePath)) "non-admin child was not created"
+    }
+    Assert-ProtectedAcls
+    Assert-CustomerStateRetained "$Stage after non-admin probes"
 }
 
 function Invoke-DirectProvisionCheck {
@@ -349,20 +451,20 @@ function Invoke-ManualSmoke {
     Assert-CustomerStateRetained "manual install"
     Assert-ProtectedAcls
     Assert-NoService
-    Write-Host "PASS manual v1 install repairs root/log ACLs and retains customer state"
+    Write-Host "PASS manual v1 install repairs root/logs/auth/tmp ACLs and retains customer state"
     Add-PermissiveAces
     $maintenanceResult = Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "manual-maintenance" @(0, 3010)
     Write-Host "Manual maintenance reboot result: $maintenanceResult"
     Assert-CustomerStateRetained "manual maintenance"
     Assert-ProtectedAcls
-    Write-Host "PASS manual maintenance repairs root/log ACLs and retains customer state"
+    Write-Host "PASS manual maintenance repairs root/logs/auth/tmp ACLs and retains customer state"
     Add-PermissiveAces
     $upgradeResult = Invoke-Msi @("/i", ('"{0}"' -f $v2)) "manual-upgrade" @(0, 3010)
     Write-Host "Manual upgrade reboot result: $upgradeResult"
     Assert-CustomerStateRetained "manual upgrade"
     Assert-ProtectedAcls
     Assert-NoService
-    Write-Host "PASS manual upgrade repairs root/log ACLs and retains customer state"
+    Write-Host "PASS manual upgrade repairs root/logs/auth/tmp ACLs and retains customer state"
     $installed = @(Get-RelatedProducts)
     Assert-Equal 1 $installed.Count "one production product before uninstall"
     $uninstallResult = Invoke-Msi @("/x", $installed[0]) "manual-uninstall" @(0, 3010)
@@ -371,7 +473,7 @@ function Invoke-ManualSmoke {
     Assert-CustomerStateRetained "manual uninstall"
     Assert-ProtectedAcls
     Assert-NoService
-    Write-Host "PASS manual uninstall retains protected root/log customer state"
+    Write-Host "PASS manual uninstall retains protected root/logs/auth/tmp customer state"
     Write-Host "Smoke completed: $(Get-Date -Format o)"
     Write-Host "PASS manual production smoke; sentinel intentionally retained at $sentinelPath"
 }
@@ -422,16 +524,14 @@ try {
     $v3 = Build-IntegrationPackage "1.2.0" $fixtureProducts[2] "fixture-v3"
     Assert-FailingFixtureContract $v3
 
-    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
-    [IO.File]::WriteAllText($sentinelPath, "retain-me")
-    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
-    & icacls.exe $programDataRoot /inheritance:e | Out-Null
-    Assert-Equal 0 $LASTEXITCODE "pre-existing ProgramData inheritance enabled"
-    Add-PermissiveAces
-
     $secureTestPassword = ConvertTo-SecureString $testPassword -AsPlainText -Force
     New-LocalUser -Name $testUser -Password $secureTestPassword | Out-Null
     $createdUser = $true
+    $testUserSid = (Get-LocalUser -Name $testUser).SID.Value
+    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
+    [IO.File]::WriteAllText($sentinelPath, "retain-me")
+    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
+    Add-PermissiveAces -OwnerSid $testUserSid
 
     Invoke-Msi @("/i", ('"{0}"' -f $v1)) "fixture-v1" @(0, 3010) | Out-Null
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
@@ -440,27 +540,26 @@ try {
     Assert-True (Test-ArpProductCode $fixtureProducts[0]) "v1 installer metadata registered"
     Assert-CustomerStateRetained "initial install"
     Assert-ProtectedAcls
-    # Provisioning state is created after installation and must inherit the
-    # protected ProgramData descriptor.
-    [IO.File]::WriteAllText($secretPath, "representative-secret")
-    Invoke-NonAdminProbe
+    # Fresh representative files exercise inheritance without creating real
+    # provisioning state or relying on files secured by an earlier operation.
+    Invoke-NonAdminProbe -Stage "install"
     Assert-NoService
     Invoke-DirectProvisionCheck
     Write-Host "PASS initial install, ACL correction, denial, direct provision check exit 3, and no service"
 
     $v1Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
-    Add-PermissiveAces
+    Add-PermissiveAces -OwnerSid $testUserSid
     Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "fixture-v1-maintenance" @(0, 3010) | Out-Null
     Assert-Equal "fixture-v1" ([IO.File]::ReadAllText($markerPath)) "maintenance keeps v1 marker"
     Assert-Equal $v1Hash (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash "maintenance keeps v1 hash"
     Assert-CustomerStateRetained "maintenance"
     Assert-OneRegistration $fixtureProducts[0]
     Assert-ProtectedAcls
-    Invoke-NonAdminProbe
+    Invoke-NonAdminProbe -Stage "maintenance"
     Assert-NoService
     Write-Host "PASS same-MSI maintenance repairs ACL and retains v1 state"
 
-    Add-PermissiveAces
+    Add-PermissiveAces -OwnerSid $testUserSid
     Invoke-Msi @("/i", ('"{0}"' -f $v2)) "fixture-v2-upgrade" @(0, 3010) | Out-Null
     Assert-OneRegistration $fixtureProducts[1]
     Assert-True (Test-ArpProductCode $fixtureProducts[1]) "v2 installer metadata registered"
@@ -468,7 +567,7 @@ try {
     Assert-CustomerStateRetained "upgrade"
     $v2Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
     Assert-ProtectedAcls
-    Invoke-NonAdminProbe
+    Invoke-NonAdminProbe -Stage "upgrade"
     Assert-NoService
     Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
 
@@ -476,6 +575,8 @@ try {
     Assert-OneRegistration $fixtureProducts[1]
     Assert-Equal "fixture-v2" ([IO.File]::ReadAllText($markerPath)) "downgrade leaves v2 marker"
     Assert-Equal $v2Hash (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash "downgrade leaves v2 executable"
+    Assert-CustomerStateRetained "downgrade rejection"
+    Assert-ProtectedAcls
     Write-Host "PASS downgrade rejected with v2 intact"
 
     Invoke-Msi @("/i", ('"{0}"' -f $v3), "FAIL_UPGRADE_FOR_TEST=1") "fixture-v3-rollback" @(1603) | Out-Null
@@ -493,7 +594,6 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $markerPath)) "test marker removed"
     Assert-True (Test-Path -LiteralPath $programDataRoot -PathType Container) "ProgramData retained"
     Assert-CustomerStateRetained "uninstall"
-    Assert-Equal "representative-secret" ([IO.File]::ReadAllText($secretPath)) "representative customer state retained"
     Assert-ProtectedAcls
     Assert-NoService
     Write-Host "PASS uninstall removes package state and retains protected customer state"
