@@ -410,7 +410,7 @@ mod pull_success {
         assert_eq!(content, "shared content");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn pull_deployments_retries_on_network_error() {
         let f = Fixture::new("sync_retry_pull").await;
         let call_count = AtomicUsize::new(0);
@@ -452,7 +452,7 @@ mod pull_success {
         assert_deployment_not_stored(&f.deployment_stor, "dpl_1").await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn pull_deployments_exhausts_retries() {
         let f = Fixture::new("sync_retry_exhaust").await;
         f.http_client.set_list_all_deployments(|| {
@@ -1128,7 +1128,7 @@ mod push_failure {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn retries_on_network_error() {
         let f = Fixture::new("push_retry_network").await;
         let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
@@ -1175,7 +1175,7 @@ mod push_failure {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn exhausts_retries() {
         let f = Fixture::new("push_retry_exhaust").await;
         let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));

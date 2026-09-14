@@ -826,7 +826,7 @@ mod tests {
             assert_eq!(f.http_client.call_count(Call::UpdateDevice), 0);
         }
 
-        #[tokio::test]
+        #[tokio::test(start_paused = true)]
         async fn network_error() {
             let f = Fixture::new("sync_network_error").await;
 
@@ -923,7 +923,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(start_paused = true)]
         async fn non_network_error_to_network_error_to_recovery() {
             let f = Fixture::new("sync_nn_to_net_to_recovery").await;
 
@@ -1047,7 +1047,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(start_paused = true)]
         async fn network_error_preserves_err_streak() {
             let f = Fixture::new("sync_net_preserves_streak").await;
 
