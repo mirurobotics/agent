@@ -100,7 +100,7 @@ function Get-MiruArpProducts {
     return @($roots | ForEach-Object {
         Get-ChildItem -LiteralPath $_ -ErrorAction SilentlyContinue |
             ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue }
-    } | Where-Object { $_.DisplayName -eq "Miru Agent" })
+    } | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq "Miru Agent" })
 }
 
 function Assert-ProtectedAcl {
