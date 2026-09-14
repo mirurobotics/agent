@@ -9,10 +9,12 @@ const release = readFileSync(new URL('../../../.github/workflows/release.yml', i
 // explicitly if their structure changes instead of testing a stale copy.
 function block(source, key, indent, optional = false) {
   const lines = source.split(/\r?\n/);
+  const declaration = new RegExp(`^ {${indent}}(?:${key}|"${key}"|'${key}'):`);
   const header = new RegExp(`^ {${indent}}${key}:\\s*(?:#.*)?$`);
-  const starts = lines.flatMap((line, index) => header.test(line) ? [index] : []);
+  const starts = lines.flatMap((line, index) => declaration.test(line) ? [index] : []);
   if (optional && starts.length === 0) return undefined;
   assert.equal(starts.length, 1, `one ${key} block at indentation ${indent}`);
+  assert.match(lines[starts[0]], header, `supported multiline ${key} block at indentation ${indent}`);
   const start = starts[0] + 1;
   let end = start;
   while (end < lines.length) {
@@ -146,3 +148,16 @@ test('job-level caller permissions replace the inherited ceiling', () => {
   assert.notEqual(fixture, release);
   assert.equal(callerCanRunCI(fixture), false);
 });
+
+for (const declaration of [
+  'permissions: {}',
+  'permissions: { contents: read }',
+  'permissions: read-all',
+  '"permissions": {}',
+]) {
+  test(`unsupported job-level declaration fails explicitly: ${declaration}`, () => {
+    const fixture = release.replace(/^  ci:\r?\n/m, `  ci:\n    ${declaration}\n`);
+    assert.notEqual(fixture, release);
+    assert.throws(() => callerCanRunCI(fixture), { code: 'ERR_ASSERTION' });
+  });
+}
