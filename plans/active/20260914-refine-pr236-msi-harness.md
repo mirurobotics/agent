@@ -20,7 +20,7 @@ PR #236 (`mirurobotics/agent`, draft, base `main`, branch `feat/windows-msi-pack
 - [x] M1: Baseline captured, full review produced, findings accepted/rejected.
 - [x] M2: Commit A (`7a5b0811`) and Commit B (`568155e0`) landed locally, each self-consistent.
 - [x] M3: Refine loop fixes committed (`e42c4dcd`, `23636442`, `60d2a57f`); no accepted findings remain.
-- [ ] M4: Pushed; CI CLEAN on pushed head; delivery recheck done (run pending at time of writing; see Outcomes).
+- [x] M4: Pushed; CI CLEAN on pushed head (run 34879810311 on `f0578ec5`); delivery recheck done.
 
 ## Surprises & Discoveries
 
@@ -42,7 +42,10 @@ PR #236 (`mirurobotics/agent`, draft, base `main`, branch `feat/windows-msi-pack
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+- Landed as scoped signed commits on `feat/windows-msi-packaging` (PR #236 still draft): `7a5b0811` (Manufacturer rename + MIRUMSI1009), `568155e0` (harness split), `e42c4dcd` (ARP DisplayName StrictMode guard), `23636442` (body-local per-case mocks + label), `60d2a57f` (gitignore), `5d0b6060` (plan progress), `f0578ec5` (rustls bump).
+- CI round 1 (run 34877995025 on `5d0b6060`): `windows-check`, `windows-scope`, `test`, `tools` green; `lint` failed on RUSTSEC-2026-0285 (rustls 0.23.43, advisory published 2026-09-14, unrelated to this PR and also affecting `main`). Fixed with a lockfile-only bump to rustls 0.23.45.
+- CI round 2 (run 34879810311 on `f0578ec5`): all five checks green. Preflight CLEAN.
+- Retrospective: keeping mocks body-local (the pre-split design) was simpler and safer than function-table snapshot/restore, whose `Remove-Item function:script:X` scope handling is uncertain in 5.1. Out of scope, for follow-up: `CLAUDE.md` is a dangling symlink to `AGENTS.MD` (case mismatch).
 
 ## Context and Orientation
 
