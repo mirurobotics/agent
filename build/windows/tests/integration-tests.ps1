@@ -364,15 +364,23 @@ function Get-AccessOutcome {
         throw
     }
 }
+function Set-PermissiveDacl {
+    param([string]$Path)
+    # Default All also requests an audit update requiring a separate privilege.
+    # Persist clears modification flags, so each attempt needs a fresh descriptor.
+    $replacement = New-Object Security.AccessControl.DirectorySecurity
+    $replacement.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;WD)", [Security.AccessControl.AccessControlSections]::Access)
+    [IO.Directory]::SetAccessControl($Path, $replacement)
+}
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-$replacement = New-Object Security.AccessControl.DirectorySecurity
-$replacement.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;WD)")
-$control = Get-AccessOutcome {
-    [IO.File]::WriteAllText($manifest.ControlPath, "probe-control")
-    if ([IO.File]::ReadAllText($manifest.ControlPath) -ne "probe-control") { throw "Probe control mismatch" }
-    [IO.Directory]::SetAccessControl($manifest.ProbeRoot, $replacement)
+$control = [pscustomobject]@{
+    Create = Get-AccessOutcome { [IO.File]::WriteAllText($manifest.ControlPath, "probe-control") }
+    Read = Get-AccessOutcome {
+        if ([IO.File]::ReadAllText($manifest.ControlPath) -ne "probe-control") { throw "Probe control mismatch" }
+    }
+    Regrant = Get-AccessOutcome { Set-PermissiveDacl $manifest.ProbeRoot }
 }
 $results = @($manifest.Files | ForEach-Object {
     $file = $_
@@ -380,7 +388,7 @@ $results = @($manifest.Files | ForEach-Object {
         Path = $file.Path
         Read = Get-AccessOutcome { [IO.File]::ReadAllText($file.Path) }
         Create = Get-AccessOutcome { [IO.File]::WriteAllText($file.CreatePath, "unexpected") }
-        Regrant = Get-AccessOutcome { [IO.Directory]::SetAccessControl($file.Parent, $replacement) }
+        Regrant = Get-AccessOutcome { Set-PermissiveDacl $file.Parent }
     }
 })
 @{
@@ -398,7 +406,9 @@ $results = @($manifest.Files | ForEach-Object {
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
     Assert-Equal $testUserSid $result.Sid "probe runs as the temporary account"
     Assert-Equal $false $result.Administrator "probe account is not an administrator"
-    Assert-Equal "Allowed" $result.Control "probe control read/write/regrant succeeds"
+    foreach ($operation in @("Read", "Create", "Regrant")) {
+        Assert-Equal "Allowed" $result.Control.$operation "probe control $operation succeeds"
+    }
     Assert-Equal $files.Count @($result.Results).Count "one result per protected directory"
     foreach ($file in $files) {
         $entry = @($result.Results | Where-Object { $_.Path -eq $file.Path })

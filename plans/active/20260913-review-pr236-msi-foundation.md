@@ -33,6 +33,7 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - The full review identified an additional ownership gap: a standard user owning a pre-existing data directory retains implicit `WRITE_DAC` when only its DACL is replaced. Native regression coverage will verify ownership repair and denial of permission changes.
 - The second full-PR review traced provisioning through pre-existing `auth` and `tmp` directories. Their protected child ACLs survive ancestor repair, so these credential parents also require explicit installer protection.
 - Final review found that manual smoke left `auth` and `tmp` empty while requiring them after uninstall. Empty component directories may be removed legitimately; the smoke now seeds representative retained contents in all four directories.
+- Source-preflight round 1, run `34793237223` at `ecfa773f67a6d32786cd0008e7f33087f80077d5`, passed Linux checks, Windows release build, harness scenarios, and package contracts, then failed the native probe's positive control after initial install. Its replacement descriptor used the default `AccessControlSections.All`, which also requests an audit ACL update unavailable to the standard account. The repair limits each regrant to `Access`, creates a fresh descriptor per attempt because successful persistence clears modification flags, and reports positive read/create/regrant outcomes separately. Native lifecycle acceptance remains pending source-preflight round 2.
 
 ## Decision Log
 
