@@ -74,6 +74,8 @@ Preserve protected retained data, fixture ProductCode allowlists, transactional 
 
 All commands below run from `/home/ben/miru/workbench5/repos/agent`; Windows commands run from that repository's checkout root on the disposable CI runner. Local inspection and lightweight syntax/diff checks are allowed. Do not run full lint, tests, coverage, or native installer tests locally; CI is their execution environment.
 
+The parent activates this plan and invokes `$implement` exactly once with this plan path, repository, `base=main`, and `ci_trigger=draft-pr`. That implementation orchestrator owns milestones 1–3 through its source, refinement, test, and preflight phases; these milestones do not instruct source or test workers to invoke `$implement` again. Milestone 4 belongs to the parent after `$implement` returns `CLEAN`.
+
 Milestone 1 — establish and review the baseline. After the orchestrator activates this plan at `plans/active/20260913-review-pr236-msi-foundation.md`, inspect the branch and PR:
 
     git status --short --branch
@@ -96,7 +98,7 @@ Milestone 2 — implement accepted source and test corrections. Apply minimal ch
     git diff --cached --stat
     git commit -m "fix(windows): address accepted MSI foundation review findings"
 
-Milestone 3 — delegate full source/CI verification through implement and preflight. Use `ci_trigger=draft-pr` despite `task mode:push`; this is an explicit task override. Preflight must perform full-PR refinement, push to the existing branch, and report CLEAN only after associated CI is green. Use no more than three CI rounds. The existing workflow executes:
+Milestone 3 — the implementation orchestrator invokes `$preflight` for full source/CI verification. Use `ci_trigger=draft-pr` despite `task mode:push`; this is an explicit task override. Follow preflight’s normal rebase onto the latest `origin/main`, including the already-existing upstream dependency bump. Before rebasing, fetch and inspect the PR branch and record its remote SHA. Incorporate any newly discovered remote commits without discarding their changes. Use a normal push when possible; when rebasing requires rewriting the PR branch, use `--force-with-lease` constrained to the inspected remote SHA. A rejected lease requires another fetch, inspection, and reconciliation before retrying. Preflight must perform full-PR refinement, push to the existing branch, and report CLEAN only after associated CI is green. Set `max_ci_rounds=3` for source preflight: each round consists of one batch of changes, one push, and one CI run watched to completion. The parent’s single delivery recheck in milestone 4 is separate from this repair budget. The existing workflow executes:
 
     LINT_FIX=0 ./scripts/lint.sh
     ./scripts/covgate.sh
@@ -107,9 +109,8 @@ Milestone 3 — delegate full source/CI verification through implement and prefl
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
-The compile-only route uses `cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked`. This PR includes packaging changes, so acceptance requires its native package and lifecycle steps to execute. Push and inspect evidence with:
+The compile-only route uses `cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked`. This PR includes packaging changes, so acceptance requires its native package and lifecycle steps to execute. Preflight performs the rebase and single push described above; inspect evidence with:
 
-    git push origin HEAD:feat/windows-msi-packaging
     gh pr checks 236
     gh run list --branch feat/windows-msi-packaging --limit 5
     gh run view RUN_ID --json headSha,status,conclusion,jobs
@@ -127,7 +128,7 @@ Milestone 4 — parent delivery completes the plan. Fill Outcomes & Retrospectiv
     git commit -m "docs(plan): complete Windows MSI PR refinement"
     git push origin HEAD:feat/windows-msi-packaging
 
-Recheck CI using the commands above on this final pushed head; do not report completion before it passes. Preserve draft status when resynchronizing the PR description with the delivered changes and evidence. Report the final SHA and run in the handoff without another bookkeeping commit. A later corrective commit requires another push and head-specific CI recheck; do not silently exceed the three-round CI budget.
+Recheck CI using the commands above on this final pushed head; do not report completion before it passes. This is one mandatory delivery recheck, separate from the three source-preflight rounds. If it fails, treat delivery as `CAPPED`, report the failing jobs and evidence, preserve draft status, and stop without starting another repair round. After it passes, preserve draft status when resynchronizing the PR description with the delivered changes and evidence. Report the final SHA and run in the handoff without another bookkeeping commit.
 
 ## Validation and Acceptance
 
@@ -141,4 +142,4 @@ All required Linux/tool CI and native Windows package/integration validation mus
 ## Idempotence and Recovery
 
 
-Fetching, diff inspection, and CI status reads are repeatable. Keep pushes non-forced and commits scoped; if the branch changes remotely, inspect and reconcile without discarding user work. Do not reset, rewrite existing commits, or change installer identities to simplify tests. Reuse the disposable-host safeguards and allowlisted fixture cleanup; never delete arbitrary installed products or customer data. On failure, preserve evidence before deleting owned temporary files. If three refinement cycles or three CI rounds leave unresolved work, report the precise remaining failure and evidence; do not claim CLEAN or completion.
+Fetching, diff inspection, and CI status reads are repeatable. Keep commits scoped and preserve unrelated user work. Preflight may rebase onto `origin/main` and publish rewritten commits using the inspected-SHA lease described in milestone 3; never use an unconditional force push or discard newly discovered remote changes. Do not reset away user work or change installer identities to simplify tests. Reuse the disposable-host safeguards and allowlisted fixture cleanup; never delete arbitrary installed products or customer data. On failure, preserve evidence before deleting owned temporary files. If three refinement cycles or three source-preflight CI rounds leave unresolved work, or the separate delivery recheck fails, report the precise remaining failure and evidence; do not claim CLEAN or completion.
