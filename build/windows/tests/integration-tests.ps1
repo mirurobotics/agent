@@ -448,8 +448,9 @@ function Invoke-ManualSmoke {
     Add-PermissiveAces
     $installResult = Invoke-Msi @("/i", ('"{0}"' -f $v1)) "manual-install" @(0, 3010)
     Write-Host "Manual install reboot result: $installResult"
-    Assert-CustomerStateRetained "manual install"
     Assert-ProtectedAcls
+    New-RepresentativeSecrets -Stage "manual-install" | Out-Null
+    Assert-CustomerStateRetained "manual install"
     Assert-NoService
     Write-Host "PASS manual v1 install repairs root/logs/auth/tmp ACLs and retains customer state"
     Add-PermissiveAces

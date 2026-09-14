@@ -32,6 +32,7 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - Executing the actual workflow classifier reproduced `false/false` for both a package input and a Rust input renamed into `archive/`. Directly relevant inputs and non-PR events select the expected lanes.
 - The full review identified an additional ownership gap: a standard user owning a pre-existing data directory retains implicit `WRITE_DAC` when only its DACL is replaced. Native regression coverage will verify ownership repair and denial of permission changes.
 - The second full-PR review traced provisioning through pre-existing `auth` and `tmp` directories. Their protected child ACLs survive ancestor repair, so these credential parents also require explicit installer protection.
+- Final review found that manual smoke left `auth` and `tmp` empty while requiring them after uninstall. Empty component directories may be removed legitimately; the smoke now seeds representative retained contents in all four directories.
 
 ## Decision Log
 
@@ -41,11 +42,13 @@ Make the proposed Windows installer foundation reliable enough to review and mer
 - Log files will be written directly outside temporary build output so cleanup and auxiliary diagnostics cannot delete the only failure evidence. Local validation remains lightweight; complete Linux and native Windows validation runs in CI.
 - Source refinement accepts `R236-007`: author `auth` and `tmp` with stable new directory-component identities and the same SYSTEM ownership/protected descriptor, retaining contents and extending native hostile-directory coverage. `R236-006` is explicitly skipped after review and critique: classifier rejection fails the workflow; branch protection excluding Windows checks predates this PR and requires a separate policy decision.
 - Source refinement completed three full-PR review passes: five initial findings, one additional credential-directory finding, and no findings at `97a1b38`. Six accepted defects are corrected; the separate test phase will validate all six before publication.
+- Final review/critique accepts `R236-008`, the seventh finding: populate all four manual-smoke directories after the first install. The harness executes the actual representative-file and retention helpers, checks every directory's real sandbox contents before mocked uninstall and afterward, and retains all zero/3010/failure scenarios.
+- After adjusted test planning, the platform repeatedly rejected fresh agent allocation because completed agents occupied the four available slots and no retirement API was exposed. The parent coordinator informed the user and continued with available agents and separate file ownership/review/critique/fix roles. Those later stages are not represented as fresh-context runs.
 
 ## Outcomes & Retrospective
 
 
-Record delivered behavior, final commit and CI evidence, remaining limitations, and lessons at completion.
+Regression updates are prepared: exact four-directory MSI contracts; native hostile ownership and protected-ACL repair with fresh-file denial/retention probes; 28 injected PowerShell harness scenarios; and 38 workflow classifier/permission cases. The workflow cases and scoped syntax/diff checks passed locally. PowerShell harness, native installer lifecycle, and full Linux checks remain pending CI; no interactive production smoke or tag release is claimed.
 
 ## Context and Orientation
 

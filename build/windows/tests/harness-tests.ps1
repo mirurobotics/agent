@@ -20,7 +20,7 @@ function Get-UniqueNode {
 }
 
 $functions = @($sourceAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))
-foreach ($name in @("Assert-True", "Assert-Equal", "Invoke-Msi", "Complete-IntegrationRun", "Invoke-ManualSmoke")) {
+foreach ($name in @("Assert-True", "Assert-Equal", "Invoke-Msi", "Complete-IntegrationRun", "Assert-CustomerStateRetained", "New-RepresentativeSecrets", "Invoke-ManualSmoke")) {
     $definition = Get-UniqueNode @($functions | Where-Object { $_.Name -eq $name }) $name
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -68,6 +68,7 @@ function Start-Process {
     $path = $ArgumentList[$logIndex + 1].Trim('"')
     $name = [IO.Path]::GetFileNameWithoutExtension($path)
     Assert-Test ($script:hostLines -contains "MSI log ($name): $path") "log location reported before MSI starts"
+    if ($name -eq "manual-uninstall") { Assert-RepresentativeContents }
     $contents = "$name/$($script:processCalls.Count)/$([Guid]::NewGuid())"
     [IO.File]::WriteAllText($path, $contents)
     $code = 0
@@ -129,6 +130,16 @@ function Assert-LogsSurvive {
     }
 }
 
+function Assert-RepresentativeContents {
+    Assert-Test ($script:representativeFiles.Count -eq 4) "manual smoke populates all four protected directories"
+    foreach ($parent in $script:protectedRoots) {
+        $files = @($script:representativeFiles | Where-Object { $_.Parent -eq $parent })
+        Assert-Test ($files.Count -eq 1) "one retained representative per protected directory"
+        Assert-Test (Test-Path -LiteralPath $files[0].Path -PathType Leaf) "representative exists before and after uninstall"
+        Assert-Test ([IO.File]::ReadAllText($files[0].Path) -ceq $files[0].Contents) "representative bytes retained"
+    }
+}
+
 function Assert-Failure {
     param($Actual, [bool]$Expected, [bool]$Primary)
     Assert-Test (($null -ne $Actual) -eq $Expected) "expected final failure status"
@@ -150,6 +161,8 @@ function Invoke-Case {
     $script:sessionLogs = & $sessionExpression
     $script:programDataRoot = Join-Path $script:caseRoot "data"
     $script:logsRoot = Join-Path $script:programDataRoot "logs"
+    $script:protectedRoots = @($script:programDataRoot, $script:logsRoot, (Join-Path $script:programDataRoot "auth"), (Join-Path $script:programDataRoot "tmp"))
+    $script:representativeFiles = New-Object Collections.ArrayList
     $script:sentinelPath = Join-Path $script:programDataRoot "sentinel.txt"
     $script:customerLogPath = Join-Path $script:logsRoot "customer.log"
     $script:customerLogContents = "retained"
@@ -229,9 +242,26 @@ try {
             function Start-Transcript { param([string]$LiteralPath, [switch]$Force) }
             function Get-ComputerInfo { [pscustomobject]@{ WindowsProductName = "Harness"; WindowsVersion = "test"; OsBuildNumber = "0" } }
             function Get-MsiIdentity { param([string]$Path) [pscustomobject]@{ ProductName = "Harness" } }
-            function Add-PermissiveAces { }
-            function Assert-CustomerStateRetained { param([string]$Stage) }
-            function Assert-ProtectedAcls { }
+            function Add-PermissiveAces {
+                foreach ($path in $script:protectedRoots) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+            }
+            function Assert-ProtectedAcls {
+                foreach ($path in $script:protectedRoots) { Assert-Test (Test-Path -LiteralPath $path -PathType Container) "protected directory still exists" }
+            }
+            function Get-Acl {
+                param([string]$LiteralPath)
+                Assert-Test (Test-Path -LiteralPath $LiteralPath -PathType Leaf) "ACL probe targets a real representative file"
+                Assert-Test ($script:protectedRoots -contains [IO.Path]::GetDirectoryName($LiteralPath)) "ACL probe stays inside sandbox directories"
+                $rules = @("S-1-5-18", "S-1-5-32-544") | ForEach-Object {
+                    [pscustomobject]@{
+                        IsInherited = $true
+                        AccessControlType = [Security.AccessControl.AccessControlType]::Allow
+                        FileSystemRights = [Security.AccessControl.FileSystemRights]::FullControl
+                        IdentityReference = [Security.Principal.SecurityIdentifier]::new($_)
+                    }
+                }
+                return [pscustomobject]@{ AreAccessRulesProtected = $false; Access = @($rules) }
+            }
             function Assert-NoService { }
             function Get-RelatedProducts { return @($fixtureProducts[0]) }
             $ConfirmDisposableCleanVm = $true
@@ -259,6 +289,8 @@ try {
                 $previous = $position
             }
             if ($failed) { Assert-Test (@($script:hostLines | Where-Object { $_ -match '^PASS manual maintenance ' }).Count -eq 0) "failed stage does not report PASS" }
+            Assert-RepresentativeContents
+            Assert-CustomerStateRetained "harness after manual smoke"
             Assert-LogsSurvive
         }
     }
