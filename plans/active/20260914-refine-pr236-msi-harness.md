@@ -17,18 +17,28 @@ PR #236 (`mirurobotics/agent`, draft, base `main`, branch `feat/windows-msi-pack
 
 ## Progress
 
-- [ ] M1: Baseline captured, full review produced, findings accepted/rejected.
-- [ ] M2: Commit A (Manufacturer rename + MIRUMSI1009) and Commit B (harness split) landed locally, each self-consistent.
-- [ ] M3: Refine loop fixes committed; no accepted findings remain.
-- [ ] M4: Pushed; CI CLEAN on pushed head; delivery recheck done.
+- [x] M1: Baseline captured, full review produced, findings accepted/rejected.
+- [x] M2: Commit A (`7a5b0811`) and Commit B (`568155e0`) landed locally, each self-consistent.
+- [x] M3: Refine loop fixes committed (`e42c4dcd`, `23636442`, `60d2a57f`); no accepted findings remain.
+- [ ] M4: Pushed; CI CLEAN on pushed head; delivery recheck done (run pending at time of writing; see Outcomes).
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- The signing precondition was already resolved before M1 (`commit.gpgsign` only from the global config); the plan file had been committed as `34409fa9` under `plans/active/`, not `plans/backlog/`.
+- The pre-split harness defined per-case mocks unscoped inside the case body and relied on dynamic scoping; the split changed them to `function script:X`, which is what introduced the leak (finding 5). Reverting to body-local mocks removes the leak with no restore machinery.
+- `dotnet restore`/`build` of the wixproj also writes `build/windows/obj` and `build/windows/bin`, so finding 7 needed three ignore entries, not one.
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- Finding 1: accepted; fixed by ordering (Commit A patches the inline assertion, Commit B ships `MsiTest.psm1` with `"Miru"`).
+- Finding 2: accepted (major). Only reachable on the manual production-smoke path, but deterministic on a real VM. Fixed in `e42c4dcd`.
+- Finding 3: accepted as a nit; `Property.Property` is the table primary key so the check is equivalent, only the label was stale. Relabelled in `23636442`.
+- Finding 4: rejected. All callers pass a non-empty ProductCode and the wixproj already conditions the define on non-empty; error strings are not asserted anywhere.
+- Finding 5: accepted (minor). A first attempt used a function-table snapshot/restore in `Invoke-Case`, but `Remove-Item function:script:X` is not reliably scope-aware in 5.1; replaced with body-local mocks (the pre-split design) in `23636442`.
+- Finding 6: rejected; the harness now dot-sources the same lib the entry script uses, so the AST uniqueness guard has nothing to protect.
+- Finding 7: accepted; `.gitignore` gains `build/windows/{artifacts,bin,obj}/` in `60d2a57f`.
+- Finding 8 (`CLAUDE.md` dangling symlink): out of scope, report only.
+- Review nits not acted on: `Get-Acl` mock now uses a psobject with a `Translate` ScriptMethod instead of `[SecurityIdentifier]::new` (equivalent, unexplained churn); `harness-tests.ps1` no longer parses `integration-tests.ps1` itself (still executed by the CI integration step).
 
 ## Outcomes & Retrospective
 
