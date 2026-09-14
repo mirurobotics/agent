@@ -13,7 +13,7 @@ use miru_agent::filesys::File;
 
 // external crates
 use chrono::Utc;
-use serde_json::json;
+use serde_json::{json, Value};
 
 pub fn make_job(name: &str) -> Job {
     let now = Utc::now();
@@ -38,17 +38,22 @@ pub fn destination() -> UploadDestination {
     }
 }
 
+/// The inner `s3_credentials` arm of [`s3_credentials`], as vended JSON.
+pub fn s3_credentials_json() -> Value {
+    json!({
+        "scheme": "s3",
+        "access_key_id": "AKIA_TEST",
+        "secret_access_key": "secret",
+        "session_token": "session",
+        "region": "us-east-1",
+        "expires_at": "2021-01-01T01:00:00Z"
+    })
+}
+
 pub fn s3_credentials() -> UploadCredentials {
     serde_json::from_value(json!({
         "scheme": "s3",
-        "s3_credentials": {
-            "scheme": "s3",
-            "access_key_id": "AKIA_TEST",
-            "secret_access_key": "secret",
-            "session_token": "session",
-            "region": "us-east-1",
-            "expires_at": "2021-01-01T01:00:00Z"
-        },
+        "s3_credentials": s3_credentials_json(),
         "gcs_credentials": null,
         "expires_at": "2021-01-01T01:00:00Z"
     }))

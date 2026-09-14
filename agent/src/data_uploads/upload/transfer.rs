@@ -167,7 +167,7 @@ impl ObjectTransfer for SdkTransfer {
 
 /// Maps vended S3 session credentials into an [`s3::Config`]. Kept separate so
 /// the credential→SDK mapping is unit-testable without a live transfer.
-pub fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
+fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
     s3::Config {
         creds: s3::Credentials {
             access_key_id: creds.access_key_id.clone(),
@@ -185,10 +185,14 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     // internal crates
-    use crate::test_utils::{filesys::files as test_files, http_client::run_server};
-    use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
+    use super::s3_config;
+    use crate::test_utils::{
+        filesys::files as test_files,
+        http_client::run_server,
+        upload::{destination, response_metadata, s3_credentials_json},
+    };
+    use backend_api::models::{S3UploadCredentials, UploadCredentials};
     use miru_agent::data_uploads::upload::errors::TransferErr;
-    use miru_agent::data_uploads::upload::transfer::s3_config;
     use miru_agent::data_uploads::upload::{ObjectTransfer, SdkTransfer, UploadErr};
     use miru_agent::errors::Error as ErrorTrait;
     use miru_agent::filesys::{files, File, WriteOptions};
@@ -212,29 +216,6 @@ mod tests {
         e.source
             .downcast_ref::<TransferErr>()
             .unwrap_or_else(|| panic!("expected TransferErr source, got: {:?}", e.source))
-    }
-
-    fn destination() -> UploadDestination {
-        UploadDestination {
-            bucket_id: "bkt_1".to_string(),
-            bucket_name: "my-bucket".to_string(),
-            object_key: "logs/a.log".to_string(),
-        }
-    }
-
-    fn metadata() -> HashMap<String, String> {
-        HashMap::from([("device_id".to_string(), "dvc_1".to_string())])
-    }
-
-    fn s3_credentials_json() -> Value {
-        json!({
-            "scheme": "s3",
-            "access_key_id": "AKIA_TEST",
-            "secret_access_key": "secret",
-            "session_token": "session",
-            "region": "us-east-1",
-            "expires_at": "2021-01-01T01:00:00Z"
-        })
     }
 
     fn gcs_credentials_json(access_token: &str) -> Value {
@@ -415,7 +396,7 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         SdkTransfer::with_s3_http_client(replay.clone())
-            .transfer(&creds, &destination(), src.file(), &metadata())
+            .transfer(&creds, &destination(), src.file(), &response_metadata())
             .await
             .unwrap();
 
@@ -527,7 +508,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         SdkTransfer::with_gcs_endpoint(server.base_url)
-            .transfer(&creds, &destination(), src.file(), &metadata())
+            .transfer(&creds, &destination(), src.file(), &response_metadata())
             .await
             .unwrap();
 

@@ -9,6 +9,7 @@ use crate::mocks::{
     upload_executor::{MockStep, MockUploadExecutor},
 };
 use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::upload::make_job;
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
@@ -31,20 +32,6 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// hanging tests.
 async fn timed<T>(fut: impl Future<Output = T>) -> T {
     timeout(TEST_TIMEOUT, fut).await.expect("test timed out")
-}
-
-fn make_job(name: &str) -> Job {
-    Job {
-        file: File::new(format!("/data/{name}")),
-        size: 42,
-        digest: format!("sha256:{name}"),
-        mtime: Utc::now(),
-        first_observed_at: Utc::now(),
-        last_observed_at: Utc::now(),
-        file_rule_id: "rule_1".to_string(),
-        deployment_id: "dpl_1".to_string(),
-        retention: None,
-    }
 }
 
 fn scripted_err() -> Result<(), UploadErr> {
