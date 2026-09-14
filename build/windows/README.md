@@ -32,9 +32,9 @@ changed after publication. Each package version receives a different ProductCode
 
 Run these commands from the repository root on Windows 10 or 11 x64. The build
 requires Git, the Rust MSVC toolchain with the `x86_64-pc-windows-msvc` target,
-Visual Studio Build Tools with the C++ workload, NASM on `PATH`, and the .NET
-SDK. Installation and integration testing additionally require an elevated
-64-bit Windows PowerShell 5.1 session.
+Visual Studio Build Tools with the C++ workload, NASM on `PATH`, and the .NET 8
+SDK or later. Installation and integration testing additionally require an
+elevated 64-bit Windows PowerShell 5.1 session.
 
 Restore the pinned WiX SDK, build the real Windows executable, and exercise the
 package contract with explicit inputs:
