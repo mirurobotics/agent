@@ -88,6 +88,10 @@ which serializes them relative to each other while leaving all other tests
 parallel. When adding a test that uses a fixed path or other global state, add
 `#[serial]` to that test function.
 
+Gate a test with `#[cfg(unix)]` only when it asserts Unix-specific semantics
+(mode bits, mode-induced permission denial, symlinks). Otherwise use a portable
+fixture so the test also runs in the `windows-check` CI job.
+
 Integration test files in `agent/tests/` mirror the `agent/src/` module structure.
 
 ### Coverage gates

@@ -16,7 +16,7 @@ windows cfg-gates #234). This is **PR 6** of the Windows-support roadmap
 
 Before this branch, #234's `windows-check` job compiled lib + bin for
 `x86_64-pc-windows-msvc` but did not compile or run the **test crate**. This
-work makes `cargo test --features test` compile and pass on Windows, and adds
+work makes `cargo test --package miru-agent --locked` compile and pass on Windows, and adds
 a CI step that runs it — turning up **runtime** Unix assumptions (path
 separators in assertions, permission-mode checks, symlink behavior,
 delete-while-open) that a compile check cannot catch, and gating the
@@ -24,8 +24,8 @@ Unix-only-API test code (`PermissionsExt`) that would otherwise fail to compile
 on Windows.
 
 The scope also includes production fixes discovered by the Windows tests:
-home-directory lookup uses `USERPROFILE` on Windows and `HOME` elsewhere, and
-Windows copies with `Sync::Yes` open a writable destination handle for syncing.
+home-directory lookup uses `std::env::home_dir()`, and synced copies stream
+through an owned write handle on every platform.
 
 Coverage gates stay Linux-only (they need `cargo-llvm-cov` and the
 `.covgate` thresholds are tuned on Linux); the Windows job runs tests
@@ -43,7 +43,7 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 ## Progress
 
 - [x] Activate plan (`docs(plans):` commit on the branch)
-- [x] CI: add a `cargo test --features test` step to the windows job (RUST_LOG=off; no coverage)
+- [x] CI: add a `cargo test --package miru-agent --locked` step to the windows job (RUST_LOG=off; no coverage)
 - [x] Gate genuinely Unix-only test code (from audit)
 - [x] Replace portable scenarios' Unix-only fixtures with cross-platform fixtures
 - [x] Derive behavioral path expectations from fixtures while preserving literal wire pins
@@ -52,7 +52,7 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - [x] Push; inspect the first Windows CI test-job failure and fix its compile errors/warnings locally
 - [x] Re-run Windows CI and iterate until green (2026-09-11, commit `57361317124296750ad8175be10669686eb5f6f0`)
 - [x] PR opened
-- [ ] Fresh CI validation of the 2026-09-13 review fixes; all checks green
+- [x] Fresh CI validation of the 2026-09-13 review fixes; all checks green (run 34922948716, green)
 
 ## Surprises & Discoveries
 
@@ -96,11 +96,19 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   invalid input before filesystem lookup on Unix and Windows, deterministically
   exercising the existing non-`NotFound` metadata-error branch without a
   production seam or behavior change.
-- 2026-09-13 (review): Windows synced copies of readonly files temporarily
-  clear the destination's readonly attribute, open a writable handle, then
-  restore the original permissions before syncing. The clear/open/restore
-  sequence is synchronous within a blocking task; restoration is attempted
-  even when opening fails, and restoration errors propagate as `WriteFileErr`.
+- 2026-09-14 (review iteration 2): the Windows-only readonly clear/open/restore
+  path was replaced by a platform-neutral `copy_to` that owns the destination
+  write handle (`create_new` under `Overwrite::Deny`, stream, `sync_data`, then
+  apply the source permissions). This removes all `#[cfg(windows)]` code from
+  `files.rs`; the synced path is now exercised by the Linux suite.
+- 2026-09-14: `dirs::home()` delegates to `std::env::home_dir()` (stable,
+  un-deprecated since 1.87; MSRV 1.93) instead of hand-selecting
+  `HOME`/`USERPROFILE`.
+- 2026-09-14: the Windows job runs only `cargo test` (the check step was
+  redundant and used a different target dir); rust-cache gets
+  `key: test-suite` + `cache-on-failure` because the cache saved by the
+  check-only job on `main` never contained `target/debug/` and rust-cache does
+  not re-save on an exact hit.
 
 ## Outcomes & Retrospective
 
@@ -108,7 +116,11 @@ Windows test execution, portable fixtures and assertions, and the production
 home-lookup and synced-copy fixes are implemented. CI was green on 2026-09-11
 at `57361317124296750ad8175be10669686eb5f6f0`
 ([run 34658026631](https://github.com/mirurobotics/agent/actions/runs/34658026631)).
-Fresh CI validation of the 2026-09-13 review fixes is pending.
+Review fixes validated by run 34922948716.
+
+Follow-up (needs a Windows dev box): un-gate the deploy permission-denied tests
+with a per-platform inducer so their platform-neutral rollback assertions also
+run on Windows.
 
 ## Audit inventory
 
@@ -118,9 +130,10 @@ Genuinely Unix-only code remains gated (Unix API imports and tests that assert
 mode bits, Unix permission denial, Unix absolute-path semantics, or Unix-only
 integrations):
 - `tests/{disk/device, provisioning/check, crypt/rsa, filesys/dirs,
-  filesys/files, filesys/path, deploy/filesys, gcs/mod}.rs` — import gated
-  `#[cfg(unix)]`; `from_mode`/`.mode()` tests and helpers gated where their
-  semantics are Unix-specific.
+  filesys/files, filesys/path, deploy/filesys}.rs` and `src/gcs/store.rs`
+  (inline `source_unreadable` module) — import gated `#[cfg(unix)]`;
+  `from_mode`/`.mode()` tests and helpers gated where their semantics are
+  Unix-specific.
 - `tests/deploy/filesys.rs` — `read_only`/`writeable` perm fixtures + their 7
   permission-denied tests gated (Windows ignores the readonly attribute for
   child creation, so the denial can't reproduce).
@@ -137,9 +150,9 @@ Portable scenarios remain enabled on Windows:
   pins, and expected `File` values are deserialized from the literal.
 - Filesystem error-display tests derive expected strings from their `PathBuf`,
   `File`, and `Dir` fixtures. The home-directory test compares directly with
-  `USERPROFILE` on Windows or `HOME` elsewhere, without changing the environment.
-- Windows synced-copy coverage includes a readonly source and verifies the
-  copied contents and preserved destination readonly attribute.
+  `std::env::home_dir()`, without changing the environment.
+- Synced-copy coverage (all platforms) includes a readonly source and verifies
+  the copied contents and the preserved readonly attribute.
 
 Already gated (no action): `tests/mod.rs` `privilege` module, `deploy/apply.rs`
 perm tests, the existing `#[cfg(unix)]` mode-test bodies in `filesys/{dirs,
@@ -165,7 +178,7 @@ existing-directory-as-`File` fixture.
        - name: Run Windows Tests
          env:
            RUST_LOG: "off"
-         run: cargo test --package miru-agent --features test --locked
+         run: cargo test --package miru-agent --locked
 
 2. Gate genuinely Unix-specific assertions and APIs behind `#[cfg(unix)]`.
    Keep platform-neutral behavior enabled with portable fixtures: permissions
@@ -180,20 +193,19 @@ existing-directory-as-`File` fixture.
 
 ## Validation and Acceptance
 
-1. `cargo test --features test` compiles and passes on `windows-latest` (CI).
+1. `cargo test --package miru-agent --locked` compiles and passes on `windows-latest` (CI).
 2. Linux behavior remains covered: Unix-only tests still run on Linux, while
    portable replacements exercise the same cross-platform error paths.
 3. Behavioral path assertions accept native separators without weakening queue
    ordering/error semantics; literal persisted JSON remains pinned exactly.
 4. CI enforces the Windows test run on every PR.
-5. Home-directory lookup matches `USERPROFILE` on Windows and `HOME` elsewhere.
-6. A Windows copy with `Sync::Yes` succeeds for a readonly source and preserves
-   the destination's readonly attribute.
+5. Home-directory lookup matches `std::env::home_dir()` on every platform.
+6. A copy with `Sync::Yes` succeeds for a readonly source on every platform and
+   preserves the destination's readonly attribute.
 
 ## Idempotence and Recovery
 
 Revert the relevant commits to undo the production, test, plan, and CI changes;
 deleting the feature branch does not undo merged changes. Wire format and
-packaging are unchanged. Copy or sync failure can leave a copied destination.
-If restoring permissions fails, the operation reports `WriteFileErr` and the
-destination's readonly attribute may remain cleared.
+packaging are unchanged. A failed copy can leave a partially written
+destination; callers that need atomicity use the atomic write path.
