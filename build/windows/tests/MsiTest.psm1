@@ -46,7 +46,7 @@ function New-MsiSessionLogDirectory {
 function Open-MsiDatabase {
     param([Parameter(Mandatory = $true)][string]$Path)
     $installer = New-Object -ComObject WindowsInstaller.Installer
-    $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
+    $database = Invoke-ComMethod $installer "OpenDatabase" @($Path, 0)
     return [pscustomobject]@{ Installer = $installer; Database = $database }
 }
 
@@ -60,6 +60,36 @@ function Close-MsiDatabase {
     }
 }
 
+function Invoke-ComMethod {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [object[]]$Arguments = $null
+    )
+    return $Object.GetType().InvokeMember($Name, "InvokeMethod", $null, $Object, $Arguments)
+}
+
+function Get-ComProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [object[]]$Arguments = $null
+    )
+    return $Object.GetType().InvokeMember($Name, "GetProperty", $null, $Object, $Arguments)
+}
+
+function Read-MsiRecord {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][int]$Columns
+    )
+    $row = @()
+    for ($column = 1; $column -le $Columns; $column++) {
+        $row += Get-ComProperty $Record "StringData" @($column)
+    }
+    return ,$row
+}
+
 function Get-MsiRows {
     param(
         [Parameter(Mandatory = $true)]$Database,
@@ -67,28 +97,21 @@ function Get-MsiRows {
         [Parameter(Mandatory = $true)][int]$Columns
     )
     $view = $null
-    $record = $null
     $rows = @()
     try {
-        $view = $Database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $Database, @($Query))
-        $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+        $view = Invoke-ComMethod $Database "OpenView" @($Query)
+        Invoke-ComMethod $view "Execute" | Out-Null
         while ($true) {
-            $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+            $record = Invoke-ComMethod $view "Fetch"
             if ($null -eq $record) { break }
-            $row = @()
-            for ($column = 1; $column -le $Columns; $column++) {
-                $row += $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, @($column))
-            }
-            $rows += ,$row
+            $rows += ,(Read-MsiRecord $record $Columns)   # comma keeps each row as one element
             [Runtime.InteropServices.Marshal]::ReleaseComObject($record) | Out-Null
-            $record = $null
         }
         return @($rows)
     }
     finally {
-        if ($null -ne $record) { [Runtime.InteropServices.Marshal]::ReleaseComObject($record) | Out-Null }
         if ($null -ne $view) {
-            $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
+            Invoke-ComMethod $view "Close" | Out-Null
             [Runtime.InteropServices.Marshal]::ReleaseComObject($view) | Out-Null
         }
     }
@@ -119,8 +142,7 @@ function Get-MsiContract {
     $handle = Open-MsiDatabase -Path $Path
     $summary = $null
     try {
-        $summary = $handle.Database.GetType().InvokeMember("SummaryInformation", "GetProperty", $null, $handle.Database, @(0))
-        $template = $summary.GetType().InvokeMember("Property", "GetProperty", $null, $summary, @(7))
+        $summary = Get-ComProperty $handle.Database "SummaryInformation" @(0)
         return [pscustomobject]@{
             ProductName = Get-MsiPropertyValue $handle.Database "ProductName"
             Manufacturer = Get-MsiPropertyValue $handle.Database "Manufacturer"
@@ -128,8 +150,8 @@ function Get-MsiContract {
             ProductCode = Get-MsiPropertyValue $handle.Database "ProductCode"
             UpgradeCode = Get-MsiPropertyValue $handle.Database "UpgradeCode"
             ALLUSERS = Get-MsiPropertyValue $handle.Database "ALLUSERS"
-            Template = $template
-            InstallerVersion = $summary.GetType().InvokeMember("Property", "GetProperty", $null, $summary, @(14))
+            Template = Get-ComProperty $summary "Property" @(7)
+            InstallerVersion = Get-ComProperty $summary "Property" @(14)
         }
     }
     finally {
@@ -181,26 +203,35 @@ function Invoke-DotNetBuild {
     return $msi.FullName
 }
 
+function Assert-FixtureCustomAction {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "CustomAction") "fixture custom action table"
+    $actions = @(Get-MsiRows $Database "SELECT ``Action``, ``Type``, ``Source``, ``Target`` FROM ``CustomAction``" 4)
+    $action = @($actions | Where-Object { $_[0] -eq "FailUpgradeForTest" })
+    Assert-Equal 1 $action.Count "one failing fixture custom action"
+    Assert-Equal 3106 ([int]$action[0][1]) "deferred no-impersonate checked Type 34 action"
+    Assert-Equal "SystemFolder" $action[0][2] "failing action SystemFolder source"
+    Assert-Equal "[SystemFolder]cmd.exe /d /c exit /b 1" $action[0][3] "isolated cmd failure command"
+}
+
+function Assert-FixtureSequence {
+    param([Parameter(Mandatory = $true)]$Database)
+    $sequence = @(Get-MsiRows $Database "SELECT ``Action``, ``Condition``, ``Sequence`` FROM ``InstallExecuteSequence``" 3)
+    $fixtureRow = @($sequence | Where-Object { $_[0] -eq "FailUpgradeForTest" })
+    Assert-Equal 1 $fixtureRow.Count "one failing action sequence row"
+    Assert-Equal "FAIL_UPGRADE_FOR_TEST=1" $fixtureRow[0][1] "failing action condition"
+    $installFiles = [int](@($sequence | Where-Object { $_[0] -eq "InstallFiles" })[0][2])
+    $installFinalize = [int](@($sequence | Where-Object { $_[0] -eq "InstallFinalize" })[0][2])
+    $fixtureSequence = [int]$fixtureRow[0][2]
+    Assert-True ($fixtureSequence -gt $installFiles -and $fixtureSequence -lt $installFinalize) "failing action runs after files and before finalize"
+}
+
 function Assert-FailingFixtureContract {
     param([Parameter(Mandatory = $true)][string]$Path)
     $handle = Open-MsiDatabase -Path $Path
     try {
-        $tables = @(Get-MsiRows $handle.Database "SELECT ``Name`` FROM ``_Tables``" 1)
-        Assert-Equal 1 (@($tables | Where-Object { $_[0] -eq "CustomAction" })).Count "fixture custom action table"
-        $actions = @(Get-MsiRows $handle.Database "SELECT ``Action``, ``Type``, ``Source``, ``Target`` FROM ``CustomAction``" 4)
-        $action = @($actions | Where-Object { $_[0] -eq "FailUpgradeForTest" })
-        Assert-Equal 1 $action.Count "one failing fixture custom action"
-        Assert-Equal 3106 ([int]$action[0][1]) "deferred no-impersonate checked Type 34 action"
-        Assert-Equal "SystemFolder" $action[0][2] "failing action SystemFolder source"
-        Assert-Equal "[SystemFolder]cmd.exe /d /c exit /b 1" $action[0][3] "isolated cmd failure command"
-        $sequence = @(Get-MsiRows $handle.Database "SELECT ``Action``, ``Condition``, ``Sequence`` FROM ``InstallExecuteSequence``" 3)
-        $fixtureRow = @($sequence | Where-Object { $_[0] -eq "FailUpgradeForTest" })
-        Assert-Equal 1 $fixtureRow.Count "one failing action sequence row"
-        Assert-Equal "FAIL_UPGRADE_FOR_TEST=1" $fixtureRow[0][1] "failing action condition"
-        $installFiles = [int](@($sequence | Where-Object { $_[0] -eq "InstallFiles" })[0][2])
-        $installFinalize = [int](@($sequence | Where-Object { $_[0] -eq "InstallFinalize" })[0][2])
-        $fixtureSequence = [int]$fixtureRow[0][2]
-        Assert-True ($fixtureSequence -gt $installFiles -and $fixtureSequence -lt $installFinalize) "failing action runs after files and before finalize"
+        Assert-FixtureCustomAction $handle.Database
+        Assert-FixtureSequence $handle.Database
     }
     finally { Close-MsiDatabase $handle }
 }
