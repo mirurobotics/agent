@@ -2,6 +2,7 @@
 use std::{env, path::PathBuf};
 
 // internal crates
+use crate::test_utils::filesys::abs_dir;
 use miru_agent::filesys::{self, FileSysErr, PathExt};
 
 // external crates
@@ -104,7 +105,7 @@ pub mod name {
 
         #[test]
         fn root_directory() {
-            let dir = filesys::Dir::new(PathBuf::from("/"));
+            let dir = abs_dir("");
             assert!(matches!(
                 dir.name().unwrap_err(),
                 FileSysErr::UnknownDirNameErr { .. }
@@ -168,7 +169,7 @@ pub mod parent {
 
         #[test]
         fn root_directory() {
-            let dir = filesys::Dir::new(PathBuf::from("/"));
+            let dir = abs_dir("");
             assert!(matches!(
                 dir.parent().unwrap_err(),
                 FileSysErr::UnknownParentDirForDirErr { .. }

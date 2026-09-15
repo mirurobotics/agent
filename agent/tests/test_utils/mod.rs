@@ -1,4 +1,5 @@
 pub mod filesys;
+pub mod retention;
 pub mod sync;
 pub mod testdata;
 pub mod upload;

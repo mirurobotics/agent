@@ -12,6 +12,8 @@ pub mod error_harnesses;
 pub mod filesys;
 #[path = "../mocks/http_client.rs"]
 pub mod http_client;
+#[path = "retention.rs"]
+pub mod retention;
 #[path = "sync.rs"]
 pub mod sync;
 #[path = "../sync/helpers.rs"]

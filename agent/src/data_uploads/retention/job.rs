@@ -34,7 +34,7 @@ impl Job {
 mod tests {
     // internal crates
     use super::Job;
-    use crate::filesys::File;
+    use crate::test_utils::filesys::abs_file;
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -42,7 +42,7 @@ mod tests {
     fn job(observed_secs: i64, ttl_secs: u64) -> Job {
         let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
         Job {
-            file: File::new("/data/a.log"),
+            file: abs_file("data/a.log"),
             size: 4,
             digest: "sha256:unused".to_string(),
             mtime: DateTime::from_timestamp(900, 0).unwrap(),

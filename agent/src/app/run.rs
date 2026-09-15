@@ -13,9 +13,9 @@ use crate::app::{
 use crate::authn::{self, TokenManagerExt};
 use crate::data_uploads::scan;
 use crate::http;
+use crate::server::errors::*;
 #[cfg(unix)]
-use crate::server::unix::serve;
-use crate::server::{self, errors::*};
+use crate::server::{self, unix::serve};
 use crate::trace;
 use crate::workers::{
     mqtt, poller, sync_scan_bridge,
@@ -525,7 +525,7 @@ impl ShutdownManager {
         Ok(())
     }
 
-    #[cfg(unix)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn with_socket_server_handle(
         &mut self,
         socket_server_handle: JoinHandle<Result<(), ServerErr>>,

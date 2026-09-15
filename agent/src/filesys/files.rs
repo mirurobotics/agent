@@ -8,7 +8,7 @@ use crate::filesys::{
     errors::*,
     file::{File, Metadata},
     path::PathExt,
-    Atomic, CopyOptions, Overwrite, WriteOptions,
+    Atomic, Overwrite, WriteOptions,
 };
 use crate::trace;
 
@@ -277,27 +277,26 @@ pub async fn delete(file: &File) -> Result<(), FileSysErr> {
     }
 }
 
-/// Copy this file to a new file.
-pub async fn copy_to(file: &File, dst: &File, opts: CopyOptions) -> Result<(), FileSysErr> {
+/// Copy `file` to `dst`. Permissions follow `tokio::fs::copy` (Unix mode bits
+/// and Windows attributes).
+pub async fn copy_to(file: &File, dst: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
     if file.path() == dst.path() {
         file.assert_exists()?;
         return Ok(());
     }
 
     // TOCTOU note: tokio::fs::copy has no O_EXCL equivalent, so this
-    // pre-check is the best we can do for Overwrite::Deny. The race
-    // window is unavoidable.
-    if opts.overwrite == Overwrite::Deny && dst.exists() {
+    // pre-check is the best we can do for Overwrite::Deny.
+    if overwrite == Overwrite::Deny && dst.exists() {
         return Err(FileSysErr::InvalidFileOverwriteErr(
             InvalidFileOverwriteErr {
                 file: dst.clone(),
-                overwrite: opts.overwrite,
+                overwrite,
                 trace: trace!(),
             },
         ));
     }
 
-    // ensure the parent directory of the new file exists and create it if not
     dirs::create_if_absent(&dst.parent()?).await?;
 
     tokio::fs::copy(file.path(), dst.path())
@@ -317,20 +316,6 @@ pub async fn copy_to(file: &File, dst: &File, opts: CopyOptions) -> Result<(), F
                 })
             }
         })?;
-
-    if opts.sync == crate::filesys::Sync::Yes {
-        let f = TokioFile::open(dst.path())
-            .await
-            .map_err(|e| map_io_err_for_open(e, dst))?;
-        f.sync_data().await.map_err(|e| {
-            FileSysErr::WriteFileErr(WriteFileErr {
-                source: Box::new(e),
-                file: dst.clone(),
-                trace: trace!(),
-            })
-        })?;
-    }
-
     Ok(())
 }
 
