@@ -9,6 +9,7 @@ permissions:
   checks: write
   contents: write
   packages: write
+  # Required by the ci.yml windows-scope job, which this workflow calls.
   pull-requests: read
 
 jobs:
