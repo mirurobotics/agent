@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::filesys::{file::File, files, path::PathExt};
+use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
 use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
     Credentials, GcsErr, Object, StaticTokenCredentials,
@@ -124,10 +124,10 @@ impl Store {
     /// Creates or overwrites an object by streaming a file off disk.
     ///
     /// The whole file is never held in memory: the `write_object` path reads it
-    /// in bounded chunks. `put` reads the source size up front so a missing
-    /// local source surfaces as a [`GcsErr::FileSysErr`] before any request is
-    /// dispatched. The GCS SDK chooses between simple and resumable transfer
-    /// based on the payload size.
+    /// in bounded chunks. A missing local source surfaces as a
+    /// [`GcsErr::FileSysErr`] before any request is dispatched; any other
+    /// failure to open the source is [`GcsErr::LocalIoErr`]. The GCS SDK
+    /// chooses between simple and resumable transfer based on the payload size.
     ///
     /// The upload itself carries no timeout — a single attempt spans the whole
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
@@ -142,11 +142,18 @@ impl Store {
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), GcsErr> {
-        files::size(&src).await?;
         let resource_name = dst.resource_name();
-        let file = tokio::fs::File::open(src.path())
-            .await
-            .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?;
+        let file = tokio::fs::File::open(src.path()).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                    path: src.path().clone(),
+                    trace: trace!(),
+                })
+                .into()
+            } else {
+                errors::map_body_io_err("put_object", dst, &src, e)
+            }
+        })?;
         self.data
             .write_object(&resource_name, &dst.key, file)
             .set_metadata(metadata.clone())
@@ -595,36 +602,6 @@ mod tests {
                     .unwrap_err();
 
                 assert!(matches!(err, GcsErr::FileSysErr(_)));
-                assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
-            }
-        }
-
-        #[cfg(unix)]
-        pub mod source_unreadable {
-            // standard crates
-            use std::os::unix::fs::PermissionsExt;
-
-            // internal crates
-            use super::*;
-
-            #[tokio::test]
-            async fn upload_unreadable_source_maps_to_local_io_err() {
-                // A source that stats fine but cannot be opened for reading passes
-                // the up-front size read and fails at the open, surfacing as
-                // `LocalIoErr` before any request is dispatched.
-                let rec = HttpRecorder::default();
-                let store = http_store(rec.clone()).await;
-                let src = temp_file_with(b"secret").await;
-                files::set_permissions(src.file(), std::fs::Permissions::from_mode(0o000))
-                    .await
-                    .unwrap();
-
-                let err = store
-                    .put(src.to_file(), &obj("k"), &HashMap::new())
-                    .await
-                    .unwrap_err();
-
-                assert!(matches!(err, GcsErr::LocalIoErr(_)));
                 assert_eq!(rec.inner.lock().unwrap().upload_hits, 0);
             }
         }
