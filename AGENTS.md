@@ -94,9 +94,7 @@ Integration test files in `agent/tests/` mirror the `agent/src/` module structur
 
 Each module has a `.covgate` file with a minimum coverage percentage. Run `scripts/covgate.sh` to enforce. When adding or modifying code, verify coverage still passes.
 
-`./scripts/coverage.sh` runs tests and generates HTML. After `./scripts/covgate.sh`,
-use `./scripts/coverage.sh --report-only` to generate HTML from the same recorded
-execution.
+`./scripts/coverage.sh` runs tests and generates HTML.
 
 ## Linting
 
