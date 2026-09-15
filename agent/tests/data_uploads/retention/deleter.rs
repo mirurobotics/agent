@@ -1,8 +1,11 @@
 // internal crates
-use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::{
+    filesys::{dirs as test_dirs, files as test_files},
+    retention::undeletable_dir_job,
+};
 use miru_agent::cooldown;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
-use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
+use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -27,27 +30,6 @@ async fn make_job(file: &File) -> Job {
         size: files::size(file).await.unwrap(),
         digest: files::hash(file).await.unwrap(),
         mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
-        first_observed_at: now,
-        last_observed_at: now,
-        ttl_secs: 0,
-        file_rule_id: "rule_1".to_string(),
-        deployment_id: "dpl_1".to_string(),
-    }
-}
-
-/// A `Job` whose identity matches an existing directory represented as a file.
-/// Stat succeeds, but unlinking it as a file fails on every platform.
-async fn undeletable_dir_job(dir: &Dir) -> Job {
-    let now = Utc::now();
-    let target = dir.subdir("undeletable");
-    dirs::create(&target).await.unwrap();
-    let file = File::new(target.path().clone());
-    let metadata = files::metadata(&file).await.unwrap();
-    Job {
-        file,
-        size: metadata.len(),
-        digest: "sha256:unused".to_string(),
-        mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
         first_observed_at: now,
         last_observed_at: now,
         ttl_secs: 0,
@@ -150,7 +132,7 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
     .unwrap();
 
     deleter
-        .enqueue(undeletable_dir_job(&dir).await)
+        .enqueue(undeletable_dir_job(&dir, Utc::now()).await)
         .await
         .unwrap();
     assert_eq!(deleter.len().await.unwrap(), 1);

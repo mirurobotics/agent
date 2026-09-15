@@ -392,8 +392,9 @@ mod tests {
     use crate::data_uploads::retention::job::Job;
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-    use crate::test_utils::filesys::dirs as test_dirs;
-    use crate::test_utils::filesys::files as test_files;
+    use crate::test_utils::{
+        filesys::dirs as test_dirs, filesys::files as test_files, retention::undeletable_dir_job,
+    };
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -480,6 +481,11 @@ mod tests {
             .unwrap()
     }
 
+    /// Epoch seconds as a `DateTime<Utc>`.
+    fn at(secs: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(secs, 0).unwrap()
+    }
+
     /// A `Job` for a path whose stat cannot succeed. The recorded
     /// size/digest/mtime are never compared: the sweep fails at the stat step
     /// before any identity check runs. `make_job` is unusable here — its
@@ -493,27 +499,6 @@ mod tests {
             mtime: DateTime::from_timestamp(1000, 0).unwrap(),
             first_observed_at: at,
             last_observed_at: at,
-            ttl_secs: 0,
-            file_rule_id: "rule_1".to_string(),
-            deployment_id: "dpl_1".to_string(),
-        }
-    }
-
-    /// A `Job` whose identity matches an existing directory represented as a
-    /// file. Stat succeeds, but unlinking it as a file fails on every platform.
-    async fn undeletable_dir_job(dir: &Dir, observed_secs: i64) -> Job {
-        let target = dir.subdir("undeletable");
-        dirs::create(&target).await.unwrap();
-        let file = File::new(target.path().clone());
-        let metadata = files::metadata(&file).await.unwrap();
-        let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
-        Job {
-            file,
-            size: metadata.len(),
-            digest: "sha256:unused".to_string(),
-            mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
-            first_observed_at: observed_at,
-            last_observed_at: observed_at,
             ttl_secs: 0,
             file_rule_id: "rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
@@ -709,6 +694,38 @@ mod tests {
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
         }
 
+        // ENOTDIR: the recorded path's parent is a file. Unix reports
+        // NotADirectory, which is counted like any other stat failure.
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn parent_is_a_file_counts_an_attempt() {
+            let parent = temp_file(b"not a dir").await;
+            let child = File::new(parent.file().path().join("child"));
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            deleter.enqueue(wedged_job(child)).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
+        }
+
+        // Windows reports NotFound for a path beneath a file, so the entry is
+        // dropped as already gone.
+        #[cfg(windows)]
+        #[tokio::test]
+        async fn parent_is_a_file_is_treated_as_already_gone() {
+            let parent = temp_file(b"not a dir").await;
+            let child = File::new(parent.file().path().join("child"));
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            deleter.enqueue(wedged_job(child)).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert!(deleter.queue.is_empty());
+        }
+
         #[tokio::test]
         async fn size_changed_file_is_dropped_without_deleting() {
             let tmp = temp_file(b"aaaa").await;
@@ -774,23 +791,15 @@ mod tests {
         #[tokio::test]
         async fn hash_failure_counts_an_attempt() {
             let dir = test_dirs::temp("delete-hash-eisdir").unwrap();
-            let target = File::new(dir.path().clone());
-            let metadata = files::metadata(&target).await.unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = Job {
-                file: target.clone(),
-                size: metadata.len(),
-                digest: "sha256:unused".to_string(),
-                // sentinel mtime: the re-stat mismatches, forcing the re-hash.
-                mtime: DateTime::from_timestamp(1, 0).unwrap(),
-                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                ttl_secs: 0,
-                file_rule_id: "rule_1".to_string(),
-                deployment_id: "dpl_1".to_string(),
+            // sentinel mtime: the re-stat mismatches, forcing the re-hash.
+            let job = Job {
+                mtime: at(1),
+                ..undeletable_dir_job(&dir, at(1000)).await
             };
-            deleter.enqueue(record).await.unwrap();
+            let target = job.file.clone();
+            deleter.enqueue(job).await.unwrap();
 
             deleter.sweep().await.unwrap();
 
@@ -819,22 +828,11 @@ mod tests {
         #[tokio::test]
         async fn unlink_failure_counts_an_attempt() {
             let dir = test_dirs::temp("delete-eisdir").unwrap();
-            let target = File::new(dir.path().clone());
-            let metadata = files::metadata(&target).await.unwrap();
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
-            let record = Job {
-                file: target.clone(),
-                size: metadata.len(),
-                digest: "sha256:unused".to_string(),
-                mtime: DateTime::<Utc>::from(metadata.modified().unwrap()),
-                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                ttl_secs: 0,
-                file_rule_id: "rule_1".to_string(),
-                deployment_id: "dpl_1".to_string(),
-            };
-            deleter.enqueue(record).await.unwrap();
+            let job = undeletable_dir_job(&dir, at(1000)).await;
+            let target = job.file.clone();
+            deleter.enqueue(job).await.unwrap();
 
             deleter.sweep().await.unwrap();
 
@@ -925,7 +923,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
 
@@ -948,7 +946,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
 
@@ -969,7 +967,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
 
@@ -1041,7 +1039,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
 
@@ -1070,7 +1068,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
 
@@ -1095,7 +1093,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, Some(&state_path)).await;
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1118,7 +1116,7 @@ mod tests {
             let clock = Clock::new(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1148,7 +1146,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
             deleter.sweep().await.unwrap();
@@ -1181,7 +1179,7 @@ mod tests {
                 ..DeleterArgs::default()
             });
             deleter
-                .enqueue(undeletable_dir_job(&dir, 1000).await)
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
                 .await
                 .unwrap();
 
