@@ -50,16 +50,6 @@ function Open-MsiDatabase {
     return [pscustomobject]@{ Installer = $installer; Database = $database }
 }
 
-function Close-MsiDatabase {
-    param($Handle)
-    if ($null -ne $Handle -and $null -ne $Handle.Database) {
-        [Runtime.InteropServices.Marshal]::ReleaseComObject($Handle.Database) | Out-Null
-    }
-    if ($null -ne $Handle -and $null -ne $Handle.Installer) {
-        [Runtime.InteropServices.Marshal]::ReleaseComObject($Handle.Installer) | Out-Null
-    }
-}
-
 function Invoke-ComMethod {
     param(
         [Parameter(Mandatory = $true)]$Object,
@@ -69,25 +59,14 @@ function Invoke-ComMethod {
     return $Object.GetType().InvokeMember($Name, "InvokeMethod", $null, $Object, $Arguments)
 }
 
-function Get-ComProperty {
-    param(
-        [Parameter(Mandatory = $true)]$Object,
-        [Parameter(Mandatory = $true)][string]$Name,
-        [object[]]$Arguments = $null
-    )
-    return $Object.GetType().InvokeMember($Name, "GetProperty", $null, $Object, $Arguments)
-}
-
-function Read-MsiRecord {
-    param(
-        [Parameter(Mandatory = $true)]$Record,
-        [Parameter(Mandatory = $true)][int]$Columns
-    )
-    $row = @()
-    for ($column = 1; $column -le $Columns; $column++) {
-        $row += Get-ComProperty $Record "StringData" @($column)
+function Close-MsiDatabase {
+    param($Handle)
+    if ($null -ne $Handle -and $null -ne $Handle.Database) {
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($Handle.Database) | Out-Null
     }
-    return ,$row
+    if ($null -ne $Handle -and $null -ne $Handle.Installer) {
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($Handle.Installer) | Out-Null
+    }
 }
 
 function Get-MsiRows {
@@ -115,6 +94,27 @@ function Get-MsiRows {
             [Runtime.InteropServices.Marshal]::ReleaseComObject($view) | Out-Null
         }
     }
+}
+
+function Read-MsiRecord {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][int]$Columns
+    )
+    $row = @()
+    for ($column = 1; $column -le $Columns; $column++) {
+        $row += Get-ComProperty $Record "StringData" @($column)
+    }
+    return ,$row
+}
+
+function Get-ComProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [object[]]$Arguments = $null
+    )
+    return $Object.GetType().InvokeMember($Name, "GetProperty", $null, $Object, $Arguments)
 }
 
 function Get-MsiPropertyValue {
@@ -203,6 +203,16 @@ function Invoke-DotNetBuild {
     return $msi.FullName
 }
 
+function Assert-FailingFixtureContract {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $handle = Open-MsiDatabase -Path $Path
+    try {
+        Assert-FixtureCustomAction $handle.Database
+        Assert-FixtureSequence $handle.Database
+    }
+    finally { Close-MsiDatabase $handle }
+}
+
 function Assert-FixtureCustomAction {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "CustomAction") "fixture custom action table"
@@ -224,16 +234,6 @@ function Assert-FixtureSequence {
     $installFinalize = [int](@($sequence | Where-Object { $_[0] -eq "InstallFinalize" })[0][2])
     $fixtureSequence = [int]$fixtureRow[0][2]
     Assert-True ($fixtureSequence -gt $installFiles -and $fixtureSequence -lt $installFinalize) "failing action runs after files and before finalize"
-}
-
-function Assert-FailingFixtureContract {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    $handle = Open-MsiDatabase -Path $Path
-    try {
-        Assert-FixtureCustomAction $handle.Database
-        Assert-FixtureSequence $handle.Database
-    }
-    finally { Close-MsiDatabase $handle }
 }
 
 Export-ModuleMember -Function @(

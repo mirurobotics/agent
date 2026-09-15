@@ -3,16 +3,22 @@ Set-StrictMode -Version Latest
 
 $script:WindowsTestRoot = $PSScriptRoot
 
-# ---------------------------------------------------------------------------
-# Environment and Windows Installer queries
-# ---------------------------------------------------------------------------
-
 function Assert-Elevated64BitWindows {
     Assert-True ([Environment]::Is64BitOperatingSystem) "64-bit Windows is required"
     Assert-True ([Environment]::Is64BitProcess) "64-bit Windows PowerShell is required"
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     Assert-True ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) "an elevated Administrator session is required"
+}
+
+function Assert-InstalledAllowlistSafe {
+    $related = @(Get-RelatedProducts)
+    foreach ($product in $related) {
+        if (-not (Test-FixtureProduct $product)) {
+            throw "Refusing mutation: installed related ProductCode $product is outside the committed fixture allowlist."
+        }
+    }
+    return $related
 }
 
 function Get-RelatedProducts {
@@ -32,51 +38,47 @@ function Test-FixtureProduct {
     return $fixtureProducts -contains $ProductCode.ToUpperInvariant()
 }
 
-function Assert-InstalledAllowlistSafe {
-    $related = @(Get-RelatedProducts)
-    foreach ($product in $related) {
-        if (-not (Test-FixtureProduct $product)) {
-            throw "Refusing mutation: installed related ProductCode $product is outside the committed fixture allowlist."
-        }
+function Invoke-IntegrationRun {
+    try { Invoke-IntegrationLifecycle }
+    catch {
+        $script:integrationFailure = $_
+        Write-FailureEvidence $integrationFailure
     }
-    return $related
+    finally {
+        Remove-FixtureProducts
+        Remove-TestUser
+        Remove-TestFiles
+    }
+    Complete-IntegrationRun $integrationFailure
 }
 
-function Test-ArpProductCode {
-    param([Parameter(Mandatory = $true)][string]$ProductCode)
-    $paths = @(
-        "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode",
-        "Registry::HKEY_LOCAL_MACHINE\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode"
+function Invoke-IntegrationLifecycle {
+    Remove-LeftoverFixtures
+    $packages = Build-LifecyclePackages
+    New-TestUser
+    Initialize-CustomerState
+    Invoke-InstallStage $packages
+    Invoke-MaintenanceStage $packages
+    Invoke-UpgradeStage $packages
+    Invoke-DowngradeStage $packages
+    Invoke-RollbackStage $packages
+    Invoke-UninstallStage
+}
+
+function Remove-LeftoverFixtures {
+    foreach ($product in $initialRelated) {
+        Uninstall-Msi $product "preclean-$($product.Trim('{}'))" @(0, 3010, 1605)
+    }
+}
+
+function Uninstall-Msi {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProductCode,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [int[]]$AllowedExitCodes = @(0, 3010)
     )
-    return (@($paths | Where-Object { Test-Path -LiteralPath $_ })).Count -ne 0
+    Invoke-Msi @("/x", $ProductCode) $Name $AllowedExitCodes | Out-Null
 }
-
-function Get-MiruArpProducts {
-    $roots = @(
-        "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall",
-        "Registry::HKEY_LOCAL_MACHINE\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-    )
-    return @($roots | ForEach-Object {
-        Get-ChildItem -LiteralPath $_ -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue }
-    } | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -eq "Miru Agent" })
-}
-
-function Assert-NoService {
-    $service = Get-Service -Name "MiruAgent" -ErrorAction SilentlyContinue
-    Assert-True ($null -eq $service) "MiruAgent service must not exist"
-}
-
-function Assert-OneRegistration {
-    param([Parameter(Mandatory = $true)][string]$ExpectedProduct)
-    $related = @(Get-RelatedProducts)
-    Assert-Equal 1 $related.Count "exactly one related product registration"
-    Assert-Equal $ExpectedProduct.ToUpperInvariant() $related[0].ToUpperInvariant() "registered ProductCode"
-}
-
-# ---------------------------------------------------------------------------
-# msiexec and package builds
-# ---------------------------------------------------------------------------
 
 function Invoke-Msi {
     param(
@@ -96,23 +98,15 @@ function Invoke-Msi {
     return $process.ExitCode
 }
 
-function Install-Msi {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Name,
-        [int[]]$AllowedExitCodes = @(0, 3010),
-        [string[]]$Properties = @()
-    )
-    Invoke-Msi (@("/i", ('"{0}"' -f $Path)) + $Properties) $Name $AllowedExitCodes | Out-Null
-}
-
-function Uninstall-Msi {
-    param(
-        [Parameter(Mandatory = $true)][string]$ProductCode,
-        [Parameter(Mandatory = $true)][string]$Name,
-        [int[]]$AllowedExitCodes = @(0, 3010)
-    )
-    Invoke-Msi @("/x", $ProductCode) $Name $AllowedExitCodes | Out-Null
+function Build-LifecyclePackages {
+    Assert-True (Test-Path -LiteralPath (Join-Path $binDir "miru-agent.exe") -PathType Leaf) "real x64 miru-agent.exe exists"
+    $packages = @{
+        V1 = Build-IntegrationPackage "1.0.0" $fixtureProducts[0] "fixture-v1"
+        V2 = Build-IntegrationPackage "1.1.0" $fixtureProducts[1] "fixture-v2"
+        V3 = Build-IntegrationPackage "1.2.0" $fixtureProducts[2] "fixture-v3"
+    }
+    Assert-FailingFixtureContract $packages.V3
+    return $packages
 }
 
 function Build-IntegrationPackage {
@@ -130,92 +124,38 @@ function Build-IntegrationPackage {
         -TestWixSource $fixtureSource -FixturePayloadPath $payload
 }
 
-function Build-LifecyclePackages {
-    Assert-True (Test-Path -LiteralPath (Join-Path $binDir "miru-agent.exe") -PathType Leaf) "real x64 miru-agent.exe exists"
-    $packages = @{
-        V1 = Build-IntegrationPackage "1.0.0" $fixtureProducts[0] "fixture-v1"
-        V2 = Build-IntegrationPackage "1.1.0" $fixtureProducts[1] "fixture-v2"
-        V3 = Build-IntegrationPackage "1.2.0" $fixtureProducts[2] "fixture-v3"
+function New-TestUser {
+    $securePassword = ConvertTo-SecureString $testPassword -AsPlainText -Force
+    New-LocalUser -Name $testUser -Password $securePassword | Out-Null
+    $script:createdUser = $true
+    $script:testUserSid = (Get-LocalUser -Name $testUser).SID.Value
+}
+
+function Initialize-CustomerState {
+    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
+    [IO.File]::WriteAllText($sentinelPath, "retain-me")
+    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
+}
+
+function Invoke-InstallStage {
+    param([Parameter(Mandatory = $true)]$Packages)
+    Add-PermissiveAces -OwnerSid $testUserSid
+    Install-Msi $Packages.V1 "fixture-v1"
+    Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
+    Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
+    Assert-ProtectedState "initial install"
+    Invoke-NonAdminProbe -Stage "install"
+    Assert-NoService
+    Write-Host "PASS initial install, ACL correction, denial, and no service"
+}
+
+# Loosen every protected directory so the next installer operation must repair it.
+function Add-PermissiveAces {
+    param([string]$OwnerSid = "")
+    foreach ($path in $protectedRoots) {
+        Set-PermissiveAcl $path $OwnerSid
+        Assert-PermissiveAcl $path $OwnerSid
     }
-    Assert-FailingFixtureContract $packages.V3
-    return $packages
-}
-
-# ---------------------------------------------------------------------------
-# Installed-state observations
-# ---------------------------------------------------------------------------
-
-function Get-AgentHash {
-    return (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
-}
-
-function Get-Marker {
-    return [IO.File]::ReadAllText($markerPath)
-}
-
-function Assert-InstalledVersion {
-    param(
-        [Parameter(Mandatory = $true)][string]$ProductCode,
-        [Parameter(Mandatory = $true)][string]$Marker,
-        [Parameter(Mandatory = $true)][string]$Stage
-    )
-    Assert-OneRegistration $ProductCode
-    Assert-True (Test-ArpProductCode $ProductCode) "$Stage installer metadata registered"
-    Assert-Equal $Marker (Get-Marker) "$Stage marker"
-}
-
-function Assert-ProtectedState {
-    param([Parameter(Mandatory = $true)][string]$Stage)
-    Assert-CustomerStateRetained $Stage
-    Assert-ProtectedAcls
-}
-
-# ---------------------------------------------------------------------------
-# ACL assertions and sabotage
-# ---------------------------------------------------------------------------
-
-# Returns the ACE's SID. Directory ACEs must also propagate to children;
-# file ACEs carry no inheritance flags, so -Inheritable is only for directories.
-function Assert-FullControlAce {
-    param(
-        [Parameter(Mandatory = $true)]$Rule,
-        [Parameter(Mandatory = $true)][string]$Label,
-        [switch]$Inheritable
-    )
-    Assert-Equal "Allow" $Rule.AccessControlType.ToString() "$Label ACE type"
-    Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$Rule.FileSystemRights) "$Label ACE grants exactly full control"
-    if ($Inheritable) {
-        $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
-        Assert-Equal ([int]$inherit) ([int]$Rule.InheritanceFlags) "$Label ACE inherits to containers and files"
-        Assert-Equal ([int][Security.AccessControl.PropagationFlags]::None) ([int]$Rule.PropagationFlags) "$Label ACE has no propagation restriction"
-    }
-    return $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-}
-
-function Assert-TrustedIdentities {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Sids,
-        [Parameter(Mandatory = $true)][string]$Label
-    )
-    Assert-Equal "S-1-5-18,S-1-5-32-544" (($Sids | Sort-Object) -join ",") "$Label ACE identities"
-}
-
-function Assert-ProtectedAcl {
-    param([Parameter(Mandatory = $true)][string]$LiteralPath)
-    $acl = Get-Acl -LiteralPath $LiteralPath
-    Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
-    Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
-    Assert-Equal 2 @($acl.Access).Count "only two total $LiteralPath ACEs"
-    $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
-    Assert-Equal 2 $explicit.Count "only two explicit $LiteralPath ACEs"
-    $sids = @($explicit | ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
-    Assert-TrustedIdentities $sids $LiteralPath
-    & icacls.exe $LiteralPath 2>&1 | Out-Null
-    Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
-}
-
-function Assert-ProtectedAcls {
-    foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
 }
 
 function Set-PermissiveAcl {
@@ -247,23 +187,69 @@ function Assert-PermissiveAcl {
     if ($OwnerSid) { Assert-Equal $OwnerSid $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$Path hostile owner verified" }
 }
 
-# Loosen every protected directory so the next installer operation must repair it.
-function Add-PermissiveAces {
-    param([string]$OwnerSid = "")
-    foreach ($path in $protectedRoots) {
-        Set-PermissiveAcl $path $OwnerSid
-        Assert-PermissiveAcl $path $OwnerSid
+# Returns the ACE's SID. Directory ACEs must also propagate to children;
+# file ACEs carry no inheritance flags, so -Inheritable is only for directories.
+function Assert-FullControlAce {
+    param(
+        [Parameter(Mandatory = $true)]$Rule,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$Inheritable
+    )
+    Assert-Equal "Allow" $Rule.AccessControlType.ToString() "$Label ACE type"
+    Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$Rule.FileSystemRights) "$Label ACE grants exactly full control"
+    if ($Inheritable) {
+        $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        Assert-Equal ([int]$inherit) ([int]$Rule.InheritanceFlags) "$Label ACE inherits to containers and files"
+        Assert-Equal ([int][Security.AccessControl.PropagationFlags]::None) ([int]$Rule.PropagationFlags) "$Label ACE has no propagation restriction"
     }
+    return $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
 }
 
-# ---------------------------------------------------------------------------
-# Customer state and representative files
-# ---------------------------------------------------------------------------
+function Install-Msi {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [int[]]$AllowedExitCodes = @(0, 3010),
+        [string[]]$Properties = @()
+    )
+    Invoke-Msi (@("/i", ('"{0}"' -f $Path)) + $Properties) $Name $AllowedExitCodes | Out-Null
+}
 
-function Initialize-CustomerState {
-    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
-    [IO.File]::WriteAllText($sentinelPath, "retain-me")
-    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
+function Assert-InstalledVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProductCode,
+        [Parameter(Mandatory = $true)][string]$Marker,
+        [Parameter(Mandatory = $true)][string]$Stage
+    )
+    Assert-OneRegistration $ProductCode
+    Assert-True (Test-ArpProductCode $ProductCode) "$Stage installer metadata registered"
+    Assert-Equal $Marker (Get-Marker) "$Stage marker"
+}
+
+function Assert-OneRegistration {
+    param([Parameter(Mandatory = $true)][string]$ExpectedProduct)
+    $related = @(Get-RelatedProducts)
+    Assert-Equal 1 $related.Count "exactly one related product registration"
+    Assert-Equal $ExpectedProduct.ToUpperInvariant() $related[0].ToUpperInvariant() "registered ProductCode"
+}
+
+function Test-ArpProductCode {
+    param([Parameter(Mandatory = $true)][string]$ProductCode)
+    $paths = @(
+        "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode",
+        "Registry::HKEY_LOCAL_MACHINE\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode"
+    )
+    return (@($paths | Where-Object { Test-Path -LiteralPath $_ })).Count -ne 0
+}
+
+function Get-Marker {
+    return [IO.File]::ReadAllText($markerPath)
+}
+
+function Assert-ProtectedState {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    Assert-CustomerStateRetained $Stage
+    Assert-ProtectedAcls
 }
 
 function Assert-CustomerStateRetained {
@@ -276,16 +262,47 @@ function Assert-CustomerStateRetained {
     }
 }
 
-function Assert-InheritedProtection {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    $acl = Get-Acl -LiteralPath $Path
-    Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
-    Assert-Equal 2 @($acl.Access).Count "$Path has only trusted inherited ACEs"
-    $sids = @($acl.Access | ForEach-Object {
-        Assert-True $_.IsInherited "$Path ACE is inherited"
-        Assert-FullControlAce $_ $Path
-    })
-    Assert-TrustedIdentities $sids $Path
+function Assert-ProtectedAcls {
+    foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
+}
+
+function Assert-ProtectedAcl {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
+    Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
+    Assert-Equal 2 @($acl.Access).Count "only two total $LiteralPath ACEs"
+    $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
+    Assert-Equal 2 $explicit.Count "only two explicit $LiteralPath ACEs"
+    $sids = @($explicit | ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
+    Assert-TrustedIdentities $sids $LiteralPath
+    & icacls.exe $LiteralPath 2>&1 | Out-Null
+    Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
+}
+
+function Assert-TrustedIdentities {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Sids,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    Assert-Equal "S-1-5-18,S-1-5-32-544" (($Sids | Sort-Object) -join ",") "$Label ACE identities"
+}
+
+function Invoke-NonAdminProbe {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $files = @(New-RepresentativeSecrets -Stage $Stage)
+    $workspace = New-ProbeWorkspace $files
+    $result = Invoke-ProbeAsTestUser $workspace
+    Assert-ProbeIdentity $result
+    Assert-ProbeDenied $result $files $Stage
+    Assert-ProtectedState "$Stage after non-admin probes"
+}
+
+# Fresh files in each protected directory prove inheritance without relying on
+# files secured by an earlier operation.
+function New-RepresentativeSecrets {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    return @($protectedRoots | ForEach-Object { New-RepresentativeFile $_ $Stage })
 }
 
 function New-RepresentativeFile {
@@ -307,22 +324,16 @@ function New-RepresentativeFile {
     return $file
 }
 
-# Fresh files in each protected directory prove inheritance without relying on
-# files secured by an earlier operation.
-function New-RepresentativeSecrets {
-    param([Parameter(Mandatory = $true)][string]$Stage)
-    return @($protectedRoots | ForEach-Object { New-RepresentativeFile $_ $Stage })
-}
-
-# ---------------------------------------------------------------------------
-# Non-admin probe
-# ---------------------------------------------------------------------------
-
-function New-TestUser {
-    $securePassword = ConvertTo-SecureString $testPassword -AsPlainText -Force
-    New-LocalUser -Name $testUser -Password $securePassword | Out-Null
-    $script:createdUser = $true
-    $script:testUserSid = (Get-LocalUser -Name $testUser).SID.Value
+function Assert-InheritedProtection {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $acl = Get-Acl -LiteralPath $Path
+    Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
+    Assert-Equal 2 @($acl.Access).Count "$Path has only trusted inherited ACEs"
+    $sids = @($acl.Access | ForEach-Object {
+        Assert-True $_.IsInherited "$Path ACE is inherited"
+        Assert-FullControlAce $_ $Path
+    })
+    Assert-TrustedIdentities $sids $Path
 }
 
 function New-ProbeWorkspace {
@@ -379,36 +390,9 @@ function Assert-ProbeDenied {
     }
 }
 
-function Invoke-NonAdminProbe {
-    param([Parameter(Mandatory = $true)][string]$Stage)
-    $files = @(New-RepresentativeSecrets -Stage $Stage)
-    $workspace = New-ProbeWorkspace $files
-    $result = Invoke-ProbeAsTestUser $workspace
-    Assert-ProbeIdentity $result
-    Assert-ProbeDenied $result $files $Stage
-    Assert-ProtectedState "$Stage after non-admin probes"
-}
-
-# ---------------------------------------------------------------------------
-# Lifecycle stages
-# ---------------------------------------------------------------------------
-
-function Remove-LeftoverFixtures {
-    foreach ($product in $initialRelated) {
-        Uninstall-Msi $product "preclean-$($product.Trim('{}'))" @(0, 3010, 1605)
-    }
-}
-
-function Invoke-InstallStage {
-    param([Parameter(Mandatory = $true)]$Packages)
-    Add-PermissiveAces -OwnerSid $testUserSid
-    Install-Msi $Packages.V1 "fixture-v1"
-    Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
-    Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
-    Assert-ProtectedState "initial install"
-    Invoke-NonAdminProbe -Stage "install"
-    Assert-NoService
-    Write-Host "PASS initial install, ACL correction, denial, and no service"
+function Assert-NoService {
+    $service = Get-Service -Name "MiruAgent" -ErrorAction SilentlyContinue
+    Assert-True ($null -eq $service) "MiruAgent service must not exist"
 }
 
 function Invoke-MaintenanceStage {
@@ -422,6 +406,10 @@ function Invoke-MaintenanceStage {
     Invoke-NonAdminProbe -Stage "maintenance"
     Assert-NoService
     Write-Host "PASS same-MSI maintenance repairs ACL and retains v1 state"
+}
+
+function Get-AgentHash {
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
 }
 
 function Invoke-UpgradeStage {
@@ -467,28 +455,6 @@ function Invoke-UninstallStage {
     Write-Host "PASS uninstall removes package state and retains protected customer state"
 }
 
-function Invoke-IntegrationLifecycle {
-    Remove-LeftoverFixtures
-    $packages = Build-LifecyclePackages
-    New-TestUser
-    Initialize-CustomerState
-    Invoke-InstallStage $packages
-    Invoke-MaintenanceStage $packages
-    Invoke-UpgradeStage $packages
-    Invoke-DowngradeStage $packages
-    Invoke-RollbackStage $packages
-    Invoke-UninstallStage
-}
-
-# ---------------------------------------------------------------------------
-# Failure evidence and cleanup
-# ---------------------------------------------------------------------------
-
-function Add-CleanupFailure {
-    param([Parameter(Mandatory = $true)][string]$Message)
-    [void]$cleanupFailures.Add($Message)
-}
-
 function Write-FailureEvidence {
     param([Parameter(Mandatory = $true)][Management.Automation.ErrorRecord]$Failure)
     Write-Host "Integration failure: $($Failure.Exception.Message)" -ForegroundColor Red
@@ -515,6 +481,11 @@ function Remove-FixtureProducts {
     catch {
         Add-CleanupFailure "product cleanup failed: $($_.Exception.Message)"
     }
+}
+
+function Add-CleanupFailure {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    [void]$cleanupFailures.Add($Message)
 }
 
 function Remove-TestUser {
@@ -547,18 +518,4 @@ function Complete-IntegrationRun {
     }
     if ($null -ne $PrimaryFailure) { throw $PrimaryFailure }
     if ($cleanupFailures.Count -ne 0) { throw "Integration cleanup failed; see cleanup diagnostics above." }
-}
-
-function Invoke-IntegrationRun {
-    try { Invoke-IntegrationLifecycle }
-    catch {
-        $script:integrationFailure = $_
-        Write-FailureEvidence $integrationFailure
-    }
-    finally {
-        Remove-FixtureProducts
-        Remove-TestUser
-        Remove-TestFiles
-    }
-    Complete-IntegrationRun $integrationFailure
 }

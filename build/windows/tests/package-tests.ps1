@@ -23,17 +23,66 @@ function Remove-AndCreateChild {
     return (Resolve-Path $path).Path
 }
 
-function Get-SequenceNumber {
+function Build-ProductionPackage {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Sequence,
-        [Parameter(Mandatory = $true)][string]$Action
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$Directory
     )
-    return [int](@($Sequence | Where-Object { $_[0] -eq $Action })[0][2])
+    $built = Invoke-DotNetBuild -ProjectPath $resolvedProject -BinDir $resolvedBinDir -Version $Version -OutputDirectory $Directory
+    $path = Join-Path $Directory "miru-agent-$Version.msi"
+    if ($built -ne $path) { Copy-Item -LiteralPath $built -Destination $path -Force }
+    $metadata = Assert-Package $path $Version
+    Assert-ProductionTables $path
+    Write-Host "PASS package $Version"
+    return $metadata
 }
 
-# ---------------------------------------------------------------------------
-# Production table assertions, one concern each
-# ---------------------------------------------------------------------------
+function Assert-Package {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+    $metadata = Get-MsiContract -Path $Path
+    Assert-Equal $MsiProductName $metadata.ProductName "ProductName"
+    Assert-Equal $MsiManufacturer $metadata.Manufacturer "Manufacturer"
+    Assert-Equal $Version $metadata.ProductVersion "ProductVersion"
+    Assert-Equal $MsiUpgradeCode $metadata.UpgradeCode "UpgradeCode"
+    Assert-True ($metadata.ProductCode -match '^\{[0-9A-Fa-f-]{36}\}$') "ProductCode"
+    Assert-True ($metadata.Template -match '(^|;)x64($|;)') "x64 summary template"
+    Assert-Equal 500 ([int]$metadata.InstallerVersion) "InstallerVersion"
+    Assert-Equal "1" $metadata.ALLUSERS "per-machine package"
+    return $metadata
+}
+
+function Assert-ProductionTables {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $handle = Open-MsiDatabase -Path $Path
+    try {
+        Assert-DirectoryComponents $handle.Database
+        Assert-ProtectedPermissionRows $handle.Database
+        Assert-FixtureIsolation $handle.Database
+        Assert-TransactionalMajorUpgrade $handle.Database
+        Assert-DowngradeLaunchCondition $handle.Database
+        Assert-NoServiceTables $handle.Database
+    }
+    finally { Close-MsiDatabase $handle }
+}
+
+function Assert-DirectoryComponents {
+    param([Parameter(Mandatory = $true)]$Database)
+    $components = @(Get-MsiRows $Database "SELECT ``Component``, ``ComponentId``, ``Directory_``, ``Attributes``, ``KeyPath`` FROM ``Component``" 5)
+    $directories = @(Get-MsiRows $Database "SELECT ``Directory``, ``Directory_Parent``, ``DefaultDir`` FROM ``Directory``" 3)
+    $folders = @(Get-MsiRows $Database "SELECT ``Directory_``, ``Component_`` FROM ``CreateFolder``" 2)
+    foreach ($expected in $MsiExpectedDirectories) {
+        Assert-RetainedDirectoryComponent $expected $components $directories $folders
+    }
+    $binary = @($components | Where-Object { $_[0] -eq "MiruAgentExe" })
+    Assert-Equal 1 $binary.Count "binary component"
+    Assert-True (([int]$binary[0][3] -band 256) -ne 0) "binary component is 64-bit"
+    Assert-Equal "AGENTFOLDER" $binary[0][2] "binary component directory"
+    Assert-Equal "miru_agent.exe" $binary[0][4] "binary component file key path"
+    Assert-Equal 1 (@($directories | Where-Object { $_[0] -eq "INSTALLFOLDER" -and $_[1] -eq "ProgramFiles64Folder" -and $_[2] -eq "Miru" })).Count "64-bit install directory"
+}
 
 function Assert-RetainedDirectoryComponent {
     param(
@@ -51,22 +100,6 @@ function Assert-RetainedDirectoryComponent {
     Assert-True ([string]::IsNullOrEmpty($retained[0][4])) "$name has a directory key path"
     Assert-Equal 1 (@($Directories | Where-Object { $_[0] -eq $directory -and $_[1] -eq $parent -and $_[2] -eq $leaf })).Count "$name directory hierarchy"
     Assert-Equal 1 (@($Folders | Where-Object { $_[0] -eq $directory -and $_[1] -eq $name })).Count "$name CreateFolder mapping"
-}
-
-function Assert-DirectoryComponents {
-    param([Parameter(Mandatory = $true)]$Database)
-    $components = @(Get-MsiRows $Database "SELECT ``Component``, ``ComponentId``, ``Directory_``, ``Attributes``, ``KeyPath`` FROM ``Component``" 5)
-    $directories = @(Get-MsiRows $Database "SELECT ``Directory``, ``Directory_Parent``, ``DefaultDir`` FROM ``Directory``" 3)
-    $folders = @(Get-MsiRows $Database "SELECT ``Directory_``, ``Component_`` FROM ``CreateFolder``" 2)
-    foreach ($expected in $MsiExpectedDirectories) {
-        Assert-RetainedDirectoryComponent $expected $components $directories $folders
-    }
-    $binary = @($components | Where-Object { $_[0] -eq "MiruAgentExe" })
-    Assert-Equal 1 $binary.Count "binary component"
-    Assert-True (([int]$binary[0][3] -band 256) -ne 0) "binary component is 64-bit"
-    Assert-Equal "AGENTFOLDER" $binary[0][2] "binary component directory"
-    Assert-Equal "miru_agent.exe" $binary[0][4] "binary component file key path"
-    Assert-Equal 1 (@($directories | Where-Object { $_[0] -eq "INSTALLFOLDER" -and $_[1] -eq "ProgramFiles64Folder" -and $_[2] -eq "Miru" })).Count "64-bit install directory"
 }
 
 function Assert-ProtectedPermissionRows {
@@ -102,6 +135,14 @@ function Assert-TransactionalMajorUpgrade {
     Assert-True ($upgradeRows.Count -ge 2) "upgrade and downgrade rows exist"
 }
 
+function Get-SequenceNumber {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Sequence,
+        [Parameter(Mandatory = $true)][string]$Action
+    )
+    return [int](@($Sequence | Where-Object { $_[0] -eq $Action })[0][2])
+}
+
 function Assert-DowngradeLaunchCondition {
     param([Parameter(Mandatory = $true)]$Database)
     $conditions = @(Get-MsiRows $Database "SELECT ``Condition``, ``Description`` FROM ``LaunchCondition``" 2)
@@ -114,55 +155,6 @@ function Assert-NoServiceTables {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (-not (Test-MsiTable $Database "ServiceInstall")) "no service installation table"
     Assert-True (-not (Test-MsiTable $Database "ServiceControl")) "no service control table"
-}
-
-function Assert-ProductionTables {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    $handle = Open-MsiDatabase -Path $Path
-    try {
-        Assert-DirectoryComponents $handle.Database
-        Assert-ProtectedPermissionRows $handle.Database
-        Assert-FixtureIsolation $handle.Database
-        Assert-TransactionalMajorUpgrade $handle.Database
-        Assert-DowngradeLaunchCondition $handle.Database
-        Assert-NoServiceTables $handle.Database
-    }
-    finally { Close-MsiDatabase $handle }
-}
-
-function Assert-Package {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Version
-    )
-    $metadata = Get-MsiContract -Path $Path
-    Assert-Equal $MsiProductName $metadata.ProductName "ProductName"
-    Assert-Equal $MsiManufacturer $metadata.Manufacturer "Manufacturer"
-    Assert-Equal $Version $metadata.ProductVersion "ProductVersion"
-    Assert-Equal $MsiUpgradeCode $metadata.UpgradeCode "UpgradeCode"
-    Assert-True ($metadata.ProductCode -match '^\{[0-9A-Fa-f-]{36}\}$') "ProductCode"
-    Assert-True ($metadata.Template -match '(^|;)x64($|;)') "x64 summary template"
-    Assert-Equal 500 ([int]$metadata.InstallerVersion) "InstallerVersion"
-    Assert-Equal "1" $metadata.ALLUSERS "per-machine package"
-    return $metadata
-}
-
-# ---------------------------------------------------------------------------
-# Builds
-# ---------------------------------------------------------------------------
-
-function Build-ProductionPackage {
-    param(
-        [Parameter(Mandatory = $true)][string]$Version,
-        [Parameter(Mandatory = $true)][string]$Directory
-    )
-    $built = Invoke-DotNetBuild -ProjectPath $resolvedProject -BinDir $resolvedBinDir -Version $Version -OutputDirectory $Directory
-    $path = Join-Path $Directory "miru-agent-$Version.msi"
-    if ($built -ne $path) { Copy-Item -LiteralPath $built -Destination $path -Force }
-    $metadata = Assert-Package $path $Version
-    Assert-ProductionTables $path
-    Write-Host "PASS package $Version"
-    return $metadata
 }
 
 function Build-FixturePackage {
@@ -190,10 +182,6 @@ function Invoke-ExpectedBuildFailure {
     Assert-True ($outputText -match "\b$([regex]::Escape($ExpectedErrorCode))\b") "$Name expected error code $ExpectedErrorCode`n$outputText"
     Assert-Equal 0 (@(Get-ChildItem -LiteralPath $outputPath -Filter "*.msi" -File -Recurse)).Count "$Name produces no MSI`n$outputText"
 }
-
-# ---------------------------------------------------------------------------
-# Run
-# ---------------------------------------------------------------------------
 
 $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
 $resolvedBinDir = (Resolve-Path -LiteralPath $BinDir).Path
