@@ -525,7 +525,6 @@ impl ShutdownManager {
         Ok(())
     }
 
-    // Only the Unix socket server registers a handle; the bookkeeping itself is platform-neutral.
     #[cfg_attr(not(unix), allow(dead_code))]
     pub fn with_socket_server_handle(
         &mut self,

@@ -24,8 +24,8 @@ Unix-only-API test code (`PermissionsExt`) that would otherwise fail to compile
 on Windows.
 
 The scope also includes production fixes discovered by the Windows tests:
-home-directory lookup uses `std::env::home_dir()`, and synced copies stream
-through an owned write handle on every platform.
+home-directory lookup uses `std::env::home_dir()`, and file copies no longer
+carry a sync option, so `copy_to` is plain `tokio::fs::copy` on every platform.
 
 Coverage gates stay Linux-only (they need `cargo-llvm-cov` and the
 `.covgate` thresholds are tuned on Linux); the Windows job runs tests
@@ -97,10 +97,10 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   exercising the existing non-`NotFound` metadata-error branch without a
   production seam or behavior change.
 - 2026-09-14 (review iteration 2): the Windows-only readonly clear/open/restore
-  path was replaced by a platform-neutral `copy_to` that owns the destination
-  write handle (`create_new` under `Overwrite::Deny`, stream, `sync_data`, then
-  apply the source permissions). This removes all `#[cfg(windows)]` code from
-  `files.rs`; the synced path is now exercised by the Linux suite.
+  path existed only to `sync_data` a copied file. No production caller needs a
+  synced copy, so `CopyOptions` and the sync path were removed; `copy_to` takes
+  an `Overwrite` and delegates to `tokio::fs::copy`. This removes all
+  `#[cfg(windows)]` code from `files.rs`.
 - 2026-09-14: `dirs::home()` delegates to `std::env::home_dir()` (stable,
   un-deprecated since 1.87; MSRV 1.93) instead of hand-selecting
   `HOME`/`USERPROFILE`.
@@ -151,8 +151,8 @@ Portable scenarios remain enabled on Windows:
 - Filesystem error-display tests derive expected strings from their `PathBuf`,
   `File`, and `Dir` fixtures. The home-directory test compares directly with
   `std::env::home_dir()`, without changing the environment.
-- Synced-copy coverage (all platforms) includes a readonly source and verifies
-  the copied contents and the preserved readonly attribute.
+- Copy coverage (all platforms) includes a readonly source and verifies the
+  copied contents and the preserved readonly attribute.
 
 Already gated (no action): `tests/mod.rs` `privilege` module, `deploy/apply.rs`
 perm tests, the existing `#[cfg(unix)]` mode-test bodies in `filesys/{dirs,
@@ -200,8 +200,8 @@ existing-directory-as-`File` fixture.
    ordering/error semantics; literal persisted JSON remains pinned exactly.
 4. CI enforces the Windows test run on every PR.
 5. Home-directory lookup matches `std::env::home_dir()` on every platform.
-6. A copy with `Sync::Yes` succeeds for a readonly source on every platform and
-   preserves the destination's readonly attribute.
+6. A copy succeeds for a readonly source on every platform and preserves the
+   destination's readonly attribute.
 
 ## Idempotence and Recovery
 
