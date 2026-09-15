@@ -227,7 +227,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn copy_readonly_source_with_sync_yes() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "synced", WriteOptions::default())
             .await
