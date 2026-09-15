@@ -1,41 +1,62 @@
 // standard crates
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::RefCell;
+use std::time::Duration;
 
 // internal crates
 use miru_agent::errors::Error;
-use miru_agent::http::errors::MockErr;
-use miru_agent::http::{with_retry, HTTPErr};
+use miru_agent::http::with_retry;
 
-fn network_err() -> HTTPErr {
-    HTTPErr::MockErr(MockErr {
+// external crates
+use thiserror::Error as ThisError;
+use tokio::time::Instant;
+
+#[derive(Debug, ThisError)]
+#[error("retry test error (network connection: {is_network_conn_err})")]
+struct RetryErr {
+    is_network_conn_err: bool,
+}
+
+impl Error for RetryErr {
+    fn is_network_conn_err(&self) -> bool {
+        self.is_network_conn_err
+    }
+}
+
+fn network_err() -> RetryErr {
+    RetryErr {
         is_network_conn_err: true,
-    })
+    }
 }
 
-fn app_err() -> HTTPErr {
-    HTTPErr::MockErr(MockErr {
+fn app_err() -> RetryErr {
+    RetryErr {
         is_network_conn_err: false,
-    })
+    }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn success_on_first_attempt() {
-    let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
-        calls.fetch_add(1, Ordering::SeqCst);
+    let attempts = RefCell::new(Vec::new());
+    let start = Instant::now();
+    let result: Result<&str, RetryErr> = with_retry(|| {
+        attempts.borrow_mut().push(Instant::now());
         async { Ok("ok") }
     })
     .await;
 
-    assert_eq!(result.unwrap(), "ok");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!("ok", result.unwrap());
+    let attempts = attempts.into_inner();
+    assert_eq!(vec![start], attempts);
+    assert_eq!(start, Instant::now());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn retries_on_network_error_then_succeeds() {
-    let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
-        let n = calls.fetch_add(1, Ordering::SeqCst);
+    let attempts = RefCell::new(Vec::new());
+    let start = Instant::now();
+    let result = with_retry(|| {
+        let n = attempts.borrow().len();
+        attempts.borrow_mut().push(Instant::now());
         async move {
             if n < 2 {
                 Err(network_err())
@@ -46,54 +67,66 @@ async fn retries_on_network_error_then_succeeds() {
     })
     .await;
 
-    assert_eq!(result.unwrap(), "recovered");
-    assert_eq!(calls.load(Ordering::SeqCst), 3, "1 initial + 2 retries");
+    assert_eq!("recovered", result.unwrap());
+    let attempts = attempts.into_inner();
+    assert_eq!(3, attempts.len());
+    assert_eq!(start, attempts[0]);
+    for pair in attempts.windows(2) {
+        let gap = pair[1] - pair[0];
+        assert!((Duration::from_millis(500)..=Duration::from_millis(1000)).contains(&gap));
+    }
+    assert_eq!(*attempts.last().unwrap(), Instant::now());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn no_retry_on_app_error() {
-    let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
-        calls.fetch_add(1, Ordering::SeqCst);
+    let attempts = RefCell::new(Vec::new());
+    let start = Instant::now();
+    let result: Result<&str, RetryErr> = with_retry(|| {
+        attempts.borrow_mut().push(Instant::now());
         async { Err(app_err()) }
     })
     .await;
 
     assert!(result.is_err());
     assert!(!result.unwrap_err().is_network_conn_err());
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "should not retry app errors"
-    );
+    let attempts = attempts.into_inner();
+    assert_eq!(vec![start], attempts);
+    assert_eq!(start, Instant::now());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn exhausts_retries_on_persistent_network_error() {
-    let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
-        calls.fetch_add(1, Ordering::SeqCst);
+    let attempts = RefCell::new(Vec::new());
+    let start = Instant::now();
+    let result: Result<&str, RetryErr> = with_retry(|| {
+        attempts.borrow_mut().push(Instant::now());
         async { Err(network_err()) }
     })
     .await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().is_network_conn_err());
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        3,
-        "should make 3 total attempts (1 initial + 2 retries)"
-    );
+    let attempts = attempts.into_inner();
+    assert_eq!(3, attempts.len());
+    assert_eq!(start, attempts[0]);
+    for pair in attempts.windows(2) {
+        let gap = pair[1] - pair[0];
+        assert!((Duration::from_millis(500)..=Duration::from_millis(1000)).contains(&gap));
+    }
+    assert_eq!(*attempts.last().unwrap(), Instant::now());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn network_error_then_app_error_stops_immediately() {
-    let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
-        let n = calls.fetch_add(1, Ordering::SeqCst);
+    let attempts = RefCell::new(Vec::new());
+    let start = Instant::now();
+    let result = with_retry(|| {
+        let n = attempts.borrow().len();
+        attempts.borrow_mut().push(Instant::now());
         async move {
             if n == 0 {
-                Err(network_err())
+                Err::<&str, RetryErr>(network_err())
             } else {
                 Err(app_err())
             }
@@ -103,18 +136,23 @@ async fn network_error_then_app_error_stops_immediately() {
 
     assert!(result.is_err());
     assert!(!result.unwrap_err().is_network_conn_err());
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        2,
-        "should stop on first non-network error"
-    );
+    let attempts = attempts.into_inner();
+    assert_eq!(2, attempts.len());
+    assert_eq!(start, attempts[0]);
+    for pair in attempts.windows(2) {
+        let gap = pair[1] - pair[0];
+        assert!((Duration::from_millis(500)..=Duration::from_millis(1000)).contains(&gap));
+    }
+    assert_eq!(*attempts.last().unwrap(), Instant::now());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn recovers_on_last_attempt() {
-    let calls = AtomicUsize::new(0);
-    let result: Result<&str, HTTPErr> = with_retry(|| {
-        let n = calls.fetch_add(1, Ordering::SeqCst);
+    let attempts = RefCell::new(Vec::new());
+    let start = Instant::now();
+    let result: Result<&str, RetryErr> = with_retry(|| {
+        let n = attempts.borrow().len();
+        attempts.borrow_mut().push(Instant::now());
         async move {
             if n < 2 {
                 Err(network_err())
@@ -125,10 +163,13 @@ async fn recovers_on_last_attempt() {
     })
     .await;
 
-    assert_eq!(result.unwrap(), "last chance");
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        3,
-        "should succeed on attempt 3"
-    );
+    assert_eq!("last chance", result.unwrap());
+    let attempts = attempts.into_inner();
+    assert_eq!(3, attempts.len());
+    assert_eq!(start, attempts[0]);
+    for pair in attempts.windows(2) {
+        let gap = pair[1] - pair[0];
+        assert!((Duration::from_millis(500)..=Duration::from_millis(1000)).contains(&gap));
+    }
+    assert_eq!(*attempts.last().unwrap(), Instant::now());
 }

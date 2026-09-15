@@ -1,8 +1,9 @@
 // internal crates
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::cache::{FileCache, SingleThreadFileCache};
-use miru_agent::filesys::{dirs, PathExt};
+use miru_agent::filesys::PathExt;
 
 // external crates
 use tokio::task::JoinHandle;
@@ -16,14 +17,14 @@ pub mod concurrent {
 
     async fn spawn_cache_with_capacity(
         capacity: usize,
-    ) -> (dirs::TempDir, TestCache, JoinHandle<()>) {
-        let tmp = dirs::temp("testing").unwrap();
+    ) -> (test_dirs::TempDir, TestCache, JoinHandle<()>) {
+        let tmp = test_dirs::temp("testing").unwrap();
         let file = tmp.file("cache.json");
         let (cache, handle) = TestCache::spawn(32, file, capacity).await.unwrap();
         (tmp, cache, handle)
     }
 
-    async fn spawn_cache() -> (dirs::TempDir, TestCache, JoinHandle<()>) {
+    async fn spawn_cache() -> (test_dirs::TempDir, TestCache, JoinHandle<()>) {
         spawn_cache_with_capacity(1000).await
     }
 
@@ -32,7 +33,7 @@ pub mod concurrent {
 
         #[tokio::test]
         async fn spawn() {
-            let tmp = dirs::temp("testing").unwrap();
+            let tmp = test_dirs::temp("testing").unwrap();
             let file = tmp.file("cache.json");
             TestCache::spawn(32, file.clone(), 1000).await.unwrap();
             assert!(file.exists());
@@ -50,14 +51,14 @@ pub mod single_thread {
 
     type TestCache = SingleThreadFileCache<String, String>;
 
-    async fn new_cache_with_capacity(capacity: usize) -> (dirs::TempDir, TestCache) {
-        let tmp = dirs::temp("testing").unwrap();
+    async fn new_cache_with_capacity(capacity: usize) -> (test_dirs::TempDir, TestCache) {
+        let tmp = test_dirs::temp("testing").unwrap();
         let file = tmp.file("cache.json");
         let cache = TestCache::new(file, capacity).await.unwrap();
         (tmp, cache)
     }
 
-    async fn new_cache() -> (dirs::TempDir, TestCache) {
+    async fn new_cache() -> (test_dirs::TempDir, TestCache) {
         new_cache_with_capacity(1000).await
     }
 
@@ -66,7 +67,7 @@ pub mod single_thread {
 
         #[tokio::test]
         async fn new() {
-            let tmp = dirs::temp("testing").unwrap();
+            let tmp = test_dirs::temp("testing").unwrap();
             let file = tmp.file("cache.json");
             TestCache::new(file.clone(), 1000).await.unwrap();
             assert!(file.exists());

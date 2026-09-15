@@ -10,9 +10,10 @@
 
 // internal crates
 use crate::data_uploads::queue::queue_suite;
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
-use miru_agent::filesys::{dirs, files, File, WriteOptions};
+use miru_agent::filesys::{files, File, WriteOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -81,7 +82,7 @@ mod wire {
     /// out here to match the literal JSON exactly.
     #[tokio::test]
     async fn raw_json_snapshot_loads() {
-        let dir = dirs::temp("upload_queue_test").unwrap();
+        let dir = test_dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let id = Uuid::new_v4();
         let raw = format!(
@@ -127,7 +128,7 @@ mod wire {
     /// or an added `version` field all fail here.
     #[tokio::test]
     async fn enqueue_writes_the_pinned_json_shape() {
-        let dir = dirs::temp("upload_queue_test").unwrap();
+        let dir = test_dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
 
         {
@@ -168,7 +169,7 @@ mod wire {
 
     #[tokio::test]
     async fn legacy_snapshot_without_next_attempt_at_loads() {
-        let dir = dirs::temp("upload_queue_test").unwrap();
+        let dir = test_dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let snapshot = QueueSnapshot {
             entries: vec![QueueEntry {

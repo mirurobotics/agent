@@ -1,6 +1,7 @@
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::Deployments;
-use miru_agent::filesys::{dirs, Overwrite};
+use miru_agent::filesys::Overwrite;
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::services::deployment as dpl_svc;
 use miru_agent::services::ServiceErr;
@@ -8,8 +9,8 @@ use miru_agent::services::ServiceErr;
 // external crates
 use chrono::{DateTime, Utc};
 
-async fn setup(name: &str) -> (dirs::TempDir, Deployments) {
-    let dir = dirs::temp(name).unwrap();
+async fn setup(name: &str) -> (test_dirs::TempDir, Deployments) {
+    let dir = test_dirs::temp(name).unwrap();
     let (dpl_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
         .await
         .unwrap();

@@ -78,7 +78,7 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@21eb0b6228fa6252dafdd9c82e7516ad2328c775 # cargo-llvm-cov
 
-      - name: Run Tests and Coverage
+      - name: Run Tests and Coverage Gates
         run: ./scripts/covgate.sh
 
   tools:

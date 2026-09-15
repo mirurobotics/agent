@@ -1,8 +1,9 @@
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::events::errors::EventsErr;
 use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED};
 use miru_agent::events::store::{EventStore, DEFAULT_MAX_RETAINED};
-use miru_agent::filesys::{self, dirs, files, WriteOptions};
+use miru_agent::filesys::{self, files, WriteOptions};
 
 // external crates
 use chrono::Utc;
@@ -27,7 +28,7 @@ mod init {
 
     #[tokio::test]
     async fn empty_dir_starts_at_id_1() {
-        let dir = dirs::temp("ev_init_empty").unwrap();
+        let dir = test_dirs::temp("ev_init_empty").unwrap();
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
         assert_eq!(store.earliest_id(), None);
         assert_eq!(store.latest_id(), None);
@@ -35,7 +36,7 @@ mod init {
 
     #[tokio::test]
     async fn loads_existing_log() {
-        let dir = dirs::temp("ev_init_load").unwrap();
+        let dir = test_dirs::temp("ev_init_load").unwrap();
         let log_file = dir.file("events.jsonl");
 
         // write two events manually
@@ -73,7 +74,7 @@ mod init {
 
     #[tokio::test]
     async fn skips_malformed_lines() {
-        let dir = dirs::temp("ev_init_malformed").unwrap();
+        let dir = test_dirs::temp("ev_init_malformed").unwrap();
         let log_file = dir.file("events.jsonl");
 
         let valid = Event {
@@ -98,7 +99,7 @@ mod init {
 
     #[tokio::test]
     async fn all_malformed_lines_produces_empty_store() {
-        let dir = dirs::temp("ev_all_malformed").unwrap();
+        let dir = test_dirs::temp("ev_all_malformed").unwrap();
         let log_file = dir.file("events.jsonl");
 
         files::write_string(
@@ -131,7 +132,7 @@ mod append {
 
     #[tokio::test]
     async fn assigns_monotonic_ids() {
-        let dir = dirs::temp("ev_append_mono").unwrap();
+        let dir = test_dirs::temp("ev_append_mono").unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         let e1 = store.append(make_event("test.a")).await.unwrap();
@@ -145,7 +146,7 @@ mod append {
 
     #[tokio::test]
     async fn persists_to_disk() {
-        let dir = dirs::temp("ev_append_disk").unwrap();
+        let dir = test_dirs::temp("ev_append_disk").unwrap();
         let log_file = dir.file("events.jsonl");
 
         {
@@ -164,7 +165,7 @@ mod append {
 
     #[tokio::test]
     async fn preserves_event_type_and_data() {
-        let dir = dirs::temp("ev_append_data").unwrap();
+        let dir = test_dirs::temp("ev_append_data").unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         let event_args = EventArgs {
@@ -187,7 +188,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_zero_returns_all() {
-        let dir = dirs::temp("ev_replay_zero").unwrap();
+        let dir = test_dirs::temp("ev_replay_zero").unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         store.append(make_event("a")).await.unwrap();
@@ -202,7 +203,7 @@ mod replay {
 
     #[tokio::test]
     async fn returns_events_after_cursor() {
-        let dir = dirs::temp("ev_replay_after").unwrap();
+        let dir = test_dirs::temp("ev_replay_after").unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         store.append(make_event("a")).await.unwrap();
@@ -217,7 +218,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_at_latest_returns_empty() {
-        let dir = dirs::temp("ev_replay_latest").unwrap();
+        let dir = test_dirs::temp("ev_replay_latest").unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         store.append(make_event("a")).await.unwrap();
@@ -229,7 +230,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_beyond_latest_returns_empty() {
-        let dir = dirs::temp("ev_replay_beyond").unwrap();
+        let dir = test_dirs::temp("ev_replay_beyond").unwrap();
         let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         store.append(make_event("a")).await.unwrap();
@@ -240,7 +241,7 @@ mod replay {
 
     #[tokio::test]
     async fn cursor_zero_on_empty_store_returns_empty() {
-        let dir = dirs::temp("ev_empty_replay").unwrap();
+        let dir = test_dirs::temp("ev_empty_replay").unwrap();
         let store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
 
         let result = store.replay_after(0);
@@ -256,7 +257,7 @@ mod replay {
 
     #[tokio::test]
     async fn expired_cursor_returns_error() {
-        let dir = dirs::temp("ev_replay_expired").unwrap();
+        let dir = test_dirs::temp("ev_replay_expired").unwrap();
         // small max_retained to force compaction
         let mut store = make_store(&dir, 4).await;
 
@@ -288,7 +289,7 @@ mod compaction {
 
     #[tokio::test]
     async fn compacts_when_exceeding_max_retained() {
-        let dir = dirs::temp("ev_compact").unwrap();
+        let dir = test_dirs::temp("ev_compact").unwrap();
         let max_retained = 10;
         let mut store = make_store(&dir, max_retained).await;
 
@@ -306,7 +307,7 @@ mod compaction {
 
     #[tokio::test]
     async fn compacted_log_survives_reload() {
-        let dir = dirs::temp("ev_compact_reload").unwrap();
+        let dir = test_dirs::temp("ev_compact_reload").unwrap();
         let max_retained = 6;
         let mut store = make_store(&dir, max_retained).await;
 
@@ -326,7 +327,7 @@ mod compaction {
 
     #[tokio::test]
     async fn append_after_compaction_continues_ids() {
-        let dir = dirs::temp("ev_compact_ids").unwrap();
+        let dir = test_dirs::temp("ev_compact_ids").unwrap();
         let mut store = make_store(&dir, 4).await;
 
         // append 5 events (triggers compaction at > 4)

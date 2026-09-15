@@ -3,12 +3,13 @@ use std::os::unix::fs::PermissionsExt;
 pub use std::path::PathBuf;
 
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 pub use crate::test_utils::testdata::testdata_dir;
 use miru_agent::crypt::{rsa, CryptErr};
-use miru_agent::filesys::{self, dirs, files, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{self, files, Overwrite, PathExt, WriteOptions};
 
-async fn temp_key_pair() -> (dirs::TempDir, filesys::File, filesys::File) {
-    let dir = dirs::temp("crypt_rsa_test").unwrap();
+async fn temp_key_pair() -> (test_dirs::TempDir, filesys::File, filesys::File) {
+    let dir = test_dirs::temp("crypt_rsa_test").unwrap();
     let private_key_file = dir.file("private_key.pem");
     let public_key_file = dir.file("public_key.pem");
     rsa::gen_key_pair(
@@ -32,7 +33,7 @@ pub mod fingerprint {
 
     #[tokio::test]
     async fn success_deterministic_for_known_key() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
 
@@ -61,7 +62,7 @@ pub mod fingerprint {
 
     #[tokio::test]
     async fn differs_across_keys() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let priv1 = filesys::File::new(crypt_dir.path().join("priv1.pem"));
         let pub1 = filesys::File::new(crypt_dir.path().join("pub1.pem"));
         rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv1, &pub1, Overwrite::Allow)
@@ -84,7 +85,7 @@ pub mod gen_key_pair {
 
     #[tokio::test]
     async fn success_doesnt_exist_overwrite_true() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -109,7 +110,7 @@ pub mod gen_key_pair {
 
     #[tokio::test]
     async fn success_doesnt_exist_overwrite_false() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -133,7 +134,7 @@ pub mod gen_key_pair {
 
     #[tokio::test]
     async fn success_existing_files_overwrite_true() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -180,7 +181,7 @@ pub mod gen_key_pair {
 
     #[tokio::test]
     async fn failure_existing_files_overwrite_false() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -223,7 +224,7 @@ pub mod gen_key_pair {
 
     #[tokio::test]
     async fn file_permissions() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -255,7 +256,7 @@ pub mod gen_key_pair {
 
     #[tokio::test]
     async fn writes_pkcs8_private_and_spki_public_pem() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
 
@@ -290,7 +291,7 @@ pub mod read_private_key {
 
     #[tokio::test]
     async fn success() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -314,7 +315,7 @@ pub mod read_private_key {
 
     #[tokio::test]
     async fn invalid_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
 
         let private_key_file = filesys::File::new(private_key_path.clone());
@@ -333,7 +334,7 @@ pub mod read_private_key {
 
     #[tokio::test]
     async fn missing_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
 
         let private_key_file = filesys::File::new(private_key_path.clone());
@@ -344,7 +345,7 @@ pub mod read_private_key {
     }
 
     async fn write_pem_and_read_private_key(pem: &str) -> Result<(), CryptErr> {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_file = filesys::File::new(crypt_dir.path().join("private_key.pem"));
         files::write_bytes(
             &private_key_file,
@@ -384,7 +385,7 @@ pub mod read_public_key {
 
     #[tokio::test]
     async fn success() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_path = crypt_dir.path().join("private_key.pem");
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
@@ -408,7 +409,7 @@ pub mod read_public_key {
 
     #[tokio::test]
     async fn invalid_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
         let public_key_file = filesys::File::new(public_key_path.clone());
@@ -423,7 +424,7 @@ pub mod read_public_key {
 
     #[tokio::test]
     async fn missing_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let public_key_path = crypt_dir.path().join("public_key.pem");
 
         let public_key_file = filesys::File::new(public_key_path.clone());
@@ -434,7 +435,7 @@ pub mod read_public_key {
     }
 
     async fn write_pem_and_read_public_key(pem: &str) -> Result<(), CryptErr> {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let public_key_file = filesys::File::new(crypt_dir.path().join("public_key.pem"));
         files::write_bytes(
             &public_key_file,
@@ -487,7 +488,7 @@ pub mod sign {
 
     #[tokio::test]
     async fn missing_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_file = crypt_dir.file("private_key.pem");
         files::delete(&private_key_file).await.unwrap();
 
@@ -497,7 +498,7 @@ pub mod sign {
 
     #[tokio::test]
     async fn invalid_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let private_key_file = crypt_dir.file("private_key.pem");
         files::write_bytes(
             &private_key_file,
@@ -529,7 +530,7 @@ pub mod verify {
 
     #[tokio::test]
     async fn wrong_key_pair_returns_false() {
-        let dir = dirs::temp("crypt_rsa_test").unwrap();
+        let dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let priv1 = dir.file("priv1.pem");
         let pub1 = dir.file("pub1.pem");
         rsa::gen_key_pair(rsa::KeySize::Rsa2048, &priv1, &pub1, Overwrite::Allow)
@@ -561,7 +562,7 @@ pub mod verify {
 
     #[tokio::test]
     async fn missing_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let public_key_file = crypt_dir.file("public_key.pem");
         files::delete(&public_key_file).await.unwrap();
 
@@ -571,7 +572,7 @@ pub mod verify {
 
     #[tokio::test]
     async fn invalid_file() {
-        let crypt_dir = dirs::temp("crypt_rsa_test").unwrap();
+        let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();
         let public_key_file = crypt_dir.file("public_key.pem");
         files::write_bytes(&public_key_file, &[4, 4], WriteOptions::OVERWRITE_NONATOMIC)
             .await

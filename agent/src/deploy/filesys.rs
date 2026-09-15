@@ -300,10 +300,12 @@ mod tests {
     // internal crates
     use super::*;
     use crate::filesys;
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::files as test_files;
 
     /// RAII temp dir for absolute path fixtures; absolute on every platform.
-    fn tmp_fixture() -> filesys::dirs::TempDir {
-        filesys::dirs::temp("deploy-filesys").unwrap()
+    fn tmp_fixture() -> test_dirs::TempDir {
+        test_dirs::temp("deploy-filesys").unwrap()
     }
 
     // ============================= map_write_err ============================= //
@@ -430,6 +432,7 @@ mod tests {
         let actual = map_snapshot_err(&cfg_inst, &dest, &backup, err);
         match actual {
             DeployErr::BackupAccessDenied(e) => {
+                // lint:allow(field-by-field-assert) — source is io::Error (no PartialEq), so a struct compare is impossible.
                 assert_eq!(e.cfg_inst_id, cfg_inst.id);
                 assert_eq!(e.filepath, cfg_inst.filepath);
                 assert_eq!(e.backup_filepath, backup.path().display().to_string());
@@ -551,8 +554,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn rollback_returns_errors_when_restores_fail_synthetic() {
-        let tmp =
-            filesys::dirs::temp("rollback_returns_errors_when_restores_fail_synthetic").unwrap();
+        let tmp = test_dirs::temp("rollback_returns_errors_when_restores_fail_synthetic").unwrap();
 
         // Asymmetric setup: rollback iterates `snapshots.iter().rev()`, so
         // the LAST entry in the vec is processed first. We put the failing
@@ -568,8 +570,8 @@ mod tests {
         filesys::dirs::create(&existed_parent).await.unwrap();
         filesys::dirs::create(&dne_parent).await.unwrap();
 
-        files::seed(&existed_parent.file("backup.json"), "backup content").await;
-        files::seed(&dne_parent.file("dst.json"), "leftover").await;
+        test_files::seed(&existed_parent.file("backup.json"), "backup content").await;
+        test_files::seed(&dne_parent.file("dst.json"), "leftover").await;
 
         // Only lock existed_parent so its rename-back fails with EACCES.
         // Leave dne_parent at default 0o755 so its remove_file succeeds.
@@ -615,19 +617,19 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn remove_backups_continues_when_delete_fails() {
-        let tmp = filesys::dirs::temp("remove_backups_continues_when_delete_fails").unwrap();
+        let tmp = test_dirs::temp("remove_backups_continues_when_delete_fails").unwrap();
 
         // Writable dir: backup can be deleted
         let writable_dir = tmp.subdir("writable");
         filesys::dirs::create(&writable_dir).await.unwrap();
-        files::seed(&writable_dir.file("dst.json"), "content").await;
-        files::seed(&writable_dir.file("miru.backup.dst.json"), "backup").await;
+        test_files::seed(&writable_dir.file("dst.json"), "content").await;
+        test_files::seed(&writable_dir.file("miru.backup.dst.json"), "backup").await;
 
         // Locked dir: backup cannot be deleted (EACCES)
         let locked_dir = tmp.subdir("locked");
         filesys::dirs::create(&locked_dir).await.unwrap();
-        files::seed(&locked_dir.file("dst.json"), "content").await;
-        files::seed(&locked_dir.file("miru.backup.dst.json"), "backup").await;
+        test_files::seed(&locked_dir.file("dst.json"), "content").await;
+        test_files::seed(&locked_dir.file("miru.backup.dst.json"), "backup").await;
         filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
             .await
             .unwrap();

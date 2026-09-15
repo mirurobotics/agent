@@ -4,11 +4,13 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::http_client::MockClient;
-use crate::sync::syncer::{create_storage, create_token_manager};
+use crate::test_utils::{
+    filesys::dirs as test_dirs,
+    sync::{create_storage, create_token_manager},
+};
 use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
-use miru_agent::filesys::dirs;
 use miru_agent::server::{routes, State};
 use miru_agent::sync::Syncer;
 
@@ -25,7 +27,7 @@ struct Fixture {
     state: Arc<State>,
     app: Router,
     shutdown_tx: broadcast::Sender<()>,
-    _dir: dirs::TempDir,
+    _dir: test_dirs::TempDir,
 }
 
 impl Fixture {
@@ -34,7 +36,7 @@ impl Fixture {
     }
 
     async fn with_hub_opts(name: &str, opts: SpawnOptions) -> Self {
-        let dir = dirs::temp(name).unwrap();
+        let dir = test_dirs::temp(name).unwrap();
         let storage = Arc::new(create_storage(dir.dir()).await);
         let http_client = Arc::new(MockClient::default());
         let (token_mngr, _handle) = create_token_manager(dir.dir(), http_client.clone()).await;

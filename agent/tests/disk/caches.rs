@@ -1,4 +1,5 @@
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
 use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::{self, device};
@@ -35,7 +36,7 @@ pub mod init {
 
     #[tokio::test]
     async fn init_and_shutdown() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -48,7 +49,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_while_online() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -119,7 +120,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_twice_returns_error() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -135,7 +136,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_substore() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -151,7 +152,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_releases() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -167,7 +168,7 @@ pub mod init {
 
     #[tokio::test]
     async fn shutdown_with_pre_closed_file_rules() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
@@ -187,7 +188,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn all_workers_exit_after_success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let (storage, storage_handle) =
             Storage::init(&layout, Capacities::default(), "test_device".to_string())
@@ -204,7 +205,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn attempts_all_stores_after_early_failure() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let (storage, storage_handle) =
             Storage::init(&layout, Capacities::default(), "test_device".to_string())
@@ -227,7 +228,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn returns_first_error_with_multiple_failures() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let (storage, storage_handle) =
             Storage::init(&layout, Capacities::default(), "test_device".to_string())

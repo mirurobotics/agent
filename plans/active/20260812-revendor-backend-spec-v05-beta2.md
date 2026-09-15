@@ -156,7 +156,7 @@ Note that after regen the spec type is also named `FileRuleSource`, colliding by
 
 ### Repo conventions (from `AGENTS.md`)
 
-- Tests: `./scripts/test.sh` (equals `RUST_LOG=off cargo test --features test`). The `--features test` flag is mandatory; plain `cargo test` will not build.
+- Tests: `./scripts/test.sh` (equals `RUST_LOG=off cargo test --package miru-agent`). Ordinary `cargo test` also works without a custom feature or logging environment.
 - Lint: run `./scripts/update-deps.sh` first (refreshes `Cargo.lock`), then `./scripts/lint.sh` (import linter, `cargo fmt`, machete/diet, audit, clippy).
 - Coverage: `./scripts/covgate.sh`, with per-directory threshold files named `.covgate`.
 - `./scripts/preflight.sh` runs four jobs in parallel: `scripts/lint.sh`, `scripts/covgate.sh`, `tools/lint/scripts/lint.sh` (with `LINT_FIX=0`), `tools/lint/scripts/covgate.sh`.
@@ -417,7 +417,7 @@ Individual commands, in order, all from `/home/ben/miru/workbench1/repos/agent`:
 
 `./scripts/lint.sh` — runs the import linter, `cargo fmt`, machete/diet, audit, and clippy. Expected: exits 0 with no findings. Clippy warnings pointing into `libs/backend-api/` or `libs/device-api/` are generated code and are ignorable. Note that `lint.sh` **auto-fixes** formatting, so re-check `git status` after running it and fold any changes into the commit.
 
-`./scripts/test.sh` — equals `RUST_LOG=off cargo test --features test`. Expected: all tests pass, `0 failed`. Plain `cargo test` without `--features test` will not compile; that is a usage error, not a real failure.
+`./scripts/test.sh` — equals `RUST_LOG=off cargo test --package miru-agent`. Expected: all tests pass, `0 failed`. Ordinary `cargo test` also works without a custom feature or logging environment.
 
 `./scripts/covgate.sh` — per-directory coverage gates. Relevant thresholds for the directories this plan touches:
 

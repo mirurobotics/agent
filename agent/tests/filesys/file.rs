@@ -13,7 +13,7 @@ pub mod display {
 
     #[test]
     fn absolute_path() {
-        let tmp = filesys::dirs::temp("file-display").unwrap();
+        let tmp = crate::test_utils::filesys::dirs::temp("file-display").unwrap();
         let file = tmp.file("test-file.txt");
         assert_eq!(file.path(), &tmp.path().join("test-file.txt"));
     }
@@ -67,7 +67,7 @@ pub mod is_absolute {
 
     #[test]
     fn returns_true_for_absolute_path() {
-        let tmp = filesys::dirs::temp("file-abs").unwrap();
+        let tmp = crate::test_utils::filesys::dirs::temp("file-abs").unwrap();
         let f = tmp.file("foo.json");
         assert!(f.is_absolute());
     }

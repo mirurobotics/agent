@@ -1,10 +1,11 @@
 // internal crates
 use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
-use miru_agent::filesys::{dirs, files, File, WriteOptions};
+use miru_agent::filesys::{files, File, WriteOptions};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -78,7 +79,7 @@ mod wire {
     /// fields nested rather than flattened.
     #[tokio::test]
     async fn raw_json_snapshot_loads() {
-        let dir = dirs::temp("delete-queue-test").unwrap();
+        let dir = test_dirs::temp("delete-queue-test").unwrap();
         let path = dir.file("delete_queue.json");
         let id = Uuid::new_v4();
         let raw = format!(

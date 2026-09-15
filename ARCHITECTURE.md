@@ -92,7 +92,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
-- **Tests require `--features test` and `--test-threads=1`.** This is a hard constraint. Many test helpers are behind `#[cfg(feature = "test")]` and tests share `/tmp/miru.sock`.
+- **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based via `storage::Layout`. The backend owns the database.
 
 ## Cross-Cutting Concerns

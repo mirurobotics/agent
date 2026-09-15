@@ -690,8 +690,9 @@ mod tests {
     use super::*;
     use crate::deploy::fsm;
     use crate::disk::{Capacities, Layout};
-    use crate::filesys::{dirs, files, WriteOptions};
+    use crate::filesys::{files, WriteOptions};
     use crate::models::Device;
+    use crate::test_utils::filesys::dirs as test_dirs;
 
     fn new_shutdown_manager() -> ShutdownManager {
         let (shutdown_tx, _) = broadcast::channel(1);
@@ -714,11 +715,11 @@ mod tests {
     }
 
     async fn init_app_state() -> (
-        dirs::TempDir,
+        test_dirs::TempDir,
         Arc<AppState>,
         Pin<Box<dyn Future<Output = ()> + Send>>,
     ) {
-        let tmp = dirs::temp("shutdown_impl_tests").unwrap();
+        let tmp = test_dirs::temp("shutdown_impl_tests").unwrap();
         let layout = Layout::new(tmp.to_dir());
 
         let opts = WriteOptions::default();

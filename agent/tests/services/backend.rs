@@ -206,7 +206,7 @@ async fn fetch_deployment_5xx_propagates_as_request_failed() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fetch_deployment_with_retry_recovers_from_network_error() {
     let mock = MockClient::default();
     let counter = AtomicUsize::new(0);
@@ -280,7 +280,7 @@ async fn fetch_release_404_propagates_as_request_failed() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fetch_release_with_retry_recovers_from_network_error() {
     let mock = MockClient::default();
     let counter = AtomicUsize::new(0);
@@ -354,7 +354,7 @@ async fn fetch_git_commit_404_propagates_as_request_failed() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn fetch_git_commit_with_retry_recovers_from_network_error() {
     let mock = MockClient::default();
     let counter = AtomicUsize::new(0);

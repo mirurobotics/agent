@@ -4,10 +4,9 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use miru_agent::authn::{AuthnErr, Token, TokenManagerExt};
 
-type GetTokenFn = Box<dyn Fn() -> Result<Arc<Token>, AuthnErr> + Send + Sync>;
 type RefreshTokenFn = Box<dyn Fn() -> Result<(), AuthnErr> + Send + Sync>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TokenManagerCall {
     GetToken,
     RefreshToken,
@@ -16,7 +15,6 @@ pub enum TokenManagerCall {
 pub struct MockTokenManager {
     pub token: Arc<Mutex<Token>>,
     pub calls: Arc<Mutex<Vec<TokenManagerCall>>>,
-    pub get_token_fn: Arc<Mutex<Option<GetTokenFn>>>,
     pub refresh_token_fn: Arc<Mutex<RefreshTokenFn>>,
 }
 
@@ -25,7 +23,6 @@ impl MockTokenManager {
         Self {
             token: Arc::new(Mutex::new(token)),
             calls: Arc::new(Mutex::new(Vec::new())),
-            get_token_fn: Arc::new(Mutex::new(None)),
             refresh_token_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
         }
     }
@@ -56,10 +53,6 @@ impl MockTokenManager {
             .count()
     }
 
-    pub fn set_get_token(&self, get_token_fn: GetTokenFn) {
-        *self.get_token_fn.lock().unwrap() = Some(get_token_fn);
-    }
-
     pub fn set_refresh_token(&self, refresh_token_fn: RefreshTokenFn) {
         *self.refresh_token_fn.lock().unwrap() = refresh_token_fn;
     }
@@ -72,11 +65,7 @@ impl TokenManagerExt for MockTokenManager {
 
     async fn get_token(&self) -> Result<Arc<Token>, AuthnErr> {
         self.calls.lock().unwrap().push(TokenManagerCall::GetToken);
-        if let Some(get_token_fn) = &*self.get_token_fn.lock().unwrap() {
-            (get_token_fn)()
-        } else {
-            Ok(Arc::new(self.token.lock().unwrap().clone()))
-        }
+        Ok(Arc::new(self.token.lock().unwrap().clone()))
     }
 
     async fn refresh_token(&self) -> Result<(), AuthnErr> {

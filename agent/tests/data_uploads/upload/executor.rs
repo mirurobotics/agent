@@ -1,5 +1,4 @@
 // standard crates
-use std::collections::HashMap;
 use std::sync::Arc;
 
 // internal crates
@@ -7,102 +6,29 @@ use crate::mocks::{
     http_client::{Call, MockClient},
     object_transfer::MockObjectTransfer,
     stub_token_manager::StubTokenManager,
-    token_manager::MockTokenManager,
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use backend_api::models::{
-    CreateUploadRequest, Upload, UploadCredentials, UploadDestination, UploadSource, UploadStatus,
-    UploadWithCredentials,
+use crate::test_utils::upload::{
+    destination, make_job, pending_response, response_metadata, response_with_status,
+    s3_credentials, token_manager,
 };
+use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus, UploadWithCredentials};
 use miru_agent::authn::errors::MockError as AuthnMockError;
-use miru_agent::authn::{AuthnErr, Token};
+use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
-use miru_agent::data_uploads::upload::{Job, LiveExecutor, SdkTransfer, UploadErr, UploadExecutor};
+use miru_agent::data_uploads::upload::{Job, LiveExecutor, UploadErr, UploadExecutor};
 use miru_agent::errors::Error;
-use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::filesys::File;
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
 
 // external crates
-use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
-use aws_smithy_types::body::SdkBody;
 use chrono::{TimeZone, Utc};
-use serde_json::json;
 
 // ================================ HELPERS ======================================== //
 
-fn make_job(name: &str) -> Job {
-    let now = Utc::now();
-    Job {
-        file: File::new(format!("/data/{name}")),
-        size: 42,
-        digest: format!("sha256:{name}"),
-        mtime: now,
-        first_observed_at: now,
-        last_observed_at: now,
-        file_rule_id: "rule_1".to_string(),
-        deployment_id: "dpl_1".to_string(),
-        retention: None,
-    }
-}
-
-fn destination() -> UploadDestination {
-    UploadDestination {
-        bucket_id: "bkt_1".to_string(),
-        bucket_name: "my-bucket".to_string(),
-        object_key: "logs/a.log".to_string(),
-    }
-}
-
-fn s3_credentials() -> UploadCredentials {
-    serde_json::from_value(json!({
-        "scheme": "s3",
-        "s3_credentials": {
-            "scheme": "s3",
-            "access_key_id": "AKIA_TEST",
-            "secret_access_key": "secret",
-            "session_token": "session",
-            "region": "us-east-1",
-            "expires_at": "2021-01-01T01:00:00Z"
-        },
-        "gcs_credentials": null,
-        "expires_at": "2021-01-01T01:00:00Z"
-    }))
-    .unwrap()
-}
-
-fn response_metadata() -> HashMap<String, String> {
-    HashMap::from([("device_id".to_string(), "dvc_1".to_string())])
-}
-
-/// A `POST /uploads` response for upload `upl_1` (destination
-/// `my-bucket`/`logs/a.log`, s3 credentials) in the given `status`.
-fn response_with_status(status: UploadStatus) -> UploadWithCredentials {
-    UploadWithCredentials {
-        upload: Box::new(Upload {
-            id: "upl_1".to_string(),
-            status,
-            destination: Box::new(destination()),
-            ..Default::default()
-        }),
-        credentials: Box::new(s3_credentials()),
-        metadata: response_metadata(),
-    }
-}
-
-fn pending_response() -> UploadWithCredentials {
-    response_with_status(UploadStatus::UPLOAD_STATUS_PENDING)
-}
-
 fn uploaded_response() -> UploadWithCredentials {
     response_with_status(UploadStatus::UPLOAD_STATUS_UPLOADED)
-}
-
-fn token_manager() -> Arc<MockTokenManager> {
-    Arc::new(MockTokenManager::new(Token {
-        token: "test-token".to_string(),
-        expires_at: Utc::now() + chrono::Duration::hours(1),
-    }))
 }
 
 fn non_network_http_err() -> HTTPErr {
@@ -329,60 +255,6 @@ async fn confirm_4xx_failure_is_terminal() {
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
     assert!(err.is_terminal());
-}
-
-/// The path-style PutObject URI the S3 SDK emits for [`destination`]'s bucket
-/// and key with the vended `us-east-1` region (see `tests/upload/transfer.rs`).
-const S3_PUT_URI: &str = "https://s3.us-east-1.amazonaws.com/my-bucket/logs/a.log?x-id=PutObject";
-
-#[tokio::test]
-async fn end_to_end_with_sdk_transfer_over_replayed_s3() {
-    // Same composition as production — LiveExecutor over the real
-    // SdkTransfer — with the S3 exchange replayed offline.
-    let replay = StaticReplayClient::new(vec![ReplayEvent::new(
-        http::Request::builder()
-            .method("PUT")
-            .uri(S3_PUT_URI)
-            .body(SdkBody::empty())
-            .unwrap(),
-        http::Response::builder()
-            .status(200)
-            .header("content-length", "0")
-            .body(SdkBody::empty())
-            .unwrap(),
-    )]);
-    let client = Arc::new(MockClient::default());
-    client.set_create_upload(|| Ok(pending_response()));
-    let src = files::temp("upload-executor-test").unwrap();
-    files::write_bytes(
-        src.file(),
-        b"hello world",
-        WriteOptions::OVERWRITE_NONATOMIC,
-    )
-    .await
-    .unwrap();
-    let mut job = make_job("a.log");
-    job.file = src.file().clone();
-    let executor = LiveExecutor::new(
-        client.clone(),
-        token_manager(),
-        SdkTransfer::with_s3_http_client(replay.clone()),
-    );
-
-    executor.upload(&job).await.unwrap();
-
-    // The replay client saw exactly one PUT at the expected URI — the create
-    // response's credentials and destination drove the production transfer —
-    // stamped with the create response's metadata map.
-    let requests = replay.actual_requests().collect::<Vec<_>>();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].method(), "PUT");
-    assert_eq!(requests[0].uri().to_string(), S3_PUT_URI);
-    assert_eq!(
-        requests[0].headers().get("x-amz-meta-device_id"),
-        Some("dvc_1")
-    );
-    assert_eq!(client.call_count(Call::ConfirmUpload), 1);
 }
 
 // ================================ create_request ================================= //

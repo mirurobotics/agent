@@ -82,8 +82,8 @@ production today (`main.rs` always uses `Default`), so changing the two
 Repo conventions that apply: import ordering (standard/internal/external
 groups with comments), function length ≤ 50 body lines, new module chores
 (`agent/src/<mod>/mod.rs` + `pub mod` in `agent/src/lib.rs` + mirror in
-`agent/tests/mod.rs` + `.covgate`), `./scripts/test.sh` (requires
-`--features test`), `./scripts/lint.sh`.
+`agent/tests/mod.rs` + `.covgate`), ordinary `cargo test` or
+`./scripts/test.sh`, `./scripts/lint.sh`.
 
 ## Plan of Work / Concrete Steps
 
@@ -107,7 +107,7 @@ groups with comments), function length ≤ 50 body lines, new module chores
 4. `agent/src/logs/mod.rs`: `log_dir: platform::log_dir()`.
 5. `agent/tests/platform/mod.rs`: env-override honored, fallback constant
    used, log dir nests under the base, unix constants exact.
-6. Validate: targeted `cargo test --features test` for `platform`, `disk`,
+6. Validate: targeted `cargo test` for `platform`, `disk`,
    `logs`; full `./scripts/test.sh` + `./scripts/lint.sh` as cache permits
    (CI is the authoritative gate — record any local waiver in the Decision
    Log as PR 1 did).

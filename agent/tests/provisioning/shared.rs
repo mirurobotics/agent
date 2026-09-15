@@ -1,9 +1,10 @@
 // internal crates
 use crate::mocks::http_client::MockClient;
+use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};
-use miru_agent::filesys::{dirs, files, PathExt};
+use miru_agent::filesys::{files, PathExt};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
 
@@ -42,7 +43,7 @@ pub(super) fn new_device(id: &str, name: &str) -> Device {
 pub(super) struct Env {
     /// Held only for RAII: the `TempDir` guard deletes the temp directory when
     /// the `Env` is dropped (or `cleanup` is called).
-    _root: dirs::TempDir,
+    _root: test_dirs::TempDir,
     pub layout: Layout,
     pub settings: Settings,
     pub token: String,
@@ -50,7 +51,7 @@ pub(super) struct Env {
 
 impl Env {
     pub async fn new(prefix: &str) -> Self {
-        let root = dirs::temp(prefix).unwrap();
+        let root = test_dirs::temp(prefix).unwrap();
         let layout = Layout::new(root.to_dir());
         Self {
             _root: root,

@@ -108,9 +108,9 @@ topics, S3/GCS object keys — `/` is the correct separator; untouched.
 - 2026-09-11 (authoring): "Some absolute path" fixtures use
   `std::env::temp_dir()` rather than a cfg-based literal helper — absolute on
   every platform, no cfg surface in tests, and consistent with the repo's
-  existing `filesys::dirs::temp` fixture idiom.
+  existing `test_utils::filesys::dirs::temp` fixture idiom.
 - 2026-09-11 (review): superseded — per Ben's preference, all fixtures use
-  the repo's `filesys::dirs::temp()` RAII helper uniformly (one greppable
+  the repo's `test_utils::filesys::dirs::temp()` RAII helper uniformly (one greppable
   idiom), including path-only fixtures, at the cost of a real mkdir/rmdir
   per fixture. `tests/app/state.rs` binds the guard for the log dir; the
   global tracing worker writing to an unlinked dir after test end is
@@ -132,8 +132,8 @@ Windows requires a drive/UNC prefix — `/etc/foo.json` is relative there.
 `deploy::filesys::validate_filepath` (absolute + no `..`) is exercised by
 unit tests in `agent/src/deploy/filesys.rs` and integration tests in
 `agent/tests/deploy/filesys.rs`. `disk::Layout::root()` is per-OS since
-#232. Repo conventions: import ordering, `./scripts/test.sh`
-(`--features test` required), `./scripts/lint.sh`, funclen ≤ 50.
+#232. Repo conventions: import ordering, ordinary `cargo test` or
+`./scripts/test.sh`, `./scripts/lint.sh`, funclen ≤ 50.
 
 ## Plan of Work / Concrete Steps
 

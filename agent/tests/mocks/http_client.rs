@@ -183,13 +183,6 @@ impl MockClient {
         *self.create_upload_fn.lock().unwrap() = Box::new(f);
     }
 
-    pub fn set_vend_upload_credentials<F>(&self, f: F)
-    where
-        F: Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync + 'static,
-    {
-        *self.vend_upload_credentials_fn.lock().unwrap() = Box::new(f);
-    }
-
     pub fn set_confirm_upload<F>(&self, f: F)
     where
         F: Fn() -> Result<Upload, HTTPErr> + Send + Sync + 'static,
@@ -216,16 +209,6 @@ impl MockClient {
 
     pub fn requests(&self) -> Vec<CapturedRequest> {
         self.requests.lock().unwrap().clone()
-    }
-
-    pub fn paths_for(&self, target: Call) -> Vec<String> {
-        self.requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.call == target)
-            .map(|r| r.path.clone())
-            .collect()
     }
 
     fn match_route(method: &reqwest::Method, path: &str) -> Call {

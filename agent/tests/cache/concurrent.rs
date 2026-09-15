@@ -294,7 +294,7 @@ pub mod shutdown {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -315,7 +315,7 @@ pub mod size {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -370,7 +370,7 @@ pub mod entry_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -416,7 +416,7 @@ pub mod value_map {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -456,7 +456,7 @@ pub mod entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -499,7 +499,7 @@ pub mod values {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -540,7 +540,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -560,7 +560,7 @@ pub mod read_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -612,7 +612,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -634,7 +634,7 @@ pub mod read_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -682,7 +682,7 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -700,7 +700,7 @@ pub mod read_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -735,7 +735,7 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -754,7 +754,7 @@ pub mod read {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -791,7 +791,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -825,7 +825,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -859,7 +859,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -889,7 +889,7 @@ pub mod write {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -929,7 +929,7 @@ pub mod write {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -969,7 +969,7 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -994,7 +994,7 @@ pub mod write_if_absent {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1032,7 +1032,7 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1049,7 +1049,7 @@ pub mod delete {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1079,7 +1079,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1095,7 +1095,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1130,7 +1130,7 @@ pub mod prune {
         F: Fn(usize) -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1175,7 +1175,7 @@ pub mod find_entries_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1231,7 +1231,7 @@ pub mod find_where {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1280,7 +1280,7 @@ pub mod find_one_entry_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1336,7 +1336,7 @@ pub mod find_one_optional {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1394,7 +1394,7 @@ pub mod find_one_entry {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1449,7 +1449,7 @@ pub mod find_one {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),
@@ -1506,7 +1506,7 @@ pub mod get_dirty_entries {
         F: Fn() -> Fut + Clone,
         Fut: Future<
             Output = (
-                miru_agent::filesys::dirs::TempDir,
+                crate::test_utils::filesys::dirs::TempDir,
                 ConcurrentCache<SingleThreadCacheT, String, String>,
                 JoinHandle<()>,
             ),

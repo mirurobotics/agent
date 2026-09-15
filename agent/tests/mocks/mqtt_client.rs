@@ -29,9 +29,7 @@ pub enum MockCall {
         topic: String,
         qos: QoS,
     },
-    Unsubscribe {
-        topic: String,
-    },
+    Unsubscribe,
     Disconnect,
 }
 
@@ -106,10 +104,8 @@ impl ClientI for MockClient {
         (self.subscribe_fn)().map_err(|err| *err)
     }
 
-    async fn unsubscribe(&self, topic: &str) -> Result<(), MQTTError> {
-        self.calls.lock().unwrap().push(MockCall::Unsubscribe {
-            topic: topic.to_string(),
-        });
+    async fn unsubscribe(&self, _topic: &str) -> Result<(), MQTTError> {
+        self.calls.lock().unwrap().push(MockCall::Unsubscribe);
         (self.unsubscribe_fn)().map_err(|err| *err)
     }
 

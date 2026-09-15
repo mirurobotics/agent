@@ -2,12 +2,13 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::disk::{
     self, CfgInstContent, CfgInsts, Deployments, FileRules, GitCommits, Releases,
 };
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{dirs, Overwrite, PathExt};
+use miru_agent::filesys::{Overwrite, PathExt};
 use miru_agent::http::errors::*;
 use miru_agent::models::{self, DplActivity, DplErrStatus, DplTarget};
 use miru_agent::sync::deployments::{sync, SyncArgs};
@@ -37,12 +38,12 @@ struct Fixture {
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
     event_hub: EventHub,
-    dir: dirs::TempDir,
+    dir: test_dirs::TempDir,
 }
 
 impl Fixture {
     async fn new(name: &str) -> Self {
-        let dir = dirs::temp(name).unwrap();
+        let dir = test_dirs::temp(name).unwrap();
         let (deployment_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
             .await
             .unwrap();
@@ -409,7 +410,7 @@ mod pull_success {
         assert_eq!(content, "shared content");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn pull_deployments_retries_on_network_error() {
         let f = Fixture::new("sync_retry_pull").await;
         let call_count = AtomicUsize::new(0);
@@ -451,7 +452,7 @@ mod pull_success {
         assert_deployment_not_stored(&f.deployment_stor, "dpl_1").await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn pull_deployments_exhausts_retries() {
         let f = Fixture::new("sync_retry_exhaust").await;
         f.http_client.set_list_all_deployments(|| {
@@ -1127,7 +1128,7 @@ mod push_failure {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn retries_on_network_error() {
         let f = Fixture::new("push_retry_network").await;
         let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
@@ -1174,7 +1175,7 @@ mod push_failure {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn exhausts_retries() {
         let f = Fixture::new("push_retry_exhaust").await;
         let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));

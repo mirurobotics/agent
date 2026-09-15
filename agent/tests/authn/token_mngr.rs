@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 // internal crates
 use crate::mocks::http_client::MockClient;
+use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::TokenResponse;
 use miru_agent::authn::{token_mngr::TokenFile, AuthnErr, Token, TokenManager, TokenManagerExt};
 use miru_agent::crypt::rsa;
-use miru_agent::filesys::{dirs, files, Overwrite, WriteOptions};
+use miru_agent::filesys::{files, Overwrite, WriteOptions};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::{self, HTTPErr};
 
@@ -15,8 +16,8 @@ use chrono::{Duration, Utc};
 use tokio::task::JoinHandle;
 
 /// Setup a TokenManager with a dummy private key (for tests that don't reach RSA signing).
-async fn setup(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHandle<()>) {
-    let dir = dirs::temp("testing").unwrap();
+async fn setup(mock_client: MockClient) -> (test_dirs::TempDir, TokenManager, JoinHandle<()>) {
+    let dir = test_dirs::temp("testing").unwrap();
     let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
         .await
         .unwrap();
@@ -40,8 +41,10 @@ async fn setup(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHan
 }
 
 /// Setup a TokenManager with a real RSA key pair (for tests that exercise token refresh/signing).
-async fn setup_with_rsa(mock_client: MockClient) -> (dirs::TempDir, TokenManager, JoinHandle<()>) {
-    let dir = dirs::temp("testing").unwrap();
+async fn setup_with_rsa(
+    mock_client: MockClient,
+) -> (test_dirs::TempDir, TokenManager, JoinHandle<()>) {
+    let dir = test_dirs::temp("testing").unwrap();
     let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
         .await
         .unwrap();
@@ -71,7 +74,7 @@ pub mod spawn {
 
     #[tokio::test]
     async fn token_file_does_not_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
             .await
             .unwrap();
@@ -99,7 +102,7 @@ pub mod spawn {
 
     #[tokio::test]
     async fn private_key_file_does_not_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
             .await
             .unwrap();
@@ -122,7 +125,7 @@ pub mod spawn {
 
     #[tokio::test]
     async fn public_key_file_does_not_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let token_file = TokenFile::new_with_default(dir.file("token.json"), Token::default())
             .await
             .unwrap();

@@ -4,27 +4,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-// internal crates
-use miru_agent::errors::Error;
-
-#[derive(Debug, thiserror::Error)]
-#[error("MockMiruError")]
-pub struct MockMiruError {
-    network_err: bool,
-}
-
-impl MockMiruError {
-    pub fn new(network_err: bool) -> Self {
-        Self { network_err }
-    }
-}
-
-impl Error for MockMiruError {
-    fn is_network_conn_err(&self) -> bool {
-        self.network_err
-    }
-}
-
 // ================================== SLEEP ===================================== //
 pub struct SleepController {
     target: Arc<AtomicBool>,
@@ -93,14 +72,6 @@ impl SleepController {
                 completed_sleeps.lock().unwrap().push(wait);
             })
         }
-    }
-
-    pub fn get_attempted_sleeps(&self) -> Vec<Duration> {
-        self.attempted_sleeps.lock().unwrap().clone()
-    }
-
-    pub fn get_completed_sleeps(&self) -> Vec<Duration> {
-        self.completed_sleeps.lock().unwrap().clone()
     }
 
     pub fn get_last_attempted_sleep(&self) -> Option<Duration> {

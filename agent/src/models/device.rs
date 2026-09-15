@@ -214,13 +214,18 @@ mod tests {
 
         let device: Device = (&api_device).into();
 
-        assert_eq!(device.id, "dev-123");
-        assert_eq!(device.name, "my-robot");
-        assert_eq!(device.session_id, "sess-456");
-        assert!(device.activated);
-        assert_eq!(device.status, DeviceStatus::Online);
-        assert_eq!(device.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-        assert_eq!(device.last_connected_at, DateTime::<Utc>::UNIX_EPOCH);
-        assert_eq!(device.last_disconnected_at, DateTime::<Utc>::UNIX_EPOCH);
+        assert_eq!(
+            device,
+            Device {
+                id: "dev-123".to_string(),
+                name: "my-robot".to_string(),
+                session_id: "sess-456".to_string(),
+                activated: true,
+                status: DeviceStatus::Online,
+                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
+                last_connected_at: DateTime::<Utc>::UNIX_EPOCH,
+                last_disconnected_at: DateTime::<Utc>::UNIX_EPOCH,
+            }
+        );
     }
 }

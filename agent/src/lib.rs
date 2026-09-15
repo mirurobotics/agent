@@ -27,3 +27,14 @@ pub mod sync;
 pub mod telemetry;
 pub mod version;
 pub mod workers;
+
+// Fixture sources under `agent/tests/test_utils/` name the library as
+// `miru_agent`, so this self-alias lets the same files be mounted here for
+// inline unit tests. The mount stays `pub` (not `pub(crate)`) so fixtures used
+// only by the integration crate do not raise dead-code warnings in the unit build.
+#[cfg(test)]
+extern crate self as miru_agent;
+
+#[cfg(test)]
+#[path = "../tests/test_utils/unit.rs"]
+pub mod test_utils;

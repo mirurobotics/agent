@@ -45,13 +45,18 @@ cargo build -p miru-agent --release  # release
 ## Testing
 
 ```bash
+cargo test
+cargo test --package miru-agent
 ./scripts/test.sh
 ```
 
-This runs `RUST_LOG=off cargo test --features test -- --test-threads=1`. Both flags are required:
+Ordinary Cargo tests require no custom features or logging environment. The
+wrapper runs `RUST_LOG=off cargo test --package miru-agent` to suppress log output.
 
-- `--features test` enables `#[cfg(feature = "test")]` gated test helpers and mock implementations.
-- `--test-threads=1` prevents conflicts on the shared `/tmp/miru.sock` Unix socket.
+The main suite in `agent/tests/mod.rs` is an external integration target that
+exercises the ordinary library's public APIs; cases needing private access live
+in inline `#[cfg(test)]` modules under `agent/src/`. See `AGENTS.md` § Testing
+for target layout, fixture rules, and `#[serial]` conventions.
 
 ### Coverage gates
 

@@ -9,7 +9,6 @@
 //      must fail with `LogsErr::SetGlobalDefault`.
 
 // internal crates
-use miru_agent::filesys::{dirs, PathExt};
 use miru_agent::logs::{self, LogLevel, LogsErr, Options};
 
 // external crates
@@ -27,11 +26,14 @@ async fn test_init_installs_globally_and_rejects_double_install() {
         std::env::remove_var("RUST_LOG");
     }
 
-    let dir = dirs::temp("miru_test_logs_smoke").unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("miru_test_logs_smoke")
+        .tempdir()
+        .unwrap();
 
     let options = Options {
         stdout: false,
-        log_dir: dir.path().clone(),
+        log_dir: dir.path().to_path_buf(),
         ..Default::default()
     };
     let guard = logs::init(options).expect("first init should succeed");
@@ -50,7 +52,7 @@ async fn test_init_installs_globally_and_rejects_double_install() {
 
     let options_second = Options {
         stdout: false,
-        log_dir: dir.path().clone(),
+        log_dir: dir.path().to_path_buf(),
         ..Default::default()
     };
     match logs::init(options_second) {

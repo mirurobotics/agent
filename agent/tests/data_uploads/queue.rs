@@ -15,6 +15,7 @@
 //! and the macro.
 
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::data_uploads::queue::{
     Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
@@ -69,8 +70,8 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
         .collect()
 }
 
-fn temp_path(name: &str) -> (dirs::TempDir, File) {
-    let dir = dirs::temp(name).unwrap();
+fn temp_path(name: &str) -> (test_dirs::TempDir, File) {
+    let dir = test_dirs::temp(name).unwrap();
     let path = dir.file("queue.json");
     (dir, path)
 }

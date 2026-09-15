@@ -11,7 +11,6 @@ type ResultFn = Box<dyn Fn() -> Result<(), DeleteErr> + Send + Sync>;
 
 /// One scripted result for a `MockDeleter::enqueue` call.
 pub enum MockStep {
-    Ok,
     Err,
 }
 
@@ -65,7 +64,7 @@ impl DeleterExt for MockDeleter {
         self.calls.lock().unwrap().push(job);
         let step = self.script.lock().unwrap().pop_front();
         match step {
-            None | Some(MockStep::Ok) => Ok(()),
+            None => Ok(()),
             Some(MockStep::Err) => Err(QueueFullErr::new("delete", 0, file).into()),
         }
     }

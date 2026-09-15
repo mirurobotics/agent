@@ -6,9 +6,6 @@ rust-version = { workspace = true }
 include = ["src/**/*"]
 build = "build.rs"
 
-[features]
-test = []
-
 [lints.clippy]
 new_without_default = "allow"
 

@@ -4,8 +4,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{
-    self, dirs, files, Atomic, CopyOptions, FileSysErr, Overwrite, PathExt, WriteOptions,
+    self, files, Atomic, CopyOptions, FileSysErr, Overwrite, PathExt, WriteOptions,
 };
 
 // external crates
@@ -19,7 +20,7 @@ pub mod assert_exists {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::default())
             .await
@@ -48,7 +49,7 @@ pub mod assert_doesnt_exist {
 
     #[tokio::test]
     async fn failure() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::default())
             .await
@@ -65,7 +66,7 @@ pub mod delete {
 
     #[tokio::test]
     async fn exists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::default())
             .await
@@ -88,7 +89,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn copies_bytes_to_new_destination() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "hello world", WriteOptions::default())
             .await
@@ -107,7 +108,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn same_path_existing_file_succeeds() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "content", WriteOptions::default())
             .await
@@ -122,7 +123,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn same_path_missing_file_returns_path_does_not_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent");
 
         assert!(matches!(
@@ -135,7 +136,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn overwrite_deny_with_existing_dest_returns_invalid_overwrite() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "src", WriteOptions::default())
             .await
@@ -157,7 +158,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn overwrite_allow_with_existing_dest_overwrites() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "new", WriteOptions::default())
             .await
@@ -176,7 +177,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn source_missing_returns_path_does_not_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("nonexistent-src");
         let dest = dir.file("dest");
 
@@ -190,7 +191,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn creates_parent_dirs_for_destination() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "nested", WriteOptions::default())
             .await
@@ -208,7 +209,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn copy_with_sync_yes() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "synced", WriteOptions::default())
             .await
@@ -225,7 +226,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn copy_with_sync_no() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "unsynced", WriteOptions::default())
             .await
@@ -242,7 +243,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn overwrite_allow_with_sync_no() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "new", WriteOptions::default())
             .await
@@ -260,7 +261,7 @@ pub mod copy_to {
 
     #[tokio::test]
     async fn overwrite_deny_with_sync_yes_rejects_existing() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "src", WriteOptions::default())
             .await
@@ -287,7 +288,7 @@ pub mod move_to {
 
     #[tokio::test]
     async fn src_doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
         // overwrite false
@@ -309,7 +310,7 @@ pub mod move_to {
 
     #[tokio::test]
     async fn dest_doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "test", WriteOptions::default())
             .await
@@ -336,7 +337,7 @@ pub mod move_to {
 
     #[tokio::test]
     async fn dest_exists_overwrite_false() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "src", WriteOptions::default())
             .await
@@ -359,7 +360,7 @@ pub mod move_to {
 
     #[tokio::test]
     async fn dest_exists_overwrite_true() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "src", WriteOptions::default())
             .await
@@ -379,7 +380,7 @@ pub mod move_to {
 
     #[tokio::test]
     async fn src_and_dest_are_same_file() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::default())
             .await
@@ -408,7 +409,7 @@ pub mod read_bytes {
 
     #[tokio::test]
     async fn read_success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "arglebargle", WriteOptions::default())
             .await
@@ -422,7 +423,7 @@ pub mod hash {
 
     #[tokio::test]
     async fn empty_file() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("empty");
         files::write_string(&file, "", WriteOptions::default())
             .await
@@ -435,7 +436,7 @@ pub mod hash {
 
     #[tokio::test]
     async fn known_vector_hello() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("hello");
         files::write_string(&file, "hello", WriteOptions::default())
             .await
@@ -449,7 +450,7 @@ pub mod hash {
     #[tokio::test]
     async fn large_file_multi_read_is_deterministic() {
         // Larger than the 8 KiB streaming buffer, so hashing spans multiple reads.
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("large");
         let contents = "a".repeat(20 * 1024);
         files::write_string(&file, &contents, WriteOptions::default())
@@ -464,7 +465,7 @@ pub mod hash {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
         assert!(matches!(
             files::hash(&file).await.unwrap_err(),
@@ -487,7 +488,7 @@ pub mod read_secret_bytes {
 
     #[tokio::test]
     async fn read_success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "arglebargle", WriteOptions::default())
             .await
@@ -516,7 +517,7 @@ pub mod read_string {
 
     #[tokio::test]
     async fn read_success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "arglebargle", WriteOptions::default())
             .await
@@ -526,7 +527,7 @@ pub mod read_string {
 
     #[tokio::test]
     async fn read_invalid_utf8() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         // Write invalid UTF-8 bytes directly
         files::append_bytes(
@@ -557,7 +558,7 @@ pub mod read_json {
 
     #[tokio::test]
     async fn read_success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(
             &file,
@@ -574,7 +575,7 @@ pub mod read_json {
 
     #[tokio::test]
     async fn read_invalid_json() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file.json");
         files::write_string(&file, "not valid json {{{", WriteOptions::default())
             .await
@@ -637,7 +638,7 @@ pub mod write_bytes {
     async fn doesnt_exist() {
         let write_funcs = &[write_bytes_atomic, write_bytes_non_atomic];
         for write_bytes in write_funcs {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
@@ -649,7 +650,7 @@ pub mod write_bytes {
     #[tokio::test]
     async fn parent_doesnt_exist() {
         for write_bytes in [write_bytes_atomic, write_bytes_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let subdir = dir.subdir(PathBuf::from("nested").join("subdir"));
             let file = subdir.file("test-file");
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
@@ -662,7 +663,7 @@ pub mod write_bytes {
     #[tokio::test]
     async fn exists_overwrite_false() {
         for write_bytes in [write_bytes_atomic, write_bytes_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
@@ -682,7 +683,7 @@ pub mod write_bytes {
     #[tokio::test]
     async fn exists_overwrite_true() {
         for write_bytes in [write_bytes_atomic, write_bytes_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             write_bytes(&file, b"arglebargle", Overwrite::Deny)
                 .await
@@ -699,7 +700,7 @@ pub mod write_bytes {
 
     #[tokio::test]
     async fn honors_mode_atomic() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_bytes(
             &file,
@@ -718,7 +719,7 @@ pub mod write_bytes {
 
     #[tokio::test]
     async fn honors_mode_non_atomic() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_bytes(
             &file,
@@ -784,7 +785,7 @@ pub mod write_string {
     #[tokio::test]
     async fn doesnt_exist() {
         for write_string in [write_string_atomic, write_string_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
@@ -796,7 +797,7 @@ pub mod write_string {
     #[tokio::test]
     async fn parent_doesnt_exist() {
         for write_string in [write_string_atomic, write_string_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let subdir = dir.subdir(PathBuf::from("nested").join("subdir"));
             let file = subdir.file("test-file");
             write_string(&file, "hello world", Overwrite::Deny)
@@ -809,7 +810,7 @@ pub mod write_string {
     #[tokio::test]
     async fn exists_overwrite_false() {
         for write_string in [write_string_atomic, write_string_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
@@ -829,7 +830,7 @@ pub mod write_string {
     #[tokio::test]
     async fn exists_overwrite_true() {
         for write_string in [write_string_atomic, write_string_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             write_string(&file, "hello world", Overwrite::Deny)
                 .await
@@ -893,7 +894,7 @@ mod write_json {
     #[tokio::test]
     async fn doesnt_exist() {
         for write_json in [write_json_atomic, write_json_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             let data = json!({
                 "name": "test",
@@ -908,7 +909,7 @@ mod write_json {
     #[tokio::test]
     async fn parent_doesnt_exist() {
         for write_json in [write_json_atomic, write_json_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let subdir = dir.subdir(PathBuf::from("nested").join("subdir"));
             let file = subdir.file("test-file");
             let data = json!({
@@ -924,7 +925,7 @@ mod write_json {
     #[tokio::test]
     async fn exists_overwrite_false() {
         for write_json in [write_json_atomic, write_json_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             let data = json!({
             "name": "test",
@@ -951,7 +952,7 @@ mod write_json {
     #[tokio::test]
     async fn exists_overwrite_true() {
         for write_json in [write_json_atomic, write_json_non_atomic] {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let file = dir.file("test-file");
             let data = json!({
             "name": "test",
@@ -980,7 +981,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn creates_file_when_doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::append_bytes(&file, b"hello", filesys::AppendOptions::default())
             .await
@@ -990,7 +991,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn creates_parent_dirs() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let subdir = dir.subdir(PathBuf::from("nested").join("subdir"));
         let file = subdir.file("test-file");
         files::append_bytes(&file, b"hello", filesys::AppendOptions::default())
@@ -1001,7 +1002,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn appends_to_existing_content() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::append_bytes(&file, b"hello ", filesys::AppendOptions::default())
             .await
@@ -1014,7 +1015,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn appends_multiple_lines() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::append_bytes(&file, b"line1\n", filesys::AppendOptions::default())
             .await
@@ -1032,7 +1033,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn sync_option_writes_and_persists() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::append_bytes(&file, b"first\n", filesys::AppendOptions::SYNC)
             .await
@@ -1045,7 +1046,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn empty_buffer_creates_file() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::append_bytes(&file, b"", filesys::AppendOptions::default())
             .await
@@ -1056,7 +1057,7 @@ pub mod append_bytes {
 
     #[tokio::test]
     async fn empty_buffer_preserves_existing_content() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::append_bytes(&file, b"existing", filesys::AppendOptions::default())
             .await
@@ -1073,7 +1074,7 @@ pub mod set_permissions {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
         let permissions = std::fs::Permissions::from_mode(0o644);
 
@@ -1089,7 +1090,7 @@ pub mod set_permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn basic_permissions() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
         // Create the file first
@@ -1119,7 +1120,7 @@ pub mod set_permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn all_permission_combinations() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test content", WriteOptions::default())
             .await
@@ -1153,7 +1154,7 @@ pub mod glob {
 
     #[test]
     fn matches_regular_file() {
-        let tmp = dirs::temp("testing").unwrap();
+        let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");
         fs::write(&path, b"hello world").unwrap();
 
@@ -1166,7 +1167,7 @@ pub mod glob {
 
     #[test]
     fn non_matching_file_absent() {
-        let tmp = dirs::temp("testing").unwrap();
+        let tmp = test_dirs::temp("testing").unwrap();
         fs::write(tmp.path().join("data.log"), b"nope").unwrap();
 
         let pattern = tmp.path().join("*.txt");
@@ -1177,7 +1178,7 @@ pub mod glob {
 
     #[test]
     fn directory_matched_by_pattern_skipped() {
-        let tmp = dirs::temp("testing").unwrap();
+        let tmp = test_dirs::temp("testing").unwrap();
         fs::create_dir(tmp.path().join("subdir")).unwrap();
         let file_path = tmp.path().join("file");
         fs::write(&file_path, b"x").unwrap();
@@ -1203,7 +1204,7 @@ pub mod metadata {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
 
         assert!(matches!(
@@ -1214,7 +1215,7 @@ pub mod metadata {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         let contents = "hello";
         files::write_string(&file, contents, WriteOptions::default())
@@ -1233,7 +1234,7 @@ pub mod metadata {
     #[cfg(unix)]
     #[tokio::test]
     async fn reflects_set_permissions() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::default())
             .await
@@ -1252,7 +1253,7 @@ pub mod permissions {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
 
         // Should fail because file doesn't exist
@@ -1265,7 +1266,7 @@ pub mod permissions {
     #[cfg(unix)]
     #[tokio::test]
     async fn basic_permissions() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
         // Create the file first
@@ -1298,7 +1299,7 @@ pub mod last_modified {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
 
         // Should fail because file doesn't exist
@@ -1310,7 +1311,7 @@ pub mod last_modified {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::default())
             .await
@@ -1325,7 +1326,7 @@ pub mod size {
 
     #[tokio::test]
     async fn doesnt_exist() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
 
         // Should fail because file doesn't exist
@@ -1337,7 +1338,7 @@ pub mod size {
 
     #[tokio::test]
     async fn success() {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
         files::write_string(&file, "test", WriteOptions::ATOMIC)
             .await

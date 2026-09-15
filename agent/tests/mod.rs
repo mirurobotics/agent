@@ -11,7 +11,6 @@ pub mod disk;
 pub mod errors;
 pub mod events;
 pub mod filesys;
-pub mod gcs;
 pub mod http;
 pub mod logs;
 pub mod mocks;
@@ -22,7 +21,6 @@ pub mod platform;
 #[cfg(unix)]
 pub mod privilege;
 pub mod provisioning;
-pub mod s3;
 pub mod server;
 pub mod services;
 pub mod sync;

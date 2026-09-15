@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
 use miru_agent::data_uploads::retention::DeleterExt;
@@ -31,13 +32,13 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 type ShutdownHandle = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 struct TestEnv {
-    _dir: dirs::TempDir,
+    _dir: test_dirs::TempDir,
     layout: Layout,
 }
 
 impl TestEnv {
     fn new() -> Self {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         Self { _dir: dir, layout }
     }
@@ -223,7 +224,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // the scanner actor is spawned and its snapshot file is seeded on disk
-        state.scanner.get_rules().await.unwrap();
+        state.scanner.scan().await.unwrap();
         assert!(env.layout.scanner_snapshot().exists());
 
         // clean up the spawned actors so they don't leak
@@ -243,7 +244,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the scanner runs without persistence
-        state.scanner.get_rules().await.unwrap();
+        state.scanner.scan().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -315,7 +316,7 @@ pub mod shutdown {
 
     #[tokio::test]
     async fn success_device_online() {
-        let log_tmp = dirs::temp("miru-logs").unwrap();
+        let log_tmp = test_dirs::temp("miru-logs").unwrap();
         let _ = logs::init(logs::Options {
             stdout: true,
             log_level: logs::LogLevel::Info,

@@ -3,7 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::{error::SleepController, token_manager::MockTokenManager};
+use crate::mocks::{
+    error::SleepController,
+    token_manager::{MockTokenManager, TokenManagerCall},
+};
 use miru_agent::authn::errors::MockError;
 use miru_agent::authn::{AuthnErr, Token};
 use miru_agent::cooldown;
@@ -77,6 +80,11 @@ pub mod run_refresh_token_worker {
             assert_eq!(
                 token_mngr.num_refresh_token_calls(),
                 expected_refresh_token_calls
+            );
+            assert_eq!(
+                token_mngr.get_calls(),
+                [TokenManagerCall::RefreshToken, TokenManagerCall::GetToken]
+                    .repeat(expected_get_token_calls)
             );
             sleep_ctrl.release().await;
         }

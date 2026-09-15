@@ -1,4 +1,5 @@
 // internal crates
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
@@ -15,12 +16,12 @@ struct Fixture {
     deployments: disk::Deployments,
     cfg_insts: disk::CfgInsts,
     cfg_inst_content: disk::CfgInstContent,
-    temp_dir: dirs::TempDir,
+    temp_dir: test_dirs::TempDir,
 }
 
 impl Fixture {
     async fn new() -> Self {
-        let temp_dir = dirs::temp("apply-test").unwrap();
+        let temp_dir = test_dirs::temp("apply-test").unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
         let (deployments, _) =

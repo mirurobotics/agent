@@ -119,7 +119,7 @@ impl SingleThreadScanner {
         }
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     async fn get_rules(&self) -> Result<Vec<FileRule>, ScanErr> {
         let rules = self
             .scanners
@@ -129,7 +129,7 @@ impl SingleThreadScanner {
         Ok(rules)
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
         let count = self
             .scanners
@@ -275,11 +275,11 @@ pub enum Command {
     Shutdown {
         respond_to: oneshot::Sender<Result<(), ScanErr>>,
     },
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     GetRules {
         respond_to: oneshot::Sender<Result<Vec<FileRule>, ScanErr>>,
     },
-    #[cfg(feature = "test")]
+    #[cfg(test)]
     GetLedgerCount {
         respond_to: oneshot::Sender<Result<usize, ScanErr>>,
     },
@@ -330,7 +330,7 @@ impl Worker {
                         "Actor failed to send scan response"
                     );
                 }
-                #[cfg(feature = "test")]
+                #[cfg(test)]
                 Command::GetRules { respond_to } => {
                     dispatch!(
                         self.scanner.get_rules().await,
@@ -338,7 +338,7 @@ impl Worker {
                         "Actor failed to send get rules response"
                     );
                 }
-                #[cfg(feature = "test")]
+                #[cfg(test)]
                 Command::GetLedgerCount { respond_to } => {
                     dispatch!(
                         self.scanner.get_ledger_count().await,
@@ -395,14 +395,14 @@ impl Scanner {
         })
     }
 
-    #[cfg(feature = "test")]
-    pub async fn get_rules(&self) -> Result<Vec<FileRule>, ScanErr> {
+    #[cfg(test)]
+    pub(crate) async fn get_rules(&self) -> Result<Vec<FileRule>, ScanErr> {
         self.send_command(|tx| Command::GetRules { respond_to: tx })
             .await?
     }
 
-    #[cfg(feature = "test")]
-    pub async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
+    #[cfg(test)]
+    pub(crate) async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
         self.send_command(|tx| Command::GetLedgerCount { respond_to: tx })
             .await?
     }
@@ -456,6 +456,8 @@ mod tests {
     use crate::data_uploads::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use crate::test_utils::filesys::files as test_files;
 
     // external crates
     use chrono::{DateTime, Utc};
@@ -631,8 +633,8 @@ mod tests {
     /// temp dir + `*.mcap` glob + spawned scanner + one deployed upload-bearing rule
     /// keyed [`DEFAULT_RULE_ID`] (deployment "d", window `window`). Returns (dir,
     /// clock, scanner). Hold `dir` to keep the temp tree alive.
-    async fn single_rule(window: i64) -> (dirs::TempDir, Clock, Scanner) {
-        let dir = dirs::temp("testing").unwrap();
+    async fn single_rule(window: i64) -> (test_dirs::TempDir, Clock, Scanner) {
+        let dir = test_dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
         let scanner = spawn_scanner(&clock);
@@ -641,8 +643,10 @@ mod tests {
     }
 
     /// [`single_rule`], but with a recording sink attached at spawn.
-    async fn single_rule_with_sink(window: i64) -> (dirs::TempDir, Clock, Scanner, RecordingSink) {
-        let dir = dirs::temp("testing").unwrap();
+    async fn single_rule_with_sink(
+        window: i64,
+    ) -> (test_dirs::TempDir, Clock, Scanner, RecordingSink) {
+        let dir = test_dirs::temp("testing").unwrap();
         let glob = format!("{}/*.mcap", dir.path().display());
         let clock = Clock::new(1000);
         let (scanner, sink) = spawn_scanner_with_sink(&clock);
@@ -751,14 +755,14 @@ mod tests {
     }
 
     struct PersistedScannerFixture {
-        dir: dirs::TempDir,
+        dir: test_dirs::TempDir,
         clock: Clock,
         scanner: Scanner,
         state_path: File,
     }
 
     async fn persisted_rule(window: i64) -> PersistedScannerFixture {
-        let dir = dirs::temp("testing").unwrap();
+        let dir = test_dirs::temp("testing").unwrap();
         let state_path = dir.file("scanner.json");
         let clock = Clock::new(1000);
         let scanner = spawn_persisted(&clock, &state_path).await;
@@ -813,9 +817,9 @@ mod tests {
 
         #[tokio::test]
         async fn corrupt_state_file_starts_fresh() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
-            files::seed(&state_path, "not json").await;
+            test_files::seed(&state_path, "not json").await;
 
             let clock = Clock::new(1000);
             let scanner = spawn_persisted(&clock, &state_path).await;
@@ -837,9 +841,9 @@ mod tests {
         /// ledger to a different rule. It must fail to parse and start fresh.
         #[tokio::test]
         async fn stale_collection_keyed_state_file_starts_fresh() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
-            files::seed(
+            test_files::seed(
                 &state_path,
                 r#"{"collections":{"coll-1":{"cfg":{"deployment":{},"rule":{}},
                    "preexisting":{},"candidates":{},"ledger":{}}},
@@ -866,7 +870,7 @@ mod tests {
 
         #[tokio::test]
         async fn existing_state_file_restores_scanner() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
             let rule_state = RuleState::new(Config {
                 deployment: deployment("d"),
@@ -899,7 +903,7 @@ mod tests {
 
         #[tokio::test]
         async fn loads_existing_snapshot() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
             let config = Config {
                 deployment: deployment("d"),
@@ -926,7 +930,7 @@ mod tests {
 
         #[tokio::test]
         async fn writes_current_snapshot() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
             let clock = Clock::new(1000);
             let config = Config {
@@ -957,7 +961,7 @@ mod tests {
 
         #[tokio::test]
         async fn write_failure_is_swallowed() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
             let rule_state = RuleState::new(Config {
                 deployment: deployment("d"),
@@ -996,7 +1000,7 @@ mod tests {
         // awaited inside scan(), so the sink is populated when the tick returns.
         #[tokio::test]
         async fn sink_receives_stable_file_payload() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
@@ -1036,7 +1040,7 @@ mod tests {
         /// sinks know not to mint an upload job.
         #[tokio::test]
         async fn retention_only_rule_scans_and_delivers_without_upload() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let clock = Clock::new(1000);
             let (scanner, sink) = spawn_scanner_with_sink(&clock);
             deploy(
@@ -1084,7 +1088,7 @@ mod tests {
         // exercises the empty-dispatch branch.
         #[tokio::test]
         async fn scan_with_no_sinks_does_not_error() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let clock = Clock::new(1000);
             let scanner = spawn_scanner_with_sinks(&clock, Vec::new());
             deploy(
@@ -1103,7 +1107,7 @@ mod tests {
         /// second production sink; the fan-out must already hold).
         #[tokio::test]
         async fn every_sink_receives_every_stable_file() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
             let clock = Clock::new(1000);
             let first = RecordingSink::new();
@@ -1296,7 +1300,7 @@ mod tests {
 
         #[tokio::test]
         async fn update_rules_persists_snapshot() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
             let clock = Clock::new(1000);
             let scanner = spawn_persisted(&clock, &state_path).await;
@@ -1316,7 +1320,7 @@ mod tests {
         // immutable per id, so the deployment is all a re-push can change.
         #[tokio::test]
         async fn update_rules_refreshes_deployment_carrying_state() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
@@ -1386,7 +1390,7 @@ mod tests {
         // drain its existing candidates, while only B discovers newly added files.
         #[tokio::test]
         async fn update_rules_keeps_legacy_scanner_until_candidates_drain() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
             let clock = Clock::new(1000);
             let (scanner, sink) = spawn_scanner_with_sink(&clock);
@@ -1527,7 +1531,7 @@ mod tests {
         // the summed ledger count is 2 (per-rule isolation).
         #[tokio::test]
         async fn distinct_rules_do_not_share_dedup() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let glob = format!("{}/*.mcap", dir.path().display());
 
             let clock = Clock::new(1000);
@@ -1567,7 +1571,7 @@ mod tests {
             .unwrap();
 
             // --- good rule: a real file, discovered as a candidate at t=1000. ---
-            let good_dir = dirs::temp("testing").unwrap();
+            let good_dir = test_dirs::temp("testing").unwrap();
             let good_glob = format!("{}/*.mcap", good_dir.path().display());
             let good_cfg = Config {
                 deployment: deployment("d"),
@@ -1676,7 +1680,7 @@ mod tests {
             })
             .unwrap();
 
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let live = write(&dir, "live.mcap", b"aaaa").await;
             let (state, stale) = padded_state(&dir, &live, 0);
             single.scanners.insert(
@@ -1703,7 +1707,7 @@ mod tests {
         // no dedicated prune-persist path anymore).
         #[tokio::test]
         async fn scan_prune_is_persisted() {
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let state_path = dir.file("scanner.json");
             let live = write(&dir, "live.mcap", b"aaaa").await;
             let (coll_state, stale) = padded_state(&dir, &live, 0);
@@ -1747,7 +1751,7 @@ mod tests {
             })
             .unwrap();
 
-            let dir = dirs::temp("testing").unwrap();
+            let dir = test_dirs::temp("testing").unwrap();
             let live = write(&dir, "live.mcap", b"aaaa").await;
             // a large stability window keeps the candidate (and therefore the
             // undeployed collection) alive across the tick.

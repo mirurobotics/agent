@@ -217,7 +217,7 @@ Run every command from `/home/ben/miru/workbench3/repos/agent`. This matters: `r
 
 3. Edit `agent/src/data_uploads/retention/deleter.rs` per Plan of Work.
 4. `cargo check --package miru-agent` — clean.
-5. `./scripts/test.sh` filtered: `RUST_LOG=off cargo test --features test data_uploads::retention` — the inline deleter tests must pass with no behavioral edits beyond those listed. Any deleter test that needs a *behavioral* change is a signal the refactor changed semantics: stop and re-read D2 before editing the test.
+5. `./scripts/test.sh` filtered: `RUST_LOG=off cargo test data_uploads::retention` — the inline deleter tests must pass with no behavioral edits beyond those listed. Any deleter test that needs a *behavioral* change is a signal the refactor changed semantics: stop and re-read D2 before editing the test.
 6. Commit: `refactor(retention): keep a delete job queued until its sweep resolves it`.
 
 ### M3 — Tests
@@ -255,7 +255,7 @@ Behavioral acceptance criteria:
 
 Exact commands (from `/home/ben/miru/workbench3/repos/agent`) and expected results:
 
-    RUST_LOG=off cargo test --features test data_uploads::retention   # 0 failed
+    RUST_LOG=off cargo test data_uploads::retention                   # 0 failed
     ./scripts/test.sh                                                 # 0 failed
     cargo fmt -p miru-agent -- --check                                # exit 0, no diff
     ./scripts/lint.sh                                                 # exit 0

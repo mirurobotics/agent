@@ -13,7 +13,7 @@ pub mod display {
 
     #[test]
     fn absolute_path() {
-        let tmp = filesys::dirs::temp("dir-display").unwrap();
+        let tmp = crate::test_utils::filesys::dirs::temp("dir-display").unwrap();
         let dir = tmp.subdir("test-dir");
         assert_eq!(dir.path(), &tmp.path().join("test-dir"));
     }
