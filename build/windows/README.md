@@ -123,9 +123,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\inte
 ```
 
 The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
-failed-upgrade rollback, uninstall, ACL repair, state retention, direct binary
-provisioning check exit 3 on a fresh install, and the absence of a `MiruAgent`
-service.
+failed-upgrade rollback, uninstall, ACL repair, state retention, and the
+absence of a `MiruAgent` service.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru\logs`. The
 root and its `logs`, `auth`, and `tmp` children must be owned by Local System,
@@ -135,28 +134,10 @@ hostile ownership and protected permissions before installation or maintenance.
 Non-administrators must not read sensitive files created in those directories
 after installation, create children, or change the directory permissions.
 
-Both integration and manual smoke runs write verbose MSI logs directly beneath
+Integration runs write verbose MSI logs directly beneath
 `build\windows\artifacts\package-tests\logs\<unique-run-id>`. Each operation
 prints its log path before starting Windows Installer. These logs survive
 temporary build-output cleanup, including when only cleanup fails.
-
-For the production smoke pass, start from a disposable clean Windows 10 or 11
-x64 VM snapshot with no installed Miru product. Build the production 1.0.0 and
-1.1.0 packages, then run:
-
-```powershell
-Set-Location C:\src\agent
-Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsBuildNumber
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ManualProductionSmoke -ConfirmDisposableCleanVm -TranscriptPath C:\Windows\Temp\miru-msi-smoke.txt
-Get-FileHash C:\Windows\Temp\miru-msi-smoke.txt -Algorithm SHA256
-```
-
-Record the transcript hash with the validation evidence. The smoke pass must
-record any 3010 reboot result and stage-specific PASS lines for install,
-maintenance, upgrade, and uninstall. It confirms the no-service expectation,
-repairs deliberately permissive root, `logs`, `auth`, and `tmp` ACLs, and leaves
-the retained ProgramData sentinel and customer-owned log for inspection. Revert
-the VM snapshot afterward rather than deleting retained customer state.
 
 Authenticode signing of the executable and MSI remains deferred, along with the
 GoReleaser/PDB release lane, artifact and WinGet publication, Windows service
