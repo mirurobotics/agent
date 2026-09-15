@@ -78,10 +78,7 @@ pub mod new_home_dir {
 
         assert!(dir.exists());
         assert!(dir.path().is_absolute());
-        #[cfg(windows)]
-        assert_eq!(dir.path(), &PathBuf::from(env::var("USERPROFILE").unwrap()));
-        #[cfg(not(windows))]
-        assert_eq!(dir.path(), &PathBuf::from(env::var("HOME").unwrap()));
+        assert_eq!(dir.path(), &std::env::home_dir().unwrap());
     }
 }
 

@@ -6,9 +6,8 @@ use crate::errors::Trace;
 use crate::filesys::{dir::Dir, file::File, Overwrite};
 
 #[derive(Debug, thiserror::Error)]
-#[error("unable to find home directory: {source}")]
+#[error("unable to find home directory")]
 pub struct UnknownHomeDirErr {
-    pub source: Box<std::env::VarError>,
     pub trace: Box<Trace>,
 }
 
