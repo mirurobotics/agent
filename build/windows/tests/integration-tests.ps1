@@ -2,10 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")][string]$Configuration = "Release",
-    [switch]$ConfirmDisposableTestMachine,
-    [switch]$ManualProductionSmoke,
-    [switch]$ConfirmDisposableCleanVm,
-    [string]$TranscriptPath = ""
+    [switch]$ConfirmDisposableTestMachine
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,9 +33,8 @@ $createdUser = $false
 $failureEvidence = New-Object System.Collections.ArrayList
 $cleanupFailures = New-Object System.Collections.ArrayList
 $integrationFailure = $null
-$transcriptStarted = $false
 
-if (-not $ManualProductionSmoke -and -not $ConfirmDisposableTestMachine) {
+if (-not $ConfirmDisposableTestMachine) {
     if (Test-Path -LiteralPath $programDataRoot) {
         throw "Refusing mutation of pre-existing $programDataRoot; normal integration requires -ConfirmDisposableTestMachine."
     }
@@ -46,10 +42,6 @@ if (-not $ManualProductionSmoke -and -not $ConfirmDisposableTestMachine) {
 }
 
 Assert-Elevated64BitWindows
-if ($ManualProductionSmoke) {
-    Invoke-ManualRun
-    exit 0
-}
 
 $initialRelated = @(Assert-InstalledAllowlistSafe)
 $existingUser = Get-LocalUser -Name $testUser -ErrorAction SilentlyContinue

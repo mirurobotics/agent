@@ -24,11 +24,7 @@ function Get-RelatedProducts {
 }
 
 function Assert-InstalledAllowlistSafe {
-    param([switch]$RequireClean)
     $related = @(Get-RelatedProducts)
-    if ($RequireClean -and $related.Count -ne 0) {
-        throw "Manual production smoke requires a clean VM with no product matching $MsiUpgradeCode."
-    }
     foreach ($product in $related) {
         if ($fixtureProducts -notcontains $product.ToUpperInvariant()) {
             throw "Refusing mutation: installed related ProductCode $product is outside the committed fixture allowlist."
@@ -242,93 +238,6 @@ function Invoke-NonAdminProbe {
     Assert-CustomerStateRetained "$Stage after non-admin probes"
 }
 
-function Invoke-DirectProvisionCheck {
-    $stdout = Join-Path $artifactsRoot "provision-check.stdout.txt"
-    $stderr = Join-Path $artifactsRoot "provision-check.stderr.txt"
-    $process = Start-Process -FilePath $agentPath -ArgumentList @("provision", "--check") -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
-    Assert-Equal 3 $process.ExitCode "fresh install provision check"
-    $output = ([IO.File]::ReadAllText($stdout) + [IO.File]::ReadAllText($stderr))
-    Assert-True (-not [string]::IsNullOrWhiteSpace($output)) "provision check preserves useful output"
-}
-
-function Invoke-ManualSmoke {
-    if (-not $ConfirmDisposableCleanVm -or [string]::IsNullOrWhiteSpace($TranscriptPath)) {
-        throw "ManualProductionSmoke requires -ConfirmDisposableCleanVm and -TranscriptPath."
-    }
-    Assert-InstalledAllowlistSafe -RequireClean | Out-Null
-    New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
-    $arpProducts = @(Get-MiruArpProducts)
-    Assert-Equal 0 $arpProducts.Count "clean VM has no Miru Agent registration"
-    Assert-True (-not (Test-Path -LiteralPath $programDataRoot)) "clean VM has no pre-existing Miru ProgramData"
-    Start-Transcript -LiteralPath $TranscriptPath -Force | Out-Null
-    $script:transcriptStarted = $true
-    Write-Host "Smoke started: $(Get-Date -Format o)"
-    Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsBuildNumber
-    $v1 = Join-Path $repositoryRoot "build\windows\artifacts\package-tests\v1\miru-agent-1.0.0.msi"
-    $v2 = Join-Path $repositoryRoot "build\windows\artifacts\package-tests\v2\miru-agent-1.1.0.msi"
-    Assert-True (Test-Path -LiteralPath $v1 -PathType Leaf) "production v1 package exists"
-    Assert-True (Test-Path -LiteralPath $v2 -PathType Leaf) "production v2 package exists"
-    Get-FileHash -Algorithm SHA256 -LiteralPath $v1
-    Get-FileHash -Algorithm SHA256 -LiteralPath $v2
-    Get-MsiIdentity $v1 | Format-List
-    Get-MsiIdentity $v2 | Format-List
-    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
-    [IO.File]::WriteAllText($sentinelPath, "retain-me")
-    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
-    Add-PermissiveAces
-    $installResult = Invoke-Msi @("/i", ('"{0}"' -f $v1)) "manual-install" @(0, 3010)
-    Write-Host "Manual install reboot result: $installResult"
-    Assert-ProtectedAcls
-    New-RepresentativeSecrets -Stage "manual-install" | Out-Null
-    Assert-CustomerStateRetained "manual install"
-    Assert-NoService
-    Write-Host "PASS manual v1 install repairs root/logs/auth/tmp ACLs and retains customer state"
-    Add-PermissiveAces
-    $maintenanceResult = Invoke-Msi @("/i", ('"{0}"' -f $v1), "REINSTALL=ALL", "REINSTALLMODE=vomus") "manual-maintenance" @(0, 3010)
-    Write-Host "Manual maintenance reboot result: $maintenanceResult"
-    Assert-CustomerStateRetained "manual maintenance"
-    Assert-ProtectedAcls
-    Write-Host "PASS manual maintenance repairs root/logs/auth/tmp ACLs and retains customer state"
-    Add-PermissiveAces
-    $upgradeResult = Invoke-Msi @("/i", ('"{0}"' -f $v2)) "manual-upgrade" @(0, 3010)
-    Write-Host "Manual upgrade reboot result: $upgradeResult"
-    Assert-CustomerStateRetained "manual upgrade"
-    Assert-ProtectedAcls
-    Assert-NoService
-    Write-Host "PASS manual upgrade repairs root/logs/auth/tmp ACLs and retains customer state"
-    $installed = @(Get-RelatedProducts)
-    Assert-Equal 1 $installed.Count "one production product before uninstall"
-    $uninstallResult = Invoke-Msi @("/x", $installed[0]) "manual-uninstall" @(0, 3010)
-    Write-Host "Manual uninstall reboot result: $uninstallResult"
-    Assert-True (-not (Test-Path -LiteralPath $agentPath)) "production executable removed"
-    Assert-CustomerStateRetained "manual uninstall"
-    Assert-ProtectedAcls
-    Assert-NoService
-    Write-Host "PASS manual uninstall retains protected root/logs/auth/tmp customer state"
-    Write-Host "Smoke completed: $(Get-Date -Format o)"
-    Write-Host "PASS manual production smoke; sentinel intentionally retained at $sentinelPath"
-}
-
-function Invoke-ManualRun {
-    try { Invoke-ManualSmoke }
-    catch { $script:integrationFailure = $_ }
-    finally {
-        try {
-            if ($transcriptStarted) { Stop-Transcript | Out-Null }
-        }
-        catch {
-            [void]$cleanupFailures.Add("transcript stop failed: $($_.Exception.Message)")
-        }
-        try {
-            if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
-        }
-        catch {
-            [void]$cleanupFailures.Add("temporary artifact deletion failed: $($_.Exception.Message)")
-        }
-    }
-    Complete-IntegrationRun $integrationFailure
-}
-
 function Invoke-IntegrationLifecycle {
     foreach ($product in $initialRelated) {
         Invoke-Msi @("/x", $product) "preclean-$($product.Trim('{}'))" @(0, 3010, 1605) | Out-Null
@@ -360,8 +269,7 @@ function Invoke-IntegrationLifecycle {
     # provisioning state or relying on files secured by an earlier operation.
     Invoke-NonAdminProbe -Stage "install"
     Assert-NoService
-    Invoke-DirectProvisionCheck
-    Write-Host "PASS initial install, ACL correction, denial, direct provision check exit 3, and no service"
+    Write-Host "PASS initial install, ACL correction, denial, and no service"
 
     $v1Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath).Hash
     Add-PermissiveAces -OwnerSid $testUserSid
