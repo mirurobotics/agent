@@ -316,6 +316,67 @@ pub mod copy_to {
         ));
         assert_eq!(files::read_string(&dest).await.unwrap(), "dest");
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unreadable_source_returns_copy_file_err_permission_denied() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let src = dir.file("src-file");
+        files::write_string(&src, "secret", WriteOptions::default())
+            .await
+            .unwrap();
+        files::set_permissions(&src, std::fs::Permissions::from_mode(0o000))
+            .await
+            .unwrap();
+        let dest = dir.file("dest-file");
+
+        let err = files::copy_to(&src, &dest, CopyOptions::default())
+            .await
+            .unwrap_err();
+
+        // restore permissions before the temp dir drops
+        files::set_permissions(&src, std::fs::Permissions::from_mode(0o644))
+            .await
+            .unwrap();
+
+        assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
+        let FileSysErr::CopyFileErr(e) = err else {
+            panic!("expected CopyFileErr");
+        };
+        assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!dest.exists(), "destination should not be created");
+    }
+
+    #[tokio::test]
+    async fn directory_source_leaves_existing_destination_untouched() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let src = filesys::File::new(dir.path().clone());
+        let dest = dir.file("dest-file");
+        files::write_string(&dest, "keep", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let err = files::copy_to(&src, &dest, CopyOptions::OVERWRITE_NO_SYNC)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
+        assert_eq!(files::read_string(&dest).await.unwrap(), "keep");
+    }
+
+    #[tokio::test]
+    async fn directory_source_does_not_create_destination() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let src = filesys::File::new(dir.path().clone());
+        let dest = dir.file("dest-file");
+
+        let err = files::copy_to(&src, &dest, CopyOptions::default())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
+        assert!(!dest.exists(), "destination should not be created");
+    }
 }
 
 pub mod move_to {
@@ -733,7 +794,6 @@ pub mod write_bytes {
         }
     }
 
-    // asserts Unix mode bits are applied; no Windows analog
     #[cfg(unix)]
     #[tokio::test]
     async fn honors_mode_atomic() {
@@ -754,7 +814,6 @@ pub mod write_bytes {
         assert_eq!(perms.mode() & 0o777, 0o600);
     }
 
-    // asserts Unix mode bits are applied; no Windows analog
     #[cfg(unix)]
     #[tokio::test]
     async fn honors_mode_non_atomic() {

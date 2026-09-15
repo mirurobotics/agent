@@ -277,118 +277,124 @@ pub async fn delete(file: &File) -> Result<(), FileSysErr> {
     }
 }
 
-/// Copy this file to a new file.
+/// Copy `file` to `dst`, preserving the source's permissions.
+///
+/// The bytes stream through a write handle this function owns instead of
+/// going through `tokio::fs::copy`, so that `Sync::Yes` can `sync_data` the
+/// destination on every platform: Windows requires a writable handle for
+/// `FlushFileBuffers`, and a destination that inherited a read-only source's
+/// attributes could not be reopened for writing. Permissions are applied last,
+/// after the data is written and synced.
+///
+/// A missing source is `PathDoesNotExistErr`. Failures creating the
+/// destination's parent directory propagate the `dirs` error unchanged. Every
+/// other source or destination failure is `CopyFileErr` carrying the
+/// underlying I/O error, including a source that is not a regular file
+/// (rejected before the destination is opened) or a source that cannot be
+/// read. An existing destination under `Overwrite::Deny` is
+/// `InvalidFileOverwriteErr` (enforced by `create_new`, so there is no
+/// check-then-create race).
 pub async fn copy_to(file: &File, dst: &File, opts: CopyOptions) -> Result<(), FileSysErr> {
     if file.path() == dst.path() {
         file.assert_exists()?;
         return Ok(());
     }
 
-    // TOCTOU note: tokio::fs::copy has no O_EXCL equivalent, so this
-    // pre-check is the best we can do for Overwrite::Deny. The race
-    // window is unavoidable.
-    if opts.overwrite == Overwrite::Deny && dst.exists() {
-        return Err(FileSysErr::InvalidFileOverwriteErr(
-            InvalidFileOverwriteErr {
-                file: dst.clone(),
-                overwrite: opts.overwrite,
-                trace: trace!(),
-            },
-        ));
+    let mut src = TokioFile::open(file.path())
+        .await
+        .map_err(|e| map_src_open_err(e, file, dst))?;
+    let metadata = src
+        .metadata()
+        .await
+        .map_err(|e| map_copy_err(e, file, dst))?;
+    if !metadata.is_file() {
+        return Err(map_copy_err(not_regular_file_err(), file, dst));
     }
+    let permissions = metadata.permissions();
 
     // ensure the parent directory of the new file exists and create it if not
     dirs::create_if_absent(&dst.parent()?).await?;
 
-    tokio::fs::copy(file.path(), dst.path())
+    let mut out = dst_open_options(opts.overwrite, &permissions)
+        .open(dst.path())
         .await
         .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                    path: file.path().clone(),
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
+                    file: dst.clone(),
+                    overwrite: opts.overwrite,
                     trace: trace!(),
                 })
             } else {
-                FileSysErr::CopyFileErr(CopyFileErr {
-                    source: Box::new(e),
-                    src_file: file.clone(),
-                    dest_file: dst.clone(),
-                    trace: trace!(),
-                })
+                map_copy_err(e, file, dst)
             }
         })?;
 
-    if opts.sync == crate::filesys::Sync::Yes {
-        let f = open_destination_for_sync(dst).await?;
-        f.sync_data().await.map_err(|e| {
-            FileSysErr::WriteFileErr(WriteFileErr {
-                source: Box::new(e),
-                file: dst.clone(),
-                trace: trace!(),
-            })
-        })?;
-    }
-
-    Ok(())
-}
-
-#[cfg(not(windows))]
-async fn open_destination_for_sync(dst: &File) -> Result<TokioFile, FileSysErr> {
-    TokioFile::open(dst.path())
+    tokio::io::copy(&mut src, &mut out)
         .await
-        .map_err(|e| map_io_err_for_open(e, dst))
-}
-
-#[cfg(windows)]
-async fn open_destination_for_sync(dst: &File) -> Result<TokioFile, FileSysErr> {
-    let dst_for_open = dst.clone();
-    let file =
-        tokio::task::spawn_blocking(move || open_windows_destination_for_sync(&dst_for_open))
+        .map_err(|e| map_copy_err(e, file, dst))?;
+    if opts.sync == crate::filesys::Sync::Yes {
+        out.sync_data()
             .await
-            .map_err(|e| {
-                FileSysErr::WriteFileErr(WriteFileErr {
-                    source: Box::new(e.into()),
-                    file: dst.clone(),
-                    trace: trace!(),
-                })
-            })??;
-    Ok(TokioFile::from_std(file))
+            .map_err(|e| map_copy_err(e, file, dst))?;
+    }
+    out.set_permissions(permissions)
+        .await
+        .map_err(|e| map_copy_err(e, file, dst))
 }
 
-#[cfg(windows)]
-fn open_windows_destination_for_sync(dst: &File) -> Result<std::fs::File, FileSysErr> {
-    let permissions = std::fs::metadata(dst.path())
-        .map_err(|e| map_io_err_for_open(e, dst))?
-        .permissions();
-    if !permissions.readonly() {
-        return std::fs::OpenOptions::new()
-            .write(true)
-            .open(dst.path())
-            .map_err(|e| map_io_err_for_open(e, dst));
+/// Open options for the copy destination: write-only, created according to
+/// `overwrite`, and on Unix created with the source's mode bits so a private
+/// source never has a wider-readable copy on disk mid-write. The caller still
+/// applies the exact permissions afterwards, which also covers bits the umask
+/// masked at creation.
+#[cfg_attr(not(unix), allow(unused_variables))]
+fn dst_open_options(
+    overwrite: Overwrite,
+    permissions: &std::fs::Permissions,
+) -> tokio::fs::OpenOptions {
+    let mut open_opts = tokio::fs::OpenOptions::new();
+    open_opts.write(true);
+    match overwrite {
+        Overwrite::Deny => open_opts.create_new(true),
+        Overwrite::Allow => open_opts.create(true).truncate(true),
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        apply_mode(&mut open_opts, Some(permissions.mode()));
     }
+    open_opts
+}
 
-    let mut writable = permissions.clone();
-    writable.set_readonly(false);
-    std::fs::set_permissions(dst.path(), writable).map_err(|e| {
-        FileSysErr::WriteFileErr(WriteFileErr {
-            source: Box::new(e),
-            file: dst.clone(),
+fn map_copy_err(e: std::io::Error, src: &File, dst: &File) -> FileSysErr {
+    FileSysErr::CopyFileErr(CopyFileErr {
+        source: Box::new(e),
+        src_file: src.clone(),
+        dest_file: dst.clone(),
+        trace: trace!(),
+    })
+}
+
+fn not_regular_file_err() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "source is not a regular file",
+    )
+}
+
+/// Map a failure to open the copy source: a missing source is
+/// `PathDoesNotExistErr`; anything else (e.g. permission denied) is
+/// `CopyFileErr` so callers can inspect the underlying I/O error kind.
+fn map_src_open_err(e: std::io::Error, src: &File, dst: &File) -> FileSysErr {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+            path: src.path().clone(),
             trace: trace!(),
         })
-    })?;
-
-    let open_result = std::fs::OpenOptions::new().write(true).open(dst.path());
-    let restore_result = std::fs::set_permissions(dst.path(), permissions);
-
-    if let Err(e) = restore_result {
-        return Err(FileSysErr::WriteFileErr(WriteFileErr {
-            source: Box::new(e),
-            file: dst.clone(),
-            trace: trace!(),
-        }));
+    } else {
+        map_copy_err(e, src, dst)
     }
-
-    open_result.map_err(|e| map_io_err_for_open(e, dst))
 }
 
 /// Rename this file to a new file.
