@@ -38,7 +38,11 @@ function Assert-InstalledAllowlistSafe {
 }
 
 function Invoke-Msi {
-    param([string[]]$Arguments, [string]$Name, [int[]]$AllowedExitCodes)
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int[]]$AllowedExitCodes
+    )
     New-Item -ItemType Directory -Path $sessionLogs -Force | Out-Null
     $logPath = Join-Path $sessionLogs "$Name.log"
     $fullArguments = @($Arguments) + @("/qn", "/norestart", "/l*v", ('"{0}"' -f $logPath))
@@ -61,7 +65,11 @@ function Complete-IntegrationRun {
 }
 
 function Build-IntegrationPackage {
-    param([string]$Version, [string]$ProductCode, [string]$Marker)
+    param(
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$ProductCode,
+        [Parameter(Mandatory = $true)][string]$Marker
+    )
     $output = Join-Path $artifactsRoot $Version
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $payload = Join-Path $output "rollback-payload.txt"
@@ -77,14 +85,14 @@ function Assert-NoService {
 }
 
 function Assert-OneRegistration {
-    param([string]$ExpectedProduct)
+    param([Parameter(Mandatory = $true)][string]$ExpectedProduct)
     $related = @(Get-RelatedProducts)
     Assert-Equal 1 $related.Count "exactly one related product registration"
     Assert-Equal $ExpectedProduct.ToUpperInvariant() $related[0].ToUpperInvariant() "registered ProductCode"
 }
 
 function Test-ArpProductCode {
-    param([string]$ProductCode)
+    param([Parameter(Mandatory = $true)][string]$ProductCode)
     $paths = @(
         "Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode",
         "Registry::HKEY_LOCAL_MACHINE\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode"
@@ -104,7 +112,10 @@ function Get-MiruArpProducts {
 }
 
 function Assert-ProtectedAcl {
-    param([string]$LiteralPath, [string]$Label)
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
     $acl = Get-Acl -LiteralPath $LiteralPath
     Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$Label owner is SYSTEM"
     Assert-True $acl.AreAccessRulesProtected "$Label DACL inheritance is disabled"
@@ -159,7 +170,7 @@ function Add-PermissiveAces {
 }
 
 function Assert-CustomerStateRetained {
-    param([string]$Stage)
+    param([Parameter(Mandatory = $true)][string]$Stage)
     Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "$Stage keeps sentinel"
     Assert-True (Test-Path -LiteralPath $logsRoot -PathType Container) "$Stage keeps logs directory"
     Assert-Equal $customerLogContents ([IO.File]::ReadAllText($customerLogPath)) "$Stage keeps customer log"
@@ -169,7 +180,7 @@ function Assert-CustomerStateRetained {
 }
 
 function New-RepresentativeSecrets {
-    param([string]$Stage)
+    param([Parameter(Mandatory = $true)][string]$Stage)
     foreach ($path in $protectedRoots) {
         $file = [pscustomobject]@{
             Parent = $path
@@ -196,7 +207,7 @@ function New-RepresentativeSecrets {
 }
 
 function Invoke-NonAdminProbe {
-    param([string]$Stage)
+    param([Parameter(Mandatory = $true)][string]$Stage)
     $files = @(New-RepresentativeSecrets -Stage $Stage)
     $probeRoot = Join-Path $artifactsRoot ("probe-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null

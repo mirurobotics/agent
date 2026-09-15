@@ -1,10 +1,14 @@
 #Requires -Version 5.1
-param([string]$ManifestPath, [string]$ResultPath)
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$ManifestPath,
+    [Parameter(Mandatory = $true)][string]$ResultPath
+)
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 function Get-AccessOutcome {
-    param([scriptblock]$Action)
+    param([Parameter(Mandatory = $true)][scriptblock]$Action)
     try { & $Action | Out-Null; return "Allowed" }
     catch {
         $cause = $_.Exception.GetBaseException()
@@ -16,7 +20,7 @@ function Get-AccessOutcome {
 }
 
 function Set-PermissiveDacl {
-    param([string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path)
     # Default All also requests an audit update requiring a separate privilege.
     # Persist clears modification flags, so each attempt needs a fresh descriptor.
     $replacement = New-Object Security.AccessControl.DirectorySecurity

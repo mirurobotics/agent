@@ -11,7 +11,10 @@ Set-StrictMode -Version Latest
 Import-Module -Force -Name (Join-Path $PSScriptRoot "MsiTest.psm1")
 
 function Remove-AndCreateChild {
-    param([string]$Parent, [string]$Child)
+    param(
+        [Parameter(Mandatory = $true)][string]$Parent,
+        [Parameter(Mandatory = $true)][string]$Child
+    )
     $path = Join-Path $Parent $Child
     if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Recurse -Force
@@ -21,7 +24,7 @@ function Remove-AndCreateChild {
 }
 
 function Assert-ProductionTables {
-    param([string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path)
     $handle = Open-MsiDatabase -Path $Path
     try {
         $components = @(Get-MsiRows $handle.Database "SELECT ``Component``, ``ComponentId``, ``Directory_``, ``Attributes``, ``KeyPath`` FROM ``Component``" 5)
@@ -79,7 +82,10 @@ function Assert-ProductionTables {
 }
 
 function Assert-Package {
-    param([string]$Path, [string]$Version)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
     $metadata = Get-MsiContract -Path $Path
     Assert-Equal $MsiProductName $metadata.ProductName "ProductName"
     Assert-Equal $MsiManufacturer $metadata.Manufacturer "Manufacturer"
@@ -93,7 +99,11 @@ function Assert-Package {
 }
 
 function Invoke-ExpectedBuildFailure {
-    param([string]$Name, [string[]]$Properties, [string]$ExpectedErrorCode)
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string[]]$Properties,
+        [Parameter(Mandatory = $true)][string]$ExpectedErrorCode
+    )
     $outputPath = Join-Path $script:invalidDirectory $Name
     New-Item -ItemType Directory -Path $outputPath | Out-Null
     $arguments = @("build", $script:resolvedProject, "--no-restore", "--configuration", "Release", "-p:OutputPath=$outputPath\") + $Properties

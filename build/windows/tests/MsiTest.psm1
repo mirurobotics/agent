@@ -20,12 +20,19 @@ $MsiFixtureProductCodes = @(
 )
 
 function Assert-True {
-    param([bool]$Condition, [string]$Message)
+    param(
+        [Parameter(Mandatory = $true)][bool]$Condition,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
     if (-not $Condition) { throw "ASSERT: $Message" }
 }
 
 function Assert-Equal {
-    param($Expected, $Actual, [string]$Message)
+    param(
+        [Parameter(Mandatory = $true)]$Expected,
+        [Parameter(Mandatory = $true)]$Actual,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
     if (-not [object]::Equals($Expected, $Actual)) {
         throw "ASSERT: $Message (expected '$Expected', actual '$Actual')"
     }
@@ -54,7 +61,11 @@ function Close-MsiDatabase {
 }
 
 function Get-MsiRows {
-    param($Database, [string]$Query, [int]$Columns)
+    param(
+        [Parameter(Mandatory = $true)]$Database,
+        [Parameter(Mandatory = $true)][string]$Query,
+        [Parameter(Mandatory = $true)][int]$Columns
+    )
     $view = $null
     $record = $null
     $rows = @()
@@ -84,7 +95,10 @@ function Get-MsiRows {
 }
 
 function Get-MsiPropertyValue {
-    param($Database, [string]$Name)
+    param(
+        [Parameter(Mandatory = $true)]$Database,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
     $escaped = $Name.Replace("'", "''")
     $rows = @(Get-MsiRows -Database $Database -Query "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$escaped'" -Columns 1)
     if ($rows.Count -eq 0) { return $null }
@@ -92,7 +106,10 @@ function Get-MsiPropertyValue {
 }
 
 function Test-MsiTable {
-    param($Database, [string]$Name)
+    param(
+        [Parameter(Mandatory = $true)]$Database,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
     $escaped = $Name.Replace("'", "''")
     return (@(Get-MsiRows -Database $Database -Query "SELECT ``Name`` FROM ``_Tables`` WHERE ``Name``='$escaped'" -Columns 1)).Count -eq 1
 }
