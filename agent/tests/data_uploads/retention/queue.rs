@@ -1,6 +1,6 @@
 // internal crates
 use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::{abs_file, abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
@@ -22,7 +22,7 @@ fn now() -> DateTime<Utc> {
 fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
     let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
     Job {
-        file: File::new(format!("/data/{name}")),
+        file: abs_file(&format!("data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
         mtime: DateTime::from_timestamp(900, 0).unwrap(),
@@ -85,16 +85,19 @@ mod wire {
         let dir = test_dirs::temp("delete-queue-test").unwrap();
         let path = dir.file("delete_queue.json");
         let id = Uuid::new_v4();
+        let expected = make_job("a.log", 1000, 500);
+        let file_json = serde_json::to_string(abs_path("data/a.log").to_str().unwrap()).unwrap();
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
-                r#""file":"/data/a.log","size":42,"#,
+                r#""file":{file},"size":42,"#,
                 r#""digest":"sha256:a.log","mtime":"1970-01-01T00:15:00Z","#,
                 r#""first_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""last_observed_at":"1970-01-01T00:16:40Z","ttl_secs":500,"#,
                 r#""file_rule_id":"file_rule_1","deployment_id":"dpl_1"}}}}]}}"#,
             ),
             id = id,
+            file = file_json,
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -105,21 +108,6 @@ mod wire {
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();
         assert_eq!(entry.id, id);
-        let expected_file = serde_json::from_str::<File>(r#""/data/a.log""#).unwrap();
-        let observed_at = DateTime::from_timestamp(1000, 0).unwrap();
-        assert_eq!(
-            entry.job,
-            Job {
-                file: expected_file,
-                size: 42,
-                digest: "sha256:a.log".to_string(),
-                mtime: DateTime::from_timestamp(900, 0).unwrap(),
-                first_observed_at: observed_at,
-                last_observed_at: observed_at,
-                ttl_secs: 500,
-                file_rule_id: "file_rule_1".to_string(),
-                deployment_id: "dpl_1".to_string(),
-            }
-        );
+        assert_eq!(entry.job, expected);
     }
 }
