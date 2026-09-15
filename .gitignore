@@ -39,3 +39,8 @@ venv/
 
 # coverage reports
 target/coverage/
+
+# windows MSI packaging test output
+build/windows/artifacts/
+build/windows/bin/
+build/windows/obj/
