@@ -263,11 +263,11 @@ mod tests {
     // internal crates
     use super::*;
     use crate::data_uploads::retention::job::Job;
-    use crate::filesys::File;
+    use crate::test_utils::filesys::abs_file;
 
     fn job(name: &str) -> Job {
         Job {
-            file: File::new(format!("/data/{name}")),
+            file: abs_file(&format!("data/{name}")),
             size: 42,
             digest: format!("sha256:{name}"),
             mtime: DateTime::from_timestamp(900, 0).unwrap(),

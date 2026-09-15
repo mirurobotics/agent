@@ -76,6 +76,7 @@ crate::impl_error!(ScanErr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::filesys::abs_path;
     use crate::trace;
 
     fn boxed_source() -> Box<dyn std::error::Error + Send + Sync> {
@@ -110,7 +111,7 @@ mod tests {
     fn from_filesys_err() {
         let err = crate::filesys::FileSysErr::PathDoesNotExistErr(
             crate::filesys::errors::PathDoesNotExistErr {
-                path: std::path::PathBuf::from("/nope"),
+                path: abs_path("nope"),
                 trace: trace!(),
             },
         );

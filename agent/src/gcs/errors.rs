@@ -177,6 +177,7 @@ pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io:
 mod tests {
     use super::*;
     use crate::errors::Error as _;
+    use crate::test_utils::filesys::{abs_file, missing_file};
     use google_cloud_gax::error::rpc::{Code, Status};
 
     fn object() -> Object {
@@ -279,10 +280,9 @@ mod tests {
     // error.
     #[tokio::test]
     async fn filesys_err_delegates_to_underlying_error() {
-        let fs_err: filesys::FileSysErr =
-            filesys::files::read_bytes(&File::new("/nonexistent/definitely/not/here.bin"))
-                .await
-                .unwrap_err();
+        let fs_err: filesys::FileSysErr = filesys::files::read_bytes(&missing_file())
+            .await
+            .unwrap_err();
         // `Code` is not `PartialEq`, so compare its `Debug` form.
         let want_code = format!("{:?}", fs_err.code());
         let want_status = fs_err.http_status().as_u16();
@@ -314,7 +314,7 @@ mod tests {
             // A failure writing bytes to the local destination is a terminal
             // local I/O error, never a network condition.
             let err = std::io::Error::other("no space left on device");
-            let file = File::new("/data/out.bin");
+            let file = abs_file("data/out.bin");
             let file_path = file.to_string();
             let mapped = map_body_io_err("get_object", &object(), &file, err);
             assert!(matches!(mapped, GcsErr::LocalIoErr(_)));

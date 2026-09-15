@@ -112,6 +112,7 @@ fn disk_err_to_scan_err(e: disk::DiskErr) -> ScanErr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::filesys::abs_path;
     use crate::trace;
 
     // A DiskErr::CacheErr maps onto ScanErr::CacheErr.
@@ -131,7 +132,7 @@ mod tests {
     fn disk_filesys_err_maps_to_scan_filesys_err() {
         let err = disk::DiskErr::FileSysErr(crate::filesys::FileSysErr::PathDoesNotExistErr(
             crate::filesys::errors::PathDoesNotExistErr {
-                path: std::path::PathBuf::from("/nope"),
+                path: abs_path("nope"),
                 trace: trace!(),
             },
         ));

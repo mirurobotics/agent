@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
-use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::filesys::{abs_dir, dirs as test_dirs, files as test_files};
 #[cfg(unix)]
 use miru_agent::filesys::FileSysErr;
 use miru_agent::filesys::{self, dirs, path, Atomic, Overwrite, PathExt, WriteOptions};
@@ -24,7 +24,7 @@ pub mod exists {
 
     #[test]
     fn nonexistent_path() {
-        let dir = filesys::Dir::new(PathBuf::from("/nonexistent/path/abc123"));
+        let dir = abs_dir("nonexistent/path/abc123");
         assert!(!dir.exists());
     }
 }

@@ -157,6 +157,7 @@ mod tests {
 
     // internal crates
     use crate::models::{FileRuleSource, FileRuleUpload};
+    use crate::test_utils::filesys::abs_file;
 
     // external crates
     use std::time::SystemTime;
@@ -254,7 +255,7 @@ mod tests {
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert_eq!(state.ledger_count(), 0);
 
-            let file = File::new("/none/a.mcap");
+            let file = abs_file("none/a.mcap");
             state
                 .ledger
                 .insert(file.clone(), vec![stable_file(file, ts(1000))]);
@@ -266,7 +267,7 @@ mod tests {
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert!(!state.has_candidates());
 
-            let file = File::new("/none/c.mcap");
+            let file = abs_file("none/c.mcap");
             state.candidates.insert(
                 file.clone(),
                 Candidate {
@@ -279,7 +280,7 @@ mod tests {
 
         #[test]
         fn is_candidate() {
-            let file = File::new("/none/c.mcap");
+            let file = abs_file("none/c.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
 
             assert!(!state.is_candidate(&file));
@@ -315,13 +316,13 @@ mod tests {
         #[test]
         fn does_not_exist() {
             let state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
-            let obs = observation(File::new("/none/p.mcap"));
+            let obs = observation(abs_file("none/p.mcap"));
             assert!(!state.is_preexisting(&obs));
         }
 
         #[test]
         fn metadata_not_equal() {
-            let file = File::new("/none/p.mcap");
+            let file = abs_file("none/p.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             state
                 .preexisting
@@ -338,7 +339,7 @@ mod tests {
 
         #[test]
         fn is_preexisting() {
-            let file = File::new("/none/p.mcap");
+            let file = abs_file("none/p.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let obs = observation(file.clone());
             state.preexisting.insert(file, obs.clone());
@@ -355,7 +356,7 @@ mod tests {
         fn seed_n(state: &mut RuleState, n: usize) -> Vec<File> {
             let mut files = Vec::with_capacity(n);
             for i in 0..n {
-                let file = File::new(format!("/none/{i}.mcap"));
+                let file = abs_file(&format!("none/{i}.mcap"));
                 state
                     .ledger
                     .insert(file.clone(), vec![stable_file(file.clone(), ts(1000))]);
@@ -427,7 +428,7 @@ mod tests {
 
         #[test]
         fn equal_metadata_equal() {
-            let file = File::new("/none/a.mcap");
+            let file = abs_file("none/a.mcap");
             let a = obs(file.clone());
             let b = obs(file);
             assert!(a.equal_metadata(&b));
@@ -435,7 +436,7 @@ mod tests {
 
         #[test]
         fn equal_metadata_size_differs() {
-            let file = File::new("/none/a.mcap");
+            let file = abs_file("none/a.mcap");
             let a = obs(file.clone());
             let mut b = obs(file);
             b.size += 1;
@@ -444,7 +445,7 @@ mod tests {
 
         #[test]
         fn equal_metadata_mtime_differs() {
-            let file = File::new("/none/a.mcap");
+            let file = abs_file("none/a.mcap");
             let a = obs(file.clone());
             let mut b = obs(file);
             b.mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
@@ -457,7 +458,7 @@ mod tests {
 
         #[test]
         fn holds_single_observation() {
-            let file = File::new("/none/x.mcap");
+            let file = abs_file("none/x.mcap");
             let obs = observation(file.clone());
             let cand = Candidate {
                 file: file.clone(),
@@ -488,7 +489,7 @@ mod tests {
 
         #[test]
         fn matches() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
@@ -498,7 +499,7 @@ mod tests {
 
         #[test]
         fn metadata_differs() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
@@ -515,7 +516,7 @@ mod tests {
 
         #[test]
         fn absent() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert!(!state.is_latest_ledger_entry(&obs(file)));
         }
@@ -526,7 +527,7 @@ mod tests {
 
         #[test]
         fn appends_alias() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             state
                 .ledger
@@ -542,7 +543,7 @@ mod tests {
 
         #[test]
         fn none_when_absent() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             assert!(state.latest_ledger_entry_mut(&file).is_none());
         }
@@ -553,7 +554,7 @@ mod tests {
 
         #[test]
         fn dedups_against_primary_mtime() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let mut entry = stable_file(file, ts(900));
             entry.mtime = ts(500);
             entry.push_mtime_alias(ts(500));
@@ -562,7 +563,7 @@ mod tests {
 
         #[test]
         fn dedups_repeated_alias() {
-            let file = File::new("/none/l.mcap");
+            let file = abs_file("none/l.mcap");
             let mut entry = stable_file(file, ts(900));
             entry.push_mtime_alias(ts(1234));
             entry.push_mtime_alias(ts(1234));
@@ -578,7 +579,7 @@ mod tests {
         /// A RuleState with one preexisting file, one candidate, and one ledger
         /// entry, so every map in the snapshot is exercised.
         fn populated_state() -> RuleState {
-            let file = File::new("/none/p.mcap");
+            let file = abs_file("none/p.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 10));
             state
                 .preexisting
@@ -646,7 +647,7 @@ mod tests {
 
         #[test]
         fn matches_primary_mtime() {
-            let file = File::new("/none/s.mcap");
+            let file = abs_file("none/s.mcap");
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             let observation = obs(file);
@@ -656,7 +657,7 @@ mod tests {
 
         #[test]
         fn matches_aliased_mtime() {
-            let file = File::new("/none/s.mcap");
+            let file = abs_file("none/s.mcap");
             let aliased = SystemTime::UNIX_EPOCH + Duration::from_secs(7);
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = ts(0);
@@ -669,7 +670,7 @@ mod tests {
 
         #[test]
         fn size_mismatch() {
-            let file = File::new("/none/s.mcap");
+            let file = abs_file("none/s.mcap");
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
             let mut observation = obs(file);
@@ -679,7 +680,7 @@ mod tests {
 
         #[test]
         fn mtime_mismatch() {
-            let file = File::new("/none/s.mcap");
+            let file = abs_file("none/s.mcap");
             let mut entry = stable_file(file.clone(), ts(900));
             entry.mtime = ts(0);
             let mut observation = obs(file);

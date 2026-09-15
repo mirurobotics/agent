@@ -339,7 +339,7 @@ mod tests {
         access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
         store_with, temp_file_with, uri,
     };
-    use crate::test_utils::filesys::files as test_files;
+    use crate::test_utils::filesys::{files as test_files, missing_file};
     use miru_agent::errors::{Code, Error};
     use miru_agent::filesys::files;
 
@@ -744,7 +744,7 @@ mod tests {
                 // the failure surfaces when `upload_part` opens the path for
                 // streaming → `LocalIoErr`, then a best-effort abort.
                 let missing = Source {
-                    file: File::new("/nonexistent/definitely/not/here.bin"),
+                    file: missing_file(),
                     // Claimed size > 0 so the part loop runs at least once.
                     size: 14,
                 };

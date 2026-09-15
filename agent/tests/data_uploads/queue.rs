@@ -71,8 +71,7 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<String> {
 }
 
 /// [`QueueJob::name`] for each stem after it goes through `make`. Expected
-/// values must take this path so they match host path normalization
-/// (`File::new("/data/a.log")` Displays as `\data\a.log` on Windows).
+/// values go through `make` too, so they carry the host's path separators.
 fn job_names<J: QueueJob>(make: fn(&str) -> J, stems: &[&str]) -> Vec<String> {
     stems.iter().map(|stem| make(stem).name()).collect()
 }

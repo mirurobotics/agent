@@ -393,7 +393,8 @@ mod tests {
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::test_utils::{
-        filesys::dirs as test_dirs, filesys::files as test_files, retention::undeletable_dir_job,
+        filesys::abs_file, filesys::dirs as test_dirs, filesys::files as test_files,
+        retention::undeletable_dir_job,
     };
 
     // external crates
@@ -910,7 +911,7 @@ mod tests {
 
         #[tokio::test]
         async fn vanished_file_at_the_hash_step_is_already_gone() {
-            let job = wedged_job(File::new("/nonexistent/miru-delete-test/a.log"));
+            let job = wedged_job(abs_file("nonexistent/miru-delete-test/a.log"));
 
             let outcome = SingleThreadDeleter::check_digest_mismatch(&job).await;
 

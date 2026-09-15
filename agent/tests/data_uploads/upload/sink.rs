@@ -5,11 +5,11 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::{deleter::MockDeleter, upload_executor::MockUploadExecutor};
+use crate::test_utils::filesys::abs_file;
 use miru_agent::data_uploads::scan::{scanner::StableFile, StableFileSink};
 use miru_agent::data_uploads::upload::{
     Job, UploadStableFileSink, Uploader, UploaderExt, UploaderOptions,
 };
-use miru_agent::filesys::File;
 use miru_agent::models::{FileRule, FileRuleRetention, FileRuleUpload};
 
 // external crates
@@ -27,7 +27,7 @@ async fn within<T>(fut: impl Future<Output = T>) -> T {
 
 fn stable_file(name: &str, deployment_id: &str, rule_id: &str) -> StableFile {
     StableFile {
-        file: File::new(format!("/data/{name}")),
+        file: abs_file(&format!("data/{name}")),
         size: 128,
         digest: format!("sha256:{name}"),
         mtime: DateTime::from_timestamp(1000, 0).unwrap(),

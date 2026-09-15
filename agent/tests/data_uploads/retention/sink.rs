@@ -1,8 +1,8 @@
 // internal crates
 use crate::mocks::deleter::{MockDeleter, MockStep};
+use crate::test_utils::filesys::abs_file;
 use miru_agent::data_uploads::retention::{Job, RetentionStableFileSink};
 use miru_agent::data_uploads::scan::{scanner::StableFile, StableFileSink};
-use miru_agent::filesys::File;
 use miru_agent::models::{FileRule, FileRuleRetention, FileRuleUpload};
 
 // external crates
@@ -10,7 +10,7 @@ use chrono::DateTime;
 
 fn stable_file(name: &str) -> StableFile {
     StableFile {
-        file: File::new(format!("/data/{name}")),
+        file: abs_file(&format!("data/{name}")),
         size: 128,
         digest: format!("sha256:{name}"),
         mtime: DateTime::from_timestamp(950, 0).unwrap(),
@@ -34,7 +34,7 @@ fn rule(upload: Option<FileRuleUpload>, retention: Option<FileRuleRetention>) ->
 /// observation and the rule's `ttl_secs`.
 fn expected_job(name: &str, ttl_secs: u64) -> Job {
     Job {
-        file: File::new(format!("/data/{name}")),
+        file: abs_file(&format!("data/{name}")),
         size: 128,
         digest: format!("sha256:{name}"),
         mtime: DateTime::from_timestamp(950, 0).unwrap(),

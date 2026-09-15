@@ -1,7 +1,5 @@
-// standard crates
-use std::path::PathBuf;
-
 // internal crates
+use crate::test_utils::filesys::{abs_dir, abs_file, abs_path};
 use miru_agent::filesys;
 use miru_agent::filesys::errors::*;
 
@@ -23,7 +21,7 @@ mod display {
     #[test]
     fn unknown_dir_name_err() {
         let err = FileSysErr::UnknownDirNameErr(UnknownDirNameErr {
-            dir: filesys::Dir::new(PathBuf::from("/")),
+            dir: abs_dir(""),
             trace: miru_agent::trace!(),
         });
         let msg = err.to_string();
@@ -32,7 +30,7 @@ mod display {
 
     #[test]
     fn path_does_not_exist_err() {
-        let path = PathBuf::from("/missing/path");
+        let path = abs_path("missing/path");
         let expected_path = path.display().to_string();
         let err = FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
             path,
@@ -44,7 +42,7 @@ mod display {
 
     #[test]
     fn path_existence_err() {
-        let path = PathBuf::from("/unreadable/path");
+        let path = abs_path("unreadable/path");
         let expected_path = path.display().to_string();
         let err = FileSysErr::PathExistenceErr(PathExistenceErr {
             path,
@@ -61,7 +59,7 @@ mod display {
 
     #[test]
     fn path_exists_err() {
-        let path = PathBuf::from("/exists/path");
+        let path = abs_path("exists/path");
         let expected_path = path.display().to_string();
         let err = FileSysErr::PathExistsErr(PathExistsErr {
             path,
@@ -73,7 +71,7 @@ mod display {
 
     #[test]
     fn invalid_file_overwrite_err() {
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::InvalidFileOverwriteErr(InvalidFileOverwriteErr {
             file,
@@ -88,7 +86,7 @@ mod display {
     #[test]
     fn unknown_parent_dir_for_file_err() {
         let err = FileSysErr::UnknownParentDirForFileErr(UnknownParentDirForFileErr {
-            file: filesys::File::new("/orphan"),
+            file: abs_file("orphan"),
             trace: miru_agent::trace!(),
         });
         let msg = err.to_string();
@@ -98,7 +96,7 @@ mod display {
     #[test]
     fn unknown_parent_dir_for_dir_err() {
         let err = FileSysErr::UnknownParentDirForDirErr(UnknownParentDirForDirErr {
-            dir: filesys::Dir::new(PathBuf::from("/")),
+            dir: abs_dir(""),
             trace: miru_agent::trace!(),
         });
         let msg = err.to_string();
@@ -108,7 +106,7 @@ mod display {
     #[test]
     fn parse_json_err() {
         let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
-        let file = filesys::File::new("/some/file.json");
+        let file = abs_file("some/file.json");
         let expected_file = file.to_string();
         let err = FileSysErr::ParseJSONErr(ParseJSONErr {
             source: Box::new(serde_err),
@@ -123,7 +121,7 @@ mod display {
     #[test]
     fn read_file_err() {
         let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::ReadFileErr(ReadFileErr {
             source: Box::new(io_err),
@@ -137,7 +135,7 @@ mod display {
     #[test]
     fn write_file_err() {
         let io_err = std::io::Error::other("disk full");
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::WriteFileErr(WriteFileErr {
             source: Box::new(io_err),
@@ -151,7 +149,7 @@ mod display {
     #[test]
     fn open_file_err() {
         let io_err = std::io::Error::other("i/o error");
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::OpenFileErr(OpenFileErr {
             source: Box::new(io_err),
@@ -165,7 +163,7 @@ mod display {
     #[test]
     fn create_dir_err() {
         let io_err = std::io::Error::other("mkdir failed");
-        let dir = filesys::Dir::new(PathBuf::from("/some/dir"));
+        let dir = abs_dir("some/dir");
         let expected_dir = dir.to_string();
         let err = FileSysErr::CreateDirErr(CreateDirErr {
             source: Box::new(io_err),
@@ -179,7 +177,7 @@ mod display {
     #[test]
     fn delete_dir_err() {
         let io_err = std::io::Error::other("rmdir failed");
-        let dir = filesys::Dir::new(PathBuf::from("/some/dir"));
+        let dir = abs_dir("some/dir");
         let expected_dir = dir.to_string();
         let err = FileSysErr::DeleteDirErr(DeleteDirErr {
             source: Box::new(io_err),
@@ -193,7 +191,7 @@ mod display {
     #[test]
     fn delete_file_err() {
         let io_err = std::io::Error::other("rm failed");
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::DeleteFileErr(DeleteFileErr {
             source: Box::new(io_err),
@@ -207,8 +205,8 @@ mod display {
     #[test]
     fn move_file_err() {
         let io_err = std::io::Error::other("rename failed");
-        let src_file = filesys::File::new("/src");
-        let dest_file = filesys::File::new("/dest");
+        let src_file = abs_file("src");
+        let dest_file = abs_file("dest");
         let expected_src = src_file.to_string();
         let expected_dest = dest_file.to_string();
         let err = FileSysErr::MoveFileErr(MoveFileErr {
@@ -225,8 +223,8 @@ mod display {
     #[test]
     fn move_dir_err() {
         let io_err = std::io::Error::other("rename failed");
-        let src_dir = filesys::Dir::new(PathBuf::from("/src"));
-        let dest_dir = filesys::Dir::new(PathBuf::from("/dest"));
+        let src_dir = abs_dir("src");
+        let dest_dir = abs_dir("dest");
         let expected_src = src_dir.to_string();
         let expected_dest = dest_dir.to_string();
         let err = FileSysErr::MoveDirErr(MoveDirErr {
@@ -243,7 +241,7 @@ mod display {
     #[test]
     fn file_metadata_err() {
         let io_err = std::io::Error::other("stat failed");
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::FileMetadataErr(FileMetadataErr {
             file,
@@ -270,7 +268,7 @@ mod display {
     #[test]
     fn atomic_write_file_err() {
         let io_err = std::io::Error::other("atomic write failed");
-        let file = filesys::File::new("/some/file");
+        let file = abs_file("some/file");
         let expected_file = file.to_string();
         let err = FileSysErr::AtomicWriteFileErr(AtomicWriteFileErr {
             file,
@@ -285,7 +283,7 @@ mod display {
     #[test]
     fn read_dir_err() {
         let io_err = std::io::Error::other("readdir failed");
-        let dir = filesys::Dir::new(PathBuf::from("/some/dir"));
+        let dir = abs_dir("some/dir");
         let expected_dir = dir.to_string();
         let err = FileSysErr::ReadDirErr(ReadDirErr {
             dir,
@@ -299,7 +297,7 @@ mod display {
     #[test]
     fn unknown_file_name_err() {
         let err = FileSysErr::UnknownFileNameErr(UnknownFileNameErr {
-            file: filesys::File::new("/"),
+            file: abs_file(""),
             trace: miru_agent::trace!(),
         });
         let msg = err.to_string();
@@ -310,9 +308,9 @@ mod display {
     fn move_dir_rollback_err() {
         let primary = std::io::Error::other("rename failed");
         let rollback = std::io::Error::other("rollback failed");
-        let src_dir = filesys::Dir::new(PathBuf::from("/src"));
-        let dest_dir = filesys::Dir::new(PathBuf::from("/dest"));
-        let trash_dir = filesys::Dir::new(PathBuf::from("/trash"));
+        let src_dir = abs_dir("src");
+        let dest_dir = abs_dir("dest");
+        let trash_dir = abs_dir("trash");
         let expected_src = src_dir.to_string();
         let expected_dest = dest_dir.to_string();
         let expected_trash = trash_dir.to_string();
