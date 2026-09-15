@@ -61,6 +61,11 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   fixtures. Raw persisted JSON is different: it intentionally pins `/data/...`
   and its expected `File` must be deserialized from that same literal wire
   value so the comparison tests preservation rather than host normalization.
+  2026-09-15: queue wire tests build the raw `"file"` JSON from a plain
+  host-rooted string (`abs_path("data/a.log")`) rather than from `File`'s
+  serializer, so they still pin that `File` serializes as a bare string while
+  staying host-portable. Fixture paths across the suite come from
+  `test_utils::filesys::{abs_path, abs_file, abs_dir}`.
 - 2026-09-11: an existing directory represented as a `File` supplies a portable
   delete failure after a successful stat. It exercises retry counts, backoff,
   attempt caps, and persistence without a Unix symlink loop.
@@ -91,6 +96,11 @@ the first CI run; residual runtime failures are then fixed from CI logs.
 - 2026-09-11: keep literal `/data/...` JSON in queue wire tests. Build the
   whole-job expected `File` by deserializing that literal, while deriving all
   behavioral queue names through their job factories.
+  2026-09-15: queue wire tests build the raw `"file"` JSON from a plain
+  host-rooted string (`abs_path("data/a.log")`) rather than from `File`'s
+  serializer, so they still pin that `File` serializes as a bare string while
+  staying host-portable. Fixture paths across the suite come from
+  `test_utils::filesys::{abs_path, abs_file, abs_dir}`.
 - 2026-09-11: replace the stat-classification canary's child-beneath-a-file
   fixture with a path containing an embedded NUL. Rust rejects that path as
   invalid input before filesystem lookup on Unix and Windows, deterministically
