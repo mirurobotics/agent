@@ -113,8 +113,7 @@ impl Fixture {
     }
 }
 
-// Unix permission fixtures for the permission-denied deploy tests below; no
-// Windows analog (Windows ignores the readonly attribute for child creation).
+// Unix mode fixtures; Windows ignores the readonly attribute for child creation.
 #[cfg(unix)]
 fn read_only() -> std::fs::Permissions {
     std::fs::Permissions::from_mode(0o555)
@@ -578,13 +577,11 @@ pub mod deploy_func_validation_errs {
     }
 }
 
+#[cfg(unix)]
 pub mod deploy_func_backup_errs {
-    #[cfg(unix)]
     use super::*;
-    #[cfg(unix)]
     use miru_agent::filesys::PathExt;
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn copy_file_for_backup_permission_denied() {
         let f = Fixture::new().await;
@@ -633,7 +630,49 @@ pub mod deploy_func_backup_errs {
         );
     }
 
-    #[cfg(unix)]
+    #[tokio::test]
+    async fn unreadable_existing_file_returns_backup_access_denied() {
+        let f = Fixture::new().await;
+
+        // seed c.json with "old" content, then make it unreadable so the
+        // backup copy cannot open the source
+        let c_file = f.temp_dir.file("c.json");
+        let c_path = c_file.path().display().to_string();
+        test_files::seed(&c_file, "old").await;
+        files::set_permissions(&c_file, std::fs::Permissions::from_mode(0o000))
+            .await
+            .unwrap();
+
+        let c_cfg = ConfigInstance {
+            filepath: c_path.clone(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&c_cfg, "new".to_string()).await;
+
+        let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
+        let result = f.deploy(&deployment).await;
+        assert!(
+            matches!(&result, Err(DeployErr::BackupAccessDenied(_))),
+            "expected BackupAccessDenied, got {result:?}"
+        );
+
+        // restore permissions
+        files::set_permissions(&c_file, std::fs::Permissions::from_mode(0o644))
+            .await
+            .unwrap();
+
+        // c.json content must be unchanged
+        let c_actual = files::read_string(&c_file).await.unwrap();
+        assert_eq!(c_actual, "old");
+
+        // no backup siblings leaked next to c.json
+        let leftover = detect_backup_files(&f.temp_dir).await;
+        assert!(
+            leftover.is_empty(),
+            "expected no miru.backup.* siblings near c.json, found {leftover:?}"
+        );
+    }
+
     #[tokio::test]
     async fn copy_backups_failure_retains_original_files() {
         let f = Fixture::new().await;
@@ -705,13 +744,11 @@ pub mod deploy_func_backup_errs {
     }
 }
 
+#[cfg(unix)]
 pub mod deploy_func_write_errs {
-    #[cfg(unix)]
     use super::*;
-    #[cfg(unix)]
     use miru_agent::filesys::PathExt;
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn write_file_permission_denied() {
         let f = Fixture::new().await;
@@ -746,7 +783,6 @@ pub mod deploy_func_write_errs {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn write_files_restores_existing_files_on_mid_failure() {
         let f = Fixture::new().await;
@@ -814,7 +850,6 @@ pub mod deploy_func_write_errs {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn write_files_deletes_new_files_on_mid_failure() {
         let f = Fixture::new().await;
@@ -879,7 +914,6 @@ pub mod deploy_func_write_errs {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn write_files_rolls_back_mixed_existed_and_did_not_exist_in_same_call() {
         let f = Fixture::new().await;

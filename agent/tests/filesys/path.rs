@@ -57,7 +57,6 @@ pub mod try_exists {
         assert!(!file.try_exists().unwrap());
     }
 
-    // sets Unix file modes to force an unreadable parent dir; no Windows analog
     #[cfg(unix)]
     #[tokio::test]
     async fn returns_err_when_parent_dir_is_unreadable() {

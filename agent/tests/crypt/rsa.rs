@@ -223,7 +223,6 @@ pub mod gen_key_pair {
         .unwrap_err();
     }
 
-    // asserts Unix 0o600/0o640 key-file mode bits; no Windows analog
     #[cfg(unix)]
     #[tokio::test]
     async fn file_permissions() {

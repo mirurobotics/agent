@@ -81,7 +81,6 @@ pub mod reports {
         assert!(stderr.starts_with("miru-agent: "), "got {stderr}");
     }
 
-    // sets Unix file modes to force an unreadable dir; no Windows analog
     #[cfg(unix)]
     #[tokio::test]
     async fn unreadable_auth_dir_is_undeterminable() {

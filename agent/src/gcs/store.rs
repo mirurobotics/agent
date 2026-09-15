@@ -269,8 +269,6 @@ impl Store {
 mod tests {
     // standard crates
     use std::collections::HashMap;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::{Arc, Mutex};
 
     // internal crates
@@ -601,11 +599,14 @@ mod tests {
             }
         }
 
+        #[cfg(unix)]
         pub mod source_unreadable {
-            #[cfg(unix)]
+            // standard crates
+            use std::os::unix::fs::PermissionsExt;
+
+            // internal crates
             use super::*;
 
-            #[cfg(unix)]
             #[tokio::test]
             async fn upload_unreadable_source_maps_to_local_io_err() {
                 // A source that stats fine but cannot be opened for reading passes

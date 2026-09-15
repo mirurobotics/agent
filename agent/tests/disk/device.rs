@@ -105,7 +105,6 @@ pub mod activation_state {
         assert_eq!(Activation::Activated, activation_state(&layout).unwrap());
     }
 
-    // sets Unix file modes to force an unreadable dir; no Windows analog
     #[cfg(unix)]
     #[tokio::test]
     async fn errs_when_auth_dir_is_unreadable() {
