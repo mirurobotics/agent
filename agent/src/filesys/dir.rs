@@ -29,8 +29,13 @@ impl PathExt for Dir {
 }
 
 impl Dir {
+    /// Normalizes the path by re-collecting its components, which drops `.`
+    /// segments and trailing separators and uses the host separator, so two
+    /// spellings of the same directory compare and display identically.
+    /// `..` is preserved, not resolved.
     pub fn new<T: Into<PathBuf>>(path: T) -> Dir {
-        Dir { path: path.into() }
+        let path: PathBuf = path.into().components().collect();
+        Dir { path }
     }
 
     pub fn name(&self) -> Result<&str, FileSysErr> {

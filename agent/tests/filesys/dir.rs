@@ -25,6 +25,40 @@ pub mod display {
     }
 }
 
+pub mod new_normalization {
+    use super::*;
+
+    #[test]
+    fn strips_dot_component() {
+        assert_eq!(
+            filesys::Dir::new(PathBuf::from("a").join(".").join("b"))
+                .path()
+                .as_os_str(),
+            PathBuf::from("a").join("b").as_os_str(),
+        );
+    }
+
+    #[test]
+    fn strips_trailing_separator() {
+        assert_eq!(
+            filesys::Dir::new(PathBuf::from("a").join("b").join(""))
+                .path()
+                .as_os_str(),
+            PathBuf::from("a").join("b").as_os_str(),
+        );
+    }
+
+    #[test]
+    fn preserves_parent_dir_component() {
+        assert_eq!(
+            filesys::Dir::new(PathBuf::from("a").join("..").join("b"))
+                .path()
+                .as_os_str(),
+            PathBuf::from("a").join("..").join("b").as_os_str(),
+        );
+    }
+}
+
 pub mod name {
     use super::*;
 
