@@ -252,7 +252,7 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     const REGION: &str = "us-east-1";
-    pub(super) const BUCKET: &str = "test-bucket";
+    const BUCKET: &str = "test-bucket";
 
     fn test_credentials() -> Credentials {
         Credentials {

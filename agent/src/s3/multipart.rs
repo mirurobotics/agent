@@ -337,7 +337,7 @@ mod tests {
     use super::*;
     use crate::s3::tests::{
         access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
-        store_with, temp_file_with, uri, BUCKET,
+        store_with, temp_file_with, uri,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
@@ -346,6 +346,8 @@ mod tests {
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+
+    const BUCKET: &str = "test-bucket";
 
     #[test]
     fn part_size_uses_fixed_size_below_the_part_ceiling() {
