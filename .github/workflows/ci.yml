@@ -62,7 +62,7 @@ jobs:
       - name: Run Windows Tests
         env:
           RUST_LOG: "off"
-        run: cargo test --package miru-agent --features test --locked
+        run: cargo test --package miru-agent --locked
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
