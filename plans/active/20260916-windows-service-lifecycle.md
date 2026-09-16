@@ -30,8 +30,8 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 
 ## Progress
 
-- [ ] M0 Activate plan (`docs(plans):` commit; roadmap PR 5 marker)
-- [ ] M1 `windows-service` dependency + lockfile; portable `service` module + tests
+- [x] M0 Activate plan (`docs(plans):` commit; roadmap PR 5 marker)
+- [x] M1 `windows-service` dependency + lockfile; portable `service` module + tests
 - [ ] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
 - [ ] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
 - [ ] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
@@ -40,7 +40,17 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 
 ## Surprises & Discoveries
 
-(Record as they happen, dated.)
+- 2026-09-16 (M1): the lockfile step added exactly `widestring 1.2.1` and `windows-service 0.8.1`
+  (both `bitflags 2.13.1` and `windows-sys 0.61.2` were already locked), but the re-resolve also
+  flipped `tempfile 3.27.0`'s `getrandom` edge from 0.3.4 to 0.4.3: tempfile declares
+  `getrandom = ">=0.3.0, <0.5"`, so any resolve unifies it onto the highest already-locked
+  version. Both getrandom versions stay in the lock for other dependents; the second
+  `cargo check` is a no-op, so the change is kept.
+- 2026-09-16 (M1): cargo-machete did not flag `windows-service` on Linux (it scans source text and
+  sees the `windows_service::Error` field in `service/errors.rs`), so no
+  `[package.metadata.cargo-machete]` entry was needed.
+- 2026-09-16 (M1): the `ServiceErr` Display test lives in `agent/tests/service/errors.rs`
+  (mirroring `agent/src/service/errors.rs`) rather than inside `stop_signal.rs`.
 
 ## Decision Log
 
