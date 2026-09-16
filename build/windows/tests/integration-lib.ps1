@@ -86,7 +86,7 @@ function Invoke-Msi {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][int[]]$AllowedExitCodes
     )
-    New-Item -ItemType Directory -Path $sessionLogs -Force | Out-Null
+    Initialize-Directory $sessionLogs | Out-Null
     $logPath = Join-Path $sessionLogs "$Name.log"
     $fullArguments = @($Arguments) + @("/qn", "/norestart", "/l*v", ('"{0}"' -f $logPath))
     Write-Host "MSI log ($Name): $logPath"
@@ -115,8 +115,7 @@ function Build-IntegrationPackage {
         [Parameter(Mandatory = $true)][string]$ProductCode,
         [Parameter(Mandatory = $true)][string]$Marker
     )
-    $output = Join-Path $artifactsRoot $Version
-    New-Item -ItemType Directory -Path $output -Force | Out-Null
+    $output = Initialize-Directory (Join-Path $artifactsRoot $Version)
     $payload = Join-Path $output "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, $Marker, [Text.Encoding]::ASCII)
     Invoke-DotNetBuild -ProjectPath $projectPath -BinDir $binDir -Version $Version `
@@ -132,9 +131,12 @@ function New-TestUser {
 }
 
 function Initialize-CustomerState {
-    New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
-    [IO.File]::WriteAllText($sentinelPath, "retain-me")
-    [IO.File]::WriteAllText($customerLogPath, $customerLogContents)
+    foreach ($path in $protectedRoots) {
+        Initialize-Directory $path | Out-Null
+    }
+    foreach ($file in $customerOwnedFiles) {
+        [IO.File]::WriteAllText($file.Path, $file.Contents)
+    }
 }
 
 function Invoke-InstallStage {
@@ -163,7 +165,7 @@ function Set-PermissiveAcl {
         [Parameter(Mandatory = $true)][string]$Path,
         [string]$OwnerSid = ""
     )
-    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    Initialize-Directory $Path | Out-Null
     $permissive = New-Object Security.AccessControl.DirectorySecurity
     $permissive.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
     Set-Acl -LiteralPath $Path -AclObject $permissive
@@ -254,11 +256,27 @@ function Assert-ProtectedState {
 
 function Assert-CustomerStateRetained {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    Assert-Equal "retain-me" ([IO.File]::ReadAllText($sentinelPath)) "$Stage keeps sentinel"
-    Assert-True (Test-Path -LiteralPath $logsRoot -PathType Container) "$Stage keeps logs directory"
-    Assert-Equal $customerLogContents ([IO.File]::ReadAllText($customerLogPath)) "$Stage keeps customer log"
-    foreach ($file in $representativeFiles) {
-        Assert-Equal $file.Contents ([IO.File]::ReadAllText($file.Path)) "$Stage keeps $($file.Path)"
+    Assert-ProtectedRootsRetained $Stage
+    Assert-OwnedFilesRetained $customerOwnedFiles $Stage
+    Assert-OwnedFilesRetained @($representativeFiles) $Stage
+}
+
+function Assert-ProtectedRootsRetained {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    foreach ($path in $protectedRoots) {
+        Assert-True (Test-Path -LiteralPath $path -PathType Container) `
+            "$Stage keeps $path"
+    }
+}
+
+function Assert-OwnedFilesRetained {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Files,
+        [Parameter(Mandatory = $true)][string]$Stage
+    )
+    foreach ($file in $Files) {
+        $contents = [IO.File]::ReadAllText($file.Path)
+        Assert-Equal $file.Contents $contents "$Stage keeps $($file.Path)"
     }
 }
 
@@ -338,8 +356,8 @@ function Assert-InheritedProtection {
 
 function New-ProbeWorkspace {
     param([Parameter(Mandatory = $true)][object[]]$Files)
-    $root = Join-Path $artifactsRoot ("probe-" + [Guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $root = Initialize-Directory (Join-Path $artifactsRoot `
+        ("probe-" + [Guid]::NewGuid().ToString("N")))
     & icacls.exe $root /grant ("$testUser`:(OI)(CI)F") | Out-Null
     Assert-Equal 0 $LASTEXITCODE "non-admin probe directory permissions"
     $workspace = [pscustomobject]@{

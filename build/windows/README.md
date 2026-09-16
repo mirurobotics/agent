@@ -126,7 +126,8 @@ The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
 failed-upgrade rollback, uninstall, ACL repair, state retention, and the
 absence of a `MiruAgent` service.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
-state, including customer-owned files under `%ProgramData%\Miru\logs`. The
+state, including customer-owned files under `%ProgramData%\Miru` and its
+`logs`, `auth`, and `tmp` children. The
 root and its `logs`, `auth`, and `tmp` children must be owned by Local System,
 with protected DACLs permitting inheritable full control only for Local System
 and built-in Administrators, including when those directories existed with

@@ -10,12 +10,6 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 Import-Module -Force -Name (Join-Path $PSScriptRoot "MsiTest.psm1")
 
-function Initialize-Directory {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    return (Resolve-Path -LiteralPath $Path).Path
-}
-
 function Reset-ChildDirectory {
     param(
         [Parameter(Mandatory = $true)][string]$Parent,

@@ -43,6 +43,12 @@ function New-MsiSessionLogDirectory {
     Join-Path $DeterministicLogs ([Guid]::NewGuid().ToString("N"))
 }
 
+function Initialize-Directory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    return (Resolve-Path -LiteralPath $Path).Path
+}
+
 function Open-MsiDatabase {
     param([Parameter(Mandatory = $true)][string]$Path)
     $installer = New-Object -ComObject WindowsInstaller.Installer
@@ -248,6 +254,7 @@ Export-ModuleMember -Function @(
     "Assert-True",
     "Assert-Equal",
     "New-MsiSessionLogDirectory",
+    "Initialize-Directory",
     "Open-MsiDatabase",
     "Close-MsiDatabase",
     "Get-MsiRows",
