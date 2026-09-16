@@ -85,6 +85,10 @@ jobs:
       - name: Run Windows Tests
         env:
           RUST_LOG: "off"
+          # The suites are filesystem-bound on this runner, so more libtest
+          # threads than the 4 cores overlap I/O waits. Step-level so the
+          # rust-cache key (hashes job-level RUST*/CARGO* env) is unchanged.
+          RUST_TEST_THREADS: "16"
         run: cargo test --package miru-agent --locked --timings
 
       - name: Upload Cargo Timings
