@@ -51,9 +51,6 @@ pub mod try_exists {
 
     #[test]
     fn returns_err_when_path_is_invalid() {
-        // An embedded NUL makes metadata fail with InvalidInput on every
-        // platform. chmod 000 is Unix-only, and a file occupying the parent
-        // is NotFound on Windows.
         let result = filesys::File::new("invalid\0path").try_exists();
         assert!(
             matches!(result, Err(FileSysErr::PathExistenceErr(_))),
@@ -133,6 +130,17 @@ pub mod abs_path {
         assert_eq!(abs("path//to///thing"), cwd_path.join("path/to/thing"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn replace_multiple_backslashes() {
+        let cwd = current();
+        let cwd_path = cwd.path();
+        assert_eq!(abs(r".\\"), cwd_path.clone());
+        assert_eq!(abs(r"..\\"), path::clean(cwd.parent().unwrap().path()));
+        assert_eq!(abs(r".\.\.\\."), cwd_path.clone());
+        assert_eq!(abs(r"path\\to\\\thing"), cwd_path.join(r"path\to\thing"));
+    }
+
     #[test]
     fn eliminate_current_dir() {
         let cwd = current().path().clone();
@@ -140,6 +148,16 @@ pub mod abs_path {
         assert_eq!(abs("./test"), cwd.join("test"));
         assert_eq!(abs("./test/./path"), cwd.join("test/path"));
         assert_eq!(abs("test/path/."), cwd.join("test/path"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn eliminate_current_dir_backslashes() {
+        let cwd = current().path().clone();
+        assert_eq!(abs(r#".\"#), cwd);
+        assert_eq!(abs(r".\test"), cwd.join("test"));
+        assert_eq!(abs(r".\test\.\path"), cwd.join(r"test\path"));
+        assert_eq!(abs(r"test\path\."), cwd.join(r"test\path"));
     }
 
     #[test]
@@ -167,6 +185,34 @@ pub mod abs_path {
         assert_eq!(abs("../test/"), parent.join("test"));
         assert_eq!(abs("../test/path"), parent.join("test/path"));
         assert_eq!(abs("../test/.."), parent);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn eliminate_parent_dir_backslashes() {
+        let cwd = current();
+        let cwd_path = cwd.path();
+        let parent = path::clean(cwd.parent().unwrap().path());
+        let grandparent = path::clean(cwd.parent().unwrap().parent().unwrap().path());
+
+        assert_eq!(abs(r"test\.."), cwd_path.clone());
+        assert_eq!(abs(r"test\path\.."), cwd_path.join("test"));
+        assert_eq!(abs(r"test\..\path"), cwd_path.join("path"));
+        assert_eq!(abs(r#"test\path\..\..\"#), cwd_path.clone());
+        assert_eq!(abs(r"test\path\..\..\.."), parent.clone());
+        assert_eq!(abs(r"test\path\..\..\..\.."), grandparent);
+        assert_eq!(
+            abs(r"test\path\..\..\another\path"),
+            cwd_path.join(r"another\path")
+        );
+        assert_eq!(
+            abs(r"test\path\..\..\another\path\.."),
+            cwd_path.join("another")
+        );
+        assert_eq!(abs(r"..\test"), parent.join("test"));
+        assert_eq!(abs(r#"..\test\"#), parent.join("test"));
+        assert_eq!(abs(r"..\test\path"), parent.join(r"test\path"));
+        assert_eq!(abs(r"..\test\.."), parent);
     }
 
     #[cfg(unix)]
@@ -200,7 +246,7 @@ pub mod abs_path {
         let root_str = root.to_string_lossy();
         let cases = [
             (format!(r"{root_str}\\"), root.clone()),
-            (format!(r"{root_str}.\\.\"), root.clone()),
+            (format!(r#"{root_str}.\\.\"#), root.clone()),
             (
                 format!(r"{root_str}path\\to\.\thing\..\file"),
                 root.join("path").join("to").join("file"),
@@ -210,6 +256,54 @@ pub mod abs_path {
         for (input, expected) in cases {
             assert_eq!(abs(input), expected);
         }
+    }
+
+    /// `C:foo` has a drive prefix but no root, so it is not absolute.
+    /// `Path::join` then ignores cwd and returns the drive-relative path.
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_relative_is_not_absolute() {
+        let cwd = current().path().to_string_lossy();
+        let drive: String = cwd.chars().take(2).collect();
+        assert_eq!(
+            drive.chars().nth(1),
+            Some(':'),
+            "expected a disk cwd, got {cwd}"
+        );
+        let drive_rel = format!("{drive}foo");
+
+        assert!(
+            !Path::new(&drive_rel).is_absolute(),
+            "{drive_rel} must not be absolute"
+        );
+        assert_eq!(abs(&drive_rel), PathBuf::from(&drive_rel));
+        assert_ne!(abs(&drive_rel), host_root().join("foo"));
+    }
+
+    /// `\foo` has a root but no drive prefix. Joining it onto cwd keeps the
+    /// drive and replaces the rest, so abs_path is `<drive>\foo`.
+    #[cfg(windows)]
+    #[test]
+    fn windows_current_drive_root_joins_the_cwd_prefix() {
+        assert!(!Path::new(r"\foo").is_absolute());
+        assert_eq!(abs(r"\foo"), host_root().join("foo"));
+        assert_eq!(abs(r"\foo\.\bar"), host_root().join("foo").join("bar"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_unc_is_absolute() {
+        let unc = PathBuf::from(r"\\server\share\a\b");
+        assert!(unc.is_absolute());
+        assert_eq!(abs(&unc), PathBuf::from(r"\\server\share\a\b"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_verbatim_disk_is_absolute() {
+        let verbatim = PathBuf::from(r"\\?\C:\foo\bar");
+        assert!(verbatim.is_absolute());
+        assert_eq!(abs(&verbatim), PathBuf::from(r"\\?\C:\foo\bar"));
     }
 }
 
@@ -249,6 +343,20 @@ pub mod clean {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn replace_multiple_backslashes() {
+        let cases = [
+            (r".\\", "."),
+            (r"..\\", ".."),
+            (r".\.\.\\.", "."),
+            (r"path\\to\\\thing", r"path\to\thing"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
+        }
+    }
+
     #[test]
     fn eliminate_current_dir() {
         let cases = [
@@ -256,6 +364,20 @@ pub mod clean {
             ("./test", "test"),
             ("./test/./path", "test/path"),
             ("test/path/.", "test/path"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn eliminate_current_dir_backslashes() {
+        let cases = [
+            (r#".\"#, "."),
+            (r".\test", "test"),
+            (r".\test\.\path", r"test\path"),
+            (r"test\path\.", r"test\path"),
         ];
         for (input, expected) in cases {
             assert_eq!(cleaned(input), PathBuf::from(expected));
@@ -277,6 +399,28 @@ pub mod clean {
             ("../test/", "../test"),
             ("../test/path", "../test/path"),
             ("../test/..", ".."),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn eliminate_parent_dir_backslashes() {
+        let cases = [
+            (r"test\..", "."),
+            (r"test\path\..", "test"),
+            (r"test\..\path", "path"),
+            (r#"test\path\..\..\"#, "."),
+            (r"test\path\..\..\..", ".."),
+            (r"test\path\..\..\..\..", r"..\.."),
+            (r"test\path\..\..\another\path", r"another\path"),
+            (r"test\path\..\..\another\path\..", "another"),
+            (r"..\test", r"..\test"),
+            (r#"..\test\"#, r"..\test"),
+            (r"..\test\path", r"..\test\path"),
+            (r"..\test\..", ".."),
         ];
         for (input, expected) in cases {
             assert_eq!(cleaned(input), PathBuf::from(expected));
@@ -305,5 +449,19 @@ pub mod clean {
         for (input, expected) in cases {
             assert_eq!(cleaned(input), PathBuf::from(expected));
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_unc_and_verbatim() {
+        assert_eq!(
+            cleaned(r"\\server\share\a\b\.."),
+            PathBuf::from(r"\\server\share\a")
+        );
+        assert_eq!(
+            cleaned(r"\\server\share\a\.\b"),
+            PathBuf::from(r"\\server\share\a\b")
+        );
+        assert_eq!(cleaned(r"\\?\C:\foo\..\bar"), PathBuf::from(r"\\?\C:\bar"));
     }
 }
