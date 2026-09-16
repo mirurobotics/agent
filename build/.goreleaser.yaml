@@ -29,14 +29,24 @@ builds:
     # Built natively on a Windows runner (aws-lc-sys cannot cross-compile
     # from Linux) through `cargo auditable`, so the PE also carries a
     # `.dep-v0` section. The workflow downloads the runner's artifact into
-    # build/prebuilt/windows_amd64/ before GoReleaser runs; the prebuilt
-    # builder fails loudly if the file is missing.
-    builder: prebuilt
-    goos: [windows]
-    goarch: [amd64]
-    prebuilt:
-      path: prebuilt/{{ .Os }}_{{ .Arch }}/miru-agent.exe
-    binary: miru-agent
+    # build/prebuilt/windows_amd64/ before GoReleaser runs.
+    #
+    # The builder image ships OSS GoReleaser, which lacks the Pro `prebuilt`
+    # builder, so this reuses the Rust builder with an importer as its tool:
+    # GoReleaser runs `build/import-prebuilt.sh build --target=... --release
+    # -p=miru-agent` from the repo root (dir: ..), the script copies the
+    # staged .exe to target/<triple>/release/ (failing loudly if it is
+    # missing), and GoReleaser picks it up from there like any Rust build.
+    builder: rust
+    tool: ./build/import-prebuilt.sh
+    command: build
+    binary: "miru-agent"
+    targets:
+      - x86_64-pc-windows-msvc
+    dir: ..
+    flags:
+      - --release
+      - -p=miru-agent
 
 nfpms:
   - id: agent
