@@ -1032,34 +1032,31 @@ pub mod remove_func_success {
         f.remove(&dpl, &[]).await.unwrap();
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn delete_error_is_propagated() {
         let f = Fixture::new().await;
 
-        // deploy a file to a directory, then lock the directory so delete fails
-        let ci = seed_and_deploy(&f, "locked/config.json", r#"{"v": 1}"#).await;
-        let dest = filesys::File::new(&ci.filepath);
-        assert!(dest.path().exists(), "file should exist before removal");
-
-        // lock the parent directory so remove_file fails with EACCES
-        let parent = dest.parent().unwrap();
-        dirs::set_permissions(&parent, read_only()).await.unwrap();
+        // `remove_file` on a directory fails on every platform, so the dest
+        // stays in place and the error propagates.
+        let dest_dir = f.temp_dir.subdir("config.json");
+        dirs::create(&dest_dir).await.unwrap();
+        let dest = filesys::File::new(dest_dir.path().clone());
+        let ci = ConfigInstance {
+            filepath: dest.path().display().to_string(),
+            ..Default::default()
+        };
+        f.seed_cfg_inst(&ci, r#"{"v": 1}"#.to_string()).await;
 
         let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
 
-        // restore permissions so tempdir drop can recurse
-        dirs::set_permissions(&parent, writeable()).await.unwrap();
-
-        // deletion errors are now propagated
         assert!(
-            result.is_err(),
-            "remove should return error when deletion fails"
+            matches!(result, Err(DeployErr::FileSysErr(_))),
+            "remove should return error when deletion fails, got {result:?}"
         );
         assert!(
-            dest.path().exists(),
-            "file should still exist since delete was blocked"
+            dest.path().is_dir(),
+            "directory destination should still exist since delete was blocked"
         );
     }
 }
