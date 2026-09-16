@@ -35,7 +35,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 - [x] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
 - [x] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
 - [x] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
-- [ ] M5 `ARCHITECTURE.md` updates
+- [x] M5 `ARCHITECTURE.md` updates
 - [ ] M6 `./scripts/preflight.sh` CLEAN; CI green incl. `windows-check`; PR leaves draft
 
 ## Surprises & Discoveries
