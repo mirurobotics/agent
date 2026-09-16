@@ -106,11 +106,12 @@ provisioned, and 1 when the state is undetermined or an error occurs.
 
 ## Validation
 
-Every pull request runs the agent test suite natively on Windows. Pull
-requests that change this directory or the CI/release workflows additionally
-run the complete package and installer lifecycle matrix below. The complete
-matrix also runs after pushes to `main` and `release/*`, and when the release
-workflow calls CI for a tag. Superseded pull-request CI runs are cancelled.
+Every pull request runs the agent test suite natively on Windows
+(`windows-check`). Pull requests that change this directory or the CI/release
+workflows additionally run the package and installer lifecycle on a separate
+`windows-package` job. That job also runs after pushes to `main` and
+`release/*`, and when the release workflow calls CI for a tag. Superseded
+pull-request CI runs are cancelled.
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
 integration matrix only on a disposable test machine. Normal integration removes
