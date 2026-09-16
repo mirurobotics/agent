@@ -580,8 +580,9 @@ pub mod deploy_func_validation_errs {
 pub mod deploy_func_backup_errs {
     use super::*;
 
-    /// An existing destination that is a directory, so `copy_to` fails with
-    /// `InvalidInput` on every platform before a backup sibling is created.
+    /// An existing destination that is a directory, so the backup copy fails
+    /// before a backup sibling is created. The failure surfaces differently
+    /// per platform, see [`is_backup_copy_failure`].
     async fn dest_is_a_directory(f: &Fixture, name: &str) -> (filesys::Dir, String) {
         let dir = f.temp_dir.subdir(name);
         dirs::create(&dir).await.unwrap();
@@ -589,8 +590,22 @@ pub mod deploy_func_backup_errs {
         (dir, path)
     }
 
+    /// Copying a directory as a file is `InvalidInput` on Unix, which the
+    /// deploy layer passes through as `FileSysErr`; Windows reports
+    /// `PermissionDenied` for the same open, which it classifies as
+    /// `BackupAccessDenied`.
+    #[cfg(unix)]
+    fn is_backup_copy_failure(result: &Result<(), DeployErr>) -> bool {
+        matches!(result, Err(DeployErr::FileSysErr(_)))
+    }
+
+    #[cfg(windows)]
+    fn is_backup_copy_failure(result: &Result<(), DeployErr>) -> bool {
+        matches!(result, Err(DeployErr::BackupAccessDenied(_)))
+    }
+
     #[tokio::test]
-    async fn directory_destination_maps_to_filesys_err() {
+    async fn directory_destination_fails_the_backup_copy() {
         let f = Fixture::new().await;
         let (dest_dir, c_path) = dest_is_a_directory(&f, "c.json").await;
 
@@ -603,8 +618,8 @@ pub mod deploy_func_backup_errs {
         let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
         let result = f.deploy(&deployment).await;
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(_))),
-            "expected FileSysErr, got {result:?}"
+            is_backup_copy_failure(&result),
+            "expected a backup copy failure, got {result:?}"
         );
 
         assert!(
@@ -650,8 +665,8 @@ pub mod deploy_func_backup_errs {
         let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
         assert!(
-            matches!(&result, Err(DeployErr::FileSysErr(_))),
-            "expected FileSysErr, got {result:?}"
+            is_backup_copy_failure(&result),
+            "expected a backup copy failure, got {result:?}"
         );
 
         assert_eq!(
