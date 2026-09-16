@@ -261,7 +261,7 @@ pub fn missing_response_field(operation: &str, object: &Object, field: &str) -> 
 mod tests {
     use super::*;
     use crate::errors::Error as _;
-    use crate::test_utils::filesys::{abs_file, missing_file};
+    use crate::test_utils::filesys::missing_file;
     use aws_sdk_s3::config::http::HttpResponse;
     use aws_sdk_s3::error::ConnectorError;
     use aws_smithy_types::body::SdkBody;
@@ -383,7 +383,7 @@ mod tests {
             // A failure writing bytes to the local destination is a terminal
             // local I/O error, never a network condition.
             let err = std::io::Error::other("no space left on device");
-            let file = abs_file("data/out.bin");
+            let file = File::new("/data/out.bin");
             let file_path = file.to_string();
             let mapped = map_body_io_err("get_object", &object(), &file, err);
             assert!(matches!(mapped, S3Err::LocalIoErr(_)));
@@ -400,7 +400,7 @@ mod tests {
             // A failure opening the local source file for streaming is also a
             // terminal local I/O error.
             let err = ByteStreamError::from(std::io::Error::other("permission denied"));
-            let file = abs_file("data/in.bin");
+            let file = File::new("/data/in.bin");
             let file_path = file.to_string();
             let mapped = map_bytestream_err("put_object", &object(), &file, &err);
             assert!(matches!(mapped, S3Err::LocalIoErr(_)));

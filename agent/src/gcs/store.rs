@@ -280,7 +280,7 @@ mod tests {
 
     // internal crates
     use crate::test_utils::{
-        filesys::{abs_file, dirs as test_dirs, files as test_files, missing_file},
+        filesys::{dirs as test_dirs, files as test_files, missing_file},
         http_client::run_server,
     };
     use miru_agent::errors::{Code, Error};
@@ -714,7 +714,7 @@ mod tests {
                 let store = http_store(rec).await;
                 // The destination's parent directory does not exist, so creating the file
                 // fails after the object is fetched.
-                let dest = abs_file("nonexistent/dir/out.bin");
+                let dest = File::new("/nonexistent/dir/out.bin");
 
                 let err = store.get(&obj("blobs/data.bin"), &dest).await.unwrap_err();
 

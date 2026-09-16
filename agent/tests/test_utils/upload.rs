@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 // internal crates
-use super::filesys::abs_file;
 use super::token_manager::MockTokenManager;
 use backend_api::models::{
     Upload, UploadCredentials, UploadDestination, UploadStatus, UploadWithCredentials,
 };
 use miru_agent::authn::Token;
 use miru_agent::data_uploads::upload::Job;
+use miru_agent::filesys::File;
 
 // external crates
 use chrono::Utc;
@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 pub fn make_job(name: &str) -> Job {
     let now = Utc::now();
     Job {
-        file: abs_file(&format!("data/{name}")),
+        file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
         mtime: now,

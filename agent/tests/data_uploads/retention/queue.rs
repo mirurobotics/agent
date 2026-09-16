@@ -1,6 +1,6 @@
 // internal crates
 use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
-use crate::test_utils::filesys::{abs_file, abs_path, dirs as test_dirs};
+use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
@@ -22,7 +22,7 @@ fn now() -> DateTime<Utc> {
 fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
     let observed_at = DateTime::from_timestamp(observed_secs, 0).unwrap();
     Job {
-        file: abs_file(&format!("data/{name}")),
+        file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
         mtime: DateTime::from_timestamp(900, 0).unwrap(),

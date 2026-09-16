@@ -177,7 +177,7 @@ pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io:
 mod tests {
     use super::*;
     use crate::errors::Error as _;
-    use crate::test_utils::filesys::{abs_file, missing_file};
+    use crate::test_utils::filesys::missing_file;
     use google_cloud_gax::error::rpc::{Code, Status};
 
     fn object() -> Object {
@@ -314,7 +314,7 @@ mod tests {
             // A failure writing bytes to the local destination is a terminal
             // local I/O error, never a network condition.
             let err = std::io::Error::other("no space left on device");
-            let file = abs_file("data/out.bin");
+            let file = File::new("/data/out.bin");
             let file_path = file.to_string();
             let mapped = map_body_io_err("get_object", &object(), &file, err);
             assert!(matches!(mapped, GcsErr::LocalIoErr(_)));

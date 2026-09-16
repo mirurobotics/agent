@@ -91,9 +91,9 @@ parallel. When adding a test that uses a fixed path or other global state, add
 Gate a test with `#[cfg(unix)]` only when it asserts Unix-specific semantics
 (mode bits, mode-induced permission denial, symlinks). Otherwise use a portable
 fixture so the test also runs in the `windows-check` CI job.
-Build rooted fixture paths with
-`test_utils::filesys::{abs_path, abs_file, abs_dir}` rather than `/`-prefixed
-string literals.
+`File::new` and `Dir::new` normalize path components, so `/`-rooted literals are
+fine for them on every platform; build a raw `PathBuf` fixture that will be
+compared or displayed with `test_utils::filesys::abs_path`.
 
 Integration test files in `agent/tests/` mirror the `agent/src/` module structure.
 

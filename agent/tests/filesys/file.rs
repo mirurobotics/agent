@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
-use crate::test_utils::filesys::{abs_file, abs_path};
+use crate::test_utils::filesys::abs_path;
 use miru_agent::filesys::{self, file, FileSysErr, PathExt};
 
 // external crates
@@ -60,7 +60,7 @@ pub mod new_normalization {
     #[test]
     fn preserves_parent_dir_component() {
         // .. is NOT resolved — it is preserved as a component
-        assert_ne!(abs_file("a/../b"), abs_file("b"),);
+        assert_ne!(filesys::File::new("/a/../b"), filesys::File::new("/b"),);
     }
 }
 
@@ -121,7 +121,7 @@ pub mod parent {
 
     #[test]
     fn root_file() {
-        let file = abs_file("file.txt");
+        let file = filesys::File::new("/file.txt");
         let parent = file.parent().unwrap();
         assert_eq!(parent.path(), &abs_path(""));
     }
@@ -171,7 +171,7 @@ pub mod name {
 
     #[tokio::test]
     async fn root_path() {
-        let file = abs_file("");
+        let file = filesys::File::new("/");
         assert!(matches!(
             file.name().unwrap_err(),
             FileSysErr::UnknownFileNameErr { .. }

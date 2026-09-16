@@ -66,6 +66,9 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   serializer, so they still pin that `File` serializes as a bare string while
   staying host-portable. Fixture paths across the suite come from
   `test_utils::filesys::{abs_path, abs_file, abs_dir}`.
+  2026-09-15: After `Dir::new` gained the same normalization as `File::new`
+  (#240), the `abs_file`/`abs_dir` wrappers were removed; only `abs_path` (raw
+  `PathBuf` fixtures) and `missing_file` remain.
 - 2026-09-11: an existing directory represented as a `File` supplies a portable
   delete failure after a successful stat. It exercises retry counts, backoff,
   attempt caps, and persistence without a Unix symlink loop.
@@ -101,6 +104,9 @@ the first CI run; residual runtime failures are then fixed from CI logs.
   serializer, so they still pin that `File` serializes as a bare string while
   staying host-portable. Fixture paths across the suite come from
   `test_utils::filesys::{abs_path, abs_file, abs_dir}`.
+  2026-09-15: After `Dir::new` gained the same normalization as `File::new`
+  (#240), the `abs_file`/`abs_dir` wrappers were removed; only `abs_path` (raw
+  `PathBuf` fixtures) and `missing_file` remain.
 - 2026-09-11: replace the stat-classification canary's child-beneath-a-file
   fixture with a path containing an embedded NUL. Rust rejects that path as
   invalid input before filesystem lookup on Unix and Windows, deterministically

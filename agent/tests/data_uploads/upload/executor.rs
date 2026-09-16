@@ -8,12 +8,9 @@ use crate::mocks::{
     stub_token_manager::StubTokenManager,
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use crate::test_utils::{
-    filesys::abs_file,
-    upload::{
-        destination, make_job, pending_response, response_metadata, response_with_status,
-        s3_credentials, token_manager,
-    },
+use crate::test_utils::upload::{
+    destination, make_job, pending_response, response_metadata, response_with_status,
+    s3_credentials, token_manager,
 };
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus, UploadWithCredentials};
 use miru_agent::authn::errors::MockError as AuthnMockError;
@@ -21,6 +18,7 @@ use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{Job, LiveExecutor, UploadErr, UploadExecutor};
 use miru_agent::errors::Error;
+use miru_agent::filesys::File;
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
 
@@ -263,7 +261,7 @@ async fn confirm_4xx_failure_is_terminal() {
 
 #[test]
 fn create_request_maps_job_fields() {
-    let file = abs_file("data/a.log");
+    let file = File::new("/data/a.log");
     let file_path = file.to_string();
     let job = Job {
         file,

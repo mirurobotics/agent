@@ -187,7 +187,7 @@ mod tests {
     // internal crates
     use super::s3_config;
     use crate::test_utils::{
-        filesys::{abs_file, files as test_files, missing_file},
+        filesys::{files as test_files, missing_file},
         http_client::run_server,
         upload::{destination, response_metadata, s3_credentials_json},
     };
@@ -195,7 +195,7 @@ mod tests {
     use miru_agent::data_uploads::upload::errors::TransferErr;
     use miru_agent::data_uploads::upload::{ObjectTransfer, SdkTransfer, UploadErr};
     use miru_agent::errors::Error as ErrorTrait;
-    use miru_agent::filesys::{files, WriteOptions};
+    use miru_agent::filesys::{files, File, WriteOptions};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -355,7 +355,7 @@ mod tests {
             .transfer(
                 &creds,
                 &destination(),
-                &abs_file("data/a.log"),
+                &File::new("/data/a.log"),
                 &HashMap::new(),
             )
             .await
@@ -374,7 +374,7 @@ mod tests {
             .transfer(
                 &creds,
                 &destination(),
-                &abs_file("data/a.log"),
+                &File::new("/data/a.log"),
                 &HashMap::new(),
             )
             .await
@@ -468,7 +468,7 @@ mod tests {
             .transfer(
                 &creds,
                 &destination(),
-                &abs_file("data/a.log"),
+                &File::new("/data/a.log"),
                 &HashMap::new(),
             )
             .await
@@ -489,7 +489,7 @@ mod tests {
             .transfer(
                 &creds,
                 &destination(),
-                &abs_file("data/a.log"),
+                &File::new("/data/a.log"),
                 &HashMap::new(),
             )
             .await

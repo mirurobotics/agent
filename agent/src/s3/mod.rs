@@ -239,9 +239,10 @@ mod tests {
     // internal crates
     use crate::test_utils::{
         error_harnesses::{assert_error, Expected},
-        filesys::{abs_file, files as test_files, missing_file},
+        filesys::{files as test_files, missing_file},
     };
     use miru_agent::errors::{Code, Error, HTTPCode};
+    use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, WriteOptions};
     use miru_agent::s3::{Config, Credentials, Object, S3Err, Store};
@@ -611,7 +612,7 @@ mod tests {
                 // The destination's parent directory does not exist, so creating the
                 // file fails after the object is fetched — exercising the streaming
                 // I/O error path.
-                let dest = abs_file("nonexistent/dir/out.bin");
+                let dest = File::new("/nonexistent/dir/out.bin");
                 let (store, _replay) = store_expecting(
                     req("GET", "blobs/data.bin?x-id=GetObject"),
                     resp(200, b"body"),

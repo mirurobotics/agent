@@ -10,7 +10,7 @@
 
 // internal crates
 use crate::data_uploads::queue::queue_suite;
-use crate::test_utils::filesys::{abs_file, abs_path, dirs as test_dirs};
+use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// every one of these is due at `queue::now()`.
 fn upload_job(name: &str) -> Job {
     Job {
-        file: abs_file(&format!("data/{name}")),
+        file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
         mtime: DateTime::from_timestamp(900, 0).unwrap(),
@@ -49,7 +49,7 @@ fn due_at_is_min_utc() {
 
 fn make_job(name: &str) -> Job {
     Job {
-        file: abs_file(&format!("data/{name}")),
+        file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
         mtime: Utc::now(),

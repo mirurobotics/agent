@@ -330,7 +330,6 @@ mod tests {
     use crate::data_uploads::scan::state::{Candidate, Config, Observation, RuleState, StableFile};
     use crate::filesys::{dirs, Dir, PathExt, WriteOptions};
     use crate::models::{Deployment, FileRule, FileRuleSource, FileRuleUpload};
-    use crate::test_utils::filesys::abs_file;
     use crate::test_utils::filesys::dirs as test_dirs;
     use crate::test_utils::filesys::dirs::TempDir;
 
@@ -753,7 +752,7 @@ mod tests {
 
         #[test]
         fn unchanged() {
-            let file = abs_file("none/x.mcap");
+            let file = File::new("/none/x.mcap");
             let base = bare_observation(file.clone());
             let cand = candidate(file, base.clone());
             assert!(is_metadata_stable(&cand, &base));
@@ -761,7 +760,7 @@ mod tests {
 
         #[test]
         fn size_differs() {
-            let file = abs_file("none/x.mcap");
+            let file = File::new("/none/x.mcap");
             let base = bare_observation(file.clone());
             let cand = candidate(file, base.clone());
             let mut diff_size = base;
@@ -771,7 +770,7 @@ mod tests {
 
         #[test]
         fn mtime_differs() {
-            let file = abs_file("none/x.mcap");
+            let file = File::new("/none/x.mcap");
             let base = bare_observation(file.clone());
             let cand = candidate(file, base.clone());
             let mut diff_mtime = base;
@@ -787,7 +786,7 @@ mod tests {
 
         #[test]
         fn absent() {
-            let file = abs_file("none/s.mcap");
+            let file = File::new("/none/s.mcap");
             let state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let cand = candidate(file.clone(), bare_observation(file));
             assert_eq!(super::find_previous_stable_file(&state, &cand), None);
@@ -795,7 +794,7 @@ mod tests {
 
         #[test]
         fn returns_last_ledger_entry() {
-            let file = abs_file("none/s.mcap");
+            let file = File::new("/none/s.mcap");
             let mut state = RuleState::new(config("d", "r1", "/none/*.mcap", 0));
             let first = stable_file(file.clone(), ts(900));
             let last = stable_file(file.clone(), ts(1000));
