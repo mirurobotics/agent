@@ -91,7 +91,7 @@ jobs:
   windows-package:
     needs: windows_package_scope
     if: needs.windows_package_scope.outputs.windows_package == 'true'
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
