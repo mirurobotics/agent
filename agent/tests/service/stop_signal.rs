@@ -110,3 +110,15 @@ async fn clones_share_one_signal() {
         .await
         .expect("waiter on the clone resolves");
 }
+
+#[tokio::test]
+async fn dropping_every_handle_resolves_waiters() {
+    let stop = StopSignal::new();
+    let waiter = stop.wait();
+
+    drop(stop);
+
+    timeout(RESOLVE_WITHIN, waiter)
+        .await
+        .expect("waiter resolves once no handle can trigger the signal");
+}

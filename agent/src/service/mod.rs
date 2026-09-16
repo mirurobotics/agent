@@ -60,10 +60,11 @@ impl StopSignal {
         *self.tx.borrow()
     }
 
-    /// Returns a future that resolves once the signal is triggered. The
-    /// future owns its receiver so it is `'static` and can be handed to
-    /// `app::run`; it checks the current value first, so it resolves at once
-    /// when the signal is already triggered.
+    /// Returns a future that resolves once the signal is triggered, or once
+    /// every `StopSignal` handle has been dropped (a stop that can no longer
+    /// arrive). The future owns its receiver so it is `'static` and can be
+    /// handed to `app::run`; it checks the current value first, so it
+    /// resolves at once when the signal is already triggered.
     pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         let mut rx = self.tx.subscribe();
         async move {

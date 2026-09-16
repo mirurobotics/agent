@@ -36,7 +36,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 - [x] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
 - [x] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
 - [x] M5 `ARCHITECTURE.md` updates
-- [ ] M6 `./scripts/preflight.sh` CLEAN; CI green incl. `windows-check`; PR leaves draft
+- [x] M6 `./scripts/preflight.sh` CLEAN; CI green incl. `windows-check`; PR leaves draft (draft PR #242; leaving draft is the orchestrator's call)
 
 ## Surprises & Discoveries
 
@@ -68,6 +68,12 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   generated `backend-api` crate (`manual_map`); only `scripts/lint.sh` (the CI `--fix
   --allow-dirty` form) is authoritative, and it is clean. Covgate after M4: app 94.13, cli 100,
   platform 100, service 100.
+- 2026-09-16 (M6 refine): the first push (`60c54605`) was green on all four CI jobs, and
+  `windows-check` listed all 17 `service::windows::*` tests as `ok` with zero rustc warnings. The
+  refine review found no defects; its one note is that `StopSignal::wait` also resolves when every
+  `StopSignal` handle is dropped (`watch::Receiver::wait_for` returns `Err` on close). Unreachable
+  in service mode (`service_body` owns the signal for the agent's whole run), so the behavior is
+  kept and now stated in the doc comment plus a `dropping_every_handle_resolves_waiters` test.
 
 ## Decision Log
 
@@ -127,7 +133,22 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+- Delivered on draft PR #242 (`feat/windows-service-lifecycle`, 7 commits after M0): the `service`
+  module (`StopSignal`, `RunOutcome`, `ServiceErr`, `service::windows` SCM plumbing), the
+  `--console` flag, `platform::supports_idle_exit` + `LifecycleOptions::resolve_persistence`, the
+  sync-`main` restructure with `run_runtime_mode` / `service_body` / generic `run_agent`, and the
+  `ARCHITECTURE.md` updates. Linux behavior is unchanged; `app::run` was not touched.
+- Validation: `./scripts/preflight.sh` CLEAN locally; CI on the first pushed head (`60c54605`) was
+  green on `lint`, `test`, `tools`, and `windows-check`, the latter running all 17
+  `service::windows::*` tests plus `stop_signal`, with zero rustc warnings. Covgate: service 100,
+  app 94.06, cli 100, platform 100. Lockfile stable (second `cargo check` a no-op).
+- What worked: the plan's exact signatures and the Decision Log let fresh-context agents implement
+  each milestone without design churn, and compiling the Windows-only files against a local shim of
+  the `windows-service` public surface caught nothing but gave confidence before the single
+  Windows CI round — which passed first time.
+- Follow-ups (out of scope here): MSI `ServiceInstall` (PR 8) must use `SERVICE_NAME =
+  "miru-agent"`; Event Log sink, PRESHUTDOWN, and a service-account privilege check remain
+  roadmap items. Manual SCM validation (`sc.exe start/stop`) still needs a Windows host.
 
 ## Context and Orientation
 
