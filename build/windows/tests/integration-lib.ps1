@@ -271,7 +271,8 @@ function Assert-ProtectedRootsRetained {
 
 function Assert-OwnedFilesRetained {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Files,
+        # Empty until the first non-admin probe registers representative files.
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Files,
         [Parameter(Mandatory = $true)][string]$Stage
     )
     foreach ($file in $Files) {
