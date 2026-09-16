@@ -30,7 +30,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 
 ## Progress
 
-- [x] M0 Activate plan (`docs(plans):` commit; roadmap PR 5 marker)
+- [x] M0 Activate plan (`docs(plans):` commit; roadmap service-lifecycle marker (PR 5 before #236 renumbered it to PR 6))
 - [x] M1 `windows-service` dependency + lockfile; portable `service` module + tests
 - [x] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
 - [x] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
