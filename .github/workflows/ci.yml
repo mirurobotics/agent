@@ -39,7 +39,7 @@ jobs:
         run: LINT_FIX=0 ./scripts/lint.sh
 
   windows-check:
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 60
     env:
       # Full PDBs dominate MSVC link time; test diagnostics do not need them.
