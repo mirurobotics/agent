@@ -2,7 +2,7 @@
 use crate::errors::Trace;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceErr {
+pub enum ScmErr {
     #[error(
         "miru-agent was not started by the Windows Service Control Manager; \
          run it with --console to run in the foreground"
@@ -17,4 +17,4 @@ pub enum ServiceErr {
     },
 }
 
-impl crate::errors::Error for ServiceErr {}
+impl crate::errors::Error for ScmErr {}

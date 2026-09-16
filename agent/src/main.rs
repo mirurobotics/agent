@@ -20,10 +20,10 @@ use miru_agent::network::BackendHost;
 use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
-use miru_agent::service::RunOutcome;
-#[cfg(windows)]
-use miru_agent::service::{self, StopSignal};
 use miru_agent::version;
+use miru_agent::windows::RunOutcome;
+#[cfg(windows)]
+use miru_agent::windows::{self, StopSignal};
 use miru_agent::workers::mqtt;
 
 // external crates
@@ -81,7 +81,7 @@ fn run_runtime_mode(console: bool) {
     #[cfg(windows)]
     {
         if !console {
-            if let Err(e) = service::windows::dispatch(service_body) {
+            if let Err(e) = windows::scm::dispatch(service_body) {
                 eprintln!("miru-agent: {e}");
                 std::process::exit(1);
             }
@@ -319,7 +319,7 @@ async fn get_bootstrap_backend_host() -> BackendHost {
 
 #[cfg(windows)]
 async fn await_shutdown_signal() {
-    // console mode: ctrl-c; service mode uses `service::StopSignal`
+    // console mode: ctrl-c; service mode uses `windows::StopSignal`
     let _ = tokio::signal::ctrl_c().await;
     info!("received ctrl-c, shutting down...");
 }

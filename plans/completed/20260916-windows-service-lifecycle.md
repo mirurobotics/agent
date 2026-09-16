@@ -31,8 +31,8 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 ## Progress
 
 - [x] M0 Activate plan (`docs(plans):` commit; roadmap service-lifecycle marker (PR 5 before #236 renumbered it to PR 6))
-- [x] M1 `windows-service` dependency + lockfile; portable `service` module + tests
-- [x] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
+- [x] M1 `windows-service` dependency + lockfile; portable `windows` module + tests
+- [x] M2 `windows/scm.rs` SCM plumbing + `cfg(windows)` tests
 - [x] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
 - [x] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
 - [x] M5 `ARCHITECTURE.md` updates
@@ -49,13 +49,13 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 - 2026-09-16 (M1): cargo-machete did not flag `windows-service` on Linux (it scans source text and
   sees the `windows_service::Error` field in `service/errors.rs`), so no
   `[package.metadata.cargo-machete]` entry was needed.
-- 2026-09-16 (M1): the `ServiceErr` Display test lives in `agent/tests/service/errors.rs`
-  (mirroring `agent/src/service/errors.rs`) rather than inside `stop_signal.rs`.
+- 2026-09-16 (M1): the `ScmErr` Display test lives in `agent/tests/windows/errors.rs`
+  (mirroring `agent/src/windows/errors.rs`) rather than inside `stop_signal.rs`.
 - 2026-09-16 (M2): `scripts/lint.sh` runs `cargo fmt` in write mode and rustfmt follows the
   `#[cfg(windows)] pub mod windows;` declaration, so both Windows-only files are formatted (and
   `fmt --check`-clean) on Linux even though rustc/clippy never compile them here.
-- 2026-09-16 (M2): to catch type/borrow errors before `windows-check`, `service/windows.rs` and
-  `tests/service/windows.rs` were also compiled and run on Linux against a throwaway shim crate
+- 2026-09-16 (M2): to catch type/borrow errors before `windows-check`, `windows/scm.rs` and
+  `tests/windows/scm.rs` were also compiled and run on Linux against a throwaway shim crate
   (session scratchpad, not committed) that mirrors the windows-service 0.8.1 public signatures
   copied from the registry source (`ServiceStatus` derives, `#[non_exhaustive]` `Error` /
   `ServiceControl`, `register` bounds, `define_windows_service!` verbatim). All 17 tests plus a
@@ -69,7 +69,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   --allow-dirty` form) is authoritative, and it is clean. Covgate after M4: app 94.13, cli 100,
   platform 100, service 100.
 - 2026-09-16 (M6 refine): the first push (`60c54605`) was green on all four CI jobs, and
-  `windows-check` listed all 17 `service::windows::*` tests as `ok` with zero rustc warnings. The
+  `windows-check` listed all 17 `windows::scm::*` tests as `ok` with zero rustc warnings. The
   refine review found no defects; its one note is that `StopSignal::wait` also resolves when every
   `StopSignal` handle is dropped (`watch::Receiver::wait_for` returns `Err` on close). Unreachable
   in service mode (`service_body` owns the signal for the agent's whole run), so the behavior is
@@ -77,7 +77,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 
 ## Decision Log
 
-- 2026-09-16: SCM integration lives in a new lib module `agent/src/service/` (`mod.rs`,
+- 2026-09-16: SCM integration lives in a new lib module `agent/src/windows/` (`mod.rs`,
   `errors.rs` portable; `windows.rs` under `#[cfg(windows)]`), not in `main.rs` (a bin, outside
   covgate) or `platform/` (path/capability dispatch only); `windows_service` would shadow the crate.
 - 2026-09-16: `StopSignal` wraps `tokio::sync::watch::channel(false)`: `watch` over `Notify`
@@ -93,7 +93,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   handler reaches the status handle via a shared `Arc<OnceLock<ServiceStatusHandle>>` filled
   right after `register` returns (`ServiceStatusHandle: Copy + Send + Sync`). A drain-timeout
   `exit(1)` is logged by SCM as an unexpected termination — accepted.
-- 2026-09-16: `ServiceErr` follows the `privilege/errors.rs` precedent (unconditional
+- 2026-09-16: `ScmErr` follows the `privilege/errors.rs` precedent (unconditional
   `NotLaunchedByScm`, cfg-gated `Scm { source }`; blanket `impl crate::errors::Error`). Win32
   error 1063 → `NotLaunchedByScm`, message points at `--console`, exit 1 — no silent fallback.
 - 2026-09-16: forced persistence = `platform::supports_idle_exit()` (unix `true`, windows
@@ -109,7 +109,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 - 2026-09-16: service mode logs with `logs::Options { stdout: false, .. }` (rolling `miru.log`
   under `%ProgramData%\Miru\logs`, the `run_provision` precedent); console mode keeps
   `Options::default()`. A service-mode `logs::init` failure → `Failed` → `ServiceSpecific(1)`.
-- 2026-09-16: `agent/src/service/.covgate` is `90.00`, not `0`: covgate runs on Linux only, where
+- 2026-09-16: `agent/src/windows/.covgate` is `90.00`, not `0`: covgate runs on Linux only, where
   `windows.rs` contributes zero regions, so the gate measures exactly the portable relay and error
   type, which should be gated. Windows-only code is verified by `windows-check`, not covgate.
 - 2026-09-16: the console path discards `RunOutcome` and exits 0 as today; only the service path
@@ -120,7 +120,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   `stop_pending.and(stopped)` so the `StopPending` error wins when both trailing reports fail.
 - 2026-09-16 (M2): the test `RecordingSink` (`RefCell<Vec<ServiceStatus>>` + `fail_on:
   Option<ServiceState>`) records only successful reports and stays local to
-  `tests/service/windows.rs` (cfg(windows)-only, so not in `test_utils`). One extra
+  `tests/windows/scm.rs` (cfg(windows)-only, so not in `test_utils`). One extra
   `run_lifecycle` case beyond the plan list: a sink failing on `Running` skips the body and
   leaves only `StartPending` recorded.
 - 2026-09-16 (M3): `app/options.rs` gained a `// external crates` group with `use tracing::warn;`
@@ -134,13 +134,13 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 ## Outcomes & Retrospective
 
 - Delivered on draft PR #242 (`feat/windows-service-lifecycle`, 7 commits after M0): the `service`
-  module (`StopSignal`, `RunOutcome`, `ServiceErr`, `service::windows` SCM plumbing), the
+  module (`StopSignal`, `RunOutcome`, `ScmErr`, `windows::scm` SCM plumbing), the
   `--console` flag, `platform::supports_idle_exit` + `LifecycleOptions::resolve_persistence`, the
   sync-`main` restructure with `run_runtime_mode` / `service_body` / generic `run_agent`, and the
   `ARCHITECTURE.md` updates. Linux behavior is unchanged; `app::run` was not touched.
 - Validation: `./scripts/preflight.sh` CLEAN locally; CI on the first pushed head (`60c54605`) was
   green on `lint`, `test`, `tools`, and `windows-check`, the latter running all 17
-  `service::windows::*` tests plus `stop_signal`, with zero rustc warnings. Covgate: service 100,
+  `windows::scm::*` tests plus `stop_signal`, with zero rustc warnings. Covgate: service 100,
   app 94.06, cli 100, platform 100. Lockfile stable (second `cargo check` a no-op).
 - What worked: the plan's exact signatures and the Decision Log let fresh-context agents implement
   each milestone without design churn, and compiling the Windows-only files against a local shim of
@@ -202,7 +202,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
         git commit -m "docs(plans): add windows service lifecycle plan" \
             -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
-### M1 — Dependency and portable `service` module
+### M1 — Dependency and portable `windows` module
 
 1. `/Cargo.toml` `[workspace.dependencies]`: append `windows-service = "0.8.1"` after `uuid`
    (currently the last entry; the list is not alphabetical). `agent/Cargo.toml`, after the
@@ -215,7 +215,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
    `cargo check --package miru-agent`. Expected: `Adding widestring v1.x` and `Adding
    windows-service v0.8.1`, then `Finished`; `git diff --stat Cargo.lock` shows the two new
    packages; a second run prints no `Adding` lines.
-3. `agent/src/service/mod.rs` — module doc "OS service-manager integration"; `pub mod errors;
+3. `agent/src/windows/mod.rs` — module doc "OS service-manager integration"; `pub mod errors;
    #[cfg(windows)] pub mod windows;`; portable types:
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,12 +235,12 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
    `wait` owns its `Receiver` because `app::run` needs a `'static` future; `wait_for` checks the
    current value first, so a `wait()` created after `trigger()` resolves at once. Doc comments
    state the contract: `trigger` is callable from a non-tokio thread, idempotent, and wakes every
-   past and future `wait()`. Create `agent/src/service/windows.rs` now as a doc-comment-only stub
+   past and future `wait()`. Create `agent/src/windows/scm.rs` now as a doc-comment-only stub
    (`//! Windows SCM integration (filled in by M2).`) so the `pub mod` line compiles on Windows.
-4. `agent/src/service/errors.rs`:
+4. `agent/src/windows/errors.rs`:
 
         #[derive(Debug, thiserror::Error)]
-        pub enum ServiceErr {
+        pub enum ScmErr {
             #[error("miru-agent was not started by the Windows Service Control \
                      Manager; run it with --console to run in the foreground")]
             NotLaunchedByScm { trace: Box<Trace> },
@@ -248,25 +248,25 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
             #[error("service control manager call failed: {source}")]
             Scm { source: windows_service::Error, trace: Box<Trace> },
         }
-        impl crate::errors::Error for ServiceErr {}
+        impl crate::errors::Error for ScmErr {}
 
-5. `agent/src/service/.covgate` containing `90.00`.
-6. Tests: `agent/tests/service/mod.rs` with `pub mod stop_signal;` (M2 adds `#[cfg(windows)] pub
+5. `agent/src/windows/.covgate` containing `90.00`.
+6. Tests: `agent/tests/windows/mod.rs` with `pub mod stop_signal;` (M2 adds `#[cfg(windows)] pub
    mod windows;`); `pub mod service;` between `server` and `services` in both `agent/src/lib.rs`
-   and `agent/tests/mod.rs`. `agent/tests/service/stop_signal.rs` (`#[tokio::test]`, `timeout`):
+   and `agent/tests/mod.rs`. `agent/tests/windows/stop_signal.rs` (`#[tokio::test]`, `timeout`):
    - `trigger` resolves two independent `wait()` futures (1 s timeout); a `wait()` created after
      `trigger()` resolves at once; untriggered `wait()` stays pending (`timeout(100ms)` → `Err`);
    - `trigger()` twice is harmless and `wait()` still resolves; `trigger()` from
      `std::thread::spawn` (no runtime) wakes an async waiter;
    - `is_triggered()` is false then true; `Default` equals `new()` behavior;
-   - `ServiceErr::NotLaunchedByScm { trace: miru_agent::trace!() }` Display contains `--console`
-     (here or in a small `tests/service/errors.rs`).
+   - `ScmErr::NotLaunchedByScm { trace: miru_agent::trace!() }` Display contains `--console`
+     (here or in a small `tests/windows/errors.rs`).
 7. `./scripts/test.sh` and `./scripts/lint.sh` pass. Commit `feat(windows): add windows-service
    dependency and stop-signal relay`.
 
-### M2 — SCM plumbing (`service/windows.rs`)
+### M2 — SCM plumbing (`windows/scm.rs`)
 
-1. `agent/src/service/windows.rs` (`windows_service::{define_windows_service, service::{…},
+1. `agent/src/windows/scm.rs` (`windows_service::{define_windows_service, service::{…},
    service_control_handler::{self, ServiceControlHandlerResult, ServiceStatusHandle},
    service_dispatcher}` imports go in the external group):
 
@@ -274,7 +274,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
         const PENDING_WAIT_HINT: Duration = Duration::from_secs(30);
         pub type ServiceBody = fn(StopSignal) -> RunOutcome;
         static BODY: OnceLock<ServiceBody> = OnceLock::new();
-        pub fn dispatch(body: ServiceBody) -> Result<(), ServiceErr>
+        pub fn dispatch(body: ServiceBody) -> Result<(), ScmErr>
             // BODY.set(body) (ignore AlreadySet); service_dispatcher::start(SERVICE_NAME,
             // ffi_service_main); Err(Winapi(e)) with e.raw_os_error() == Some(1063)
             // → NotLaunchedByScm, any other Err → Scm { source }
@@ -300,16 +300,16 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
             // Duration::ZERO; process_id None
         pub fn exit_code(outcome: RunOutcome) -> ServiceExitCode
             // Completed → NO_ERROR; Failed → ServiceSpecific(1)
-        pub trait StatusSink { fn report(&self, status: ServiceStatus) -> Result<(), ServiceErr>; }
+        pub trait StatusSink { fn report(&self, status: ServiceStatus) -> Result<(), ScmErr>; }
         impl StatusSink for ServiceStatusHandle   // set_service_status → Scm
         pub fn run_lifecycle<S: StatusSink>(
-            sink: &S, body: impl FnOnce() -> RunOutcome) -> Result<(), ServiceErr>
+            sink: &S, body: impl FnOnce() -> RunOutcome) -> Result<(), ScmErr>
             // report(StartPending, NO_ERROR)?; report(Running, NO_ERROR)?; let outcome = body();
             // always attempt report(StopPending) AND report(Stopped, exit_code(outcome));
             // return the first error encountered
 
-2. `agent/tests/service/windows.rs` (`#[cfg(windows)] pub mod windows;` in
-   `agent/tests/service/mod.rs`); only `dispatch`, `service_main`, and the `StatusSink` impl touch
+2. `agent/tests/windows/scm.rs` (`#[cfg(windows)] pub mod windows;` in
+   `agent/tests/windows/mod.rs`); only `dispatch`, `service_main`, and the `StatusSink` impl touch
    Win32, so the rest is testable without a registered service. One `pub mod` per fn under test
    (`handle_control`, `status`, `exit_code`, `run_lifecycle`):
    - `handle_control` (recording sink passed as `Some(&sink)`): `Stop` → sink recorded exactly
@@ -327,7 +327,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
      `[StartPending, Running, StopPending, Stopped]`; `Stopped` carries the exit code for each
      outcome; a sink failing on `StartPending` returns `Err` and the body never runs
      (`Cell<bool>` flag); a sink failing only on `StopPending` still reports `Stopped` and
-     returns `Err`. Failing sinks return `ServiceErr::NotLaunchedByScm { trace }` as the
+     returns `Err`. Failing sinks return `ScmErr::NotLaunchedByScm { trace }` as the
      stand-in (constructing `windows_service::Error` is unnecessary).
 3. Linux `./scripts/test.sh` and `./scripts/lint.sh` pass unchanged (the module is `cfg(windows)`).
    Commit `feat(windows): add SCM control handler and service status lifecycle`.
@@ -390,7 +390,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
             #[cfg(windows)]
             {
                 if !console {
-                    if let Err(e) = service::windows::dispatch(service_body) {
+                    if let Err(e) = windows::scm::dispatch(service_body) {
                         eprintln!("miru-agent: {e}");
                         std::process::exit(1);
                     }
@@ -438,7 +438,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
    dev binary as `miru`: this host has an activated device and a live `miru.service`, so it would
    start a second production agent.) Commit `feat(windows): run the agent as a windows service`.
 5. CI runs only on `pull_request` (`.github/workflows/ci.yml`), so open the draft PR now to get
-   `windows-check` compiling `service/windows.rs` and `service_body` for the first time. Write the
+   `windows-check` compiling `windows/scm.rs` and `service_body` for the first time. Write the
    PR body to `/tmp/windows-service-lifecycle-pr.md` in the repo's PR style, ending with the line
    `🤖 Generated with [Claude Code](https://claude.com/claude-code)`, then:
 
@@ -457,7 +457,7 @@ milestone, in the M0 form, ending with `Co-Authored-By: Claude Fable 5.1 <norepl
 - Codemap, Core infrastructure: add `platform` ("per-OS defaults (data root, log dir) and
   capability dispatch (`supports_idle_exit`); OS-specific fns compile on every target for
   testability") and `service` ("OS service-manager integration: portable `StopSignal` relay and
-  `RunOutcome`; `service::windows` holds the SCM entry point, control handler, and status
+  `RunOutcome`; `windows::scm` holds the SCM entry point, control handler, and status
   lifecycle (`cfg(windows)`)"); mention `--console` in `cli`'s entry.
 - Cross-Cutting Concerns, Graceful shutdown: SIGTERM/SIGINT/ctrl-c on Unix, ctrl-c in Windows
   console mode, and `SERVICE_CONTROL_STOP`/`SHUTDOWN` in service mode (via `service::StopSignal`)
@@ -483,10 +483,10 @@ Required before the PR leaves draft or the task is reported complete:
 
 1. Preflight CLEAN: `./scripts/preflight.sh` (M6) exits 0, all four checks (agent lint, agent
    covgate, tools lint, tools covgate) green, last line `Preflight clean`; covgate reports ≥ 90.00
-   for `agent/src/service`, and app ≥ 90.38, cli = 100, platform ≥ 95.00 still hold.
+   for `agent/src/windows`, and app ≥ 90.38, cli = 100, platform ≥ 95.00 still hold.
 2. CI green on the pushed head: `lint`, `test`, `tools`, `windows-check`; the latter's `cargo test
    --locked` succeeds (the M1 lockfile holds `windows-service`/`widestring`) and lists the
-   `service::windows::{handle_control, status, exit_code, run_lifecycle}` tests as `ok`.
+   `windows::scm::{handle_control, status, exit_code, run_lifecycle}` tests as `ok`.
 3. Linux behavior byte-identical: the M4 step 4 commands behave as stated; `test.sh` ends with
    `test result: ok.` everywhere and lists the new tests `service::stop_signal`,
    `app::options::lifecycle_options_resolve_persistence`, `cli::args_parse` (console), and
@@ -513,3 +513,15 @@ converges, and the `cargo check` lockfile step is a no-op on repeat. One commit 
 console mode and Linux are unaffected (the console path never touches `StopSignal`), and deleting
 the `#[cfg(windows)]` block in `run_runtime_mode` restores the previous ctrl-c-only Windows
 behavior.
+
+## Post-review rename (2026-09-16)
+
+- Review on PR #242 flagged the module name: `service` sat one line from the existing `services`
+  module in `lib.rs`, and both defined a `ServiceErr`. Renamed `agent/src/service/` →
+  `agent/src/windows/` (Windows-specific integration; a natural home for later Windows-only work),
+  `windows.rs` → `scm.rs` (so the path reads `windows::scm`, not `windows::windows`), and
+  `ServiceErr` → `ScmErr`. Tests mirror to `agent/tests/windows/`. The portable `StopSignal` /
+  `RunOutcome` stay in `windows/mod.rs`, compiled unconditionally so the Linux suite tests them.
+  The transitive `windows` crate (windows-rs) is not a direct dependency, so the root module name
+  does not collide; if it ever becomes one, only `lib.rs` would see an ambiguous path.
+  References above were rewritten to the new names.

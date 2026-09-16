@@ -1,9 +1,9 @@
 // internal crates
-use miru_agent::service::errors::ServiceErr;
+use miru_agent::windows::errors::ScmErr;
 
 #[test]
 fn not_launched_by_scm_message_points_at_console_flag() {
-    let err = ServiceErr::NotLaunchedByScm {
+    let err = ScmErr::NotLaunchedByScm {
         trace: miru_agent::trace!(),
     };
     let message = err.to_string();

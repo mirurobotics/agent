@@ -1,10 +1,10 @@
-//! OS service-manager integration.
+//! Windows-specific integration.
 //!
-//! The portable pieces live here: [`StopSignal`] relays a service-manager stop
-//! request into the shutdown future `app::run` awaits, and [`RunOutcome`] is
-//! what the agent body reports back so the service manager can be told whether
-//! the service exited cleanly. [`windows`] holds the Service Control Manager
-//! plumbing and compiles only on Windows.
+//! [`scm`] holds the Service Control Manager plumbing and compiles only on
+//! Windows. The pieces it relies on live here unconditionally so the Linux
+//! suite tests them: [`StopSignal`] relays a service-manager stop request into
+//! the shutdown future `app::run` awaits, and [`RunOutcome`] is what the agent
+//! body reports back so the SCM can be told whether the service exited cleanly.
 
 // standard crates
 use std::future::Future;
@@ -14,7 +14,7 @@ use tokio::sync::watch;
 
 pub mod errors;
 #[cfg(windows)]
-pub mod windows;
+pub mod scm;
 
 /// How the agent body finished, mapped to a service exit code by the OS layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

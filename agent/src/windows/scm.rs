@@ -14,9 +14,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // internal crates
-use crate::service::errors::ServiceErr;
-use crate::service::{RunOutcome, StopSignal};
 use crate::trace;
+use crate::windows::errors::ScmErr;
+use crate::windows::{RunOutcome, StopSignal};
 
 // external crates
 use windows_service::define_windows_service;
@@ -46,18 +46,18 @@ pub type ServiceBody = fn(StopSignal) -> RunOutcome;
 static BODY: OnceLock<ServiceBody> = OnceLock::new();
 
 /// Registers `body` as the service entry point and blocks the calling thread
-/// until the service stops. Fails with [`ServiceErr::NotLaunchedByScm`] when
+/// until the service stops. Fails with [`ScmErr::NotLaunchedByScm`] when
 /// the process was not started by the SCM.
-pub fn dispatch(body: ServiceBody) -> Result<(), ServiceErr> {
+pub fn dispatch(body: ServiceBody) -> Result<(), ScmErr> {
     let _ = BODY.set(body);
     match service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
         Ok(()) => Ok(()),
         Err(windows_service::Error::Winapi(ref e))
             if e.raw_os_error() == Some(ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) =>
         {
-            Err(ServiceErr::NotLaunchedByScm { trace: trace!() })
+            Err(ScmErr::NotLaunchedByScm { trace: trace!() })
         }
-        Err(source) => Err(ServiceErr::Scm {
+        Err(source) => Err(ScmErr::Scm {
             source,
             trace: trace!(),
         }),
@@ -144,13 +144,13 @@ pub fn exit_code(outcome: RunOutcome) -> ServiceExitCode {
 /// Destination for service status reports: the real [`ServiceStatusHandle`]
 /// in production, a recording fake in tests.
 pub trait StatusSink {
-    fn report(&self, status: ServiceStatus) -> Result<(), ServiceErr>;
+    fn report(&self, status: ServiceStatus) -> Result<(), ScmErr>;
 }
 
 impl StatusSink for ServiceStatusHandle {
-    fn report(&self, status: ServiceStatus) -> Result<(), ServiceErr> {
+    fn report(&self, status: ServiceStatus) -> Result<(), ScmErr> {
         self.set_service_status(status)
-            .map_err(|source| ServiceErr::Scm {
+            .map_err(|source| ScmErr::Scm {
                 source,
                 trace: trace!(),
             })
@@ -164,7 +164,7 @@ impl StatusSink for ServiceStatusHandle {
 pub fn run_lifecycle<S: StatusSink>(
     sink: &S,
     body: impl FnOnce() -> RunOutcome,
-) -> Result<(), ServiceErr> {
+) -> Result<(), ScmErr> {
     sink.report(status(
         ServiceState::StartPending,
         ServiceExitCode::NO_ERROR,

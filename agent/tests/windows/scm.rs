@@ -3,9 +3,9 @@ use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
 // internal crates
-use miru_agent::service::errors::ServiceErr;
-use miru_agent::service::windows::{self, StatusSink};
-use miru_agent::service::{RunOutcome, StopSignal};
+use miru_agent::windows::errors::ScmErr;
+use miru_agent::windows::scm::{self, StatusSink};
+use miru_agent::windows::{RunOutcome, StopSignal};
 
 // external crates
 use windows_service::service::{
@@ -43,9 +43,9 @@ impl RecordingSink {
 }
 
 impl StatusSink for RecordingSink {
-    fn report(&self, status: ServiceStatus) -> Result<(), ServiceErr> {
+    fn report(&self, status: ServiceStatus) -> Result<(), ScmErr> {
         if self.fail_on == Some(status.current_state) {
-            return Err(ServiceErr::NotLaunchedByScm {
+            return Err(ScmErr::NotLaunchedByScm {
                 trace: miru_agent::trace!(),
             });
         }
@@ -55,7 +55,7 @@ impl StatusSink for RecordingSink {
 }
 
 fn stop_pending() -> ServiceStatus {
-    windows::status(ServiceState::StopPending, ServiceExitCode::NO_ERROR)
+    scm::status(ServiceState::StopPending, ServiceExitCode::NO_ERROR)
 }
 
 pub mod handle_control {
@@ -66,7 +66,7 @@ pub mod handle_control {
         let stop = StopSignal::new();
         let sink = RecordingSink::default();
 
-        let result = windows::handle_control(ServiceControl::Stop, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Stop, &stop, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
         assert!(stop.is_triggered());
@@ -78,7 +78,7 @@ pub mod handle_control {
         let stop = StopSignal::new();
         let sink = RecordingSink::default();
 
-        let result = windows::handle_control(ServiceControl::Shutdown, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Shutdown, &stop, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
         assert!(stop.is_triggered());
@@ -90,7 +90,7 @@ pub mod handle_control {
         let stop = StopSignal::new();
         let sink = RecordingSink::default();
 
-        let result = windows::handle_control(ServiceControl::Interrogate, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Interrogate, &stop, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
         assert!(!stop.is_triggered());
@@ -102,7 +102,7 @@ pub mod handle_control {
         let stop = StopSignal::new();
         let sink = RecordingSink::default();
 
-        let result = windows::handle_control(ServiceControl::Pause, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Pause, &stop, Some(&sink));
 
         assert!(matches!(
             result,
@@ -116,7 +116,7 @@ pub mod handle_control {
     fn stop_without_sink_still_triggers() {
         let stop = StopSignal::new();
 
-        let result = windows::handle_control(ServiceControl::Stop, &stop, None::<&RecordingSink>);
+        let result = scm::handle_control(ServiceControl::Stop, &stop, None::<&RecordingSink>);
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
         assert!(stop.is_triggered());
@@ -127,7 +127,7 @@ pub mod handle_control {
         let stop = StopSignal::new();
         let sink = RecordingSink::failing_on(ServiceState::StopPending);
 
-        let result = windows::handle_control(ServiceControl::Stop, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Stop, &stop, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
         assert!(stop.is_triggered());
@@ -158,7 +158,7 @@ pub mod status {
     #[test]
     fn running_accepts_stop_and_shutdown_with_no_wait_hint() {
         assert_eq!(
-            windows::status(ServiceState::Running, ServiceExitCode::NO_ERROR),
+            scm::status(ServiceState::Running, ServiceExitCode::NO_ERROR),
             expected(
                 ServiceState::Running,
                 ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
@@ -171,7 +171,7 @@ pub mod status {
     #[test]
     fn start_pending_accepts_nothing_with_thirty_second_hint() {
         assert_eq!(
-            windows::status(ServiceState::StartPending, ServiceExitCode::NO_ERROR),
+            scm::status(ServiceState::StartPending, ServiceExitCode::NO_ERROR),
             expected(
                 ServiceState::StartPending,
                 ServiceControlAccept::empty(),
@@ -197,7 +197,7 @@ pub mod status {
     #[test]
     fn stopped_carries_the_exit_code() {
         assert_eq!(
-            windows::status(ServiceState::Stopped, ServiceExitCode::ServiceSpecific(1)),
+            scm::status(ServiceState::Stopped, ServiceExitCode::ServiceSpecific(1)),
             expected(
                 ServiceState::Stopped,
                 ServiceControlAccept::empty(),
@@ -214,7 +214,7 @@ pub mod exit_code {
     #[test]
     fn completed_is_no_error() {
         assert_eq!(
-            windows::exit_code(RunOutcome::Completed),
+            scm::exit_code(RunOutcome::Completed),
             ServiceExitCode::NO_ERROR
         );
     }
@@ -222,7 +222,7 @@ pub mod exit_code {
     #[test]
     fn failed_is_service_specific_one() {
         assert_eq!(
-            windows::exit_code(RunOutcome::Failed),
+            scm::exit_code(RunOutcome::Failed),
             ServiceExitCode::ServiceSpecific(1)
         );
     }
@@ -236,7 +236,7 @@ pub mod run_lifecycle {
         let sink = RecordingSink::default();
         let ran = Cell::new(false);
 
-        let result = windows::run_lifecycle(&sink, || {
+        let result = scm::run_lifecycle(&sink, || {
             ran.set(true);
             RunOutcome::Completed
         });
@@ -259,13 +259,13 @@ pub mod run_lifecycle {
         for outcome in [RunOutcome::Completed, RunOutcome::Failed] {
             let sink = RecordingSink::default();
 
-            let result = windows::run_lifecycle(&sink, || outcome);
+            let result = scm::run_lifecycle(&sink, || outcome);
 
             assert!(result.is_ok(), "{outcome:?}");
             let last = sink.reported().pop().expect("Stopped is reported");
             assert_eq!(
                 last,
-                windows::status(ServiceState::Stopped, windows::exit_code(outcome)),
+                scm::status(ServiceState::Stopped, scm::exit_code(outcome)),
                 "{outcome:?}",
             );
         }
@@ -276,12 +276,12 @@ pub mod run_lifecycle {
         let sink = RecordingSink::failing_on(ServiceState::StartPending);
         let ran = Cell::new(false);
 
-        let result = windows::run_lifecycle(&sink, || {
+        let result = scm::run_lifecycle(&sink, || {
             ran.set(true);
             RunOutcome::Completed
         });
 
-        assert!(matches!(result, Err(ServiceErr::NotLaunchedByScm { .. })));
+        assert!(matches!(result, Err(ScmErr::NotLaunchedByScm { .. })));
         assert!(!ran.get());
         assert!(sink.reported().is_empty());
     }
@@ -291,7 +291,7 @@ pub mod run_lifecycle {
         let sink = RecordingSink::failing_on(ServiceState::Running);
         let ran = Cell::new(false);
 
-        let result = windows::run_lifecycle(&sink, || {
+        let result = scm::run_lifecycle(&sink, || {
             ran.set(true);
             RunOutcome::Completed
         });
@@ -305,9 +305,9 @@ pub mod run_lifecycle {
     fn stop_pending_failure_still_reports_stopped() {
         let sink = RecordingSink::failing_on(ServiceState::StopPending);
 
-        let result = windows::run_lifecycle(&sink, || RunOutcome::Failed);
+        let result = scm::run_lifecycle(&sink, || RunOutcome::Failed);
 
-        assert!(matches!(result, Err(ServiceErr::NotLaunchedByScm { .. })));
+        assert!(matches!(result, Err(ScmErr::NotLaunchedByScm { .. })));
         assert_eq!(
             sink.states(),
             vec![

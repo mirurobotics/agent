@@ -31,7 +31,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `platform` — per-OS defaults (data root, log dir) and capability dispatch (`supports_idle_exit`). OS-specific functions compile on every target so they are testable from any host.
 
-`service` — OS service-manager integration. Portable `StopSignal` relay and `RunOutcome`; `service::windows` holds the SCM entry point, control handler, and status lifecycle (`cfg(windows)`).
+`windows` — Windows-specific integration. Portable `StopSignal` relay and `RunOutcome` (compiled everywhere so the Linux suite tests them); `windows::scm` holds the Service Control Manager entry point, control handler, and status lifecycle (`cfg(windows)`).
 
 `version` — build-time version string. Embedded by `build.rs` from git commit hash and build date.
 
@@ -104,7 +104,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 **Error handling.** Every module defines its errors in an `errors.rs` file. Leaf errors derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (which provides default implementations for the common case). Aggregating enums use `impl_error!` to forward trait methods to inner variants.
 
-**Graceful shutdown.** `app/run.rs` creates a `tokio::sync::broadcast` channel. All workers and the HTTP server subscribe to it. SIGTERM/SIGINT/ctrl-c on Unix, ctrl-c in Windows console mode, and `SERVICE_CONTROL_STOP`/`SERVICE_CONTROL_SHUTDOWN` in Windows service mode (relayed through `service::StopSignal`) all resolve the shutdown future `app/run.rs` awaits; the channel then fires and each component drains in-flight work before exiting. AppState components shut down in dependency order.
+**Graceful shutdown.** `app/run.rs` creates a `tokio::sync::broadcast` channel. All workers and the HTTP server subscribe to it. SIGTERM/SIGINT/ctrl-c on Unix, ctrl-c in Windows console mode, and `SERVICE_CONTROL_STOP`/`SERVICE_CONTROL_SHUTDOWN` in Windows service mode (relayed through `windows::StopSignal`) all resolve the shutdown future `app/run.rs` awaits; the channel then fires and each component drains in-flight work before exiting. AppState components shut down in dependency order.
 
 **Authentication.** JWT-based. The `TokenManager` runs as a background task, refreshing the token before expiry using the device's RSA private key. `http::Client` reads the current token from `TokenManager` for every request. Token persistence is via `TokenFile` (atomic writes to disk).
 

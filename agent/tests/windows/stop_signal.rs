@@ -2,7 +2,7 @@
 use std::time::Duration;
 
 // internal crates
-use miru_agent::service::StopSignal;
+use miru_agent::windows::StopSignal;
 
 // external crates
 use tokio::time::timeout;
