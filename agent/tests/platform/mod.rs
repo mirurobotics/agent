@@ -98,4 +98,16 @@ pub mod dispatch {
             platform::windows_log_dir(std::env::var_os("ProgramData")),
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn supports_idle_exit_on_unix() {
+        assert!(platform::supports_idle_exit());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn does_not_support_idle_exit_on_windows() {
+        assert!(!platform::supports_idle_exit());
+    }
 }

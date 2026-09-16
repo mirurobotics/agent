@@ -45,6 +45,30 @@ pub mod lifecycle_options_default {
     }
 }
 
+pub mod lifecycle_options_resolve_persistence {
+    use super::*;
+
+    #[test]
+    fn persistent_request_stays_persistent_when_idle_exit_supported() {
+        assert!(LifecycleOptions::resolve_persistence(true, true));
+    }
+
+    #[test]
+    fn non_persistent_request_is_honored_when_idle_exit_supported() {
+        assert!(!LifecycleOptions::resolve_persistence(false, true));
+    }
+
+    #[test]
+    fn persistent_request_stays_persistent_when_idle_exit_unsupported() {
+        assert!(LifecycleOptions::resolve_persistence(true, false));
+    }
+
+    #[test]
+    fn non_persistent_request_is_overridden_when_idle_exit_unsupported() {
+        assert!(LifecycleOptions::resolve_persistence(false, false));
+    }
+}
+
 pub mod app_options_default {
     use super::*;
 

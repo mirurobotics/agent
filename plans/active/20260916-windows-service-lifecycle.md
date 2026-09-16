@@ -33,7 +33,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 - [x] M0 Activate plan (`docs(plans):` commit; roadmap PR 5 marker)
 - [x] M1 `windows-service` dependency + lockfile; portable `service` module + tests
 - [x] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
-- [ ] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
+- [x] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
 - [ ] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
 - [ ] M5 `ARCHITECTURE.md` updates
 - [ ] M6 `./scripts/preflight.sh` CLEAN; CI green incl. `windows-check`; PR leaves draft

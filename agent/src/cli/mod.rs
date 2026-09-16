@@ -3,6 +3,9 @@ pub struct Args {
     pub display_version: bool,
     pub provision_args: Option<ProvisionArgs>,
     pub reprovision_args: Option<ReprovisionArgs>,
+    /// Run the agent in the foreground with ctrl-c shutdown instead of as a Windows
+    /// service. Accepted and ignored on Unix, where the agent always runs in the foreground.
+    pub console: bool,
 }
 
 impl Args {
@@ -13,6 +16,7 @@ impl Args {
                 "version" => args.display_version = true,
                 "provision" => args.provision_args = Some(ProvisionArgs::parse(inputs)),
                 "reprovision" => args.reprovision_args = Some(ReprovisionArgs::parse(inputs)),
+                "console" => args.console = true,
                 _ => {}
             }
         }

@@ -8,6 +8,9 @@ use crate::network::BackendHost;
 use crate::server;
 use crate::workers::{delete, mqtt, poller, scan, token_refresh::TokenRefreshWorkerOptions};
 
+// external crates
+use tracing::warn;
+
 #[derive(Debug, Clone, Copy)]
 pub struct LifecycleOptions {
     pub is_persistent: bool,
@@ -26,6 +29,20 @@ impl Default for LifecycleOptions {
             idle_timeout_poll_interval: Duration::from_secs(5),
             max_shutdown_delay: Duration::from_secs(15),
         }
+    }
+}
+
+impl LifecycleOptions {
+    /// Resolves the effective persistence for this platform; warns when a
+    /// non-persistent request is overridden.
+    pub fn resolve_persistence(requested: bool, supports_idle_exit: bool) -> bool {
+        if !requested && !supports_idle_exit {
+            warn!(
+                "settings.is_persistent = false is not supported on this platform; \
+                 running persistently"
+            );
+        }
+        requested || !supports_idle_exit
     }
 }
 
