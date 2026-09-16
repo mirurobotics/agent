@@ -1,7 +1,6 @@
 // internal crates
 use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
-use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
@@ -67,8 +66,8 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     // due_at is inclusive: "due" is due at exactly `now`
     assert_eq!(queue.count_ready(now()), 1);
     assert_eq!(
-        queue.next_ready(now()).unwrap().job.name(),
-        retention_job_with_ttl("due", 500).name()
+        queue.next_ready(now()).unwrap().job,
+        retention_job_with_ttl("due", 500)
     );
 
     // the waiting job becomes ready once its TTL elapses

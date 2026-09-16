@@ -119,28 +119,21 @@ pub mod abs_path {
         assert_eq!(&dir.abs_path().unwrap(), expected_dir.path());
     }
 
-    #[cfg(unix)]
     #[test]
-    fn unix_abs_paths_dont_change() {
-        let tests = vec![
-            ("/", "/"),
-            ("/another/one", "/another/one"),
-            ("/bronny/james", "/bronny/james"),
-        ];
+    fn abs_paths_dont_change() {
+        let root = dirs::current()
+            .unwrap()
+            .path()
+            .ancestors()
+            .last()
+            .unwrap()
+            .to_path_buf();
 
-        for test in tests {
-            let dir = filesys::Dir::new(PathBuf::from(test.0));
-            assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_abs_paths_dont_change() {
-        let current_dir = dirs::current().unwrap();
-        let root = current_dir.path().ancestors().last().unwrap();
-
-        for expected in [root.to_path_buf(), root.join("another").join("one")] {
+        for expected in [
+            root.clone(),
+            root.join("another").join("one"),
+            root.join("bronny").join("james"),
+        ] {
             let dir = filesys::Dir::new(expected.clone());
             assert_eq!(dir.abs_path().unwrap(), expected);
         }
