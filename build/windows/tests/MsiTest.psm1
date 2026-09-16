@@ -196,6 +196,14 @@ function Invoke-DotNetBuild {
     if ($FixturePayloadPath) { $arguments += "-p:FixturePayloadPath=$FixturePayloadPath" }
     & dotnet @arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for version $Version" }
+    return Get-OutputMsi -OutputDirectory $OutputDirectory -Version $Version
+}
+
+function Get-OutputMsi {
+    param(
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
     $msi = Get-ChildItem -LiteralPath $OutputDirectory -Filter "*.msi" -File -Recurse |
         Where-Object { $_.FullName -notmatch '\\obj\\' } |
         Select-Object -First 1
