@@ -32,7 +32,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 
 - [x] M0 Activate plan (`docs(plans):` commit; roadmap PR 5 marker)
 - [x] M1 `windows-service` dependency + lockfile; portable `service` module + tests
-- [ ] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
+- [x] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
 - [ ] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
 - [ ] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
 - [ ] M5 `ARCHITECTURE.md` updates
@@ -51,6 +51,16 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   `[package.metadata.cargo-machete]` entry was needed.
 - 2026-09-16 (M1): the `ServiceErr` Display test lives in `agent/tests/service/errors.rs`
   (mirroring `agent/src/service/errors.rs`) rather than inside `stop_signal.rs`.
+- 2026-09-16 (M2): `scripts/lint.sh` runs `cargo fmt` in write mode and rustfmt follows the
+  `#[cfg(windows)] pub mod windows;` declaration, so both Windows-only files are formatted (and
+  `fmt --check`-clean) on Linux even though rustc/clippy never compile them here.
+- 2026-09-16 (M2): to catch type/borrow errors before `windows-check`, `service/windows.rs` and
+  `tests/service/windows.rs` were also compiled and run on Linux against a throwaway shim crate
+  (session scratchpad, not committed) that mirrors the windows-service 0.8.1 public signatures
+  copied from the registry source (`ServiceStatus` derives, `#[non_exhaustive]` `Error` /
+  `ServiceControl`, `register` bounds, `define_windows_service!` verbatim). All 17 tests plus a
+  `dispatch` check (`Winapi` raw_os_error 1063 → `NotLaunchedByScm`) pass under
+  `clippy -D warnings`. The real Windows CI job remains the arbiter.
 
 ## Decision Log
 
@@ -91,6 +101,15 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   type, which should be gated. Windows-only code is verified by `windows-check`, not covgate.
 - 2026-09-16: the console path discards `RunOutcome` and exits 0 as today; only the service path
   maps it to an exit code.
+- 2026-09-16 (M2): `dispatch` matches `Err(windows_service::Error::Winapi(ref e))` with a
+  `raw_os_error() == Some(1063)` guard (named const `ERROR_FAILED_SERVICE_CONTROLLER_CONNECT`)
+  and a catch-all `Err(source)` arm for the `#[non_exhaustive]` enum. `run_lifecycle` returns
+  `stop_pending.and(stopped)` so the `StopPending` error wins when both trailing reports fail.
+- 2026-09-16 (M2): the test `RecordingSink` (`RefCell<Vec<ServiceStatus>>` + `fail_on:
+  Option<ServiceState>`) records only successful reports and stays local to
+  `tests/service/windows.rs` (cfg(windows)-only, so not in `test_utils`). One extra
+  `run_lifecycle` case beyond the plan list: a sink failing on `Running` skips the body and
+  leaves only `StartPending` recorded.
 
 ## Outcomes & Retrospective
 
