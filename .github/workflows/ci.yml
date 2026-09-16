@@ -196,6 +196,55 @@ jobs:
           path: build/prebuilt/windows_amd64/
           if-no-files-found: error
 
+  goreleaser-snapshot:
+    name: goreleaser-snapshot
+    needs: [windows_package_scope, windows-release-build]
+    # Pull requests only: on tags the real release job in release.yml consumes
+    # the same artifact. Same-repo PRs can read GORELEASER_KEY; forks cannot.
+    if: github.event_name == 'pull_request' && needs.windows_package_scope.outputs.windows_release == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows prebuilt artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: agent-windows-amd64-msvc
+          path: build/prebuilt/windows_amd64
+
+      - name: GoReleaser snapshot (no publish)
+        run: ./build/build.sh
+        env:
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+
+      - name: Verify Windows artifacts
+        run: |
+          set -euxo pipefail
+          ls -l build/dist
+          test -f build/dist/agent_Windows_x86_64.zip
+          unzip -l build/dist/agent_Windows_x86_64.zip | grep -E ' miru-agent\.exe$'
+          ls build/dist/miru-agent_*_windows_amd64.sbom.json
+          grep -c '"name": "tokio"' build/dist/miru-agent_*_windows_amd64.sbom.json
+          test -f build/dist/agent_Windows_x86_64.zip.sbom.json
+          # The nfpm entry is pinned to the Linux build id; fail on any .deb
+          # that names windows (a negated `! ls | grep` skips errexit).
+          for deb in build/dist/*.deb; do
+            case "$deb" in
+              *[Ww]indows*) echo "unexpected Windows .deb: $deb" >&2; exit 1 ;;
+            esac
+          done
+          ls -l build/prebuilt/windows_amd64/miru_agent.pdb
+
+      - name: Upload snapshot dist
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: goreleaser-snapshot-dist
+          path: build/dist/
+          if-no-files-found: error
+
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
