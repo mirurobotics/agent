@@ -218,6 +218,8 @@ pub mod copy_to {
         let dest_contents = files::read_string(&dest).await;
         let dest_permissions = files::permissions(&dest).await;
 
+        // Windows cannot delete a readonly file, so clear the bit before
+        // TempDir drop. Dest may be missing if the copy failed.
         files::set_permissions(&src, original_permissions.clone())
             .await
             .unwrap();
@@ -263,7 +265,7 @@ pub mod copy_to {
     }
 
     #[tokio::test]
-    async fn directory_source_leaves_existing_destination_untouched() {
+    async fn directory_source_returns_copy_file_err_without_overwriting_dest() {
         let dir = test_dirs::temp("testing").unwrap();
         let src = filesys::File::new(dir.path().clone());
         let dest = dir.file("dest-file");
@@ -280,7 +282,7 @@ pub mod copy_to {
     }
 
     #[tokio::test]
-    async fn directory_source_does_not_create_destination() {
+    async fn directory_source_returns_copy_file_err_without_creating_dest() {
         let dir = test_dirs::temp("testing").unwrap();
         let src = filesys::File::new(dir.path().clone());
         let dest = dir.file("dest-file");
