@@ -227,7 +227,15 @@ jobs:
           test -f build/dist/agent_Windows_x86_64.zip
           unzip -l build/dist/agent_Windows_x86_64.zip | grep -E ' miru-agent\.exe$'
           ls build/dist/miru-agent_*_windows_amd64.sbom.json
-          grep -c '"name": "tokio"' build/dist/miru-agent_*_windows_amd64.sbom.json
+          # Prove syft read the cargo-auditable .dep-v0 section out of the PE:
+          # the SBOM must enumerate a real crate. Tolerate compact or
+          # pretty-printed JSON (syft emits compact, no space after the colon).
+          tokio_hits=$(grep -Ec '"name"[[:space:]]*:[[:space:]]*"tokio"' \
+            build/dist/miru-agent_*_windows_amd64.sbom.json || true)
+          test "$tokio_hits" -gt 0 || {
+            echo "windows SBOM does not enumerate tokio; cargo-auditable .dep-v0 not read from the PE" >&2
+            exit 1
+          }
           test -f build/dist/agent_Windows_x86_64.zip.sbom.json
           # The nfpm entry is pinned to the Linux build id; fail on any .deb
           # that names windows (a negated `! ls | grep` skips errexit).
