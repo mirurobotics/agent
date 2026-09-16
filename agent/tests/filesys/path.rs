@@ -263,7 +263,7 @@ pub mod abs_path {
     #[cfg(windows)]
     #[test]
     fn windows_drive_relative_is_not_absolute() {
-        let cwd = current().path().to_string_lossy();
+        let cwd = current().path().to_string_lossy().into_owned();
         let drive: String = cwd.chars().take(2).collect();
         assert_eq!(
             drive.chars().nth(1),

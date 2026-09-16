@@ -301,6 +301,7 @@ mod tests {
     use super::*;
     use crate::filesys;
     use crate::test_utils::filesys::dirs as test_dirs;
+    #[cfg(unix)]
     use crate::test_utils::filesys::files as test_files;
 
     /// RAII temp dir for absolute path fixtures; absolute on every platform.
