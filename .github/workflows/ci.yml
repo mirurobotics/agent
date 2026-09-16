@@ -49,6 +49,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The suites are bound by per-file-operation latency on NTFS. A ReFS
+      # Dev Drive skips most filesystem filter drivers. Mounting it at
+      # `target` keeps rust-cache and every cargo command unchanged, and
+      # routing TEMP/TMP onto it moves every tempfile fixture there. This
+      # step precedes rust-cache so the cache's post-step save runs before
+      # this action's post-step dismounts the drive.
+      - name: Create Dev Drive (ReFS) for target and temp
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+        with:
+          drive-size: 12GB
+          drive-format: ReFS
+          drive-type: Dynamic
+          drive-path: D:\dev_drive.vhdx
+          mount-path: ${{ github.workspace }}\target
+          env-mapping: |
+            TEMP,{{ DEV_DRIVE }}\tmp
+            TMP,{{ DEV_DRIVE }}\tmp
+
+      - name: Create temp directory on the Dev Drive
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force $env:TEMP | Out-Null
+
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
