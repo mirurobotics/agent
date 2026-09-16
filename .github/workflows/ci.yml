@@ -46,6 +46,12 @@ jobs:
     env:
       # Full PDBs dominate MSVC link time; test diagnostics do not need them.
       CARGO_PROFILE_DEV_DEBUG: 0
+      # Link the five test binaries with rust-lld (ships in every MSVC
+      # toolchain; rustc puts its directory on the linker's PATH and infers
+      # the lld-link flavor from the file stem). Job-level on purpose: the
+      # CARGO prefix puts it in rust-cache's key, so artifacts from the two
+      # linkers never share a cache.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

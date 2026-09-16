@@ -31,7 +31,7 @@ Target (a target, not a guarantee): test step under about 1m30s and whole job un
 
 - [x] M0: measurement scaffolding (runner probe, cargo timings artifact, baseline recorded below; build/run split dropped, see Surprises).
 - [x] M1: libtest parallelism (`RUST_TEST_THREADS`) — rejected, reverted (see Decision Log).
-- [ ] M2: ReFS Dev Drive for `target/` and the temp directory (Defender exclusion as fallback).
+- [x] M2: ReFS Dev Drive for `target/` and the temp directory — kept (inline cmdlets; see Decision Log).
 - [ ] M3: `rust-lld` as the MSVC linker.
 - [ ] M4: cache workspace crates (`backend-api`, `device-api`) with a source-keyed cache.
 - [ ] Final: measurement table complete, losers reverted, preflight `CLEAN`, PR out of draft.
@@ -50,6 +50,7 @@ Target (a target, not a guarantee): test step under about 1m30s and whole job un
 - 2026-09-16 (authoring): Kept the pinned `Swatinem/rust-cache@6323deb1...`. That SHA is tag `v2.9.2` (and what `v2` resolves to), and its `action.yml` already has `cache-workspace-crates`, so no pin bump is needed.
 - 2026-09-16 (authoring): Ranked the Dev Drive above Defender exclusions. The `windows-latest` image (Windows Server 2025) is built with `Set-MpPreference -DisableRealtimeMonitoring $true` and `ExclusionPath C:\, D:\` (runner-images `images/windows/scripts/build/Configure-WindowsDefender.ps1`), so exclusions likely add nothing; M0 probes the live state so the implementer knows rather than guesses.
 
+- 2026-09-16 (M2): Kept the ReFS Dev Drive, created inline (run 35135736249: `FileSystemType: ReFS`, `fsutil devdrv query` reports a trusted developer volume). `mod.rs` 73.67s -> 31.63s, lib 10.81s -> 7.82s, run phase 86s -> 41s, job 4m20s -> 3m36s; the drive costs 9s to create. Far outside the ~30s noise band. The Defender-exclusion fallback is moot (real-time protection already off, `C:\\` and `D:\\` already excluded).
 - 2026-09-16 (M1): Rejected `RUST_TEST_THREADS`. 16 threads (run 35133866291): `mod.rs` 79.62s vs 73.67s at M0, 1 failed. 8 threads (run 35134395736): `mod.rs` 246.66s, 1 failed. Both failures are `workers::poller::run::ignored_syncer_events` (`agent/tests/workers/poller.rs:374`), whose 1s wall-clock drift tolerance cannot survive oversubscribed cores. The per-file overhead appears to be CPU/kernel time on the runner rather than idle waits, so extra threads add contention rather than overlap. Both commits reverted; repairing would require test-side edits, which this plan excludes.
 
 ## Outcomes & Retrospective
@@ -159,7 +160,8 @@ Fill this table after each CI round (warm-cache runs only):
 | M0 (split) | bb104ce | 6m6s | 1m32s | 3m26s (incl. 1m18s recompile) | 16.07s | 108.70s | ~461 MB | no (split dropped) |
 | M0 | | | | | | | | |
 | M1 (8 threads) | 0bde612 | 9m28s (red) | 1m35s | 263s | 16.32s | 246.66s, 1 failed | ~461 MB | no (reverted) |
-| M2 | | | | | | | | |
+| M2 (action) | add5285 | startup_failure | - | - | - | - | - | replaced |
+| M2 | ae50979 | 3m36s | 1m33s | 41s | 7.82s | 31.63s | ~461 MB | yes |
 | M3 | | | | | | | | |
 | M4 | | | | | | | | |
 
