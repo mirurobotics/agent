@@ -110,7 +110,11 @@ Every pull request runs the agent test suite natively on Windows
 (`windows-check`). Pull requests that change this directory or the CI/release
 workflows additionally run the package and installer lifecycle on a separate
 `windows-package` job. That job also runs after pushes to `main` and
-`release/*`, and when the release workflow calls CI for a tag. Superseded
+`release/*`, and when the release workflow calls CI for a tag. Pull requests
+that touch `build/**` or the workflows also run `windows-release-build` (the
+`cargo auditable` MSVC release build that uploads `miru-agent.exe` and
+`miru_agent.pdb`) and `goreleaser-snapshot` (a GoReleaser dry run proving the
+`agent_Windows_x86_64.zip`, its SBOM and the PDB are produced). Superseded
 pull-request CI runs are cancelled.
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
@@ -140,7 +144,6 @@ Integration runs write verbose MSI logs directly beneath
 prints its log path before starting Windows Installer. These logs survive
 temporary build-output cleanup, including when only cleanup fails.
 
-Authenticode signing of the executable and MSI remains deferred, along with the
-GoReleaser/PDB release lane, artifact and WinGet publication, Windows service
-lifecycle, account and recovery handling, full live-backend provisioning, and
-Windows Server certification.
+Authenticode signing of the executable and MSI remains deferred, along with
+WinGet publication, Windows service lifecycle, account and recovery handling,
+full live-backend provisioning, and Windows Server certification.

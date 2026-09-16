@@ -29,7 +29,7 @@ A reviewer can see it working before any tag exists: CI on the pull request buil
 - [x] M2: `build/.goreleaser.yaml` gains the `agent-windows` prebuilt build, archive/nfpm id filters, and the PDB extra file; `goreleaser check` passes locally (goreleaser-pro v2.18.1: "1 configuration file(s) validated", no `GORELEASER_KEY` needed for `check` with the Pro binary).
 - [x] M3: `goreleaser-snapshot` dry-run job in `ci.yml` proves ingestion on the PR. (committed; evidence recorded in Outcomes once the run finishes)
 - [x] M4: `release.yml` downloads the Windows artifact before `build/release.sh`. (not executable on a PR; reviewed by diff: same artifact name `agent-windows-amd64-msvc` and path `build/prebuilt/windows_amd64` as the dry-run job, `release` still `needs: [ci, check-main]`)
-- [ ] M5: docs (`build/windows/README.md`, roadmap PR 8 entry) updated.
+- [x] M5: docs (`build/windows/README.md`, roadmap PR 8 entry) updated.
 - [ ] Final: preflight `CLEAN`, dry-run artifact inspected, PR leaves draft.
 
 ## Surprises & Discoveries
@@ -43,6 +43,8 @@ A reviewer can see it working before any tag exists: CI on the pull request buil
 (Authoring decisions are in Context and Plan of Work; add implementation-time entries here.)
 
 - 2026-09-16, M3: the planned `! ls build/dist/*.deb | grep -i windows` guard was replaced by a `for deb in build/dist/*.deb; case ... *[Ww]indows*) exit 1` loop. shellcheck SC2251 is right that a `!`-negated pipeline never trips `set -e`, so the planned line could not fail even if a Windows `.deb` appeared; the loop fails loudly and also avoids `ls | grep` (SC2010). Same assertion, now enforceable.
+- 2026-09-16, M5: the roadmap cross-reference points at `plans/active/20260916-windows-release-lane.md`, not the `plans/backlog/...` path written in Plan of Work: the plan was activated (moved to `plans/active/`) before implementation started, so the backlog path no longer exists.
+- 2026-09-16, setup: the draft PR title is `ci(release): add the Windows msvc release lane` (the orchestrator's instruction) rather than the Concrete Steps' `build(windows): ...` title; the body links this plan.
 
 ## Outcomes & Retrospective
 

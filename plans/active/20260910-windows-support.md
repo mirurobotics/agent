@@ -121,7 +121,9 @@ enforced on Linux only).
 **PR 8 — msvc release lane.** Windows runner job builds
 `x86_64-pc-windows-msvc` (via the same cargo-auditable wrapper), uploads binary + PDB;
 `build/.goreleaser.yaml` gains a `prebuilt` build id ingesting it; zip archives for the
-windows target.
+windows target. (implemented by this plan's PR; `plans/active/20260916-windows-release-lane.md`.)
+The PDB is attached to the GitHub release as a separate asset (`miru_agent.pdb`) rather
+than inside the zip.
 
 **PR 9 — service-aware MSI follow-up.** After the executable implements Windows
 Service Control Manager integration, extend the MSI with service install/start/stop,
