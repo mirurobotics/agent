@@ -1,5 +1,6 @@
 // standard crates
 use std::env;
+use std::future::Future;
 
 // internal crates
 use backend_api::models as backend_client;
@@ -16,8 +17,12 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendHost;
+use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
+use miru_agent::service::RunOutcome;
+#[cfg(windows)]
+use miru_agent::service::{self, StopSignal};
 use miru_agent::version;
 use miru_agent::workers::mqtt;
 
@@ -26,8 +31,7 @@ use miru_agent::workers::mqtt;
 use tokio::signal::unix::signal;
 use tracing::{error, info};
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli_args = cli::Args::parse(&env::args().collect::<Vec<String>>());
 
     if cli_args.display_version {
@@ -52,18 +56,51 @@ async fn main() {
             std::process::exit(report.exit_code());
         }
 
-        let result = run_provision(provision_args).await;
-        handle_provision_result(result);
+        handle_provision_result(runtime().block_on(run_provision(provision_args)));
         return;
     }
 
     if let Some(reprovision_args) = cli_args.reprovision_args {
-        let result = run_reprovision(reprovision_args).await;
-        handle_reprovision_result(result);
+        handle_reprovision_result(runtime().block_on(run_reprovision(reprovision_args)));
         return;
     }
 
-    run_agent().await;
+    run_runtime_mode(cli_args.console);
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime")
+}
+
+/// Runs the agent in the foreground (`console`) or, on Windows without
+/// `--console`, hands the process to the Service Control Manager.
+fn run_runtime_mode(console: bool) {
+    #[cfg(windows)]
+    {
+        if !console {
+            if let Err(e) = service::windows::dispatch(service_body) {
+                eprintln!("miru-agent: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
+    let _ = console; // unix: the flag is a no-op (keeps clippy -D warnings quiet)
+    runtime().block_on(run_agent(logs::Options::default(), await_shutdown_signal));
+}
+
+/// Service entry point: runs on the SCM's service thread with its own runtime
+/// and logs to the rolling file only, since a service has no console.
+#[cfg(windows)]
+fn service_body(stop: StopSignal) -> RunOutcome {
+    let options = logs::Options {
+        stdout: false,
+        ..Default::default()
+    };
+    runtime().block_on(run_agent(options, move || stop.wait()))
 }
 
 async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
@@ -162,24 +199,30 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
     }
 }
 
-async fn run_agent() {
+/// Runs the agent to completion. `shutdown` builds the future that resolves
+/// when the agent should stop; it is called once per phase that awaits it.
+async fn run_agent<F, Fut>(log_options: logs::Options, shutdown: F) -> RunOutcome
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
     let layout = disk::Layout::default();
 
     // initialize logging early so reconciliation and pre-settings activity are
     // observable. The level is reloaded once settings are read below.
-    let log_guard = match logs::init(logs::Options::default()) {
+    let log_guard = match logs::init(log_options) {
         Ok(g) => g,
         Err(e) => {
             // tracing is not yet installed if init failed, so use eprintln!
             eprintln!("Failed to initialize logging: {e}");
-            return;
+            return RunOutcome::Failed;
         }
     };
 
     // wait for the device to be activated (or a shutdown signal)
-    match await_activation(&layout, tokio::time::sleep, await_shutdown_signal()).await {
+    match await_activation(&layout, tokio::time::sleep, shutdown()).await {
         Outcome::Activated => {}
-        Outcome::ShutdownRequested => return,
+        Outcome::ShutdownRequested => return RunOutcome::Completed,
     }
 
     // reconcile the agent package version to ensure the file system storage state
@@ -189,7 +232,7 @@ async fn run_agent() {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
-            return;
+            return RunOutcome::Failed;
         }
     };
     if let Err(e) = upgrade::reconcile(
@@ -201,12 +244,12 @@ async fn run_agent() {
     .await
     {
         error!("upgrade: failed to reconcile agent package version: {e}");
-        return;
+        return RunOutcome::Failed;
     }
 
     // retrieve the settings files
     let Some(settings) = read_settings(&layout).await else {
-        return;
+        return RunOutcome::Failed;
     };
 
     // apply the configured log level to the running subscriber
@@ -217,9 +260,12 @@ async fn run_agent() {
     // run the server
     let options = build_app_options(settings);
     info!("Running the server with options: {:?}", options);
-    let result = run(options, await_shutdown_signal()).await;
-    if let Err(e) = result {
-        error!("Failed to run the server: {e}");
+    match run(options, shutdown()).await {
+        Ok(()) => RunOutcome::Completed,
+        Err(e) => {
+            error!("Failed to run the server: {e}");
+            RunOutcome::Failed
+        }
     }
 }
 
@@ -244,7 +290,10 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
 
     AppOptions {
         lifecycle: LifecycleOptions {
-            is_persistent: settings.is_persistent,
+            is_persistent: LifecycleOptions::resolve_persistence(
+                settings.is_persistent,
+                platform::supports_idle_exit(),
+            ),
             ..Default::default()
         },
         backend_host: settings.backend.host,
@@ -270,8 +319,7 @@ async fn get_bootstrap_backend_host() -> BackendHost {
 
 #[cfg(windows)]
 async fn await_shutdown_signal() {
-    // Service-control integration (SERVICE_CONTROL_STOP) lands with the
-    // Windows service lifecycle; ctrl-c covers console runs until then.
+    // console mode: ctrl-c; service mode uses `service::StopSignal`
     let _ = tokio::signal::ctrl_c().await;
     info!("received ctrl-c, shutting down...");
 }

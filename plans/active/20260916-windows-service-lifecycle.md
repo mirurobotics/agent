@@ -34,7 +34,7 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
 - [x] M1 `windows-service` dependency + lockfile; portable `service` module + tests
 - [x] M2 `service/windows.rs` SCM plumbing + `cfg(windows)` tests
 - [x] M3 `--console` flag, `platform::supports_idle_exit`, `resolve_persistence` + tests
-- [ ] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
+- [x] M4 `main.rs` restructure (sync `main`, `run_runtime_mode`, `service_body`); draft PR opened
 - [ ] M5 `ARCHITECTURE.md` updates
 - [ ] M6 `./scripts/preflight.sh` CLEAN; CI green incl. `windows-check`; PR leaves draft
 
@@ -61,6 +61,13 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   `ServiceControl`, `register` bounds, `define_windows_service!` verbatim). All 17 tests plus a
   `dispatch` check (`Winapi` raw_os_error 1063 → `NotLaunchedByScm`) pass under
   `clippy -D warnings`. The real Windows CI job remains the arbiter.
+- 2026-09-16 (M4): the generic `run_agent` body lands at ~45 non-blank, non-comment lines (the
+  `run(...)` result match adds two net lines), so `reconcile_version` was not extracted; the
+  funclen linter passes as-is.
+- 2026-09-16 (M4): `cargo clippy --package miru-agent -- -D warnings` run directly fails in the
+  generated `backend-api` crate (`manual_map`); only `scripts/lint.sh` (the CI `--fix
+  --allow-dirty` form) is authoritative, and it is clean. Covgate after M4: app 94.13, cli 100,
+  platform 100, service 100.
 
 ## Decision Log
 
@@ -110,6 +117,13 @@ activation or idle-exit on Windows, and clippy for the Windows target in CI.
   `tests/service/windows.rs` (cfg(windows)-only, so not in `test_utils`). One extra
   `run_lifecycle` case beyond the plan list: a sink failing on `Running` skips the body and
   leaves only `StartPending` recorded.
+- 2026-09-16 (M3): `app/options.rs` gained a `// external crates` group with `use tracing::warn;`
+  (the file had none) rather than a fully qualified `tracing::warn!`, matching the import-group
+  convention used elsewhere in `app/`.
+- 2026-09-16 (M4): `run_runtime_mode`, `service_body`, and `run_agent` carry short doc comments
+  stating the threading/logging contract (service body runs on the SCM thread with its own
+  runtime; `shutdown` is a factory called once per awaiting phase). No other additions to the
+  plan's `main.rs` shape.
 
 ## Outcomes & Retrospective
 
