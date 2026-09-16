@@ -26,7 +26,7 @@ A reviewer can see it working before any tag exists: CI on the pull request buil
 
 
 - [x] M1: `windows-release-build` job in `ci.yml` uploads `miru-agent.exe` + `miru_agent.pdb`. (committed; CI result recorded in Outcomes)
-- [ ] M2: `build/.goreleaser.yaml` gains the `agent-windows` prebuilt build, archive/nfpm id filters, and the PDB extra file; `goreleaser check` passes locally.
+- [x] M2: `build/.goreleaser.yaml` gains the `agent-windows` prebuilt build, archive/nfpm id filters, and the PDB extra file; `goreleaser check` passes locally (goreleaser-pro v2.18.1: "1 configuration file(s) validated", no `GORELEASER_KEY` needed for `check` with the Pro binary).
 - [ ] M3: `goreleaser-snapshot` dry-run job in `ci.yml` proves ingestion on the PR.
 - [ ] M4: `release.yml` downloads the Windows artifact before `build/release.sh`.
 - [ ] M5: docs (`build/windows/README.md`, roadmap PR 8 entry) updated.
