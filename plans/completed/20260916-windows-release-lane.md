@@ -30,7 +30,7 @@ A reviewer can see it working before any tag exists: CI on the pull request buil
 - [x] M3: `goreleaser-snapshot` dry-run job in `ci.yml` proves ingestion on the PR. (committed; evidence recorded in Outcomes once the run finishes)
 - [x] M4: `release.yml` downloads the Windows artifact before `build/release.sh`. (not executable on a PR; reviewed by diff: same artifact name `agent-windows-amd64-msvc` and path `build/prebuilt/windows_amd64` as the dry-run job, `release` still `needs: [ci, check-main]`)
 - [x] M5: docs (`build/windows/README.md`, roadmap PR 8 entry) updated.
-- [ ] Final: preflight `CLEAN`, dry-run artifact inspected, PR leaves draft.
+- [x] Final: preflight `CLEAN` (run 35157539186, all jobs green), dry-run evidence inspected (see Outcomes M3), PR marked ready.
 
 ## Surprises & Discoveries
 
@@ -49,6 +49,7 @@ A reviewer can see it working before any tag exists: CI on the pull request buil
 - 2026-09-16, M2/M3 round 2: replaced the Pro-only `builder: prebuilt` with an OSS-compatible ingestion that keeps every other part of the design (artifact name and `build/prebuilt/windows_amd64` layout, archive ids, nfpm filter, SBOMs, PDB `extra_files`, `release.yml` download step). The `agent-windows` build now uses `builder: rust` with `tool: ./build/import-prebuilt.sh`, `command: build`, target `x86_64-pc-windows-msvc`, `dir: ..`, `flags: [--release, -p=miru-agent]`. GoReleaser 2.13.3's Rust builder (`internal/builders/rust/build.go`) runs `<tool> <command> --target=<triple> <flags>` from `dir` and then copies `target/<triple>/release/<binary><ext>` (ext `.exe` for windows targets, `internal/pipe/build/build.go` `extFor`) into `dist/`; the importer copies the staged `.exe` to that path and exits 1 if it is missing, so the strict-failure property of the prebuilt builder is preserved. `x86_64-pc-windows-msvc` is in the builder's `all_targets.txt`; its `Prepare` runs `rustup target add x86_64-pc-windows-msvc` in the container (network is already required for crate downloads). Verified locally in the pinned image `ghcr.io/mirurobotics/agent-builder:43e2c5b` with `goreleaser build --snapshot --clean --id agent-windows`: "build succeeded after 19s", `dist/agent-windows_x86_64-pc-windows-msvc/miru-agent.exe` 37.22 MiB.
   Rejected alternatives: (a) installing `goreleaser-pro` 2.13.3 in `build/Dockerfile.builder` (asset `goreleaser-pro_Linux_x86_64.tar.gz` + `checksums.txt` exist) is the cleanest long-term fix but is explicitly out of this plan's scope and needs a builder-image publish (`builder.yml` only runs on `main` pushes or a manual dispatch, which pushes to the public GHCR package) plus a repin of `build/Dockerfile`, so it is left for the maintainers to decide; the importer can be dropped in favour of `builder: prebuilt` once the image is Pro. (b) Downloading the artifact straight into `target/x86_64-pc-windows-msvc/release/` with `tool: "true"` avoids the script but hides the contract and breaks the shared prebuilt layout the PDB glob and `release.yml` use.
 - 2026-09-16, setup: the draft PR title is `ci(release): add the Windows msvc release lane` (the orchestrator's instruction) rather than the Concrete Steps' `build(windows): ...` title; the body links this plan.
+- 2026-09-16, M3 round 3: the `tokio` SBOM assertion used `grep -c '"name": "tokio"'` with a literal space after the colon, but syft emits the SBOM as compact JSON (no space), so it matched nothing and failed the verify step under `set -e` even though the SBOM was complete. Replaced with a whitespace-tolerant `grep -Ec '"name"[[:space:]]*:[[:space:]]*"tokio"'` captured into a variable (`|| true`) plus an explicit `test -gt 0` with a clear message, so the assertion survives either JSON style and fails loudly rather than ambiguously. Confirmed `tokio_hits=1` on run 35157539186.
 
 ## Outcomes & Retrospective
 
@@ -61,6 +62,13 @@ M1 evidence, CI run 35153139460 (head `9ff5ab9e`, job `windows-release-build` id
 - "Stage prebuilt artifacts" listed `miru_agent.pdb` 111,276,032 bytes and `miru-agent.exe` 39,032,832 bytes (PDB in the 100 MB range with `CARGO_PROFILE_RELEASE_DEBUG: 1`, as predicted) and printed `Version: v0.10.2` from `miru-agent.exe version`.
 - Artifact `agent-windows-amd64-msvc` (id 10469659999, 45,908,012 bytes zipped, 2 files).
 - Only annotation: `actions/upload-artifact` (v4.6.2) targets Node 20, forced to Node 24; same pin the repo already uses elsewhere.
+
+M3 evidence, CI run 35157539186 (head `b972e172`, all eight jobs green; `goreleaser-snapshot` 8 min 28 s, `windows-release-build` 4 min 16 s warm cache). The dry-run `Verify Windows artifacts` step confirmed, from `build/dist/`:
+
+- `agent_Windows_x86_64.zip` (13,683,191 bytes) contains `miru-agent.exe` (39,032,832 bytes); the `format_overrides` zip now fires.
+- `miru-agent_0.10.3-next_windows_amd64.sbom.json` (695,400 bytes, on par with the Linux SBOMs at ~679 KB) enumerates the crate tree: `tokio_hits=1`, proving syft read the cargo-auditable `.dep-v0` section out of the PE.
+- `agent_Windows_x86_64.zip.sbom.json` (698,393 bytes) exists; no Windows `.deb` (only `miru-agent_0.10.3-next_{amd64,arm64}.deb`, both Linux).
+- `build/prebuilt/windows_amd64/miru_agent.pdb` (111,276,032 bytes) present for the later `release.extra_files` attach.
 
 ## Context and Orientation
 
