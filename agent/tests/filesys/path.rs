@@ -1,17 +1,9 @@
 // standard crates
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // internal crates
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
-#[cfg(unix)]
-use miru_agent::filesys::FileSysErr;
-use miru_agent::filesys::{self, dirs, path, Atomic, Overwrite, PathExt, WriteOptions};
-
-// external crates
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
+use miru_agent::filesys::{self, dirs, path, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 pub mod exists {
     use super::*;
@@ -24,7 +16,7 @@ pub mod exists {
 
     #[test]
     fn nonexistent_path() {
-        let dir = filesys::Dir::new("/nonexistent/path/abc123");
+        let dir = filesys::Dir::new(PathBuf::from("nonexistent").join("path").join("abc123"));
         assert!(!dir.exists());
     }
 }
@@ -57,24 +49,12 @@ pub mod try_exists {
         assert!(!file.try_exists().unwrap());
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn returns_err_when_parent_dir_is_unreadable() {
-        let tmp = test_dirs::temp("testing").unwrap();
-        let locked = tmp.to_dir().subdir("locked");
-        dirs::create(&locked).await.unwrap();
-        let file = locked.file("secret.txt");
-        test_files::seed(&file, "contents").await;
-
-        dirs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
-            .await
-            .unwrap();
-        let result = file.try_exists();
-        // restore before asserting so a failure cannot leak an unreadable dir
-        dirs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
-
+    #[test]
+    fn returns_err_when_path_is_invalid() {
+        // An embedded NUL makes metadata fail with InvalidInput on every
+        // platform. chmod 000 is Unix-only, and a file occupying the parent
+        // is NotFound on Windows.
+        let result = filesys::File::new("invalid\0path").try_exists();
         assert!(
             matches!(result, Err(FileSysErr::PathExistenceErr(_))),
             "expected PathExistenceErr, got {result:?}"
@@ -109,67 +89,90 @@ pub mod write_options {
 }
 
 pub mod abs_path {
-    // test cases taken from path-clean crate https://github.com/danreeves/path-clean/blob/3876d7cb5367997bcda17ce165bf69c4f434cb93/src/lib.rs#L108
+    // Relative cases from path-clean
+    // (https://github.com/danreeves/path-clean). Rooted `/` and `\\` tables
+    // stay per-OS: a `/` literal is not absolute on Windows.
     use super::*;
+
+    fn current() -> filesys::Dir {
+        dirs::current().unwrap()
+    }
+
+    fn host_root() -> PathBuf {
+        current().path().ancestors().last().unwrap().to_path_buf()
+    }
+
+    fn abs(input: impl AsRef<Path>) -> PathBuf {
+        filesys::Dir::new(input.as_ref()).abs_path().unwrap()
+    }
 
     #[test]
     fn empty_path_is_current_dir() {
-        let dir = filesys::Dir::new(PathBuf::from(""));
-        let expected_dir = dirs::current().unwrap();
-        assert_eq!(&dir.abs_path().unwrap(), expected_dir.path());
+        assert_eq!(&abs(""), current().path());
     }
 
     #[test]
     fn abs_paths_dont_change() {
-        let root = dirs::current()
-            .unwrap()
-            .path()
-            .ancestors()
-            .last()
-            .unwrap()
-            .to_path_buf();
-
+        let root = host_root();
         for expected in [
             root.clone(),
             root.join("another").join("one"),
             root.join("bronny").join("james"),
         ] {
-            let dir = filesys::Dir::new(expected.clone());
-            assert_eq!(dir.abs_path().unwrap(), expected);
+            assert_eq!(abs(&expected), expected);
         }
     }
 
     #[test]
     fn replace_multiple_slashes() {
-        let current_dir = dirs::current().unwrap();
-        let current_dir_path_buf = current_dir.path();
-        let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
-        let parent_dir_path = path::clean(current_dir.parent().unwrap().path())
-            .to_string_lossy()
-            .into_owned();
+        let cwd = current();
+        let cwd_path = cwd.path();
+        assert_eq!(abs(".//"), cwd_path.clone());
+        assert_eq!(abs("..//"), path::clean(cwd.parent().unwrap().path()));
+        assert_eq!(abs("././/./"), cwd_path.clone());
+        assert_eq!(abs("path//to///thing"), cwd_path.join("path/to/thing"));
+    }
 
-        let rel_path_to_thing_path = current_dir_path_buf
-            .join("path/to/thing")
-            .to_string_lossy()
-            .into_owned();
+    #[test]
+    fn eliminate_current_dir() {
+        let cwd = current().path().clone();
+        assert_eq!(abs("./"), cwd);
+        assert_eq!(abs("./test"), cwd.join("test"));
+        assert_eq!(abs("./test/./path"), cwd.join("test/path"));
+        assert_eq!(abs("test/path/."), cwd.join("test/path"));
+    }
 
-        let tests = vec![
-            (".//", &current_dir_path),
-            ("..//", &parent_dir_path),
-            ("././/./", &current_dir_path),
-            ("path//to///thing", &rel_path_to_thing_path),
-        ];
+    #[test]
+    fn eliminate_parent_dir() {
+        let cwd = current();
+        let cwd_path = cwd.path();
+        let parent = path::clean(cwd.parent().unwrap().path());
+        let grandparent = path::clean(cwd.parent().unwrap().parent().unwrap().path());
 
-        for test in tests {
-            let dir = filesys::Dir::new(PathBuf::from(test.0));
-            assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
-        }
+        assert_eq!(abs("test/.."), cwd_path.clone());
+        assert_eq!(abs("test/path/.."), cwd_path.join("test"));
+        assert_eq!(abs("test/../path"), cwd_path.join("path"));
+        assert_eq!(abs("test/path/../../"), cwd_path.clone());
+        assert_eq!(abs("test/path/../../.."), parent.clone());
+        assert_eq!(abs("test/path/../../../.."), grandparent);
+        assert_eq!(
+            abs("test/path/../../another/path"),
+            cwd_path.join("another/path")
+        );
+        assert_eq!(
+            abs("test/path/../../another/path/.."),
+            cwd_path.join("another")
+        );
+        assert_eq!(abs("../test"), parent.join("test"));
+        assert_eq!(abs("../test/"), parent.join("test"));
+        assert_eq!(abs("../test/path"), parent.join("test/path"));
+        assert_eq!(abs("../test/.."), parent);
     }
 
     #[cfg(unix)]
     #[test]
-    fn replace_multiple_slashes_in_unix_abs_paths() {
-        let tests = vec![
+    fn unix_rooted_abs_paths() {
+        let cases = [
             ("/", "/"),
             ("//", "/"),
             ("///", "/"),
@@ -177,230 +180,96 @@ pub mod abs_path {
             ("/..//", "/"),
             ("/.//./", "/"),
             ("/path//to///thing", "/path/to/thing"),
+            ("/./", "/"),
+            ("/test/./path/", "/test/path"),
+            ("/..", "/"),
+            ("/../test", "/test"),
+            ("/test/../path", "/path"),
+            ("/test/path/../../..", "/"),
+            ("/test/path/../../../..", "/"),
         ];
-
-        for test in tests {
-            let dir = filesys::Dir::new(PathBuf::from(test.0));
-            assert_eq!(dir.abs_path().unwrap(), PathBuf::from(test.1));
+        for (input, expected) in cases {
+            assert_eq!(abs(input), PathBuf::from(expected));
         }
     }
 
     #[cfg(windows)]
     #[test]
-    fn normalize_windows_abs_paths() {
-        let current_dir = dirs::current().unwrap();
-        let root = current_dir.path().ancestors().last().unwrap();
+    fn windows_rooted_abs_paths() {
+        let root = host_root();
         let root_str = root.to_string_lossy();
-        let tests = vec![
-            (format!(r"{root_str}\\"), root.to_path_buf()),
-            (format!(r"{root_str}.\\.\"), root.to_path_buf()),
+        let cases = [
+            (format!(r"{root_str}\\"), root.clone()),
+            (format!(r"{root_str}.\\.\"), root.clone()),
             (
                 format!(r"{root_str}path\\to\.\thing\..\file"),
                 root.join("path").join("to").join("file"),
             ),
             (format!(r"{root_str}..\\..\path"), root.join("path")),
         ];
-
-        for (input, expected) in tests {
-            let dir = filesys::Dir::new(PathBuf::from(input));
-            assert_eq!(dir.abs_path().unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn eliminate_current_dir() {
-        let current_dir = dirs::current().unwrap();
-        let current_dir_path_buf = current_dir.path();
-        let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
-
-        let rel_test_path = current_dir_path_buf
-            .join("test")
-            .to_string_lossy()
-            .into_owned();
-        let rel_test_path_path = current_dir_path_buf
-            .join("test/path")
-            .to_string_lossy()
-            .into_owned();
-
-        let tests = vec![
-            ("./", &current_dir_path),
-            ("./test", &rel_test_path),
-            ("./test/./path", &rel_test_path_path),
-            ("test/path/.", &rel_test_path_path),
-        ];
-
-        for test in tests {
-            assert_eq!(
-                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
-                PathBuf::from(test.1)
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn eliminate_current_dir_in_unix_abs_paths() {
-        let tests = vec![("/./", "/"), ("/test/./path/", "/test/path")];
-
-        for test in tests {
-            assert_eq!(
-                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
-                PathBuf::from(test.1)
-            );
-        }
-    }
-
-    #[test]
-    fn eliminate_parent_dir() {
-        let current_dir = dirs::current().unwrap();
-        let current_dir_path_buf = current_dir.path();
-        let current_dir_path = current_dir_path_buf.to_string_lossy().into_owned();
-        let parent_dir = current_dir.parent().unwrap();
-        let parent_dir_path_buf = parent_dir.path();
-        let parent_dir_path = path::clean(parent_dir_path_buf)
-            .to_string_lossy()
-            .into_owned();
-        let grandparent_dir_path =
-            path::clean(current_dir.parent().unwrap().parent().unwrap().path())
-                .to_string_lossy()
-                .into_owned();
-
-        let rel_test_path = current_dir_path_buf
-            .join("test")
-            .to_string_lossy()
-            .into_owned();
-        let rel_path_path = current_dir_path_buf
-            .join("path")
-            .to_string_lossy()
-            .into_owned();
-        let rel_another_path = current_dir_path_buf
-            .join("another")
-            .to_string_lossy()
-            .into_owned();
-        let rel_another_path_path = current_dir_path_buf
-            .join("another/path")
-            .to_string_lossy()
-            .into_owned();
-        let rel_parent_test_path = parent_dir_path_buf
-            .join("test")
-            .to_string_lossy()
-            .into_owned();
-        let rel_parent_test_path_path = parent_dir_path_buf
-            .join("test/path")
-            .to_string_lossy()
-            .into_owned();
-
-        let tests = vec![
-            ("test/..", &current_dir_path),
-            ("test/path/..", &rel_test_path),
-            ("test/../path", &rel_path_path),
-            ("test/path/../../", &current_dir_path),
-            ("test/path/../../..", &parent_dir_path),
-            ("test/path/../../../..", &grandparent_dir_path),
-            ("test/path/../../another/path", &rel_another_path_path),
-            ("test/path/../../another/path/..", &rel_another_path),
-            ("../test", &rel_parent_test_path),
-            ("../test/", &rel_parent_test_path),
-            ("../test/path", &rel_parent_test_path_path),
-            ("../test/..", &parent_dir_path),
-        ];
-
-        for test in tests {
-            assert_eq!(
-                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
-                PathBuf::from(test.1)
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn eliminate_parent_dir_in_unix_abs_paths() {
-        let tests = vec![
-            ("/..", "/"),
-            ("/../test", "/test"),
-            ("/test/../path", "/path"),
-            ("/test/path/../../..", "/"),
-            ("/test/path/../../../..", "/"),
-        ];
-
-        for test in tests {
-            assert_eq!(
-                filesys::Dir::new(PathBuf::from(test.0)).abs_path().unwrap(),
-                PathBuf::from(test.1)
-            );
+        for (input, expected) in cases {
+            assert_eq!(abs(input), expected);
         }
     }
 }
 
 pub mod clean {
-    // test cases taken from path-clean crate https://github.com/danreeves/path-clean/blob/3876d7cb5367997bcda17ce165bf69c4f434cb93/src/lib.rs#L108
+    // Relative cases from path-clean
+    // (https://github.com/danreeves/path-clean). `/`-rooted literals are
+    // Unix path syntax (`//` is a UNC prefix on Windows), so those tables
+    // stay unix-gated.
     use super::*;
+
+    fn cleaned(input: &str) -> PathBuf {
+        path::clean(PathBuf::from(input))
+    }
 
     #[test]
     fn empty_path_is_current_dir() {
-        assert_eq!(path::clean(PathBuf::from("")), PathBuf::from("."));
+        assert_eq!(cleaned(""), PathBuf::from("."));
     }
 
     #[test]
     fn clean_paths_dont_change() {
-        let tests = vec![(".", "."), ("..", ".."), ("/", "/")];
-
-        for test in tests {
-            assert_eq!(path::clean(PathBuf::from(test.0)), PathBuf::from(test.1));
+        for input in [".", ".."] {
+            assert_eq!(cleaned(input), PathBuf::from(input));
         }
     }
 
     #[test]
     fn replace_multiple_slashes() {
-        let tests = vec![
-            ("/", "/"),
-            ("//", "/"),
-            ("///", "/"),
+        let cases = [
             (".//", "."),
-            ("//..", "/"),
             ("..//", ".."),
-            ("/..//", "/"),
-            ("/.//./", "/"),
             ("././/./", "."),
             ("path//to///thing", "path/to/thing"),
-            ("/path//to///thing", "/path/to/thing"),
         ];
-
-        for test in tests {
-            assert_eq!(path::clean(PathBuf::from(test.0)), PathBuf::from(test.1));
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
         }
     }
 
     #[test]
     fn eliminate_current_dir() {
-        let tests = vec![
+        let cases = [
             ("./", "."),
-            ("/./", "/"),
             ("./test", "test"),
             ("./test/./path", "test/path"),
-            ("/test/./path/", "/test/path"),
             ("test/path/.", "test/path"),
         ];
-
-        for test in tests {
-            assert_eq!(path::clean(PathBuf::from(test.0)), PathBuf::from(test.1));
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
         }
     }
 
     #[test]
     fn eliminate_parent_dir() {
-        let tests = vec![
-            ("/..", "/"),
-            ("/../test", "/test"),
+        let cases = [
             ("test/..", "."),
             ("test/path/..", "test"),
             ("test/../path", "path"),
-            ("/test/../path", "/path"),
             ("test/path/../../", "."),
             ("test/path/../../..", ".."),
-            ("/test/path/../../..", "/"),
-            ("/test/path/../../../..", "/"),
             ("test/path/../../../..", "../.."),
             ("test/path/../../another/path", "another/path"),
             ("test/path/../../another/path/..", "another"),
@@ -409,9 +278,32 @@ pub mod clean {
             ("../test/path", "../test/path"),
             ("../test/..", ".."),
         ];
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
+        }
+    }
 
-        for test in tests {
-            assert_eq!(path::clean(PathBuf::from(test.0)), PathBuf::from(test.1));
+    #[cfg(unix)]
+    #[test]
+    fn unix_rooted_paths() {
+        let cases = [
+            ("/", "/"),
+            ("//", "/"),
+            ("///", "/"),
+            ("//..", "/"),
+            ("/..//", "/"),
+            ("/.//./", "/"),
+            ("/path//to///thing", "/path/to/thing"),
+            ("/./", "/"),
+            ("/test/./path/", "/test/path"),
+            ("/..", "/"),
+            ("/../test", "/test"),
+            ("/test/../path", "/path"),
+            ("/test/path/../../..", "/"),
+            ("/test/path/../../../..", "/"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(cleaned(input), PathBuf::from(expected));
         }
     }
 }
