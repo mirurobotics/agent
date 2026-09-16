@@ -41,6 +41,7 @@ Target (a target, not a guarantee): test step under about 1m30s and whole job un
 
 - 2026-09-16 (M0, run 35132246902): splitting into `--no-run` build + run steps made the run step recompile `miru-agent` for 1m18s (job 6m6s vs 4m49s baseline). Cause: `agent/build.rs` emits `rerun-if-changed=.git/HEAD` and `.git/refs/`, which Cargo resolves relative to the package dir `agent/`, where no `.git` exists; a missing rerun-if-changed path is permanently stale, so the build script re-runs on every invocation, emits a fresh `MIRU_AGENT_BUILD_DATE`, and dirties the crate. Verified locally on Linux with `CARGO_LOG=cargo::core::compiler::fingerprint=info` (`stale: missing ".../agent/.git/HEAD"`). Fixing `build.rs` is out of this plan's scope (production build metadata semantics), so M0 keeps a single `cargo test --timings` step and derives compile time from the `Finished` timestamp. Filed as a follow-up task.
 - 2026-09-16 (M0 probe): `RealTimeProtectionEnabled: False`, `AntivirusEnabled: True`, 4 CPUs, `TEMP=C:\Users\RUNNER~1\AppData\Local\Temp`, `RUNNER_TEMP=D:\a\_temp`. The `Get-MpPreference` and `Get-PSDrive` tables printed empty because pwsh defers formatting across object types; the probe now pipes each through `Out-String`. Real-time protection is already off, so the Defender-exclusion fallback in M2 is moot. Corrected probe (run 35133302125): `DisableRealtimeMonitoring: True`, `ExclusionPath: {C:\\, D:\\}`, `C:` 33 GB free, `D:` 156 GB free (dev drive fits on `D:`).
+- 2026-09-16 (M1, run 35133866291): `RUST_TEST_THREADS=16` failed `workers::poller::run::ignored_syncer_events` (`agent/tests/workers/poller.rs:374`), a wall-clock assertion with a 1s drift tolerance; oversubscribing 4 cores 4x stretched the gap between loop iterations past that. `mod.rs` was not faster either (79.62s vs 73.67s). Trying 8 threads as the second and last round for this lever.
 - 2026-09-16 (M0, run 35133302125): with no lever applied, `mod.rs` took 73.67s versus 108.5s at baseline and 108.70s one run earlier; run-to-run noise on `windows-latest` is on the order of 30s for the test phase. Judge levers on repeated runs, not single deltas.
 
 ## Decision Log
@@ -157,6 +158,7 @@ Fill this table after each CI round (warm-cache runs only):
 | Baseline | 4b3ac66 | 4m49s | (in 3m50s step) 1m36s | (in 3m50s step) | 12.1s | 108.5s | ~461 MB | n/a |
 | M0 (split) | bb104ce | 6m6s | 1m32s | 3m26s (incl. 1m18s recompile) | 16.07s | 108.70s | ~461 MB | no (split dropped) |
 | M0 | 246838d | 4m20s | 1m38s | 86s | 10.81s | 73.67s | ~461 MB | yes (scaffolding) |
+| M1 (16 threads) | 0a27e19 | 4m04s (red) | 1m20s | 91s | 10.85s | 79.62s, 1 failed | ~461 MB | no |
 | M1 | | | | | | | | |
 | M2 | | | | | | | | |
 | M3 | | | | | | | | |
