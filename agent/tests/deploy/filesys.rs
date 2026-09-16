@@ -577,71 +577,22 @@ pub mod deploy_func_validation_errs {
     }
 }
 
-#[cfg(unix)]
 pub mod deploy_func_backup_errs {
     use super::*;
-    use miru_agent::filesys::PathExt;
 
-    #[tokio::test]
-    async fn copy_file_for_backup_permission_denied() {
-        let f = Fixture::new().await;
-
-        // create locked_dir and write c.json with "old" content BEFORE locking
-        let locked_dir = f.temp_dir.subdir("locked");
-        dirs::create(&locked_dir).await.unwrap();
-        let c_path = locked_dir.file("c.json").path().display().to_string();
-        test_files::seed(&filesys::File::new(&c_path), "old").await;
-
-        // now lock the parent directory so snapshot_destination's sibling
-        // backup copy cannot succeed
-        dirs::set_permissions(&locked_dir, read_only())
-            .await
-            .unwrap();
-
-        let c_cfg = ConfigInstance {
-            filepath: c_path.clone(),
-            ..Default::default()
-        };
-        f.seed_cfg_inst(&c_cfg, "new".to_string()).await;
-
-        let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
-        let result = f.deploy(&deployment).await;
-        assert!(
-            matches!(&result, Err(DeployErr::BackupAccessDenied(_))),
-            "expected BackupAccessDenied, got {result:?}"
-        );
-
-        // restore permissions
-        dirs::set_permissions(&locked_dir, writeable())
-            .await
-            .unwrap();
-
-        // c.json content must be unchanged
-        let c_actual = files::read_string(&filesys::File::new(&c_path))
-            .await
-            .unwrap();
-        assert_eq!(c_actual, "old");
-
-        // no backup siblings leaked next to c.json
-        let leftover = detect_backup_files(&locked_dir).await;
-        assert!(
-            leftover.is_empty(),
-            "expected no miru.backup.* siblings near c.json, found {leftover:?}"
-        );
+    /// An existing destination that is a directory, so `copy_to` fails with
+    /// `InvalidInput` on every platform before a backup sibling is created.
+    async fn dest_is_a_directory(f: &Fixture, name: &str) -> (filesys::Dir, String) {
+        let dir = f.temp_dir.subdir(name);
+        dirs::create(&dir).await.unwrap();
+        let path = dir.path().display().to_string();
+        (dir, path)
     }
 
     #[tokio::test]
-    async fn unreadable_existing_file_returns_backup_access_denied() {
+    async fn directory_destination_maps_to_filesys_err() {
         let f = Fixture::new().await;
-
-        // seed c.json with "old" content, then make it unreadable so the
-        // backup copy cannot open the source
-        let c_file = f.temp_dir.file("c.json");
-        let c_path = c_file.path().display().to_string();
-        test_files::seed(&c_file, "old").await;
-        files::set_permissions(&c_file, std::fs::Permissions::from_mode(0o000))
-            .await
-            .unwrap();
+        let (dest_dir, c_path) = dest_is_a_directory(&f, "c.json").await;
 
         let c_cfg = ConfigInstance {
             filepath: c_path.clone(),
@@ -652,21 +603,15 @@ pub mod deploy_func_backup_errs {
         let deployment = f.new_queued(std::slice::from_ref(&c_cfg));
         let result = f.deploy(&deployment).await;
         assert!(
-            matches!(&result, Err(DeployErr::BackupAccessDenied(_))),
-            "expected BackupAccessDenied, got {result:?}"
+            matches!(&result, Err(DeployErr::FileSysErr(_))),
+            "expected FileSysErr, got {result:?}"
         );
 
-        // restore permissions
-        files::set_permissions(&c_file, std::fs::Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        // c.json content must be unchanged
-        let c_actual = files::read_string(&c_file).await.unwrap();
-        assert_eq!(c_actual, "old");
-
-        // no backup siblings leaked next to c.json
-        let leftover = detect_backup_files(&f.temp_dir).await;
+        assert!(
+            dest_dir.path().is_dir(),
+            "destination directory must be left in place"
+        );
+        let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
             "expected no miru.backup.* siblings near c.json, found {leftover:?}"
@@ -677,21 +622,14 @@ pub mod deploy_func_backup_errs {
     async fn copy_backups_failure_retains_original_files() {
         let f = Fixture::new().await;
 
-        // Pre-populate a.json and b.json in writable temp_dir root
         let a_path = f.temp_dir.path().join("a.json").display().to_string();
         let b_path = f.temp_dir.path().join("b.json").display().to_string();
         test_files::seed(&filesys::File::new(&a_path), "old_a").await;
         test_files::seed(&filesys::File::new(&b_path), "old_b").await;
 
-        // Pre-populate c.json in a subdir, then lock the subdir so snapshot's
-        // backup copy cannot create miru.backup.c.json (EACCES)
-        let locked_dir = f.temp_dir.subdir("locked");
-        dirs::create(&locked_dir).await.unwrap();
-        let c_path = locked_dir.file("c.json").path().display().to_string();
-        test_files::seed(&filesys::File::new(&c_path), "old_c").await;
-        dirs::set_permissions(&locked_dir, read_only())
-            .await
-            .unwrap();
+        // a.json and b.json snapshot, then c.json is a directory so its
+        // backup copy fails and the earlier writes roll back.
+        let (c_dir, c_path) = dest_is_a_directory(&f, "c.json").await;
 
         let a_cfg = ConfigInstance {
             filepath: a_path.clone(),
@@ -712,30 +650,27 @@ pub mod deploy_func_backup_errs {
         let deployment = f.new_queued(&[a_cfg, b_cfg, c_cfg]);
         let result = f.deploy(&deployment).await;
         assert!(
-            matches!(&result, Err(DeployErr::BackupAccessDenied(_))),
-            "expected BackupAccessDenied, got {result:?}"
+            matches!(&result, Err(DeployErr::FileSysErr(_))),
+            "expected FileSysErr, got {result:?}"
         );
 
-        // restore permissions
-        dirs::set_permissions(&locked_dir, writeable())
-            .await
-            .unwrap();
+        assert_eq!(
+            files::read_string(&filesys::File::new(&a_path))
+                .await
+                .unwrap(),
+            "old_a"
+        );
+        assert_eq!(
+            files::read_string(&filesys::File::new(&b_path))
+                .await
+                .unwrap(),
+            "old_b"
+        );
+        assert!(
+            c_dir.path().is_dir(),
+            "directory destination must be left in place"
+        );
 
-        // files should be unchanged
-        let a_actual = files::read_string(&filesys::File::new(&a_path))
-            .await
-            .unwrap();
-        assert_eq!(a_actual, "old_a");
-        let b_actual = files::read_string(&filesys::File::new(&b_path))
-            .await
-            .unwrap();
-        assert_eq!(b_actual, "old_b");
-        let c_actual = files::read_string(&filesys::File::new(&c_path))
-            .await
-            .unwrap();
-        assert_eq!(c_actual, "old_c");
-
-        // backup files consumed by rollback (rename-back), none should remain
         let leftover = detect_backup_files(f.temp_dir.dir()).await;
         assert!(
             leftover.is_empty(),
