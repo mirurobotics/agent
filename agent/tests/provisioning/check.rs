@@ -1,12 +1,9 @@
-// standard crates
-use std::os::unix::fs::PermissionsExt;
-
 // internal crates
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::disk::{DiskErr, Layout};
 use miru_agent::errors::Trace;
 use miru_agent::filesys::errors::{FileSysErr, PathExistenceErr};
-use miru_agent::filesys::{dirs, PathExt};
+use miru_agent::filesys::{dirs, Dir, PathExt};
 use miru_agent::provisioning::check::{
     self, Report, EXIT_ERROR, EXIT_NOT_PROVISIONED, EXIT_PROVISIONED,
 };
@@ -80,21 +77,9 @@ pub mod reports {
         assert!(stderr.starts_with("miru-agent: "), "got {stderr}");
     }
 
-    #[tokio::test]
-    async fn unreadable_auth_dir_is_undeterminable() {
-        let (layout, _tmp) = fresh_layout().await;
-        let auth = layout.auth();
-        test_files::seed(&auth.private_key(), "private").await;
-        test_files::seed(&auth.public_key(), "public").await;
-
-        dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o000))
-            .await
-            .unwrap();
-        let report = check::check(&layout);
-        // restore before asserting so a failure cannot leak an unreadable dir
-        dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
+    #[test]
+    fn invalid_auth_path_is_undeterminable() {
+        let report = check::check(&Layout::new(Dir::new("invalid\0path")));
 
         assert!(
             matches!(report, Report::Undeterminable(_)),

@@ -2,6 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
+use crate::test_utils::filesys::abs_path;
 use miru_agent::filesys::{self, file, FileSysErr, PathExt};
 
 // external crates
@@ -31,34 +32,35 @@ pub mod new_normalization {
     #[test]
     fn strips_dot_component() {
         assert_eq!(
-            filesys::File::new(PathBuf::from("/a/./b")),
-            filesys::File::new(PathBuf::from("/a/b")),
+            filesys::File::new(abs_path("a/./b")).path().as_os_str(),
+            abs_path("a/b").as_os_str()
         );
     }
 
     #[test]
     fn strips_trailing_separator() {
         assert_eq!(
-            filesys::File::new(PathBuf::from("/a/b/")),
-            filesys::File::new(PathBuf::from("/a/b")),
+            filesys::File::new(abs_path("a/b").join(""))
+                .path()
+                .as_os_str(),
+            abs_path("a/b").as_os_str()
         );
     }
 
     #[test]
     fn strips_dot_in_relative_path() {
         assert_eq!(
-            filesys::File::new(PathBuf::from("relative/./path")),
-            filesys::File::new(PathBuf::from("relative/path")),
+            filesys::File::new(PathBuf::from("relative/./path"))
+                .path()
+                .as_os_str(),
+            PathBuf::from("relative").join("path").as_os_str(),
         );
     }
 
     #[test]
     fn preserves_parent_dir_component() {
         // .. is NOT resolved — it is preserved as a component
-        assert_ne!(
-            filesys::File::new(PathBuf::from("/a/../b")),
-            filesys::File::new(PathBuf::from("/b")),
-        );
+        assert_ne!(filesys::File::new("/a/../b"), filesys::File::new("/b"),);
     }
 }
 
@@ -119,9 +121,9 @@ pub mod parent {
 
     #[test]
     fn root_file() {
-        let file = filesys::File::new(PathBuf::from("/file.txt"));
+        let file = filesys::File::new("/file.txt");
         let parent = file.parent().unwrap();
-        assert_eq!(parent.path(), &PathBuf::from("/"));
+        assert_eq!(parent.path(), &abs_path(""));
     }
 
     #[test]
@@ -169,7 +171,7 @@ pub mod name {
 
     #[tokio::test]
     async fn root_path() {
-        let file = filesys::File::new(PathBuf::from("/"));
+        let file = filesys::File::new("/");
         assert!(matches!(
             file.name().unwrap_err(),
             FileSysErr::UnknownFileNameErr { .. }

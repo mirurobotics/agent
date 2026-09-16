@@ -187,7 +187,7 @@ mod tests {
     // internal crates
     use super::s3_config;
     use crate::test_utils::{
-        filesys::files as test_files,
+        filesys::{files as test_files, missing_file},
         http_client::run_server,
         upload::{destination, response_metadata, s3_credentials_json},
     };
@@ -451,7 +451,7 @@ mod tests {
         // Construction does no I/O and `put` stats the file before dispatching any
         // request, so a missing local file fails fast offline.
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
-        let missing = File::new("/nonexistent/definitely/not/here.log");
+        let missing = missing_file();
 
         let err = SdkTransfer::default()
             .transfer(&creds, &destination(), &missing, &HashMap::new())
@@ -563,7 +563,7 @@ mod tests {
         // error path). `put` stats the file before dispatching any request, so a
         // missing local file fails fast offline.
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("valid-token"));
-        let missing = File::new("/nonexistent/definitely/not/here.log");
+        let missing = missing_file();
 
         let err = SdkTransfer::default()
             .transfer(&creds, &destination(), &missing, &HashMap::new())

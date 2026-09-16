@@ -1,4 +1,5 @@
 // standard crates
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
@@ -74,8 +75,10 @@ pub mod new_home_dir {
     #[test]
     fn success() {
         let dir = dirs::home().unwrap();
+
         assert!(dir.exists());
-        assert!(dir.path().to_str().unwrap().contains("home"));
+        assert!(dir.path().is_absolute());
+        assert_eq!(dir.path(), &std::env::home_dir().unwrap());
     }
 }
 
@@ -790,7 +793,7 @@ pub mod set_permissions {
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();
         let target = dir.subdir("nonexistent-dir");
-        let permissions = std::fs::Permissions::from_mode(0o755);
+        let permissions = std::fs::metadata(dir.path()).unwrap().permissions();
 
         assert!(matches!(
             dirs::set_permissions(&target, permissions)

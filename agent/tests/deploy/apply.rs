@@ -4,7 +4,9 @@ use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
-use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt};
+#[cfg(unix)]
+use miru_agent::filesys::dirs;
+use miru_agent::filesys::{files, File, Overwrite, PathExt};
 use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
 
 // external crates

@@ -1,8 +1,11 @@
 // internal crates
-use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::{
+    filesys::{dirs as test_dirs, files as test_files},
+    retention::undeletable_dir_job,
+};
 use miru_agent::cooldown;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
-use miru_agent::filesys::{files, Dir, File, PathExt, WriteOptions};
+use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -27,36 +30,6 @@ async fn make_job(file: &File) -> Job {
         size: files::size(file).await.unwrap(),
         digest: files::hash(file).await.unwrap(),
         mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
-        first_observed_at: now,
-        last_observed_at: now,
-        ttl_secs: 0,
-        file_rule_id: "rule_1".to_string(),
-        deployment_id: "dpl_1".to_string(),
-    }
-}
-
-/// Two symlinks pointing at each other. `stat` and `open` on either fail with
-/// ELOOP, which classifies as a counted retry rather than a terminal failure.
-/// Built with `std::os::unix::fs::symlink` so the targets can be dangling (a
-/// loop) rather than existing files.
-fn symlink_loop(dir: &Dir) -> File {
-    let a = dir.file("loop-a");
-    let b = dir.file("loop-b");
-    std::os::unix::fs::symlink(b.path(), a.path()).unwrap();
-    std::os::unix::fs::symlink(a.path(), b.path()).unwrap();
-    a
-}
-
-/// A `Job` for a path whose stat cannot succeed. The recorded size/digest/mtime
-/// are never compared: the sweep fails at the stat step before any identity
-/// check runs, so `make_job` — which stats the file in setup — is unusable.
-fn wedged_job(file: File) -> Job {
-    let now = Utc::now();
-    Job {
-        file,
-        size: 0,
-        digest: "sha256:unused".to_string(),
-        mtime: now,
         first_observed_at: now,
         last_observed_at: now,
         ttl_secs: 0,
@@ -159,7 +132,7 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
     .unwrap();
 
     deleter
-        .enqueue(wedged_job(symlink_loop(&dir)))
+        .enqueue(undeletable_dir_job(&dir, Utc::now()).await)
         .await
         .unwrap();
     assert_eq!(deleter.len().await.unwrap(), 1);

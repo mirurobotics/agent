@@ -1,7 +1,6 @@
 // internal crates
 use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
-use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::data_uploads::queue::QueueJob;
+use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
@@ -66,7 +65,10 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
 
     // due_at is inclusive: "due" is due at exactly `now`
     assert_eq!(queue.count_ready(now()), 1);
-    assert_eq!(queue.next_ready(now()).unwrap().job.name(), "/data/due");
+    assert_eq!(
+        queue.next_ready(now()).unwrap().job,
+        retention_job_with_ttl("due", 500)
+    );
 
     // the waiting job becomes ready once its TTL elapses
     assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
@@ -82,16 +84,19 @@ mod wire {
         let dir = test_dirs::temp("delete-queue-test").unwrap();
         let path = dir.file("delete_queue.json");
         let id = Uuid::new_v4();
+        let expected = make_job("a.log", 1000, 500);
+        let file_json = serde_json::to_string(abs_path("data/a.log").to_str().unwrap()).unwrap();
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
-                r#""file":"/data/a.log","size":42,"#,
+                r#""file":{file},"size":42,"#,
                 r#""digest":"sha256:a.log","mtime":"1970-01-01T00:15:00Z","#,
                 r#""first_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""last_observed_at":"1970-01-01T00:16:40Z","ttl_secs":500,"#,
                 r#""file_rule_id":"file_rule_1","deployment_id":"dpl_1"}}}}]}}"#,
             ),
             id = id,
+            file = file_json,
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -102,6 +107,6 @@ mod wire {
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(entry.job, make_job("a.log", 1000, 500));
+        assert_eq!(entry.job, expected);
     }
 }

@@ -34,31 +34,41 @@ jobs:
       - name: Run Linter
         run: LINT_FIX=0 ./scripts/lint.sh
 
-  # Compile check for the Windows target. Runs natively on a Windows runner:
-  # aws-lc-sys cannot cross-compile from Linux (its build script drives the
-  # host C compiler with pthread-based sources). Checks lib + bin only; the
-  # test crate's Windows portability is tracked separately in the roadmap.
+  # Run the agent test suite natively on Windows. A native runner is required
+  # because aws-lc-sys cannot cross-compile from Linux (its build script drives
+  # the host C compiler with pthread-based sources). `cargo test` type-checks
+  # lib, bin and tests for the host MSVC target, so no separate check step is
+  # needed. Coverage gates stay Linux-only. The job id is kept as
+  # `windows-check` for branch protection.
   windows-check:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      # Full PDBs dominate MSVC link time; test diagnostics do not need them.
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: x86_64-pc-windows-msvc
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # The cache saved by the former check-only job never held the
+          # host-target test artifacts; a new key lets this job save its own.
+          key: test-suite
+          cache-on-failure: true
 
       - name: Install NASM (aws-lc-sys)
         run: |
           choco install nasm -y
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
-      - name: Check Windows Target
-        run: cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked
+      - name: Run Windows Tests
+        env:
+          RUST_LOG: "off"
+        run: cargo test --package miru-agent --locked
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404

@@ -1,6 +1,3 @@
-// standard crates
-use std::os::unix::fs::PermissionsExt;
-
 // internal crates
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::authn::Token;
@@ -8,7 +5,7 @@ use miru_agent::crypt::base64;
 use miru_agent::disk::{
     activation_state, assert_activated, resolve_device_id, Activation, DiskErr, Layout,
 };
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{dirs, files, Dir, WriteOptions};
 use miru_agent::models::Device;
 
 // external crates
@@ -104,21 +101,9 @@ pub mod activation_state {
         assert_eq!(Activation::Activated, activation_state(&layout).unwrap());
     }
 
-    #[tokio::test]
-    async fn errs_when_auth_dir_is_unreadable() {
-        let (layout, _tmp) = fresh_layout().await;
-        let auth = layout.auth();
-        test_files::seed(&auth.private_key(), "private").await;
-        test_files::seed(&auth.public_key(), "public").await;
-
-        dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o000))
-            .await
-            .unwrap();
-        let result = activation_state(&layout);
-        // restore before asserting so a failure cannot leak an unreadable dir
-        dirs::set_permissions(&auth.root, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
+    #[test]
+    fn errs_when_auth_path_is_invalid() {
+        let result = activation_state(&Layout::new(Dir::new("invalid\0path")));
 
         assert!(
             matches!(result, Err(DiskErr::FileSysErr(_))),

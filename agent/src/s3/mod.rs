@@ -239,7 +239,7 @@ mod tests {
     // internal crates
     use crate::test_utils::{
         error_harnesses::{assert_error, Expected},
-        filesys::files as test_files,
+        filesys::{files as test_files, missing_file},
     };
     use miru_agent::errors::{Code, Error, HTTPCode};
     use miru_agent::filesys::file::File;
@@ -528,7 +528,7 @@ mod tests {
                 // file first (to route by size), so the failure is caught reading the
                 // file's metadata before any request is dispatched.
                 let (store, _replay) = store_with(vec![]);
-                let missing = File::new("/nonexistent/definitely/not/here.bin");
+                let missing = missing_file();
 
                 let err = store
                     .put(missing, &obj("k"), &HashMap::new())

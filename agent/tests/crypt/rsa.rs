@@ -1,4 +1,5 @@
 // standard crates
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 pub use std::path::PathBuf;
 
@@ -222,6 +223,7 @@ pub mod gen_key_pair {
         .unwrap_err();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn file_permissions() {
         let crypt_dir = test_dirs::temp("crypt_rsa_test").unwrap();

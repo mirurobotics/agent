@@ -69,15 +69,33 @@ pub mod windows_defaults {
 pub mod dispatch {
     use super::*;
 
-    #[test]
     #[cfg(unix)]
+    #[test]
     fn data_root_base_matches_unix_default() {
         assert_eq!(platform::data_root_base(), platform::unix_data_root_base());
     }
 
-    #[test]
     #[cfg(unix)]
+    #[test]
     fn log_dir_matches_unix_default() {
         assert_eq!(platform::log_dir(), platform::unix_log_dir());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn data_root_base_reads_program_data() {
+        assert_eq!(
+            platform::data_root_base(),
+            platform::windows_data_root_base(std::env::var_os("ProgramData")),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn log_dir_reads_program_data() {
+        assert_eq!(
+            platform::log_dir(),
+            platform::windows_log_dir(std::env::var_os("ProgramData")),
+        );
     }
 }

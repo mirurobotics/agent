@@ -10,7 +10,7 @@
 
 // internal crates
 use crate::data_uploads::queue::queue_suite;
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
@@ -78,17 +78,21 @@ mod wire {
     /// silently overwrites a snapshot it cannot parse, so a shape change would
     /// wipe a live user's queue instead of erroring — this test is the guard.
     ///
-    /// `make_job` stamps a fresh `Utc::now()`, so the expected job is spelled
-    /// out here to match the literal JSON exactly.
+    /// `upload_job` is deterministic, so the expected job comes from it. The
+    /// raw `"file"` value is a plain host-rooted string rather than `File`'s
+    /// own serializer, so the test also pins that `File` serializes as a bare
+    /// string.
     #[tokio::test]
     async fn raw_json_snapshot_loads() {
         let dir = test_dirs::temp("upload_queue_test").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let id = Uuid::new_v4();
+        let expected = upload_job("a.log");
+        let file_json = serde_json::to_string(abs_path("data/a.log").to_str().unwrap()).unwrap();
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
-                r#""file":"/data/a.log","size":42,"#,
+                r#""file":{file},"size":42,"#,
                 r#""digest":"sha256:a.log","mtime":"1970-01-01T00:15:00Z","#,
                 r#""first_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""last_observed_at":"1970-01-01T00:16:40Z","#,
@@ -96,6 +100,7 @@ mod wire {
                 r#""retention":null}},"attempts":0,"next_attempt_at":null}}]}}"#,
             ),
             id = id,
+            file = file_json,
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -106,20 +111,7 @@ mod wire {
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(
-            entry.job,
-            Job {
-                file: File::new("/data/a.log".to_string()),
-                size: 42,
-                digest: "sha256:a.log".to_string(),
-                mtime: DateTime::from_timestamp(900, 0).unwrap(),
-                first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
-                file_rule_id: "rule_1".to_string(),
-                deployment_id: "dpl_1".to_string(),
-                retention: None,
-            }
-        );
+        assert_eq!(entry.job, expected);
     }
 
     /// Pins the persisted wire format on the write side: the exact key set at

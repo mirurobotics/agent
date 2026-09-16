@@ -1,13 +1,12 @@
 // standard crates
 use std::future::Future;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::filesys::{
-    self, files, Atomic, CopyOptions, FileSysErr, Overwrite, PathExt, WriteOptions,
-};
+use miru_agent::filesys::{self, files, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 // external crates
 use secrecy::ExposeSecret;
@@ -96,9 +95,7 @@ pub mod copy_to {
             .unwrap();
         let dest = dir.file("dest-file");
 
-        files::copy_to(&src, &dest, CopyOptions::default())
-            .await
-            .unwrap();
+        files::copy_to(&src, &dest, Overwrite::Deny).await.unwrap();
 
         assert!(src.exists(), "source should still exist after copy");
         assert!(dest.exists(), "destination should exist after copy");
@@ -114,9 +111,7 @@ pub mod copy_to {
             .await
             .unwrap();
 
-        files::copy_to(&file, &file, CopyOptions::default())
-            .await
-            .unwrap();
+        files::copy_to(&file, &file, Overwrite::Deny).await.unwrap();
         assert!(file.exists());
         assert_eq!(files::read_string(&file).await.unwrap(), "content");
     }
@@ -127,7 +122,7 @@ pub mod copy_to {
         let file = dir.file("nonexistent");
 
         assert!(matches!(
-            files::copy_to(&file, &file, CopyOptions::default())
+            files::copy_to(&file, &file, Overwrite::Deny)
                 .await
                 .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
@@ -147,7 +142,7 @@ pub mod copy_to {
             .unwrap();
 
         assert!(matches!(
-            files::copy_to(&src, &dest, CopyOptions::default())
+            files::copy_to(&src, &dest, Overwrite::Deny)
                 .await
                 .unwrap_err(),
             FileSysErr::InvalidFileOverwriteErr { .. }
@@ -168,9 +163,7 @@ pub mod copy_to {
             .await
             .unwrap();
 
-        files::copy_to(&src, &dest, CopyOptions::OVERWRITE_SYNC)
-            .await
-            .unwrap();
+        files::copy_to(&src, &dest, Overwrite::Allow).await.unwrap();
         assert_eq!(files::read_string(&dest).await.unwrap(), "new");
         assert_eq!(files::read_string(&src).await.unwrap(), "new");
     }
@@ -182,7 +175,7 @@ pub mod copy_to {
         let dest = dir.file("dest");
 
         assert!(matches!(
-            files::copy_to(&src, &dest, CopyOptions::OVERWRITE_SYNC)
+            files::copy_to(&src, &dest, Overwrite::Allow)
                 .await
                 .unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
@@ -200,15 +193,13 @@ pub mod copy_to {
         let dest = dest_dir.file("dest-file");
 
         assert!(!dest_dir.exists());
-        files::copy_to(&src, &dest, CopyOptions::default())
-            .await
-            .unwrap();
+        files::copy_to(&src, &dest, Overwrite::Deny).await.unwrap();
         assert!(dest.exists());
         assert_eq!(files::read_string(&dest).await.unwrap(), "nested");
     }
 
     #[tokio::test]
-    async fn copy_with_sync_yes() {
+    async fn copy_readonly_source() {
         let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
         files::write_string(&src, "synced", WriteOptions::default())
@@ -216,70 +207,92 @@ pub mod copy_to {
             .unwrap();
         let dest = dir.file("dest-file");
 
-        let opts = CopyOptions {
-            overwrite: Overwrite::Deny,
-            sync: filesys::Sync::Yes,
-        };
-        files::copy_to(&src, &dest, opts).await.unwrap();
-        assert_eq!(files::read_string(&dest).await.unwrap(), "synced");
+        let original_permissions = files::permissions(&src).await.unwrap();
+        let mut readonly_permissions = original_permissions.clone();
+        readonly_permissions.set_readonly(true);
+        files::set_permissions(&src, readonly_permissions)
+            .await
+            .unwrap();
+
+        let result = files::copy_to(&src, &dest, Overwrite::Deny).await;
+        let dest_contents = files::read_string(&dest).await;
+        let dest_permissions = files::permissions(&dest).await;
+
+        // Windows cannot delete a readonly file, so clear the bit before
+        // TempDir drop. Dest may be missing if the copy failed.
+        files::set_permissions(&src, original_permissions.clone())
+            .await
+            .unwrap();
+        if dest.exists() {
+            files::set_permissions(&dest, original_permissions)
+                .await
+                .unwrap();
+        }
+
+        result.unwrap();
+        assert_eq!(dest_contents.unwrap(), "synced");
+        assert!(dest_permissions.unwrap().readonly());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
-    async fn copy_with_sync_no() {
+    async fn unreadable_source_returns_copy_file_err_permission_denied() {
         let dir = test_dirs::temp("testing").unwrap();
         let src = dir.file("src-file");
-        files::write_string(&src, "unsynced", WriteOptions::default())
+        files::write_string(&src, "secret", WriteOptions::default())
+            .await
+            .unwrap();
+        files::set_permissions(&src, std::fs::Permissions::from_mode(0o000))
             .await
             .unwrap();
         let dest = dir.file("dest-file");
 
-        let opts = CopyOptions {
-            overwrite: Overwrite::Deny,
-            sync: filesys::Sync::No,
+        let err = files::copy_to(&src, &dest, Overwrite::Deny)
+            .await
+            .unwrap_err();
+
+        // restore permissions before the temp dir drops
+        files::set_permissions(&src, std::fs::Permissions::from_mode(0o644))
+            .await
+            .unwrap();
+
+        assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
+        let FileSysErr::CopyFileErr(e) = err else {
+            panic!("expected CopyFileErr");
         };
-        files::copy_to(&src, &dest, opts).await.unwrap();
-        assert_eq!(files::read_string(&dest).await.unwrap(), "unsynced");
+        assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!dest.exists(), "destination should not be created");
     }
 
     #[tokio::test]
-    async fn overwrite_allow_with_sync_no() {
+    async fn directory_source_returns_copy_file_err_without_overwriting_dest() {
         let dir = test_dirs::temp("testing").unwrap();
-        let src = dir.file("src-file");
-        files::write_string(&src, "new", WriteOptions::default())
-            .await
-            .unwrap();
+        let src = filesys::File::new(dir.path().clone());
         let dest = dir.file("dest-file");
-        files::write_string(&dest, "old", WriteOptions::default())
+        files::write_string(&dest, "keep", WriteOptions::default())
             .await
             .unwrap();
 
-        files::copy_to(&src, &dest, CopyOptions::OVERWRITE_NO_SYNC)
+        let err = files::copy_to(&src, &dest, Overwrite::Allow)
             .await
-            .unwrap();
-        assert_eq!(files::read_string(&dest).await.unwrap(), "new");
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
+        assert_eq!(files::read_string(&dest).await.unwrap(), "keep");
     }
 
     #[tokio::test]
-    async fn overwrite_deny_with_sync_yes_rejects_existing() {
+    async fn directory_source_returns_copy_file_err_without_creating_dest() {
         let dir = test_dirs::temp("testing").unwrap();
-        let src = dir.file("src-file");
-        files::write_string(&src, "src", WriteOptions::default())
-            .await
-            .unwrap();
+        let src = filesys::File::new(dir.path().clone());
         let dest = dir.file("dest-file");
-        files::write_string(&dest, "dest", WriteOptions::default())
-            .await
-            .unwrap();
 
-        let opts = CopyOptions {
-            overwrite: Overwrite::Deny,
-            sync: filesys::Sync::Yes,
-        };
-        assert!(matches!(
-            files::copy_to(&src, &dest, opts).await.unwrap_err(),
-            FileSysErr::InvalidFileOverwriteErr { .. }
-        ));
-        assert_eq!(files::read_string(&dest).await.unwrap(), "dest");
+        let err = files::copy_to(&src, &dest, Overwrite::Deny)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
+        assert!(!dest.exists(), "destination should not be created");
     }
 }
 
@@ -698,6 +711,7 @@ pub mod write_bytes {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn honors_mode_atomic() {
         let dir = test_dirs::temp("testing").unwrap();
@@ -717,6 +731,7 @@ pub mod write_bytes {
         assert_eq!(perms.mode() & 0o777, 0o600);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn honors_mode_non_atomic() {
         let dir = test_dirs::temp("testing").unwrap();
@@ -1076,7 +1091,7 @@ pub mod set_permissions {
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
-        let permissions = std::fs::Permissions::from_mode(0o644);
+        let permissions = std::fs::metadata(dir.path()).unwrap().permissions();
 
         // Should fail because file doesn't exist
         assert!(matches!(

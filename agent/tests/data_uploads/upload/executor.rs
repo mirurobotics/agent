@@ -261,8 +261,10 @@ async fn confirm_4xx_failure_is_terminal() {
 
 #[test]
 fn create_request_maps_job_fields() {
+    let file = File::new("/data/a.log");
+    let file_path = file.to_string();
     let job = Job {
-        file: File::new("/data/a.log"),
+        file,
         size: 42,
         digest: "sha256:abc".to_string(),
         mtime: Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap(),
@@ -276,7 +278,7 @@ fn create_request_maps_job_fields() {
     let expected = CreateUploadRequest {
         file_rule_id: "rule_1".to_string(),
         source: Box::new(UploadSource {
-            file_path: "/data/a.log".to_string(),
+            file_path,
             mtime: "2021-01-01T00:00:00+00:00".to_string(),
             first_observed_at: "2021-01-01T00:01:00+00:00".to_string(),
             last_observed_at: "2021-01-01T00:02:00+00:00".to_string(),

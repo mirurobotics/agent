@@ -104,7 +104,7 @@ pub mod name {
 
         #[test]
         fn root_directory() {
-            let dir = filesys::Dir::new(PathBuf::from("/"));
+            let dir = filesys::Dir::new("/");
             assert!(matches!(
                 dir.name().unwrap_err(),
                 FileSysErr::UnknownDirNameErr { .. }
@@ -168,7 +168,7 @@ pub mod parent {
 
         #[test]
         fn root_directory() {
-            let dir = filesys::Dir::new(PathBuf::from("/"));
+            let dir = filesys::Dir::new("/");
             assert!(matches!(
                 dir.parent().unwrap_err(),
                 FileSysErr::UnknownParentDirForDirErr { .. }
