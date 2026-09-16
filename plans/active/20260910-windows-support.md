@@ -8,9 +8,10 @@ this document covers the agent repo's share.
 
 Phasing:
 
-- **Phase 1 — config sync only.** Agent runs as a Windows service, provisions, syncs
-  deployments to disk, reports status. The local device API server stays disabled
-  (`enable_socket_server: false` already supports this).
+- **Phase 1 — config sync only.** The console-capable agent provisions, syncs
+  deployments to disk, and reports status. The local device API server stays disabled
+  (`enable_socket_server: false` already supports this). Windows service lifecycle is
+  a later step and must not be inferred from the current executable or MSI.
 - **Phase 2 — local device API.** Server exposed over localhost TCP with token auth;
   Python SDK follows (external repo).
 
@@ -87,7 +88,7 @@ Validation beyond unit tests: on a staging device, (1) fresh provision, (2) toke
 refresh using a **pre-migration** on-disk key. This path is device identity — a
 regression is a fleet-wide auth outage, so it gets the staging soak before release.
 
-**PR 3 — cfg-gates + Windows compile check in CI.** Gate `tokio::signal::unix`,
+**PR 3 — cfg-gates + Windows compile check in CI (completed by PR #234).** Gate `tokio::signal::unix`,
 `privilege` (Windows: warn-only stub), `.mode()` calls, and the unix-socket server path
 behind `cfg(unix)`; add minimal Windows counterparts (ctrl handlers; no-op modes). Add
 `cargo check --target x86_64-pc-windows-msvc` to CI — runs natively on a
@@ -99,37 +100,39 @@ behind `cfg(unix)`; add minimal Windows counterparts (ctrl handlers; no-op modes
 (`/var/log/miru` ↔ `C:\ProgramData\Miru\logs`), resolved via `%ProgramData%` rather
 than a hardcoded `C:`. `Layout` stays parameterized by `filesystem_root` for tests.
 
-**PR 5 — Windows service lifecycle.** `windows-service` crate: service entry point,
+**PR 5 — Windows MSI foundation (PR #236).** Build and validate a pinned WiX x64
+MSI for the current console-capable executable. Install under 64-bit Program Files,
+protect retained ProgramData state, and prove direct Windows Installer maintenance,
+transactional upgrades, rollback, and uninstall behavior. This package intentionally
+creates no Windows service. Customer distribution, Authenticode, release artifact
+publication, WinGet, and the GoReleaser/PDB lane remain deferred.
+
+**PR 6 — Windows service lifecycle.** `windows-service` crate: service entry point,
 `SERVICE_CONTROL_STOP`/`SHUTDOWN` wired into the existing shutdown broadcast channel
 (same channel SIGTERM feeds today; AppState shutdown ordering untouched). `--console`
 mode for interactive debugging. Force persistence on Windows (decision 3).
 
-**PR 6 — test-suite portability + Windows CI job.** Fix Unix assumptions (unix-path
+**PR 7 — test-suite portability + Windows CI job.** Fix Unix assumptions (unix-path
 fixtures, `/tmp/miru.sock` `#[serial]` tests, passwd/root lookups in privilege tests,
 `std::os::unix::fs::symlink` in retention tests, delete-while-open differences). Add a
 windows runner job running `scripts/test.sh` equivalents (build + test; covgates remain
 enforced on Linux only).
 
-**PR 7 — msvc build lane.** Windows runner job builds
+**PR 8 — msvc release lane.** Windows runner job builds
 `x86_64-pc-windows-msvc` (via the same cargo-auditable wrapper), uploads binary + PDB;
 `build/.goreleaser.yaml` gains a `prebuilt` build id ingesting it; zip archives for the
 windows target.
 
-**PR 8 — WiX MSI.** Under `build/windows/`: install to Program Files; register the
-service (auto-start, restart-on-failure recovery — parity with the systemd unit);
-create the `Miru Clients` local group; create `C:\ProgramData\Miru` tree with
-inheritable ACLs (SYSTEM + Administrators full; service account modify; `Miru Clients`
-read on the auth/discovery dir — parity with `postinst` dir creation + `miru.socket`
-group model); upgrade = stop/replace/start; uninstall parity with `postrm`.
+**PR 9 — service-aware MSI follow-up.** After the executable implements Windows
+Service Control Manager integration, extend the MSI with service install/start/stop,
+account, and recovery behavior. Add the Phase 2 `Miru Clients` group and discovery
+directory permissions only when the local device API is implemented.
 
-**PR 9 — Authenticode signing.** Sign binary + MSI in the release pipeline
+**PR 10 — Authenticode signing.** Sign binary + MSI in the release pipeline
 (osslsigncode from the Linux pipeline, or signtool on the Windows runner), RFC 3161
 timestamped. Cert procurement is tracked in the workbench plan (long lead — started
-independently).
-
-**PR 10 — PowerShell install + provision scripts.** `install.ps1` / `provision.ps1`
-with parity to `scripts/install/*.sh` (download, verify, install MSI, provision with
-`MIRU_PROVISIONING_TOKEN`, `--check` exit-code contract preserved).
+independently). Publish the signed MSI through GitHub Releases, then submit and
+maintain its WinGet manifest.
 
 ### Phase 2 — local device API (gated on customer need)
 
@@ -146,9 +149,9 @@ on all routes, SSE verified over TCP. Python SDK work happens in
 
 - **Crypt migration blast radius** (PR 2): mitigated by golden fixtures, dual PEM-format
   reads, and staging soak with pre-migration keys before any release.
-- **MSI upgrade semantics**: service stop/start ordering and in-place file replacement
-  differ from dpkg; the PR 8 ExecPlan needs an explicit install→upgrade→uninstall→
-  reboot test matrix on a clean VM.
+- **MSI upgrade semantics**: PR #236 exercises install, maintenance, transactional
+  upgrade, downgrade rejection, rollback, and uninstall on Windows. Service
+  stop/start ordering remains part of the later service-aware MSI follow-up.
 - **Locked-down customer environments**: WDAC/AppLocker may require publisher
   whitelisting beyond a valid Authenticode signature; enterprise TLS-intercepting
   proxies are handled by SChannel's OS trust store, but MQTT egress on 8883 may be

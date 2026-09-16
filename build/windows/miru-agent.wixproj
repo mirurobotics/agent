@@ -1,0 +1,59 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+  <PropertyGroup>
+    <AcceptEula>wix7</AcceptEula>
+    <OutputType>Package</OutputType>
+    <OutputName>miru-agent-$(Version)</OutputName>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <Platform>x64</Platform>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <SuppressValidation>false</SuppressValidation>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
+    <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
+    <DefineConstants Condition="'$(FixturePayloadPath)' != ''">$(DefineConstants);FixturePayloadPath=$(FixturePayloadPath)</DefineConstants>
+    <DefineConstants Condition="'$(TestWixSource)' != ''">$(DefineConstants);IntegrationFixture=1</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="miru-agent.wxs" />
+    <Compile Include="$(TestWixSource)" Condition="'$(TestWixSource)' != ''" />
+  </ItemGroup>
+
+  <Target Name="ValidatePackageInputs" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(Version)' == ''"
+           Code="MIRUMSI1001"
+           Text="Version is required. Pass -p:Version=MAJOR.MINOR.PATCH." />
+    <Error Condition="'$(Version)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+$'))"
+           Code="MIRUMSI1002"
+           Text="Version must be exactly three numeric fields: MAJOR.MINOR.PATCH." />
+    <Error Condition="'$(BinDir)' == ''"
+           Code="MIRUMSI1003"
+           Text="BinDir is required. Pass -p:BinDir to the directory containing miru-agent.exe." />
+
+    <PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+$'))">
+      <MsiVersion>$([System.Version]::Parse('$(Version)'))</MsiVersion>
+      <MsiVersionMajor>$([System.Version]::Parse('$(Version)').Major)</MsiVersionMajor>
+      <MsiVersionMinor>$([System.Version]::Parse('$(Version)').Minor)</MsiVersionMinor>
+      <MsiVersionPatch>$([System.Version]::Parse('$(Version)').Build)</MsiVersionPatch>
+    </PropertyGroup>
+
+    <Error Condition="'$(MsiVersion)' != '' and $(MsiVersionMajor) &gt; 255"
+           Code="MIRUMSI1004"
+           Text="Version MAJOR must be between 0 and 255." />
+    <Error Condition="'$(MsiVersion)' != '' and $(MsiVersionMinor) &gt; 255"
+           Code="MIRUMSI1005"
+           Text="Version MINOR must be between 0 and 255." />
+    <Error Condition="'$(MsiVersion)' != '' and $(MsiVersionPatch) &gt; 65535"
+           Code="MIRUMSI1006"
+           Text="Version PATCH must be between 0 and 65535." />
+    <Error Condition="'$(BinDir)' != '' and !Exists('$(BinDir)')"
+           Code="MIRUMSI1007"
+           Text="BinDir does not exist: $(BinDir)" />
+    <Error Condition="'$(BinDir)' != '' and !Exists('$(BinDir)\miru-agent.exe')"
+           Code="MIRUMSI1008"
+           Text="BinDir must contain miru-agent.exe: $(BinDir)" />
+    <Error Condition="'$(TestWixSource)' != '' and '$(FixturePayloadPath)' == ''"
+           Code="MIRUMSI1009"
+           Text="FixturePayloadPath is required when TestWixSource is set." />
+  </Target>
+</Project>

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?define ProductName = "Miru Agent" ?>
+  <?define Manufacturer = "Miru" ?>
+  <?ifndef ProductCode ?><?define ProductCode = "*" ?><?endif ?>
+
+  <Package Name="$(ProductName)"
+           Manufacturer="$(Manufacturer)"
+           Version="$(Version)"
+           ProductCode="$(ProductCode)"
+           UpgradeCode="B5ED0336-5F14-4308-A667-3CE8CDEF7D48"
+           InstallerVersion="500"
+           Scope="perMachine"
+           Compressed="yes">
+    <!-- Never change UpgradeCode after publication: it is the permanent identity
+         that relates every Miru Agent major-upgrade package. -->
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of $(ProductName) is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Miru">
+        <Directory Id="AGENTFOLDER" Name="Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="MIRUDATA" Name="Miru">
+        <Directory Id="MIRULOGS" Name="logs" />
+        <Directory Id="MIRUAUTH" Name="auth" />
+        <Directory Id="MIRUTMP" Name="tmp" />
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="AgentBinary" Directory="AGENTFOLDER">
+      <Component Id="MiruAgentExe" Guid="*" Bitness="always64">
+        <File Id="miru_agent.exe"
+              Name="miru-agent.exe"
+              Source="$(BinDir)\miru-agent.exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- These directory-keyed components deliberately contain no RemoveFolder or
+         registry resource. Windows Installer reapplies the protected descriptor
+         during repair and upgrade, while populated customer state survives an
+         ordinary uninstall. -->
+    <ComponentGroup Id="DataDirs">
+      <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruLogsDir" Directory="MIRULOGS" Guid="C3AF8332-28E8-4707-8430-780C553D86EC" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruAuthDir" Directory="MIRUAUTH" Guid="A2AE361A-41E6-427A-AF4C-ACCEE7F451F9" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruTmpDir" Directory="MIRUTMP" Guid="D654A9BF-2860-44FA-8FFB-A8E36986197B" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="$(ProductName)" Level="1">
+      <ComponentGroupRef Id="AgentBinary" />
+      <ComponentGroupRef Id="DataDirs" />
+      <?ifdef IntegrationFixture ?>
+      <ComponentGroupRef Id="IntegrationFixturePayload" />
+      <?endif ?>
+    </Feature>
+
+    <?ifdef IntegrationFixture ?>
+    <CustomActionRef Id="FailUpgradeForTest" />
+    <?endif ?>
+  </Package>
+</Wix>

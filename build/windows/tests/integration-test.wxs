@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <DirectoryRef Id="MIRUDATA">
+      <Component Id="RollbackFixturePayload" Guid="52FC030C-C305-4935-B6A9-A88B193EF4F4" Bitness="always64">
+        <File Id="RollbackFixtureFile"
+              Name="rollback-payload.txt"
+              Source="$(FixturePayloadPath)"
+              KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="IntegrationFixturePayload">
+      <ComponentRef Id="RollbackFixturePayload" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <CustomAction Id="FailUpgradeForTest"
+                  Directory="SystemFolder"
+                  ExeCommand="[SystemFolder]cmd.exe /d /c exit /b 1"
+                  Execute="deferred"
+                  Return="check"
+                  Impersonate="no" />
+    <InstallExecuteSequence>
+      <Custom Action="FailUpgradeForTest"
+              After="InstallFiles"
+              Condition="FAIL_UPGRADE_FOR_TEST=1" />
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>
