@@ -7,52 +7,6 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-function Test-AccessDeniedException {
-    param([Parameter(Mandatory = $true)]$Exception)
-    $cause = $Exception.GetBaseException()
-    if ($cause -is [UnauthorizedAccessException]) { return $true }
-    $isAccessDenied = $cause -is [ComponentModel.Win32Exception] -and `
-        $cause.NativeErrorCode -eq 5
-    return $isAccessDenied
-}
-
-function Invoke-AccessAttempt {
-    param([Parameter(Mandatory = $true)][scriptblock]$Action)
-    try {
-        & $Action | Out-Null
-        return "Allowed"
-    }
-    catch {
-        if (Test-AccessDeniedException $_.Exception) { return "AccessDenied" }
-        throw
-    }
-}
-
-function Set-PermissiveDacl {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    # Default All also requests an audit update requiring a separate privilege.
-    # Persist clears modification flags, so each attempt needs a fresh descriptor.
-    $replacement = New-Object Security.AccessControl.DirectorySecurity
-    $sections = [Security.AccessControl.AccessControlSections]::Access
-    $replacement.SetSecurityDescriptorSddlForm(
-        "D:P(A;OICI;FA;;;WD)", $sections)
-    [IO.Directory]::SetAccessControl($Path, $replacement)
-}
-
-function ConvertTo-ProbeFile {
-    param([Parameter(Mandatory = $true)]$Raw)
-    if ([string]::IsNullOrWhiteSpace($Raw.Path) -or
-        [string]::IsNullOrWhiteSpace($Raw.CreatePath) -or
-        [string]::IsNullOrWhiteSpace($Raw.Parent)) {
-        throw "Probe manifest file is missing Path, CreatePath, or Parent"
-    }
-    return [pscustomobject]@{
-        Path = [string]$Raw.Path
-        CreatePath = [string]$Raw.CreatePath
-        Parent = [string]$Raw.Parent
-    }
-}
-
 function ConvertTo-ProbeManifest {
     param([Parameter(Mandatory = $true)][string]$Path)
     $raw = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
@@ -71,32 +25,17 @@ function ConvertTo-ProbeManifest {
     }
 }
 
-function Assert-ControlContents {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    $contents = [IO.File]::ReadAllText($Path)
-    if ($contents -ne "probe-control") { throw "Probe control mismatch" }
-}
-
-function Invoke-ControlProbe {
-    param([Parameter(Mandatory = $true)]$Manifest)
-    return [pscustomobject]@{
-        Create = Invoke-AccessAttempt {
-            [IO.File]::WriteAllText($Manifest.ControlPath, "probe-control")
-        }
-        Read = Invoke-AccessAttempt { Assert-ControlContents $Manifest.ControlPath }
-        Regrant = Invoke-AccessAttempt { Set-PermissiveDacl $Manifest.ProbeRoot }
+function ConvertTo-ProbeFile {
+    param([Parameter(Mandatory = $true)]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw.Path) -or
+        [string]::IsNullOrWhiteSpace($Raw.CreatePath) -or
+        [string]::IsNullOrWhiteSpace($Raw.Parent)) {
+        throw "Probe manifest file is missing Path, CreatePath, or Parent"
     }
-}
-
-function Invoke-ProtectedFileProbe {
-    param([Parameter(Mandatory = $true)]$File)
     return [pscustomobject]@{
-        Path = $File.Path
-        Read = Invoke-AccessAttempt { [IO.File]::ReadAllText($File.Path) }
-        Create = Invoke-AccessAttempt {
-            [IO.File]::WriteAllText($File.CreatePath, "unexpected")
-        }
-        Regrant = Invoke-AccessAttempt { Set-PermissiveDacl $File.Parent }
+        Path = [string]$Raw.Path
+        CreatePath = [string]$Raw.CreatePath
+        Parent = [string]$Raw.Parent
     }
 }
 
@@ -113,6 +52,67 @@ function Invoke-NonAdminProbe {
             Invoke-ProtectedFileProbe $_
         })
     }
+}
+
+function Invoke-ControlProbe {
+    param([Parameter(Mandatory = $true)]$Manifest)
+    return [pscustomobject]@{
+        Create = Invoke-AccessAttempt {
+            [IO.File]::WriteAllText($Manifest.ControlPath, "probe-control")
+        }
+        Read = Invoke-AccessAttempt { Assert-ControlContents $Manifest.ControlPath }
+        Regrant = Invoke-AccessAttempt { Set-PermissiveDacl $Manifest.ProbeRoot }
+    }
+}
+
+function Assert-ControlContents {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $contents = [IO.File]::ReadAllText($Path)
+    if ($contents -ne "probe-control") { throw "Probe control mismatch" }
+}
+
+function Invoke-ProtectedFileProbe {
+    param([Parameter(Mandatory = $true)]$File)
+    return [pscustomobject]@{
+        Path = $File.Path
+        Read = Invoke-AccessAttempt { [IO.File]::ReadAllText($File.Path) }
+        Create = Invoke-AccessAttempt {
+            [IO.File]::WriteAllText($File.CreatePath, "unexpected")
+        }
+        Regrant = Invoke-AccessAttempt { Set-PermissiveDacl $File.Parent }
+    }
+}
+
+function Invoke-AccessAttempt {
+    param([Parameter(Mandatory = $true)][scriptblock]$Action)
+    try {
+        & $Action | Out-Null
+        return "Allowed"
+    }
+    catch {
+        if (Test-AccessDeniedException $_.Exception) { return "AccessDenied" }
+        throw
+    }
+}
+
+function Test-AccessDeniedException {
+    param([Parameter(Mandatory = $true)]$Exception)
+    $cause = $Exception.GetBaseException()
+    if ($cause -is [UnauthorizedAccessException]) { return $true }
+    $isAccessDenied = $cause -is [ComponentModel.Win32Exception] -and `
+        $cause.NativeErrorCode -eq 5
+    return $isAccessDenied
+}
+
+function Set-PermissiveDacl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    # Default All also requests an audit update requiring a separate privilege.
+    # Persist clears modification flags, so each attempt needs a fresh descriptor.
+    $replacement = New-Object Security.AccessControl.DirectorySecurity
+    $sections = [Security.AccessControl.AccessControlSections]::Access
+    $replacement.SetSecurityDescriptorSddlForm(
+        "D:P(A;OICI;FA;;;WD)", $sections)
+    [IO.Directory]::SetAccessControl($Path, $replacement)
 }
 
 $manifest = ConvertTo-ProbeManifest $ManifestPath

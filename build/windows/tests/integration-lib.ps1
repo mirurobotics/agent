@@ -309,7 +309,7 @@ function Assert-TrustedIdentities {
 
 function Invoke-NonAdminProbe {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    $files = @(New-RepresentativeSecrets -Stage $Stage)
+    $files = @(New-RepresentativeFiles -Stage $Stage)
     $workspace = New-ProbeWorkspace $files
     $result = Invoke-ProbeAsTestUser $workspace
     Assert-ProbeIdentity $result
@@ -319,7 +319,7 @@ function Invoke-NonAdminProbe {
 
 # Fresh files in each protected directory prove inheritance without relying on
 # files secured by an earlier operation.
-function New-RepresentativeSecrets {
+function New-RepresentativeFiles {
     param([Parameter(Mandatory = $true)][string]$Stage)
     return @($protectedRoots | ForEach-Object { New-RepresentativeFile $_ $Stage })
 }
