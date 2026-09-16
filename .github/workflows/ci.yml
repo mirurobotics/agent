@@ -76,7 +76,6 @@ jobs:
       pull-requests: read
     outputs:
       windows_package: ${{ github.event_name != 'pull_request' || steps.filter.outputs.package == 'true' }}
-      windows_release: ${{ github.event_name != 'pull_request' || steps.filter.outputs.release == 'true' }}
     steps:
       - name: Classify changes
         id: filter
@@ -88,12 +87,6 @@ jobs:
               - 'build/windows/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
-            release:
-              - 'build/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/release.yml'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
 
   windows-package:
     needs: windows_package_scope
@@ -140,61 +133,6 @@ jobs:
           name: windows-installer-failure-logs
           path: build/windows/artifacts/package-tests/logs
           if-no-files-found: ignore
-
-  windows-release-build:
-    needs: windows_package_scope
-    if: needs.windows_package_scope.outputs.windows_release == 'true'
-    runs-on: blacksmith-4vcpu-windows-2025
-    timeout-minutes: 45
-    env:
-      # Line/module-level debug info so the shipped PDB supports symbolized
-      # backtraces. On MSVC debug info is "packed" into the .pdb, so the .exe
-      # is unchanged. Job-scoped on purpose: the Linux lane keeps
-      # [profile.release] debug = false from Cargo.toml.
-      CARGO_PROFILE_RELEASE_DEBUG: 1
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: release-msvc
-          cache-on-failure: true
-
-      - name: Install NASM (aws-lc-sys)
-        run: |
-          choco install nasm -y
-          echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
-
-      - name: Install cargo-auditable
-        uses: taiki-e/install-action@47345a21ef01b2d0e9b59e2e41d51f17780e1b0d # cargo-auditable
-        with:
-          tool: cargo-auditable@0.7.6
-
-      - name: Build Windows Release (cargo auditable)
-        run: cargo auditable build --release --target x86_64-pc-windows-msvc -p miru-agent --locked
-
-      - name: Stage prebuilt artifacts
-        shell: pwsh
-        run: |
-          $out = "build\prebuilt\windows_amd64"
-          New-Item -ItemType Directory -Force $out | Out-Null
-          Copy-Item target\x86_64-pc-windows-msvc\release\miru-agent.exe $out
-          Copy-Item target\x86_64-pc-windows-msvc\release\miru_agent.pdb $out
-          Get-ChildItem $out
-          & "$out\miru-agent.exe" version
-
-      - name: Upload prebuilt artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: agent-windows-amd64-msvc
-          path: build/prebuilt/windows_amd64/
-          if-no-files-found: error
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
