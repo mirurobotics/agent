@@ -26,6 +26,9 @@ deleteme_dir/
 dist/
 zig*/
 
+# externally built binaries staged for GoReleaser's prebuilt builder (CI only)
+build/prebuilt/
+
 .vscode/
 .venv/
 venv/
