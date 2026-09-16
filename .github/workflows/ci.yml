@@ -47,7 +47,6 @@ jobs:
     outputs:
       # Non-PR events (push to protected branches, release workflow_call) always
       # get the full package lifecycle.
-      windows_compile: ${{ github.event_name != 'pull_request' || steps.filter.outputs.compile == 'true' }}
       windows_package: ${{ github.event_name != 'pull_request' || steps.filter.outputs.package == 'true' }}
     steps:
       - name: Classify changes
@@ -62,25 +61,21 @@ jobs:
               - 'build/windows/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
-            compile:
-              - 'build/windows/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/release.yml'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain.toml'
-              - '.cargo/**'
-              - 'agent/**'
-              - 'libs/**'
 
-  # Compile Windows-affecting pull requests and run the complete MSI lifecycle
-  # for package changes, protected branches, and release workflow calls.
-  # aws-lc-sys requires a native Windows host compiler.
+  # Run the agent test suite natively on Windows, and for package changes,
+  # protected branches, and release workflow calls, build and exercise the MSI.
+  # A native runner is required because aws-lc-sys cannot cross-compile from
+  # Linux (its build script drives the host C compiler with pthread-based
+  # sources). `cargo test` type-checks lib, bin and tests for the host MSVC
+  # target, so no separate check step is needed. Coverage gates stay
+  # Linux-only. The job id is kept as `windows-check` for branch protection.
   windows-check:
     needs: windows_scope
-    if: needs.windows_scope.outputs.windows_compile == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # Full PDBs dominate MSVC link time; test diagnostics do not need them.
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -100,9 +95,10 @@ jobs:
           choco install nasm -y
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
-      - name: Check Windows Target
-        if: needs.windows_scope.outputs.windows_package != 'true'
-        run: cargo check --target x86_64-pc-windows-msvc --package miru-agent --locked
+      - name: Run Windows Tests
+        env:
+          RUST_LOG: "off"
+        run: cargo test --package miru-agent --locked
 
       - name: Build Windows Target
         if: needs.windows_scope.outputs.windows_package == 'true'
