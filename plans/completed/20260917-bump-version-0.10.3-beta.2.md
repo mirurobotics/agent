@@ -17,7 +17,7 @@ The next prerelease tag will be `v0.10.3-beta.2`. `agent/build.rs` refuses to bu
 ## Progress
 
 - [x] Milestone 1: bump `Cargo.toml`, refresh `Cargo.lock`, verify, commit.
-- [ ] Preflight reports `CLEAN`.
+- [x] Preflight reports `CLEAN` (CI green on PR #247 at 488d1ab).
 
 ## Surprises & Discoveries
 
