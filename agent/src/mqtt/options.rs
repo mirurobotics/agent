@@ -19,7 +19,7 @@ impl Default for ConnectAddress {
         Self {
             protocol: Protocol::SSL,
             broker: "mqtt.mirurobotics.com".to_string(),
-            port: 8883,
+            port: 443,
         }
     }
 }
