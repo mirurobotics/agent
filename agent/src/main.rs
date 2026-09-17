@@ -238,7 +238,7 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
     let broker_address = ConnectAddress::new_or(
         settings.mqtt_broker.host,
         Protocol::SSL,
-        8883,
+        443,
         ConnectAddress::default(),
     );
 
