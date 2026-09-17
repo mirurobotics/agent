@@ -25,8 +25,27 @@ builds:
       - --release
       - -p=miru-agent
 
+  - id: "agent-windows"
+    # Built natively on a Windows runner (aws-lc-sys cannot cross-compile
+    # from Linux) through `cargo auditable`, so the PE also carries a
+    # `.dep-v0` section. The windows-release-build CI job uploads the
+    # executable, which the release job downloads into
+    # build/prebuilt/windows_amd64/ before GoReleaser runs. GoReleaser's Pro
+    # prebuilt builder stats that path and fails the release if it is missing,
+    # then treats the binary as if it had built it. `prebuilt.path` is relative
+    # to GoReleaser's working directory, which is build/ (see build/Dockerfile).
+    builder: prebuilt
+    goos:
+      - windows
+    goarch:
+      - amd64
+    binary: "miru-agent"
+    prebuilt:
+      path: prebuilt/windows_amd64/miru-agent.exe
+
 nfpms:
   - id: agent
+    ids: ["agent"]
     package_name: miru-agent
     file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
     vendor: "Miru"
@@ -79,7 +98,7 @@ nfpms:
 
 archives:
   - id: agent
-    ids: ["agent"]
+    ids: ["agent", "agent-windows"]
     formats: [tar.gz]
     name_template: >-
       agent_
@@ -94,10 +113,11 @@ archives:
 
 # Generate SPDX-JSON SBOMs via syft (GoReleaser's default SBOM cmd), uploaded
 # with the release via the release stanza. Scan the binary and the archive — not
-# the .deb: syft reads the cargo-auditable `.dep-v0` section out of the binary
-# (and recurses into the tar.gz to find it), so those SBOMs list every linked
-# crate. A .deb scan only reads DPKG control metadata and never inspects the
-# nested binary, so it can never enumerate dependencies.
+# the .deb: syft's cargo-auditable cataloger reads the `.dep-v0` section out of
+# the binary for ELF, PE and Mach-O alike (so the Windows `miru-agent.exe` is
+# covered too), and recurses into the tar.gz/zip to find it, so those SBOMs
+# list every linked crate. A .deb scan only reads DPKG control metadata and
+# never inspects the nested binary, so it can never enumerate dependencies.
 sboms:
   - id: archive
     artifacts: archive
@@ -139,6 +159,13 @@ release:
   github:
     owner: mirurobotics
     name: agent
+  extra_files:
+    # Debug symbols for the Windows executable, attached as their own asset
+    # so the zip stays a clean install artifact. The file keeps the name
+    # recorded in miru-agent.exe's debug directory (Cargo writes
+    # miru_agent.pdb) because debuggers look for exactly that name next
+    # to the executable.
+    - glob: ./prebuilt/windows_amd64/miru_agent.pdb
   footer: >-
     ## Miru Agent {{.Tag}}
 

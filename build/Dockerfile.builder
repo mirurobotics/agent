@@ -51,14 +51,17 @@ RUN printf '#!/usr/bin/env bash\nexec cargo auditable "$@"\n' \
         > /usr/local/bin/cargo-auditable-zigbuild \
     && chmod +x /usr/local/bin/cargo-auditable-zigbuild
 
-# Install GoReleaser (OSS version - Pro features unlocked via GORELEASER_KEY at runtime)
-# Verified using SHA256 checksum from release
-ARG GORELEASER_VERSION=2.13.3
-RUN curl -fsSL -o /tmp/goreleaser_Linux_x86_64.tar.gz "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" \
-    && curl -fsSL -o /tmp/checksums.txt "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/checksums.txt" \
-    && cd /tmp && grep "goreleaser_Linux_x86_64.tar.gz$" checksums.txt | sha256sum -c - \
-    && tar -xzf /tmp/goreleaser_Linux_x86_64.tar.gz -C /usr/local/bin goreleaser \
-    && rm /tmp/goreleaser_Linux_x86_64.tar.gz /tmp/checksums.txt \
+# Install GoReleaser Pro. The GORELEASER_KEY secret licenses this binary at
+# run time; the separate OSS binary has no Pro features (e.g. the `prebuilt`
+# builder the Windows release lane uses) regardless of the key, so the image
+# must ship goreleaser-pro, not goreleaser.
+# Verified using SHA256 checksum from release.
+ARG GORELEASER_VERSION=2.18.1
+RUN curl -fsSL -o /tmp/goreleaser-pro_Linux_x86_64.tar.gz "https://github.com/goreleaser/goreleaser-pro/releases/download/v${GORELEASER_VERSION}/goreleaser-pro_Linux_x86_64.tar.gz" \
+    && curl -fsSL -o /tmp/checksums.txt "https://github.com/goreleaser/goreleaser-pro/releases/download/v${GORELEASER_VERSION}/checksums.txt" \
+    && cd /tmp && grep "goreleaser-pro_Linux_x86_64.tar.gz$" checksums.txt | sha256sum -c - \
+    && tar -xzf /tmp/goreleaser-pro_Linux_x86_64.tar.gz -C /usr/local/bin goreleaser \
+    && rm /tmp/goreleaser-pro_Linux_x86_64.tar.gz /tmp/checksums.txt \
     && goreleaser --version
 
 # Install syft (Anchore) for SBOM generation. build/.goreleaser.yaml's
