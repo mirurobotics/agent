@@ -23,6 +23,7 @@ pub mod privilege;
 pub mod provisioning;
 pub mod server;
 pub mod services;
+pub mod shutdown;
 pub mod sync;
 pub mod telemetry;
 pub mod test_utils;

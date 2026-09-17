@@ -14,9 +14,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // internal crates
+use crate::shutdown::{RunOutcome, StopSignal};
 use crate::trace;
 use crate::windows::errors::ScmErr;
-use crate::windows::{RunOutcome, StopSignal};
 
 // external crates
 use windows_service::define_windows_service;

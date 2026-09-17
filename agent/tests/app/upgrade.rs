@@ -14,7 +14,7 @@ use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost,
 use miru_agent::filesys::{dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
-use miru_agent::windows::StopSignal;
+use miru_agent::shutdown::StopSignal;
 
 // external crates
 use chrono::{Duration, Utc};

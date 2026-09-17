@@ -8,7 +8,7 @@ Agent-specific conventions for AI coding agents. Read this before making changes
 - `Cargo.toml` — workspace layout, shared dependencies, MSRV.
 - `agent/Cargo.toml` — binary package config, feature flags, dev dependencies.
 - `agent/src/main.rs` — entry point (provision vs runtime).
-- `agent/src/lib.rs` — module listing (all 22 public modules).
+- `agent/src/lib.rs` — module listing (all 23 public modules).
 
 ## Project conventions
 

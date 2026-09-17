@@ -9,7 +9,7 @@ The agent is a Rust binary that runs on customer devices (robots). It solves one
 The binary has two mutually exclusive modes, selected at startup:
 
 - **Provision mode** (`--provision`): activates a new device by reading a provisioning token from the environment, registering with the backend, and writing device identity and auth files to disk. Adding `--check` short-circuits into a local, offline, read-only probe that reports provisioning state through the exit code instead — `0` provisioned, `3` not provisioned, `1` state could not be determined (message on stderr).
-- **Agent runtime mode** (default): reads settings from disk, initializes shared state (AppState), starts background workers (MQTT subscriber, poller, token refresh), serves a local HTTP server, and waits for a shutdown signal. On Windows it runs as service `miru-agent` under the Service Control Manager unless `--console` is passed, which keeps it in the foreground with ctrl-c shutdown; `--console` is accepted and ignored on Unix.
+- **Agent runtime mode** (default): reads settings from disk, initializes shared state (AppState), starts background workers (MQTT subscriber, poller, token refresh), serves a local HTTP server, and waits for a shutdown signal. On Windows it runs as service `miru-agent` under the Service Control Manager unless `--console` is passed, which keeps it in the foreground with ctrl-c shutdown; `--console` is accepted and ignored on Unix. Ctrl-c and SCM STOP share one `StopSignal` and abort startup upgrade between attempts (never mid-reset).
 
 These modes do not share runtime state.
 
@@ -31,7 +31,9 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `platform` — per-OS defaults (data root, log dir) and capability dispatch (`supports_idle_exit`). OS-specific functions compile on every target so they are testable from any host.
 
-`windows` — Windows-specific integration. Portable `StopSignal` relay and `RunOutcome` (compiled everywhere so the Linux suite tests them); `windows::scm` holds the Service Control Manager entry point, control handler, and status lifecycle (`cfg(windows)`).
+`shutdown` — process-wide stop relay (`StopSignal`) and agent-body outcome (`RunOutcome`). Used on every OS; the Windows SCM maps `RunOutcome` to a service exit code.
+
+`windows` — Windows Service Control Manager integration. `windows::scm` holds the SCM entry point, control handler, and status lifecycle (`cfg(windows)`); `windows::errors` compiles everywhere so Linux can test `NotLaunchedByScm`.
 
 `version` — build-time version string. Embedded by `build.rs` from git commit hash and build date.
 
@@ -104,7 +106,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 **Error handling.** Every module defines its errors in an `errors.rs` file. Leaf errors derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (which provides default implementations for the common case). Aggregating enums use `impl_error!` to forward trait methods to inner variants.
 
-**Graceful shutdown.** `app/run.rs` creates a `tokio::sync::broadcast` channel. All workers and the HTTP server subscribe to it. SIGTERM/SIGINT/ctrl-c on Unix, ctrl-c in Windows console mode, and `SERVICE_CONTROL_STOP`/`SERVICE_CONTROL_SHUTDOWN` in Windows service mode (relayed through `windows::StopSignal`) all resolve the shutdown future `app/run.rs` awaits; the channel then fires and each component drains in-flight work before exiting. AppState components shut down in dependency order.
+**Graceful shutdown.** `app/run.rs` creates a `tokio::sync::broadcast` channel. All workers and the HTTP server subscribe to it. SIGTERM/SIGINT/ctrl-c on Unix, ctrl-c in Windows console mode, and `SERVICE_CONTROL_STOP`/`SERVICE_CONTROL_SHUTDOWN` in Windows service mode (relayed through `shutdown::StopSignal`) all resolve the shutdown future `app/run.rs` awaits; the channel then fires and each component drains in-flight work before exiting. AppState components shut down in dependency order.
 
 **Authentication.** JWT-based. The `TokenManager` runs as a background task, refreshing the token before expiry using the device's RSA private key. `http::Client` reads the current token from `TokenManager` for every request. Token persistence is via `TokenFile` (atomic writes to disk).
 

@@ -23,6 +23,7 @@ pub mod provisioning;
 pub mod s3;
 pub mod server;
 pub mod services;
+pub mod shutdown;
 pub mod sync;
 pub mod telemetry;
 pub mod version;

@@ -1,6 +1,5 @@
 // standard crates
 use std::env;
-use std::future::Future;
 
 // internal crates
 use backend_api::models as backend_client;
@@ -20,10 +19,10 @@ use miru_agent::network::BackendHost;
 use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
+use miru_agent::shutdown::{RunOutcome, StopSignal};
 use miru_agent::version;
-use miru_agent::windows::RunOutcome;
 #[cfg(windows)]
-use miru_agent::windows::{self, StopSignal};
+use miru_agent::windows;
 use miru_agent::workers::mqtt;
 
 // external crates
@@ -65,7 +64,7 @@ fn main() {
         return;
     }
 
-    run_runtime_mode(cli_args.console);
+    launch_agent(cli_args.console);
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -73,39 +72,6 @@ fn runtime() -> tokio::runtime::Runtime {
         .enable_all()
         .build()
         .expect("failed to build tokio runtime")
-}
-
-/// Runs the agent in the foreground (`console`) or, on Windows without
-/// `--console`, hands the process to the Service Control Manager.
-fn run_runtime_mode(console: bool) {
-    #[cfg(windows)]
-    {
-        if !console {
-            if let Err(e) = windows::scm::dispatch(service_body) {
-                eprintln!("miru-agent: {e}");
-                std::process::exit(1);
-            }
-            return;
-        }
-    }
-    let _ = console; // unix: the flag is a no-op (keeps clippy -D warnings quiet)
-    runtime().block_on(run_agent(
-        logs::Options::default(),
-        await_shutdown_signal,
-        std::future::pending::<()>(),
-    ));
-}
-
-/// Service entry point: runs on the SCM's service thread with its own runtime
-/// and logs to the rolling file only, since a service has no console.
-#[cfg(windows)]
-fn service_body(stop: StopSignal) -> RunOutcome {
-    let options = logs::Options {
-        stdout: false,
-        ..Default::default()
-    };
-    let startup_shutdown = stop.wait();
-    runtime().block_on(run_agent(options, move || stop.wait(), startup_shutdown))
 }
 
 async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
@@ -204,17 +170,54 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
     }
 }
 
-/// Runs the agent to completion. `shutdown` builds the future that resolves
-/// when the agent should stop; it is called once per phase that awaits it.
-async fn run_agent<F, Fut>(
-    log_options: logs::Options,
-    shutdown: F,
-    startup_shutdown: impl Future<Output = ()> + Send,
-) -> RunOutcome
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ()> + Send + 'static,
-{
+/// Starts the long-running agent: the Windows service unless `--console`,
+/// otherwise the foreground process.
+fn launch_agent(console: bool) {
+    #[cfg(windows)]
+    if !console {
+        run_agent_as_windows_service();
+        return;
+    }
+    let _ = console; // unix: the flag is a no-op (keeps clippy -D warnings quiet)
+    runtime().block_on(run_agent_in_foreground());
+}
+
+/// Foreground path: latch OS signals onto a [`StopSignal`] shared with every
+/// startup and runtime phase, including upgrade reconcile.
+async fn run_agent_in_foreground() -> RunOutcome {
+    let stop = StopSignal::new();
+    let relay = stop.clone();
+    tokio::spawn(async move {
+        await_shutdown_signal().await;
+        relay.trigger();
+    });
+    run_agent(logs::Options::default(), stop).await
+}
+
+/// Hands the process to the SCM. Exits 1 if this process was not started by
+/// the service manager (use `--console` for foreground).
+#[cfg(windows)]
+fn run_agent_as_windows_service() {
+    if let Err(e) = windows::scm::dispatch(windows_service_body) {
+        eprintln!("miru-agent: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// Service entry point: runs on the SCM's service thread with its own runtime
+/// and logs to the rolling file only, since a service has no console.
+#[cfg(windows)]
+fn windows_service_body(stop: StopSignal) -> RunOutcome {
+    let options = logs::Options {
+        stdout: false,
+        ..Default::default()
+    };
+    runtime().block_on(run_agent(options, stop))
+}
+
+/// Runs the agent to completion. `stop` is observed at every phase, including
+/// upgrade reconcile (between attempts and during backoff, never mid-reset).
+async fn run_agent(log_options: logs::Options, stop: StopSignal) -> RunOutcome {
     let layout = disk::Layout::default();
 
     // initialize logging early so reconciliation and pre-settings activity are
@@ -229,35 +232,13 @@ where
     };
 
     // wait for the device to be activated (or a shutdown signal)
-    match await_activation(&layout, tokio::time::sleep, shutdown()).await {
+    match await_activation(&layout, tokio::time::sleep, stop.wait()).await {
         Outcome::Activated => {}
         Outcome::ShutdownRequested => return RunOutcome::Completed,
     }
 
-    // reconcile the agent package version to ensure the file system storage state
-    // is compatible with the running version
-    let bootstrap_client = match http::Client::new(&get_bootstrap_backend_host().await.as_url()) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("upgrade: failed to construct http client: {e}");
-            return RunOutcome::Failed;
-        }
-    };
-    match upgrade::reconcile(
-        &layout,
-        &bootstrap_client,
-        version::VERSION,
-        tokio::time::sleep,
-        startup_shutdown,
-    )
-    .await
-    {
-        Ok(Some(_)) => {}
-        Ok(None) => return RunOutcome::Completed,
-        Err(e) => {
-            error!("upgrade: failed to reconcile agent package version: {e}");
-            return RunOutcome::Failed;
-        }
+    if let Some(outcome) = reconcile_agent_version(&layout, &stop).await {
+        return outcome;
     }
 
     // retrieve the settings files
@@ -273,11 +254,39 @@ where
     // run the server
     let options = build_app_options(settings);
     info!("Running the server with options: {:?}", options);
-    match run(options, shutdown()).await {
+    match run(options, stop.wait()).await {
         Ok(()) => RunOutcome::Completed,
         Err(e) => {
             error!("Failed to run the server: {e}");
             RunOutcome::Failed
+        }
+    }
+}
+
+/// Reconcile on-disk state with the running version. `Some(outcome)` means
+/// `run_agent` should return that outcome (stop or failure).
+async fn reconcile_agent_version(layout: &disk::Layout, stop: &StopSignal) -> Option<RunOutcome> {
+    let client = match http::Client::new(&get_bootstrap_backend_host().await.as_url()) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("upgrade: failed to construct http client: {e}");
+            return Some(RunOutcome::Failed);
+        }
+    };
+    match upgrade::reconcile(
+        layout,
+        &client,
+        version::VERSION,
+        tokio::time::sleep,
+        stop.wait(),
+    )
+    .await
+    {
+        Ok(Some(_)) => None,
+        Ok(None) => Some(RunOutcome::Completed),
+        Err(e) => {
+            error!("upgrade: failed to reconcile agent package version: {e}");
+            Some(RunOutcome::Failed)
         }
     }
 }
@@ -301,12 +310,13 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
         ConnectAddress::default(),
     );
 
+    let is_persistent = LifecycleOptions::resolve_persistence(
+        settings.is_persistent,
+        platform::supports_idle_exit(),
+    );
     AppOptions {
         lifecycle: LifecycleOptions {
-            is_persistent: LifecycleOptions::resolve_persistence(
-                settings.is_persistent,
-                platform::supports_idle_exit(),
-            ),
+            is_persistent,
             ..Default::default()
         },
         backend_host: settings.backend.host,
@@ -332,7 +342,7 @@ async fn get_bootstrap_backend_host() -> BackendHost {
 
 #[cfg(windows)]
 async fn await_shutdown_signal() {
-    // console mode: ctrl-c; service mode uses `windows::StopSignal`
+    // Foreground only; service mode triggers `StopSignal` from the SCM handler.
     let _ = tokio::signal::ctrl_c().await;
     info!("received ctrl-c, shutting down...");
 }

@@ -3,9 +3,9 @@ use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
 // internal crates
+use miru_agent::shutdown::{RunOutcome, StopSignal};
 use miru_agent::windows::errors::ScmErr;
 use miru_agent::windows::scm::{self, StatusSink};
-use miru_agent::windows::{RunOutcome, StopSignal};
 
 // external crates
 use windows_service::service::{
