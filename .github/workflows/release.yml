@@ -49,20 +49,16 @@ jobs:
     if: needs.check-main.outputs.on_main == 'true'
     uses: ./.github/workflows/ci.yml
 
-  # Build the Windows release binary natively (aws-lc-sys cannot cross-compile
-  # from Linux) and hand it to the release job, which imports it through
-  # GoReleaser's prebuilt builder. Kept here rather than in ci.yml because it
-  # produces a release artifact, not a validation signal.
+  # Build the Windows release binary natively and hand it to the release job, which
+  # imports it through GoReleaser's prebuilt builder. 
   windows-release-build:
     needs: check-main
     if: needs.check-main.outputs.on_main == 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 45
     env:
-      # Line/module-level debug info so the shipped PDB supports symbolized
-      # backtraces. On MSVC debug info is "packed" into the .pdb, so the .exe
-      # is unchanged. Job-scoped on purpose: the Linux lane keeps
-      # [profile.release] debug = false from Cargo.toml.
+      # Line/module-level debug info so the shipped PDB supports symbolized backtraces.
+      # On MSVC debug info is "packed" into the .pdb, so the .exe is unchanged.
       CARGO_PROFILE_RELEASE_DEBUG: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
