@@ -16,16 +16,17 @@ The next prerelease tag will be `v0.10.3-beta.2`. `agent/build.rs` refuses to bu
 
 ## Progress
 
-- [ ] Milestone 1: bump `Cargo.toml`, refresh `Cargo.lock`, verify, commit.
+- [x] Milestone 1: bump `Cargo.toml`, refresh `Cargo.lock`, verify, commit.
 - [ ] Preflight reports `CLEAN`.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- None. `cargo update --workspace --offline` changed exactly the three workspace entries; `cargo check --workspace --locked --offline` passed.
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- Commit message uses `0.10.3-beta.2` (no `v` prefix), matching the Cargo version rather than the tag name.
+- Separate refine and test-writing passes were skipped: the diff is four version lines, and the existing `agent/tests/version/mod.rs` covers the runtime version string.
 
 ## Outcomes & Retrospective
 
