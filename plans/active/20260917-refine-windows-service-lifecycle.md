@@ -22,7 +22,7 @@ Establish that PR #242 correctly runs the Windows agent under the Service Contro
 - [x] (2026-09-17) Confirm PR identity, branch, merge base, existing tests, and CI configuration; author this conditional plan.
 - [x] (2026-09-17) Promote this plan to `plans/active/` and commit through the task orchestrator (`a33c9631`).
 - [x] (2026-09-17) Review the entire PR diff with a fresh read-only review agent; a separate critique confirmed its single P2 startup-stop finding (one accepted, zero skipped).
-- [ ] If confirmed defects exist, apply minimal fixes and appropriate regression coverage, then repeat full-diff review within the refinement limit.
+- [x] (2026-09-17) Apply the confirmed startup-stop fix and four portable regression cases (`5ee82d33`), then complete fresh full-diff review iteration 2 with no findings (two of three iterations used).
 - [ ] Run CI-driven preflight and record `CLEAN` on the pushed branch head, or leave the PR draft with an accurate incomplete report.
 - [ ] Complete the plan, push any final plan changes, verify CI again on that final head, update PR #242's description, and mark that PR ready.
 
@@ -34,6 +34,8 @@ The initial tree was clean. Both local HEAD and `origin/feat/windows-service-lif
 The PR body still cites older commit evidence, although its current head has newer green CI. Refresh its description at delivery from the final behavior and actual validation. Full-diff review iteration 1 reported one P2 finding: SCM STOP is never observed during startup upgrade reconciliation, so an activated device with an outdated or absent version marker and an unavailable backend can remain in StopPending indefinitely. A fresh critique confirmed the call path. Although reconciliation's retry loop predates the PR and individual HTTP requests time out, the PR newly accepts SCM STOP during this unbounded loop; the latched signal and later application watchdog cannot release it.
 
 Cancellation must occur between complete reconciliation attempts or during retry backoff. `disk::setup::reset` performs multiple writes/deletions before writing the version marker last, so racing STOP against the whole reconciliation future would risk interrupting persistence. The accepted fix intentionally waits for an active attempt to finish.
+
+Fresh full-diff review iteration 2 inspected all 26 changed paths at `5ee82d33900fd05b802f96ee04aaaa9e8d9a58f0` against merge base `fa80a317af1acc2a2f9fbc0255c53fab607ae0d1`, plus relevant callers and tests, and returned no findings. A fresh fetch confirmed `origin/main` was unchanged. The reviewer confirmed that the startup-stop defect is resolved without cancelling an active disk reset.
 
 ## Decision Log
 
@@ -53,7 +55,7 @@ Cancellation must occur between complete reconciliation attempts or during retry
 
 Review iteration 1 produced one confirmed P2 finding and zero skips. Its fix is implemented in `agent/src/app/upgrade.rs` and `agent/src/main.rs`, with four portable regression cases in `agent/tests/app/upgrade.rs`. Reconciliation observes startup stop before and after complete attempts and during backoff; foreground startup passes a never-resolving future. An active attempt is deliberately allowed to finish persistence before the service body exits cleanly.
 
-The regression tests cover offline backoff cancellation without state changes, a pre-triggered stop with zero backend requests, stop during a successful attempt with reset and backend update completed, and the existing typed missing-key validation failure. Five existing successful/retry cases retain their assertions with the new explicit completed outcome. File-scoped formatting and the repository's import/function-length/assertion checker passed on the three changed files; diff whitespace checks passed. No local suites, compilation, whole-repository lint, or coverage were run. Fresh full-diff review and CI execution are still pending. A live registered Windows SCM start/stop smoke test remains outside the available evidence.
+The regression tests cover offline backoff cancellation without state changes, a pre-triggered stop with zero backend requests, stop during a successful attempt with reset and backend update completed, and the existing typed missing-key validation failure. Five existing successful/retry cases retain their assertions with the new explicit completed outcome. File-scoped formatting and the repository's import/function-length/assertion checker passed on the three changed files; diff whitespace checks passed. No local suites, compilation, whole-repository lint, or coverage were run. Fresh full-diff review iteration 2 returned no findings; the global refinement count is two of three iterations, with one finding fixed and zero skipped. CI execution on the next pushed head is still pending. A live registered Windows SCM start/stop smoke test remains outside the available evidence.
 
 ## Context and Orientation
 
