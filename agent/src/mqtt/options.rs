@@ -43,7 +43,7 @@ impl Default for ConnectAddress {
         Self {
             protocol: Protocol::SSL,
             broker: MqttHost::default(),
-            port: 8883,
+            port: 443,
         }
     }
 }

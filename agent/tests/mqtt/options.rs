@@ -30,7 +30,7 @@ mod connect_address {
         let addr = ConnectAddress::default();
         assert!(matches!(addr.protocol(), Protocol::SSL));
         assert_eq!(addr.broker().as_str(), "mqtt.mirurobotics.com");
-        assert_eq!(addr.port(), 8883);
+        assert_eq!(addr.port(), 443);
     }
 
     #[test]
