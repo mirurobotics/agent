@@ -8,7 +8,7 @@ This ExecPlan is a living document. Keep Progress, Surprises & Discoveries, Deci
 
 The sole repository to change is `/home/ben/miru/workbench2/repos/agent` (`mirurobotics/agent`). Refine the existing branch `feat/windows-service-lifecycle` and deliver the existing draft PR https://github.com/mirurobotics/agent/pull/242 against `main`. Read the workbench instructions and skills at `/home/ben/miru/workbench2/.agents/skills/` and the review skill at `/home/ben/.codex/skills/.system/review-agent/SKILL.md` as read-only references. Do not change the workbench, shared skill files, generated API libraries, or unrelated code.
 
-This plan lives at `plans/active/20260917-refine-windows-service-lifecycle.md` in the agent repository. The explicit task workflow and current repository convention use `plans/backlog`, `plans/active`, and `plans/completed`; this placement supersedes the repository planning policy's older `.agents/exec-plans` paths. Plan authoring changed this file only; subsequent implementation is the caller's responsibility.
+The completed plan's intended path is `plans/completed/20260917-refine-windows-service-lifecycle.md` in the agent repository; relocation from `plans/active/` is pending delivery bookkeeping. The explicit task workflow and current repository convention use `plans/backlog`, `plans/active`, and `plans/completed`; this placement supersedes the repository planning policy's older `.agents/exec-plans` paths.
 
 ## Purpose / Big Picture
 
@@ -23,8 +23,9 @@ Establish that PR #242 correctly runs the Windows agent under the Service Contro
 - [x] (2026-09-17) Promote this plan to `plans/active/` and commit through the task orchestrator (`a33c9631`).
 - [x] (2026-09-17) Review the entire PR diff with a fresh read-only review agent; a separate critique confirmed its single P2 startup-stop finding (one accepted, zero skipped).
 - [x] (2026-09-17) Apply the confirmed startup-stop fix and four portable regression cases (`5ee82d33`), then complete fresh full-diff review iteration 2 with no findings (two of three iterations used).
-- [ ] Run CI-driven preflight and record `CLEAN` on the pushed branch head, or leave the PR draft with an accurate incomplete report.
-- [ ] Complete the plan, push any final plan changes, verify CI again on that final head, update PR #242's description, and mark that PR ready.
+- [x] (2026-09-17) Run CI-driven preflight: `CLEAN` on pushed head `50a1f3932460d2481a49197cb12513135ae5e4d4`, CI run [35277371800](https://github.com/mirurobotics/agent/actions/runs/35277371800), one of three CI rounds used.
+- [x] (2026-09-17) Complete implementation and this plan's outcome record; ready for delivery.
+- [ ] Relocate the completed plan, commit and push final bookkeeping, verify CI on that final head, update PR #242's description, and mark that PR ready.
 
 ## Surprises & Discoveries
 
@@ -36,6 +37,8 @@ The PR body still cites older commit evidence, although its current head has new
 Cancellation must occur between complete reconciliation attempts or during retry backoff. `disk::setup::reset` performs multiple writes/deletions before writing the version marker last, so racing STOP against the whole reconciliation future would risk interrupting persistence. The accepted fix intentionally waits for an active attempt to finish.
 
 Fresh full-diff review iteration 2 inspected all 26 changed paths at `5ee82d33900fd05b802f96ee04aaaa9e8d9a58f0` against merge base `fa80a317af1acc2a2f9fbc0255c53fab607ae0d1`, plus relevant callers and tests, and returned no findings. A fresh fetch confirmed `origin/main` was unchanged. The reviewer confirmed that the startup-stop defect is resolved without cancelling an active disk reset.
+
+CI run [35277371800](https://github.com/mirurobotics/agent/actions/runs/35277371800) passed on exact pushed head `50a1f3932460d2481a49197cb12513135ae5e4d4`. Lint, Linux tests/coverage, tools, Windows tests, and Windows packaging scope all succeeded; packaging itself was skipped by its path classifier as expected. The four new regression names appear with `ok` in both Linux and Windows logs. All coverage gates passed (app 94.06%, portable Windows module 100%). No CI repair was needed.
 
 ## Decision Log
 
@@ -50,12 +53,18 @@ Fresh full-diff review iteration 2 inspected all 26 changed paths at `5ee82d3390
 
 2026-09-17, implementation: Accept the sole review finding after a separate critique. Add a shutdown future to the existing production reconciliation path, returning an explicit stopped result only at safe boundaries. Service startup supplies the latched SCM stop; foreground startup supplies a never-resolving future to preserve its behavior. Test the actual reconciliation function with a failing backend and controlled retry wait, an already-triggered stop, and a stop during a successful attempt that must finish persistence. Apply this conditional source-and-regression batch through the refine fix stage, then review the complete diff again before CI publication.
 
+2026-09-17, implementation: Implementation is complete. Leave this outcome record uncommitted for completed-plan relocation in one final delivery commit, then verify CI on that pushed head. Preserve draft status and the existing PR description until that check is green. Report final delivery evidence in the PR and task after the bookkeeping commit, avoiding a recursive plan-only commit.
+
 ## Outcomes & Retrospective
 
 
 Review iteration 1 produced one confirmed P2 finding and zero skips. Its fix is implemented in `agent/src/app/upgrade.rs` and `agent/src/main.rs`, with four portable regression cases in `agent/tests/app/upgrade.rs`. Reconciliation observes startup stop before and after complete attempts and during backoff; foreground startup passes a never-resolving future. An active attempt is deliberately allowed to finish persistence before the service body exits cleanly.
 
-The regression tests cover offline backoff cancellation without state changes, a pre-triggered stop with zero backend requests, stop during a successful attempt with reset and backend update completed, and the existing typed missing-key validation failure. Five existing successful/retry cases retain their assertions with the new explicit completed outcome. File-scoped formatting and the repository's import/function-length/assertion checker passed on the three changed files; diff whitespace checks passed. No local suites, compilation, whole-repository lint, or coverage were run. Fresh full-diff review iteration 2 returned no findings; the global refinement count is two of three iterations, with one finding fixed and zero skipped. CI execution on the next pushed head is still pending. A live registered Windows SCM start/stop smoke test remains outside the available evidence.
+The regression tests cover offline backoff cancellation without state changes, a pre-triggered stop with zero backend requests, stop during a successful attempt with reset and backend update completed, and the existing typed missing-key validation failure. Five existing successful/retry cases retain their assertions with the new explicit completed outcome. File-scoped formatting and the repository's import/function-length/assertion checker passed on the three changed files; diff whitespace checks passed. No local suites, compilation, whole-repository lint, or coverage were run.
+
+Implementation preflight is `CLEAN`: CI run [35277371800](https://github.com/mirurobotics/agent/actions/runs/35277371800) passed on exact pushed head `50a1f3932460d2481a49197cb12513135ae5e4d4`. The four new regression tests and existing SCM lifecycle tests passed in CI; new regression names were independently confirmed in both Linux and Windows logs. Global counts are two of three review iterations and one of three CI rounds, with one confirmed finding fixed, zero skipped, zero unresolved, and no CI fixes. Commits since the original PR head are `a33c9631` (plan), `5ee82d33` (fix and regression coverage), and `50a1f393` (second-review record). Fetch/rebase was a no-op; the branch was pushed once and local, remote, and PR head SHAs matched with a clean tree before this final plan-only update.
+
+Implementation is complete and ready for delivery; PR #242 remains draft. The task orchestrator must relocate this completed plan, commit and push delivery bookkeeping, validate that final head, update the PR description, and mark the same PR ready. Final delivery evidence belongs in the PR and task after that commit. A live registered Windows SCM start/stop smoke test remains outside the available evidence; shutdown deliberately waits for any active reconciliation attempt to complete so disk reset is not interrupted.
 
 ## Context and Orientation
 
@@ -139,3 +148,5 @@ Acceptance requires a completed full-diff review and documented disposition of e
 Read-only review, status queries, and CI polling may be repeated safely. Recompute the merge base and refresh the full diff after every rebase or fix batch. Preserve unrelated work if the tree becomes dirty; do not reset or overwrite it. Use existing PR #242 rather than creating duplicates. On a rebase conflict, resolve only understood changes and review the resolution; `git rebase --abort` restores the pre-rebase state if necessary. A rejected lease requires fetching and inspecting the remote change before retrying.
 
 If authentication or CI is unavailable, report that validation is incomplete and keep the PR draft. At the refinement or CI limit, report remaining findings/failing jobs and retain restartable progress. Never make green CI by deleting/skipping tests, lowering coverage, or suppressing errors. Final plan relocation is safe only once implementation and preflight have succeeded; if the resulting delivery re-check fails, record that failure and keep delivery incomplete.
+
+Revision (2026-09-17): Record completed implementation and the intended completed-plan path while keeping final commit CI and PR delivery pending.
