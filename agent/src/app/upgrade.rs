@@ -12,6 +12,7 @@ use crate::http::{self, ClientI};
 use crate::models;
 
 // external crates
+use futures::FutureExt;
 use tracing::{error, info, warn};
 
 pub struct Outcome {
@@ -20,19 +21,23 @@ pub struct Outcome {
 }
 
 /// Reconcile on-disk state with the running version. No-op if the marker matches;
-/// otherwise wipes per-version state and rebootstraps from the backend. Blocks
-/// indefinitely on network failure to avoid leaving a half-wiped device.
+/// otherwise wipes per-version state and rebootstraps from the backend. Retries
+/// network failures until successful or shutdown is requested. Returns `None`
+/// on shutdown, but always finishes an active attempt before stopping so that
+/// persistence is never interrupted.
 pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(
     layout: &Layout,
     http_client: &HTTPClientT,
     version: &str,
     sleep_fn: F,
-) -> Result<Outcome, UpgradeErr>
+    shutdown: impl Future<Output = ()> + Send,
+) -> Result<Option<Outcome>, UpgradeErr>
 where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
 {
     validate_layout(layout)?;
+    tokio::pin!(shutdown);
 
     let backoff = cooldown::Backoff {
         base_secs: 1,
@@ -42,31 +47,42 @@ where
     let mut attempts: u32 = 0;
 
     loop {
+        if shutdown.as_mut().now_or_never().is_some() {
+            return Ok(None);
+        }
         if !needs_upgrade(layout, version).await {
-            return Ok(Outcome {
+            return Ok(Some(Outcome {
                 upgraded: false,
                 attempts,
-            });
+            }));
         }
         info!("resetting miru agent state to use version '{}'", version);
 
-        match reconcile_impl(http_client, layout, version).await {
+        let result = reconcile_impl(http_client, layout, version).await;
+        if shutdown.as_mut().now_or_never().is_some() {
+            return Ok(None);
+        }
+        match result {
             Ok(_) => {
                 info!(
                     "upgrade: resetting storage state for version '{}' complete",
                     version
                 );
-                return Ok(Outcome {
+                return Ok(Some(Outcome {
                     upgraded: true,
                     attempts,
-                });
+                }));
             }
             Err(e) => {
                 warn!("updating agent version storage failed: {e}");
                 attempts = attempts.saturating_add(1);
                 let wait = cooldown::calc(&backoff, attempts);
                 warn!("retrying in {wait} seconds (attempts: {attempts})");
-                sleep_fn(Duration::from_secs(wait as u64)).await;
+                tokio::select! {
+                    biased;
+                    _ = &mut shutdown => return Ok(None),
+                    _ = sleep_fn(Duration::from_secs(wait as u64)) => {}
+                }
             }
         }
     }

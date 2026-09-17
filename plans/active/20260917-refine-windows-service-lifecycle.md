@@ -8,7 +8,7 @@ This ExecPlan is a living document. Keep Progress, Surprises & Discoveries, Deci
 
 The sole repository to change is `/home/ben/miru/workbench2/repos/agent` (`mirurobotics/agent`). Refine the existing branch `feat/windows-service-lifecycle` and deliver the existing draft PR https://github.com/mirurobotics/agent/pull/242 against `main`. Read the workbench instructions and skills at `/home/ben/miru/workbench2/.agents/skills/` and the review skill at `/home/ben/.codex/skills/.system/review-agent/SKILL.md` as read-only references. Do not change the workbench, shared skill files, generated API libraries, or unrelated code.
 
-This plan lives at `plans/backlog/20260917-refine-windows-service-lifecycle.md` in the agent repository. The explicit task workflow and current repository convention use `plans/backlog`, `plans/active`, and `plans/completed`; this placement supersedes the repository planning policy's older `.agents/exec-plans` paths. Plan authoring changes this file only; subsequent implementation is the caller's responsibility.
+This plan lives at `plans/active/20260917-refine-windows-service-lifecycle.md` in the agent repository. The explicit task workflow and current repository convention use `plans/backlog`, `plans/active`, and `plans/completed`; this placement supersedes the repository planning policy's older `.agents/exec-plans` paths. Plan authoring changed this file only; subsequent implementation is the caller's responsibility.
 
 ## Purpose / Big Picture
 
@@ -20,8 +20,8 @@ Establish that PR #242 correctly runs the Windows agent under the Service Contro
 
 - [x] (2026-09-17) Read applicable repository/workbench instructions, architecture, repository plan skill and its complete policy, and the explicitly selected review/refine/preflight/task workflows.
 - [x] (2026-09-17) Confirm PR identity, branch, merge base, existing tests, and CI configuration; author this conditional plan.
-- [ ] Promote this plan to `plans/active/` and commit through the task orchestrator.
-- [ ] Review the entire PR diff with a fresh read-only review agent; critique every finding and record confirmed defects or explicit skips.
+- [x] (2026-09-17) Promote this plan to `plans/active/` and commit through the task orchestrator (`a33c9631`).
+- [x] (2026-09-17) Review the entire PR diff with a fresh read-only review agent; a separate critique confirmed its single P2 startup-stop finding (one accepted, zero skipped).
 - [ ] If confirmed defects exist, apply minimal fixes and appropriate regression coverage, then repeat full-diff review within the refinement limit.
 - [ ] Run CI-driven preflight and record `CLEAN` on the pushed branch head, or leave the PR draft with an accurate incomplete report.
 - [ ] Complete the plan, push any final plan changes, verify CI again on that final head, update PR #242's description, and mark that PR ready.
@@ -31,7 +31,9 @@ Establish that PR #242 correctly runs the Windows agent under the Service Contro
 
 The initial tree was clean. Both local HEAD and `origin/feat/windows-service-lifecycle` were `86986fe3c6bcdba1427a65a46b0600594f17b71f`; `origin/main` and the merge base were `fa80a317af1acc2a2f9fbc0255c53fab607ae0d1`. PR #242 was draft. CI run `35275351251` had successful lint, test, tools, windows-check, and windows-package-scope jobs. The packaging job was intentionally skipped by its path classifier. These observations are a baseline, not validation of later commits.
 
-The PR body still cites older commit evidence, although its current head has newer green CI. Refresh its description at delivery from the final behavior and actual validation. The authoring pass has made no defect finding and has not performed the delegated whole-diff review.
+The PR body still cites older commit evidence, although its current head has newer green CI. Refresh its description at delivery from the final behavior and actual validation. Full-diff review iteration 1 reported one P2 finding: SCM STOP is never observed during startup upgrade reconciliation, so an activated device with an outdated or absent version marker and an unavailable backend can remain in StopPending indefinitely. A fresh critique confirmed the call path. Although reconciliation's retry loop predates the PR and individual HTTP requests time out, the PR newly accepts SCM STOP during this unbounded loop; the latched signal and later application watchdog cannot release it.
+
+Cancellation must occur between complete reconciliation attempts or during retry backoff. `disk::setup::reset` performs multiple writes/deletions before writing the version marker last, so racing STOP against the whole reconciliation future would risk interrupting persistence. The accepted fix intentionally waits for an active attempt to finish.
 
 ## Decision Log
 
@@ -44,10 +46,14 @@ The PR body still cites older commit evidence, although its current head has new
 
 2026-09-17, planner: Use GitHub CI for all full suites, whole-repository lint, and coverage. Do not run local aggregate validation scripts or refresh dependencies merely to satisfy an older local-lint suggestion. Local verification is limited to reading changes, checking diffs, and trivially cheap file-scoped formatting/static checks.
 
+2026-09-17, implementation: Accept the sole review finding after a separate critique. Add a shutdown future to the existing production reconciliation path, returning an explicit stopped result only at safe boundaries. Service startup supplies the latched SCM stop; foreground startup supplies a never-resolving future to preserve its behavior. Test the actual reconciliation function with a failing backend and controlled retry wait, an already-triggered stop, and a stop during a successful attempt that must finish persistence. Apply this conditional source-and-regression batch through the refine fix stage, then review the complete diff again before CI publication.
+
 ## Outcomes & Retrospective
 
 
-Planning is complete; review, conditional implementation, and delivery remain. No source edits, local suites, commits, or pushes were performed by the planner. At completion, replace this paragraph with the number of review iterations, confirmed findings fixed/skipped, final pushed SHA and CI run, residual test limitations, and PR delivery state. If no findings qualify, say so without inventing code work.
+Review iteration 1 produced one confirmed P2 finding and zero skips. Its fix is implemented in `agent/src/app/upgrade.rs` and `agent/src/main.rs`, with four portable regression cases in `agent/tests/app/upgrade.rs`. Reconciliation observes startup stop before and after complete attempts and during backoff; foreground startup passes a never-resolving future. An active attempt is deliberately allowed to finish persistence before the service body exits cleanly.
+
+The regression tests cover offline backoff cancellation without state changes, a pre-triggered stop with zero backend requests, stop during a successful attempt with reset and backend update completed, and the existing typed missing-key validation failure. Five existing successful/retry cases retain their assertions with the new explicit completed outcome. File-scoped formatting and the repository's import/function-length/assertion checker passed on the three changed files; diff whitespace checks passed. No local suites, compilation, whole-repository lint, or coverage were run. Fresh full-diff review and CI execution are still pending. A live registered Windows SCM start/stop smoke test remains outside the available evidence.
 
 ## Context and Orientation
 

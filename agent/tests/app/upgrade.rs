@@ -1,4 +1,5 @@
 // standard crates
+use std::future::pending;
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
@@ -10,12 +11,14 @@ use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
-use miru_agent::filesys::{dirs, files, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
+use miru_agent::windows::StopSignal;
 
 // external crates
 use chrono::{Duration, Utc};
+use tokio::sync::oneshot;
 
 // ============================ TEST HARNESS ============================ //
 
@@ -77,6 +80,40 @@ async fn read_keys(layout: &Layout) -> (PrivateKey, PublicKey) {
     (private, public)
 }
 
+async fn seed_upgrade_state(layout: &Layout) {
+    let device = Device::from(&backend_device("dvc_old", "old"));
+    let settings = Settings {
+        enable_poller: false,
+        ..Settings::default()
+    };
+    disk::setup::reset(layout, &device, &settings, "v0.0.1")
+        .await
+        .unwrap();
+    dirs::create(&layout.resources()).await.unwrap();
+    test_files::seed(&layout.resources().file("stale.json"), "old resource").await;
+    test_files::seed(&layout.events_log_file(), "old event").await;
+    test_files::seed(
+        &layout.auth().token(),
+        r#"{"token":"old.jwt.token","expires_at":"2026-01-01T00:00:00Z"}"#,
+    )
+    .await;
+}
+
+async fn read_upgrade_state(layout: &Layout) -> Vec<String> {
+    let mut state = Vec::new();
+    for file in [
+        layout.agent_version(),
+        layout.device(),
+        layout.settings(),
+        layout.auth().token(),
+        layout.resources().file("stale.json"),
+        layout.events_log_file(),
+    ] {
+        state.push(files::read_string(&file).await.unwrap());
+    }
+    state
+}
+
 async fn no_sleep(_: StdDuration) {}
 
 // ============================ TESTS ============================ //
@@ -95,8 +132,9 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_1", "alpha"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep)
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, pending())
             .await
+            .unwrap()
             .unwrap();
 
         assert!(!outcome.upgraded);
@@ -114,8 +152,9 @@ mod reconcile {
         let (priv_before, pub_before) = read_keys(&layout).await;
 
         let mock = make_mock_client(backend_device("dvc_2", "beta"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep)
+        let outcome = reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep, pending())
             .await
+            .unwrap()
             .unwrap();
 
         assert!(outcome.upgraded);
@@ -151,8 +190,9 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_3", "gamma"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep)
+        let outcome = reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep, pending())
             .await
+            .unwrap()
             .unwrap();
 
         assert!(outcome.upgraded);
@@ -188,8 +228,9 @@ mod reconcile {
             }
         });
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep)
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep, pending())
             .await
+            .unwrap()
             .unwrap();
 
         assert!(outcome.upgraded);
@@ -227,13 +268,143 @@ mod reconcile {
             }
         });
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep)
+        let outcome = reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep, pending())
             .await
+            .unwrap()
             .unwrap();
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 4);
         assert_eq!(mock.num_update_device_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn stops_during_retry_wait_without_changing_state() {
+        let (layout, _tmp) = prepare_layout("upgrade_stop_retry").await;
+        seed_upgrade_state(&layout).await;
+        let state_before = read_upgrade_state(&layout).await;
+        let keys_before = read_keys(&layout).await;
+        let mock = make_mock_client(backend_device("dvc_new", "new"));
+        mock.set_get_device(|| {
+            Err(HTTPErr::MockErr(HTTPMockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let stop = StopSignal::new();
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let entered_tx = Mutex::new(Some(entered_tx));
+        let sleep_fn = |_| {
+            let entered_tx = entered_tx.lock().unwrap().take().unwrap();
+            async move {
+                entered_tx.send(()).unwrap();
+                pending::<()>().await;
+            }
+        };
+        let attempt = reconcile(&layout, mock.as_ref(), "v1.0.0", sleep_fn, stop.wait());
+        let request_stop = async {
+            entered_rx.await.unwrap();
+            stop.trigger();
+        };
+        let (outcome, ()) = tokio::time::timeout(StdDuration::from_secs(5), async {
+            tokio::join!(attempt, request_stop)
+        })
+        .await
+        .expect("shutdown should interrupt the retry wait");
+
+        assert!(outcome.unwrap().is_none());
+        assert_eq!(1, mock.call_count(Call::IssueDeviceToken));
+        assert_eq!(1, mock.num_get_device_calls());
+        assert_eq!(0, mock.num_update_device_calls());
+        assert_eq!(state_before, read_upgrade_state(&layout).await);
+        assert_eq!(keys_before, read_keys(&layout).await);
+    }
+
+    #[tokio::test]
+    async fn already_requested_stop_skips_reconciliation() {
+        let (layout, _tmp) = prepare_layout("upgrade_stop_before_attempt").await;
+        seed_upgrade_state(&layout).await;
+        let state_before = read_upgrade_state(&layout).await;
+        let keys_before = read_keys(&layout).await;
+        let mock = make_mock_client(backend_device("dvc_new", "new"));
+        let stop = StopSignal::new();
+        stop.trigger();
+
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, stop.wait())
+            .await
+            .unwrap();
+
+        assert!(outcome.is_none());
+        assert!(mock.requests().is_empty());
+        assert_eq!(state_before, read_upgrade_state(&layout).await);
+        assert_eq!(keys_before, read_keys(&layout).await);
+    }
+
+    #[tokio::test]
+    async fn stop_during_attempt_waits_for_reset_and_backend_update() {
+        let (layout, _tmp) = prepare_layout("upgrade_stop_during_attempt").await;
+        seed_upgrade_state(&layout).await;
+        let keys_before = read_keys(&layout).await;
+        let settings_before = files::read_json::<Settings>(&layout.settings())
+            .await
+            .unwrap();
+        let backend_device = backend_device("dvc_new", "new");
+        let expected_device = Device::from(&backend_device);
+        let mock = make_mock_client(backend_device.clone());
+        let stop = StopSignal::new();
+        let stop_on_get = stop.clone();
+        mock.set_get_device(move || {
+            stop_on_get.trigger();
+            Ok(backend_device.clone())
+        });
+
+        let outcome = tokio::time::timeout(
+            StdDuration::from_secs(5),
+            reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, stop.wait()),
+        )
+        .await
+        .expect("shutdown should finish after the active attempt")
+        .unwrap();
+
+        assert!(outcome.is_none());
+        assert_eq!(1, mock.call_count(Call::IssueDeviceToken));
+        assert_eq!(1, mock.num_get_device_calls());
+        assert_eq!(1, mock.num_update_device_calls());
+        assert_eq!(
+            Some("v1.0.0".to_string()),
+            disk::agent_version::read(&layout.agent_version())
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            expected_device,
+            files::read_json::<Device>(&layout.device()).await.unwrap()
+        );
+        assert_eq!(
+            settings_before,
+            files::read_json::<Settings>(&layout.settings())
+                .await
+                .unwrap()
+        );
+        assert_eq!(keys_before, read_keys(&layout).await);
+        assert!(!layout.resources().exists());
+        assert!(layout.events_dir().exists());
+        assert!(!layout.events_log_file().exists());
+    }
+
+    #[tokio::test]
+    async fn missing_key_returns_validation_error_with_pending_stop() {
+        let (layout, _tmp) = prepare_layout("upgrade_missing_key").await;
+        files::delete(&layout.auth().private_key()).await.unwrap();
+        let mock = make_mock_client(backend_device("dvc_new", "new"));
+
+        let result = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, pending()).await;
+
+        assert!(matches!(
+            result,
+            Err(UpgradeErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_)))
+        ));
+        assert!(mock.requests().is_empty());
     }
 }
 

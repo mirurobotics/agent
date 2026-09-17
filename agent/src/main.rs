@@ -89,7 +89,11 @@ fn run_runtime_mode(console: bool) {
         }
     }
     let _ = console; // unix: the flag is a no-op (keeps clippy -D warnings quiet)
-    runtime().block_on(run_agent(logs::Options::default(), await_shutdown_signal));
+    runtime().block_on(run_agent(
+        logs::Options::default(),
+        await_shutdown_signal,
+        std::future::pending::<()>(),
+    ));
 }
 
 /// Service entry point: runs on the SCM's service thread with its own runtime
@@ -100,7 +104,8 @@ fn service_body(stop: StopSignal) -> RunOutcome {
         stdout: false,
         ..Default::default()
     };
-    runtime().block_on(run_agent(options, move || stop.wait()))
+    let startup_shutdown = stop.wait();
+    runtime().block_on(run_agent(options, move || stop.wait(), startup_shutdown))
 }
 
 async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
@@ -201,7 +206,11 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
 
 /// Runs the agent to completion. `shutdown` builds the future that resolves
 /// when the agent should stop; it is called once per phase that awaits it.
-async fn run_agent<F, Fut>(log_options: logs::Options, shutdown: F) -> RunOutcome
+async fn run_agent<F, Fut>(
+    log_options: logs::Options,
+    shutdown: F,
+    startup_shutdown: impl Future<Output = ()> + Send,
+) -> RunOutcome
 where
     F: Fn() -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
@@ -227,24 +236,28 @@ where
 
     // reconcile the agent package version to ensure the file system storage state
     // is compatible with the running version
-    let host = get_bootstrap_backend_host().await;
-    let bootstrap_http_client = match http::Client::new(&host.as_url()) {
+    let bootstrap_client = match http::Client::new(&get_bootstrap_backend_host().await.as_url()) {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
             return RunOutcome::Failed;
         }
     };
-    if let Err(e) = upgrade::reconcile(
+    match upgrade::reconcile(
         &layout,
-        &bootstrap_http_client,
+        &bootstrap_client,
         version::VERSION,
         tokio::time::sleep,
+        startup_shutdown,
     )
     .await
     {
-        error!("upgrade: failed to reconcile agent package version: {e}");
-        return RunOutcome::Failed;
+        Ok(Some(_)) => {}
+        Ok(None) => return RunOutcome::Completed,
+        Err(e) => {
+            error!("upgrade: failed to reconcile agent package version: {e}");
+            return RunOutcome::Failed;
+        }
     }
 
     // retrieve the settings files
