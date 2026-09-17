@@ -33,12 +33,10 @@ impl Default for LifecycleOptions {
 }
 
 impl LifecycleOptions {
-    /// Resolves the effective persistence for this platform; warns when a
-    /// non-persistent request is overridden.
     pub fn resolve_persistence(requested: bool, supports_idle_exit: bool) -> bool {
         if !requested && !supports_idle_exit {
             warn!(
-                "settings.is_persistent = false is not supported on this platform; \
+                "non-persistent runtime is not supported on this platform; \
                  running persistently"
             );
         }

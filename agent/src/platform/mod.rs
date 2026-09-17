@@ -68,9 +68,8 @@ pub fn windows_log_dir(program_data: Option<OsString>) -> PathBuf {
         .join("logs")
 }
 
-/// Whether the runtime may exit when idle (`settings.is_persistent = false`). Only
-/// Unix supports it — socket activation restarts the agent on demand. Windows runs
-/// as a service and is persistent-only.
+/// Whether the runtime may exit when idle. Unix supports it — socket activation
+/// restarts the agent on demand. Windows runs as a service and is persistent-only.
 pub fn supports_idle_exit() -> bool {
     #[cfg(unix)]
     {
