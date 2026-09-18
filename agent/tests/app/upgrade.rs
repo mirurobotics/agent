@@ -367,22 +367,16 @@ mod reconcile {
         assert_eq!(1, mock.call_count(Call::IssueDeviceToken));
         assert_eq!(1, mock.num_get_device_calls());
         assert_eq!(1, mock.num_update_device_calls());
-        assert_eq!(
-            Some("v1.0.0".to_string()),
-            disk::agent_version::read(&layout.agent_version())
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            expected_device,
-            files::read_json::<Device>(&layout.device()).await.unwrap()
-        );
-        assert_eq!(
-            settings_before,
-            files::read_json::<Settings>(&layout.settings())
-                .await
-                .unwrap()
-        );
+        let actual_version = disk::agent_version::read(&layout.agent_version())
+            .await
+            .unwrap();
+        assert_eq!(Some("v1.0.0".to_string()), actual_version);
+        let actual_device = files::read_json::<Device>(&layout.device()).await.unwrap();
+        assert_eq!(expected_device, actual_device);
+        let actual_settings = files::read_json::<Settings>(&layout.settings())
+            .await
+            .unwrap();
+        assert_eq!(settings_before, actual_settings);
         assert_eq!(keys_before, read_keys(&layout).await);
         assert!(!layout.resources().exists());
         assert!(layout.events_dir().exists());
