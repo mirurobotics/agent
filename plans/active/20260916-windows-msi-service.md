@@ -33,7 +33,7 @@ Non-goals (roadmap Phase 2, explicitly deferred here): the `Miru Clients` local 
 - [x] M1 Install the agent as a service in the MSI (`feat(windows):` — `miru-agent.wixproj` + `miru-agent.wxs`)
 - [x] M2 Assert the service in the static package contract (`feat(windows):` — `package-tests.ps1`)
 - [x] M3 Assert the service across the install lifecycle (`feat(windows):` — `integration-lib.ps1`)
-- [ ] M4 Document the service behavior (`docs(windows):` — `build/windows/README.md`)
+- [x] M4 Document the service behavior (`docs(windows):` — `build/windows/README.md`)
 - [ ] M5 Preflight CLEAN; CI `windows-package` green on the pushed head; draft PR opened and (only then) left as draft resolved
 
 ## Surprises & Discoveries

@@ -4,16 +4,22 @@ This directory contains the pinned WiX project for a validated x64 Miru Agent
 MSI. Native Windows compile CI was established in PR #234; PR #236 adds the
 package contract and direct Windows Installer lifecycle validation.
 
-The current executable is console-capable but is not a Windows Service Control
-Manager executable. Accordingly, this MSI does not create, start, stop, or
-remove a `MiruAgent` service. Service lifecycle, account selection, and recovery
-configuration remain separate roadmap work.
+The MSI installs `miru-agent.exe` as a Windows service named `miru-agent`
+(display name "Miru Agent", description "Miru Config Agent"). The service runs
+as **LocalSystem** with start type **Automatic**; it is started on install and
+stopped and removed on uninstall. Major upgrades stop and delete the old
+service before file replacement, then install and start the new one. The
+service is configured to **restart on failure** with a 10 second delay and a
+1 day reset period.
 
 ## Package behavior
 
 The MSI:
 
 - installs `miru-agent.exe` under 64-bit `Program Files\Miru\Agent`;
+- registers `miru-agent.exe` as the LocalSystem service `miru-agent`, set to
+  automatic start, started on install, stopped and deleted on uninstall, and
+  configured to restart on failure (10 second delay, 1 day reset period);
 - uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
 - rejects downgrades and schedules major upgrades transactionally so a failed
   replacement can restore the previously installed package;
@@ -127,8 +133,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\inte
 ```
 
 The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
-failed-upgrade rollback, uninstall, ACL repair, state retention, and the
-absence of a `MiruAgent` service.
+failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
+the `miru-agent` service is installed (automatic start, LocalSystem, the
+installed binary path, and a restart failure action) after install,
+maintenance, and upgrade, and removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru` and its
 `logs`, `auth`, and `tmp` children. The
@@ -145,5 +153,6 @@ prints its log path before starting Windows Installer. These logs survive
 temporary build-output cleanup, including when only cleanup fails.
 
 Authenticode signing of the executable and MSI remains deferred, along with
-WinGet publication, Windows service lifecycle, account and recovery handling,
-full live-backend provisioning, and Windows Server certification.
+WinGet publication, full live-backend provisioning, Windows Server
+certification, and the Phase 2 `Miru Clients` local group and device-API
+discovery-directory permissions.
