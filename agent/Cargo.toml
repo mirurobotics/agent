@@ -51,6 +51,9 @@ nix = { workspace = true }
 # cargo machete cannot see that, hence the ignored entry below.
 openssl = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-service = { workspace = true }
+
 [package.metadata.cargo-machete]
 ignored = ["openssl"]
 

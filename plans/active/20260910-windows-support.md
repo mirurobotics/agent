@@ -107,7 +107,7 @@ transactional upgrades, rollback, and uninstall behavior. This package intention
 creates no Windows service. Customer distribution, Authenticode, release artifact
 publication, WinGet, and the GoReleaser/PDB lane remain deferred.
 
-**PR 6 — Windows service lifecycle.** `windows-service` crate: service entry point,
+**PR 6 — Windows service lifecycle** (PR #242 — `plans/completed/20260916-windows-service-lifecycle.md`)**.** `windows-service` crate: service entry point,
 `SERVICE_CONTROL_STOP`/`SHUTDOWN` wired into the existing shutdown broadcast channel
 (same channel SIGTERM feeds today; AppState shutdown ordering untouched). `--console`
 mode for interactive debugging. Force persistence on Windows (decision 3).

@@ -183,6 +183,30 @@ mod args_parse {
         assert!(reprovision_args.provision_args.is_none());
         assert!(reprovision_args.reprovision_args.is_some());
     }
+
+    #[test]
+    fn console_flag_accepts_double_dash_single_dash_and_bare_forms() {
+        for flag in ["--console", "-console", "console"] {
+            let inputs = to_inputs(&["miru-agent", flag]);
+            let args = Args::parse(&inputs);
+            assert!(args.console, "{flag} should set console");
+        }
+    }
+
+    #[test]
+    fn console_defaults_to_false() {
+        let inputs = to_inputs(&["miru-agent"]);
+        let args = Args::parse(&inputs);
+        assert!(!args.console);
+    }
+
+    #[test]
+    fn version_and_console_flags_set_both() {
+        let inputs = to_inputs(&["miru-agent", "--version", "--console"]);
+        let args = Args::parse(&inputs);
+        assert!(args.display_version);
+        assert!(args.console);
+    }
 }
 
 mod provision_args_parse {

@@ -1,5 +1,7 @@
 // standard crates
 use std::env;
+#[cfg(windows)]
+use std::ffi::OsString;
 
 // internal crates
 use backend_api::models as backend_client;
@@ -16,18 +18,23 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendHost;
+use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
+use miru_agent::shutdown::{Latch, RunOutcome};
 use miru_agent::version;
+#[cfg(windows)]
+use miru_agent::windows;
 use miru_agent::workers::mqtt;
 
 // external crates
 #[cfg(unix)]
 use tokio::signal::unix::signal;
 use tracing::{error, info};
+#[cfg(windows)]
+use windows_service::define_windows_service;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli_args = cli::Args::parse(&env::args().collect::<Vec<String>>());
 
     if cli_args.display_version {
@@ -52,18 +59,23 @@ async fn main() {
             std::process::exit(report.exit_code());
         }
 
-        let result = run_provision(provision_args).await;
-        handle_provision_result(result);
+        handle_provision_result(runtime().block_on(run_provision(provision_args)));
         return;
     }
 
     if let Some(reprovision_args) = cli_args.reprovision_args {
-        let result = run_reprovision(reprovision_args).await;
-        handle_reprovision_result(result);
+        handle_reprovision_result(runtime().block_on(run_reprovision(reprovision_args)));
         return;
     }
 
-    run_agent().await;
+    launch_agent(cli_args.console);
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime")
 }
 
 async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
@@ -162,51 +174,95 @@ fn handle_reprovision_result(result: Result<backend_client::Device, ProvisionErr
     }
 }
 
-async fn run_agent() {
+/// Starts the long-running agent: the Windows service unless `--console`,
+/// otherwise the foreground process.
+fn launch_agent(console: bool) {
+    #[cfg(windows)]
+    if !console {
+        run_agent_as_windows_service();
+        return;
+    }
+    let _ = console; // unix: the flag is a no-op (keeps clippy -D warnings quiet)
+    runtime().block_on(run_agent_in_foreground());
+}
+
+/// Foreground path: trip a shared [`Latch`] from OS signals so every startup
+/// and runtime phase, including upgrade reconcile, observes the same stop.
+async fn run_agent_in_foreground() -> RunOutcome {
+    let latch = Latch::new();
+    let relay = latch.clone();
+    tokio::spawn(async move {
+        await_shutdown_signal().await;
+        relay.trigger();
+    });
+    run_agent(logs::Options::default(), latch).await
+}
+
+/// Hands the process to the SCM. Exits 1 if this process was not started by
+/// the service manager (use `--console` for foreground).
+#[cfg(windows)]
+fn run_agent_as_windows_service() {
+    if let Err(e) = windows::scm::dispatch(ffi_service_main) {
+        eprintln!("miru-agent: {e}");
+        std::process::exit(1);
+    }
+}
+
+// Generates `ffi_service_main`, the `extern "system"` thunk the SCM calls
+// (`lpServiceProc`). It parses the Win32 argv and forwards to
+// `windows_service_main`. `dispatch` registers that thunk with
+// StartServiceCtrlDispatcher; we cannot pass `windows_service_main` itself
+// because the SCM requires the C ABI.
+#[cfg(windows)]
+define_windows_service!(ffi_service_main, windows_service_main);
+
+/// SCM entry point, called on a thread the SCM owns. The agent body is in
+/// this crate, so the callback can name it without a process-wide pointer.
+#[cfg(windows)]
+fn windows_service_main(_args: Vec<OsString>) {
+    windows::scm::run(windows_service_body);
+}
+
+/// Service entry point: runs on the SCM's service thread with its own runtime
+/// and logs to the rolling file only, since a service has no console.
+#[cfg(windows)]
+fn windows_service_body(latch: Latch) -> RunOutcome {
+    let options = logs::Options {
+        stdout: false,
+        ..Default::default()
+    };
+    runtime().block_on(run_agent(options, latch))
+}
+
+/// Runs the agent to completion. `latch` is observed at every phase, including
+/// upgrade reconcile (between attempts and during backoff, never mid-reset).
+async fn run_agent(log_options: logs::Options, latch: Latch) -> RunOutcome {
     let layout = disk::Layout::default();
 
     // initialize logging early so reconciliation and pre-settings activity are
     // observable. The level is reloaded once settings are read below.
-    let log_guard = match logs::init(logs::Options::default()) {
+    let log_guard = match logs::init(log_options) {
         Ok(g) => g,
         Err(e) => {
             // tracing is not yet installed if init failed, so use eprintln!
             eprintln!("Failed to initialize logging: {e}");
-            return;
+            return RunOutcome::Failed;
         }
     };
 
     // wait for the device to be activated (or a shutdown signal)
-    match await_activation(&layout, tokio::time::sleep, await_shutdown_signal()).await {
+    match await_activation(&layout, tokio::time::sleep, latch.wait()).await {
         Outcome::Activated => {}
-        Outcome::ShutdownRequested => return,
+        Outcome::ShutdownRequested => return RunOutcome::Completed,
     }
 
-    // reconcile the agent package version to ensure the file system storage state
-    // is compatible with the running version
-    let host = get_bootstrap_backend_host().await;
-    let bootstrap_http_client = match http::Client::new(&host.as_url()) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("upgrade: failed to construct http client: {e}");
-            return;
-        }
-    };
-    if let Err(e) = upgrade::reconcile(
-        &layout,
-        &bootstrap_http_client,
-        version::VERSION,
-        tokio::time::sleep,
-    )
-    .await
-    {
-        error!("upgrade: failed to reconcile agent package version: {e}");
-        return;
+    if let AfterReconcile::Exit(outcome) = reconcile_agent_version(&layout, &latch).await {
+        return outcome;
     }
 
     // retrieve the settings files
     let Some(settings) = read_settings(&layout).await else {
-        return;
+        return RunOutcome::Failed;
     };
 
     // apply the configured log level to the running subscriber
@@ -217,9 +273,37 @@ async fn run_agent() {
     // run the server
     let options = build_app_options(settings);
     info!("Running the server with options: {:?}", options);
-    let result = run(options, await_shutdown_signal()).await;
-    if let Err(e) = result {
-        error!("Failed to run the server: {e}");
+    match run(options, latch.wait()).await {
+        Ok(()) => RunOutcome::Completed,
+        Err(e) => {
+            error!("Failed to run the server: {e}");
+            RunOutcome::Failed
+        }
+    }
+}
+
+/// Whether `run_agent` should keep going after upgrade reconcile.
+enum AfterReconcile {
+    Continue,
+    Exit(RunOutcome),
+}
+
+/// Reconcile on-disk state with the running version.
+async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> AfterReconcile {
+    let client = match http::Client::new(&get_bootstrap_backend_host().await.as_url()) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("upgrade: failed to construct http client: {e}");
+            return AfterReconcile::Exit(RunOutcome::Failed);
+        }
+    };
+    match upgrade::reconcile(layout, &client, version::VERSION, tokio::time::sleep, latch).await {
+        Ok(upgrade::Reconcile::Ready(_)) => AfterReconcile::Continue,
+        Ok(upgrade::Reconcile::Stopped) => AfterReconcile::Exit(RunOutcome::Completed),
+        Err(e) => {
+            error!("upgrade: failed to reconcile agent package version: {e}");
+            AfterReconcile::Exit(RunOutcome::Failed)
+        }
     }
 }
 
@@ -242,9 +326,13 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
         ConnectAddress::default(),
     );
 
+    let is_persistent = LifecycleOptions::resolve_persistence(
+        settings.is_persistent,
+        platform::supports_idle_exit(),
+    );
     AppOptions {
         lifecycle: LifecycleOptions {
-            is_persistent: settings.is_persistent,
+            is_persistent,
             ..Default::default()
         },
         backend_host: settings.backend.host,
@@ -270,8 +358,7 @@ async fn get_bootstrap_backend_host() -> BackendHost {
 
 #[cfg(windows)]
 async fn await_shutdown_signal() {
-    // Service-control integration (SERVICE_CONTROL_STOP) lands with the
-    // Windows service lifecycle; ctrl-c covers console runs until then.
+    // Foreground only; service mode trips `Latch` from the SCM handler.
     let _ = tokio::signal::ctrl_c().await;
     info!("received ctrl-c, shutting down...");
 }

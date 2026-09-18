@@ -23,9 +23,11 @@ pub mod provisioning;
 pub mod s3;
 pub mod server;
 pub mod services;
+pub mod shutdown;
 pub mod sync;
 pub mod telemetry;
 pub mod version;
+pub mod windows;
 pub mod workers;
 
 // Fixture sources under `agent/tests/test_utils/` name the library as

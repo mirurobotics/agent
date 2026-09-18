@@ -1,8 +1,9 @@
-//! Per-OS filesystem path defaults.
+//! Per-OS filesystem path defaults and capability dispatch.
 //!
 //! The OS-specific functions are compiled on every target so their logic is
 //! unit-testable from any host; only the dispatchers ([`data_root_base`],
-//! [`log_dir`]) read the real environment.
+//! [`log_dir`]) read the real environment. [`supports_idle_exit`] reports
+//! which lifecycle behaviors the host OS supports.
 
 // standard crates
 use std::ffi::OsString;
@@ -65,4 +66,17 @@ pub fn windows_log_dir(program_data: Option<OsString>) -> PathBuf {
     windows_data_root_base(program_data)
         .join("Miru")
         .join("logs")
+}
+
+/// Whether the runtime may exit when idle. Unix supports it — socket activation
+/// restarts the agent on demand. Windows runs as a service and is persistent-only.
+pub fn supports_idle_exit() -> bool {
+    #[cfg(unix)]
+    {
+        true
+    }
+    #[cfg(windows)]
+    {
+        false
+    }
 }
