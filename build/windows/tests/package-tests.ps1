@@ -267,17 +267,13 @@ function Assert-ServiceControlRow {
     Assert-True (($serviceEvent -band 0x80) -ne 0) "service deletes on uninstall"
 }
 
-# The Util extension emits its own failure-actions table (not the empty standard
-# ServiceConfig table); the restart action values are pinned at runtime in
-# integration-lib.ps1.
+# The Util extension emits its own failure-actions table, Wix4ServiceConfig
+# (pinned from the CI build), rather than the standard MSI ServiceConfig table;
+# the restart action values are pinned at runtime in integration-lib.ps1.
 function Assert-ServiceRecoveryTable {
     param([Parameter(Mandatory = $true)]$Database)
-    $tables = @(Get-MsiRows $Database "SELECT ``Name`` FROM ``_Tables``" 1)
-    $recovery = @($tables | Where-Object {
-        $_[0] -like "*ServiceConfig" -and $_[0] -ne "ServiceConfig"
-    })
-    Assert-Equal 1 $recovery.Count "WiX Util service recovery table present"
-    Write-Host "PASS service recovery table $($recovery[0][0])"
+    Assert-True (Test-MsiTable $Database "Wix4ServiceConfig") `
+        "WiX Util service recovery table present"
 }
 
 function Build-FixturePackage {

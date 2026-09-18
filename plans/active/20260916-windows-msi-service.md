@@ -34,11 +34,12 @@ Non-goals (roadmap Phase 2, explicitly deferred here): the `Miru Clients` local 
 - [x] M2 Assert the service in the static package contract (`feat(windows):` — `package-tests.ps1`)
 - [x] M3 Assert the service across the install lifecycle (`feat(windows):` — `integration-lib.ps1`)
 - [x] M4 Document the service behavior (`docs(windows):` — `build/windows/README.md`)
-- [ ] M5 Preflight CLEAN; CI `windows-package` green on the pushed head; draft PR opened and (only then) left as draft resolved
+- [x] M5 Preflight CLEAN; CI `windows-package` green on the pushed head; draft PR opened and (only then) left as draft resolved
 
 ## Surprises & Discoveries
 
 - M1: the doc comment above `ServiceInstall` cannot describe the console flag as `--console`: `--` is illegal inside an XML comment and the offline well-formedness check rejected it. Reworded to "console flag".
+- M5: the **first** CI `windows-package` run (run 35371264494) was fully green — no ICE failures, no `TreatWarningsAsErrors` promotion from the new `ServiceInstall`/`ServiceControl`/`util:ServiceConfig` authoring, and both test layers passed. The Util recovery table name is exactly `Wix4ServiceConfig` (confirmed from the `PASS service recovery table Wix4ServiceConfig` log line), matching the Decision Log expectation. `Assert-ServiceRecoveryTable` was tightened from a robust `*ServiceConfig` match to pin that exact table name.
 
 ## Decision Log
 
@@ -53,7 +54,12 @@ Design decisions resolved during authoring (2026-09-18, Benjamin Smidt):
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Completed 2026-09-18. The MSI now installs `miru-agent.exe` as the LocalSystem service `miru-agent` (Automatic start, restart-on-failure via `util:ServiceConfig`: 10 s delay, 1 day reset), started on install and stopped+removed on uninstall; major upgrades stop+delete the old service before file replacement and then install+start the new one. Both CI test layers were flipped from asserting absence to asserting presence: the static contract (`package-tests.ps1`) pins the `ServiceInstall`/`ServiceControl` MSI-table values and the presence of the `Wix4ServiceConfig` recovery table; the runtime matrix (`integration-lib.ps1`) asserts the service (Automatic, LocalSystem, installed binary path, `sc.exe qfailure` restart action) after install/maintenance/upgrade and its absence after uninstall, keeping all prior coverage. Draft PR #251.
+
+Key facts pinned from CI:
+- Util recovery table name: **`Wix4ServiceConfig`** (matched the anticipated name).
+- No ICE failures and no `TreatWarningsAsErrors` promotions from the service authoring — the first `windows-package` run (35371264494) was green; the only offline surprise was the illegal `--` in an XML comment, fixed before the first push.
+- The old harness probed the wrong service name (`MiruAgent`); the new positive assertions use `miru-agent`, matching `SERVICE_NAME` in `scm.rs`.
 
 ## Context and Orientation
 
