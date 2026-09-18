@@ -52,6 +52,11 @@ dotnet restore build\windows\miru-agent.wixproj
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 ```
 
+The produced `miru-agent.exe` statically links the MSVC C runtime (via
+`+crt-static` in `.cargo/config.toml`), so the installed agent is self-contained
+and needs no Visual C++ Redistributable prerequisite on the target machine for
+the service to start.
+
 `Version` is deliberately stricter than general SemVer. It must contain exactly
 three numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH`
 from 0 through 65535. Leading `v`, prerelease/build labels, and fourth fields are
