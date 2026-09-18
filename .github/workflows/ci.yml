@@ -135,8 +135,13 @@ jobs:
         run: |
           $raw = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
           $ver = ($raw -split '-')[0]
-          Write-Host "Building unsigned MSI version $ver"
-          dotnet build build\windows\miru-agent.wixproj --no-restore --configuration Release -p:Version=$ver -p:BinDir=target\x86_64-pc-windows-msvc\release -p:OutputPath=build\windows\artifacts\msi\
+          # MSBuild resolves a relative BinDir/OutputPath against the .wixproj
+          # directory, so pass absolute paths (the wixproj checks BinDir exists).
+          $bin = (Resolve-Path target\x86_64-pc-windows-msvc\release).Path
+          $out = Join-Path (Get-Location).Path 'build\windows\artifacts\msi'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Write-Host "Building unsigned MSI version $ver from $bin"
+          dotnet build build\windows\miru-agent.wixproj --no-restore --configuration Release -p:Version=$ver -p:BinDir=$bin -p:OutputPath=$out
 
       - name: Upload unsigned installer MSI
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
