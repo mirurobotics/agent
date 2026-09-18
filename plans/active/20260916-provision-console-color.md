@@ -30,8 +30,8 @@ Observable acceptance has two layers with a hard boundary:
 
 ## Progress
 
-- [ ] M0 Activate plan (`docs(plans):` commit adding this file)
-- [ ] M1 Miru green SGR string (`fix(windows):` — `display.rs` `color()` + unit tests; Linux-testable)
+- [x] M0 Activate plan (`docs(plans):` commit adding this file)
+- [x] M1 Miru green SGR string (`fix(windows):` — `display.rs` `color()` + unit tests; Linux-testable)
 - [ ] M2 Enable Windows console ANSI at startup (`fix(windows):` — `windows-sys` dep + `display::enable_ansi` + `main.rs` call + `Cargo.lock`)
 - [ ] M3 Preflight CLEAN; all CI jobs green on the pushed head (incl. `windows-check`, `windows-package`); draft PR opened against `feat/windows-msi-artifact`
 
