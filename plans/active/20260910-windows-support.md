@@ -125,7 +125,7 @@ windows target. (implemented by this plan's PR; `plans/active/20260916-windows-r
 The PDB is attached to the GitHub release as a separate asset (`miru_agent.pdb`) rather
 than inside the zip.
 
-**PR 9 — service-aware MSI follow-up.** After the executable implements Windows
+**PR 9 — service-aware MSI follow-up** (in progress — `plans/completed/20260916-windows-msi-service.md`)**.** After the executable implements Windows
 Service Control Manager integration, extend the MSI with service install/start/stop,
 account, and recovery behavior. Add the Phase 2 `Miru Clients` group and discovery
 directory permissions only when the local device API is implemented.

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <?define ProductName = "Miru Agent" ?>
   <?define Manufacturer = "Miru" ?>
   <?ifndef ProductCode ?><?define ProductCode = "*" ?><?endif ?>
@@ -39,6 +40,33 @@
               Name="miru-agent.exe"
               Source="$(BinDir)\miru-agent.exe"
               KeyPath="yes" />
+        <!-- The SCM launches the bare exe (no subcommand, no console flag) as
+             the service; Name must equal SERVICE_NAME in
+             agent/src/windows/scm.rs. -->
+        <ServiceInstall Id="MiruAgentService"
+                        Name="miru-agent"
+                        DisplayName="Miru Agent"
+                        Description="Miru Config Agent"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem"
+                        Vital="yes"
+                        Interactive="no">
+          <!-- SCM restarts the service on failure; the Util extension is the
+               reliable path to failure actions. -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="10"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="MiruAgentServiceControl"
+                        Name="miru-agent"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
       </Component>
     </ComponentGroup>
 
