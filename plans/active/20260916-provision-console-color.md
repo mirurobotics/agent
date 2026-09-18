@@ -32,12 +32,13 @@ Observable acceptance has two layers with a hard boundary:
 
 - [x] M0 Activate plan (`docs(plans):` commit adding this file)
 - [x] M1 Miru green SGR string (`fix(windows):` — `display.rs` `color()` + unit tests; Linux-testable)
-- [ ] M2 Enable Windows console ANSI at startup (`fix(windows):` — `windows-sys` dep + `display::enable_ansi` + `main.rs` call + `Cargo.lock`)
+- [x] M2 Enable Windows console ANSI at startup (`fix(windows):` — `windows-sys` dep + `display::enable_ansi` + `main.rs` call + `Cargo.lock`)
 - [ ] M3 Preflight CLEAN; all CI jobs green on the pushed head (incl. `windows-check`, `windows-package`); draft PR opened against `feat/windows-msi-artifact`
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- `scripts/update-deps.sh` runs a bare `cargo update` (full-tree), which churned 324/290 lines of unrelated version bumps in `Cargo.lock`. Reverted and regenerated with `cargo check --package miru-agent`, which added exactly one line — the `windows-sys 0.61.2` edge under `miru-agent` — confirming the Decision Log's claim that `windows-sys 0.61.2` was already resolved in the tree (via `windows-service`). This keeps the stacked PR's lock diff minimal.
+- `cargo machete` did **not** flag `windows-sys` (the literal `use windows_sys::…` in `display.rs` is visible to its source scan even though the block is `#[cfg(windows)]`), so **no** `[package.metadata.cargo-machete] ignored` entry was needed. `./scripts/lint.sh` passed clean (import linter, fmt, machete, clippy) on Linux.
 
 ## Decision Log
 

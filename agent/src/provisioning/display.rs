@@ -1,3 +1,10 @@
+// external crates
+#[cfg(windows)]
+use windows_sys::Win32::System::Console::{
+    GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+    STD_OUTPUT_HANDLE,
+};
+
 pub enum Colors {
     Red,
     Green,
@@ -26,6 +33,27 @@ pub fn color(text: &str, color: Colors) -> String {
 pub fn format_info(text: &str) -> String {
     format!("{}{}", color("==> ", Colors::Green), text)
 }
+
+/// Enables ANSI virtual-terminal processing on the Windows console so the
+/// provisioning SGR sequences render as color. Best-effort: a no-op when no
+/// console is attached or the mode cannot be read/set. Never fails startup.
+#[cfg(windows)]
+pub fn enable_ansi() {
+    // SAFETY: standard Win32 console FFI. An absent or invalid handle makes
+    // GetConsoleMode return 0 (FALSE), so SetConsoleMode is never reached.
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut mode: u32 = 0;
+        if GetConsoleMode(handle, &mut mode) == 0 {
+            return;
+        }
+        let _ = SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+}
+
+/// Non-Windows platforms already honor ANSI SGR sequences.
+#[cfg(not(windows))]
+pub fn enable_ansi() {}
 
 #[cfg(test)]
 mod tests {
@@ -70,6 +98,15 @@ mod tests {
             let result = format_info("test message");
             let expected = format!("{}test message", color("==> ", Colors::Green));
             assert_eq!(result, expected);
+        }
+    }
+
+    mod enable_ansi {
+        use super::*;
+
+        #[test]
+        fn is_callable() {
+            enable_ansi();
         }
     }
 }

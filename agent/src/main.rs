@@ -42,6 +42,9 @@ fn main() {
         return;
     }
 
+    // enable ANSI color on the Windows console before any provisioning output
+    display::enable_ansi();
+
     if let Err(e) = privilege::verify_effective_user("miru") {
         eprintln!("miru-agent: {e}");
         std::process::exit(1);
