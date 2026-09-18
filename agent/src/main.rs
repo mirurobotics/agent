@@ -256,7 +256,7 @@ async fn run_agent(log_options: logs::Options, latch: Latch) -> RunOutcome {
         Outcome::ShutdownRequested => return RunOutcome::Completed,
     }
 
-    if let Some(outcome) = reconcile_agent_version(&layout, &latch).await {
+    if let AfterReconcile::Exit(outcome) = reconcile_agent_version(&layout, &latch).await {
         return outcome;
     }
 
@@ -282,14 +282,19 @@ async fn run_agent(log_options: logs::Options, latch: Latch) -> RunOutcome {
     }
 }
 
-/// Reconcile on-disk state with the running version. `Some(outcome)` means
-/// `run_agent` should return that outcome (stop or failure).
-async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> Option<RunOutcome> {
+/// Whether `run_agent` should keep going after upgrade reconcile.
+enum AfterReconcile {
+    Continue,
+    Exit(RunOutcome),
+}
+
+/// Reconcile on-disk state with the running version.
+async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> AfterReconcile {
     let client = match http::Client::new(&get_bootstrap_backend_host().await.as_url()) {
         Ok(c) => c,
         Err(e) => {
             error!("upgrade: failed to construct http client: {e}");
-            return Some(RunOutcome::Failed);
+            return AfterReconcile::Exit(RunOutcome::Failed);
         }
     };
     match upgrade::reconcile(
@@ -301,11 +306,11 @@ async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> Option
     )
     .await
     {
-        Ok(Some(_)) => None,
-        Ok(None) => Some(RunOutcome::Completed),
+        Ok(upgrade::Reconcile::Ready(_)) => AfterReconcile::Continue,
+        Ok(upgrade::Reconcile::Stopped) => AfterReconcile::Exit(RunOutcome::Completed),
         Err(e) => {
             error!("upgrade: failed to reconcile agent package version: {e}");
-            Some(RunOutcome::Failed)
+            AfterReconcile::Exit(RunOutcome::Failed)
         }
     }
 }

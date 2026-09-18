@@ -15,23 +15,33 @@ use crate::models;
 use futures::FutureExt;
 use tracing::{error, info, warn};
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Outcome {
     pub upgraded: bool,
     pub attempts: u32,
 }
 
+/// How [`reconcile`] finished when it did not error.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Reconcile {
+    /// Disk already matches, or a rebootstrap completed.
+    Ready(Outcome),
+    /// Shutdown was requested at a safe point (not mid-reset).
+    Stopped,
+}
+
 /// Reconcile on-disk state with the running version. No-op if the marker matches;
 /// otherwise wipes per-version state and rebootstraps from the backend. Retries
-/// network failures until successful or shutdown is requested. Returns `None`
-/// on shutdown, but always finishes an active attempt before stopping so that
-/// persistence is never interrupted.
+/// network failures until successful or shutdown is requested. Returns
+/// [`Reconcile::Stopped`] on shutdown, but always finishes an active attempt
+/// before stopping so that persistence is never interrupted.
 pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(
     layout: &Layout,
     http_client: &HTTPClientT,
     version: &str,
     sleep_fn: F,
     shutdown: impl Future<Output = ()> + Send,
-) -> Result<Option<Outcome>, UpgradeErr>
+) -> Result<Reconcile, UpgradeErr>
 where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
@@ -48,10 +58,10 @@ where
 
     loop {
         if shutdown.as_mut().now_or_never().is_some() {
-            return Ok(None);
+            return Ok(Reconcile::Stopped);
         }
         if !needs_upgrade(layout, version).await {
-            return Ok(Some(Outcome {
+            return Ok(Reconcile::Ready(Outcome {
                 upgraded: false,
                 attempts,
             }));
@@ -60,7 +70,7 @@ where
 
         let result = reconcile_impl(http_client, layout, version).await;
         if shutdown.as_mut().now_or_never().is_some() {
-            return Ok(None);
+            return Ok(Reconcile::Stopped);
         }
         match result {
             Ok(_) => {
@@ -68,7 +78,7 @@ where
                     "upgrade: resetting storage state for version '{}' complete",
                     version
                 );
-                return Ok(Some(Outcome {
+                return Ok(Reconcile::Ready(Outcome {
                     upgraded: true,
                     attempts,
                 }));
@@ -80,7 +90,7 @@ where
                 warn!("retrying in {wait} seconds (attempts: {attempts})");
                 tokio::select! {
                     biased;
-                    _ = &mut shutdown => return Ok(None),
+                    _ = &mut shutdown => return Ok(Reconcile::Stopped),
                     _ = sleep_fn(Duration::from_secs(wait as u64)) => {}
                 }
             }

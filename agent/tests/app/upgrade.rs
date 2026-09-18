@@ -7,7 +7,7 @@ use std::time::Duration as StdDuration;
 use crate::mocks::http_client::{Call, MockClient};
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use backend_api::models as backend_client;
-use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl};
+use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl, Outcome, Reconcile};
 use miru_agent::app::UpgradeErr;
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
@@ -121,6 +121,13 @@ async fn no_sleep(_: StdDuration) {}
 mod reconcile {
     use super::*;
 
+    fn ready(result: Result<Reconcile, UpgradeErr>) -> Outcome {
+        match result.unwrap() {
+            Reconcile::Ready(outcome) => outcome,
+            Reconcile::Stopped => panic!("expected Ready"),
+        }
+    }
+
     #[tokio::test]
     async fn is_noop_when_marker_matches() {
         let (layout, _tmp) = prepare_layout("upgrade_noop").await;
@@ -132,10 +139,7 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_1", "alpha"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, pending())
-            .await
-            .unwrap()
-            .unwrap();
+        let outcome = ready(reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, pending()).await);
 
         assert!(!outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -152,10 +156,7 @@ mod reconcile {
         let (priv_before, pub_before) = read_keys(&layout).await;
 
         let mock = make_mock_client(backend_device("dvc_2", "beta"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep, pending())
-            .await
-            .unwrap()
-            .unwrap();
+        let outcome = ready(reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep, pending()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -190,10 +191,7 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_3", "gamma"));
-        let outcome = reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep, pending())
-            .await
-            .unwrap()
-            .unwrap();
+        let outcome = ready(reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep, pending()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -228,10 +226,7 @@ mod reconcile {
             }
         });
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep, pending())
-            .await
-            .unwrap()
-            .unwrap();
+        let outcome = ready(reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep, pending()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 2);
@@ -268,10 +263,7 @@ mod reconcile {
             }
         });
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep, pending())
-            .await
-            .unwrap()
-            .unwrap();
+        let outcome = ready(reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep, pending()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 4);
@@ -312,7 +304,7 @@ mod reconcile {
         .await
         .expect("shutdown should interrupt the retry wait");
 
-        assert!(outcome.unwrap().is_none());
+        assert_eq!(outcome.unwrap(), Reconcile::Stopped);
         assert_eq!(1, mock.call_count(Call::IssueDeviceToken));
         assert_eq!(1, mock.num_get_device_calls());
         assert_eq!(0, mock.num_update_device_calls());
@@ -334,7 +326,7 @@ mod reconcile {
             .await
             .unwrap();
 
-        assert!(outcome.is_none());
+        assert_eq!(outcome, Reconcile::Stopped);
         assert!(mock.requests().is_empty());
         assert_eq!(state_before, read_upgrade_state(&layout).await);
         assert_eq!(keys_before, read_keys(&layout).await);
@@ -366,7 +358,7 @@ mod reconcile {
         .expect("shutdown should finish after the active attempt")
         .unwrap();
 
-        assert!(outcome.is_none());
+        assert_eq!(outcome, Reconcile::Stopped);
         assert_eq!(1, mock.call_count(Call::IssueDeviceToken));
         assert_eq!(1, mock.num_get_device_calls());
         assert_eq!(1, mock.num_update_device_calls());
