@@ -85,8 +85,6 @@ jobs:
           tool: cargo-auditable@0.7.6
 
       - name: Build Windows Release (cargo auditable)
-        # The MSVC build statically links the CRT (see .cargo/config.toml) so the
-        # released exe is self-contained and needs no VC++ redistributable.
         run: cargo auditable build --release --target x86_64-pc-windows-msvc -p miru-agent --locked
 
       - name: Stage prebuilt artifacts
