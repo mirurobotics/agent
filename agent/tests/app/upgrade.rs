@@ -14,7 +14,7 @@ use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost,
 use miru_agent::filesys::{dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
 use miru_agent::models::Device;
-use miru_agent::shutdown::StopSignal;
+use miru_agent::shutdown::Latch;
 
 // external crates
 use chrono::{Duration, Utc};
@@ -291,7 +291,7 @@ mod reconcile {
             }))
         });
 
-        let stop = StopSignal::new();
+        let latch = Latch::new();
         let (entered_tx, entered_rx) = oneshot::channel();
         let entered_tx = Mutex::new(Some(entered_tx));
         let sleep_fn = |_| {
@@ -301,10 +301,10 @@ mod reconcile {
                 pending::<()>().await;
             }
         };
-        let attempt = reconcile(&layout, mock.as_ref(), "v1.0.0", sleep_fn, stop.wait());
+        let attempt = reconcile(&layout, mock.as_ref(), "v1.0.0", sleep_fn, latch.wait());
         let request_stop = async {
             entered_rx.await.unwrap();
-            stop.trigger();
+            latch.trigger();
         };
         let (outcome, ()) = tokio::time::timeout(StdDuration::from_secs(5), async {
             tokio::join!(attempt, request_stop)
@@ -327,10 +327,10 @@ mod reconcile {
         let state_before = read_upgrade_state(&layout).await;
         let keys_before = read_keys(&layout).await;
         let mock = make_mock_client(backend_device("dvc_new", "new"));
-        let stop = StopSignal::new();
-        stop.trigger();
+        let latch = Latch::new();
+        latch.trigger();
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, stop.wait())
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, latch.wait())
             .await
             .unwrap();
 
@@ -351,16 +351,16 @@ mod reconcile {
         let backend_device = backend_device("dvc_new", "new");
         let expected_device = Device::from(&backend_device);
         let mock = make_mock_client(backend_device.clone());
-        let stop = StopSignal::new();
-        let stop_on_get = stop.clone();
+        let latch = Latch::new();
+        let latch_on_get = latch.clone();
         mock.set_get_device(move || {
-            stop_on_get.trigger();
+            latch_on_get.trigger();
             Ok(backend_device.clone())
         });
 
         let outcome = tokio::time::timeout(
             StdDuration::from_secs(5),
-            reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, stop.wait()),
+            reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, latch.wait()),
         )
         .await
         .expect("shutdown should finish after the active attempt")

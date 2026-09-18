@@ -19,7 +19,7 @@ use miru_agent::network::BackendHost;
 use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
-use miru_agent::shutdown::{RunOutcome, StopSignal};
+use miru_agent::shutdown::{Latch, RunOutcome};
 use miru_agent::version;
 #[cfg(windows)]
 use miru_agent::windows;
@@ -182,16 +182,16 @@ fn launch_agent(console: bool) {
     runtime().block_on(run_agent_in_foreground());
 }
 
-/// Foreground path: latch OS signals onto a [`StopSignal`] shared with every
-/// startup and runtime phase, including upgrade reconcile.
+/// Foreground path: trip a shared [`Latch`] from OS signals so every startup
+/// and runtime phase, including upgrade reconcile, observes the same stop.
 async fn run_agent_in_foreground() -> RunOutcome {
-    let stop = StopSignal::new();
-    let relay = stop.clone();
+    let latch = Latch::new();
+    let relay = latch.clone();
     tokio::spawn(async move {
         await_shutdown_signal().await;
         relay.trigger();
     });
-    run_agent(logs::Options::default(), stop).await
+    run_agent(logs::Options::default(), latch).await
 }
 
 /// Hands the process to the SCM. Exits 1 if this process was not started by
@@ -207,17 +207,17 @@ fn run_agent_as_windows_service() {
 /// Service entry point: runs on the SCM's service thread with its own runtime
 /// and logs to the rolling file only, since a service has no console.
 #[cfg(windows)]
-fn windows_service_body(stop: StopSignal) -> RunOutcome {
+fn windows_service_body(latch: Latch) -> RunOutcome {
     let options = logs::Options {
         stdout: false,
         ..Default::default()
     };
-    runtime().block_on(run_agent(options, stop))
+    runtime().block_on(run_agent(options, latch))
 }
 
-/// Runs the agent to completion. `stop` is observed at every phase, including
+/// Runs the agent to completion. `latch` is observed at every phase, including
 /// upgrade reconcile (between attempts and during backoff, never mid-reset).
-async fn run_agent(log_options: logs::Options, stop: StopSignal) -> RunOutcome {
+async fn run_agent(log_options: logs::Options, latch: Latch) -> RunOutcome {
     let layout = disk::Layout::default();
 
     // initialize logging early so reconciliation and pre-settings activity are
@@ -232,12 +232,12 @@ async fn run_agent(log_options: logs::Options, stop: StopSignal) -> RunOutcome {
     };
 
     // wait for the device to be activated (or a shutdown signal)
-    match await_activation(&layout, tokio::time::sleep, stop.wait()).await {
+    match await_activation(&layout, tokio::time::sleep, latch.wait()).await {
         Outcome::Activated => {}
         Outcome::ShutdownRequested => return RunOutcome::Completed,
     }
 
-    if let Some(outcome) = reconcile_agent_version(&layout, &stop).await {
+    if let Some(outcome) = reconcile_agent_version(&layout, &latch).await {
         return outcome;
     }
 
@@ -254,7 +254,7 @@ async fn run_agent(log_options: logs::Options, stop: StopSignal) -> RunOutcome {
     // run the server
     let options = build_app_options(settings);
     info!("Running the server with options: {:?}", options);
-    match run(options, stop.wait()).await {
+    match run(options, latch.wait()).await {
         Ok(()) => RunOutcome::Completed,
         Err(e) => {
             error!("Failed to run the server: {e}");
@@ -265,7 +265,7 @@ async fn run_agent(log_options: logs::Options, stop: StopSignal) -> RunOutcome {
 
 /// Reconcile on-disk state with the running version. `Some(outcome)` means
 /// `run_agent` should return that outcome (stop or failure).
-async fn reconcile_agent_version(layout: &disk::Layout, stop: &StopSignal) -> Option<RunOutcome> {
+async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> Option<RunOutcome> {
     let client = match http::Client::new(&get_bootstrap_backend_host().await.as_url()) {
         Ok(c) => c,
         Err(e) => {
@@ -278,7 +278,7 @@ async fn reconcile_agent_version(layout: &disk::Layout, stop: &StopSignal) -> Op
         &client,
         version::VERSION,
         tokio::time::sleep,
-        stop.wait(),
+        latch.wait(),
     )
     .await
     {
@@ -342,7 +342,7 @@ async fn get_bootstrap_backend_host() -> BackendHost {
 
 #[cfg(windows)]
 async fn await_shutdown_signal() {
-    // Foreground only; service mode triggers `StopSignal` from the SCM handler.
+    // Foreground only; service mode trips `Latch` from the SCM handler.
     let _ = tokio::signal::ctrl_c().await;
     info!("received ctrl-c, shutting down...");
 }

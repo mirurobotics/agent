@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // internal crates
-use crate::shutdown::{RunOutcome, StopSignal};
+use crate::shutdown::{Latch, RunOutcome};
 use crate::trace;
 use crate::windows::errors::ScmErr;
 
@@ -39,9 +39,9 @@ const PENDING_WAIT_HINT: Duration = Duration::from_secs(30);
 /// started by the SCM.
 const ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: i32 = 1063;
 
-/// The agent body run on the SCM's service thread. It receives the stop relay
-/// the control handler triggers on STOP / SHUTDOWN and reports how it ended.
-pub type ServiceBody = fn(StopSignal) -> RunOutcome;
+/// The agent body run on the SCM's service thread. It receives the latch
+/// the control handler trips on STOP / SHUTDOWN and reports how it ended.
+pub type ServiceBody = fn(Latch) -> RunOutcome;
 
 static BODY: OnceLock<ServiceBody> = OnceLock::new();
 
@@ -69,12 +69,12 @@ define_windows_service!(ffi_service_main, service_main);
 /// SCM entry point, called on a thread the SCM owns.
 fn service_main(_args: Vec<OsString>) {
     let Some(body) = BODY.get() else { return };
-    let stop = StopSignal::new();
-    let handler_stop = stop.clone();
+    let latch = Latch::new();
+    let handler_latch = latch.clone();
     let slot: Arc<OnceLock<ServiceStatusHandle>> = Arc::default();
     let handler_slot = Arc::clone(&slot);
     let handle = match service_control_handler::register(SERVICE_NAME, move |control| {
-        handle_control(control, &handler_stop, handler_slot.get())
+        handle_control(control, &handler_latch, handler_slot.get())
     }) {
         Ok(handle) => handle,
         // Without a status handle nothing can be reported to the SCM.
@@ -83,17 +83,17 @@ fn service_main(_args: Vec<OsString>) {
     // The SCM sends no controls before `Running` is reported, so the handler
     // always finds the handle once it can be invoked.
     let _ = slot.set(handle);
-    let _ = run_lifecycle(&handle, || body(stop));
+    let _ = run_lifecycle(&handle, || body(latch));
 }
 
 /// SCM control callback. Runs on the SCM's handler thread: synchronous, no
 /// awaits, no locks held. STOP and SHUTDOWN report `StopPending` through
-/// `sink` when one is available and trigger `stop`; a failed report never
+/// `sink` when one is available and trip `latch`; a failed report never
 /// blocks the stop. INTERROGATE is acknowledged; everything else is
 /// unimplemented.
 pub fn handle_control<S: StatusSink>(
     control: ServiceControl,
-    stop: &StopSignal,
+    latch: &Latch,
     sink: Option<&S>,
 ) -> ServiceControlHandlerResult {
     match control {
@@ -101,7 +101,7 @@ pub fn handle_control<S: StatusSink>(
             if let Some(sink) = sink {
                 let _ = sink.report(status(ServiceState::StopPending, ServiceExitCode::NO_ERROR));
             }
-            stop.trigger();
+            latch.trigger();
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,

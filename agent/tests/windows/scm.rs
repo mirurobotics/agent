@@ -3,7 +3,7 @@ use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
 // internal crates
-use miru_agent::shutdown::{RunOutcome, StopSignal};
+use miru_agent::shutdown::{Latch, RunOutcome};
 use miru_agent::windows::errors::ScmErr;
 use miru_agent::windows::scm::{self, StatusSink};
 
@@ -63,74 +63,74 @@ pub mod handle_control {
 
     #[test]
     fn stop_reports_stop_pending_and_triggers() {
-        let stop = StopSignal::new();
+        let latch = Latch::new();
         let sink = RecordingSink::default();
 
-        let result = scm::handle_control(ServiceControl::Stop, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Stop, &latch, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
-        assert!(stop.is_triggered());
+        assert!(latch.is_triggered());
         assert_eq!(sink.reported(), vec![stop_pending()]);
     }
 
     #[test]
     fn shutdown_reports_stop_pending_and_triggers() {
-        let stop = StopSignal::new();
+        let latch = Latch::new();
         let sink = RecordingSink::default();
 
-        let result = scm::handle_control(ServiceControl::Shutdown, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Shutdown, &latch, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
-        assert!(stop.is_triggered());
+        assert!(latch.is_triggered());
         assert_eq!(sink.reported(), vec![stop_pending()]);
     }
 
     #[test]
     fn interrogate_is_acknowledged_without_side_effects() {
-        let stop = StopSignal::new();
+        let latch = Latch::new();
         let sink = RecordingSink::default();
 
-        let result = scm::handle_control(ServiceControl::Interrogate, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Interrogate, &latch, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
-        assert!(!stop.is_triggered());
+        assert!(!latch.is_triggered());
         assert!(sink.reported().is_empty());
     }
 
     #[test]
     fn pause_is_not_implemented() {
-        let stop = StopSignal::new();
+        let latch = Latch::new();
         let sink = RecordingSink::default();
 
-        let result = scm::handle_control(ServiceControl::Pause, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Pause, &latch, Some(&sink));
 
         assert!(matches!(
             result,
             ServiceControlHandlerResult::NotImplemented
         ));
-        assert!(!stop.is_triggered());
+        assert!(!latch.is_triggered());
         assert!(sink.reported().is_empty());
     }
 
     #[test]
     fn stop_without_sink_still_triggers() {
-        let stop = StopSignal::new();
+        let latch = Latch::new();
 
-        let result = scm::handle_control(ServiceControl::Stop, &stop, None::<&RecordingSink>);
+        let result = scm::handle_control(ServiceControl::Stop, &latch, None::<&RecordingSink>);
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
-        assert!(stop.is_triggered());
+        assert!(latch.is_triggered());
     }
 
     #[test]
     fn stop_with_failing_sink_still_triggers() {
-        let stop = StopSignal::new();
+        let latch = Latch::new();
         let sink = RecordingSink::failing_on(ServiceState::StopPending);
 
-        let result = scm::handle_control(ServiceControl::Stop, &stop, Some(&sink));
+        let result = scm::handle_control(ServiceControl::Stop, &latch, Some(&sink));
 
         assert!(matches!(result, ServiceControlHandlerResult::NoError));
-        assert!(stop.is_triggered());
+        assert!(latch.is_triggered());
         assert!(sink.reported().is_empty());
     }
 }

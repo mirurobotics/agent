@@ -1,8 +1,9 @@
 //! Process-wide shutdown types.
 //!
-//! [`StopSignal`] relays a stop request into the futures `run_agent` awaits
-//! (activation, upgrade reconcile, and the long-running agent). [`RunOutcome`]
-//! is how that body finished; the Windows SCM maps it to a service exit code.
+//! [`Latch`] is the process-wide stop latch: one `trigger()` completes every
+//! current and future `wait()` that `run_agent` awaits (activation, upgrade
+//! reconcile, and the long-running agent). [`RunOutcome`] is how that body
+//! finished; the Windows SCM maps it to a service exit code.
 
 // standard crates
 use std::future::Future;
@@ -19,31 +20,31 @@ pub enum RunOutcome {
     Failed,
 }
 
-/// One-shot, multi-waiter stop relay.
+/// One-shot, multi-waiter latch.
 ///
 /// [`trigger`](Self::trigger) may be called from any thread, with or without
 /// a tokio runtime, is idempotent, and wakes every [`wait`](Self::wait) future
 /// created before or after the call. A `wait()` future created after the
-/// signal has been triggered resolves immediately.
+/// latch has been triggered resolves immediately.
 #[derive(Debug, Clone)]
-pub struct StopSignal {
+pub struct Latch {
     tx: watch::Sender<bool>,
 }
 
-impl Default for StopSignal {
+impl Default for Latch {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StopSignal {
-    /// Creates an untriggered signal.
+impl Latch {
+    /// Creates an untriggered latch.
     pub fn new() -> Self {
         let (tx, _rx) = watch::channel(false);
         Self { tx }
     }
 
-    /// Marks the signal as triggered and wakes every waiter. Safe to call
+    /// Marks the latch as triggered and wakes every waiter. Safe to call
     /// repeatedly and from a non-tokio thread.
     pub fn trigger(&self) {
         self.tx.send_replace(true);
@@ -55,10 +56,10 @@ impl StopSignal {
     }
 
     /// Returns a future that resolves once the signal is triggered, or once
-    /// every `StopSignal` handle has been dropped (a stop that can no longer
+    /// every `Latch` handle has been dropped (a stop that can no longer
     /// arrive). The future owns its receiver so it is `'static` and can be
     /// handed to `app::run`; it checks the current value first, so it
-    /// resolves at once when the signal is already triggered.
+    /// resolves at once when the latch is already triggered.
     pub fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
         let mut rx = self.tx.subscribe();
         async move {
