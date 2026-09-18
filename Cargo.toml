@@ -78,6 +78,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 url = "2.5.8"
 uuid = { version = "1.16.0", features = ["v4", "serde"] }
 windows-service = "0.8.1"
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [profile.release]
 debug = false

@@ -53,6 +53,7 @@ openssl = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = { workspace = true }
+windows-sys = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = ["openssl"]
