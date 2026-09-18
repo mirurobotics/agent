@@ -63,7 +63,7 @@ function Assert-ProductionTables {
         Assert-FixtureIsolation $handle.Database
         Assert-TransactionalMajorUpgrade $handle.Database
         Assert-DowngradeLaunchCondition $handle.Database
-        Assert-NoServiceTables $handle.Database
+        Assert-ServiceTables $handle.Database
     }
     finally { Close-MsiDatabase $handle }
 }
@@ -217,12 +217,67 @@ function Assert-DowngradeLaunchCondition {
         $downgrade[0][1] "downgrade launch condition description"
 }
 
-function Assert-NoServiceTables {
+function Assert-ServiceTables {
     param([Parameter(Mandatory = $true)]$Database)
-    Assert-True (-not (Test-MsiTable $Database "ServiceInstall")) `
-        "no service installation table"
-    Assert-True (-not (Test-MsiTable $Database "ServiceControl")) `
-        "no service control table"
+    Assert-ServiceInstallRow $Database
+    Assert-ServiceControlRow $Database
+    Assert-ServiceRecoveryTable $Database
+}
+
+# The MSI registers miru-agent as an own-process, auto-start, vital LocalSystem
+# service with no arguments and the authored display name and description.
+function Assert-ServiceInstallRow {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "ServiceInstall") "service install table present"
+    $query = "SELECT ``ServiceInstall``, ``Name``, ``DisplayName``, " + `
+        "``ServiceType``, ``StartType``, ``ErrorControl``, ``StartName``, " + `
+        "``Arguments``, ``Component_``, ``Description`` FROM ``ServiceInstall``"
+    $rows = @(Get-MsiRows $Database $query 10)
+    Assert-Equal 1 $rows.Count "one service install row"
+    $row = $rows[0]
+    Assert-Equal "miru-agent" $row[1] "service name"
+    Assert-Equal "Miru Agent" $row[2] "service display name"
+    Assert-Equal "Miru Config Agent" $row[9] "service description"
+    Assert-Equal "MiruAgentExe" $row[8] "service owning component"
+    Assert-Equal "LocalSystem" $row[6] "service runs as LocalSystem"
+    Assert-True ([string]::IsNullOrEmpty($row[7])) "service takes no arguments"
+    Assert-True (([int]$row[3] -band 16) -ne 0) "service is own-process"
+    Assert-Equal 2 ([int]$row[4]) "service start type is automatic"
+    Assert-True (([int]$row[5] -band 1) -ne 0) "service error control is normal"
+    Assert-True (([int]$row[5] -band 0x8000) -ne 0) "service is vital"
+}
+
+# ServiceControl starts the service on install, stops it on install and
+# uninstall, deletes it on uninstall, and waits for each transition.
+function Assert-ServiceControlRow {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "ServiceControl") "service control table present"
+    $query = "SELECT ``Name``, ``Event``, ``Wait``, ``Component_`` " + `
+        "FROM ``ServiceControl``"
+    $rows = @(Get-MsiRows $Database $query 4)
+    Assert-Equal 1 $rows.Count "one service control row"
+    $row = $rows[0]
+    Assert-Equal "miru-agent" $row[0] "service control name"
+    Assert-Equal "MiruAgentExe" $row[3] "service control owning component"
+    Assert-Equal 1 ([int]$row[2]) "service control waits for transitions"
+    $serviceEvent = [int]$row[1]
+    Assert-True (($serviceEvent -band 0x1) -ne 0) "service starts on install"
+    Assert-True (($serviceEvent -band 0x2) -ne 0) "service stops on install"
+    Assert-True (($serviceEvent -band 0x20) -ne 0) "service stops on uninstall"
+    Assert-True (($serviceEvent -band 0x80) -ne 0) "service deletes on uninstall"
+}
+
+# The Util extension emits its own failure-actions table (not the empty standard
+# ServiceConfig table); the restart action values are pinned at runtime in
+# integration-lib.ps1.
+function Assert-ServiceRecoveryTable {
+    param([Parameter(Mandatory = $true)]$Database)
+    $tables = @(Get-MsiRows $Database "SELECT ``Name`` FROM ``_Tables``" 1)
+    $recovery = @($tables | Where-Object {
+        $_[0] -like "*ServiceConfig" -and $_[0] -ne "ServiceConfig"
+    })
+    Assert-Equal 1 $recovery.Count "WiX Util service recovery table present"
+    Write-Host "PASS service recovery table $($recovery[0][0])"
 }
 
 function Build-FixturePackage {
