@@ -1,15 +1,14 @@
 //! Windows Service Control Manager (SCM) integration.
 //!
-//! [`dispatch`] hands the process to the SCM, which calls `service_main` back
-//! on its own thread. That thread registers the control handler, reports the
+//! [`dispatch`] hands the process to the SCM. The binary owns `ServiceMain`
+//! (next to the agent body) and calls [`run`] from that callback. [`run`]
+//! registers the control handler, reports the
 //! `StartPending → Running → StopPending → Stopped` lifecycle, and runs the
-//! agent body. Only [`dispatch`], `service_main`, and the [`StatusSink`] impl
-//! for [`ServiceStatusHandle`] touch Win32; [`handle_control`], [`status`],
-//! [`exit_code`], and [`run_lifecycle`] are pure and testable without a
-//! registered service.
+//! body. Only [`dispatch`], [`run`], and the [`StatusSink`] impl for
+//! [`ServiceStatusHandle`] touch Win32. The status helpers are private and
+//! tested in this file.
 
 // standard crates
-use std::ffi::OsString;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -19,7 +18,6 @@ use crate::trace;
 use crate::windows::errors::ScmErr;
 
 // external crates
-use windows_service::define_windows_service;
 use windows_service::service::{
     ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
 };
@@ -30,7 +28,7 @@ use windows_service::service_dispatcher;
 
 /// Name the service is registered under; must match the installer's
 /// `ServiceInstall Name`.
-pub const SERVICE_NAME: &str = "miru-agent";
+const SERVICE_NAME: &str = "miru-agent";
 
 /// `wait_hint` reported with `StartPending` and `StopPending`.
 const PENDING_WAIT_HINT: Duration = Duration::from_secs(30);
@@ -39,18 +37,12 @@ const PENDING_WAIT_HINT: Duration = Duration::from_secs(30);
 /// started by the SCM.
 const ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: i32 = 1063;
 
-/// The agent body run on the SCM's service thread. It receives the latch
-/// the control handler trips on STOP / SHUTDOWN and reports how it ended.
-pub type ServiceBody = fn(Latch) -> RunOutcome;
-
-static BODY: OnceLock<ServiceBody> = OnceLock::new();
-
-/// Registers `body` as the service entry point and blocks the calling thread
-/// until the service stops. Fails with [`ScmErr::NotLaunchedByScm`] when
-/// the process was not started by the SCM.
-pub fn dispatch(body: ServiceBody) -> Result<(), ScmErr> {
-    let _ = BODY.set(body);
-    match service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
+/// Blocks the calling thread until the service stops. `service_main` is the
+/// `extern "system"` thunk from [`windows_service::define_windows_service`].
+/// Fails with [`ScmErr::NotLaunchedByScm`] when the process was not started
+/// by the SCM.
+pub fn dispatch(service_main: extern "system" fn(u32, *mut *mut u16)) -> Result<(), ScmErr> {
+    match service_dispatcher::start(SERVICE_NAME, service_main) {
         Ok(()) => Ok(()),
         Err(windows_service::Error::Winapi(ref e))
             if e.raw_os_error() == Some(ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) =>
@@ -64,14 +56,12 @@ pub fn dispatch(body: ServiceBody) -> Result<(), ScmErr> {
     }
 }
 
-define_windows_service!(ffi_service_main, service_main);
-
-/// SCM entry point, called on a thread the SCM owns.
-fn service_main(_args: Vec<OsString>) {
-    let Some(body) = BODY.get() else { return };
+/// Registers the control handler and runs `body` on the SCM's service thread.
+pub fn run(body: impl FnOnce(Latch) -> RunOutcome) {
     let latch = Latch::new();
-    let handler_latch = latch.clone();
     let slot: Arc<OnceLock<ServiceStatusHandle>> = Arc::default();
+
+    let handler_latch = latch.clone();
     let handler_slot = Arc::clone(&slot);
     let handle = match service_control_handler::register(SERVICE_NAME, move |control| {
         handle_control(control, &handler_latch, handler_slot.get())
@@ -80,6 +70,7 @@ fn service_main(_args: Vec<OsString>) {
         // Without a status handle nothing can be reported to the SCM.
         Err(_) => return,
     };
+
     // The SCM sends no controls before `Running` is reported, so the handler
     // always finds the handle once it can be invoked.
     let _ = slot.set(handle);
@@ -91,7 +82,7 @@ fn service_main(_args: Vec<OsString>) {
 /// `sink` when one is available and trip `latch`; a failed report never
 /// blocks the stop. INTERROGATE is acknowledged; everything else is
 /// unimplemented.
-pub fn handle_control<S: StatusSink>(
+fn handle_control<S: StatusSink>(
     control: ServiceControl,
     latch: &Latch,
     sink: Option<&S>,
@@ -109,10 +100,26 @@ pub fn handle_control<S: StatusSink>(
     }
 }
 
+/// Reports `StartPending` then `Running`, runs `body`, then always attempts
+/// both `StopPending` and `Stopped` (carrying the body's exit code). A report
+/// failure before `Running` skips the body; the first error encountered is
+/// returned.
+fn run_lifecycle<S: StatusSink>(sink: &S, body: impl FnOnce() -> RunOutcome) -> Result<(), ScmErr> {
+    sink.report(status(
+        ServiceState::StartPending,
+        ServiceExitCode::NO_ERROR,
+    ))?;
+    sink.report(status(ServiceState::Running, ServiceExitCode::NO_ERROR))?;
+    let outcome = body();
+    let stop_pending = sink.report(status(ServiceState::StopPending, ServiceExitCode::NO_ERROR));
+    let stopped = sink.report(status(ServiceState::Stopped, exit_code(outcome)));
+    stop_pending.and(stopped)
+}
+
 /// Builds the status report for `state`: an own-process service that accepts
 /// STOP and SHUTDOWN only while `Running`, with [`PENDING_WAIT_HINT`] on the
 /// pending states and no wait hint otherwise.
-pub fn status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceStatus {
+fn status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceStatus {
     let controls_accepted = if state == ServiceState::Running {
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
     } else {
@@ -134,7 +141,7 @@ pub fn status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceStatus 
 }
 
 /// Maps the body's outcome to the exit code reported with `Stopped`.
-pub fn exit_code(outcome: RunOutcome) -> ServiceExitCode {
+fn exit_code(outcome: RunOutcome) -> ServiceExitCode {
     match outcome {
         RunOutcome::Completed => ServiceExitCode::NO_ERROR,
         RunOutcome::Failed => ServiceExitCode::ServiceSpecific(1),
@@ -143,7 +150,7 @@ pub fn exit_code(outcome: RunOutcome) -> ServiceExitCode {
 
 /// Destination for service status reports: the real [`ServiceStatusHandle`]
 /// in production, a recording fake in tests.
-pub trait StatusSink {
+trait StatusSink {
     fn report(&self, status: ServiceStatus) -> Result<(), ScmErr>;
 }
 
@@ -157,21 +164,328 @@ impl StatusSink for ServiceStatusHandle {
     }
 }
 
-/// Reports `StartPending` then `Running`, runs `body`, then always attempts
-/// both `StopPending` and `Stopped` (carrying the body's exit code). A report
-/// failure before `Running` skips the body; the first error encountered is
-/// returned.
-pub fn run_lifecycle<S: StatusSink>(
-    sink: &S,
-    body: impl FnOnce() -> RunOutcome,
-) -> Result<(), ScmErr> {
-    sink.report(status(
-        ServiceState::StartPending,
-        ServiceExitCode::NO_ERROR,
-    ))?;
-    sink.report(status(ServiceState::Running, ServiceExitCode::NO_ERROR))?;
-    let outcome = body();
-    let stop_pending = sink.report(status(ServiceState::StopPending, ServiceExitCode::NO_ERROR));
-    let stopped = sink.report(status(ServiceState::Stopped, exit_code(outcome)));
-    stop_pending.and(stopped)
+#[cfg(test)]
+mod tests {
+    // standard crates
+    use std::cell::{Cell, RefCell};
+    use std::time::Duration;
+
+    // internal crates
+    use super::StatusSink;
+    use crate::shutdown::{Latch, RunOutcome};
+    use crate::windows::errors::ScmErr;
+
+    // external crates
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler::ServiceControlHandlerResult;
+
+    /// Records every successful report; reports for `fail_on` fail without being
+    /// recorded.
+    #[derive(Default)]
+    struct RecordingSink {
+        reported: RefCell<Vec<ServiceStatus>>,
+        fail_on: Option<ServiceState>,
+    }
+
+    impl RecordingSink {
+        fn failing_on(state: ServiceState) -> Self {
+            Self {
+                reported: RefCell::default(),
+                fail_on: Some(state),
+            }
+        }
+
+        fn reported(self) -> Vec<ServiceStatus> {
+            self.reported.into_inner()
+        }
+
+        fn states(&self) -> Vec<ServiceState> {
+            self.reported
+                .borrow()
+                .iter()
+                .map(|status| status.current_state)
+                .collect()
+        }
+    }
+
+    impl StatusSink for RecordingSink {
+        fn report(&self, status: ServiceStatus) -> Result<(), ScmErr> {
+            if self.fail_on == Some(status.current_state) {
+                return Err(ScmErr::NotLaunchedByScm {
+                    trace: crate::trace!(),
+                });
+            }
+            self.reported.borrow_mut().push(status);
+            Ok(())
+        }
+    }
+
+    fn stop_pending() -> ServiceStatus {
+        super::status(ServiceState::StopPending, ServiceExitCode::NO_ERROR)
+    }
+
+    mod handle_control {
+        use super::super::handle_control;
+        use super::*;
+
+        #[test]
+        fn stop_reports_stop_pending_and_triggers() {
+            let latch = Latch::new();
+            let sink = RecordingSink::default();
+
+            let result = handle_control(ServiceControl::Stop, &latch, Some(&sink));
+
+            assert!(matches!(result, ServiceControlHandlerResult::NoError));
+            assert!(latch.is_triggered());
+            assert_eq!(sink.reported(), vec![stop_pending()]);
+        }
+
+        #[test]
+        fn shutdown_reports_stop_pending_and_triggers() {
+            let latch = Latch::new();
+            let sink = RecordingSink::default();
+
+            let result = handle_control(ServiceControl::Shutdown, &latch, Some(&sink));
+
+            assert!(matches!(result, ServiceControlHandlerResult::NoError));
+            assert!(latch.is_triggered());
+            assert_eq!(sink.reported(), vec![stop_pending()]);
+        }
+
+        #[test]
+        fn interrogate_is_acknowledged_without_side_effects() {
+            let latch = Latch::new();
+            let sink = RecordingSink::default();
+
+            let result = handle_control(ServiceControl::Interrogate, &latch, Some(&sink));
+
+            assert!(matches!(result, ServiceControlHandlerResult::NoError));
+            assert!(!latch.is_triggered());
+            assert!(sink.reported().is_empty());
+        }
+
+        #[test]
+        fn pause_is_not_implemented() {
+            let latch = Latch::new();
+            let sink = RecordingSink::default();
+
+            let result = handle_control(ServiceControl::Pause, &latch, Some(&sink));
+
+            assert!(matches!(
+                result,
+                ServiceControlHandlerResult::NotImplemented
+            ));
+            assert!(!latch.is_triggered());
+            assert!(sink.reported().is_empty());
+        }
+
+        #[test]
+        fn stop_without_sink_still_triggers() {
+            let latch = Latch::new();
+
+            let result = handle_control(ServiceControl::Stop, &latch, None::<&RecordingSink>);
+
+            assert!(matches!(result, ServiceControlHandlerResult::NoError));
+            assert!(latch.is_triggered());
+        }
+
+        #[test]
+        fn stop_with_failing_sink_still_triggers() {
+            let latch = Latch::new();
+            let sink = RecordingSink::failing_on(ServiceState::StopPending);
+
+            let result = handle_control(ServiceControl::Stop, &latch, Some(&sink));
+
+            assert!(matches!(result, ServiceControlHandlerResult::NoError));
+            assert!(latch.is_triggered());
+            assert!(sink.reported().is_empty());
+        }
+    }
+
+    mod status {
+        use super::super::status;
+        use super::*;
+
+        fn expected(
+            state: ServiceState,
+            controls_accepted: ServiceControlAccept,
+            exit_code: ServiceExitCode,
+            wait_hint: Duration,
+        ) -> ServiceStatus {
+            ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: state,
+                controls_accepted,
+                exit_code,
+                checkpoint: 0,
+                wait_hint,
+                process_id: None,
+            }
+        }
+
+        #[test]
+        fn running_accepts_stop_and_shutdown_with_no_wait_hint() {
+            assert_eq!(
+                status(ServiceState::Running, ServiceExitCode::NO_ERROR),
+                expected(
+                    ServiceState::Running,
+                    ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+                    ServiceExitCode::NO_ERROR,
+                    Duration::ZERO,
+                ),
+            );
+        }
+
+        #[test]
+        fn start_pending_accepts_nothing_with_thirty_second_hint() {
+            assert_eq!(
+                status(ServiceState::StartPending, ServiceExitCode::NO_ERROR),
+                expected(
+                    ServiceState::StartPending,
+                    ServiceControlAccept::empty(),
+                    ServiceExitCode::NO_ERROR,
+                    Duration::from_secs(30),
+                ),
+            );
+        }
+
+        #[test]
+        fn stop_pending_accepts_nothing_with_thirty_second_hint() {
+            assert_eq!(
+                stop_pending(),
+                expected(
+                    ServiceState::StopPending,
+                    ServiceControlAccept::empty(),
+                    ServiceExitCode::NO_ERROR,
+                    Duration::from_secs(30),
+                ),
+            );
+        }
+
+        #[test]
+        fn stopped_carries_the_exit_code() {
+            assert_eq!(
+                status(ServiceState::Stopped, ServiceExitCode::ServiceSpecific(1)),
+                expected(
+                    ServiceState::Stopped,
+                    ServiceControlAccept::empty(),
+                    ServiceExitCode::ServiceSpecific(1),
+                    Duration::ZERO,
+                ),
+            );
+        }
+    }
+
+    mod exit_code {
+        use super::super::exit_code;
+        use super::*;
+
+        #[test]
+        fn completed_is_no_error() {
+            assert_eq!(exit_code(RunOutcome::Completed), ServiceExitCode::NO_ERROR);
+        }
+
+        #[test]
+        fn failed_is_service_specific_one() {
+            assert_eq!(
+                exit_code(RunOutcome::Failed),
+                ServiceExitCode::ServiceSpecific(1)
+            );
+        }
+    }
+
+    mod run_lifecycle {
+        use super::super::{exit_code, run_lifecycle, status};
+        use super::*;
+
+        #[test]
+        fn reports_the_full_state_sequence_around_the_body() {
+            let sink = RecordingSink::default();
+            let ran = Cell::new(false);
+
+            let result = run_lifecycle(&sink, || {
+                ran.set(true);
+                RunOutcome::Completed
+            });
+
+            assert!(result.is_ok());
+            assert!(ran.get());
+            assert_eq!(
+                sink.states(),
+                vec![
+                    ServiceState::StartPending,
+                    ServiceState::Running,
+                    ServiceState::StopPending,
+                    ServiceState::Stopped,
+                ],
+            );
+        }
+
+        #[test]
+        fn stopped_carries_the_exit_code_for_each_outcome() {
+            for outcome in [RunOutcome::Completed, RunOutcome::Failed] {
+                let sink = RecordingSink::default();
+
+                let result = run_lifecycle(&sink, || outcome);
+
+                assert!(result.is_ok(), "{outcome:?}");
+                let last = sink.reported().pop().expect("Stopped is reported");
+                assert_eq!(
+                    last,
+                    status(ServiceState::Stopped, exit_code(outcome)),
+                    "{outcome:?}",
+                );
+            }
+        }
+
+        #[test]
+        fn start_pending_failure_skips_the_body() {
+            let sink = RecordingSink::failing_on(ServiceState::StartPending);
+            let ran = Cell::new(false);
+
+            let result = run_lifecycle(&sink, || {
+                ran.set(true);
+                RunOutcome::Completed
+            });
+
+            assert!(matches!(result, Err(ScmErr::NotLaunchedByScm { .. })));
+            assert!(!ran.get());
+            assert!(sink.reported().is_empty());
+        }
+
+        #[test]
+        fn running_failure_skips_the_body() {
+            let sink = RecordingSink::failing_on(ServiceState::Running);
+            let ran = Cell::new(false);
+
+            let result = run_lifecycle(&sink, || {
+                ran.set(true);
+                RunOutcome::Completed
+            });
+
+            assert!(result.is_err());
+            assert!(!ran.get());
+            assert_eq!(sink.states(), vec![ServiceState::StartPending]);
+        }
+
+        #[test]
+        fn stop_pending_failure_still_reports_stopped() {
+            let sink = RecordingSink::failing_on(ServiceState::StopPending);
+
+            let result = run_lifecycle(&sink, || RunOutcome::Failed);
+
+            assert!(matches!(result, Err(ScmErr::NotLaunchedByScm { .. })));
+            assert_eq!(
+                sink.states(),
+                vec![
+                    ServiceState::StartPending,
+                    ServiceState::Running,
+                    ServiceState::Stopped,
+                ],
+            );
+        }
+    }
 }

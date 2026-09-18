@@ -33,7 +33,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `shutdown` — process-wide stop latch (`Latch`) and agent-body outcome (`RunOutcome`). Used on every OS; the Windows SCM maps `RunOutcome` to a service exit code.
 
-`windows` — Windows Service Control Manager integration. `windows::scm` holds the SCM entry point, control handler, and status lifecycle (`cfg(windows)`); `windows::errors` compiles everywhere so Linux can test `NotLaunchedByScm`.
+`windows` — Windows Service Control Manager integration. `windows::scm` exposes `dispatch` and `run` (`cfg(windows)`); the binary owns `ServiceMain` next to the agent body. `windows::errors` compiles everywhere so Linux can test `NotLaunchedByScm`.
 
 `version` — build-time version string. Embedded by `build.rs` from git commit hash and build date.
 

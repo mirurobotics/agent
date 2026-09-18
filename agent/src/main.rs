@@ -1,5 +1,7 @@
 // standard crates
 use std::env;
+#[cfg(windows)]
+use std::ffi::OsString;
 
 // internal crates
 use backend_api::models as backend_client;
@@ -29,6 +31,8 @@ use miru_agent::workers::mqtt;
 #[cfg(unix)]
 use tokio::signal::unix::signal;
 use tracing::{error, info};
+#[cfg(windows)]
+use windows_service::define_windows_service;
 
 fn main() {
     let cli_args = cli::Args::parse(&env::args().collect::<Vec<String>>());
@@ -198,10 +202,25 @@ async fn run_agent_in_foreground() -> RunOutcome {
 /// the service manager (use `--console` for foreground).
 #[cfg(windows)]
 fn run_agent_as_windows_service() {
-    if let Err(e) = windows::scm::dispatch(windows_service_body) {
+    if let Err(e) = windows::scm::dispatch(ffi_service_main) {
         eprintln!("miru-agent: {e}");
         std::process::exit(1);
     }
+}
+
+// Generates `ffi_service_main`, the `extern "system"` thunk the SCM calls
+// (`lpServiceProc`). It parses the Win32 argv and forwards to
+// `windows_service_main`. `dispatch` registers that thunk with
+// StartServiceCtrlDispatcher; we cannot pass `windows_service_main` itself
+// because the SCM requires the C ABI.
+#[cfg(windows)]
+define_windows_service!(ffi_service_main, windows_service_main);
+
+/// SCM entry point, called on a thread the SCM owns. The agent body is in
+/// this crate, so the callback can name it without a process-wide pointer.
+#[cfg(windows)]
+fn windows_service_main(_args: Vec<OsString>) {
+    windows::scm::run(windows_service_body);
 }
 
 /// Service entry point: runs on the SCM's service thread with its own runtime
