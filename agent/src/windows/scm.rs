@@ -5,11 +5,11 @@
 //! registers the control handler, reports the
 //! `StartPending → Running → StopPending → Stopped` lifecycle, and runs the
 //! body. Only [`dispatch`], [`run`], and the [`StatusSink`] impl for
-//! [`ServiceStatusHandle`] touch Win32. The status helpers are private and
-//! tested in this file.
+//! [`ServiceStatusHandle`] touch Win32. The control handler only trips the
+//! latch; status reports stay in [`run_lifecycle`]. The helpers are private
+//! and tested in this file.
 
 // standard crates
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // internal crates
@@ -18,6 +18,7 @@ use crate::trace;
 use crate::windows::errors::ScmErr;
 
 // external crates
+use tracing::error;
 use windows_service::service::{
     ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
 };
@@ -30,18 +31,15 @@ use windows_service::service_dispatcher;
 /// `ServiceInstall Name`.
 const SERVICE_NAME: &str = "miru-agent";
 
-/// `wait_hint` reported with `StartPending` and `StopPending`.
-const PENDING_WAIT_HINT: Duration = Duration::from_secs(30);
-
-/// Win32 `ERROR_FAILED_SERVICE_CONTROLLER_CONNECT`: the process was not
-/// started by the SCM.
-const ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: i32 = 1063;
-
 /// Blocks the calling thread until the service stops. `service_main` is the
 /// `extern "system"` thunk from [`windows_service::define_windows_service`].
 /// Fails with [`ScmErr::NotLaunchedByScm`] when the process was not started
 /// by the SCM.
 pub fn dispatch(service_main: extern "system" fn(u32, *mut *mut u16)) -> Result<(), ScmErr> {
+    // Win32 `ERROR_FAILED_SERVICE_CONTROLLER_CONNECT`: this process was not
+    // started by the SCM.
+    const ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: i32 = 1063;
+
     match service_dispatcher::start(SERVICE_NAME, service_main) {
         Ok(()) => Ok(()),
         Err(windows_service::Error::Winapi(ref e))
@@ -59,39 +57,34 @@ pub fn dispatch(service_main: extern "system" fn(u32, *mut *mut u16)) -> Result<
 /// Registers the control handler and runs `body` on the SCM's service thread.
 pub fn run(body: impl FnOnce(Latch) -> RunOutcome) {
     let latch = Latch::new();
-    let slot: Arc<OnceLock<ServiceStatusHandle>> = Arc::default();
-
     let handler_latch = latch.clone();
-    let handler_slot = Arc::clone(&slot);
     let handle = match service_control_handler::register(SERVICE_NAME, move |control| {
-        handle_control(control, &handler_latch, handler_slot.get())
+        handle_control(control, &handler_latch)
     }) {
         Ok(handle) => handle,
         // Without a status handle nothing can be reported to the SCM.
-        Err(_) => return,
+        // Tracing is not installed yet (`body` never runs).
+        Err(e) => {
+            eprintln!("miru-agent: failed to register service control handler: {e}");
+            return;
+        }
     };
-
-    // The SCM sends no controls before `Running` is reported, so the handler
-    // always finds the handle once it can be invoked.
-    let _ = slot.set(handle);
-    let _ = run_lifecycle(&handle, || body(latch));
+    if let Err(e) = run_lifecycle(&handle, || body(latch)) {
+        // Tracing is only installed inside `body`; StartPending/Running
+        // failures happen before that, so also write stderr.
+        eprintln!("miru-agent: failed to report service status: {e}");
+        error!("failed to report service status: {e}");
+    }
 }
 
 /// SCM control callback. Runs on the SCM's handler thread: synchronous, no
-/// awaits, no locks held. STOP and SHUTDOWN report `StopPending` through
-/// `sink` when one is available and trip `latch`; a failed report never
-/// blocks the stop. INTERROGATE is acknowledged; everything else is
-/// unimplemented.
-fn handle_control<S: StatusSink>(
-    control: ServiceControl,
-    latch: &Latch,
-    sink: Option<&S>,
-) -> ServiceControlHandlerResult {
+/// awaits, no locks held. STOP and SHUTDOWN trip `latch` only; status stays
+/// `Running` until [`run_lifecycle`] reports `StopPending` after `body`
+/// returns, so a long in-flight reset is not charged against the wait hint.
+/// INTERROGATE is acknowledged; everything else is unimplemented.
+fn handle_control(control: ServiceControl, latch: &Latch) -> ServiceControlHandlerResult {
     match control {
         ServiceControl::Stop | ServiceControl::Shutdown => {
-            if let Some(sink) = sink {
-                let _ = sink.report(status(ServiceState::StopPending, ServiceExitCode::NO_ERROR));
-            }
             latch.trigger();
             ServiceControlHandlerResult::NoError
         }
@@ -117,9 +110,11 @@ fn run_lifecycle<S: StatusSink>(sink: &S, body: impl FnOnce() -> RunOutcome) -> 
 }
 
 /// Builds the status report for `state`: an own-process service that accepts
-/// STOP and SHUTDOWN only while `Running`, with [`PENDING_WAIT_HINT`] on the
+/// STOP and SHUTDOWN only while `Running`, with a 30s wait hint on the
 /// pending states and no wait hint otherwise.
 fn status(state: ServiceState, exit_code: ServiceExitCode) -> ServiceStatus {
+    const PENDING_WAIT_HINT: Duration = Duration::from_secs(30);
+
     let controls_accepted = if state == ServiceState::Running {
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
     } else {
@@ -232,168 +227,46 @@ mod tests {
         use super::*;
 
         #[test]
-        fn stop_reports_stop_pending_and_triggers() {
+        fn stop_triggers_without_reporting() {
             let latch = Latch::new();
-            let sink = RecordingSink::default();
 
-            let result = handle_control(ServiceControl::Stop, &latch, Some(&sink));
+            let result = handle_control(ServiceControl::Stop, &latch);
 
             assert!(matches!(result, ServiceControlHandlerResult::NoError));
             assert!(latch.is_triggered());
-            assert_eq!(sink.reported(), vec![stop_pending()]);
         }
 
         #[test]
-        fn shutdown_reports_stop_pending_and_triggers() {
+        fn shutdown_triggers_without_reporting() {
             let latch = Latch::new();
-            let sink = RecordingSink::default();
 
-            let result = handle_control(ServiceControl::Shutdown, &latch, Some(&sink));
+            let result = handle_control(ServiceControl::Shutdown, &latch);
 
             assert!(matches!(result, ServiceControlHandlerResult::NoError));
             assert!(latch.is_triggered());
-            assert_eq!(sink.reported(), vec![stop_pending()]);
         }
 
         #[test]
         fn interrogate_is_acknowledged_without_side_effects() {
             let latch = Latch::new();
-            let sink = RecordingSink::default();
 
-            let result = handle_control(ServiceControl::Interrogate, &latch, Some(&sink));
+            let result = handle_control(ServiceControl::Interrogate, &latch);
 
             assert!(matches!(result, ServiceControlHandlerResult::NoError));
             assert!(!latch.is_triggered());
-            assert!(sink.reported().is_empty());
         }
 
         #[test]
         fn pause_is_not_implemented() {
             let latch = Latch::new();
-            let sink = RecordingSink::default();
 
-            let result = handle_control(ServiceControl::Pause, &latch, Some(&sink));
+            let result = handle_control(ServiceControl::Pause, &latch);
 
             assert!(matches!(
                 result,
                 ServiceControlHandlerResult::NotImplemented
             ));
             assert!(!latch.is_triggered());
-            assert!(sink.reported().is_empty());
-        }
-
-        #[test]
-        fn stop_without_sink_still_triggers() {
-            let latch = Latch::new();
-
-            let result = handle_control(ServiceControl::Stop, &latch, None::<&RecordingSink>);
-
-            assert!(matches!(result, ServiceControlHandlerResult::NoError));
-            assert!(latch.is_triggered());
-        }
-
-        #[test]
-        fn stop_with_failing_sink_still_triggers() {
-            let latch = Latch::new();
-            let sink = RecordingSink::failing_on(ServiceState::StopPending);
-
-            let result = handle_control(ServiceControl::Stop, &latch, Some(&sink));
-
-            assert!(matches!(result, ServiceControlHandlerResult::NoError));
-            assert!(latch.is_triggered());
-            assert!(sink.reported().is_empty());
-        }
-    }
-
-    mod status {
-        use super::super::status;
-        use super::*;
-
-        fn expected(
-            state: ServiceState,
-            controls_accepted: ServiceControlAccept,
-            exit_code: ServiceExitCode,
-            wait_hint: Duration,
-        ) -> ServiceStatus {
-            ServiceStatus {
-                service_type: ServiceType::OWN_PROCESS,
-                current_state: state,
-                controls_accepted,
-                exit_code,
-                checkpoint: 0,
-                wait_hint,
-                process_id: None,
-            }
-        }
-
-        #[test]
-        fn running_accepts_stop_and_shutdown_with_no_wait_hint() {
-            assert_eq!(
-                status(ServiceState::Running, ServiceExitCode::NO_ERROR),
-                expected(
-                    ServiceState::Running,
-                    ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
-                    ServiceExitCode::NO_ERROR,
-                    Duration::ZERO,
-                ),
-            );
-        }
-
-        #[test]
-        fn start_pending_accepts_nothing_with_thirty_second_hint() {
-            assert_eq!(
-                status(ServiceState::StartPending, ServiceExitCode::NO_ERROR),
-                expected(
-                    ServiceState::StartPending,
-                    ServiceControlAccept::empty(),
-                    ServiceExitCode::NO_ERROR,
-                    Duration::from_secs(30),
-                ),
-            );
-        }
-
-        #[test]
-        fn stop_pending_accepts_nothing_with_thirty_second_hint() {
-            assert_eq!(
-                stop_pending(),
-                expected(
-                    ServiceState::StopPending,
-                    ServiceControlAccept::empty(),
-                    ServiceExitCode::NO_ERROR,
-                    Duration::from_secs(30),
-                ),
-            );
-        }
-
-        #[test]
-        fn stopped_carries_the_exit_code() {
-            assert_eq!(
-                status(ServiceState::Stopped, ServiceExitCode::ServiceSpecific(1)),
-                expected(
-                    ServiceState::Stopped,
-                    ServiceControlAccept::empty(),
-                    ServiceExitCode::ServiceSpecific(1),
-                    Duration::ZERO,
-                ),
-            );
-        }
-    }
-
-    mod exit_code {
-        use super::super::exit_code;
-        use super::*;
-
-        #[test]
-        fn completed_is_no_error() {
-            assert_eq!(exit_code(RunOutcome::Completed), ServiceExitCode::NO_ERROR);
-        }
-
-        #[test]
-        fn failed_is_service_specific_one() {
-            assert_eq!(
-                exit_code(RunOutcome::Failed),
-                ServiceExitCode::ServiceSpecific(1)
-            );
         }
     }
 
@@ -485,6 +358,98 @@ mod tests {
                     ServiceState::Running,
                     ServiceState::Stopped,
                 ],
+            );
+        }
+    }
+
+    mod status {
+        use super::super::status;
+        use super::*;
+
+        fn expected(
+            state: ServiceState,
+            controls_accepted: ServiceControlAccept,
+            exit_code: ServiceExitCode,
+            wait_hint: Duration,
+        ) -> ServiceStatus {
+            ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: state,
+                controls_accepted,
+                exit_code,
+                checkpoint: 0,
+                wait_hint,
+                process_id: None,
+            }
+        }
+
+        #[test]
+        fn running_accepts_stop_and_shutdown_with_no_wait_hint() {
+            assert_eq!(
+                status(ServiceState::Running, ServiceExitCode::NO_ERROR),
+                expected(
+                    ServiceState::Running,
+                    ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+                    ServiceExitCode::NO_ERROR,
+                    Duration::ZERO,
+                ),
+            );
+        }
+
+        #[test]
+        fn start_pending_accepts_nothing_with_thirty_second_hint() {
+            assert_eq!(
+                status(ServiceState::StartPending, ServiceExitCode::NO_ERROR),
+                expected(
+                    ServiceState::StartPending,
+                    ServiceControlAccept::empty(),
+                    ServiceExitCode::NO_ERROR,
+                    Duration::from_secs(30),
+                ),
+            );
+        }
+
+        #[test]
+        fn stop_pending_accepts_nothing_with_thirty_second_hint() {
+            assert_eq!(
+                stop_pending(),
+                expected(
+                    ServiceState::StopPending,
+                    ServiceControlAccept::empty(),
+                    ServiceExitCode::NO_ERROR,
+                    Duration::from_secs(30),
+                ),
+            );
+        }
+
+        #[test]
+        fn stopped_carries_the_exit_code() {
+            assert_eq!(
+                status(ServiceState::Stopped, ServiceExitCode::ServiceSpecific(1)),
+                expected(
+                    ServiceState::Stopped,
+                    ServiceControlAccept::empty(),
+                    ServiceExitCode::ServiceSpecific(1),
+                    Duration::ZERO,
+                ),
+            );
+        }
+    }
+
+    mod exit_code {
+        use super::super::exit_code;
+        use super::*;
+
+        #[test]
+        fn completed_is_no_error() {
+            assert_eq!(exit_code(RunOutcome::Completed), ServiceExitCode::NO_ERROR);
+        }
+
+        #[test]
+        fn failed_is_service_specific_one() {
+            assert_eq!(
+                exit_code(RunOutcome::Failed),
+                ServiceExitCode::ServiceSpecific(1)
             );
         }
     }
