@@ -139,7 +139,8 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_1", "alpha"));
-        let outcome = ready(reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, pending()).await);
+        let outcome =
+            ready(reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, &Latch::new()).await);
 
         assert!(!outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -156,7 +157,8 @@ mod reconcile {
         let (priv_before, pub_before) = read_keys(&layout).await;
 
         let mock = make_mock_client(backend_device("dvc_2", "beta"));
-        let outcome = ready(reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep, pending()).await);
+        let outcome =
+            ready(reconcile(&layout, mock.as_ref(), "v0.9.0", no_sleep, &Latch::new()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -191,7 +193,8 @@ mod reconcile {
             .unwrap();
 
         let mock = make_mock_client(backend_device("dvc_3", "gamma"));
-        let outcome = ready(reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep, pending()).await);
+        let outcome =
+            ready(reconcile(&layout, mock.as_ref(), "v0.0.2", no_sleep, &Latch::new()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 0);
@@ -226,7 +229,8 @@ mod reconcile {
             }
         });
 
-        let outcome = ready(reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep, pending()).await);
+        let outcome =
+            ready(reconcile(&layout, mock.as_ref(), "v1.2.3", no_sleep, &Latch::new()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 2);
@@ -263,7 +267,8 @@ mod reconcile {
             }
         });
 
-        let outcome = ready(reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep, pending()).await);
+        let outcome =
+            ready(reconcile(&layout, mock.as_ref(), "v9.9.9", no_sleep, &Latch::new()).await);
 
         assert!(outcome.upgraded);
         assert_eq!(outcome.attempts, 4);
@@ -293,7 +298,7 @@ mod reconcile {
                 pending::<()>().await;
             }
         };
-        let attempt = reconcile(&layout, mock.as_ref(), "v1.0.0", sleep_fn, latch.wait());
+        let attempt = reconcile(&layout, mock.as_ref(), "v1.0.0", sleep_fn, &latch);
         let request_stop = async {
             entered_rx.await.unwrap();
             latch.trigger();
@@ -322,7 +327,7 @@ mod reconcile {
         let latch = Latch::new();
         latch.trigger();
 
-        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, latch.wait())
+        let outcome = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, &latch)
             .await
             .unwrap();
 
@@ -352,7 +357,7 @@ mod reconcile {
 
         let outcome = tokio::time::timeout(
             StdDuration::from_secs(5),
-            reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, latch.wait()),
+            reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, &latch),
         )
         .await
         .expect("shutdown should finish after the active attempt")
@@ -390,7 +395,7 @@ mod reconcile {
         files::delete(&layout.auth().private_key()).await.unwrap();
         let mock = make_mock_client(backend_device("dvc_new", "new"));
 
-        let result = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, pending()).await;
+        let result = reconcile(&layout, mock.as_ref(), "v1.0.0", no_sleep, &Latch::new()).await;
 
         assert!(matches!(
             result,

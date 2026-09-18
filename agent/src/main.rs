@@ -297,15 +297,7 @@ async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> AfterR
             return AfterReconcile::Exit(RunOutcome::Failed);
         }
     };
-    match upgrade::reconcile(
-        layout,
-        &client,
-        version::VERSION,
-        tokio::time::sleep,
-        latch.wait(),
-    )
-    .await
-    {
+    match upgrade::reconcile(layout, &client, version::VERSION, tokio::time::sleep, latch).await {
         Ok(upgrade::Reconcile::Ready(_)) => AfterReconcile::Continue,
         Ok(upgrade::Reconcile::Stopped) => AfterReconcile::Exit(RunOutcome::Completed),
         Err(e) => {

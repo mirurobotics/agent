@@ -10,9 +10,9 @@ use crate::disk::{self, Layout, Settings};
 use crate::filesys::{files, PathExt};
 use crate::http::{self, ClientI};
 use crate::models;
+use crate::shutdown::Latch;
 
 // external crates
-use futures::FutureExt;
 use tracing::{error, info, warn};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -40,14 +40,13 @@ pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(
     http_client: &HTTPClientT,
     version: &str,
     sleep_fn: F,
-    shutdown: impl Future<Output = ()> + Send,
+    latch: &Latch,
 ) -> Result<Reconcile, UpgradeErr>
 where
     F: Fn(Duration) -> Fut,
     Fut: Future<Output = ()> + Send,
 {
     validate_layout(layout)?;
-    tokio::pin!(shutdown);
 
     let backoff = cooldown::Backoff {
         base_secs: 1,
@@ -57,7 +56,7 @@ where
     let mut attempts: u32 = 0;
 
     loop {
-        if shutdown.as_mut().now_or_never().is_some() {
+        if latch.is_triggered() {
             return Ok(Reconcile::Stopped);
         }
         if !needs_upgrade(layout, version).await {
@@ -69,7 +68,7 @@ where
         info!("resetting miru agent state to use version '{}'", version);
 
         let result = reconcile_impl(http_client, layout, version).await;
-        if shutdown.as_mut().now_or_never().is_some() {
+        if latch.is_triggered() {
             return Ok(Reconcile::Stopped);
         }
         match result {
@@ -90,7 +89,7 @@ where
                 warn!("retrying in {wait} seconds (attempts: {attempts})");
                 tokio::select! {
                     biased;
-                    _ = &mut shutdown => return Ok(Reconcile::Stopped),
+                    _ = latch.wait() => return Ok(Reconcile::Stopped),
                     _ = sleep_fn(Duration::from_secs(wait as u64)) => {}
                 }
             }
