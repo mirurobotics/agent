@@ -27,8 +27,8 @@ Observable outcome: on a Windows machine that has never had the VC++ redistribut
 
 ## Progress
 
-- [ ] M0 Activate plan (`docs(plans):` commit)
-- [ ] M1 Statically link the MSVC CRT (`build(windows):` — `.cargo/config.toml` + `build/windows/README.md` + optional workflow comment)
+- [x] M0 Activate plan (`docs(plans):` commit) — commit `2d8714eb`
+- [x] M1 Statically link the MSVC CRT (`build(windows):` — `.cargo/config.toml` + `build/windows/README.md` + `.github/workflows/ci.yml` comment + matching `release.yml` comment)
 - [ ] M2 Preflight CLEAN; CI green on the pushed head (all jobs incl. `windows-check` and `windows-package`); draft PR opened against `feat/windows-msi-artifact` and (only then) the draft state resolved
 
 ## Surprises & Discoveries

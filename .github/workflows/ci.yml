@@ -113,6 +113,8 @@ jobs:
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
       - name: Build Windows Target
+        # The MSVC build statically links the CRT (see .cargo/config.toml) so the
+        # resulting exe/MSI is self-contained and needs no VC++ redistributable.
         run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
 
       - name: Restore pinned WiX SDK
