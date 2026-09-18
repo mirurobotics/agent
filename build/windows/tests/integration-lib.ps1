@@ -147,8 +147,8 @@ function Invoke-InstallStage {
     Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
     Assert-ProtectedState "initial install"
     Invoke-NonAdminProbe -Stage "install"
-    Assert-NoService
-    Write-Host "PASS initial install, ACL correction, denial, and no service"
+    Assert-ServiceInstalled "install"
+    Write-Host "PASS initial install, ACL correction, denial, and service installed"
 }
 
 # Loosen every protected directory so the next installer operation must repair it.
@@ -409,9 +409,35 @@ function Assert-ProbeDenied {
     }
 }
 
-function Assert-NoService {
-    $service = Get-Service -Name "MiruAgent" -ErrorAction SilentlyContinue
-    Assert-True ($null -eq $service) "MiruAgent service must not exist"
+# Install success with Start="install" Wait="yes" proves the service reached
+# Running, so this asserts SCM configuration rather than racing the runtime state
+# of the unprovisioned agent, which exits shortly after start.
+function Assert-ServiceInstalled {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $service = Get-AgentService
+    Assert-True ($null -ne $service) "$Stage installs the miru-agent service"
+    Assert-Equal "Auto" $service.StartMode "$Stage service start mode is automatic"
+    Assert-Equal "LocalSystem" $service.StartName "$Stage service runs as LocalSystem"
+    Assert-Equal $agentPath ($service.PathName.Trim('"')) "$Stage service binary path"
+    Assert-ServiceRecovery $Stage
+}
+
+function Assert-ServiceAbsent {
+    $service = Get-AgentService
+    Assert-True ($null -eq $service) "miru-agent service removed"
+}
+
+function Get-AgentService {
+    return Get-CimInstance Win32_Service -Filter "Name='miru-agent'" `
+        -ErrorAction SilentlyContinue
+}
+
+function Assert-ServiceRecovery {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $out = & sc.exe qfailure miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qfailure succeeds"
+    Assert-True ($out -match 'RESET_PERIOD') "$Stage service has a reset period"
+    Assert-True ($out -match 'RESTART') "$Stage service restarts on failure"
 }
 
 function Invoke-MaintenanceStage {
@@ -423,7 +449,7 @@ function Invoke-MaintenanceStage {
     Assert-Equal $v1Hash (Get-AgentHash) "maintenance keeps v1 hash"
     Assert-ProtectedState "maintenance"
     Invoke-NonAdminProbe -Stage "maintenance"
-    Assert-NoService
+    Assert-ServiceInstalled "maintenance"
     Write-Host "PASS same-MSI maintenance repairs ACL and retains v1 state"
 }
 
@@ -438,7 +464,7 @@ function Invoke-UpgradeStage {
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "v2"
     Assert-ProtectedState "upgrade"
     Invoke-NonAdminProbe -Stage "upgrade"
-    Assert-NoService
+    Assert-ServiceInstalled "upgrade"
     Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
 }
 
@@ -470,8 +496,8 @@ function Invoke-UninstallStage {
     Assert-True (-not (Test-Path -LiteralPath $markerPath)) "test marker removed"
     Assert-True (Test-Path -LiteralPath $programDataRoot -PathType Container) "ProgramData retained"
     Assert-ProtectedState "uninstall"
-    Assert-NoService
-    Write-Host "PASS uninstall removes package state and retains protected customer state"
+    Assert-ServiceAbsent
+    Write-Host "PASS uninstall removes package state, service, and retains protected customer state"
 }
 
 function Write-FailureEvidence {
