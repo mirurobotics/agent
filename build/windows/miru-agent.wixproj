@@ -19,6 +19,10 @@
     <Compile Include="$(TestWixSource)" Condition="'$(TestWixSource)' != ''" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+  </ItemGroup>
+
   <Target Name="ValidatePackageInputs" BeforeTargets="BeforeBuild">
     <Error Condition="'$(Version)' == ''"
            Code="MIRUMSI1001"

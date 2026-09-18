@@ -29,8 +29,8 @@ Non-goals (roadmap Phase 2, explicitly deferred here): the `Miru Clients` local 
 
 ## Progress
 
-- [ ] M0 Activate plan (`docs(plans):` commit; roadmap PR 9 in-progress marker)
-- [ ] M1 Install the agent as a service in the MSI (`feat(windows):` — `miru-agent.wixproj` + `miru-agent.wxs`)
+- [x] M0 Activate plan (`docs(plans):` commit; roadmap PR 9 in-progress marker)
+- [x] M1 Install the agent as a service in the MSI (`feat(windows):` — `miru-agent.wixproj` + `miru-agent.wxs`)
 - [ ] M2 Assert the service in the static package contract (`feat(windows):` — `package-tests.ps1`)
 - [ ] M3 Assert the service across the install lifecycle (`feat(windows):` — `integration-lib.ps1`)
 - [ ] M4 Document the service behavior (`docs(windows):` — `build/windows/README.md`)
@@ -38,7 +38,7 @@ Non-goals (roadmap Phase 2, explicitly deferred here): the `Miru Clients` local 
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- M1: the doc comment above `ServiceInstall` cannot describe the console flag as `--console`: `--` is illegal inside an XML comment and the offline well-formedness check rejected it. Reworded to "console flag".
 
 ## Decision Log
 
