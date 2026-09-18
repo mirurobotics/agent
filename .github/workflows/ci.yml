@@ -126,6 +126,30 @@ jobs:
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
+      # Build a downloadable, unsigned installer for manual testing. Authenticode
+      # signing and release publication are separate roadmap work; this artifact
+      # is not a release. The MSI version needs MAJOR.MINOR.PATCH, so drop any
+      # prerelease suffix from the workspace version (0.10.4-beta.1 -> 0.10.4).
+      - name: Build unsigned installer MSI
+        shell: powershell
+        run: |
+          $raw = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $ver = ($raw -split '-')[0]
+          # MSBuild resolves a relative BinDir/OutputPath against the .wixproj
+          # directory, so pass absolute paths (the wixproj checks BinDir exists).
+          $bin = (Resolve-Path target\x86_64-pc-windows-msvc\release).Path
+          $out = Join-Path (Get-Location).Path 'build\windows\artifacts\msi'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Write-Host "Building unsigned MSI version $ver from $bin"
+          dotnet build build\windows\miru-agent.wixproj --no-restore --configuration Release -p:Version=$ver -p:BinDir=$bin -p:OutputPath=$out
+
+      - name: Upload unsigned installer MSI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: miru-agent-msi-unsigned
+          path: build/windows/artifacts/msi/**/*.msi
+          if-no-files-found: error
+
       - name: Upload Windows installer failure logs
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
