@@ -4,10 +4,8 @@ incremental = true
 [profile.test]
 incremental = true
 
-# Statically link the MSVC C runtime into the Windows binary so it is
-# self-contained: customer machines need no Visual C++ Redistributable
-# (VCRUNTIME140.dll / MSVCP140.dll) for the service to start. Tradeoff:
-# CRT security fixes now ship via agent rebuilds/releases rather than
-# through Windows Update of the shared redistributable.
+# Statically link the MSVC C runtime into the Windows binary so it is self-contained:
+# customer machines need no Visual C++ Redistributable (VCRUNTIME140.dll / MSVCP140.dll)
+# for the service to start. 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
