@@ -179,6 +179,10 @@ async fn update_device<HTTPClientT: ClientI>(
             id: &device.id,
             payload: &backend_api::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(version.to_string()),
+                // System-metadata fields are intentionally left unset on the
+                // update path; populating them is a follow-up. Unset fields are
+                // omitted from the request body via `skip_serializing_if`.
+                ..Default::default()
             },
             token: &token.token,
         },

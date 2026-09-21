@@ -37,6 +37,10 @@ impl SystemInfo {
         System::long_os_version().unwrap_or_default()
     }
 
+    pub fn kernel_version() -> String {
+        System::kernel_version().unwrap_or_default()
+    }
+
     pub fn arch() -> String {
         System::cpu_arch()
     }
