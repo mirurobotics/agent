@@ -138,14 +138,29 @@ maintain its WinGet manifest.
 
 ### Phase 2 — local device API (gated on customer need)
 
-**PR 11 — TCP listener.** `server/serve.rs` transport split: `cfg(windows)` path binds
-`127.0.0.1:<port>` (port in settings; `0` = OS-assigned). Unix socket + `LISTEN_FDS`
-path unchanged on Linux.
+**PR 11 — TCP listener** (done — `server/tcp.rs`)**.** Loopback TCP transport that
+binds `127.0.0.1:<port>` when `settings.socket_server_tcp_port` is set (`0` =
+OS-assigned, logged at startup). Shipped for all platforms rather than
+`cfg(windows)` only: on Linux it runs alongside the Unix socket + `LISTEN_FDS`
+path, which is unchanged; on Windows it is the only transport, and the
+warn-and-skip branch remains only when no port is configured. Both transports
+serve the same `routes::app()` router with the same middleware.
 
 **PR 12 — token auth + discovery file.** Token generation at startup, atomic
 `device-api.json` write into the ACL'd dir, Bearer middleware (constant-time compare)
 on all routes, SSE verified over TCP. Python SDK work happens in
 `python-device-sdk` (transport + discovery file + re-read-on-401).
+
+## Decision log
+
+- 2026-09-21: PR 11's TCP transport is cross-platform and opt-in via
+  `socket_server_tcp_port` (default `None`), not a `cfg(windows)` replacement
+  for the Unix socket. Rationale: Linux users get the same loopback HTTP
+  transport for tooling that cannot speak Unix sockets, the transport gets
+  exercised by the Linux test suite and coverage gate rather than only on the
+  Windows runner, and keeping it opt-in means no Linux device starts listening
+  on a TCP port through an upgrade. Token auth and the discovery file (PR 12)
+  still gate any default-on port.
 
 ## Risks
 

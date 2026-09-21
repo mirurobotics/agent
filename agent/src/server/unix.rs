@@ -16,45 +16,13 @@ use crate::trace;
 // external crates
 use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
-use tower::ServiceBuilder;
-use tower_http::{
-    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
-    LatencyUnit,
-};
-use tracing::Level;
 
 pub(crate) async fn serve(
     options: &Options,
     state: Arc<State>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<JoinHandle<Result<(), ServerErr>>, ServerErr> {
-    let state_for_middleware = state.clone();
-    let app = routes::routes(state)
-        // ============================= LAYERS ===================================== //
-        .layer(
-            ServiceBuilder::new()
-                // activity middleware
-                .layer(axum::middleware::from_fn(
-                    move |req: axum::extract::Request, next: axum::middleware::Next| {
-                        let state = state_for_middleware.clone();
-                        async move {
-                            state.activity_tracker.touch();
-                            next.run(req).await
-                        }
-                    },
-                ))
-                // logging middleware
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(DefaultMakeSpan::new().include_headers(true))
-                        .on_request(DefaultOnRequest::new().level(Level::INFO))
-                        .on_response(
-                            DefaultOnResponse::new()
-                                .level(Level::INFO)
-                                .latency_unit(LatencyUnit::Micros),
-                        ),
-                ),
-        );
+    let app = routes::app(state);
 
     // obtain the unix socket file listener
     let listener = acquire_unix_socket_listener(&options.socket_file, async move {

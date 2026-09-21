@@ -4,6 +4,7 @@ pub mod response;
 pub mod routes;
 pub mod sse;
 pub mod state;
+pub mod tcp;
 #[cfg(unix)]
 pub mod unix;
 

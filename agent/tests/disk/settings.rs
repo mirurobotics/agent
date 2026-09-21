@@ -12,6 +12,7 @@ fn serialize_deserialize_settings() {
         log_level: LogLevel::Debug,
         is_persistent: false,
         enable_socket_server: false,
+        socket_server_tcp_port: Some(51823),
         enable_mqtt_worker: false,
         enable_poller: false,
         backend: Backend {
@@ -39,6 +40,7 @@ fn deserialize_settings() {
         },
         is_persistent: false,
         enable_socket_server: false,
+        socket_server_tcp_port: Some(51823),
         enable_mqtt_worker: false,
         enable_poller: false,
     };
@@ -48,6 +50,7 @@ fn deserialize_settings() {
         "mqtt_broker": settings.mqtt_broker,
         "is_persistent": settings.is_persistent,
         "enable_socket_server": settings.enable_socket_server,
+        "socket_server_tcp_port": settings.socket_server_tcp_port,
         "enable_mqtt_worker": settings.enable_mqtt_worker,
         "enable_poller": settings.enable_poller,
     });
@@ -61,6 +64,13 @@ fn deserialize_settings() {
     let valid_input = json!({});
     let deserialized = serde_json::from_value::<Settings>(valid_input).unwrap();
     assert_eq!(deserialized, settings);
+
+    // tcp port is opt-in: absent or null leaves it disabled
+    let deserialized = serde_json::from_value::<Settings>(json!({
+        "socket_server_tcp_port": null
+    }))
+    .unwrap();
+    assert_eq!(deserialized.socket_server_tcp_port, None);
 
     // invalid JSON
     assert!(serde_json::from_str::<Settings>("invalid-json").is_err());

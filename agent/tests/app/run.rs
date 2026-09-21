@@ -94,6 +94,7 @@ async fn max_runtime_reached() {
         },
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            tcp_port: Some(0),
         },
         ..Default::default()
     };
@@ -129,6 +130,7 @@ async fn is_persistent() {
         },
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -167,6 +169,7 @@ async fn idle_timeout_reached() {
         },
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -201,6 +204,7 @@ async fn shutdown_signal_received() {
         },
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            ..Default::default()
         },
         ..Default::default()
     };

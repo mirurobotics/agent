@@ -31,6 +31,16 @@ pub struct BindUnixSocketErr {
 impl crate::errors::Error for BindUnixSocketErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to bind tcp listener on '{addr}': {source}")]
+pub struct BindTcpListenerErr {
+    pub addr: std::net::SocketAddr,
+    pub source: std::io::Error,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for BindTcpListenerErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("failed to run axum server: {source}")]
 pub struct RunAxumServerErr {
     pub source: std::io::Error,
@@ -95,6 +105,8 @@ pub enum ServerErr {
     // external crate errors
     #[error(transparent)]
     BindUnixSocketErr(BindUnixSocketErr),
+    #[error(transparent)]
+    BindTcpListenerErr(BindTcpListenerErr),
     #[error(transparent)]
     RunAxumServerErr(RunAxumServerErr),
     #[error(transparent)]
@@ -189,6 +201,7 @@ crate::impl_error!(ServerErr {
     SyncErr,
     UploadErr,
     BindUnixSocketErr,
+    BindTcpListenerErr,
     RunAxumServerErr,
     JoinHandleErr,
 });
