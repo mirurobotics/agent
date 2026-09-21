@@ -28,6 +28,21 @@ pub struct BaseDevice {
     /// The version of the agent the device is running.
     #[serde(rename = "agent_version", deserialize_with = "Option::deserialize")]
     pub agent_version: Option<String>,
+    /// The operating system family the device is running (`linux` or `windows`), reported by the agent. This is the machine-readable OS kind, distinct from the human-readable `os_version` string.
+    #[serde(rename = "os", deserialize_with = "Option::deserialize")]
+    pub os: Option<models::Os>,
+    /// The hostname of the device as reported by the agent.
+    #[serde(rename = "hostname", deserialize_with = "Option::deserialize")]
+    pub hostname: Option<String>,
+    /// The CPU architecture the device is running (`x86_64` or `aarch64`), reported by the agent.
+    #[serde(rename = "arch", deserialize_with = "Option::deserialize")]
+    pub arch: Option<models::Arch>,
+    /// The human-readable long operating system version string reported by the agent (for example `Ubuntu 22.04` or `Windows 11 Pro`). Distinct from the machine-readable `os` family.
+    #[serde(rename = "os_version", deserialize_with = "Option::deserialize")]
+    pub os_version: Option<String>,
+    /// The operating system kernel version string reported by the agent.
+    #[serde(rename = "kernel_version", deserialize_with = "Option::deserialize")]
+    pub kernel_version: Option<String>,
     /// Timestamp of when the device was last made an initial connection (this is not the same as the last time the device was seen).
     #[serde(rename = "last_connected_at", deserialize_with = "Option::deserialize")]
     pub last_connected_at: Option<String>,
@@ -43,7 +58,7 @@ pub struct BaseDevice {
 }
 
 impl BaseDevice {
-    pub fn new(object: Object, id: String, name: String, description: Option<String>, status: models::DeviceStatus, agent_version: Option<String>, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String) -> BaseDevice {
+    pub fn new(object: Object, id: String, name: String, description: Option<String>, status: models::DeviceStatus, agent_version: Option<String>, os: Option<models::Os>, hostname: Option<String>, arch: Option<models::Arch>, os_version: Option<String>, kernel_version: Option<String>, last_connected_at: Option<String>, last_disconnected_at: Option<String>, created_at: String, updated_at: String) -> BaseDevice {
         BaseDevice {
             object,
             id,
@@ -51,6 +66,11 @@ impl BaseDevice {
             description,
             status,
             agent_version,
+            os,
+            hostname,
+            arch,
+            os_version,
+            kernel_version,
             last_connected_at,
             last_disconnected_at,
             created_at,
