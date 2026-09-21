@@ -86,6 +86,11 @@ pub mod app_options_default {
     }
 
     #[test]
+    fn tcp_transport_disabled() {
+        assert!(AppOptions::default().server.tcp_port.is_none());
+    }
+
+    #[test]
     fn mqtt_worker_enabled() {
         assert!(AppOptions::default().enable_mqtt_worker);
     }

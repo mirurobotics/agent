@@ -14,6 +14,9 @@ pub struct Settings {
     pub mqtt_broker: MQTTBroker,
     pub is_persistent: bool,
     pub enable_socket_server: bool,
+    /// Loopback TCP port for the local device API. `None` disables the TCP
+    /// transport (the unix socket is unaffected); `0` lets the OS assign a port.
+    pub socket_server_tcp_port: Option<u16>,
     pub enable_mqtt_worker: bool,
     pub enable_poller: bool,
 }
@@ -26,6 +29,7 @@ impl Default for Settings {
             mqtt_broker: MQTTBroker::default(),
             is_persistent: true,
             enable_socket_server: true,
+            socket_server_tcp_port: None,
             enable_mqtt_worker: true,
             enable_poller: true,
         }
@@ -44,6 +48,7 @@ impl<'de> Deserialize<'de> for Settings {
             mqtt_broker: Option<MQTTBroker>,
             is_persistent: Option<bool>,
             enable_socket_server: Option<bool>,
+            socket_server_tcp_port: Option<u16>,
             enable_mqtt_worker: Option<bool>,
             enable_poller: Option<bool>,
         }
@@ -78,6 +83,8 @@ impl<'de> Deserialize<'de> for Settings {
                     default.enable_socket_server
                 )
             }),
+            // absent means "no tcp transport", which is the default, so no warning
+            socket_server_tcp_port: result.socket_server_tcp_port,
             enable_mqtt_worker: result.enable_mqtt_worker.unwrap_or_else(|| {
                 deserialize_warn!("settings", "enable_mqtt_worker", default.enable_mqtt_worker)
             }),

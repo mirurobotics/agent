@@ -43,7 +43,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `mqtt` — rumqttc-based MQTT subscriber. Listens for real-time events from the backend (e.g., new deployment available) so the agent can react immediately instead of waiting for the next poll.
 
-`server` — axum HTTP server on a Unix socket (`/tmp/miru.sock`). Exposes device state, health, and action endpoints for the CLI and frontend. Route handlers live in `server/handlers.rs`.
+`server` — axum HTTP server exposing device state, health, and action endpoints for on-device applications, the CLI, and the frontend. One router (`server/routes.rs`) is served over two transports: a Unix socket (`/run/miru/miru.sock`, `server/unix.rs`, unix only) and, when `settings.socket_server_tcp_port` is set, IPv4 loopback TCP (`127.0.0.1:<port>`, `server/tcp.rs`, all platforms; port `0` is OS-assigned). Nothing is ever bound on a non-loopback interface. Route handlers live in `server/handlers.rs`.
 
 ### Security
 
@@ -100,7 +100,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
 - **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based via `storage::Layout`. The backend owns the database.
-- **Windows is persistent-only.** `settings.is_persistent = false` is ignored on Windows with a startup warning (`platform::supports_idle_exit`). Socket activation and idle exit are Linux-only.
+- **Windows is persistent-only.** `settings.is_persistent = false` is ignored on Windows with a startup warning (`platform::supports_idle_exit`). Socket activation and idle exit are Linux-only. The Unix socket transport is unix-only, so on Windows the local device API is served only when `socket_server_tcp_port` is set; otherwise `enable_socket_server` warns and nothing listens.
 
 ## Cross-Cutting Concerns
 
