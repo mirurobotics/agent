@@ -179,6 +179,11 @@ async fn update_device<HTTPClientT: ClientI>(
             id: &device.id,
             payload: &backend_api::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(version.to_string()),
+                os: None,
+                hostname: None,
+                arch: None,
+                os_version: None,
+                kernel_version: None,
             },
             token: &token.token,
         },
