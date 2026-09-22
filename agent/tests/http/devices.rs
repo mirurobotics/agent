@@ -87,6 +87,7 @@ pub mod reprovision {
         let payload = ReprovisionDeviceRequest {
             public_key_pem: "test-pem".to_string(),
             agent_version: "v0.0.0".to_string(),
+            ..Default::default()
         };
         let expected_body = serde_json::to_string(&payload).unwrap();
 
@@ -197,6 +198,7 @@ pub mod update {
 
         let payload = UpdateDeviceFromAgentRequest {
             agent_version: Some("1.2.3".to_string()),
+            ..Default::default()
         };
         let expected_body = serde_json::to_string(&payload).unwrap();
 
