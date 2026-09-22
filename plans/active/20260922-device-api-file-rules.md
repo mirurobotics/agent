@@ -25,7 +25,7 @@ A file rule uploads files only when it has an `upload` block; retention-only rul
 - [x] M1: Vendor device spec v0.2.2, regenerate `libs/device-api`, populate `Release.file_rule_ids` and `VersionResponse.api_release_version` (commit). Done 2026-09-22: render and regen matched the expected file lists exactly (spec +410/-31; 6 modified and 5 new device models; backend models unchanged); `server::` and `version::` tests pass (68).
 - [x] M2: `file_rule` service, `BaseFileRule` conversion, handler, route, tests, docs (commit). Done 2026-09-22: 10 new tests pass (2 service, 5 conversion, 3 route); custom linter clean on `agent/src` and `agent/tests`.
 - [x] M3: `release::get` caches file-rule bodies on backend fallback (commit). Done 2026-09-22: 12 `get` and 8 `get_current` test call sites updated; 3 new tests pass; `services::release` and `server::handlers` pass (39).
-- [ ] M4: Local validation; push; preflight reports CLEAN (CI green on the pushed head).
+- [x] M4: Local validation; push; preflight reports CLEAN (CI green on the pushed head). Done 2026-09-22: fmt, clippy `-D warnings`, the custom linter, and the full suite passed locally (apart from the root-only permission tests below). Draft PR mirurobotics/agent#261; CI run 35782899758 on `c0e39f9` passed `lint`, `test` (covgate), `windows-check`, and `tools` in the first CI round.
 
 ## Surprises & Discoveries
 
@@ -42,7 +42,10 @@ A file rule uploads files only when it has an `upload` block; retention-only rul
 
 ## Outcomes & Retrospective
 
-(Fill in at completion.)
+- The agent now serves Device API v0.2.2. `Release` responses carry `file_rule_ids`, `GET /v0.2/file_rules/{file_rule_id}` serves cached rules (404 `resource_not_found` otherwise), and `GET /v0.2/version` reports `api_release_version`. The client flow (`/releases/current`, then `/file_rules/{id}` for each id, then check `upload`) is covered end to end through the router.
+- `release::get` no longer drops rule bodies on a backend fallback, and it caches the release only after every rule body is cached.
+- Each milestone was one commit, plus one comment-wording refinement (`docs(server)`). The plan needed no deviations. CI was green on the first round and every `.covgate` passed, including the new `services/file_rule` gate at 100.
+- Follow-ups (out of scope): tag `device/v0.2.2` in openapi and re-vendor if the asset differs beyond `built_at`; document the field and endpoint in the docs repo; regenerate the Python device SDK.
 
 ## Context and Orientation
 
