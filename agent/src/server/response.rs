@@ -42,6 +42,7 @@ impl From<&models::Release> for device_server::Release {
             id: release.id.clone(),
             version: release.version.clone(),
             git_commit_id: release.git_commit_id.clone(),
+            file_rule_ids: release.file_rule_ids.clone(),
             created_at: release.created_at.to_rfc3339(),
         }
     }

@@ -11,29 +11,29 @@ use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub enum ApiGitCommit {
-    #[serde(rename = "81f3a3a05a8a3c4e6502304248e73aa7683895b8")]
-    API_GIT_COMMIT,
+pub enum ReleaseVersion {
+    #[serde(rename = "v0.2.2")]
+    RELEASE_VERSION,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    ApiGitCommitUnknown,
+    ReleaseVersionUnknown,
 }
 
-impl std::fmt::Display for ApiGitCommit {
+impl std::fmt::Display for ReleaseVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::API_GIT_COMMIT => write!(f, "81f3a3a05a8a3c4e6502304248e73aa7683895b8"),
-            Self::ApiGitCommitUnknown => write!(f, "unknown"),
+            Self::RELEASE_VERSION => write!(f, "v0.2.2"),
+            Self::ReleaseVersionUnknown => write!(f, "unknown"),
         }
     }
 }
 
-impl Default for ApiGitCommit {
-    fn default() -> ApiGitCommit {
-        Self::API_GIT_COMMIT
+impl Default for ReleaseVersion {
+    fn default() -> ReleaseVersion {
+        Self::RELEASE_VERSION
     }
 }
 
