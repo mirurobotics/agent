@@ -6,12 +6,14 @@ use crate::services::{
     backend::BackendFetcher,
     errors::{FileRulesNotExpandedErr, ServiceErr},
 };
+use backend_api::models as backend_client;
 
 // external crates
 use tracing::error;
 
 pub async fn get<B: BackendFetcher>(
     releases: &disk::Releases,
+    file_rules: &disk::FileRules,
     backend: &B,
     id: String,
 ) -> Result<models::Release, ServiceErr> {
@@ -19,8 +21,8 @@ pub async fn get<B: BackendFetcher>(
     if let Some(rls) = cached {
         return Ok(rls);
     }
-    let backend_rls = backend.fetch_release(&id).await?;
-    let backend_rules = backend_rls.file_rules.as_ref().ok_or_else(|| {
+    let mut backend_rls = backend.fetch_release(&id).await?;
+    let backend_rules = backend_rls.file_rules.take().ok_or_else(|| {
         ServiceErr::FileRulesNotExpanded(FileRulesNotExpandedErr {
             release_id: id.clone(),
         })
@@ -28,8 +30,31 @@ pub async fn get<B: BackendFetcher>(
     let file_rule_ids: Vec<models::FileRuleID> =
         backend_rules.iter().map(|r| r.id.clone()).collect();
     let storage_rls = models::Release::from_backend(backend_rls, file_rule_ids);
-    cache_release(releases, storage_rls.clone()).await;
+    // A cached release skips the backend fetch, so never cache it while one of
+    // its rule bodies is missing.
+    if cache_file_rules(file_rules, backend_rules).await {
+        cache_release(releases, storage_rls.clone()).await;
+    }
     Ok(storage_rls)
+}
+
+async fn cache_file_rules(
+    file_rules: &disk::FileRules,
+    rules: Vec<backend_client::BaseFileRule>,
+) -> bool {
+    let mut all_cached = true;
+    for rule in rules {
+        let rule = models::FileRule::from(rule);
+        let id = rule.id.clone();
+        if let Err(e) = file_rules
+            .write_if_absent(id.clone(), rule, |_, _| false)
+            .await
+        {
+            error!("failed to cache file rule {id}: {e}");
+            all_cached = false;
+        }
+    }
+    all_cached
 }
 
 async fn cache_release(releases: &disk::Releases, storage_rls: models::Release) {
