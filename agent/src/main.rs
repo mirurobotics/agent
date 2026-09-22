@@ -273,6 +273,12 @@ async fn run_agent(log_options: logs::Options, latch: Latch) -> RunOutcome {
         tracing::warn!("Failed to apply settings.log_level to running logger: {e}");
     }
 
+    // best-effort: refresh the backend's view of this device's system metadata
+    // (hostname, os/kernel version) if it drifted since the last boot. Borrows
+    // the backend host before `settings` is moved into build_app_options below;
+    // never blocks or fails startup.
+    miru_agent::app::metadata_sync::run_on_boot(&layout, &settings.backend.host).await;
+
     // run the server
     let options = build_app_options(settings);
     info!("Running the server with options: {:?}", options);

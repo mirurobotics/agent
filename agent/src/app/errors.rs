@@ -15,3 +15,11 @@ pub enum UpgradeErr {
     #[error(transparent)]
     FileSysErr(#[from] filesys::FileSysErr),
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum MetadataSyncErr {
+    #[error(transparent)]
+    DiskErr(#[from] disk::DiskErr),
+    #[error(transparent)]
+    HTTPErr(#[from] http::HTTPErr),
+}
