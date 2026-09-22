@@ -86,7 +86,7 @@ async fn provision_with_backend<HTTPClientT: http::ClientI>(
     device_name: Option<String>,
 ) -> Result<backend_client::Device, ProvisionErr> {
     let public_key_pem = files::read_string(public_key_file).await?;
-    let meta = shared::system_metadata();
+    let meta = models::system_metadata();
     let payload = backend_client::ProvisionDeviceRequest {
         public_key_pem,
         agent_version: version::VERSION.to_string(),
