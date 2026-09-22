@@ -24,7 +24,7 @@ A file rule uploads files only when it has an `upload` block; retention-only rul
 
 - [x] M1: Vendor device spec v0.2.2, regenerate `libs/device-api`, populate `Release.file_rule_ids` and `VersionResponse.api_release_version` (commit). Done 2026-09-22: render and regen matched the expected file lists exactly (spec +410/-31; 6 modified and 5 new device models; backend models unchanged); `server::` and `version::` tests pass (68).
 - [x] M2: `file_rule` service, `BaseFileRule` conversion, handler, route, tests, docs (commit). Done 2026-09-22: 10 new tests pass (2 service, 5 conversion, 3 route); custom linter clean on `agent/src` and `agent/tests`.
-- [ ] M3: `release::get` caches file-rule bodies on backend fallback (commit).
+- [x] M3: `release::get` caches file-rule bodies on backend fallback (commit). Done 2026-09-22: 12 `get` and 8 `get_current` test call sites updated; 3 new tests pass; `services::release` and `server::handlers` pass (39).
 - [ ] M4: Local validation; push; preflight reports CLEAN (CI green on the pushed head).
 
 ## Surprises & Discoveries

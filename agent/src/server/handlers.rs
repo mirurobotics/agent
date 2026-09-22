@@ -105,7 +105,13 @@ pub async fn get_release(
     handle(
         async {
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
-            let release = rls_svc::get(&state.storage.releases, &backend, release_id).await?;
+            let release = rls_svc::get(
+                &state.storage.releases,
+                &state.storage.file_rules,
+                &backend,
+                release_id,
+            )
+            .await?;
             Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting release",
@@ -120,6 +126,7 @@ pub async fn get_current_release(AxumState(state): AxumState<Arc<State>>) -> imp
             let release = rls_svc::get_current(
                 &state.storage.deployments,
                 &state.storage.releases,
+                &state.storage.file_rules,
                 &backend,
             )
             .await?;
