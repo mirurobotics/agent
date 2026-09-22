@@ -9,7 +9,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 | `/home/user/agent` (`mirurobotics/agent`) | read-write | Re-vendor the Device API spec, regenerate `libs/device-api`, serve the new field and endpoint, cache file-rule bodies on release cache misses, tests, docs. |
 | `/home/user/openapi` (`mirurobotics/openapi`, `main` at `81f3a3a`) | read-only | Source of the device-server bundle and of the release stamping code (`tools/release/spec.py`). Nothing is written there. |
 
-This plan lives in the agent repo because every change is made there. Work on the already checked-out branch `claude/sleepy-cannon-bmq3zz` (level with `origin/main`); do not create or switch branches and do not push from the milestones. Run git from `/home/user/agent`. Stage files by explicit path (never `git add .` or `git add -A`). Use Conventional Commits; every commit message ends with the attribution trailer lines supplied by the orchestrator, and no model identifiers appear anywhere else.
+This plan lives in the agent repo because every change is made there. Work on the already checked-out branch `claude/sleepy-cannon-bmq3zz` (level with `origin/main`); do not create or switch branches and do not push from the milestones. Run git from `/home/user/agent`. Stage files by explicit path (never `git add .` or `git add -A`). Use Conventional Commits; every commit message ends with the two attribution trailer lines (`Co-Authored-By: …` and `Claude-Session: …`) supplied by the orchestrator, and no model identifiers appear anywhere else. Out of scope: the docs repo, the Python device SDK, and cutting the `device/v0.2.2` tag in openapi.
 
 ## Purpose / Big Picture
 
@@ -155,7 +155,7 @@ API version reporting lives in `agent/src/version/mod.rs`. `api_version()` retur
 
    Create `agent/src/services/file_rule/.covgate` containing `100`. Add `pub mod file_rule;` after `pub mod events;` in `agent/src/services/mod.rs`.
 2. `agent/src/server/response.rs`: add field-copy conversions `From<&models::FileRuleSource> for device_server::FileRuleSource` and `From<&models::FileRuleUpload> for device_server::FileRuleUpload`. Add a private `fn to_retention(retention: &models::FileRuleRetention, has_upload: bool) -> device_server::FileRuleRetention` that sets `require_upload: has_upload.then_some(retention.require_upload)` and `ttl_secs: i64::try_from(retention.ttl_secs).unwrap_or(i64::MAX)`. Add `From<&models::FileRule> for device_server::BaseFileRule` with `object: device_server::base_file_rule::Object::FileRule`, boxed `source`, `upload`, and `retention` (the latter through `to_retention(r, rule.upload.is_some())`), and timestamps via `to_rfc3339()`.
-3. `agent/src/server/handlers.rs`: add `file_rule as file_rule_svc` to the `crate::services::{...}` import. Add a `FILE RULES` banner section with `get_file_rule(AxumState(state): AxumState<Arc<State>>, Path(file_rule_id): Path<String>)`. It calls `file_rule_svc::get(&state.storage.file_rules, file_rule_id)`, returns `device_server::BaseFileRule::from(&rule)`, and uses the error message `"Error getting file rule"`.
+3. `agent/src/server/handlers.rs`: add `file_rule as file_rule_svc` to the `crate::services::{...}` import. Add a `FILE RULES` banner section with `get_file_rule(AxumState(state): AxumState<Arc<State>>, Path(file_rule_id): Path<String>)`. Mirror `get_git_commit`: it calls `file_rule_svc::get(&state.storage.file_rules, file_rule_id)`, returns `device_server::BaseFileRule::from(&rule)`, and uses the error message `"Error getting file rule"`.
 4. `agent/src/server/routes.rs`: after the git-commits route, add a `FILE RULES` banner and `.route(format!("/{api_version}/file_rules/{{file_rule_id}}").as_str(), get(handlers::get_file_rule))`.
 5. `ARCHITECTURE.md`: add `file_rule` (cached file-rule lookup) to the `services/` submodule list. In the "Generated code" paragraph, add one sentence saying that the vendored specs are the openapi release-stamped artifacts (they carry `x-release-version` and `x-git-commit`), not raw bundles. A search found no README, AGENTS.md, or CHANGELOG list of Device API routes to update.
 6. Add the M2 tests listed under Validation and Acceptance. Declare `pub mod file_rule;` in `agent/tests/services/mod.rs` and `pub mod get;` in the new `agent/tests/services/file_rule/mod.rs`.
@@ -183,7 +183,7 @@ Run every command from `/home/user/agent` unless another directory is stated. Th
 
 Check the preconditions:
 
-    git status --short                                    # expect empty
+    git status --short                                    # expect nothing outside plans/
     git -C /home/user/openapi cat-file -e 81f3a3a05a8a3c4e6502304248e73aa7683895b8 && echo ok
     python3 -c 'import yaml' && echo ok                   # PyYAML (used by spec.py)
 
