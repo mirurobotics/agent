@@ -5,11 +5,11 @@ use backend_api::models as backend_client;
 // external crates
 use serde::{Deserialize, Serialize};
 
-/// Optional device system metadata reported to the backend on provision and
-/// reprovision, and refreshed best-effort on boot (see
-/// [`crate::app::metadata_sync`]). Any field that cannot be determined on the
-/// running host is `None`, so it is omitted from the request body rather than
-/// sent as an empty string.
+/// Optional device system metadata: the OS family and CPU architecture from the
+/// build-time target vocabulary, plus the host's hostname and OS/kernel version
+/// strings. Any field that cannot be determined on the running host is `None`, so
+/// it is omitted from the serialized request body rather than sent as an empty
+/// string.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemMetadata {
     pub os: Option<backend_client::Os>,
@@ -21,9 +21,8 @@ pub struct SystemMetadata {
 
 impl SystemMetadata {
     /// Build a device-update request carrying only these system-metadata fields.
-    /// `agent_version` is always `None` here — the upgrade path owns that field
-    /// (see [`crate::app::upgrade`]) — and every `None` field is omitted from the
-    /// serialized body.
+    /// `agent_version` is left `None` (this request never sets the running
+    /// version), and every `None` field is omitted from the serialized body.
     pub fn to_update_request(&self) -> backend_client::UpdateDeviceFromAgentRequest {
         backend_client::UpdateDeviceFromAgentRequest {
             agent_version: None,
