@@ -23,6 +23,9 @@ pub struct VersionResponse {
     /// The git commit of the API.
     #[serde(rename = "api_git_commit")]
     pub api_git_commit: String,
+    /// The API release version of the agent.
+    #[serde(rename = "api_release_version")]
+    pub api_release_version: String,
     /// The version of Rust.
     #[serde(rename = "rust_version")]
     pub rust_version: String,
@@ -38,12 +41,13 @@ pub struct VersionResponse {
 }
 
 impl VersionResponse {
-    pub fn new(version: String, git_commit: String, api_version: String, api_git_commit: String, rust_version: String, build_date: String, os: String, arch: String) -> VersionResponse {
+    pub fn new(version: String, git_commit: String, api_version: String, api_git_commit: String, api_release_version: String, rust_version: String, build_date: String, os: String, arch: String) -> VersionResponse {
         VersionResponse {
             version,
             git_commit,
             api_version,
             api_git_commit,
+            api_release_version,
             rust_version,
             build_date,
             os,

@@ -227,6 +227,7 @@ pub mod release_response {
             id: "rls-1".into(),
             version: "1.0.0".into(),
             git_commit_id: None,
+            file_rule_ids: Vec::new(),
             created_at: t.to_rfc3339(),
         };
 
@@ -251,6 +252,32 @@ pub mod release_response {
             id: "rls-2".into(),
             version: "2.0.0".into(),
             git_commit_id: Some("gc-1".into()),
+            file_rule_ids: Vec::new(),
+            created_at: t.to_rfc3339(),
+        };
+
+        let sdk: openapi::Release = (&rls).into();
+        assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_release_with_file_rule_ids() {
+        let t = fixed_time();
+        let rls = Release {
+            id: "rls-3".into(),
+            version: "3.0.0".into(),
+            git_commit_id: None,
+            created_at: t,
+            updated_at: t,
+            file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
+        };
+
+        let expected = openapi::Release {
+            object: openapi::release::Object::Release,
+            id: "rls-3".into(),
+            version: "3.0.0".into(),
+            git_commit_id: None,
+            file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
             created_at: t.to_rfc3339(),
         };
 

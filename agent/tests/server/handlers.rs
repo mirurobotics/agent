@@ -40,6 +40,7 @@ pub mod version_tests {
             git_commit: COMMIT.to_string(),
             api_version: version::api_version(),
             api_git_commit: version::api_git_commit(),
+            api_release_version: version::api_release_version(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
@@ -400,7 +401,7 @@ pub mod routes {
                 git_commit_id: None,
                 created_at: t,
                 updated_at: t,
-                file_rule_ids: Vec::new(),
+                file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
             };
             f.state
                 .storage
@@ -415,6 +416,7 @@ pub mod routes {
             let actual: openapi::Release = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(actual.id, "rls-1");
             assert_eq!(actual.version, "2.0.0");
+            assert_eq!(actual.file_rule_ids, vec!["fr-1", "fr-2"]);
         }
 
         #[tokio::test]

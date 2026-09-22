@@ -7,70 +7,173 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.1
+  x-release-version: v0.2.2
   x-git-commit:
-    sha: 10dc72e22958a4851e7f6718f5b7542b0c7f62e1
-    url: https://github.com/mirurobotics/openapi/commit/10dc72e22958a4851e7f6718f5b7542b0c7f62e1
-    message: 'feat(lint): add x-summary to event schemas and enforce via MIRU024 (#15)
+    sha: 81f3a3a05a8a3c4e6502304248e73aa7683895b8
+    url: https://github.com/mirurobotics/openapi/commit/81f3a3a05a8a3c4e6502304248e73aa7683895b8
+    message: 'feat(device): add file_rule_ids to releases and GET /file_rules/{file_rule_id}
+      (#291)
 
 
       ## Summary
 
 
-      - Add `x-summary` extension field and richer `description` to all
+      - Adds a required `file_rule_ids` array (`string[]`) to the
 
-      `*Event` data schemas (`DeploymentDeployedEvent`,
+      device-server `Release` schema. It is an empty array when the release
 
-      `DeploymentRemovedEvent`, `ValidateDeploymentEvent`)
+      has no file rules. Both the property and the schema-level `example`
 
-      - Add MIRU024 lint rule (`event_schema_x_summary_required`) that
+      include `["file_rule_123"]`.
 
-      enforces `x-summary` on all `*Event` schemas (excluding the `Event`
+      - Adds `GET /file_rules/{file_rule_id}` (`getFileRule`, tag `File
 
-      envelope)
+      Rules`) to the Device API. It returns the shared `BaseFileRule` and
 
-      - Add 3 test fixtures and test class for MIRU024 (197 tests pass, 99%
+      reuses the shared `file_rule_id` path parameter from
 
-      coverage)
+      `apis/configs/params.yaml`.
+
+      - Registers a `file_rules` resource in `tools/stainless/device.yml`
+
+      (`retrieve: get /file_rules/{file_rule_id}`, model `file_rule` →
+
+      `BaseFileRule`). MIRU018 route parity requires this. Without it, lint
+
+      fails with `Route get /file_rules/{file_rule_id} is in OpenAPI spec but
+
+      not in Stainless config`.
+
+      - Regenerates `apis/apps/device-server/openapi.gen.yaml`. No other
+
+      bundle changes.
 
 
-      The `x-summary` field is consumed by the docs codegen
-
-      (`docs/api/generate_event_pages.py`) as the page subtitle, while
-
-      `description` provides the longer inline body text. This makes generated
-
-      event type reference pages more useful.
+      ## Why the design changed
 
 
-      ## Test plan
+      This PR first added `expand=file_rules` to the release endpoints (commit
+
+      `93ef737`). That approach is **reverted** in a new revert commit
+
+      (`805d8e9`), with no history rewritten. The Device API already
+
+      references related resources by ID and has a GET for each. For example,
+
+      `Deployment.release_id` → `GET /releases/{release_id}` and
+
+      `Release.git_commit_id` → `GET /git_commits/{git_commit_id}`. The Device
+
+      API has no `expand` parameter anywhere, so `expand=file_rules` would
+
+      have been the first. The IDs go on `Release`, not `Deployment`, because
+
+      every Miru API attaches file rules to releases (e.g.
+
+      `CreateReleaseRequest.file_rule_ids`). The agent also already stores
+
+      `file_rule_ids` on its internal release model.
 
 
-      - [x] `./tools/lint/test.sh` — 197 tests pass
+      The branch also merges `origin/main` with a merge commit, which brings
 
-      - [x] `./tools/lint/covgate.sh` — 99% coverage (gate: 98%)
+      in #290 (custom-code tracking files only; bundles stay fresh).
 
-      - [x] `./scripts/lint.sh` — all custom MIRU rules and Redocly clean
 
-      - [x] MIRU024 fires on `*Event` schema missing `x-summary`
+      ## Client flow
 
-      - [x] MIRU024 passes when `x-summary` is present
 
-      - [x] MIRU024 exempts the `Event` envelope schema
+      1. `GET /releases/current` returns the release of the currently deployed
+
+      deployment, including `file_rule_ids`.
+
+      2. `GET /file_rules/{id}` for each ID.
+
+      3. Check `upload`. A rule uploads files when `upload` is present.
+
+      Retention-only rules omit it.
+
+
+      With the generated Python device SDK:
+
+
+      ```python
+
+      rel = client.releases.current()
+
+      uploads = any(client.file_rules.retrieve(i).upload is not None for i in rel.file_rule_ids)
+
+      ```
+
+
+      ## Versioning
+
+
+      The change is additive and backward compatible for clients. The API
+
+      version stays `v0.2`, and the socket URL stays `http://localhost/v0.2`.
+
+      It ships as Device API `v0.2.2` when a maintainer tags `device/v0.2.2`
+
+      on the merge commit on `main` after merge. No source file is bumped,
+
+      because `x-release-version` is written at release time from the tag.
+
+
+      ## Validation
+
+
+      - `scripts/preflight.sh`: all checks passed (MIRU lint + Redocly lint,
+
+      surface lint, tool tests and coverage).
+
+      - `scripts/is-stale.sh`: all generated specs are up to date after every
+
+      commit.
+
+      - Acceptance script against the bundle: `Release.file_rule_ids` is
+
+      required, `expand`/`ReleaseExpansion` are gone, `getFileRule` returns
+
+      `BaseFileRule`, and the servers URL is unchanged.
+
+      - MIRU018 guard: removing the Stainless entry makes lint fail for `get
+
+      /file_rules/{file_rule_id}`, and restoring it makes lint pass.
+
+
+      ## Out of scope (follow-ups)
+
+
+      - Agent: serving `Release.file_rule_ids` and `GET
+
+      /file_rules/{file_rule_id}` from its local file-rule cache (404 when not
+
+      cached).
+
+      - Device SDK release.
+
+      - Docs-repo updates.
+
+
+      Plan: `plans/active/20260922-device-file-rule-ids-and-endpoint.md`.
 
 
       🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
 
+      https://claude.ai/code/session_014KRJokLfSVXNVbkJFpQK44
+
+
       ---------
 
 
-      Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
-    author: ben-miru
+      Co-authored-by: Claude <noreply@anthropic.com>'
+    author: miru-agents
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-04-06T19:21:53.148075+00:00'
+    built_at: '2026-09-22T20:30:31.318897+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -162,6 +265,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SyncDeviceResponse'
+  /file_rules/{file_rule_id}:
+    get:
+      tags:
+      - File Rules
+      summary: Get
+      description: Retrieve a file rule by its ID.
+      operationId: getFileRule
+      parameters:
+      - $ref: '#/components/parameters/file_rule_id'
+      responses:
+        '200':
+          description: Successfully retrieved the file rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseFileRule'
   /git_commits/{git_commit_id}:
     get:
       tags:
@@ -291,10 +410,17 @@ components:
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
+    ReleaseVersion:
+      type: string
+      enum:
+      - v0.2.2
+      x-enum-varnames:
+      - RELEASE_VERSION
+      x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 10dc72e22958a4851e7f6718f5b7542b0c7f62e1
+      - 81f3a3a05a8a3c4e6502304248e73aa7683895b8
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -302,9 +428,9 @@ components:
       title: DeploymentDeployedEvent
       type: object
       x-summary: A deployment's config instances have been written to the device's
-        filesystem.
+        file system.
       description: Emitted when a deployment's config instances have been written
-        to the device's filesystem and are available for consumption. Use this event
+        to the device's file system and are available for consumption. Use this event
         to reload configuration, restart dependent services, or confirm that new configuration
         is live on the device.
       required:
@@ -348,9 +474,9 @@ components:
       title: DeploymentRemovedEvent
       type: object
       x-summary: A deployment's config instances have been removed from the device's
-        filesystem.
+        file system.
       description: Emitted when a deployment's config instances have been removed
-        from the device's filesystem and the deployment has been archived. Use this
+        from the device's file system and the deployment has been archived. Use this
         event to clean up resources or stop services that depended on the removed
         configuration.
       required:
@@ -408,6 +534,7 @@ components:
       - git_commit
       - api_version
       - api_git_commit
+      - api_release_version
       - rust_version
       - build_date
       - os
@@ -429,6 +556,10 @@ components:
           type: string
           description: The git commit of the API.
           example: a1b2c3d4
+        api_release_version:
+          type: string
+          description: The API release version of the agent.
+          example: v0.2.0-beta.1
         rust_version:
           type: string
           description: The version of Rust.
@@ -451,6 +582,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v1-0
         api_git_commit: a1b2c3d4
+        api_release_version: v0.2.0-beta.1
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -758,6 +890,230 @@ components:
         last_attempted_sync_at: '2021-01-01T00:00:00Z'
         in_cooldown: true
         cooldown_ends_at: '2021-01-01T00:00:00Z'
+    FileRuleSource:
+      title: File Rule Source
+      type: object
+      required:
+      - glob
+      - stability_window_secs
+      properties:
+        glob:
+          type: string
+          pattern: ^/
+          maxLength: 1024
+          example: /var/log/robot/*.log
+          description: A glob pattern selecting the files this rule manages. Must
+            be absolute (start with `/`), at most 1024 bytes, and must contain no
+            `..` segments and no empty path segments.
+        stability_window_secs:
+          type: integer
+          format: int64
+          example: 60
+          description: How long, in seconds, a matching file's size and modification
+            time must stay unchanged (quiescent) before it is considered finished
+            and eligible for upload. Files in a format with a finalization marker
+            (e.g. MCAP, parquet) are detected directly; this window is the fallback
+            for other files.
+      example:
+        glob: /var/log/robot/*.log
+        stability_window_secs: 60
+    FileRuleUpload:
+      title: File Rule Upload
+      type: object
+      required:
+      - upload_collection_id
+      - upload_collection_name
+      - bucket_id
+      - bucket_name
+      - path
+      properties:
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection the resulting uploads are grouped
+            into.
+        upload_collection_name:
+          type: string
+          example: Robot Logs
+          description: The name of the upload collection the resulting uploads are
+            grouped into.
+        bucket_id:
+          type: string
+          example: bkt_123
+          description: ID of the bucket this rule uploads to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Name of the bucket this rule uploads to.
+        path:
+          type: string
+          pattern: .*\{upload_id\}.*
+          maxLength: 1024
+          example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+          description: The object-path template the collected file is written to.
+            Must contain `{upload_id}` so every upload lands on a distinct object
+            key, be at most 1024 bytes, have balanced braces, and contain no `..`
+            segments and no empty path segments. The supported variables are `{device_id}`,
+            `{device_name}`, `{file_name}`, `{upload_id}`, `{year}`, `{month}`, `{day}`,
+            `{hour}`, and `{minute}`.
+      example:
+        upload_collection_id: upl_col_123
+        upload_collection_name: Robot Logs
+        bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
+        path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+    FileRuleRetention:
+      title: File Rule Retention
+      type: object
+      description: 'The retention block a file rule carries when it deletes local
+        files; a
+
+        rule without one keeps matching files indefinitely and Miru never
+
+        deletes them. Retention operates in two phases. The retention guarantee
+
+        ends once a matching file goes quiescent — its size and modification
+
+        time have stayed unchanged for `source.stability_window_secs` — and,
+
+        when `require_upload` is `true`, once its upload has been durably
+
+        confirmed; the file is then eligible for deletion, and callers may no
+
+        longer rely on it being present. `ttl_secs` schedules the enforcement
+
+        that follows: how long the file lives on after the guarantee ends
+
+        before the device deletes it. Both phases keep running on the device
+
+        even when no release is deployed, so tearing down a deployment does not
+
+        silently stop reclaiming disk.
+
+        '
+      required:
+      - ttl_secs
+      properties:
+        require_upload:
+          type: boolean
+          example: true
+          description: 'Whether a file must have its upload durably confirmed before
+            it may be deleted. Present exactly when the rule has an `upload` block.
+            When `true`, a slow or failing upload keeps the local file: the device
+            abandons an upload after 9 attempts, so a permanently failing upload retains
+            the file indefinitely. When `false`, the upload is best-effort: the file
+            may be deleted once eligible even if its upload has not completed, and
+            an unfinished upload is abandoned.'
+        ttl_secs:
+          type: integer
+          format: int64
+          example: 604800
+          description: 'How long, in seconds, the file lives on after it becomes eligible
+            for deletion. The clock starts when the retention guarantee ends, not
+            when the file was written: this schedules enforcement of a guarantee that
+            has already ended, so it defers the deletion, not the end of the guarantee.
+            `0` means the file is deleted as soon as it becomes eligible.'
+      example:
+        require_upload: true
+        ttl_secs: 604800
+    BaseFileRule:
+      title: Base File Rule
+      type: object
+      description: 'A file rule declares which files on a device Miru manages and
+        what to do
+
+        with them: upload them to a bucket, delete the local copies once they
+
+        are no longer needed, or both. `retention` is optional and marks the
+
+        rules that delete: when it is absent the device keeps matching files
+
+        indefinitely — Miru never deletes them — and when it is present the rule
+
+        deletes each matching file once its retention guarantee ends. A rule
+
+        that both deletes and uploads always states `retention.require_upload`,
+
+        so whether local deletion waits for the upload is itself an explicit
+
+        decision.
+
+        '
+      required:
+      - object
+      - id
+      - name
+      - digest
+      - source
+      - created_at
+      - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+          - file_rule
+          example: file_rule
+          x-stainless-const: true
+          description: The object type, which is always `file_rule`.
+        id:
+          type: string
+          example: file_rule_123
+          description: ID of the file rule.
+        name:
+          type: string
+          example: Robot Logs
+          description: 'A human-readable name for the file rule. Not unique within
+            a workspace: file rules are immutable, so each authored revision mints
+            a new rule and several rules may share a name. The name participates in
+            the rule''s digest, so renaming a rule mints a new rule.'
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the file rule. File rules are immutable and deduplicated
+            by digest within a workspace.
+        source:
+          $ref: '#/components/schemas/FileRuleSource'
+        upload:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleUpload'
+          description: Where matching files are uploaded. Absent when the rule only
+            enforces local retention.
+        retention:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleRetention'
+          description: Governs deletion of the local copies of matching files. Absent
+            when the device keeps matching files indefinitely — Miru never deletes
+            them; present when the rule deletes each matching file once its retention
+            guarantee ends.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the file rule was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the file rule was last updated.
+      example:
+        object: file_rule
+        id: file_rule_123
+        name: Robot Logs
+        digest: sha256:1234567890
+        source:
+          glob: /var/log/robot/*.log
+          stability_window_secs: 60
+        upload:
+          upload_collection_id: upl_col_123
+          upload_collection_name: Robot Logs
+          bucket_id: bkt_123
+          bucket_name: my-uploads-bucket
+          path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+        retention:
+          require_upload: true
+          ttl_secs: 604800
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
     GitCommit:
       title: Git Commit
       type: object
@@ -812,6 +1168,7 @@ components:
       - id
       - version
       - git_commit_id
+      - file_rule_ids
       - created_at
       properties:
         object:
@@ -834,6 +1191,14 @@ components:
           nullable: true
           example: git_commit_123
           description: The ID of the git commit associated with this release.
+        file_rule_ids:
+          type: array
+          items:
+            type: string
+          example:
+          - file_rule_123
+          description: IDs of the file rules included in this release. Retrieve each
+            file rule with `GET /file_rules/{file_rule_id}`.
         created_at:
           type: string
           format: date-time
@@ -844,6 +1209,8 @@ components:
         id: rls_123
         version: v1.0.0
         git_commit_id: git_commit_123
+        file_rule_ids:
+        - file_rule_123
         created_at: '2024-01-01T00:00:00Z'
     Event:
       title: Event
@@ -915,6 +1282,10 @@ components:
           type: string
           example: This is a message for a user
           description: A human-readable message describing the error.
+      example:
+        code: invalid_request
+        params: {}
+        message: This is a message for a user
   parameters:
     deployment_id:
       name: deployment_id
@@ -924,6 +1295,14 @@ components:
       schema:
         type: string
         example: dpl_123
+    file_rule_id:
+      name: file_rule_id
+      in: path
+      required: true
+      description: The unique identifier of the file rule.
+      schema:
+        type: string
+        example: file_rule_123
     git_commit_id:
       name: git_commit_id
       in: path

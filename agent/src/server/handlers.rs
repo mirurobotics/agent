@@ -41,6 +41,7 @@ pub async fn version() -> impl IntoResponse {
             git_commit: version::COMMIT.to_string(),
             api_version: version::api_version(),
             api_git_commit: version::api_git_commit(),
+            api_release_version: version::api_release_version(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
