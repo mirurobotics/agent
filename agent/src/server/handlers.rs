@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::errors::Error;
 use crate::server::{errors::*, state::State};
 use crate::services::{
-    deployment as dpl_svc, device as dvc_svc, git_commit as git_cmt_svc, release as rls_svc,
-    HttpBackend,
+    deployment as dpl_svc, device as dvc_svc, file_rule as file_rule_svc,
+    git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
 use crate::version;
 use device_api::models as device_server;
@@ -142,6 +142,21 @@ pub async fn get_git_commit(
             Ok::<_, ServerErr>(device_server::GitCommit::from(&gc))
         },
         "Error getting git commit",
+    )
+    .await
+}
+
+// ================================ FILE RULES ===================================== //
+pub async fn get_file_rule(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(file_rule_id): Path<String>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let rule = file_rule_svc::get(&state.storage.file_rules, file_rule_id).await?;
+            Ok::<_, ServerErr>(device_server::BaseFileRule::from(&rule))
+        },
+        "Error getting file rule",
     )
     .await
 }
