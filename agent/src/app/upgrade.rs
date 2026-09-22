@@ -180,9 +180,16 @@ async fn update_device<HTTPClientT: ClientI>(
             payload: &backend_api::models::UpdateDeviceFromAgentRequest {
                 agent_version: Some(version.to_string()),
                 // System-metadata fields are intentionally left unset on the
-                // update path; populating them is a follow-up. Unset fields are
-                // omitted from the request body via `skip_serializing_if`.
-                ..Default::default()
+                // update path (a post-upgrade version report on an unchanged
+                // machine); populating them is a follow-up. Set to None
+                // explicitly so the omission is deliberate rather than a
+                // Default fallthrough. None fields are omitted from the request
+                // body via `skip_serializing_if`.
+                os: None,
+                hostname: None,
+                arch: None,
+                os_version: None,
+                kernel_version: None,
             },
             token: &token.token,
         },
