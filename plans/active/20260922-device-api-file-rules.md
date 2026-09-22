@@ -29,11 +29,16 @@ A file rule uploads files only when it has an `upload` block; retention-only rul
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- Local validation ran as root (uid 0). Seven existing permission-denial tests fail there, because chmod 555/000 does not block root: `deploy::filesys::tests::{rollback_returns_errors_when_restores_fail_synthetic, remove_backups_continues_when_delete_fails}` (lib), and in `mod` `deploy::apply::deploy_errors::config_instance_write_permission_denied`, `deploy::apply::remove_action::remove_io_error_permission_denied`, `filesys::files::copy_to::unreadable_source_returns_copy_file_err_permission_denied`, and `sync::deployments::apply_error_isolation::{apply_error_still_pushes_retrying_status, apply_error_does_not_fail_sync}`. None touch code changed here; CI runs as a non-root user. All other tests pass (lib 462, `mod` 1577).
+- The local `main` ref was two Dependabot commits behind `origin/main`. The branch is based on `origin/main` (`f372c9c`), so compare against `origin/main`.
+- `cargo-llvm-cov`, `cargo-machete`, `cargo-audit`, and `cargo-diet` are not installed locally, so `covgate.sh` and the full `lint.sh` run only in CI. The custom linter (imports, funclen, field asserts), `cargo fmt --check`, and `cargo clippy --all-targets --all-features -D warnings` ran locally and are clean.
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- Each milestone commit includes its tests, as the plan's milestones specify, so `$implement` steps 3–4 (test-plan adjustment and test implementation) produced no separate commit. No deviations from the plan's test list were needed.
+- `cache_miss_rule_cache_failure_does_not_cache_release` shuts the `FileRules` store down before `get`, so every `write_if_absent` fails. This exercises the logged-error branch of `cache_file_rules` and keeps `services/release` at or above its `.covgate`.
+- `converts_retention_only_rule_omits_require_upload` stores `require_upload: true` on a rule without `upload`. That proves the conversion omits the field based on whether an upload block exists, not on the stored value.
+- Living-section updates to this plan ride along in each milestone commit instead of separate commits.
 
 ## Outcomes & Retrospective
 

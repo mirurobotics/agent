@@ -69,7 +69,7 @@ impl From<&models::FileRuleUpload> for device_server::FileRuleUpload {
     }
 }
 
-// The spec sends `require_upload` exactly when the rule has an `upload` block.
+// Per the spec, `require_upload` is present exactly when the rule has an `upload` block.
 fn to_retention(
     retention: &models::FileRuleRetention,
     has_upload: bool,
