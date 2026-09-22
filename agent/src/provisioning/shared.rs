@@ -62,7 +62,7 @@ pub(super) struct SystemMetadata {
     pub kernel_version: Option<String>,
 }
 
-/// Map the build-time OS family (`std::env::consts::OS`) to the backend enum.
+/// Map the build-time OS family ([`std::env::consts::OS`]) to the backend enum.
 /// An unrecognized OS yields `None` so provisioning never fails on it.
 fn map_os(os: &str) -> Option<backend_client::Os> {
     match os {
@@ -72,7 +72,7 @@ fn map_os(os: &str) -> Option<backend_client::Os> {
     }
 }
 
-/// Map the build-time CPU architecture (`std::env::consts::ARCH`) to the
+/// Map the build-time CPU architecture ([`std::env::consts::ARCH`]) to the
 /// backend enum. An unrecognized architecture yields `None`.
 fn map_arch(arch: &str) -> Option<backend_client::Arch> {
     match arch {
@@ -111,8 +111,8 @@ fn build_system_metadata(
 }
 
 /// Gather the running host's system metadata. `os`/`arch` come from the
-/// compile-time `std::env::consts` vocabulary; the human-readable strings come
-/// from telemetry.
+/// compile-time [`std::env::consts::OS`] / [`std::env::consts::ARCH`]
+/// vocabulary; the human-readable strings come from telemetry.
 pub(super) fn system_metadata() -> SystemMetadata {
     build_system_metadata(
         std::env::consts::OS,
