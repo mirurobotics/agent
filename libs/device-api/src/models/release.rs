@@ -23,18 +23,22 @@ pub struct Release {
     /// The ID of the git commit associated with this release.
     #[serde(rename = "git_commit_id", deserialize_with = "Option::deserialize")]
     pub git_commit_id: Option<String>,
+    /// IDs of the file rules included in this release. Retrieve each file rule with `GET /file_rules/{file_rule_id}`.
+    #[serde(rename = "file_rule_ids")]
+    pub file_rule_ids: Vec<String>,
     /// Timestamp of when the release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
 }
 
 impl Release {
-    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, created_at: String) -> Release {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, file_rule_ids: Vec<String>, created_at: String) -> Release {
         Release {
             object,
             id,
             version,
             git_commit_id,
+            file_rule_ids,
             created_at,
         }
     }

@@ -19,6 +19,10 @@ pub fn api_git_commit() -> String {
     device_api::models::ApiGitCommit::API_GIT_COMMIT.to_string()
 }
 
+pub fn api_release_version() -> String {
+    device_api::models::ReleaseVersion::RELEASE_VERSION.to_string()
+}
+
 pub fn format() -> String {
     format!("Version: {}\nCommit: {}", VERSION, COMMIT)
 }
