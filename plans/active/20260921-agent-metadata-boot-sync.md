@@ -23,16 +23,26 @@ Observable behavior: on a device whose hostname changed since last boot, restart
 
 ## Progress
 
-- [ ] (YYYY-MM-DD HH:MMZ) M1 — Relocate `SystemMetadata` to `crate::models`, widen derives, add `to_update_request`, repoint provisioning callers.
-- [ ] M2 — Add `Layout::system_metadata()` + `disk::system_metadata` cache module and its round-trip tests.
-- [ ] M3 — Add `app::metadata_sync` (tested core + best-effort boot wrapper), wire into `main.rs::run_agent`, add sync-decision tests.
+- [x] (2026-09-21) M1 — Relocate `SystemMetadata` to `crate::models`, widen derives, add `to_update_request`, repoint provisioning callers. (commit 774fa647; 8 inline unit tests pass)
+- [x] (2026-09-21) M2 — Add `Layout::system_metadata()` + `disk::system_metadata` cache module and its round-trip tests. (commit 67c3df14; 4 integration tests pass)
+- [x] (2026-09-21) M3 — Add `app::metadata_sync` (tested core + best-effort boot wrapper), wire into `main.rs::run_agent`, add sync-decision tests. (commit a1962169; 5 integration tests pass)
+- [x] (2026-09-21) Refine — review pass; only actionable finding fixed: strip consumer references from `models` docstrings (commit c3be4f4a). Local covgate green: models 100%, disk 97.81%, app 93.45%.
 - [ ] M4 — Validation: preflight reports `CLEAN` and CI is green on the pushed branch head.
 
 Split partially completed work into "done" and "remaining" as needed. Use timestamps when steps complete.
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- Reality matched the plan closely. Two review findings were considered and
+  declined as scope creep against the plan's explicit decisions: (1) moving the
+  impure `system_metadata()` gatherer out of `models` to keep the layer pure —
+  the Decision Log deliberately co-locates it (telemetry is a leaf, no cycle,
+  cohesion); (2) adding a full mock-server success-path test for `run_on_boot` —
+  the Decision Log designates it the untested-by-construction best-effort wrapper
+  (mirroring the untested `reconcile_agent_version` in `main.rs`), and covgate
+  passes comfortably (app 93.45% vs 90.38% floor) without it.
+- `.path()` on `filesys::File` is provided by the `PathExt` trait, not an
+  inherent method — the app integration test needed `PathExt` in scope.
 
 ## Decision Log
 
