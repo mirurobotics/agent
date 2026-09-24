@@ -8,3 +8,4 @@ pub mod init;
 pub mod layout;
 pub mod settings;
 pub mod setup;
+pub mod system_metadata;

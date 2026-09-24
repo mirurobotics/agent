@@ -77,6 +77,7 @@ impl AppState {
             token_mngr.clone(),
             dpl_retry_policy,
             event_hub.clone(),
+            layout.system_metadata(),
         );
         let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
         let syncer = Arc::new(syncer);
@@ -317,6 +318,7 @@ fn build_syncer_args(
     token_mngr: Arc<authn::TokenManager>,
     dpl_retry_policy: fsm::RetryPolicy,
     event_hub: events::EventHub,
+    system_metadata_cache: File,
 ) -> SyncerArgs<http::Client, authn::TokenManager> {
     SyncerArgs {
         storage,
@@ -331,5 +333,6 @@ fn build_syncer_args(
             max_secs: 12 * 60 * 60, // 12 hours
         },
         event_hub,
+        system_metadata_cache,
     }
 }

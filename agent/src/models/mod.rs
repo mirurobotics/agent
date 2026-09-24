@@ -6,6 +6,7 @@ pub mod file_rule;
 pub mod git_commit;
 pub mod release;
 pub(crate) mod status;
+pub mod system_metadata;
 
 // internal crates
 pub use self::config_instance::CfgInstID;
@@ -29,6 +30,7 @@ pub use self::git_commit::GitCommit;
 pub use self::git_commit::GitCommitID;
 pub use self::release::Release;
 pub use self::release::ReleaseID;
+pub use self::system_metadata::{system_metadata, SystemMetadata};
 
 pub trait Patch<PatchT> {
     fn patch(&mut self, patch: PatchT);
