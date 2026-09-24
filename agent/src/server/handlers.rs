@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::errors::Error;
 use crate::server::{errors::*, state::State};
 use crate::services::{
-    deployment as dpl_svc, device as dvc_svc, git_commit as git_cmt_svc, release as rls_svc,
-    HttpBackend,
+    deployment as dpl_svc, device as dvc_svc, file_rule as file_rule_svc,
+    git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
 use crate::version;
 use device_api::models as device_server;
@@ -41,6 +41,7 @@ pub async fn version() -> impl IntoResponse {
             git_commit: version::COMMIT.to_string(),
             api_version: version::api_version(),
             api_git_commit: version::api_git_commit(),
+            api_release_version: version::api_release_version(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
@@ -104,7 +105,13 @@ pub async fn get_release(
     handle(
         async {
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
-            let release = rls_svc::get(&state.storage.releases, &backend, release_id).await?;
+            let release = rls_svc::get(
+                &state.storage.releases,
+                &state.storage.file_rules,
+                &backend,
+                release_id,
+            )
+            .await?;
             Ok::<_, ServerErr>(device_server::Release::from(&release))
         },
         "Error getting release",
@@ -119,6 +126,7 @@ pub async fn get_current_release(AxumState(state): AxumState<Arc<State>>) -> imp
             let release = rls_svc::get_current(
                 &state.storage.deployments,
                 &state.storage.releases,
+                &state.storage.file_rules,
                 &backend,
             )
             .await?;
@@ -141,6 +149,21 @@ pub async fn get_git_commit(
             Ok::<_, ServerErr>(device_server::GitCommit::from(&gc))
         },
         "Error getting git commit",
+    )
+    .await
+}
+
+// ================================ FILE RULES ===================================== //
+pub async fn get_file_rule(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(file_rule_id): Path<String>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let rule = file_rule_svc::get(&state.storage.file_rules, file_rule_id).await?;
+            Ok::<_, ServerErr>(device_server::BaseFileRule::from(&rule))
+        },
+        "Error getting file rule",
     )
     .await
 }

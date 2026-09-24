@@ -40,6 +40,7 @@ pub mod version_tests {
             git_commit: COMMIT.to_string(),
             api_version: version::api_version(),
             api_git_commit: version::api_git_commit(),
+            api_release_version: version::api_release_version(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
@@ -63,7 +64,8 @@ pub mod routes {
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
-        Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
+        Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
+        FileRuleUpload, GitCommit, Release,
     };
     use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
@@ -400,7 +402,7 @@ pub mod routes {
                 git_commit_id: None,
                 created_at: t,
                 updated_at: t,
-                file_rule_ids: Vec::new(),
+                file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
             };
             f.state
                 .storage
@@ -415,6 +417,7 @@ pub mod routes {
             let actual: openapi::Release = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(actual.id, "rls-1");
             assert_eq!(actual.version, "2.0.0");
+            assert_eq!(actual.file_rule_ids, vec!["fr-1", "fr-2"]);
         }
 
         #[tokio::test]
@@ -469,6 +472,126 @@ pub mod routes {
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(actual.error.code, "internal_server_error");
+        }
+    }
+
+    mod file_rules {
+        use super::*;
+
+        fn upload_rule(id: &str) -> FileRule {
+            FileRule {
+                id: id.into(),
+                name: "logs".into(),
+                upload: Some(FileRuleUpload {
+                    upload_collection_id: "uc-1".into(),
+                    upload_collection_name: "logs".into(),
+                    bucket_id: "bkt-1".into(),
+                    bucket_name: "fleet-logs".into(),
+                    path: "robots/".into(),
+                }),
+                retention: Some(FileRuleRetention {
+                    require_upload: true,
+                    ttl_secs: 3600,
+                }),
+                created_at: fixed_time(),
+                updated_at: fixed_time(),
+                ..Default::default()
+            }
+        }
+
+        fn retention_rule(id: &str) -> FileRule {
+            FileRule {
+                id: id.into(),
+                name: "tmp".into(),
+                retention: Some(FileRuleRetention {
+                    require_upload: false,
+                    ttl_secs: 60,
+                }),
+                created_at: fixed_time(),
+                updated_at: fixed_time(),
+                ..Default::default()
+            }
+        }
+
+        async fn store_rule(f: &Fixture, rule: FileRule) {
+            f.state
+                .storage
+                .file_rules
+                .write_if_absent(rule.id.clone(), rule, |_, _| false)
+                .await
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn get_file_rule_returns_200() {
+            let f = Fixture::new("handler_get_fr").await;
+            let rule = upload_rule("fr-1");
+            store_rule(&f, rule.clone()).await;
+
+            let (status, bytes) = f.get("/v0.2/file_rules/fr-1").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::BaseFileRule = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual, openapi::BaseFileRule::from(&rule));
+        }
+
+        #[tokio::test]
+        async fn get_file_rule_returns_404_when_not_cached() {
+            let f = Fixture::new("handler_get_fr_404").await;
+
+            let (status, bytes) = f.get("/v0.2/file_rules/nonexistent").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "resource_not_found");
+        }
+
+        #[tokio::test]
+        async fn client_flow_detects_active_uploads() {
+            let f = Fixture::new("handler_fr_client_flow").await;
+            let dpl = Deployment {
+                id: "dpl-1".into(),
+                activity_status: DplActivity::Deployed,
+                error_status: DplErrStatus::None,
+                target_status: DplTarget::Deployed,
+                release_id: "rls-1".into(),
+                ..Default::default()
+            };
+            f.state
+                .storage
+                .deployments
+                .write("dpl-1".to_string(), dpl, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            let rls = Release {
+                id: "rls-1".into(),
+                file_rule_ids: vec!["fr-upload".into(), "fr-retain".into()],
+                ..Default::default()
+            };
+            f.state
+                .storage
+                .releases
+                .write("rls-1".to_string(), rls, |_, _| false, Overwrite::Allow)
+                .await
+                .unwrap();
+            store_rule(&f, upload_rule("fr-upload")).await;
+            store_rule(&f, retention_rule("fr-retain")).await;
+
+            let (status, bytes) = f.get("/v0.2/releases/current").await;
+            assert_eq!(status, StatusCode::OK);
+            let release: openapi::Release = serde_json::from_slice(&bytes).unwrap();
+
+            let mut rules = Vec::new();
+            for id in &release.file_rule_ids {
+                let (status, bytes) = f.get(&format!("/v0.2/file_rules/{id}")).await;
+                assert_eq!(status, StatusCode::OK);
+                rules.push(serde_json::from_slice::<openapi::BaseFileRule>(&bytes).unwrap());
+            }
+
+            let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+            assert_eq!(ids, vec!["fr-upload", "fr-retain"]);
+            assert!(rules.iter().any(|r| r.upload.is_some()));
+            assert!(rules[1].upload.is_none());
         }
     }
 }

@@ -59,7 +59,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `data_uploads/` — parent module for the file-upload pipeline. Submodule `scan` watches rule-configured directories and emits stable files to sinks (the `StableFileSink` seam in `scan/sink.rs`); submodule `upload` queues and executes uploads to object storage. The drivers that schedule the scanner live in `workers/` (`scan.rs`, `sync_scan_bridge.rs`), not here.
 
-`services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `git_commit` (commit tracking), `release` (release management).
+`services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
 
 `cache` — file-system-backed cache with TTL. Used for caching backend responses.
 
@@ -90,7 +90,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ### Generated code (workspace siblings)
 
-`libs/backend-api` and `libs/device-api` are auto-generated from OpenAPI specs in `api/specs/`. Never edit these by hand. The specs themselves are sourced from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi) — to change schemas, modify the source repo, regenerate the bundle there, then copy the updated spec here and run `api/regen.sh`.
+`libs/backend-api` and `libs/device-api` are auto-generated from OpenAPI specs in `api/specs/`. Never edit these by hand. The specs themselves are sourced from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi) — to change schemas, modify the source repo, regenerate the bundle there, then copy the updated spec here and run `api/regen.sh`. The vendored specs are the openapi release-stamped artifacts (they carry `x-release-version` and `x-git-commit`), not raw bundles.
 
 ## Architectural Invariants
 

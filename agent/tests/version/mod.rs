@@ -51,3 +51,9 @@ fn test_api_version_is_not_empty() {
 fn test_api_git_commit_is_not_empty() {
     assert!(!version::api_git_commit().is_empty());
 }
+
+#[test]
+fn test_api_release_version_extends_api_version() {
+    let prefix = format!("{}.", version::api_version());
+    assert!(version::api_release_version().starts_with(&prefix));
+}

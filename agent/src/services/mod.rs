@@ -3,6 +3,7 @@ pub mod deployment;
 pub mod device;
 pub mod errors;
 pub mod events;
+pub mod file_rule;
 pub mod git_commit;
 pub mod release;
 

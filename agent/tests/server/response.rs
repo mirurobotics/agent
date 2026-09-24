@@ -1,7 +1,8 @@
 // internal crates
 use device_api::models as openapi;
 use miru_agent::models::{
-    Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
+    Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
+    FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release,
 };
 
 // external crates
@@ -227,6 +228,7 @@ pub mod release_response {
             id: "rls-1".into(),
             version: "1.0.0".into(),
             git_commit_id: None,
+            file_rule_ids: Vec::new(),
             created_at: t.to_rfc3339(),
         };
 
@@ -251,11 +253,178 @@ pub mod release_response {
             id: "rls-2".into(),
             version: "2.0.0".into(),
             git_commit_id: Some("gc-1".into()),
+            file_rule_ids: Vec::new(),
             created_at: t.to_rfc3339(),
         };
 
         let sdk: openapi::Release = (&rls).into();
         assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_release_with_file_rule_ids() {
+        let t = fixed_time();
+        let rls = Release {
+            id: "rls-3".into(),
+            version: "3.0.0".into(),
+            git_commit_id: None,
+            created_at: t,
+            updated_at: t,
+            file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
+        };
+
+        let expected = openapi::Release {
+            object: openapi::release::Object::Release,
+            id: "rls-3".into(),
+            version: "3.0.0".into(),
+            git_commit_id: None,
+            file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
+            created_at: t.to_rfc3339(),
+        };
+
+        let sdk: openapi::Release = (&rls).into();
+        assert_eq!(sdk, expected);
+    }
+}
+
+pub mod file_rule_response {
+    use super::*;
+
+    fn upload() -> FileRuleUpload {
+        FileRuleUpload {
+            upload_collection_id: "uc-1".into(),
+            upload_collection_name: "logs".into(),
+            bucket_id: "bkt-1".into(),
+            bucket_name: "fleet-logs".into(),
+            path: "robots/".into(),
+        }
+    }
+
+    fn rule(upload: Option<FileRuleUpload>, retention: Option<FileRuleRetention>) -> FileRule {
+        let t = fixed_time();
+        FileRule {
+            id: "fr-1".into(),
+            name: "logs".into(),
+            digest: "digest-1".into(),
+            source: FileRuleSource {
+                glob: "/var/log/app/*.log".into(),
+                stability_window_secs: 30,
+            },
+            upload,
+            retention,
+            created_at: t,
+            updated_at: t,
+        }
+    }
+
+    #[test]
+    fn converts_upload_rule_with_retention() {
+        let t = fixed_time();
+        let rule = rule(
+            Some(upload()),
+            Some(FileRuleRetention {
+                require_upload: true,
+                ttl_secs: 3600,
+            }),
+        );
+
+        let expected = openapi::BaseFileRule {
+            object: openapi::base_file_rule::Object::FileRule,
+            id: "fr-1".into(),
+            name: "logs".into(),
+            digest: "digest-1".into(),
+            source: Box::new(openapi::FileRuleSource {
+                glob: "/var/log/app/*.log".into(),
+                stability_window_secs: 30,
+            }),
+            upload: Some(Box::new(openapi::FileRuleUpload {
+                upload_collection_id: "uc-1".into(),
+                upload_collection_name: "logs".into(),
+                bucket_id: "bkt-1".into(),
+                bucket_name: "fleet-logs".into(),
+                path: "robots/".into(),
+            })),
+            retention: Some(Box::new(openapi::FileRuleRetention {
+                require_upload: Some(true),
+                ttl_secs: 3600,
+            })),
+            created_at: t.to_rfc3339(),
+            updated_at: t.to_rfc3339(),
+        };
+
+        let sdk: openapi::BaseFileRule = (&rule).into();
+        assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_upload_rule_with_best_effort_retention() {
+        let rule = rule(
+            Some(upload()),
+            Some(FileRuleRetention {
+                require_upload: false,
+                ttl_secs: 60,
+            }),
+        );
+
+        let expected = openapi::FileRuleRetention {
+            require_upload: Some(false),
+            ttl_secs: 60,
+        };
+
+        let sdk: openapi::BaseFileRule = (&rule).into();
+        assert_eq!(sdk.retention, Some(Box::new(expected)));
+    }
+
+    #[test]
+    fn converts_retention_only_rule_omits_require_upload() {
+        // require_upload is dropped whenever the rule has no upload block,
+        // whatever the stored value.
+        let rule = rule(
+            None,
+            Some(FileRuleRetention {
+                require_upload: true,
+                ttl_secs: 0,
+            }),
+        );
+
+        let expected = openapi::FileRuleRetention {
+            require_upload: None,
+            ttl_secs: 0,
+        };
+
+        let sdk: openapi::BaseFileRule = (&rule).into();
+        assert!(sdk.upload.is_none());
+        assert_eq!(sdk.retention, Some(Box::new(expected)));
+
+        let json = serde_json::to_value(&sdk).unwrap();
+        assert!(json.get("upload").is_none());
+        assert!(json["retention"].get("require_upload").is_none());
+    }
+
+    #[test]
+    fn converts_rule_without_retention() {
+        let rule = rule(Some(upload()), None);
+
+        let sdk: openapi::BaseFileRule = (&rule).into();
+        assert!(sdk.retention.is_none());
+        assert!(serde_json::to_value(&sdk)
+            .unwrap()
+            .get("retention")
+            .is_none());
+    }
+
+    #[test]
+    fn saturates_ttl_secs_above_i64_max() {
+        let rule = rule(
+            None,
+            Some(FileRuleRetention {
+                require_upload: false,
+                ttl_secs: u64::MAX,
+            }),
+        );
+
+        let sdk: openapi::BaseFileRule = (&rule).into();
+        assert_eq!(sdk.retention.unwrap().ttl_secs, i64::MAX);
     }
 }
 
