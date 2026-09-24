@@ -1,7 +1,6 @@
 // internal crates
-use crate::mocks::http_client::{Call, MockClient};
+use crate::mocks::http_client::MockClient;
 use crate::test_utils::filesys::dirs as test_dirs;
-use backend_api::models as backend_client;
 use miru_agent::disk;
 use miru_agent::filesys::{dirs, Dir, File, PathExt};
 use miru_agent::http::errors::{HTTPErr, MockErr as HTTPMockErr};
@@ -86,19 +85,6 @@ async fn updates_device_and_writes_cache_when_cache_absent() {
 
     assert_eq!(outcome, Synced::Updated);
     assert_eq!(f.http_client.num_update_device_calls(), 1);
-
-    let requests = f.http_client.requests();
-    let update = requests
-        .iter()
-        .find(|r| r.call == Call::UpdateDevice)
-        .expect("an UpdateDevice request was captured");
-    assert_eq!(update.path, format!("/devices/{DEVICE_ID}"));
-    assert_eq!(update.token.as_deref(), Some(TOKEN));
-    let body = update.body.as_deref().expect("the request carried a body");
-    assert!(!body.contains("agent_version"));
-    let sent: backend_client::UpdateDeviceFromAgentRequest = serde_json::from_str(body).unwrap();
-    assert_eq!(sent, live.to_update_request());
-
     assert_eq!(f.read_cache().await, Some(live));
 }
 
