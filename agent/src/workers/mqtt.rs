@@ -23,7 +23,6 @@ use crate::workers::next_sync_event;
 
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};
-use secrecy::SecretString;
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
@@ -194,7 +193,7 @@ async fn init_client<TokenManagerT: TokenManagerExt>(
     // initialize the mqtt client
     let credentials = Credentials {
         username: device_session_id.to_string(),
-        password: SecretString::from(token),
+        password: token,
     };
     let options = MqttOptions::new(credentials)
         .with_connect_address(broker_address)
