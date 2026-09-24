@@ -28,6 +28,7 @@ Observable behavior: on a device whose hostname changed since last boot, restart
 - [x] (2026-09-21) M3 — Add `app::metadata_sync` (tested core + best-effort boot wrapper), wire into `main.rs::run_agent`, add sync-decision tests. (commit a1962169; 5 integration tests pass)
 - [x] (2026-09-21) Refine — review pass; only actionable finding fixed: strip consumer references from `models` docstrings (commit c3be4f4a). Local covgate green: models 100%, disk 97.81%, app 93.45%.
 - [ ] M4 — Validation: preflight reports `CLEAN` and CI is green on the pushed branch head.
+- [x] (2026-09-23) Revision — moved the sync from boot into the syncer: `sync::system_metadata::sync` runs in `SingleThreadSyncer::sync_impl` after `deployments::sync`; `app::metadata_sync`, `run_on_boot`, `MetadataSyncErr`, and the `main.rs` hook removed. See the Decision Log.
 
 Split partially completed work into "done" and "remaining" as needed. Use timestamps when steps complete.
 
@@ -57,6 +58,10 @@ Split partially completed work into "done" and "remaining" as needed. Use timest
 - Decision: The testable core is `sync_system_metadata(http_client, layout, token)`; a thin best-effort `run_on_boot(layout, backend_host)` wrapper (build client, issue token via `authn::issue_token`, call the core, log-and-swallow) is invoked from `main.rs::run_agent`, mirroring the existing `reconcile_agent_version` startup step.
   Rationale: Passing `token` into the core keeps unit tests free of RSA/JWT machinery (tests seed `device.json` and pass a fake token to the `MockClient`). Token issuance and client construction are the untested-by-construction wrapper's job, exactly as `reconcile_agent_version` in `main.rs` is untested and delegates to the tested `upgrade::reconcile_impl`.
   Date/Author: 2026-09-21 / Claude (authoring)
+
+- Decision (supersedes the boot-wrapper decision above): run the metadata sync from the syncer instead of at boot. `sync::system_metadata::sync` is called at the end of `SingleThreadSyncer::sync_impl` with the syncer's token, device storage, and the cache file (passed in via `SyncerArgs::system_metadata_cache`). It runs after `deployments::sync` unless that failed with a network-connection error, and its failures are logged at `warn` without affecting the sync result, err streak, or cooldown.
+  Rationale: The one-shot boot hook never retried, so a device that booted offline did not report drifted metadata until its next reboot. It also ran two sequential HTTP requests (10 s timeout each) inline before startup, issued a token separate from the token manager's, and missed runtime hostname changes. The syncer already retries on its polling schedule, on MQTT sync triggers, and after failures. The live-vs-cache comparison is a local read, so running it every sync costs no network call when nothing changed. Gating on network errors rather than full sync success keeps a persistently failing deployment from blocking metadata reports, and avoids a warning on every offline sync.
+  Date/Author: 2026-09-23 / Claude
 
 ## Outcomes & Retrospective
 
