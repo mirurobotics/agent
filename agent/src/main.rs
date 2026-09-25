@@ -21,6 +21,7 @@ use miru_agent::network::BackendHost;
 use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
+use miru_agent::server;
 use miru_agent::shutdown::{Latch, RunOutcome};
 use miru_agent::version;
 #[cfg(windows)]
@@ -340,6 +341,10 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
         },
         backend_host: settings.backend.host,
         enable_socket_server: settings.enable_socket_server,
+        server: server::Options {
+            tcp_port: settings.socket_server_tcp_port,
+            ..Default::default()
+        },
         enable_mqtt_worker: settings.enable_mqtt_worker,
         enable_poller: settings.enable_poller,
         mqtt_worker: mqtt::Options {

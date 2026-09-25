@@ -7,21 +7,60 @@ use crate::server::{handlers, state::State};
 
 // external crates
 use axum::{
+    extract::Request,
+    middleware::{self, Next},
     routing::{get, post},
     Router,
 };
+use tower::ServiceBuilder;
+use tower_http::{
+    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+    LatencyUnit,
+};
+use tracing::Level;
 
 #[derive(Debug)]
 pub struct Options {
+    /// Unix socket path (unix only).
     pub socket_file: filesys::File,
+    /// Loopback TCP port; `None` disables the TCP transport, `Some(0)` lets
+    /// the OS assign a free port.
+    pub tcp_port: Option<u16>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
             socket_file: filesys::File::new("/run/miru/miru.sock"),
+            tcp_port: None,
         }
     }
+}
+
+/// Build the application router with all routes, shared state, and middleware.
+/// Every transport serves this same app.
+pub fn app(state: Arc<State>) -> Router {
+    let activity_state = state.clone();
+    routes(state).layer(
+        ServiceBuilder::new()
+            .layer(middleware::from_fn(move |req: Request, next: Next| {
+                let state = activity_state.clone();
+                async move {
+                    state.activity_tracker.touch();
+                    next.run(req).await
+                }
+            }))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                    .on_request(DefaultOnRequest::new().level(Level::INFO))
+                    .on_response(
+                        DefaultOnResponse::new()
+                            .level(Level::INFO)
+                            .latency_unit(LatencyUnit::Micros),
+                    ),
+            ),
+    )
 }
 
 /// Build the application router with all routes and shared state, without middleware.

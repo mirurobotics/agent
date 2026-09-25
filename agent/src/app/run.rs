@@ -13,9 +13,9 @@ use crate::app::{
 use crate::authn::{self, TokenManagerExt};
 use crate::data_uploads::scan;
 use crate::http;
-use crate::server::errors::*;
 #[cfg(unix)]
-use crate::server::{self, unix::serve};
+use crate::server::unix::serve;
+use crate::server::{self, errors::*, tcp};
 use crate::trace;
 use crate::workers::{
     mqtt, poller, sync_scan_bridge,
@@ -139,21 +139,7 @@ async fn init_optional_services(
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
     if options.enable_socket_server {
-        #[cfg(unix)]
-        init_socket_server(
-            options,
-            app_state.clone(),
-            shutdown_manager,
-            shutdown_tx.clone(),
-            shutdown_tx.subscribe(),
-        )
-        .await?;
-        // The local device API is served over a unix socket; the Windows
-        // transport (localhost TCP + token) is a later roadmap phase.
-        #[cfg(windows)]
-        tracing::warn!(
-            "the local device API server is not supported on windows; ignoring enable_socket_server"
-        );
+        init_local_api_servers(options, app_state.clone(), shutdown_manager, shutdown_tx).await?;
     }
 
     if options.enable_poller {
@@ -416,18 +402,15 @@ async fn init_delete_worker(
     Ok(())
 }
 
-#[cfg(unix)]
-async fn init_socket_server(
+// the local device API is served over a unix socket (unix only) and, when a
+// port is configured, over loopback tcp (all platforms)
+async fn init_local_api_servers(
     options: &AppOptions,
     app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
-    shutdown_tx: broadcast::Sender<()>,
-    mut shutdown_rx: broadcast::Receiver<()>,
+    shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
-    info!("Initializing socket server...");
-
-    // run the axum server with graceful shutdown
-    let server_state = server::State::new(
+    let server_state = Arc::new(server::State::new(
         app_state.storage.clone(),
         app_state.http_client.clone(),
         app_state.syncer.clone(),
@@ -435,14 +418,31 @@ async fn init_socket_server(
         app_state.activity_tracker.clone(),
         app_state.event_hub.clone(),
         shutdown_tx.clone(),
-    );
-    let server_handle = serve(&options.server, Arc::new(server_state), async move {
-        let _ = shutdown_rx.recv().await;
-    })
-    .await?;
-    shutdown_manager.with_socket_server_handle(server_handle)?;
+    ));
 
-    Ok(())
+    #[cfg(unix)]
+    {
+        info!("Initializing socket server...");
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        let handle = serve(&options.server, server_state.clone(), async move {
+            let _ = shutdown_rx.recv().await;
+        })
+        .await?;
+        shutdown_manager.with_socket_server_handle(handle)?;
+    }
+
+    let Some(port) = options.server.tcp_port else {
+        #[cfg(windows)]
+        tracing::warn!("no tcp port configured; the local device API has no transport on windows");
+        return Ok(());
+    };
+    info!("Initializing tcp server...");
+    let listener = tcp::bind(port).await?;
+    let mut shutdown_rx = shutdown_tx.subscribe();
+    let handle = tcp::serve(listener, server_state, async move {
+        let _ = shutdown_rx.recv().await;
+    });
+    shutdown_manager.with_tcp_server_handle(handle)
 }
 
 // ================================= SHUTDOWN ===================================== //
@@ -459,6 +459,7 @@ struct ShutdownManager {
     // server components requiring shutdown
     app_state: Option<AppStateShutdownParams>,
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
+    tcp_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     poller_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
@@ -474,6 +475,7 @@ impl ShutdownManager {
             lifecycle_options,
             app_state: None,
             socket_server_handle: None,
+            tcp_server_handle: None,
             poller_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
@@ -528,17 +530,32 @@ impl ShutdownManager {
     #[cfg_attr(not(unix), allow(dead_code))]
     pub fn with_socket_server_handle(
         &mut self,
-        socket_server_handle: JoinHandle<Result<(), ServerErr>>,
+        handle: JoinHandle<Result<(), ServerErr>>,
     ) -> Result<(), ServerErr> {
-        if self.socket_server_handle.is_some() {
+        Self::set_server_handle(&mut self.socket_server_handle, "server_handle", handle)
+    }
+
+    pub fn with_tcp_server_handle(
+        &mut self,
+        handle: JoinHandle<Result<(), ServerErr>>,
+    ) -> Result<(), ServerErr> {
+        Self::set_server_handle(&mut self.tcp_server_handle, "tcp_server_handle", handle)
+    }
+
+    fn set_server_handle(
+        slot: &mut Option<JoinHandle<Result<(), ServerErr>>>,
+        handle_name: &str,
+        handle: JoinHandle<Result<(), ServerErr>>,
+    ) -> Result<(), ServerErr> {
+        if slot.is_some() {
             return Err(ServerErr::ShutdownMngrDuplicateArgErr(
                 ShutdownMngrDuplicateArgErr {
-                    arg_name: "server_handle".to_string(),
+                    arg_name: handle_name.to_string(),
                     trace: trace!(),
                 },
             ));
         }
-        self.socket_server_handle = Some(socket_server_handle);
+        *slot = Some(handle);
         Ok(())
     }
 
@@ -585,8 +602,11 @@ impl ShutdownManager {
         // 3. mqtt
         join_worker(self.mqtt_worker_handle.take(), "MQTT", &mut first_err).await;
 
-        // 4. server (its handle carries the socket server's own Result)
-        self.shutdown_socket_server(&mut first_err).await;
+        // 4. servers (each handle carries the server's own Result)
+        let socket_handle = self.socket_server_handle.take();
+        shutdown_server(socket_handle, "socket", &mut first_err).await;
+        let tcp_handle = self.tcp_server_handle.take();
+        shutdown_server(tcp_handle, "tcp", &mut first_err).await;
 
         // 5. scan driver worker
         join_worker(
@@ -625,30 +645,6 @@ impl ShutdownManager {
         }
     }
 
-    async fn shutdown_socket_server(&mut self, first_err: &mut Option<ServerErr>) {
-        let Some(socket_server_handle) = self.socket_server_handle.take() else {
-            info!("Socket server handle not found, skipping socket server shutdown...");
-            return;
-        };
-
-        match socket_server_handle.await {
-            Err(e) => {
-                error!("Failed to shutdown socket server: {}", e);
-                first_err.get_or_insert_with(|| {
-                    ServerErr::JoinHandleErr(JoinHandleErr {
-                        source: Box::new(e),
-                        trace: trace!(),
-                    })
-                });
-            }
-            Ok(Err(e)) => {
-                error!("Failed to shutdown socket server: {}", e);
-                first_err.get_or_insert(e);
-            }
-            Ok(Ok(())) => {}
-        }
-    }
-
     async fn shutdown_app_state(&mut self, first_err: &mut Option<ServerErr>) {
         let Some(app_state) = self.app_state.take() else {
             info!("App state not found, skipping app state shutdown...");
@@ -660,6 +656,34 @@ impl ShutdownManager {
             first_err.get_or_insert(e);
         }
         app_state.state_handle.await;
+    }
+}
+
+async fn shutdown_server(
+    handle: Option<JoinHandle<Result<(), ServerErr>>>,
+    name: &str,
+    first_err: &mut Option<ServerErr>,
+) {
+    let Some(handle) = handle else {
+        info!("{name} server handle not found, skipping {name} server shutdown...");
+        return;
+    };
+
+    match handle.await {
+        Err(e) => {
+            error!("Failed to shutdown {name} server: {}", e);
+            first_err.get_or_insert_with(|| {
+                ServerErr::JoinHandleErr(JoinHandleErr {
+                    source: Box::new(e),
+                    trace: trace!(),
+                })
+            });
+        }
+        Ok(Err(e)) => {
+            error!("Failed to shutdown {name} server: {}", e);
+            first_err.get_or_insert(e);
+        }
+        Ok(Ok(())) => {}
     }
 }
 
@@ -1016,6 +1040,46 @@ mod tests {
 
         assert!(matches!(err, ServerErr::JoinHandleErr(_)));
         assert!(mgr.socket_server_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_maps_tcp_server_join_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.with_tcp_server_handle(tokio::spawn(async { panic!("boom") }))
+            .unwrap();
+
+        let err = mgr
+            .shutdown_impl()
+            .await
+            .expect_err("tcp server panic should surface");
+
+        assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        assert!(mgr.tcp_server_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_returns_tcp_server_error() {
+        let mut mgr = new_shutdown_manager();
+        mgr.with_tcp_server_handle(tokio::spawn(async { Err(sentinel_err()) }))
+            .unwrap();
+
+        let err = mgr.shutdown_impl().await.expect_err("tcp server error");
+
+        assert!(matches!(err, ServerErr::ShutdownMngrDuplicateArgErr(_)));
+        assert!(mgr.tcp_server_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn with_tcp_server_handle_rejects_duplicate() {
+        let mut mgr = new_shutdown_manager();
+        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }))
+            .unwrap();
+
+        let err = mgr
+            .with_tcp_server_handle(tokio::spawn(async { Ok(()) }))
+            .expect_err("second handle is rejected");
+
+        assert!(matches!(err, ServerErr::ShutdownMngrDuplicateArgErr(_)));
     }
 
     #[tokio::test]
