@@ -131,7 +131,7 @@ base_install_vars: &base_install_vars
   debian_pkg_mime_type: *debian_pkg_mime_type
 
 prod_install: &prod_install
-  args: 
+  args:
     <<: *base_install_args
     backend_host: *prod_backend_host
     mqtt_broker_host: *prod_mqtt_broker_host
@@ -140,7 +140,7 @@ prod_install: &prod_install
   utilities: *checksum_utility
 
 staging_install: &staging_install
-  args: 
+  args:
     <<: *base_install_args
     backend_host: *staging_backend_host
     mqtt_broker_host: *staging_mqtt_broker_host
@@ -149,7 +149,7 @@ staging_install: &staging_install
   utilities: *checksum_utility
 
 uat_install: &uat_install
-  args: 
+  args:
     <<: *base_install_args
     backend_host: *uat_backend_host
     mqtt_broker_host: *uat_mqtt_broker_host
@@ -175,7 +175,7 @@ base_provision_vars: &base_provision_vars
   debian_pkg_mime_type: *debian_pkg_mime_type
 
 prod_provision: &prod_provision
-  args: 
+  args:
     <<: *base_provision_args
     backend_host: *prod_backend_host
     mqtt_broker_host: *prod_mqtt_broker_host
@@ -184,7 +184,7 @@ prod_provision: &prod_provision
   utilities: *checksum_utility
 
 staging_provision: &staging_provision
-  args: 
+  args:
     <<: *base_provision_args
     backend_host: *staging_backend_host
     mqtt_broker_host: *staging_mqtt_broker_host
@@ -193,7 +193,7 @@ staging_provision: &staging_provision
   utilities: *checksum_utility
 
 uat_provision: &uat_provision
-  args: 
+  args:
     <<: *base_provision_args
     backend_host: *uat_backend_host
     mqtt_broker_host: *uat_mqtt_broker_host
@@ -206,31 +206,31 @@ uat_provision: &uat_provision
 scripts:
   # installs
   - name: "install.sh"
-    template: "install.j2" 
+    template: "install.j2"
     description: "Install the Miru Agent"
     variables: *prod_install
   - name: "staging-install.sh"
-    template: "install.j2" 
+    template: "install.j2"
     description: "Install the Miru Agent in the staging environment"
     variables: *staging_install
   - name: "uat-install.sh"
-    template: "install.j2" 
+    template: "install.j2"
     description: "Install the Miru Agent in the UAT environment"
     variables: *uat_install
 
   # provisions
   - name: "provision.sh"
-    template: "provision.j2" 
+    template: "provision.j2"
     description: "Provision a device & install the Miru Agent"
     variables:
       <<: *prod_provision
   - name: "staging-provision.sh"
-    template: "provision.j2" 
+    template: "provision.j2"
     description: "Provision a device & install the Miru Agent in the staging environment"
     variables:
       <<: *staging_provision
   - name: "uat-provision.sh"
-    template: "provision.j2" 
+    template: "provision.j2"
     description: "Provision a device & install the Miru Agent in the UAT environment"
     variables:
       <<: *uat_provision

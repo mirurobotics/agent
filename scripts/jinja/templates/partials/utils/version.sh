@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 if [ -z "$VERSION" ]; then
     if [ "$PRERELEASE" = true ]; then
         log "Fetching latest pre-release version..."

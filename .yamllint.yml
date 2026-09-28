@@ -1,0 +1,22 @@
+# See: https://yamllint.readthedocs.io/en/stable/
+
+extends: default
+
+rules:
+  document-start:
+    present: false
+  line-length:
+    level: warning
+    allow-non-breakable-inline-mappings: true
+  # GitHub Actions uses `on:` as a workflow trigger key; YAML 1.1 treats `on`
+  # as a truthy boolean alias. Disable key checking to avoid false positives.
+  truthy:
+    check-keys: false
+  # SHA-pinned action comments use a single space before `#`. Reduce the
+  # minimum from the default 2 to 1 to match the existing convention.
+  comments:
+    min-spaces-from-content: 1
+
+ignore: |
+  .agents/
+  api/specs/

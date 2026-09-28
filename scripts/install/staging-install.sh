@@ -3,11 +3,12 @@ set -e
 
 # Script: staging-install.sh
 # Jinja Template: install.j2
-# Build Timestamp: 2026-05-09T19:53:58.827613
+# Build Timestamp: 2026-06-03T19:14:13.912548
 # Description: Install the Miru Agent in the staging environment
 
 # DISPLAY #
 # ======= #
+# shellcheck shell=sh
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -16,7 +17,9 @@ NO_COLOR='\033[0m'
 
 debug() { echo "${BLUE}==>${NO_COLOR} $1"; }
 log() { echo "${GREEN}==>${NO_COLOR} $1"; }
+# shellcheck disable=SC2317,SC2329 # part of the shared logging API; not every script calls every helper
 warn() { echo "${YELLOW}Warning:${NO_COLOR} $1"; }
+# shellcheck disable=SC2317,SC2329 # part of the shared logging API; not every script calls every helper
 error() { echo "${RED}Error:${NO_COLOR} $1"; }
 fatal() { echo "${RED}Error:${NO_COLOR} $1"; exit 1; }
 
@@ -102,6 +105,7 @@ for cmd in curl grep cut jq; do
 done
 
 
+# shellcheck shell=sh
 verify_checksum() {
     file=$1
     expected_checksum=$2
@@ -152,6 +156,7 @@ esac
 
 # USE PROVIDED PACKAGE #
 # -------------------- #
+# shellcheck shell=sh
 if [ -n "$FROM_PKG" ]; then
     log "Installing from package on local machine: '$FROM_PKG'"
     if [ ! -f "$FROM_PKG" ]; then
@@ -166,13 +171,16 @@ if [ -n "$FROM_PKG" ]; then
     if [ "$(dpkg -f "$FROM_PKG" Architecture)" != "$DEB_ARCH" ]; then
         fatal "The provided package architecture ($(dpkg -f "$FROM_PKG" Architecture)) does not match this machine's architecture ($DEB_ARCH)."
     fi
+    # shellcheck disable=SC2034 # consumed by a later partial in the rendered script
     AGENT_DEB_PKG=$FROM_PKG
 
+    # shellcheck disable=SC2034 # consumed by a later partial in the rendered script
     VERSION=$(dpkg -f "$FROM_PKG" Version)
 fi
 
 # DETERMINE THE VERSION #
 # --------------------- #
+# shellcheck shell=sh
 if [ -z "$VERSION" ]; then
     if [ "$PRERELEASE" = true ]; then
         log "Fetching latest pre-release version..."
@@ -208,9 +216,11 @@ fi
 
 # DOWNLOAD THE AGENT #
 # ------------------ #
+# shellcheck shell=sh
 INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$AGENT_DEB_PKG_NAME" 2>/dev/null || echo "")
-# replace '~' with '-' 
+# replace '~' with '-'
 if [ -n "$INSTALLED_VERSION" ]; then
+    # shellcheck disable=SC2001 # POSIX sh lacks ${var//search/replace}; sed is required
     INSTALLED_VERSION=$(echo "$INSTALLED_VERSION" | sed 's/~/-/g')
 fi
 
@@ -254,6 +264,8 @@ fi
 
 # ACTIVATE THE AGENT #
 # ------------------ #
+# shellcheck shell=sh
+# shellcheck disable=SC2317,SC2329 # cleanup() is invoked indirectly via trap
 cleanup() {
     exit_code=$?
 
@@ -261,7 +273,7 @@ cleanup() {
     log "Restarting the Miru Agent"
     sudo systemctl restart miru >/dev/null 2>&1
 
-    exit $exit_code
+    exit "$exit_code"
 }
 
 trap cleanup EXIT INT TERM QUIT HUP
@@ -288,5 +300,6 @@ fi
 sudo chown -R miru:miru /srv/miru
 
 # Execute the installer
+# shellcheck disable=SC2086 # word-splitting of the argument list is intentional
 sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args
 exit 0

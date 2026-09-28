@@ -54,7 +54,7 @@ nfpms:
     description: |
       Miru Agent.
       Miru provides the infrastructure to version, manage, and deploy application configurations at scale. This debian package is the miru agent, which handles configuration deployment to your robots in production.
-    
+
     formats:
       - deb
 
@@ -170,7 +170,7 @@ release:
     ## Miru Agent {{.Tag}}
 
     **Full Changelog**: https://github.com/mirurobotics/agent/compare/{{ .PreviousTag }}...{{ .Tag }}
-    
+
 
     For documentation, visit: https://docs.mirurobotics.com
 
@@ -178,4 +178,3 @@ source:
   enabled: false
 
 report_sizes: true
-
