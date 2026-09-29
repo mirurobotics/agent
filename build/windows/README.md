@@ -156,6 +156,16 @@ and leaves the target unchanged.
 The applications that read deployed configs need their own read access to the
 target folder.
 
+Earlier builds ran the service as Local System. Upgrading from one re-applies
+the protected DACL on `%ProgramData%\Miru` and its `logs`, `auth`, and `tmp`
+children, but files that already exist keep their old ACEs and do not gain the
+`NT SERVICE\miru-agent` ACE. After such an upgrade, reset the existing files,
+not the four directories, so they inherit from their folder:
+
+```powershell
+Get-ChildItem "$env:ProgramData\Miru" -File -Recurse | ForEach-Object { icacls $_.FullName /reset }
+```
+
 ## Validation
 
 Every pull request runs the agent test suite natively on Windows

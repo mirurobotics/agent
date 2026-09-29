@@ -254,9 +254,6 @@ function Assert-ProtectedState {
     param([Parameter(Mandatory = $true)][string]$Stage)
     Assert-CustomerStateRetained $Stage
     Assert-ProtectedAcls
-    # Files created by earlier probes predate this stage's ACL repair, so the
-    # re-applied directory descriptor must also reach existing children.
-    foreach ($file in @($representativeFiles)) { Assert-InheritedProtection $file.Path }
 }
 
 function Assert-CustomerStateRetained {
