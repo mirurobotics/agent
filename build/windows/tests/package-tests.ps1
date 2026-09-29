@@ -223,6 +223,7 @@ function Assert-ServiceTables {
     Assert-MsiServiceConfig $Database
     Assert-ServiceControlRow $Database
     Assert-ServiceRecoveryTable $Database
+    Assert-RollbackServiceConfig $Database
 }
 
 # The MSI registers miru-agent as an own-process, auto-start, vital service that
@@ -267,12 +268,15 @@ function Assert-MsiServiceConfig {
         Assert-True (($configEvent -band 0x1) -ne 0) "service config $($row[0]) applied on install"
         Assert-True (($configEvent -band 0x4) -ne 0) "service config $($row[0]) applied on repair"
     }
+    $sidTypeArguments = @{ none = "0"; unrestricted = "1"; restricted = "3" }
     $sidRows = @($rows | Where-Object { [int]$_[3] -eq 5 })
     Assert-Equal 1 $sidRows.Count "one SERVICE_CONFIG_SERVICE_SID_INFO row"
-    Assert-Equal "1" $sidRows[0][4] "service SID type is SERVICE_SID_TYPE_UNRESTRICTED"
+    Assert-Equal $sidTypeArguments[$MsiServiceSettings.SidType] $sidRows[0][4] `
+        "service SID type is $($MsiServiceSettings.SidType)"
     $privilegeRows = @($rows | Where-Object { [int]$_[3] -eq 6 })
     Assert-Equal 1 $privilegeRows.Count "one SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO row"
-    Assert-Equal ($MsiServiceRequiredPrivileges -join "[~]") $privilegeRows[0][4] "service requires only SeChangeNotifyPrivilege"
+    Assert-Equal ($MsiServiceSettings.RequiredPrivileges -join "[~]") $privilegeRows[0][4] `
+        "service required privileges"
     $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
         "FROM ``InstallExecuteSequence``"
     $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
@@ -308,13 +312,108 @@ function Assert-ServiceControlRow {
     Assert-True (($serviceEvent -band 0x80) -ne 0) "service deletes on uninstall"
 }
 
-# The Util extension emits its own failure-actions table, Wix4ServiceConfig
-# (pinned from the CI build), rather than the standard MSI ServiceConfig table;
-# the restart action values are pinned at runtime in integration-lib.ps1.
+# The Util extension emits its own failure-actions table, Wix4ServiceConfig,
+# rather than the standard MSI ServiceConfig table. Its units are the spec's:
+# seconds for the restart delay and days for the reset period.
 function Assert-ServiceRecoveryTable {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4ServiceConfig") `
         "WiX Util service recovery table present"
+    $query = "SELECT ``ServiceName``, ``Component_``, ``NewService``, " + `
+        "``FirstFailureActionType``, ``SecondFailureActionType``, " + `
+        "``ThirdFailureActionType``, ``ResetPeriodInDays``, " + `
+        "``RestartServiceDelayInSeconds``, ``ProgramCommandLine``, " + `
+        "``RebootMessage`` FROM ``Wix4ServiceConfig``"
+    $rows = @(Get-MsiRows $Database $query 10)
+    Assert-Equal 1 $rows.Count "one service recovery row"
+    $row = $rows[0]
+    Assert-Equal $MsiServiceName $row[0] "service recovery service name"
+    Assert-Equal "MiruAgentExe" $row[1] "service recovery owning component"
+    Assert-Equal "1" $row[2] "service recovery configures the installed service"
+    Assert-Equal ($MsiServiceSettings.FailureActions -join ",") `
+        (@($row[3], $row[4], $row[5]) -join ",") "service failure actions"
+    Assert-Equal ([string]$MsiServiceSettings.ResetPeriodDays) $row[6] `
+        "service failure count reset period in days"
+    Assert-Equal ([string]$MsiServiceSettings.RestartDelaySeconds) $row[7] `
+        "service restart delay in seconds"
+    Assert-True ([string]::IsNullOrEmpty($row[8]) -and [string]::IsNullOrEmpty($row[9])) `
+        "service recovery runs no command and shows no reboot message"
+}
+
+# If a failed major upgrade rolls back, Windows Installer recreates the old
+# service without its failure actions, SID type, or required privileges, so
+# miru-agent.wxs reapplies them with sc.exe rollback actions. Each is a
+# no-impersonation WixQuietExec64 call that ignores failure; a type-51 action
+# named Set<action> sets its command line as CustomActionData. The commands
+# must encode the same spec as the tables above (milliseconds and seconds for
+# sc.exe), and the actions must sit between InstallInitialize and
+# RemoveExistingProducts, restart first, so rollback runs them after the old
+# service is recreated and restarts it last.
+function Assert-RollbackServiceConfig {
+    param([Parameter(Mandatory = $true)]$Database)
+    # msidbCustomActionTypeDll + Continue + Rollback + InScript + NoImpersonate
+    $rollbackType = 0x1 -bor 0x40 -bor 0x100 -bor 0x400 -bor 0x800
+    $setPropertyType = 0x33   # msidbCustomActionTypeTextData + SourceProperty
+    $actionQuery = "SELECT ``Action``, ``Type``, ``Source``, ``Target`` " + `
+        "FROM ``CustomAction``"
+    $actions = @(Get-MsiRows $Database $actionQuery 4)
+    $binaries = @(Get-MsiRows $Database "SELECT ``Name`` FROM ``Binary``" 1 |
+        ForEach-Object { $_[0] })
+    $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
+        "FROM ``InstallExecuteSequence``"
+    $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
+    $order = @("InstallInitialize")
+    foreach ($expected in (Get-RollbackServiceCommands)) {
+        $name, $command = $expected
+        $action = @($actions | Where-Object { $_[0] -eq $name })
+        Assert-Equal 1 $action.Count "one $name custom action"
+        Assert-Equal $rollbackType ([int]$action[0][1]) `
+            "$name is a rollback-only, no-impersonation, ignore-failure DLL action"
+        Assert-Equal "Wix4UtilCA_X64" $action[0][2] "$name runs the x64 Util CA DLL"
+        Assert-True ($binaries -contains $action[0][2]) "$name DLL is in the Binary table"
+        Assert-Equal "WixQuietExec64" $action[0][3] "$name runs WixQuietExec64"
+        $setter = @($actions | Where-Object { $_[0] -eq "Set$name" })
+        Assert-Equal 1 $setter.Count "one Set$name custom action"
+        Assert-Equal $setPropertyType ([int]$setter[0][1]) "Set$name sets a property"
+        Assert-Equal $name $setter[0][2] "Set$name sets the $name CustomActionData"
+        Assert-Equal $command $setter[0][3] "$name command line matches the service spec"
+        $scheduled = @($sequence | Where-Object { $_[0] -eq $name })
+        Assert-Equal 1 $scheduled.Count "$name is scheduled once"
+        Assert-Equal "WIX_UPGRADE_DETECTED" $scheduled[0][1] `
+            "$name is scheduled only for a major upgrade"
+        Assert-Equal 1 (@($sequence | Where-Object { $_[0] -eq "Set$name" })).Count `
+            "Set$name is scheduled once"
+        $order += @("Set$name", $name)
+    }
+    $order += "RemoveExistingProducts"
+    for ($i = 1; $i -lt $order.Count; $i++) {
+        $previous = Get-SequenceNumber $sequence $order[$i - 1]
+        $current = Get-SequenceNumber $sequence $order[$i]
+        Assert-True ($previous -lt $current) `
+            "$($order[$i - 1]) is sequenced before $($order[$i])"
+    }
+}
+
+# The rollback commands, in sequence order, rendered from the service spec.
+function Get-RollbackServiceCommands {
+    $settings = $MsiServiceSettings
+    $name = $MsiServiceName
+    $sc = '"[System64Folder]sc.exe"'
+    $net = '"[System64Folder]net.exe"'
+    $delayMilliseconds = $settings.RestartDelaySeconds * 1000
+    $failureActions = @($settings.FailureActions | ForEach-Object {
+        "$_/$delayMilliseconds"
+    }) -join "/"
+    $resetSeconds = $settings.ResetPeriodDays * 86400
+    $privileges = $settings.RequiredPrivileges -join "/"
+    return @(
+        @("MiruRollbackServiceRestart",
+            ('"[System64Folder]cmd.exe" /d /s /c "{0} stop {1} && {0} start {1}"' -f $net, $name)),
+        @("MiruRollbackServiceFailureActions",
+            "$sc failure $name reset= $resetSeconds actions= $failureActions"),
+        @("MiruRollbackServiceSidType", "$sc sidtype $name $($settings.SidType)"),
+        @("MiruRollbackServicePrivileges", "$sc privs $name $privileges")
+    )
 }
 
 function Assert-ServiceSidDerivation {

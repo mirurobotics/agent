@@ -9,7 +9,17 @@ $MsiUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
 $MsiServiceName = "miru-agent"
 $MsiServiceAccount = "NT SERVICE\miru-agent"
 $MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
-$MsiServiceRequiredPrivileges = @("SeChangeNotifyPrivilege")
+# The one expected spec for the service settings the MSI applies on install and
+# reapplies with sc.exe if a failed upgrade rolls back. Units match
+# util:ServiceConfig (seconds, days); the tests derive the MSI table values, the
+# sc.exe command lines, and the sc.exe query output from it.
+$MsiServiceSettings = [pscustomobject]@{
+    FailureActions = @("restart", "restart", "restart")
+    RestartDelaySeconds = 10
+    ResetPeriodDays = 1
+    SidType = "unrestricted"
+    RequiredPrivileges = @("SeChangeNotifyPrivilege")
+}
 $MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;$MsiServiceSid)(A;OICIIO;FA;;;$MsiServiceSid)"
 $MsiServiceDirectoryRights = 0x1201BF   # FRFWFX: .NET reports ReadAndExecute, Write, Synchronize
 $MsiTrustedSids = @("S-1-5-18", "S-1-5-32-544", $MsiServiceSid)
@@ -287,7 +297,7 @@ Export-ModuleMember -Function @(
     "MsiServiceName",
     "MsiServiceAccount",
     "MsiServiceSid",
-    "MsiServiceRequiredPrivileges",
+    "MsiServiceSettings",
     "MsiExpectedSddl",
     "MsiServiceDirectoryRights",
     "MsiTrustedSids",

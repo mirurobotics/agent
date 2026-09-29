@@ -452,19 +452,14 @@ function Assert-ProbeDenied {
 # configuration; Assert-ServiceRuntimeIdentity checks the running agent.
 function Assert-ServiceInstalled {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    Assert-ServiceCoreInstalled $Stage
-    Assert-ServiceRecovery $Stage
-    Assert-ServiceSidIdentity $Stage
-    Assert-ServicePrivileges $Stage
-}
-
-function Assert-ServiceCoreInstalled {
-    param([Parameter(Mandatory = $true)][string]$Stage)
     $service = Get-AgentService
     Assert-True ($null -ne $service) "$Stage installs the miru-agent service"
     Assert-Equal "Auto" $service.StartMode "$Stage service start mode is automatic"
     Assert-Equal $MsiServiceAccount $service.StartName "$Stage service runs as NT SERVICE\miru-agent"
     Assert-Equal $agentPath ($service.PathName.Trim('"')) "$Stage service binary path"
+    Assert-ServiceRecovery $Stage
+    Assert-ServiceSidIdentity $Stage
+    Assert-ServicePrivileges $Stage
 }
 
 function Assert-ServiceAbsent {
@@ -477,12 +472,23 @@ function Get-AgentService {
         -ErrorAction SilentlyContinue
 }
 
+# sc.exe reports the reset period in seconds and each action's delay in
+# milliseconds; the spec is in days and seconds.
 function Assert-ServiceRecovery {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $out = & sc.exe qfailure miru-agent 2>&1 | Out-String
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qfailure succeeds"
-    Assert-True ($out -match 'RESET_PERIOD') "$Stage service has a reset period"
-    Assert-True ($out -match 'RESTART') "$Stage service restarts on failure"
+    Assert-True ($out -match 'RESET_PERIOD[^:]*:\s*(\d+)') "$Stage service has a reset period`n$out"
+    Assert-Equal ([string]($MsiServiceSettings.ResetPeriodDays * 86400)) $Matches[1] `
+        "$Stage service failure count reset period in seconds`n$out"
+    $delayMilliseconds = $MsiServiceSettings.RestartDelaySeconds * 1000
+    $expected = @($MsiServiceSettings.FailureActions | ForEach-Object {
+        "{0}/{1}" -f $_.ToUpperInvariant(), $delayMilliseconds
+    }) -join ","
+    $actual = @([regex]::Matches($out, '(\w+) -- Delay = (\d+) milliseconds') | ForEach-Object {
+        "{0}/{1}" -f $_.Groups[1].Value, $_.Groups[2].Value
+    }) -join ","
+    Assert-Equal $expected $actual "$Stage service failure actions`n$out"
 }
 
 # The SCM adds the service SID to the token, Windows derives the same SID from
@@ -492,7 +498,8 @@ function Assert-ServiceSidIdentity {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $q = & sc.exe qsidtype miru-agent 2>&1 | Out-String
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qsidtype succeeds"
-    Assert-True ($q -match 'SERVICE_SID_TYPE:\s+UNRESTRICTED') "$Stage service SID type is unrestricted`n$q"
+    $sidType = $MsiServiceSettings.SidType.ToUpperInvariant()
+    Assert-True ($q -match "SERVICE_SID_TYPE:\s+$sidType\b") "$Stage service SID type is $sidType`n$q"
     $s = & sc.exe showsid miru-agent 2>&1 | Out-String
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe showsid succeeds"
     Assert-True ($s -match 'SERVICE SID:\s+(S-1-5-80-[\d-]+)') "$Stage sc.exe showsid reports a service SID`n$s"
@@ -508,7 +515,94 @@ function Assert-ServicePrivileges {
     $out = & sc.exe qprivs miru-agent 2>&1 | Out-String
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qprivs succeeds"
     $privileges = @([regex]::Matches($out, 'Se\w+Privilege') | ForEach-Object { $_.Value } | Sort-Object)
-    Assert-Equal (($MsiServiceRequiredPrivileges | Sort-Object) -join ",") ($privileges -join ",") "$Stage service required privileges`n$out"
+    Assert-Equal (($MsiServiceSettings.RequiredPrivileges | Sort-Object) -join ",") ($privileges -join ",") "$Stage service required privileges`n$out"
+}
+
+# The SCM builds a started service's token from its required privileges, so
+# the token holds none outside that list. After a rollback this also proves the
+# service was restarted after the rollback reapplied its configuration.
+function Assert-ServiceProcessPrivileges {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][int]$ProcessId
+    )
+    $privileges = @(Get-ProcessTokenPrivileges $ProcessId | Sort-Object)
+    $unexpected = @($privileges | Where-Object { $MsiServiceSettings.RequiredPrivileges -notcontains $_ })
+    Assert-Equal 0 $unexpected.Count "$Stage service process $ProcessId token holds only required privileges: $($privileges -join ', ')"
+}
+
+function Get-ProcessTokenPrivileges {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
+    if (-not ('MiruTest.TokenPrivileges' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace MiruTest
+{
+    public static class TokenPrivileges
+    {
+        const uint ProcessQueryLimitedInformation = 0x1000;
+        const uint TokenQuery = 0x0008;
+        const int TokenPrivilegesClass = 3;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returnLength);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool LookupPrivilegeName(string systemName, IntPtr luid, StringBuilder name, ref int length);
+
+        public static string[] Get(int processId)
+        {
+            IntPtr process = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+            if (process == IntPtr.Zero) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess"); }
+            IntPtr token = IntPtr.Zero;
+            IntPtr buffer = IntPtr.Zero;
+            try
+            {
+                if (!OpenProcessToken(process, TokenQuery, out token)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcessToken"); }
+                int length;
+                GetTokenInformation(token, TokenPrivilegesClass, IntPtr.Zero, 0, out length);
+                buffer = Marshal.AllocHGlobal(length);
+                if (!GetTokenInformation(token, TokenPrivilegesClass, buffer, length, out length)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "GetTokenInformation"); }
+                // TOKEN_PRIVILEGES: a DWORD count, then 12-byte LUID_AND_ATTRIBUTES entries.
+                int count = Marshal.ReadInt32(buffer);
+                List<string> names = new List<string>();
+                for (int i = 0; i < count; i++)
+                {
+                    StringBuilder name = new StringBuilder(64);
+                    int size = name.Capacity;
+                    if (!LookupPrivilegeName(null, IntPtr.Add(buffer, 4 + i * 12), name, ref size)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "LookupPrivilegeName"); }
+                    names.Add(name.ToString());
+                }
+                return names.ToArray();
+            }
+            finally
+            {
+                if (buffer != IntPtr.Zero) { Marshal.FreeHGlobal(buffer); }
+                if (token != IntPtr.Zero) { CloseHandle(token); }
+                CloseHandle(process);
+            }
+        }
+    }
+}
+'@
+    }
+    # Enables SeDebugPrivilege so the elevated session can open the service process.
+    [Diagnostics.Process]::EnterDebugMode()
+    return [MiruTest.TokenPrivileges]::Get($ProcessId)
 }
 
 function Get-AgentLogFiles {
@@ -539,7 +633,8 @@ function Get-ActivationWaitCount {
 
 # The unprovisioned agent logs one "waiting for provisioning" line per start and
 # keeps running. A new line proves the service could write logs\ through the
-# installer's ACE; the process token proves it runs as the virtual account.
+# installer's ACE; the process token proves it runs as the virtual account with
+# only its required privileges.
 function Assert-ServiceRuntimeIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
@@ -569,6 +664,7 @@ function Assert-ServiceRuntimeIdentity {
     Assert-Equal 0 ([int]$owner.ReturnValue) "$Stage GetOwner succeeds for process $processId"
     Assert-True ($owner.Domain -ieq 'NT SERVICE') "$Stage service process domain is NT SERVICE (actual '$($owner.Domain)')"
     Assert-True ($owner.User -ieq $MsiServiceName) "$Stage service process user is $MsiServiceName (actual '$($owner.User)')"
+    Assert-ServiceProcessPrivileges $Stage $processId
 }
 
 function Invoke-MaintenanceStage {
@@ -620,23 +716,9 @@ function Invoke-RollbackStage {
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "rollback restores v2"
     Assert-Equal $v2Hash (Get-AgentHash) "rollback restores v2 executable"
     Assert-ProtectedState "rollback"
-    Assert-ServiceCoreInstalled "rollback"
-    # Windows Installer's rollback recreates the service from ServiceInstall
-    # alone. CI shows no failure actions, SID type NONE, and no required
-    # privileges (so the default service set). The virtual account's token
-    # user is still the service SID, so runtime identity holds; the repair
-    # below restores the rest. Logged for the record, not asserted.
-    foreach ($query in "qfailure", "qsidtype", "qprivs") {
-        Write-Host "rollback sc.exe $query miru-agent:"
-        & sc.exe $query miru-agent 2>&1 | Out-String | Write-Host
-    }
+    Assert-ServiceInstalled "rollback"
     Assert-ServiceRuntimeIdentity "rollback" $baseline
-    Install-Msi $Packages.V2 "fixture-v2-post-rollback-repair" -Properties @("REINSTALL=ALL", "REINSTALLMODE=vomus")
-    Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "post-rollback repair"
-    Assert-Equal $v2Hash (Get-AgentHash) "post-rollback repair keeps v2 executable"
-    Assert-ProtectedState "post-rollback repair"
-    Assert-ServiceInstalled "post-rollback repair"
-    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and core service; repair restores full service config"
+    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and full service config; the restarted service holds only its required privileges"
 }
 
 function Invoke-UninstallStage {
