@@ -6,7 +6,11 @@ $ErrorActionPreference = "Stop"
 $MsiProductName = "Miru Agent"
 $MsiManufacturer = "Miru"
 $MsiUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
-$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+$MsiServiceName = "miru-agent"
+$MsiServiceAccount = "NT SERVICE\miru-agent"
+$MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
+$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;$MsiServiceSid)"
+$MsiTrustedSids = @("S-1-5-18", "S-1-5-32-544", $MsiServiceSid)
 $MsiExpectedDirectories = @(
     @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru"),
     @("MiruLogsDir", "{C3AF8332-28E8-4707-8430-780C553D86EC}", "MIRULOGS", "MIRUDATA", "logs"),
@@ -47,6 +51,15 @@ function Initialize-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
     return (Resolve-Path -LiteralPath $Path).Path
+}
+
+function Get-ServiceSid {
+    param([Parameter(Mandatory = $true)][string]$ServiceName)
+    $bytes = [Text.Encoding]::Unicode.GetBytes($ServiceName.ToUpperInvariant())
+    $sha1 = [Security.Cryptography.SHA1]::Create()
+    try { $hash = $sha1.ComputeHash($bytes) } finally { $sha1.Dispose() }
+    $parts = 0..4 | ForEach-Object { [BitConverter]::ToUInt32($hash, $_ * 4) }
+    return "S-1-5-80-" + ($parts -join "-")
 }
 
 function Open-MsiDatabase {
@@ -255,6 +268,7 @@ Export-ModuleMember -Function @(
     "Assert-Equal",
     "New-MsiSessionLogDirectory",
     "Initialize-Directory",
+    "Get-ServiceSid",
     "Open-MsiDatabase",
     "Close-MsiDatabase",
     "Get-MsiRows",
@@ -268,7 +282,11 @@ Export-ModuleMember -Function @(
     "MsiProductName",
     "MsiManufacturer",
     "MsiUpgradeCode",
+    "MsiServiceName",
+    "MsiServiceAccount",
+    "MsiServiceSid",
     "MsiExpectedSddl",
+    "MsiTrustedSids",
     "MsiExpectedDirectories",
     "MsiFixtureProductCodes"
 )

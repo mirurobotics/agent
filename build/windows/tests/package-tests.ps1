@@ -220,12 +220,14 @@ function Assert-DowngradeLaunchCondition {
 function Assert-ServiceTables {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-ServiceInstallRow $Database
+    Assert-ServiceSidConfig $Database
     Assert-ServiceControlRow $Database
     Assert-ServiceRecoveryTable $Database
 }
 
-# The MSI registers miru-agent as an own-process, auto-start, vital LocalSystem
-# service with no arguments and the authored display name and description.
+# The MSI registers miru-agent as an own-process, auto-start, vital service that
+# runs as its virtual account NT SERVICE\miru-agent, with no arguments and the
+# authored display name and description.
 function Assert-ServiceInstallRow {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "ServiceInstall") "service install table present"
@@ -239,12 +241,46 @@ function Assert-ServiceInstallRow {
     Assert-Equal "Miru Agent" $row[2] "service display name"
     Assert-Equal "Miru Config Agent" $row[9] "service description"
     Assert-Equal "MiruAgentExe" $row[8] "service owning component"
-    Assert-Equal "LocalSystem" $row[6] "service runs as LocalSystem"
+    Assert-Equal $MsiServiceAccount $row[6] "service runs as NT SERVICE\miru-agent"
     Assert-True ([string]::IsNullOrEmpty($row[7])) "service takes no arguments"
     Assert-True (([int]$row[3] -band 16) -ne 0) "service is own-process"
     Assert-Equal 2 ([int]$row[4]) "service start type is automatic"
     Assert-True (([int]$row[5] -band 1) -ne 0) "service error control is normal"
     Assert-True (([int]$row[5] -band 0x8000) -ne 0) "service is vital"
+}
+
+# The core ServiceConfig element compiles to one MsiServiceConfig row that sets
+# SERVICE_SID_TYPE_UNRESTRICTED on install and repair. MsiConfigureServices
+# applies it after InstallServices creates the service and before
+# StartServices starts it.
+function Assert-ServiceSidConfig {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "MsiServiceConfig") "service SID config table present"
+    $query = "SELECT ``MsiServiceConfig``, ``Name``, ``Event``, " + `
+        "``ConfigType``, ``Argument``, ``Component_`` FROM ``MsiServiceConfig``"
+    $rows = @(Get-MsiRows $Database $query 6)
+    Assert-Equal 1 $rows.Count "one service SID config row"
+    $row = $rows[0]
+    Assert-Equal $MsiServiceName $row[1] "service SID config name"
+    Assert-Equal "MiruAgentExe" $row[5] "service SID config owning component"
+    Assert-Equal 5 ([int]$row[3]) "service config type is SERVICE_CONFIG_SERVICE_SID_INFO"
+    Assert-Equal "1" $row[4] "service SID type is SERVICE_SID_TYPE_UNRESTRICTED"
+    $configEvent = [int]$row[2]
+    Assert-True (($configEvent -band 0x1) -ne 0) "service SID type applied on install"
+    Assert-True (($configEvent -band 0x4) -ne 0) "service SID type applied on repair"
+    $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
+        "FROM ``InstallExecuteSequence``"
+    $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
+    $configureRows = @($sequence | Where-Object {
+        $_[0] -eq "MsiConfigureServices"
+    })
+    Assert-Equal 1 $configureRows.Count `
+        "MsiConfigureServices is scheduled once"
+    $configure = Get-SequenceNumber $sequence "MsiConfigureServices"
+    $install = Get-SequenceNumber $sequence "InstallServices"
+    $start = Get-SequenceNumber $sequence "StartServices"
+    Assert-True ($configure -gt $install -and $configure -lt $start) `
+        "MsiConfigureServices runs after InstallServices and before StartServices"
 }
 
 # ServiceControl starts the service on install, stops it on install and
@@ -268,12 +304,23 @@ function Assert-ServiceControlRow {
 }
 
 # The Util extension emits its own failure-actions table, Wix4ServiceConfig
-# (pinned from the CI build), rather than the standard MSI ServiceConfig table;
-# the restart action values are pinned at runtime in integration-lib.ps1.
+# (pinned from the CI build), rather than the standard MSI ServiceConfig table
+# (the core ServiceConfig element's MsiServiceConfig row sets only the SID
+# type); the restart action values are pinned at runtime in integration-lib.ps1.
 function Assert-ServiceRecoveryTable {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4ServiceConfig") `
         "WiX Util service recovery table present"
+}
+
+# Get-ServiceSid reproduces Windows' service SID derivation: it matches the
+# well-known TrustedInstaller SID and the SID hardcoded in miru-agent.wxs.
+function Assert-ServiceSidDerivation {
+    Assert-Equal "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464" `
+        (Get-ServiceSid "TrustedInstaller") "TrustedInstaller service SID derivation"
+    Assert-Equal $MsiServiceSid (Get-ServiceSid $MsiServiceName) `
+        "miru-agent service SID derivation"
+    Write-Host "PASS service SID derivation"
 }
 
 function Build-FixturePackage {
@@ -316,6 +363,7 @@ $resolvedBinDir = (Resolve-Path -LiteralPath $BinDir).Path
 $resolvedArtifacts = Initialize-Directory ([IO.Path]::GetFullPath($ArtifactsDirectory))
 $invalidDirectory = Reset-ChildDirectory $resolvedArtifacts "invalid"
 
+Assert-ServiceSidDerivation
 $v1 = Build-ProductionPackage "1.0.0" (Reset-ChildDirectory $resolvedArtifacts "v1")
 $v2 = Build-ProductionPackage "1.1.0" (Reset-ChildDirectory $resolvedArtifacts "v2")
 Assert-True (-not [string]::Equals($v1.ProductCode, $v2.ProductCode, `
