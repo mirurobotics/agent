@@ -520,7 +520,7 @@ function Assert-ServicePrivileges {
 
 # The SCM builds a started service's token from its required privileges, so
 # the token holds none outside that list. After a rollback this also proves the
-# service was restarted after the rollback reapplied its configuration.
+# rollback reapplied the configuration before starting the service.
 function Assert-ServiceProcessPrivileges {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
@@ -709,7 +709,7 @@ function Invoke-DowngradeStage {
 }
 
 # v2's uninstall, started by v3's RemoveExistingProducts, schedules the rollback
-# actions that reapply the service settings, so this stage tests v2's actions.
+# action that reapplies the service settings, so this stage tests v2's action.
 function Invoke-RollbackStage {
     param([Parameter(Mandatory = $true)]$Packages)
     $v2Hash = Get-AgentHash
@@ -720,7 +720,7 @@ function Invoke-RollbackStage {
     Assert-ProtectedState "rollback"
     Assert-ServiceInstalled "rollback"
     Assert-ServiceRuntimeIdentity "rollback" $baseline
-    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and full service config; the restarted service holds only its required privileges"
+    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and full service config; the restored service holds only its required privileges"
 }
 
 function Invoke-UninstallStage {

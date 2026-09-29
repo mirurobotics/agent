@@ -12,7 +12,7 @@ $MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
 # The one expected spec for the service settings the MSI applies on install and
 # reapplies with sc.exe if a failed upgrade rolls back. Units match
 # util:ServiceConfig (seconds, days); the tests derive the MSI table values, the
-# sc.exe command lines, and the sc.exe query output from it.
+# rollback command line, and the sc.exe query output from it.
 $MsiServiceSettings = [pscustomobject]@{
     FailureActions = @("restart", "restart", "restart")
     RestartDelaySeconds = 10

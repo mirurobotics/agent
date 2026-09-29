@@ -38,8 +38,8 @@ The UpgradeCode is part of the product's permanent identity and must never be
 changed after publication. Each package version receives a different ProductCode.
 
 If a major upgrade fails and rolls back, the installer reapplies the restored
-service's restart-on-failure actions, SID type, and privilege restriction, and
-restarts the service so they take effect.
+service's restart-on-failure actions, SID type, and privilege restriction
+before it starts the service again.
 
 ## Build
 

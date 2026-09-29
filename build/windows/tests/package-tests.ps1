@@ -342,54 +342,45 @@ function Assert-ServiceRecoveryTable {
 
 # If a failed major upgrade rolls back, Windows Installer recreates the old
 # service without its failure actions, SID type, or required privileges, so
-# miru-agent.wxs reapplies them with sc.exe rollback actions. Each is a
-# no-impersonation WixQuietExec64 call that ignores failure; a type-51 action
-# named Set<action> sets its command line as CustomActionData. The commands
-# must encode the same spec as the tables above (milliseconds and seconds for
-# sc.exe). The actions and their setters run only in the old version's
-# uninstall that RemoveExistingProducts starts, and sit between
-# RemoveExistingProducts and StopServices, restart first, so rollback runs
-# them after the old service is recreated and restarts it last.
+# miru-agent.wxs reapplies them with one rollback-only, no-impersonation
+# WixQuietExec64 action that ignores failure; a type-51 setter passes it the
+# sc.exe command line, which must encode the spec above. Both run only in the
+# uninstall a major upgrade starts, between StopServices and DeleteServices, so
+# rollback reapplies the settings after recreating the service and before
+# restarting it.
 function Assert-RollbackServiceConfig {
     param([Parameter(Mandatory = $true)]$Database)
-    # msidbCustomActionTypeDll + Continue + Rollback + InScript + NoImpersonate
-    $rollbackType = 0x1 -bor 0x40 -bor 0x100 -bor 0x400 -bor 0x800
-    $setPropertyType = 0x33   # msidbCustomActionTypeTextData + SourceProperty
+    $name = "MiruRollbackServiceConfig"
     $actionQuery = "SELECT ``Action``, ``Type``, ``Source``, ``Target`` " + `
         "FROM ``CustomAction``"
     $actions = @(Get-MsiRows $Database $actionQuery 4)
+    $action = @($actions | Where-Object { $_[0] -eq $name })
+    Assert-Equal 1 $action.Count "one $name custom action"
+    # msidbCustomActionTypeDll + Continue + Rollback + InScript + NoImpersonate
+    Assert-Equal 3393 ([int]$action[0][1]) `
+        "$name is a rollback-only, no-impersonation, ignore-failure DLL action"
+    Assert-Equal "Wix4UtilCA_X64" $action[0][2] "$name runs the x64 Util CA DLL"
     $binaries = @(Get-MsiRows $Database "SELECT ``Name`` FROM ``Binary``" 1 |
         ForEach-Object { $_[0] })
+    Assert-True ($binaries -contains $action[0][2]) "$name DLL is in the Binary table"
+    Assert-Equal "WixQuietExec64" $action[0][3] "$name runs WixQuietExec64"
+    $setter = @($actions | Where-Object { $_[0] -eq "Set$name" })
+    Assert-Equal 1 $setter.Count "one Set$name custom action"
+    # msidbCustomActionTypeTextData + SourceProperty
+    Assert-Equal 51 ([int]$setter[0][1]) "Set$name sets a property"
+    Assert-Equal $name $setter[0][2] "Set$name sets the $name CustomActionData"
+    Assert-Equal (Get-RollbackServiceCommand) $setter[0][3] `
+        "$name command line matches the service spec"
     $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
         "FROM ``InstallExecuteSequence``"
     $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
-    $condition = 'UPGRADINGPRODUCTCODE AND REMOVE~="ALL"'
-    $order = @("RemoveExistingProducts")
-    foreach ($expected in (Get-RollbackServiceCommands)) {
-        $name, $command = $expected
-        $action = @($actions | Where-Object { $_[0] -eq $name })
-        Assert-Equal 1 $action.Count "one $name custom action"
-        Assert-Equal $rollbackType ([int]$action[0][1]) `
-            "$name is a rollback-only, no-impersonation, ignore-failure DLL action"
-        Assert-Equal "Wix4UtilCA_X64" $action[0][2] "$name runs the x64 Util CA DLL"
-        Assert-True ($binaries -contains $action[0][2]) "$name DLL is in the Binary table"
-        Assert-Equal "WixQuietExec64" $action[0][3] "$name runs WixQuietExec64"
-        $setter = @($actions | Where-Object { $_[0] -eq "Set$name" })
-        Assert-Equal 1 $setter.Count "one Set$name custom action"
-        Assert-Equal $setPropertyType ([int]$setter[0][1]) "Set$name sets a property"
-        Assert-Equal $name $setter[0][2] "Set$name sets the $name CustomActionData"
-        Assert-Equal $command $setter[0][3] "$name command line matches the service spec"
-        $scheduled = @($sequence | Where-Object { $_[0] -eq $name })
-        Assert-Equal 1 $scheduled.Count "$name is scheduled once"
-        Assert-Equal $condition $scheduled[0][1] `
-            "$name is scheduled only when a major upgrade removes this version"
-        $setterScheduled = @($sequence | Where-Object { $_[0] -eq "Set$name" })
-        Assert-Equal 1 $setterScheduled.Count "Set$name is scheduled once"
-        Assert-Equal $condition $setterScheduled[0][1] `
-            "Set$name is scheduled only when a major upgrade removes this version"
-        $order += @("Set$name", $name)
+    foreach ($scheduledName in "Set$name", $name) {
+        $scheduled = @($sequence | Where-Object { $_[0] -eq $scheduledName })
+        Assert-Equal 1 $scheduled.Count "$scheduledName is scheduled once"
+        Assert-Equal 'UPGRADINGPRODUCTCODE AND REMOVE~="ALL"' $scheduled[0][1] `
+            "$scheduledName is scheduled only when a major upgrade removes this version"
     }
-    $order += "StopServices"
+    $order = @("StopServices", "Set$name", $name, "DeleteServices")
     for ($i = 1; $i -lt $order.Count; $i++) {
         $previous = Get-SequenceNumber $sequence $order[$i - 1]
         $current = Get-SequenceNumber $sequence $order[$i]
@@ -398,26 +389,19 @@ function Assert-RollbackServiceConfig {
     }
 }
 
-# The rollback commands, in sequence order, rendered from the service spec.
-function Get-RollbackServiceCommands {
+# The rollback command line rendered from the service spec: sc.exe takes the
+# reset period in seconds and the restart delay in milliseconds.
+function Get-RollbackServiceCommand {
     $settings = $MsiServiceSettings
-    $name = $MsiServiceName
-    $sc = '"[System64Folder]sc.exe"'
-    $net = '"[System64Folder]net.exe"'
     $delayMilliseconds = $settings.RestartDelaySeconds * 1000
-    $failureActions = @($settings.FailureActions | ForEach-Object {
-        "$_/$delayMilliseconds"
-    }) -join "/"
-    $resetSeconds = $settings.ResetPeriodDays * 86400
-    $privileges = $settings.RequiredPrivileges -join "/"
-    return @(
-        @("MiruRollbackServiceRestart",
-            ('"[System64Folder]cmd.exe" /d /s /c "{0} stop {1} && {0} start {1}"' -f $net, $name)),
-        @("MiruRollbackServiceFailureActions",
-            "$sc failure $name reset= $resetSeconds actions= $failureActions"),
-        @("MiruRollbackServiceSidType", "$sc sidtype $name $($settings.SidType)"),
-        @("MiruRollbackServicePrivileges", "$sc privs $name $privileges")
+    $actions = @($settings.FailureActions | ForEach-Object { "$_/$delayMilliseconds" }) -join "/"
+    $sc = '"[System64Folder]sc.exe"'
+    $commands = @(
+        "$sc failure $MsiServiceName reset= $($settings.ResetPeriodDays * 86400) actions= $actions",
+        "$sc sidtype $MsiServiceName $($settings.SidType)",
+        "$sc privs $MsiServiceName $($settings.RequiredPrivileges -join '/')"
     )
+    return '"[System64Folder]cmd.exe" /d /s /c "{0}"' -f ($commands -join " & ")
 }
 
 function Assert-ServiceSidDerivation {
