@@ -452,14 +452,19 @@ function Assert-ProbeDenied {
 # configuration; Assert-ServiceRuntimeIdentity checks the running agent.
 function Assert-ServiceInstalled {
     param([Parameter(Mandatory = $true)][string]$Stage)
+    Assert-ServiceCoreInstalled $Stage
+    Assert-ServiceRecovery $Stage
+    Assert-ServiceSidIdentity $Stage
+    Assert-ServicePrivileges $Stage
+}
+
+function Assert-ServiceCoreInstalled {
+    param([Parameter(Mandatory = $true)][string]$Stage)
     $service = Get-AgentService
     Assert-True ($null -ne $service) "$Stage installs the miru-agent service"
     Assert-Equal "Auto" $service.StartMode "$Stage service start mode is automatic"
     Assert-Equal $MsiServiceAccount $service.StartName "$Stage service runs as NT SERVICE\miru-agent"
     Assert-Equal $agentPath ($service.PathName.Trim('"')) "$Stage service binary path"
-    Assert-ServiceRecovery $Stage
-    Assert-ServiceSidIdentity $Stage
-    Assert-ServicePrivileges $Stage
 }
 
 function Assert-ServiceAbsent {
@@ -615,9 +620,15 @@ function Invoke-RollbackStage {
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "rollback restores v2"
     Assert-Equal $v2Hash (Get-AgentHash) "rollback restores v2 executable"
     Assert-ProtectedState "rollback"
-    Assert-ServiceInstalled "rollback"
+    Assert-ServiceCoreInstalled "rollback"
+    # Windows Installer's rollback recreates the service without its failure
+    # actions; record the SID type and required privileges it restores.
+    foreach ($query in "qfailure", "qsidtype", "qprivs") {
+        Write-Host "rollback sc.exe $query miru-agent:"
+        & sc.exe $query miru-agent 2>&1 | Out-String | Write-Host
+    }
     Assert-ServiceRuntimeIdentity "rollback" $baseline
-    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and service"
+    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and core service"
 }
 
 function Invoke-UninstallStage {

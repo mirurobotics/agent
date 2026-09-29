@@ -196,10 +196,12 @@ The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
 failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
 the `miru-agent` service is installed (automatic start, `NT SERVICE\miru-agent`,
 the installed binary path, a restart failure action, an unrestricted SID type,
-and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade,
-downgrade rejection, and rollback. It asserts the service runs as its service
-SID and writes its log after install, upgrade, and rollback, and that it is
-removed after uninstall.
+and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade, and
+downgrade rejection. After rollback, it asserts only automatic start,
+`NT SERVICE\miru-agent`, and the binary path, because Windows Installer's
+rollback does not restore the failure actions. It asserts the service runs as
+its service SID and writes its log after install, upgrade, and rollback, and
+that it is removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru` and its
 `logs`, `auth`, and `tmp` children. The
