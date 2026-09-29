@@ -9,7 +9,9 @@ $MsiUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
 $MsiServiceName = "miru-agent"
 $MsiServiceAccount = "NT SERVICE\miru-agent"
 $MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
-$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;$MsiServiceSid)"
+$MsiServiceRequiredPrivileges = @("SeChangeNotifyPrivilege")
+$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;$MsiServiceSid)(A;OICIIO;FA;;;$MsiServiceSid)"
+$MsiServiceDirectoryRights = 0x1201BF   # FRFWFX: .NET reports ReadAndExecute, Write, Synchronize
 $MsiTrustedSids = @("S-1-5-18", "S-1-5-32-544", $MsiServiceSid)
 $MsiExpectedDirectories = @(
     @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru"),
@@ -285,7 +287,9 @@ Export-ModuleMember -Function @(
     "MsiServiceName",
     "MsiServiceAccount",
     "MsiServiceSid",
+    "MsiServiceRequiredPrivileges",
     "MsiExpectedSddl",
+    "MsiServiceDirectoryRights",
     "MsiTrustedSids",
     "MsiExpectedDirectories",
     "MsiFixtureProductCodes"

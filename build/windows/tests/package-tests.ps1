@@ -220,7 +220,7 @@ function Assert-DowngradeLaunchCondition {
 function Assert-ServiceTables {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-ServiceInstallRow $Database
-    Assert-ServiceSidConfig $Database
+    Assert-MsiServiceConfig $Database
     Assert-ServiceControlRow $Database
     Assert-ServiceRecoveryTable $Database
 }
@@ -249,25 +249,30 @@ function Assert-ServiceInstallRow {
     Assert-True (([int]$row[5] -band 0x8000) -ne 0) "service is vital"
 }
 
-# The core ServiceConfig element compiles to one MsiServiceConfig row that sets
-# SERVICE_SID_TYPE_UNRESTRICTED on install and repair. MsiConfigureServices
-# applies it after InstallServices creates the service and before
-# StartServices starts it.
-function Assert-ServiceSidConfig {
+# The core ServiceConfig element compiles to two MsiServiceConfig rows, applied
+# on install and repair: the unrestricted SID type and a required-privileges
+# list. The rows are inert unless MsiConfigureServices runs between
+# InstallServices and StartServices.
+function Assert-MsiServiceConfig {
     param([Parameter(Mandatory = $true)]$Database)
-    Assert-True (Test-MsiTable $Database "MsiServiceConfig") "service SID config table present"
+    Assert-True (Test-MsiTable $Database "MsiServiceConfig") "MsiServiceConfig table present"
     $query = "SELECT ``MsiServiceConfig``, ``Name``, ``Event``, " + `
         "``ConfigType``, ``Argument``, ``Component_`` FROM ``MsiServiceConfig``"
     $rows = @(Get-MsiRows $Database $query 6)
-    Assert-Equal 1 $rows.Count "one service SID config row"
-    $row = $rows[0]
-    Assert-Equal $MsiServiceName $row[1] "service SID config name"
-    Assert-Equal "MiruAgentExe" $row[5] "service SID config owning component"
-    Assert-Equal 5 ([int]$row[3]) "service config type is SERVICE_CONFIG_SERVICE_SID_INFO"
-    Assert-Equal "1" $row[4] "service SID type is SERVICE_SID_TYPE_UNRESTRICTED"
-    $configEvent = [int]$row[2]
-    Assert-True (($configEvent -band 0x1) -ne 0) "service SID type applied on install"
-    Assert-True (($configEvent -band 0x4) -ne 0) "service SID type applied on repair"
+    Assert-Equal 2 $rows.Count "two MsiServiceConfig rows"
+    foreach ($row in $rows) {
+        Assert-Equal $MsiServiceName $row[1] "service config $($row[0]) name"
+        Assert-Equal "MiruAgentExe" $row[5] "service config $($row[0]) owning component"
+        $configEvent = [int]$row[2]
+        Assert-True (($configEvent -band 0x1) -ne 0) "service config $($row[0]) applied on install"
+        Assert-True (($configEvent -band 0x4) -ne 0) "service config $($row[0]) applied on repair"
+    }
+    $sidRows = @($rows | Where-Object { [int]$_[3] -eq 5 })
+    Assert-Equal 1 $sidRows.Count "one SERVICE_CONFIG_SERVICE_SID_INFO row"
+    Assert-Equal "1" $sidRows[0][4] "service SID type is SERVICE_SID_TYPE_UNRESTRICTED"
+    $privilegeRows = @($rows | Where-Object { [int]$_[3] -eq 6 })
+    Assert-Equal 1 $privilegeRows.Count "one SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO row"
+    Assert-Equal ($MsiServiceRequiredPrivileges -join "[~]") $privilegeRows[0][4] "service requires only SeChangeNotifyPrivilege"
     $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
         "FROM ``InstallExecuteSequence``"
     $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
@@ -304,17 +309,14 @@ function Assert-ServiceControlRow {
 }
 
 # The Util extension emits its own failure-actions table, Wix4ServiceConfig
-# (pinned from the CI build), rather than the standard MSI ServiceConfig table
-# (the core ServiceConfig element's MsiServiceConfig row sets only the SID
-# type); the restart action values are pinned at runtime in integration-lib.ps1.
+# (pinned from the CI build), rather than the standard MSI ServiceConfig table;
+# the restart action values are pinned at runtime in integration-lib.ps1.
 function Assert-ServiceRecoveryTable {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4ServiceConfig") `
         "WiX Util service recovery table present"
 }
 
-# Get-ServiceSid reproduces Windows' service SID derivation: it matches the
-# well-known TrustedInstaller SID and the SID hardcoded in miru-agent.wxs.
 function Assert-ServiceSidDerivation {
     Assert-Equal "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464" `
         (Get-ServiceSid "TrustedInstaller") "TrustedInstaller service SID derivation"

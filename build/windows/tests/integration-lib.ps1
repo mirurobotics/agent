@@ -134,6 +134,7 @@ function Initialize-CustomerState {
     foreach ($path in $protectedRoots) {
         Initialize-Directory $path | Out-Null
     }
+    foreach ($log in @(Get-AgentLogFiles)) { Remove-Item -LiteralPath $log.FullName -Force }
     foreach ($file in $customerOwnedFiles) {
         [IO.File]::WriteAllText($file.Path, $file.Contents)
     }
@@ -142,14 +143,16 @@ function Initialize-CustomerState {
 function Invoke-InstallStage {
     param([Parameter(Mandatory = $true)]$Packages)
     Add-PermissiveAces -OwnerSid $testUserSid
-    $baseline = Get-ActivationWaitCount
+    # The service must create the first log file through its own ACE.
+    Assert-Equal 0 (@(Get-AgentLogFiles)).Count "no agent log file exists before install"
     Install-Msi $Packages.V1 "fixture-v1"
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
     Assert-ProtectedState "initial install"
     Invoke-NonAdminProbe -Stage "install"
     Assert-ServiceInstalled "install"
-    Assert-ServiceRuntimeIdentity "install" $baseline
+    Assert-ServiceRuntimeIdentity "install" 0
+    foreach ($log in @(Get-AgentLogFiles)) { Assert-InheritedProtection $log.FullName }
     Write-Host "PASS initial install, ACL correction, denial, and service installed"
 }
 
@@ -292,13 +295,46 @@ function Assert-ProtectedAcl {
     $acl = Get-Acl -LiteralPath $LiteralPath
     Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
     Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
-    Assert-Equal $MsiTrustedSids.Count @($acl.Access).Count "exactly $($MsiTrustedSids.Count) total $LiteralPath ACEs"
-    $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
-    Assert-Equal $MsiTrustedSids.Count $explicit.Count "exactly $($MsiTrustedSids.Count) explicit $LiteralPath ACEs"
-    $sids = @($explicit | ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
-    Assert-TrustedIdentities $sids $LiteralPath
+    $rules = @($acl.Access)
+    Assert-Equal 4 $rules.Count "exactly 4 total $LiteralPath ACEs"
+    $explicit = @($rules | Where-Object { -not $_.IsInherited })
+    Assert-Equal 4 $explicit.Count "exactly 4 explicit $LiteralPath ACEs"
+    Assert-ServiceDirectoryAces @($explicit | Where-Object { (Get-RuleSid $_) -eq $MsiServiceSid }) $LiteralPath
+    $adminSids = @($explicit | Where-Object { (Get-RuleSid $_) -ne $MsiServiceSid } |
+        ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
+    $expectedAdmins = @($MsiTrustedSids | Where-Object { $_ -ne $MsiServiceSid })
+    Assert-Equal (($expectedAdmins | Sort-Object) -join ",") (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
     & icacls.exe $LiteralPath 2>&1 | Out-Null
     Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
+}
+
+# The service SID may list, traverse, and add children of a protected
+# directory but not delete, re-permission, or take ownership of it; an
+# inherit-only ACE gives it full control of everything created inside.
+function Assert-ServiceDirectoryAces {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rules,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    Assert-Equal 2 $Rules.Count "$Label has two service SID ACEs"
+    $inheritOnly = [int][Security.AccessControl.PropagationFlags]::InheritOnly
+    $direct = @($Rules | Where-Object { ([int]$_.PropagationFlags -band $inheritOnly) -eq 0 })
+    $children = @($Rules | Where-Object { ([int]$_.PropagationFlags -band $inheritOnly) -ne 0 })
+    Assert-Equal 1 $direct.Count "$Label has one service SID ACE for the directory itself"
+    Assert-Equal "Allow" $direct[0].AccessControlType.ToString() "$Label service directory ACE type"
+    Assert-Equal $MsiServiceDirectoryRights ([int]$direct[0].FileSystemRights) "$Label service directory ACE grants read, write, and traverse only"
+    Assert-Equal 0 ([int]$direct[0].InheritanceFlags) "$Label service directory ACE is not inherited"
+    Assert-Equal 1 $children.Count "$Label has one inherit-only service SID ACE"
+    Assert-Equal "Allow" $children[0].AccessControlType.ToString() "$Label service child ACE type"
+    Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$children[0].FileSystemRights) "$Label service child ACE grants full control"
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    Assert-Equal ([int]$inherit) ([int]$children[0].InheritanceFlags) "$Label service child ACE inherits to containers and files"
+    Assert-Equal $inheritOnly ([int]$children[0].PropagationFlags) "$Label service child ACE is inherit-only"
+}
+
+function Get-RuleSid {
+    param([Parameter(Mandatory = $true)]$Rule)
+    return $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
 }
 
 function Assert-TrustedIdentities {
@@ -412,9 +448,8 @@ function Assert-ProbeDenied {
 }
 
 # Install success with Start="install" Wait="yes" proves only that the SCM saw
-# Running, which agent/src/windows/scm.rs reports before the agent body runs, so
-# this asserts SCM configuration. The unprovisioned agent then keeps running in
-# await_activation; Assert-ServiceRuntimeIdentity checks its runtime identity.
+# Running, which the agent reports before its body runs, so this asserts SCM
+# configuration; Assert-ServiceRuntimeIdentity checks the running agent.
 function Assert-ServiceInstalled {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $service = Get-AgentService
@@ -424,6 +459,7 @@ function Assert-ServiceInstalled {
     Assert-Equal $agentPath ($service.PathName.Trim('"')) "$Stage service binary path"
     Assert-ServiceRecovery $Stage
     Assert-ServiceSidIdentity $Stage
+    Assert-ServicePrivileges $Stage
 }
 
 function Assert-ServiceAbsent {
@@ -460,13 +496,26 @@ function Assert-ServiceSidIdentity {
     Assert-Equal $MsiServiceSid $accountSid "$Stage virtual account resolves to the hardcoded SID"
 }
 
-# Counts "waiting for provisioning" lines across the agent's hourly log files.
+# The SCM gives the service token only these privileges, so the service
+# cannot use SeImpersonatePrivilege to reach Local System.
+function Assert-ServicePrivileges {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $out = & sc.exe qprivs miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qprivs succeeds"
+    $privileges = @([regex]::Matches($out, 'Se\w+Privilege') | ForEach-Object { $_.Value } | Sort-Object)
+    Assert-Equal (($MsiServiceRequiredPrivileges | Sort-Object) -join ",") ($privileges -join ",") "$Stage service required privileges`n$out"
+}
+
+function Get-AgentLogFiles {
+    if (-not (Test-Path -LiteralPath $logsRoot -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $logsRoot -Filter "miru.log*" -File)
+}
+
 # The running service holds the current file open for writing, so each file is
 # opened with read-write sharing.
 function Get-ActivationWaitCount {
-    if (-not (Test-Path -LiteralPath $logsRoot -PathType Container)) { return 0 }
     $count = 0
-    foreach ($log in @(Get-ChildItem -LiteralPath $logsRoot -Filter "miru.log*" -File)) {
+    foreach ($log in @(Get-AgentLogFiles)) {
         $fs = $null
         $reader = $null
         try {
@@ -554,17 +603,21 @@ function Invoke-DowngradeStage {
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "downgrade leaves v2"
     Assert-Equal $v2Hash (Get-AgentHash) "downgrade leaves v2 executable"
     Assert-ProtectedState "downgrade rejection"
+    Assert-ServiceInstalled "downgrade rejection"
     Write-Host "PASS downgrade rejected with v2 intact"
 }
 
 function Invoke-RollbackStage {
     param([Parameter(Mandatory = $true)]$Packages)
     $v2Hash = Get-AgentHash
+    $baseline = Get-ActivationWaitCount
     Install-Msi $Packages.V3 "fixture-v3-rollback" -AllowedExitCodes @(1603) -Properties @("FAIL_UPGRADE_FOR_TEST=1")
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "rollback restores v2"
     Assert-Equal $v2Hash (Get-AgentHash) "rollback restores v2 executable"
     Assert-ProtectedState "rollback"
-    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, and DACL"
+    Assert-ServiceInstalled "rollback"
+    Assert-ServiceRuntimeIdentity "rollback" $baseline
+    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and service"
 }
 
 function Invoke-UninstallStage {
