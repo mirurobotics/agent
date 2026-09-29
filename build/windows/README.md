@@ -182,16 +182,14 @@ local `Users` group need their own read grant on the target folder.
 ## Validation
 
 Every pull request runs the agent test suite natively on Windows
-(`windows-check`). Pull requests that change this directory, the agent or
-workspace crates, the Cargo manifests, lockfile, toolchain or `.cargo`
-configuration, or the CI/release workflows additionally run the package and
-installer lifecycle on a separate `windows-package` job. That job also runs
-after pushes to `main` and `release/*`, and when the release workflow calls CI
-for a tag. Pull requests that touch `build/**` or the workflows also run
-`windows-release-build` (the `cargo auditable` MSVC release build that uploads
-`miru-agent.exe` and `miru_agent.pdb`) and `goreleaser-snapshot` (a GoReleaser
-dry run proving the `agent_Windows_x86_64.zip`, its SBOM and the PDB are
-produced). Superseded
+(`windows-check`). Pull requests that change this directory or the CI/release
+workflows additionally run the package and installer lifecycle on a separate
+`windows-package` job. That job also runs after pushes to `main` and
+`release/*`, and when the release workflow calls CI for a tag. Pull requests
+that touch `build/**` or the workflows also run `windows-release-build` (the
+`cargo auditable` MSVC release build that uploads `miru-agent.exe` and
+`miru_agent.pdb`) and `goreleaser-snapshot` (a GoReleaser dry run proving the
+`agent_Windows_x86_64.zip`, its SBOM and the PDB are produced). Superseded
 pull-request CI runs are cancelled.
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package

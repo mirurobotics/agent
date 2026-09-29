@@ -87,12 +87,6 @@ jobs:
               - 'build/windows/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
-              - 'agent/**'
-              - 'libs/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain.toml'
-              - '.cargo/**'
 
   windows-package:
     needs: windows_package_scope
