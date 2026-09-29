@@ -158,12 +158,22 @@ target folder.
 
 Earlier builds ran the service as Local System. Upgrading from one re-applies
 the protected DACL on `%ProgramData%\Miru` and its `logs`, `auth`, and `tmp`
-children, but files that already exist keep their old ACEs and do not gain the
-`NT SERVICE\miru-agent` ACE. After such an upgrade, reset the existing files,
-not the four directories, so they inherit from their folder:
+children, but files and folders that already exist inside them, including the
+agent-created `resources` and `events` folders, keep their old ACEs and do not
+gain the `NT SERVICE\miru-agent` ACE. Until they are reset, the service cannot
+read its keys or rebuild its local state. After such an upgrade, reset every
+existing file and folder except the four directories the installer protects,
+so each one inherits from its parent, then restart the service. `Get-ChildItem`
+lists a folder before its contents, so each folder is reset before the items
+inside it:
 
 ```powershell
-Get-ChildItem "$env:ProgramData\Miru" -File -Recurse | ForEach-Object { icacls $_.FullName /reset }
+$root = "$env:ProgramData\Miru"
+$protected = @("logs", "auth", "tmp") | ForEach-Object { Join-Path $root $_ }
+Get-ChildItem -LiteralPath $root -Recurse -Force |
+    Where-Object { $protected -notcontains $_.FullName } |
+    ForEach-Object { icacls $_.FullName /reset }
+Restart-Service miru-agent
 ```
 
 ## Validation
