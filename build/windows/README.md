@@ -37,16 +37,9 @@ The MSI:
 The UpgradeCode is part of the product's permanent identity and must never be
 changed after publication. Each package version receives a different ProductCode.
 
-If a major upgrade fails and rolls back, Windows Installer restores the
-previous version's service without its restart-on-failure actions, service SID
-type, and privilege restriction, so it runs with the default service
-privileges, including `SeImpersonatePrivilege`. Repair it from an elevated
-session with the MSI of the version that is still installed; the repair
-reapplies those settings and restarts the service:
-
-```powershell
-msiexec.exe /i "C:\path\to\miru-agent-<installed-version>.msi" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart
-```
+If a major upgrade fails and rolls back, the installer reapplies the restored
+service's restart-on-failure actions, SID type, and privilege restriction, and
+restarts the service so they take effect.
 
 ## Build
 
@@ -204,15 +197,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\inte
 The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
 failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
 the `miru-agent` service is installed (automatic start, `NT SERVICE\miru-agent`,
-the installed binary path, a restart failure action, an unrestricted SID type,
-and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade,
-downgrade rejection, and a repair that follows a failed-upgrade rollback.
-Directly after rollback, it asserts only automatic start,
-`NT SERVICE\miru-agent`, and the binary path, because Windows Installer's
-rollback recreates the service without its failure actions, SID type, and
-required privileges. It asserts the service runs as
-its service SID and writes its log after install, upgrade, and rollback, and
-that it is removed after uninstall.
+the installed binary path, the restart failure actions and reset period, an
+unrestricted SID type, and only `SeChangeNotifyPrivilege`) after install,
+maintenance, upgrade, downgrade rejection, and failed-upgrade rollback. It
+asserts the service runs as its service SID, holds no privilege but
+`SeChangeNotifyPrivilege`, and writes its log after install, upgrade, and
+rollback, and that it is removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru` and its
 `logs`, `auth`, and `tmp` children. The

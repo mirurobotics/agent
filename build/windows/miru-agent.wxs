@@ -4,6 +4,20 @@
   <?define ProductName = "Miru Agent" ?>
   <?define Manufacturer = "Miru" ?>
   <?ifndef ProductCode ?><?define ProductCode = "*" ?><?endif ?>
+  <!-- miru-agent service settings, shared by ServiceInstall, both ServiceConfig
+       elements, and the rollback sc.exe commands below. util:ServiceConfig
+       takes seconds and days, sc.exe failure takes milliseconds and seconds,
+       and the preprocessor cannot convert, so each value is defined in both
+       units side by side; change both of a pair together. The MSI tests
+       (build/windows/tests/MsiTest.psm1) pin every value. -->
+  <?define ServiceName = "miru-agent" ?>
+  <?define ServiceFailureAction = "restart" ?>
+  <?define ServiceRestartDelaySeconds = "10" ?>
+  <?define ServiceRestartDelayMilliseconds = "10000" ?>
+  <?define ServiceResetPeriodDays = "1" ?>
+  <?define ServiceResetPeriodSeconds = "86400" ?>
+  <?define ServiceSidType = "unrestricted" ?>
+  <?define ServiceRequiredPrivilege = "SeChangeNotifyPrivilege" ?>
 
   <Package Name="$(ProductName)"
            Manufacturer="$(Manufacturer)"
@@ -44,33 +58,33 @@
              the service; Name must equal SERVICE_NAME in
              agent/src/windows/scm.rs. -->
         <ServiceInstall Id="MiruAgentService"
-                        Name="miru-agent"
+                        Name="$(ServiceName)"
                         DisplayName="Miru Agent"
                         Description="Miru Config Agent"
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Account="NT SERVICE\miru-agent"
+                        Account="NT SERVICE\$(ServiceName)"
                         Vital="yes"
                         Interactive="no">
           <!-- SCM restarts the service on failure; the Util extension is the
                reliable path to failure actions. -->
-          <util:ServiceConfig FirstFailureActionType="restart"
-                              SecondFailureActionType="restart"
-                              ThirdFailureActionType="restart"
-                              RestartServiceDelayInSeconds="10"
-                              ResetPeriodInDays="1" />
+          <util:ServiceConfig FirstFailureActionType="$(ServiceFailureAction)"
+                              SecondFailureActionType="$(ServiceFailureAction)"
+                              ThirdFailureActionType="$(ServiceFailureAction)"
+                              RestartServiceDelayInSeconds="$(ServiceRestartDelaySeconds)"
+                              ResetPeriodInDays="$(ServiceResetPeriodDays)" />
           <!-- Core ServiceConfig (MsiServiceConfig), applied on install and
                repair: add the service SID to the process token and remove every
                privilege except SeChangeNotifyPrivilege, so the service cannot
                impersonate. util:ServiceConfig supports neither setting; WIX1149
                is suppressed in miru-agent.wixproj for this element. -->
-          <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes">
-            <RequiredPrivilege Name="changeNotify" />
+          <ServiceConfig ServiceSid="$(ServiceSidType)" OnInstall="yes" OnReinstall="yes">
+            <RequiredPrivilege Name="$(ServiceRequiredPrivilege)" />
           </ServiceConfig>
         </ServiceInstall>
         <ServiceControl Id="MiruAgentServiceControl"
-                        Name="miru-agent"
+                        Name="$(ServiceName)"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
@@ -90,7 +104,7 @@
          descriptors before InstallServices creates the service. All four
          directories carry the ACEs because their DACLs are protected and
          provisioning renames keys from tmp to auth. Recompute the SID in every
-         Sddl if the ServiceInstall Name changes. -->
+         Sddl if ServiceName changes. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
@@ -113,6 +127,46 @@
         </CreateFolder>
       </Component>
     </ComponentGroup>
+
+    <!-- Failed-upgrade rollback. With Schedule="afterInstallInitialize", a
+         failed major upgrade rolls back the old version's uninstall, and
+         Windows Installer recreates its service from the ServiceInstall row
+         alone: the failure actions (Util ExecServiceConfig) and the SID type
+         and required privileges (MsiConfigureServices) are not reapplied, so
+         the restored service would keep SeImpersonatePrivilege. These rollback
+         actions reapply them with sc.exe. They are sequenced before
+         RemoveExistingProducts, so rollback, which runs in reverse, reaches
+         them after the old service is recreated and restarted. The restart
+         action is sequenced first so it runs last: privileges and SID type
+         apply only to a newly started process, so it restarts the service,
+         but only if it is running (net stop && net start). Each action
+         ignores failure, because a failed setting must not abort the rest of
+         the rollback. Only a major upgrade (WIX_UPGRADE_DETECTED) schedules
+         them. Each SetProperty passes its command as CustomActionData. -->
+    <CustomAction Id="MiruRollbackServiceRestart" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="MiruRollbackServiceFailureActions" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="MiruRollbackServiceSidType" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="MiruRollbackServicePrivileges" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+
+    <SetProperty Id="MiruRollbackServiceRestart" Before="MiruRollbackServiceRestart" Sequence="execute"
+                 Value="&quot;[System64Folder]cmd.exe&quot; /d /s /c &quot;&quot;[System64Folder]net.exe&quot; stop $(ServiceName) &amp;&amp; &quot;[System64Folder]net.exe&quot; start $(ServiceName)&quot;" />
+    <SetProperty Id="MiruRollbackServiceFailureActions" Before="MiruRollbackServiceFailureActions" Sequence="execute"
+                 Value="&quot;[System64Folder]sc.exe&quot; failure $(ServiceName) reset= $(ServiceResetPeriodSeconds) actions= $(ServiceFailureAction)/$(ServiceRestartDelayMilliseconds)/$(ServiceFailureAction)/$(ServiceRestartDelayMilliseconds)/$(ServiceFailureAction)/$(ServiceRestartDelayMilliseconds)" />
+    <SetProperty Id="MiruRollbackServiceSidType" Before="MiruRollbackServiceSidType" Sequence="execute"
+                 Value="&quot;[System64Folder]sc.exe&quot; sidtype $(ServiceName) $(ServiceSidType)" />
+    <SetProperty Id="MiruRollbackServicePrivileges" Before="MiruRollbackServicePrivileges" Sequence="execute"
+                 Value="&quot;[System64Folder]sc.exe&quot; privs $(ServiceName) $(ServiceRequiredPrivilege)" />
+
+    <InstallExecuteSequence>
+      <Custom Action="MiruRollbackServicePrivileges" Before="RemoveExistingProducts" Condition="WIX_UPGRADE_DETECTED" />
+      <Custom Action="MiruRollbackServiceSidType" Before="SetMiruRollbackServicePrivileges" Condition="WIX_UPGRADE_DETECTED" />
+      <Custom Action="MiruRollbackServiceFailureActions" Before="SetMiruRollbackServiceSidType" Condition="WIX_UPGRADE_DETECTED" />
+      <Custom Action="MiruRollbackServiceRestart" Before="SetMiruRollbackServiceFailureActions" Condition="WIX_UPGRADE_DETECTED" />
+    </InstallExecuteSequence>
 
     <Feature Id="Main" Title="$(ProductName)" Level="1">
       <ComponentGroupRef Id="AgentBinary" />
