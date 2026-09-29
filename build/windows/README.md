@@ -18,17 +18,19 @@ The MSI:
 
 - installs `miru-agent.exe` under 64-bit `Program Files\Miru\Agent`;
 - registers `miru-agent.exe` as the service `miru-agent`, running as the
-  virtual account `NT SERVICE\miru-agent` with an unrestricted service SID type,
-  set to automatic start, started on install, stopped and deleted on uninstall,
-  and configured to restart on failure (10 second delay, 1 day reset period);
+  virtual account `NT SERVICE\miru-agent` with an unrestricted service SID type
+  and only the `SeChangeNotifyPrivilege` privilege, set to automatic start,
+  started on install, stopped and deleted on uninstall, and configured to
+  restart on failure (10 second delay, 1 day reset period);
 - uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
 - rejects downgrades and schedules major upgrades transactionally so a failed
   replacement can restore the previously installed package;
 - protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
-  children by setting their owner to Local System and applying a non-inherited,
-  inheritable DACL granting full control only to Local System, built-in
-  Administrators, and the `miru-agent` service SID, so files created in those
-  directories inherit that protection; and
+  children by setting their owner to Local System and applying a non-inherited
+  DACL that gives Local System and built-in Administrators inheritable full
+  control, and gives the `miru-agent` service SID read, write, and traverse
+  access to each directory (but not delete or permission changes) plus full
+  control of the files and folders created inside it; and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
   maintenance, upgrades, rollback, and ordinary uninstall.
 
@@ -120,25 +122,35 @@ provisioned, and 1 when the state is undetermined or an error occurs.
 
 The service runs as the virtual account `NT SERVICE\miru-agent`, the Windows
 counterpart of the Linux `miru` user. Windows creates the account from the
-service name, so it has no password to manage, and it has no administrator
-rights. The installer grants it full control of `%ProgramData%\Miru` only; any
+service name, so it has no password to manage. It has no administrator rights
+and holds only the bypass-traverse-checking privilege (`SeChangeNotifyPrivilege`),
+so it cannot impersonate other accounts. The installer grants it access to
+`%ProgramData%\Miru` only: full control of the files and folders inside, but it
+cannot delete or change the permissions of the installer-created folders. Any
 other folder the agent uses must be granted to it explicitly.
 
 Run the grants below from an elevated PowerShell session after the MSI is
 installed, because the account name resolves only once the service exists. At
-any time, including before installation, you can use the service SID instead of
-the name: replace `NT SERVICE\miru-agent` with
-`*S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695`.
+any time, including before installation, you can use the service SID instead:
+`sc.exe showsid miru-agent` prints it, and `icacls` accepts it as `*<SID>`.
 
 Config deploy target folders (the Windows counterpart of `/srv/miru` on Linux)
 need Modify access, because a deploy creates a temporary subfolder and a
-`miru.backup.*` file next to the target. Create the folder first; `icacls` fails
-on a missing path:
+`miru.backup.*` file next to the target. A new folder under `C:\` inherits
+Modify access for every signed-in user, so replace the inherited permissions on
+the target and its parent. Only Local System and Administrators can then change
+them, local users can read them, and the service can modify the target:
 
 ```powershell
-New-Item -ItemType Directory -Force "C:\srv\miru" | Out-Null
+foreach ($dir in "C:\srv", "C:\srv\miru") {
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    icacls $dir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"
+}
 icacls "C:\srv\miru" /grant "NT SERVICE\miru-agent:(OI)(CI)M"
 ```
+
+If either folder already existed, first check with `icacls` that Administrators
+or Local System owns it; a folder's owner can always change its permissions.
 
 File-rule source folders need read access, plus delete for retention:
 
@@ -153,49 +165,22 @@ for folders created at the root of `C:\`, and none under `C:\Windows` or
 folder the service cannot write fails with an access-denied deployment error
 and leaves the target unchanged.
 
-The applications that read deployed configs need their own read access to the
-target folder.
-
-Earlier builds ran the service as Local System. Files and folders they
-created under `%ProgramData%\Miru`, including the current log file and the
-agent-created `resources` and `events` folders, grant only Local System and
-Administrators. The upgrade re-applies the protected DACL only on
-`%ProgramData%\Miru` and its `logs`, `auth`, and `tmp` children, not on items
-that already exist inside them. Without the steps below, the upgraded service
-cannot open the log file the earlier service was writing that hour and exits
-at startup, so the upgrade can fail and roll back. Before installing the
-upgrade, grant the service SID on every existing item:
-
-```powershell
-icacls "$env:ProgramData\Miru" /grant "*S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695:(OI)(CI)F" /T /C
-```
-
-The upgrade replaces this grant on the four protected directories. After the
-upgrade, remove it everywhere else: reset every existing file and folder
-except those four directories, so each one inherits from its parent, then
-restart the service. `Get-ChildItem` lists a folder before its contents, so
-each folder is reset before the items inside it:
-
-```powershell
-$root = "$env:ProgramData\Miru"
-$protected = @("logs", "auth", "tmp") | ForEach-Object { Join-Path $root $_ }
-Get-ChildItem -LiteralPath $root -Recurse -Force |
-    Where-Object { $protected -notcontains $_.FullName } |
-    ForEach-Object { icacls $_.FullName /reset }
-Restart-Service miru-agent
-```
+Applications that read deployed configs and do not run as a member of the
+local `Users` group need their own read grant on the target folder.
 
 ## Validation
 
 Every pull request runs the agent test suite natively on Windows
-(`windows-check`). Pull requests that change this directory or the CI/release
-workflows additionally run the package and installer lifecycle on a separate
-`windows-package` job. That job also runs after pushes to `main` and
-`release/*`, and when the release workflow calls CI for a tag. Pull requests
-that touch `build/**` or the workflows also run `windows-release-build` (the
-`cargo auditable` MSVC release build that uploads `miru-agent.exe` and
-`miru_agent.pdb`) and `goreleaser-snapshot` (a GoReleaser dry run proving the
-`agent_Windows_x86_64.zip`, its SBOM and the PDB are produced). Superseded
+(`windows-check`). Pull requests that change this directory, the agent or
+workspace crates, the Cargo manifests, lockfile, toolchain or `.cargo`
+configuration, or the CI/release workflows additionally run the package and
+installer lifecycle on a separate `windows-package` job. That job also runs
+after pushes to `main` and `release/*`, and when the release workflow calls CI
+for a tag. Pull requests that touch `build/**` or the workflows also run
+`windows-release-build` (the `cargo auditable` MSVC release build that uploads
+`miru-agent.exe` and `miru_agent.pdb`) and `goreleaser-snapshot` (a GoReleaser
+dry run proving the `agent_Windows_x86_64.zip`, its SBOM and the PDB are
+produced). Superseded
 pull-request CI runs are cancelled.
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
@@ -210,16 +195,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\inte
 The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
 failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
 the `miru-agent` service is installed (automatic start, `NT SERVICE\miru-agent`,
-the installed binary path, and a restart failure action) after install,
-maintenance, and upgrade, and removed after uninstall.
+the installed binary path, a restart failure action, an unrestricted SID type,
+and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade,
+downgrade rejection, and rollback. It asserts the service runs as its service
+SID and writes its log after install, upgrade, and rollback, and that it is
+removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru` and its
 `logs`, `auth`, and `tmp` children. The
 root and its `logs`, `auth`, and `tmp` children must be owned by Local System,
-with protected DACLs permitting inheritable full control only for Local System,
-built-in Administrators, and the `miru-agent` service SID, including when those
-directories existed with hostile ownership and protected permissions before
-installation or maintenance.
+with protected DACLs permitting inheritable full control only for Local System
+and built-in Administrators, and for the `miru-agent` service SID read, write,
+and traverse access to each directory plus full control of its contents,
+including when those directories existed with hostile ownership and protected
+permissions before installation or maintenance.
 Non-administrators must not read sensitive files created in those directories
 after installation, create children, or change the directory permissions.
 
