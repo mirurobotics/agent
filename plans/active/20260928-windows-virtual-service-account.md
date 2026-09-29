@@ -18,9 +18,9 @@ Observable result: after installing the MSI, `Get-CimInstance Win32_Service -Fil
 
 ## Progress
 
-- [ ] Milestone 1: installer account, service SID type, SDDL, static package tests.
+- [ ] Milestone 1: installer account, service SID type, SDDL, static package tests. (Installer changes to miru-agent.wxs done; MsiTest.psm1 / package-tests.ps1 pending.)
 - [ ] Milestone 2: integration-test assertions for ACLs and runtime service identity.
-- [ ] Milestone 3: documentation.
+- [x] Milestone 3: documentation.
 - [ ] Milestone 4: push, preflight `CLEAN`, manual test plan in PR description.
 
 ## Surprises & Discoveries
