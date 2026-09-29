@@ -4,6 +4,7 @@ use crate::crypt::rsa;
 use crate::disk::{self, settings};
 use crate::filesys::{self, files, Overwrite};
 use crate::http;
+use crate::models;
 use crate::provisioning::{errors::*, shared};
 use crate::version;
 use backend_api::models as backend_client;
@@ -57,9 +58,15 @@ async fn reprovision_with_backend<HTTPClientT: http::ClientI>(
     token: &str,
 ) -> Result<backend_client::Device, ProvisionErr> {
     let public_key_pem = files::read_string(public_key_file).await?;
+    let meta = models::system_metadata();
     let payload = backend_client::ReprovisionDeviceRequest {
         public_key_pem,
         agent_version: version::VERSION.to_string(),
+        os: meta.os,
+        hostname: meta.hostname,
+        arch: meta.arch,
+        os_version: meta.os_version,
+        kernel_version: meta.kernel_version,
     };
     let params = http::devices::ReprovisionParams {
         payload: &payload,

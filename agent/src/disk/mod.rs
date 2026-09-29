@@ -13,6 +13,7 @@ pub mod layout;
 pub mod releases;
 pub mod settings;
 pub mod setup;
+pub mod system_metadata;
 
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};

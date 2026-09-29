@@ -18,6 +18,19 @@ pub struct ProvisionDeviceRequest {
     /// The version of the agent the device is running.
     #[serde(rename = "agent_version")]
     pub agent_version: String,
+    #[serde(rename = "os", skip_serializing_if = "Option::is_none")]
+    pub os: Option<models::Os>,
+    /// The hostname of the device as reported by the agent.
+    #[serde(rename = "hostname", skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    #[serde(rename = "arch", skip_serializing_if = "Option::is_none")]
+    pub arch: Option<models::Arch>,
+    /// The human-readable long operating system version string reported by the agent (for example `Ubuntu 22.04` or `Windows 11 Pro`). Distinct from the machine-readable `os` family.
+    #[serde(rename = "os_version", skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    /// The operating system kernel version string reported by the agent.
+    #[serde(rename = "kernel_version", skip_serializing_if = "Option::is_none")]
+    pub kernel_version: Option<String>,
     /// The name to assign to the device.
     #[serde(rename = "name")]
     pub name: String,
@@ -29,6 +42,11 @@ impl ProvisionDeviceRequest {
         ProvisionDeviceRequest {
             public_key_pem,
             agent_version,
+            os: None,
+            hostname: None,
+            arch: None,
+            os_version: None,
+            kernel_version: None,
             name,
         }
     }

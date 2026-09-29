@@ -9,15 +9,16 @@ use crate::deploy::apply;
 use crate::disk;
 use crate::errors::*;
 use crate::events;
+use crate::filesys::File;
 use crate::http;
-use crate::sync::{deployments, errors::*};
+use crate::sync::{deployments, errors::*, system_metadata};
 use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -56,6 +57,7 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub deploy_opts: apply::DeployOpts,
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
+    pub system_metadata_cache: File,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +91,7 @@ pub struct SingleThreadSyncer<HTTPClientT> {
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
+    system_metadata_cache: File,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -109,6 +112,7 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             deploy_opts: args.deploy_opts,
             backoff: args.backoff,
             event_hub: args.event_hub,
+            system_metadata_cache: args.system_metadata_cache,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -240,14 +244,35 @@ impl<HTTPClientT: http::ClientI> SingleThreadSyncer<HTTPClientT> {
             git_commits: storage_ref.git_commits.as_ref(),
             file_rules: storage_ref.file_rules.as_ref(),
         };
-        deployments::sync(&deployments::SyncArgs {
+        let result = deployments::sync(&deployments::SyncArgs {
             http_client: self.http_client.as_ref(),
             storage: &sync_storage,
             opts: &self.deploy_opts,
             token: &token.token,
             event_hub: &self.event_hub,
         })
-        .await
+        .await;
+
+        // skip while the backend is unreachable; the next sync retries
+        if !matches!(&result, Err(e) if e.is_network_conn_err()) {
+            self.sync_system_metadata(&token.token).await;
+        }
+        result
+    }
+
+    /// Best-effort: failures are logged and never affect the sync result or its
+    /// cooldown.
+    async fn sync_system_metadata(&self, token: &str) {
+        let args = system_metadata::SyncArgs {
+            http_client: self.http_client.as_ref(),
+            device: self.storage.device.as_ref(),
+            cache_file: &self.system_metadata_cache,
+            token,
+        };
+        match system_metadata::sync(&args).await {
+            Ok(outcome) => debug!("system metadata sync completed: {outcome:?}"),
+            Err(e) => warn!("unable to sync system metadata: {e}"),
+        }
     }
 }
 
@@ -463,7 +488,7 @@ mod tests {
     use miru_agent::disk::Storage;
     use miru_agent::errors::*;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
-    use miru_agent::filesys::Overwrite;
+    use miru_agent::filesys::{File, Overwrite};
     use miru_agent::http;
     use miru_agent::http::errors::{HTTPErr, MockErr};
     use miru_agent::models::{DplActivity, DplErrStatus, DplTarget};
@@ -496,6 +521,7 @@ mod tests {
         syncer: Syncer,
         backoff: cooldown::Backoff,
         token_mngr: Arc<TokenManager>,
+        system_metadata_cache: File,
     }
 
     impl Fixture {
@@ -518,6 +544,7 @@ mod tests {
             let token_mngr = Arc::new(token_mngr);
             let http_client = Arc::new(MockClient::default());
             let storage = Arc::new(create_storage(dir.dir()).await);
+            let system_metadata_cache = dir.file("system_metadata.json");
 
             let log_file = dir.file("events.jsonl");
             let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
@@ -535,6 +562,7 @@ mod tests {
                     },
                     backoff,
                     event_hub,
+                    system_metadata_cache: system_metadata_cache.clone(),
                 },
             )
             .unwrap();
@@ -545,6 +573,7 @@ mod tests {
                 storage,
                 syncer,
                 backoff,
+                system_metadata_cache,
                 token_mngr,
             }
         }
@@ -631,6 +660,7 @@ mod tests {
                         max_secs: 12 * 60 * 60,
                     },
                     event_hub,
+                    system_metadata_cache: dir.file("system_metadata.json"),
                 },
             )
             .unwrap();
@@ -1088,6 +1118,85 @@ mod tests {
             let window = StateAssert::new(before, after);
             let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
             window.assert_failed(&state, base_cooldown, 3);
+        }
+    }
+
+    pub mod system_metadata {
+        use super::*;
+        use miru_agent::disk::system_metadata as cache;
+        use miru_agent::models;
+
+        fn http_err(is_network_conn_err: bool) -> HTTPErr {
+            HTTPErr::MockErr(MockErr {
+                is_network_conn_err,
+            })
+        }
+
+        #[tokio::test]
+        async fn reported_after_successful_sync() {
+            let f = Fixture::new("sync_system_metadata_reported").await;
+
+            f.syncer.sync().await.unwrap();
+
+            assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
+            let cached = cache::read(&f.system_metadata_cache).await.unwrap();
+            assert_eq!(cached, Some(models::system_metadata()));
+        }
+
+        #[tokio::test]
+        async fn not_reported_again_when_unchanged() {
+            let f = Fixture::new("sync_system_metadata_unchanged").await;
+
+            f.syncer.sync().await.unwrap();
+            f.reset_cooldown().await;
+            f.syncer.sync().await.unwrap();
+
+            assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
+        }
+
+        #[tokio::test]
+        async fn skipped_when_backend_unreachable() {
+            let f = Fixture::new("sync_system_metadata_unreachable").await;
+            f.http_client
+                .set_list_all_deployments(|| Err(http_err(true)));
+
+            f.syncer.sync().await.unwrap_err();
+
+            assert_eq!(f.http_client.call_count(Call::UpdateDevice), 0);
+            let cached = cache::read(&f.system_metadata_cache).await.unwrap();
+            assert_eq!(cached, None);
+        }
+
+        #[tokio::test]
+        async fn reported_after_non_network_sync_failure() {
+            let f = Fixture::new("sync_system_metadata_non_network_failure").await;
+            f.http_client
+                .set_list_all_deployments(|| Err(http_err(false)));
+
+            f.syncer.sync().await.unwrap_err();
+
+            assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
+            let cached = cache::read(&f.system_metadata_cache).await.unwrap();
+            assert_eq!(cached, Some(models::system_metadata()));
+        }
+
+        #[tokio::test]
+        async fn failure_does_not_fail_sync() {
+            let f = Fixture::new("sync_system_metadata_failure").await;
+            f.http_client.set_update_device(|| Err(http_err(false)));
+
+            let before = Utc::now();
+            f.syncer.sync().await.unwrap();
+            let after = Utc::now();
+
+            let state = f.syncer.get_sync_state().await.unwrap();
+            let window = StateAssert::new(before, after);
+            let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+            window.assert_success(&state, base_cooldown, 0);
+
+            assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
+            let cached = cache::read(&f.system_metadata_cache).await.unwrap();
+            assert_eq!(cached, None);
         }
     }
 

@@ -40,6 +40,10 @@ impl Layout {
         self.root().file("agent_version")
     }
 
+    pub fn system_metadata(&self) -> filesys::File {
+        self.root().file("system_metadata.json")
+    }
+
     pub fn scanner_snapshot(&self) -> filesys::File {
         self.root().file("scanner.json")
     }

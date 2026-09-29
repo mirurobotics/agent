@@ -6,11 +6,92 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.0
+  x-release-version: v0.5.1
   x-git-commit:
-    sha: 76d489f858e2076150e2ced2b9923cbd3c043622
-    url: https://github.com/mirurobotics/openapi/commit/76d489f858e2076150e2ced2b9923cbd3c043622
-    message: 'chore: bump cli-sdk default version (#240)
+    sha: cb40733d18b6bd3b363cb199e23f177f808b667f
+    url: https://github.com/mirurobotics/openapi/commit/cb40733d18b6bd3b363cb199e23f177f808b667f
+    message: 'feat(device): constrain device os/arch to DeviceOS/DeviceArch enums
+      (#289)
+
+
+      ## Summary
+
+
+      Constrains the device `os` and `arch` fields (added as free-form strings
+
+      in the merged #284) to named string enums matching the backend
+
+      `pltenums` package.
+
+
+      - New enum component schemas under `apis/configs/components/enums/`:
+
+      - `device-os.yaml` → `DeviceOS` = `[linux, windows]` (`DEVICE_OS_*`
+
+      varnames)
+
+      - `device-arch.yaml` → `DeviceArch` = `[x86_64, aarch64]`
+
+      (`DEVICE_ARCH_*` varnames)
+
+      - `BaseDevice.os`/`arch` (`apis/configs/components/schemas/device.yaml`)
+
+      become nullable enum references via the established `allOf: [ $ref ]` +
+
+      `nullable: true` + `description` pattern (mirroring
+
+      `current_deployment`); the `os` description drops the stale `macos`
+
+      mention.
+
+      - The three agent request schemas — `ProvisionDeviceRequest`,
+
+      `ReprovisionDeviceRequest`, `UpdateDeviceFromAgentRequest` in
+
+      `apis/apps/backend-server/agent/components/requests/device.yaml` — use
+
+      bare enum `$ref`s and stay optional.
+
+      - Regenerated all backend-server bundles
+
+      (`agent`/`cli`/`frontend`/`platform`) and added a
+
+      `.redocly.lint-ignore.yaml` whitelist entry for the new nullable-`$ref`
+
+      siblings, following the repo''s existing convention.
+
+
+      Fields stay nullable/optional, so agents that omit them are unaffected.
+
+      Aliases (`amd64`/`x64`/`arm64`) are intentionally excluded from the wire
+
+      enum — they remain backend parse-time leniency only.
+
+
+      ## Plan
+
+
+      `plans/completed/20260920-device-os-arch-enums.md`
+
+
+      ## Validation
+
+
+      - `./scripts/regen.sh` — all bundles regenerated
+
+      - `./scripts/lint.sh` — passes
+
+      - `./scripts/is-stale.sh` — no drift
+
+      - `./scripts/lint-surface.sh` — passes
+
+
+      CI is green (lint, stale-specs, tool-tests, surface-lint, stlc
+
+      generate).
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
 
       <!-- codesmith:footer -->
@@ -19,7 +100,7 @@ info:
 
       <a
 
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/240"><picture><source
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/289?ref=codesmith_pr_footer"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -35,7 +116,7 @@ info:
 
       <a
 
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1789019089&installation_model_id=425273&pr_number=240&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F240&signature=1f1bfb326b7c94e0e5c01f9f037d2872a8f874114b326fe80989bf7d47a2d362"><picture><source
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1792539810&installation_model_id=425273&pr_number=289&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F289&signature=2c732c9bdf5520e44727609563b1cf2796167d834647e4e9e096ca2f3ba0c797"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -47,7 +128,7 @@ info:
 
       alt="Autofix with [code]smith"
 
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"></picture></a>
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"></picture></a>
 
       <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
 
@@ -56,12 +137,18 @@ info:
 
       <!-- codesmith:autofix:disabled -->
 
-      <!-- /codesmith:footer -->'
+      <!-- /codesmith:footer -->
+
+
+      ---------
+
+
+      Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>'
     author: ben-miru
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-08-13T07:08:05.078354+00:00'
+    built_at: '2026-09-21T22:10:20.659656+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -559,14 +646,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.0
+      - v0.5.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 76d489f858e2076150e2ced2b9923cbd3c043622
+      - cb40733d18b6bd3b363cb199e23f177f808b667f
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -2025,6 +2112,44 @@ components:
       - DEVICE_STATUS_ONLINE
       - DEVICE_STATUS_OFFLINE
       - DEVICE_STATUS_ARCHIVED
+    OS:
+      title: OS
+      type: string
+      description: 'An operating system family, from the agent''s build-time OS vocabulary.
+        Shared across resources (devices, config schemas, file rules). This is the
+        machine-readable OS kind, distinct from a human-readable version string.
+
+        - `linux`
+
+        - `windows`
+
+        '
+      example: linux
+      enum:
+      - linux
+      - windows
+      x-enum-varnames:
+      - OS_LINUX
+      - OS_WINDOWS
+    Arch:
+      title: Arch
+      type: string
+      description: 'A CPU architecture, from the agent''s build-time architecture
+        vocabulary. Shared across resources (devices, config schemas, file rules).
+        These are the canonical wire values.
+
+        - `x86_64`
+
+        - `aarch64`
+
+        '
+      example: x86_64
+      enum:
+      - x86_64
+      - aarch64
+      x-enum-varnames:
+      - ARCH_X86_64
+      - ARCH_AARCH64
     BaseDevice:
       title: Base Device
       type: object
@@ -2035,6 +2160,11 @@ components:
       - description
       - status
       - agent_version
+      - os
+      - hostname
+      - arch
+      - os_version
+      - kernel_version
       - last_connected_at
       - last_disconnected_at
       - created_at
@@ -2066,6 +2196,37 @@ components:
           type: string
           example: v1.0.0
           description: The version of the agent the device is running.
+          nullable: true
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          nullable: true
+          description: The operating system family the device is running (`linux`
+            or `windows`), reported by the agent. This is the machine-readable OS
+            kind, distinct from the human-readable `os_version` string.
+        hostname:
+          type: string
+          example: robot-1.local
+          description: The hostname of the device as reported by the agent.
+          nullable: true
+        arch:
+          allOf:
+          - $ref: '#/components/schemas/Arch'
+          nullable: true
+          description: The CPU architecture the device is running (`x86_64` or `aarch64`),
+            reported by the agent.
+        os_version:
+          type: string
+          example: Ubuntu 22.04
+          description: The human-readable long operating system version string reported
+            by the agent (for example `Ubuntu 22.04` or `Windows 11 Pro`). Distinct
+            from the machine-readable `os` family.
+          nullable: true
+        kernel_version:
+          type: string
+          example: 5.15.0-91-generic
+          description: The operating system kernel version string reported by the
+            agent.
           nullable: true
         last_connected_at:
           type: string
@@ -2110,6 +2271,11 @@ components:
         description: Welder on line 3
         status: online
         agent_version: v1.0.0
+        os: linux
+        hostname: robot-1.local
+        arch: x86_64
+        os_version: Ubuntu 22.04
+        kernel_version: 5.15.0-91-generic
         last_connected_at: '2021-01-01T00:00:00Z'
         last_disconnected_at: null
         created_at: '2021-01-01T00:00:00Z'
@@ -2123,6 +2289,25 @@ components:
           type: string
           description: The version of the agent the device is running.
           example: v1.0.0
+        os:
+          $ref: '#/components/schemas/OS'
+        hostname:
+          type: string
+          description: The hostname of the device as reported by the agent.
+          example: robot-1.local
+        arch:
+          $ref: '#/components/schemas/Arch'
+        os_version:
+          type: string
+          description: The human-readable long operating system version string reported
+            by the agent (for example `Ubuntu 22.04` or `Windows 11 Pro`). Distinct
+            from the machine-readable `os` family.
+          example: Ubuntu 22.04
+        kernel_version:
+          type: string
+          description: The operating system kernel version string reported by the
+            agent.
+          example: 5.15.0-91-generic
     ProvisionDeviceRequest:
       title: Provision Device Request
       type: object
@@ -2143,6 +2328,25 @@ components:
           type: string
           description: The version of the agent the device is running.
           example: v1.0.0
+        os:
+          $ref: '#/components/schemas/OS'
+        hostname:
+          type: string
+          description: The hostname of the device as reported by the agent.
+          example: robot-1.local
+        arch:
+          $ref: '#/components/schemas/Arch'
+        os_version:
+          type: string
+          description: The human-readable long operating system version string reported
+            by the agent (for example `Ubuntu 22.04` or `Windows 11 Pro`). Distinct
+            from the machine-readable `os` family.
+          example: Ubuntu 22.04
+        kernel_version:
+          type: string
+          description: The operating system kernel version string reported by the
+            agent.
+          example: 5.15.0-91-generic
         name:
           type: string
           example: Robot 1
@@ -2171,6 +2375,25 @@ components:
           type: string
           description: The version of the agent the device is running.
           example: v1.0.0
+        os:
+          $ref: '#/components/schemas/OS'
+        hostname:
+          type: string
+          description: The hostname of the device as reported by the agent.
+          example: robot-1.local
+        arch:
+          $ref: '#/components/schemas/Arch'
+        os_version:
+          type: string
+          description: The human-readable long operating system version string reported
+            by the agent (for example `Ubuntu 22.04` or `Windows 11 Pro`). Distinct
+            from the machine-readable `os` family.
+          example: Ubuntu 22.04
+        kernel_version:
+          type: string
+          description: The operating system kernel version string reported by the
+            agent.
+          example: 5.15.0-91-generic
     TokenResponse:
       title: Token Response
       type: object
@@ -2259,6 +2482,10 @@ components:
           type: string
           example: This is a message for a user
           description: A human-readable message describing the error.
+      example:
+        code: invalid_request
+        params: {}
+        message: This is a message for a user
   parameters:
     MiruVersion:
       name: Miru-Version
