@@ -4,15 +4,6 @@ on:
   push:
     tags:
       - '*'
-  # Manual dry run of the Windows build and signing jobs from main or a
-  # release/* branch: produces a signed exe (and MSI) as a workflow artifact
-  # without running CI or publishing a release.
-  workflow_dispatch:
-    inputs:
-      msi-version:
-        description: MSI version for the test installer (MAJOR.MINOR.PATCH); keep it low so it never outranks a real release on a test machine
-        required: true
-        default: 0.0.1
 
 permissions:
   checks: write
@@ -55,7 +46,7 @@ jobs:
 
   ci:
     needs: check-main
-    if: needs.check-main.outputs.on_main == 'true' && github.event_name == 'push'
+    if: needs.check-main.outputs.on_main == 'true'
     uses: ./.github/workflows/ci.yml
 
   # Build the Windows release binary natively and hand it, unsigned, to
@@ -120,7 +111,7 @@ jobs:
   #
   # Azure login uses GitHub OIDC (no stored credential) against a federated
   # credential whose subject is this repository's `release` environment; restrict
-  # that environment's deployment refs to main, release/* and v* tags. See
+  # that environment's deployment refs to v* tags. See
   # build/windows/README.md, "Code signing", for the Azure setup.
   windows-sign:
     needs: [check-main, windows-release-build]
@@ -154,11 +145,9 @@ jobs:
         id: msi
         shell: pwsh
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_VERSION: ${{ inputs.msi-version }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          $raw = if ($env:EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_VERSION } else { $env:REF_NAME }
+          $raw = $env:REF_NAME
           $version = $raw -replace '^v', ''
           if ($version -match '^[0-9]+\.[0-9]+\.[0-9]+$') {
             "build=true" >> $env:GITHUB_OUTPUT
@@ -266,7 +255,7 @@ jobs:
   release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [ci, check-main, windows-sign]
-    if: needs.check-main.outputs.on_main == 'true' && github.event_name == 'push'
+    if: needs.check-main.outputs.on_main == 'true'
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

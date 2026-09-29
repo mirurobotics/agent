@@ -245,10 +245,9 @@ get a signed executable but no MSI, because the MSI version would collapse onto
 the final release's `0.10.4` and Windows Installer would not upgrade the beta to
 the final.
 
-To dry-run signing without releasing, run the Release workflow manually
-(`workflow_dispatch`) from `main` or a `release/*` branch with a low
-`msi-version`. It skips CI and publication and uploads the signed files as the
-`agent-windows-amd64-msvc` workflow artifact.
+A failed `windows-sign` run publishes nothing, since the release job depends
+on it. To check the Azure setup, push a prerelease tag: it exercises the login
+and executable signing. MSI build and signing first run on a stable tag.
 
 ### Azure and GitHub setup
 
@@ -263,8 +262,7 @@ stored in GitHub.
   `repo:mirurobotics/agent:environment:release`, and audience
   `api://AzureADTokenExchange`.
 - A GitHub environment named `release` whose deployment refs are limited to
-  `main`, `release/*`, and `v*` tags, so no other branch can obtain a token for
-  that subject.
+  `v*` tags, so no branch can obtain a token for that subject.
 - Secrets (repository or `release` environment): `AZURE_CLIENT_ID`,
   `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
 - Variables: `AZURE_ARTIFACT_SIGNING_ENDPOINT` (the account's regional
