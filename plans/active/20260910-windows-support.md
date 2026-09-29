@@ -135,6 +135,9 @@ directory permissions only when the local device API is implemented.
 timestamped. Cert procurement is tracked in the workbench plan (long lead — started
 independently). Publish the signed MSI through GitHub Releases, then submit and
 maintain its WinGet manifest.
+Signing and MSI publication are implemented with Azure Artifact Signing in
+`release.yml`'s `windows-sign` job (see `build/windows/README.md`, "Code
+signing"); the WinGet manifest remains.
 
 ### Phase 2 — local device API (gated on customer need)
 

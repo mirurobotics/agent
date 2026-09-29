@@ -28,8 +28,8 @@ builds:
   - id: "agent-windows"
     # Built natively on a Windows runner (aws-lc-sys cannot cross-compile
     # from Linux) through `cargo auditable`, so the PE also carries a
-    # `.dep-v0` section. The windows-release-build CI job uploads the
-    # executable, which the release job downloads into
+    # `.dep-v0` section. The release workflow's windows-sign job uploads the
+    # Authenticode-signed executable, which the release job downloads into
     # build/prebuilt/windows_amd64/ before GoReleaser runs. GoReleaser's Pro
     # prebuilt builder stats that path and fails the release if it is missing,
     # then treats the binary as if it had built it. `prebuilt.path` is relative
@@ -124,6 +124,12 @@ sboms:
   - id: binary
     artifacts: binary
 
+# Archives and packages are checksummed by default; add the MSI, which is
+# attached through release.extra_files rather than built by GoReleaser.
+checksum:
+  extra_files:
+    - glob: ./prebuilt/windows_amd64/*.msi
+
 changelog:
   sort: asc
   use: git
@@ -166,6 +172,11 @@ release:
     # miru_agent.pdb) because debuggers look for exactly that name next
     # to the executable.
     - glob: ./prebuilt/windows_amd64/miru_agent.pdb
+    # Signed Windows installer (miru-agent-<MAJOR.MINOR.PATCH>.msi), built by
+    # the release workflow's windows-sign job. Prerelease tags produce no MSI,
+    # so this glob matches nothing for them; stable tags fail in windows-sign
+    # before reaching GoReleaser if the MSI is missing.
+    - glob: ./prebuilt/windows_amd64/*.msi
   footer: >-
     ## Miru Agent {{.Tag}}
 

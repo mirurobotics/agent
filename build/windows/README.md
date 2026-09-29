@@ -78,10 +78,10 @@ not purchase a subscription.
 
 ## Install and provision
 
-Run installation from an elevated 64-bit Windows PowerShell 5.1 session. The
-current package is built and tested locally; publishing release artifacts and a
-WinGet manifest remains follow-up work. Install a trusted MSI directly with
-Windows Installer:
+Run installation from an elevated 64-bit Windows PowerShell 5.1 session. Stable
+releases attach a signed `miru-agent-<version>.msi` to the GitHub release (see
+[Code signing](#code-signing)); a WinGet manifest remains follow-up work.
+Install a trusted MSI directly with Windows Installer:
 
 ```powershell
 $msi = "C:\path\to\miru-agent-1.0.0.msi"
@@ -95,8 +95,8 @@ if (@(0, 3010) -notcontains $process.ExitCode) {
 
 An install exit code of 0 means success. Exit code 3010 also means success, but
 Windows must be restarted to complete the installation. Any other result is a
-failure; inspect the verbose log. Published packages must be Authenticode-signed
-before customer distribution.
+failure; inspect the verbose log. Check the signature before installing:
+`Get-AuthenticodeSignature` on the MSI must report `Valid`.
 
 Provision by placing the secret only in the process environment, then invoke the
 installed executable directly. Do not put the token on the command line:
@@ -219,7 +219,54 @@ Integration runs write verbose MSI logs directly beneath
 prints its log path before starting Windows Installer. These logs survive
 temporary build-output cleanup, including when only cleanup fails.
 
-Authenticode signing of the executable and MSI remains deferred, along with
 WinGet publication, full live-backend provisioning, Windows Server
 certification, and the Phase 2 `Miru Clients` local group and device-API
-discovery-directory permissions.
+discovery-directory permissions remain deferred.
+
+## Code signing
+
+Release builds are Authenticode-signed with
+[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/)
+in the `windows-sign` job of `.github/workflows/release.yml`:
+
+1. `windows-release-build` compiles `miru-agent.exe` and uploads it unsigned.
+   It has no OIDC permission, so crate build scripts never run next to the
+   signing credentials.
+2. `windows-sign` signs `miru-agent.exe`, builds the MSI around the signed
+   executable, signs the MSI, and fails unless both signatures are `Valid` and
+   RFC 3161 timestamped. Artifact Signing certificates are valid for only a few
+   days; the timestamp keeps signatures verifiable after they expire.
+3. The release job publishes only `windows-sign`'s output: the zip carries the
+   signed executable, and the MSI is attached as `miru-agent-<version>.msi` and
+   listed in the checksums file.
+
+The MSI version is the tag without its `v`. Prerelease tags (`v0.10.4-beta.1`)
+get a signed executable but no MSI, because the MSI version would collapse onto
+the final release's `0.10.4` and Windows Installer would not upgrade the beta to
+the final.
+
+To dry-run signing without releasing, run the Release workflow manually
+(`workflow_dispatch`) from `main` or a `release/*` branch with a low
+`msi-version`. It skips CI and publication and uploads the signed files as the
+`agent-windows-amd64-msvc` workflow artifact.
+
+### Azure and GitHub setup
+
+The job authenticates with GitHub OIDC; no Azure secret or certificate is
+stored in GitHub.
+
+- An Entra app registration (or user-assigned managed identity) holding the
+  **Artifact Signing Certificate Profile Signer** role on the certificate
+  profile.
+- A federated credential on it with issuer
+  `https://token.actions.githubusercontent.com`, subject
+  `repo:mirurobotics/agent:environment:release`, and audience
+  `api://AzureADTokenExchange`.
+- A GitHub environment named `release` whose deployment refs are limited to
+  `main`, `release/*`, and `v*` tags, so no other branch can obtain a token for
+  that subject.
+- Secrets (repository or `release` environment): `AZURE_CLIENT_ID`,
+  `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+- Variables: `AZURE_ARTIFACT_SIGNING_ENDPOINT` (the account's regional
+  endpoint, for example `https://eus.codesigning.azure.net/`),
+  `AZURE_ARTIFACT_SIGNING_ACCOUNT`, and `AZURE_ARTIFACT_SIGNING_PROFILE`.
