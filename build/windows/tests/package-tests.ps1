@@ -395,8 +395,11 @@ function Get-RollbackServiceCommand {
     $settings = $MsiServiceSettings
     $delayMilliseconds = $settings.RestartDelaySeconds * 1000
     $actions = @($settings.FailureActions | ForEach-Object { "$_/$delayMilliseconds" }) -join "/"
-    $sc = '"[System64Folder]sc.exe"'
+    # CustomAction.Target holds at most 255 characters, so the command changes
+    # to System64Folder once instead of repeating sc.exe's full path.
+    $sc = "sc.exe"
     $commands = @(
+        'cd /d "[System64Folder]"',
         "$sc failure $MsiServiceName reset= $($settings.ResetPeriodDays * 86400) actions= $actions",
         "$sc sidtype $MsiServiceName $($settings.SidType)",
         "$sc privs $MsiServiceName $($settings.RequiredPrivileges -join '/')"

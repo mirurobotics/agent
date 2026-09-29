@@ -127,7 +127,7 @@
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <SetProperty Id="MiruRollbackServiceConfig" Before="MiruRollbackServiceConfig" Sequence="execute"
                  Condition='UPGRADINGPRODUCTCODE AND REMOVE~="ALL"'
-                 Value='"[System64Folder]cmd.exe" /d /s /c ""[System64Folder]sc.exe" failure miru-agent reset= 86400 actions= restart/10000/restart/10000/restart/10000 &amp; "[System64Folder]sc.exe" sidtype miru-agent unrestricted &amp; "[System64Folder]sc.exe" privs miru-agent SeChangeNotifyPrivilege"' />
+                 Value='"[System64Folder]cmd.exe" /d /s /c "cd /d "[System64Folder]" &amp; sc.exe failure miru-agent reset= 86400 actions= restart/10000/restart/10000/restart/10000 &amp; sc.exe sidtype miru-agent unrestricted &amp; sc.exe privs miru-agent SeChangeNotifyPrivilege"' />
     <InstallExecuteSequence>
       <Custom Action="MiruRollbackServiceConfig" Before="DeleteServices"
               Condition='UPGRADINGPRODUCTCODE AND REMOVE~="ALL"' />
