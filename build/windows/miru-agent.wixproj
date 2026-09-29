@@ -9,7 +9,8 @@
     <SuppressValidation>false</SuppressValidation>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- WIX1149: the core ServiceConfig element is required for the service SID type and required privileges (see miru-agent.wxs). -->
-    <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>
+    <!-- WIX1103: miru-agent.exe carries a DefaultVersion so upgrades always replace it (see miru-agent.wxs). -->
+    <SuppressSpecificWarnings>1149;1103</SuppressSpecificWarnings>
     <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
     <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
     <DefineConstants Condition="'$(FixturePayloadPath)' != ''">$(DefineConstants);FixturePayloadPath=$(FixturePayloadPath)</DefineConstants>

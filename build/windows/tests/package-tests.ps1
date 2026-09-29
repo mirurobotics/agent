@@ -32,7 +32,7 @@ function Build-ProductionPackage {
     $path = Join-Path $Directory "miru-agent-$Version.msi"
     if ($built -ne $path) { Copy-Item -LiteralPath $built -Destination $path -Force }
     $metadata = Assert-Package $path $Version
-    Assert-ProductionTables $path
+    Assert-ProductionTables $path $Version
     Write-Host "PASS package $Version"
     return $metadata
 }
@@ -55,10 +55,14 @@ function Assert-Package {
 }
 
 function Assert-ProductionTables {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
     $handle = Open-MsiDatabase -Path $Path
     try {
         Assert-DirectoryComponents $handle.Database
+        Assert-AgentBinaryVersion $handle.Database $Version
         Assert-ProtectedPermissionRows $handle.Database
         Assert-FixtureIsolation $handle.Database
         Assert-TransactionalMajorUpgrade $handle.Database
@@ -125,6 +129,26 @@ function Assert-AgentBinaryComponent {
     Assert-Equal "miru_agent.exe" $binary[0][4] "binary component file key path"
 }
 
+# The unversioned executable carries the package version in the File table, so
+# an upgrade always replaces it (a versioned file beats an unversioned one)
+# instead of applying the unversioned-file date and hash rules.
+function Assert-AgentBinaryVersion {
+    param(
+        [Parameter(Mandatory = $true)]$Database,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+    $fileQuery = "SELECT ``File``, ``Version``, ``Language`` FROM ``File`` " + `
+        "WHERE ``File``='miru_agent.exe'"
+    $file = @(Get-MsiRows $Database $fileQuery 3)
+    Assert-Equal 1 $file.Count "binary file row"
+    Assert-Equal $Version $file[0][1] "binary file version is the package version"
+    Assert-Equal "0" $file[0][2] "binary file language is neutral"
+    if (Test-MsiTable $Database "MsiFileHash") {
+        $hashQuery = "SELECT ``File_`` FROM ``MsiFileHash`` WHERE ``File_``='miru_agent.exe'"
+        Assert-Equal 0 (@(Get-MsiRows $Database $hashQuery 1)).Count "binary file has no unversioned hash"
+    }
+}
+
 function Assert-InstallFolder {
     param([Parameter(Mandatory = $true)][object[]]$Directories)
     $installFolder = @($Directories | Where-Object {
@@ -185,11 +209,13 @@ function Assert-TransactionalMajorUpgrade {
     })
     Assert-Equal 1 $removeExisting.Count `
         "major upgrade removes existing product"
+    # afterInstallExecute: the new product is installed before the old one is
+    # removed, so a failed upgrade never deletes the old service.
     $remove = Get-SequenceNumber $sequence "RemoveExistingProducts"
-    $initialize = Get-SequenceNumber $sequence "InstallInitialize"
+    $execute = Get-SequenceNumber $sequence "InstallExecute"
     $finalize = Get-SequenceNumber $sequence "InstallFinalize"
-    Assert-True ($remove -gt $initialize -and $remove -lt $finalize) `
-        "RemoveExistingProducts is transactional"
+    Assert-True ($remove -gt $execute -and $remove -lt $finalize) `
+        "RemoveExistingProducts runs after InstallExecute and before InstallFinalize"
     $upgradeQuery = "SELECT ``UpgradeCode``, ``VersionMin``, ``VersionMax``, " + `
         "``Attributes``, ``ActionProperty`` FROM ``Upgrade``"
     $upgradeRows = @(Get-MsiRows $Database $upgradeQuery 5)

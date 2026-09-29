@@ -259,10 +259,10 @@ function Assert-FixtureSequence {
     $fixtureRow = @($sequence | Where-Object { $_[0] -eq "FailUpgradeForTest" })
     Assert-Equal 1 $fixtureRow.Count "one failing action sequence row"
     Assert-Equal "FAIL_UPGRADE_FOR_TEST=1" $fixtureRow[0][1] "failing action condition"
-    $installFiles = [int](@($sequence | Where-Object { $_[0] -eq "InstallFiles" })[0][2])
+    $removeExisting = [int](@($sequence | Where-Object { $_[0] -eq "RemoveExistingProducts" })[0][2])
     $installFinalize = [int](@($sequence | Where-Object { $_[0] -eq "InstallFinalize" })[0][2])
     $fixtureSequence = [int]$fixtureRow[0][2]
-    Assert-True ($fixtureSequence -gt $installFiles -and $fixtureSequence -lt $installFinalize) "failing action runs after files and before finalize"
+    Assert-True ($fixtureSequence -gt $removeExisting -and $fixtureSequence -lt $installFinalize) "failing action runs after RemoveExistingProducts and before finalize"
 }
 
 Export-ModuleMember -Function @(

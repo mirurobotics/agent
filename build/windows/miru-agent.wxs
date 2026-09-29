@@ -15,7 +15,13 @@
            Compressed="yes">
     <!-- Never change UpgradeCode after publication: it is the permanent identity
          that relates every Miru Agent major-upgrade package. -->
-    <MajorUpgrade Schedule="afterInstallInitialize"
+    <!-- afterInstallExecute installs the new version over the old one and
+         removes the old product only after that succeeds. An earlier schedule
+         deletes the old service first, and Windows Installer's rollback of a
+         failed upgrade then recreates it from ServiceInstall alone, without
+         its MsiServiceConfig settings or failure actions. This schedule needs
+         stable component GUIDs and key paths across versions. -->
+    <MajorUpgrade Schedule="afterInstallExecute"
                   DowngradeErrorMessage="A newer version of $(ProductName) is already installed." />
 
     <MediaTemplate EmbedCab="yes" />
@@ -36,9 +42,18 @@
 
     <ComponentGroup Id="AgentBinary" Directory="AGENTFOLDER">
       <Component Id="MiruAgentExe" Guid="*" Bitness="always64">
+        <!-- miru-agent.exe has no version resource. Under afterInstallExecute an
+             unversioned file is replaced only while its created and modified
+             times match, so an upgrade could keep the old binary. A
+             DefaultVersion makes Windows Installer treat the incoming file as
+             versioned, and a versioned file always replaces an unversioned one.
+             WIX1103 is suppressed in miru-agent.wixproj for this attribute;
+             DefaultLanguage satisfies ICE60 for a versioned file. -->
         <File Id="miru_agent.exe"
               Name="miru-agent.exe"
               Source="$(BinDir)\miru-agent.exe"
+              DefaultVersion="$(Version)"
+              DefaultLanguage="0"
               KeyPath="yes" />
         <!-- The SCM launches the bare exe (no subcommand, no console flag) as
              the service; Name must equal SERVICE_NAME in

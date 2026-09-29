@@ -8,8 +8,10 @@ The MSI installs `miru-agent.exe` as a Windows service named `miru-agent`
 (display name "Miru Agent", description "Miru Config Agent"). The service runs
 as the virtual account **`NT SERVICE\miru-agent`** with start type
 **Automatic**; it is started on install and stopped and removed on uninstall.
-Major upgrades stop and delete the old service before file replacement, then
-install and start the new one. The service is configured to **restart on
+A major upgrade installs the new version over the old one first: it stops the
+service, replaces the executable, reapplies the service configuration, and
+restarts it. Only then does it remove the old version, which no longer owns the
+service and so leaves it running. The service is configured to **restart on
 failure** with a 10 second delay and a 1 day reset period.
 
 ## Package behavior
@@ -23,8 +25,12 @@ The MSI:
   started on install, stopped and deleted on uninstall, and configured to
   restart on failure (10 second delay, 1 day reset period);
 - uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
-- rejects downgrades and schedules major upgrades transactionally so a failed
-  replacement can restore the previously installed package;
+- rejects downgrades and schedules major upgrades transactionally, removing the
+  old version only after the new one is installed, so a failed upgrade restores
+  the previously installed package and its fully configured service;
+- always replaces `miru-agent.exe` on upgrade and repair: the executable has no
+  version resource, so the package gives it the package version, and Windows
+  Installer always replaces an unversioned file with a versioned one;
 - protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
   children by setting their owner to Local System and applying a non-inherited
   DACL that gives Local System and built-in Administrators inheritable full
@@ -36,17 +42,6 @@ The MSI:
 
 The UpgradeCode is part of the product's permanent identity and must never be
 changed after publication. Each package version receives a different ProductCode.
-
-If a major upgrade fails and rolls back, Windows Installer restores the
-previous version's service without its restart-on-failure actions, service SID
-type, and privilege restriction, so it runs with the default service
-privileges, including `SeImpersonatePrivilege`. Repair it from an elevated
-session with the MSI of the version that is still installed; the repair
-reapplies those settings and restarts the service:
-
-```powershell
-msiexec.exe /i "C:\path\to\miru-agent-<installed-version>.msi" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart
-```
 
 ## Build
 
@@ -206,13 +201,11 @@ failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
 the `miru-agent` service is installed (automatic start, `NT SERVICE\miru-agent`,
 the installed binary path, a restart failure action, an unrestricted SID type,
 and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade,
-downgrade rejection, and a repair that follows a failed-upgrade rollback.
-Directly after rollback, it asserts only automatic start,
-`NT SERVICE\miru-agent`, and the binary path, because Windows Installer's
-rollback recreates the service without its failure actions, SID type, and
-required privileges. It asserts the service runs as
-its service SID and writes its log after install, upgrade, and rollback, and
-that it is removed after uninstall.
+downgrade rejection, and failed-upgrade rollback. The rollback fixture fails
+after the new version has reconfigured and restarted the service and the old
+version has been removed, so rollback must undo all of it. It asserts the
+service runs as its service SID and writes its log after install, upgrade, and
+rollback, and that it is removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files under `%ProgramData%\Miru` and its
 `logs`, `auth`, and `tmp` children. The

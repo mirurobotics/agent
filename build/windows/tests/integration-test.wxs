@@ -24,9 +24,13 @@
                   Execute="deferred"
                   Return="check"
                   Impersonate="no" />
+    <!-- Fail as late as possible: after the new product has replaced the
+         executable, reconfigured and restarted the existing service, and
+         RemoveExistingProducts has removed the old product, so rollback must
+         undo all of it. -->
     <InstallExecuteSequence>
       <Custom Action="FailUpgradeForTest"
-              After="InstallFiles"
+              After="RemoveExistingProducts"
               Condition="FAIL_UPGRADE_FOR_TEST=1" />
     </InstallExecuteSequence>
   </Fragment>
