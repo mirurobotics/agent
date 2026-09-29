@@ -1,0 +1,29 @@
+# Required AI review of every non-draft PR. Posts the `ai-review` status
+# checked by branch protection. See the reusable workflow for details.
+#
+# pull_request_target runs this file from the base branch, so a PR cannot
+# edit or delete its own review.
+
+name: AI Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  ai-review:
+    uses: mirurobotics/agents/.github/workflows/ai-review.yml@main
+    with:
+      runs-on: blacksmith-2vcpu-ubuntu-2404
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
