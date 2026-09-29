@@ -42,7 +42,9 @@
               KeyPath="yes" />
         <!-- The SCM launches the bare exe (no subcommand, no console flag) as
              the service; Name must equal SERVICE_NAME in
-             agent/src/windows/scm.rs. -->
+             agent/src/windows/scm.rs. The service runs as its virtual account
+             NT SERVICE\miru-agent (no password, no admin rights); the DataDirs
+             descriptors below grant it full control of %ProgramData%\Miru. -->
         <ServiceInstall Id="MiruAgentService"
                         Name="miru-agent"
                         DisplayName="Miru Agent"
@@ -50,7 +52,7 @@
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Account="LocalSystem"
+                        Account="NT SERVICE\miru-agent"
                         Vital="yes"
                         Interactive="no">
           <!-- SCM restarts the service on failure; the Util extension is the
@@ -60,6 +62,10 @@
                               ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="10"
                               ResetPeriodInDays="1" />
+          <!-- Add the service SID to the process token on install and repair
+               (MsiServiceConfig, SERVICE_SID_TYPE_UNRESTRICTED). The Util
+               extension has no SID-type attribute. -->
+          <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
         </ServiceInstall>
         <ServiceControl Id="MiruAgentServiceControl"
                         Name="miru-agent"
@@ -74,25 +80,36 @@
          registry resource. Windows Installer reapplies the protected descriptor
          during repair and upgrade, while populated customer state survives an
          ordinary uninstall. -->
+    <!-- The last ACE grants full control to the service SID of miru-agent
+         (the virtual account NT SERVICE\miru-agent). The SID is S-1-5-80
+         followed by the SHA-1 of the uppercase service name encoded UTF-16LE,
+         read as five little-endian uint32 values; it equals the output of
+         `sc.exe showsid miru-agent`. It is hardcoded because CreateFolders
+         applies these descriptors before InstallServices creates the service,
+         so the account name cannot be resolved yet. All four folders carry the
+         same ACE because their DACLs are protected (no inheritance from
+         MIRUDATA) and the agent renames files between them (tmp to auth).
+         Recompute the SID in every Sddl below if the ServiceInstall Name ever
+         changes. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruLogsDir" Directory="MIRULOGS" Guid="C3AF8332-28E8-4707-8430-780C553D86EC" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruAuthDir" Directory="MIRUAUTH" Guid="A2AE361A-41E6-427A-AF4C-ACCEE7F451F9" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruTmpDir" Directory="MIRUTMP" Guid="D654A9BF-2860-44FA-8FFB-A8E36986197B" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
     </ComponentGroup>
