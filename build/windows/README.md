@@ -37,6 +37,17 @@ The MSI:
 The UpgradeCode is part of the product's permanent identity and must never be
 changed after publication. Each package version receives a different ProductCode.
 
+If a major upgrade fails and rolls back, Windows Installer restores the
+previous version's service without its restart-on-failure actions, service SID
+type, and privilege restriction, so it runs with the default service
+privileges, including `SeImpersonatePrivilege`. Repair it from an elevated
+session with the MSI of the version that is still installed; the repair
+reapplies those settings and restarts the service:
+
+```powershell
+msiexec.exe /i "C:\path\to\miru-agent-<installed-version>.msi" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart
+```
+
 ## Build
 
 Run these commands from the repository root on Windows 10 or 11 x64. The build
@@ -196,10 +207,12 @@ The matrix covers direct MSI install, maintenance, upgrade, downgrade rejection,
 failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
 the `miru-agent` service is installed (automatic start, `NT SERVICE\miru-agent`,
 the installed binary path, a restart failure action, an unrestricted SID type,
-and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade, and
-downgrade rejection. After rollback, it asserts only automatic start,
+and only `SeChangeNotifyPrivilege`) after install, maintenance, upgrade,
+downgrade rejection, and a repair that follows a failed-upgrade rollback.
+Directly after rollback, it asserts only automatic start,
 `NT SERVICE\miru-agent`, and the binary path, because Windows Installer's
-rollback does not restore the failure actions. It asserts the service runs as
+rollback recreates the service without its failure actions, SID type, and
+required privileges. It asserts the service runs as
 its service SID and writes its log after install, upgrade, and rollback, and
 that it is removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer

@@ -621,14 +621,22 @@ function Invoke-RollbackStage {
     Assert-Equal $v2Hash (Get-AgentHash) "rollback restores v2 executable"
     Assert-ProtectedState "rollback"
     Assert-ServiceCoreInstalled "rollback"
-    # Windows Installer's rollback recreates the service without its failure
-    # actions; record the SID type and required privileges it restores.
+    # Windows Installer's rollback recreates the service from ServiceInstall
+    # alone. CI shows no failure actions, SID type NONE, and no required
+    # privileges (so the default service set). The virtual account's token
+    # user is still the service SID, so runtime identity holds; the repair
+    # below restores the rest. Logged for the record, not asserted.
     foreach ($query in "qfailure", "qsidtype", "qprivs") {
         Write-Host "rollback sc.exe $query miru-agent:"
         & sc.exe $query miru-agent 2>&1 | Out-String | Write-Host
     }
     Assert-ServiceRuntimeIdentity "rollback" $baseline
-    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and core service"
+    Install-Msi $Packages.V2 "fixture-v2-post-rollback-repair" -Properties @("REINSTALL=ALL", "REINSTALLMODE=vomus")
+    Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "post-rollback repair"
+    Assert-Equal $v2Hash (Get-AgentHash) "post-rollback repair keeps v2 executable"
+    Assert-ProtectedState "post-rollback repair"
+    Assert-ServiceInstalled "post-rollback repair"
+    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and core service; repair restores full service config"
 }
 
 function Invoke-UninstallStage {
