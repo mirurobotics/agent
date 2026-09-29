@@ -18,8 +18,8 @@ Observable result: after installing the MSI, `Get-CimInstance Win32_Service -Fil
 
 ## Progress
 
-- [ ] Milestone 1: installer account, service SID type, SDDL, static package tests. (Installer changes to miru-agent.wxs done; MsiTest.psm1 / package-tests.ps1 pending.)
-- [ ] Milestone 2: integration-test assertions for ACLs and runtime service identity.
+- [x] Milestone 1: installer account, service SID type, SDDL, static package tests. (WIX1149 suppressed in the wixproj; package tests implemented; CI validation pending in Milestone 4.)
+- [x] Milestone 2: integration-test assertions for ACLs and runtime service identity. (Implemented; CI validation pending in Milestone 4.)
 - [x] Milestone 3: documentation.
 - [ ] Milestone 4: push, preflight `CLEAN`, manual test plan in PR description.
 
@@ -32,6 +32,9 @@ Observable result: after installing the MSI, `Get-CimInstance Win32_Service -Fil
 (Add entries as work proceeds. Design choices made while authoring are under "Design choices" in Context and Orientation.)
 
 - 2026-09-28: Suppress WiX warning WIX1149 (`ServiceConfigFamilyNotSupported`) in `build/windows/miru-agent.wixproj` via `<SuppressSpecificWarnings>1149</SuppressSpecificWarnings>`. The WiX 7 compiler emits it unconditionally for every core `ServiceConfig` element, and the project sets `TreatWarningsAsErrors=true`, so the build would otherwise fail. The core element is the only way to set the service SID type (`util:ServiceConfig` has no SID-type attribute), and `package-tests.ps1` verifies the compiled `MsiServiceConfig` row. The production, CI package-test, and integration-fixture builds all use this one project, so one suppression covers them.
+- 2026-09-28: `Assert-ServiceSidConfig` also asserts that `MsiConfigureServices` is scheduled exactly once in `InstallExecuteSequence`, after `InstallServices` and before `StartServices` (sequence number and condition not pinned). Without that action the `MsiServiceConfig` row is inert. It asserts both `Event` bits, install (0x1) and reinstall (0x4), because the element sets `OnInstall` and `OnReinstall`.
+- 2026-09-28: The primary runtime identity check is `Win32_Process.GetOwnerSid` on the service process, compared with `$MsiServiceSid`; it checks the token user SID directly and does not depend on name lookup. `GetOwner` (`NT SERVICE` / `miru-agent`) is kept as a readable secondary check.
+- 2026-09-28: Only the install-stage `waiting for provisioning` log line is decisive on its own: no `miru.log*` exists yet, so the service must create one through its own ACE. In the upgrade stage `Add-PermissiveAces` also grants Everyone on the existing log file, so a new line there proves nothing alone; the upgrade stage relies on the existing-file inheritance check that `Assert-ProtectedState` now runs on every representative file.
 
 ## Outcomes & Retrospective
 
@@ -204,8 +207,8 @@ Expect `PASS service SID derivation`, both `PASS package` lines, the `PASS` line
 ## Validation and Acceptance
 
 Automated acceptance, from the `windows-package` CI job on the pushed head:
-- `package-tests.ps1` passes. `ServiceInstall.StartName` is `NT SERVICE\miru-agent`; `MsiServiceConfig` has the SID-type row (type 5, argument 1); all four `MsiLockPermissionsEx` rows carry the three-ACE SDDL; and the SID derivation matches both TrustedInstaller and `$MsiServiceSid`.
-- `integration-tests.ps1` passes every stage. After install and upgrade, the service's `StartName` is the virtual account; `sc.exe qsidtype` reports UNRESTRICTED; `sc.exe showsid` and the account-name lookup both return the hardcoded SID; the running process belongs to `NT SERVICE\miru-agent`; and a new `waiting for provisioning` line appears in `logs\`. All four protected directories are owned by SYSTEM with exactly the SYSTEM, Administrators, and service ACEs. Files created earlier still carry exactly those three inherited ACEs after the ACL repair. The non-admin probe is still denied read, create, and re-grant.
+- `package-tests.ps1` passes. `ServiceInstall.StartName` is `NT SERVICE\miru-agent`; `MsiServiceConfig` has the SID-type row (type 5, argument 1, applied on install and repair) and `MsiConfigureServices` runs between `InstallServices` and `StartServices`; all four `MsiLockPermissionsEx` rows carry the three-ACE SDDL; and the SID derivation matches both TrustedInstaller and `$MsiServiceSid`.
+- `integration-tests.ps1` passes every stage. After install and upgrade, the service's `StartName` is the virtual account; `sc.exe qsidtype` reports UNRESTRICTED; `sc.exe showsid` and the account-name lookup both return the hardcoded SID; the running process's token user is the service SID (`GetOwnerSid`) and its owner is `NT SERVICE\miru-agent`; and a new `waiting for provisioning` line appears in `logs\` (decisive in the install stage, where no log file exists yet). All four protected directories are owned by SYSTEM with exactly the SYSTEM, Administrators, and service ACEs. Files created earlier still carry exactly those three inherited ACEs after the ACL repair. The non-admin probe is still denied read, create, and re-grant.
 - The primary proof for the riskiest step, the hardcoded SID applied before the service exists, is the new log line together with the showsid and account-name checks.
 
 **Completion gate:** preflight must report `CLEAN` (CI green on the pushed branch head) before the PR leaves draft or the task is reported complete. A red or skipped `windows-package` job blocks completion.

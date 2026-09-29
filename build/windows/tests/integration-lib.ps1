@@ -142,12 +142,14 @@ function Initialize-CustomerState {
 function Invoke-InstallStage {
     param([Parameter(Mandatory = $true)]$Packages)
     Add-PermissiveAces -OwnerSid $testUserSid
+    $baseline = Get-ActivationWaitCount
     Install-Msi $Packages.V1 "fixture-v1"
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
     Assert-ProtectedState "initial install"
     Invoke-NonAdminProbe -Stage "install"
     Assert-ServiceInstalled "install"
+    Assert-ServiceRuntimeIdentity "install" $baseline
     Write-Host "PASS initial install, ACL correction, denial, and service installed"
 }
 
@@ -252,6 +254,9 @@ function Assert-ProtectedState {
     param([Parameter(Mandatory = $true)][string]$Stage)
     Assert-CustomerStateRetained $Stage
     Assert-ProtectedAcls
+    # Files created by earlier probes predate this stage's ACL repair, so the
+    # re-applied directory descriptor must also reach existing children.
+    foreach ($file in @($representativeFiles)) { Assert-InheritedProtection $file.Path }
 }
 
 function Assert-CustomerStateRetained {
@@ -290,9 +295,9 @@ function Assert-ProtectedAcl {
     $acl = Get-Acl -LiteralPath $LiteralPath
     Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
     Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
-    Assert-Equal 2 @($acl.Access).Count "only two total $LiteralPath ACEs"
+    Assert-Equal $MsiTrustedSids.Count @($acl.Access).Count "exactly $($MsiTrustedSids.Count) total $LiteralPath ACEs"
     $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
-    Assert-Equal 2 $explicit.Count "only two explicit $LiteralPath ACEs"
+    Assert-Equal $MsiTrustedSids.Count $explicit.Count "exactly $($MsiTrustedSids.Count) explicit $LiteralPath ACEs"
     $sids = @($explicit | ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
     Assert-TrustedIdentities $sids $LiteralPath
     & icacls.exe $LiteralPath 2>&1 | Out-Null
@@ -304,7 +309,7 @@ function Assert-TrustedIdentities {
         [Parameter(Mandatory = $true)][string[]]$Sids,
         [Parameter(Mandatory = $true)][string]$Label
     )
-    Assert-Equal "S-1-5-18,S-1-5-32-544" (($Sids | Sort-Object) -join ",") "$Label ACE identities"
+    Assert-Equal (($MsiTrustedSids | Sort-Object) -join ",") (($Sids | Sort-Object) -join ",") "$Label ACE identities"
 }
 
 function Invoke-NonAdminProbe {
@@ -347,7 +352,7 @@ function Assert-InheritedProtection {
     param([Parameter(Mandatory = $true)][string]$Path)
     $acl = Get-Acl -LiteralPath $Path
     Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
-    Assert-Equal 2 @($acl.Access).Count "$Path has only trusted inherited ACEs"
+    Assert-Equal $MsiTrustedSids.Count @($acl.Access).Count "$Path has only trusted inherited ACEs"
     $sids = @($acl.Access | ForEach-Object {
         Assert-True $_.IsInherited "$Path ACE is inherited"
         Assert-FullControlAce $_ $Path
@@ -409,17 +414,19 @@ function Assert-ProbeDenied {
     }
 }
 
-# Install success with Start="install" Wait="yes" proves the service reached
-# Running, so this asserts SCM configuration rather than racing the runtime state
-# of the unprovisioned agent, which exits shortly after start.
+# Install success with Start="install" Wait="yes" proves only that the SCM saw
+# Running, which agent/src/windows/scm.rs reports before the agent body runs, so
+# this asserts SCM configuration. The unprovisioned agent then keeps running in
+# await_activation; Assert-ServiceRuntimeIdentity checks its runtime identity.
 function Assert-ServiceInstalled {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $service = Get-AgentService
     Assert-True ($null -ne $service) "$Stage installs the miru-agent service"
     Assert-Equal "Auto" $service.StartMode "$Stage service start mode is automatic"
-    Assert-Equal "LocalSystem" $service.StartName "$Stage service runs as LocalSystem"
+    Assert-Equal $MsiServiceAccount $service.StartName "$Stage service runs as NT SERVICE\miru-agent"
     Assert-Equal $agentPath ($service.PathName.Trim('"')) "$Stage service binary path"
     Assert-ServiceRecovery $Stage
+    Assert-ServiceSidIdentity $Stage
 }
 
 function Assert-ServiceAbsent {
@@ -438,6 +445,79 @@ function Assert-ServiceRecovery {
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qfailure succeeds"
     Assert-True ($out -match 'RESET_PERIOD') "$Stage service has a reset period"
     Assert-True ($out -match 'RESTART') "$Stage service restarts on failure"
+}
+
+# The SCM adds the service SID to the token, Windows derives the same SID from
+# the service name, and the virtual account name resolves to it, so the SID
+# hardcoded in the installer's descriptors is the one the service runs as.
+function Assert-ServiceSidIdentity {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $q = & sc.exe qsidtype miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qsidtype succeeds"
+    Assert-True ($q -match 'SERVICE_SID_TYPE:\s+UNRESTRICTED') "$Stage service SID type is unrestricted`n$q"
+    $s = & sc.exe showsid miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe showsid succeeds"
+    Assert-True ($s -match 'SERVICE SID:\s+(S-1-5-80-[\d-]+)') "$Stage sc.exe showsid reports a service SID`n$s"
+    Assert-Equal $MsiServiceSid $Matches[1] "$Stage Windows derives the hardcoded service SID"
+    $accountSid = ([Security.Principal.NTAccount]$MsiServiceAccount).Translate([Security.Principal.SecurityIdentifier]).Value
+    Assert-Equal $MsiServiceSid $accountSid "$Stage virtual account resolves to the hardcoded SID"
+}
+
+# Counts "waiting for provisioning" lines across the agent's hourly log files.
+# The running service holds the current file open for writing, so each file is
+# opened with read-write sharing.
+function Get-ActivationWaitCount {
+    if (-not (Test-Path -LiteralPath $logsRoot -PathType Container)) { return 0 }
+    $count = 0
+    foreach ($log in @(Get-ChildItem -LiteralPath $logsRoot -Filter "miru.log*" -File)) {
+        $fs = $null
+        $reader = $null
+        try {
+            $fs = [IO.File]::Open($log.FullName, 'Open', 'Read', 'ReadWrite')
+            $reader = New-Object IO.StreamReader($fs)
+            $text = $reader.ReadToEnd()
+        }
+        finally {
+            if ($null -ne $reader) { $reader.Dispose() }
+            if ($null -ne $fs) { $fs.Dispose() }
+        }
+        $count += [regex]::Matches($text, 'waiting for provisioning').Count
+    }
+    return [int]$count
+}
+
+# The unprovisioned agent logs one "waiting for provisioning" line per start and
+# keeps running. A new line proves the service could write logs\ through the
+# installer's ACE; the process token proves it runs as the virtual account.
+function Assert-ServiceRuntimeIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][int]$Baseline
+    )
+    $service = $null
+    $count = 0
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $service = Get-AgentService
+        $count = Get-ActivationWaitCount
+        if ($null -ne $service -and $service.State -eq 'Running' -and
+            [int]$service.ProcessId -ne 0 -and $count -gt $Baseline) { break }
+        Start-Sleep -Seconds 1
+    }
+    Assert-True ($null -ne $service) "$Stage miru-agent service present"
+    $processId = [int]$service.ProcessId
+    $observed = "state $($service.State), pid $processId, activation waits $count, baseline $Baseline"
+    Assert-Equal "Running" $service.State "$Stage service is running ($observed)"
+    Assert-True ($processId -ne 0) "$Stage service has a process ($observed)"
+    Assert-True ($count -gt $Baseline) "$Stage service logged a new activation wait ($observed)"
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$processId"
+    Assert-True ($null -ne $proc) "$Stage service process $processId exists"
+    $ownerSid = $proc | Invoke-CimMethod -MethodName GetOwnerSid
+    Assert-Equal 0 ([int]$ownerSid.ReturnValue) "$Stage GetOwnerSid succeeds for process $processId"
+    Assert-Equal $MsiServiceSid $ownerSid.Sid "$Stage service process token user is the service SID"
+    $owner = $proc | Invoke-CimMethod -MethodName GetOwner
+    Assert-Equal 0 ([int]$owner.ReturnValue) "$Stage GetOwner succeeds for process $processId"
+    Assert-True ($owner.Domain -ieq 'NT SERVICE') "$Stage service process domain is NT SERVICE (actual '$($owner.Domain)')"
+    Assert-True ($owner.User -ieq $MsiServiceName) "$Stage service process user is $MsiServiceName (actual '$($owner.User)')"
 }
 
 function Invoke-MaintenanceStage {
@@ -460,11 +540,13 @@ function Get-AgentHash {
 function Invoke-UpgradeStage {
     param([Parameter(Mandatory = $true)]$Packages)
     Add-PermissiveAces -OwnerSid $testUserSid
+    $baseline = Get-ActivationWaitCount
     Install-Msi $Packages.V2 "fixture-v2-upgrade"
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "v2"
     Assert-ProtectedState "upgrade"
     Invoke-NonAdminProbe -Stage "upgrade"
     Assert-ServiceInstalled "upgrade"
+    Assert-ServiceRuntimeIdentity "upgrade" $baseline
     Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
 }
 
