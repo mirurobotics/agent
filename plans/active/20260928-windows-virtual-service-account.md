@@ -31,6 +31,8 @@ Observable result: after installing the MSI, `Get-CimInstance Win32_Service -Fil
 
 (Add entries as work proceeds. Design choices made while authoring are under "Design choices" in Context and Orientation.)
 
+- 2026-09-28: Suppress WiX warning WIX1149 (`ServiceConfigFamilyNotSupported`) in `build/windows/miru-agent.wixproj` via `<SuppressSpecificWarnings>1149</SuppressSpecificWarnings>`. The WiX 7 compiler emits it unconditionally for every core `ServiceConfig` element, and the project sets `TreatWarningsAsErrors=true`, so the build would otherwise fail. The core element is the only way to set the service SID type (`util:ServiceConfig` has no SID-type attribute), and `package-tests.ps1` verifies the compiled `MsiServiceConfig` row. The production, CI package-test, and integration-fixture builds all use this one project, so one suppression covers them.
+
 ## Outcomes & Retrospective
 
 (Summarize at completion.)
