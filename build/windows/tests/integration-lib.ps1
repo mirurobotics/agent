@@ -708,6 +708,8 @@ function Invoke-DowngradeStage {
     Write-Host "PASS downgrade rejected with v2 intact"
 }
 
+# v2's uninstall, started by v3's RemoveExistingProducts, schedules the rollback
+# actions that reapply the service settings, so this stage tests v2's actions.
 function Invoke-RollbackStage {
     param([Parameter(Mandatory = $true)]$Packages)
     $v2Hash = Get-AgentHash

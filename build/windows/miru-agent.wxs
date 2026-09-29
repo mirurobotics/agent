@@ -134,15 +134,21 @@
          alone: the failure actions (Util ExecServiceConfig) and the SID type
          and required privileges (MsiConfigureServices) are not reapplied, so
          the restored service would keep SeImpersonatePrivilege. These rollback
-         actions reapply them with sc.exe. They are sequenced before
-         RemoveExistingProducts, so rollback, which runs in reverse, reaches
-         them after the old service is recreated and restarted. The restart
-         action is sequenced first so it runs last: privileges and SID type
-         apply only to a newly started process, so it restarts the service,
-         but only if it is running (net stop && net start). Each action
-         ignores failure, because a failed setting must not abort the rest of
-         the rollback. Only a major upgrade (WIX_UPGRADE_DETECTED) schedules
-         them. Each SetProperty passes its command as CustomActionData. -->
+         actions reapply them with sc.exe. They belong to the version being
+         removed: they run only in the uninstall that RemoveExistingProducts
+         starts (UPGRADINGPRODUCTCODE set, REMOVE=ALL), so each version restores
+         its own settings, and they protect only upgrades from versions that
+         contain them. They are sequenced after RemoveExistingProducts (ICE63
+         allows no action between it and InstallInitialize) and before
+         StopServices, so rollback, which replays the uninstall script in
+         reverse, reaches them after DeleteServices' rollback recreates the
+         service and StopServices' rollback restarts it. The restart action is
+         sequenced first so it runs last: privileges and SID type apply only to
+         a newly started process, so it restarts the service, but only if it is
+         running (net stop && net start). Each action ignores failure, because
+         a failed setting must not abort the rest of the rollback. Each
+         SetProperty passes its command as CustomActionData. -->
+    <?define RollbackCondition = 'UPGRADINGPRODUCTCODE AND REMOVE~="ALL"' ?>
     <CustomAction Id="MiruRollbackServiceRestart" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="MiruRollbackServiceFailureActions" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
@@ -153,19 +159,23 @@
                   Execute="rollback" Impersonate="no" Return="ignore" />
 
     <SetProperty Id="MiruRollbackServiceRestart" Before="MiruRollbackServiceRestart" Sequence="execute"
+                 Condition="$(RollbackCondition)"
                  Value="&quot;[System64Folder]cmd.exe&quot; /d /s /c &quot;&quot;[System64Folder]net.exe&quot; stop $(ServiceName) &amp;&amp; &quot;[System64Folder]net.exe&quot; start $(ServiceName)&quot;" />
     <SetProperty Id="MiruRollbackServiceFailureActions" Before="MiruRollbackServiceFailureActions" Sequence="execute"
+                 Condition="$(RollbackCondition)"
                  Value="&quot;[System64Folder]sc.exe&quot; failure $(ServiceName) reset= $(ServiceResetPeriodSeconds) actions= $(ServiceFailureAction)/$(ServiceRestartDelayMilliseconds)/$(ServiceFailureAction)/$(ServiceRestartDelayMilliseconds)/$(ServiceFailureAction)/$(ServiceRestartDelayMilliseconds)" />
     <SetProperty Id="MiruRollbackServiceSidType" Before="MiruRollbackServiceSidType" Sequence="execute"
+                 Condition="$(RollbackCondition)"
                  Value="&quot;[System64Folder]sc.exe&quot; sidtype $(ServiceName) $(ServiceSidType)" />
     <SetProperty Id="MiruRollbackServicePrivileges" Before="MiruRollbackServicePrivileges" Sequence="execute"
+                 Condition="$(RollbackCondition)"
                  Value="&quot;[System64Folder]sc.exe&quot; privs $(ServiceName) $(ServiceRequiredPrivilege)" />
 
     <InstallExecuteSequence>
-      <Custom Action="MiruRollbackServicePrivileges" Before="RemoveExistingProducts" Condition="WIX_UPGRADE_DETECTED" />
-      <Custom Action="MiruRollbackServiceSidType" Before="SetMiruRollbackServicePrivileges" Condition="WIX_UPGRADE_DETECTED" />
-      <Custom Action="MiruRollbackServiceFailureActions" Before="SetMiruRollbackServiceSidType" Condition="WIX_UPGRADE_DETECTED" />
-      <Custom Action="MiruRollbackServiceRestart" Before="SetMiruRollbackServiceFailureActions" Condition="WIX_UPGRADE_DETECTED" />
+      <Custom Action="MiruRollbackServicePrivileges" Before="StopServices" Condition="$(RollbackCondition)" />
+      <Custom Action="MiruRollbackServiceSidType" Before="SetMiruRollbackServicePrivileges" Condition="$(RollbackCondition)" />
+      <Custom Action="MiruRollbackServiceFailureActions" Before="SetMiruRollbackServiceSidType" Condition="$(RollbackCondition)" />
+      <Custom Action="MiruRollbackServiceRestart" Before="SetMiruRollbackServiceFailureActions" Condition="$(RollbackCondition)" />
     </InstallExecuteSequence>
 
     <Feature Id="Main" Title="$(ProductName)" Level="1">

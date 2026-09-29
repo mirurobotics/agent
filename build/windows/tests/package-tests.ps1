@@ -346,9 +346,10 @@ function Assert-ServiceRecoveryTable {
 # no-impersonation WixQuietExec64 call that ignores failure; a type-51 action
 # named Set<action> sets its command line as CustomActionData. The commands
 # must encode the same spec as the tables above (milliseconds and seconds for
-# sc.exe), and the actions must sit between InstallInitialize and
-# RemoveExistingProducts, restart first, so rollback runs them after the old
-# service is recreated and restarts it last.
+# sc.exe). The actions and their setters run only in the old version's
+# uninstall that RemoveExistingProducts starts, and sit between
+# RemoveExistingProducts and StopServices, restart first, so rollback runs
+# them after the old service is recreated and restarts it last.
 function Assert-RollbackServiceConfig {
     param([Parameter(Mandatory = $true)]$Database)
     # msidbCustomActionTypeDll + Continue + Rollback + InScript + NoImpersonate
@@ -362,7 +363,8 @@ function Assert-RollbackServiceConfig {
     $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
         "FROM ``InstallExecuteSequence``"
     $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
-    $order = @("InstallInitialize")
+    $condition = 'UPGRADINGPRODUCTCODE AND REMOVE~="ALL"'
+    $order = @("RemoveExistingProducts")
     foreach ($expected in (Get-RollbackServiceCommands)) {
         $name, $command = $expected
         $action = @($actions | Where-Object { $_[0] -eq $name })
@@ -379,13 +381,15 @@ function Assert-RollbackServiceConfig {
         Assert-Equal $command $setter[0][3] "$name command line matches the service spec"
         $scheduled = @($sequence | Where-Object { $_[0] -eq $name })
         Assert-Equal 1 $scheduled.Count "$name is scheduled once"
-        Assert-Equal "WIX_UPGRADE_DETECTED" $scheduled[0][1] `
-            "$name is scheduled only for a major upgrade"
-        Assert-Equal 1 (@($sequence | Where-Object { $_[0] -eq "Set$name" })).Count `
-            "Set$name is scheduled once"
+        Assert-Equal $condition $scheduled[0][1] `
+            "$name is scheduled only when a major upgrade removes this version"
+        $setterScheduled = @($sequence | Where-Object { $_[0] -eq "Set$name" })
+        Assert-Equal 1 $setterScheduled.Count "Set$name is scheduled once"
+        Assert-Equal $condition $setterScheduled[0][1] `
+            "Set$name is scheduled only when a major upgrade removes this version"
         $order += @("Set$name", $name)
     }
-    $order += "RemoveExistingProducts"
+    $order += "StopServices"
     for ($i = 1; $i -lt $order.Count; $i++) {
         $previous = Get-SequenceNumber $sequence $order[$i - 1]
         $current = Get-SequenceNumber $sequence $order[$i]
