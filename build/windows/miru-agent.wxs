@@ -42,9 +42,7 @@
               KeyPath="yes" />
         <!-- The SCM launches the bare exe (no subcommand, no console flag) as
              the service; Name must equal SERVICE_NAME in
-             agent/src/windows/scm.rs. The service runs as its virtual account
-             NT SERVICE\miru-agent (no password, no admin rights); the DataDirs
-             descriptors below grant it full control of %ProgramData%\Miru. -->
+             agent/src/windows/scm.rs. -->
         <ServiceInstall Id="MiruAgentService"
                         Name="miru-agent"
                         DisplayName="Miru Agent"
@@ -62,10 +60,14 @@
                               ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="10"
                               ResetPeriodInDays="1" />
-          <!-- Add the service SID to the process token on install and repair
-               (MsiServiceConfig, SERVICE_SID_TYPE_UNRESTRICTED). The Util
-               extension has no SID-type attribute. -->
-          <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
+          <!-- Core ServiceConfig (MsiServiceConfig), applied on install and
+               repair: add the service SID to the process token and remove every
+               privilege except SeChangeNotifyPrivilege, so the service cannot
+               impersonate. util:ServiceConfig supports neither setting; WIX1149
+               is suppressed in miru-agent.wixproj for this element. -->
+          <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes">
+            <RequiredPrivilege Name="changeNotify" />
+          </ServiceConfig>
         </ServiceInstall>
         <ServiceControl Id="MiruAgentServiceControl"
                         Name="miru-agent"
@@ -79,37 +81,35 @@
     <!-- These directory-keyed components deliberately contain no RemoveFolder or
          registry resource. Windows Installer reapplies the protected descriptor
          during repair and upgrade, while populated customer state survives an
-         ordinary uninstall. -->
-    <!-- The last ACE grants full control to the service SID of miru-agent
-         (the virtual account NT SERVICE\miru-agent). The SID is S-1-5-80
-         followed by the SHA-1 of the uppercase service name encoded UTF-16LE,
-         read as five little-endian uint32 values; it equals the output of
-         `sc.exe showsid miru-agent`. It is hardcoded because CreateFolders
-         applies these descriptors before InstallServices creates the service,
-         so the account name cannot be resolved yet. All four folders carry the
-         same ACE because their DACLs are protected (no inheritance from
-         MIRUDATA) and the agent renames files between them (tmp to auth).
-         Recompute the SID in every Sddl below if the ServiceInstall Name ever
-         changes. -->
+         ordinary uninstall.
+         The last two ACEs are for the miru-agent service SID (NT SERVICE\miru-agent;
+         equals `sc.exe showsid miru-agent`). On each directory it may list,
+         traverse, and add children but not delete, re-permission, or take
+         ownership of the directory itself; it gets full control of everything
+         created inside. The SID is hardcoded because CreateFolders applies these
+         descriptors before InstallServices creates the service. All four
+         directories carry the ACEs because their DACLs are protected and
+         provisioning renames keys from tmp to auth. Recompute the SID in every
+         Sddl if the ServiceInstall Name changes. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruLogsDir" Directory="MIRULOGS" Guid="C3AF8332-28E8-4707-8430-780C553D86EC" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruAuthDir" Directory="MIRUAUTH" Guid="A2AE361A-41E6-427A-AF4C-ACCEE7F451F9" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruTmpDir" Directory="MIRUTMP" Guid="D654A9BF-2860-44FA-8FFB-A8E36986197B" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
     </ComponentGroup>

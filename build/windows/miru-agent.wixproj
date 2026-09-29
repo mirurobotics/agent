@@ -8,10 +8,7 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <SuppressValidation>false</SuppressValidation>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- WIX1149 warns that the core ServiceConfig family "does not work as
-         expected". The core ServiceConfig is the only way to set the service
-         SID type (util:ServiceConfig has no SID-type attribute), and
-         package-tests.ps1 verifies the compiled MsiServiceConfig row. -->
+    <!-- WIX1149: the core ServiceConfig element is required for the service SID type and required privileges (see miru-agent.wxs). -->
     <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>
     <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
     <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
