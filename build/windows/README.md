@@ -25,6 +25,9 @@ The MSI:
 - uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
 - rejects downgrades and schedules major upgrades transactionally so a failed
   replacement can restore the previously installed package;
+- allows same-version upgrades, so a stable release replaces a prerelease of
+  the same `MAJOR.MINOR.PATCH` in place (see [Code signing](#code-signing) for
+  prerelease versions);
 - protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
   children by setting their owner to Local System and applying a non-inherited
   DACL that gives Local System and built-in Administrators inheritable full
@@ -64,9 +67,10 @@ The produced `miru-agent.exe` statically links the MSVC C runtime (via
 and needs no Visual C++ Redistributable prerequisite on the target machine for
 the service to start.
 
-`Version` is deliberately stricter than general SemVer. It must contain exactly
-three numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH`
-from 0 through 65535. Leading `v`, prerelease/build labels, and fourth fields are
+`Version` is deliberately stricter than general SemVer. It must contain three
+numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH` from 0
+through 65535, plus an optional fourth `BUILD` field from 0 through 65535 that
+release builds use for prereleases. Leading `v` and prerelease/build labels are
 not accepted at the MSI build boundary. `BinDir` must contain
 `miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 7.0.0
 project; package validation is enabled and warnings fail the build.
@@ -240,14 +244,26 @@ in the `windows-sign` job of `.github/workflows/release.yml`:
    signed executable, and the MSI is attached as `miru-agent-<version>.msi` and
    listed in the checksums file.
 
-The MSI version is the tag without its `v`. Prerelease tags (`v0.10.4-beta.1`)
-get a signed executable but no MSI, because the MSI version would collapse onto
-the final release's `0.10.4` and Windows Installer would not upgrade the beta to
-the final.
+Stable tags use their version as the MSI version. Prerelease tags add a fourth
+field naming the stage: `alpha.N` becomes `1NN`, `beta.N` `2NN`, and `rc.N`
+`3NN`, with `N` from 1 to 99. Other tag shapes fail the release.
+
+| Tag | MSI version | File |
+| --- | --- | --- |
+| `v0.10.4-alpha.2` | `0.10.4.102` | `miru-agent-0.10.4-alpha.2.msi` |
+| `v0.10.4-beta.1` | `0.10.4.201` | `miru-agent-0.10.4-beta.1.msi` |
+| `v0.10.4` | `0.10.4` | `miru-agent-0.10.4.msi` |
+
+Windows Installer ignores the fourth field when comparing products, so
+`0.10.4.201` and `0.10.4` count as the same version. The MSI therefore allows
+same-version upgrades: `0.10.3` → `0.10.4-beta.1` → `0.10.4-beta.2` →
+`0.10.4` all upgrade in place, and installing anything below `0.10.4` over them
+is rejected as a downgrade. The tradeoff is that ordering *within* one
+`MAJOR.MINOR.PATCH` is not enforced: an older beta can be installed over a newer
+beta or the stable release of the same version.
 
 A failed `windows-sign` run publishes nothing, since the release job depends
-on it. To check the Azure setup, push a prerelease tag: it exercises the login
-and executable signing. MSI build and signing first run on a stable tag.
+on it, so a prerelease tag is the way to check the Azure setup.
 
 ### Azure and GitHub setup
 

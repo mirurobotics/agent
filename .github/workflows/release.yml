@@ -137,28 +137,31 @@ jobs:
           name: agent-windows-amd64-msvc-unsigned
           path: build/prebuilt/windows_amd64
 
-      # MSI versions must be exactly MAJOR.MINOR.PATCH. A prerelease tag
-      # (v0.10.4-beta.1) would collapse onto the final release's MSI version
-      # (0.10.4), and Windows Installer would not treat the final as an upgrade
-      # of the beta, so prerelease tags ship a signed exe but no MSI.
+      # Stable tags keep their version as the MSI version (v0.10.4 -> 0.10.4).
+      # Prereleases add a fourth field that names the stage: alpha.N -> 1NN,
+      # beta.N -> 2NN, rc.N -> 3NN (v0.10.4-beta.1 -> 0.10.4.201). Windows
+      # Installer ignores the fourth field when comparing products, so the MSI
+      # allows same-version upgrades (build/windows/miru-agent.wxs) and later
+      # betas and the stable release replace a beta in place. The file name
+      # keeps the tag's version: miru-agent-0.10.4-beta.1.msi.
       - name: Resolve MSI version
         id: msi
         shell: pwsh
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
-          $raw = $env:REF_NAME
-          $version = $raw -replace '^v', ''
-          if ($version -match '^[0-9]+\.[0-9]+\.[0-9]+$') {
-            "build=true" >> $env:GITHUB_OUTPUT
-            "version=$version" >> $env:GITHUB_OUTPUT
-            Write-Host "Building MSI version $version"
-          } elseif ($version -match '^[0-9]+\.[0-9]+\.[0-9]+-') {
-            "build=false" >> $env:GITHUB_OUTPUT
-            Write-Host "::notice::Prerelease ${raw}: signing the executable only, no MSI."
+          $release = $env:REF_NAME -replace '^v', ''
+          $stages = @{ alpha = 100; beta = 200; rc = 300 }
+          if ($release -match '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            $version = $release
+          } elseif ($release -match '^([0-9]+\.[0-9]+\.[0-9]+)-(alpha|beta|rc)\.([1-9][0-9]?)$') {
+            $version = '{0}.{1}' -f $Matches[1], ($stages[$Matches[2]] + [int]$Matches[3])
           } else {
-            throw "Cannot derive an MSI version from '$raw'."
+            throw "No MSI version mapping for tag '$env:REF_NAME'. Expected vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N with N from 1 to 99."
           }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "file=miru-agent-$release.msi" >> $env:GITHUB_OUTPUT
+          Write-Host "Building miru-agent-$release.msi with MSI version $version"
 
       - name: Azure login
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -186,16 +189,15 @@ jobs:
           exclude-azure-powershell-credential: true
 
       - name: Restore pinned WiX SDK
-        if: steps.msi.outputs.build == 'true'
         run: dotnet restore build/windows/miru-agent.wixproj
 
       # Same build arguments as the package tests (build/windows/tests/MsiTest.psm1,
       # Invoke-DotNetBuild), with BinDir pointing at the signed executable.
       - name: Build MSI
-        if: steps.msi.outputs.build == 'true'
         shell: pwsh
         env:
           MSI_VERSION: ${{ steps.msi.outputs.version }}
+          MSI_FILE: ${{ steps.msi.outputs.file }}
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE 'build\windows\artifacts\msi'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
@@ -206,16 +208,15 @@ jobs:
           $msi = Get-ChildItem -LiteralPath $out -Filter '*.msi' -File -Recurse |
             Where-Object { $_.FullName -notmatch '\\obj\\' } | Select-Object -First 1
           if ($null -eq $msi) { throw "No MSI was produced" }
-          Copy-Item -LiteralPath $msi.FullName -Destination (Join-Path $env:PREBUILT_DIR "miru-agent-$env:MSI_VERSION.msi")
+          Copy-Item -LiteralPath $msi.FullName -Destination (Join-Path $env:PREBUILT_DIR $env:MSI_FILE)
 
       - name: Sign MSI
-        if: steps.msi.outputs.build == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
-          files: ${{ env.PREBUILT_DIR }}\miru-agent-${{ steps.msi.outputs.version }}.msi
+          files: ${{ env.PREBUILT_DIR }}\${{ steps.msi.outputs.file }}
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
