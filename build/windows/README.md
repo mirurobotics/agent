@@ -156,16 +156,25 @@ and leaves the target unchanged.
 The applications that read deployed configs need their own read access to the
 target folder.
 
-Earlier builds ran the service as Local System. Upgrading from one re-applies
-the protected DACL on `%ProgramData%\Miru` and its `logs`, `auth`, and `tmp`
-children, but files and folders that already exist inside them, including the
-agent-created `resources` and `events` folders, keep their old ACEs and do not
-gain the `NT SERVICE\miru-agent` ACE. Until they are reset, the service cannot
-read its keys or rebuild its local state. After such an upgrade, reset every
-existing file and folder except the four directories the installer protects,
-so each one inherits from its parent, then restart the service. `Get-ChildItem`
-lists a folder before its contents, so each folder is reset before the items
-inside it:
+Earlier builds ran the service as Local System. Files and folders they
+created under `%ProgramData%\Miru`, including the current log file and the
+agent-created `resources` and `events` folders, grant only Local System and
+Administrators. The upgrade re-applies the protected DACL only on
+`%ProgramData%\Miru` and its `logs`, `auth`, and `tmp` children, not on items
+that already exist inside them. Without the steps below, the upgraded service
+cannot open the log file the earlier service was writing that hour and exits
+at startup, so the upgrade can fail and roll back. Before installing the
+upgrade, grant the service SID on every existing item:
+
+```powershell
+icacls "$env:ProgramData\Miru" /grant "*S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695:(OI)(CI)F" /T /C
+```
+
+The upgrade replaces this grant on the four protected directories. After the
+upgrade, remove it everywhere else: reset every existing file and folder
+except those four directories, so each one inherits from its parent, then
+restart the service. `Get-ChildItem` lists a folder before its contents, so
+each folder is reset before the items inside it:
 
 ```powershell
 $root = "$env:ProgramData\Miru"
